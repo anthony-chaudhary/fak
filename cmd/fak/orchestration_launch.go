@@ -104,7 +104,7 @@ type codexOrchestrationWorkerLaunch struct {
 	Terminal         *qwenEmptyUsageTerminalReceipt       `json:"terminal,omitempty"`
 }
 
-type qwenEmptyUsageGuardReceipt struct {
+type qwenEmptyUsagePolicyReceipt struct {
 	Window              string   `json:"window"`
 	MaxRecoveryAttempts int      `json:"max_recovery_attempts"`
 	ValidExclusions     []string `json:"valid_exclusions"`
@@ -151,7 +151,7 @@ type codexOrchestrationLaunchReceipt struct {
 	Activations       []ultracodebench.ActivationReceipt     `json:"activations"`
 	Budget            orchestration.UltracodeEnvelopeReceipt `json:"budget"`
 	Workload          *orchestrationWorkloadReceipt          `json:"workload,omitempty"`
-	EmptyUsageGuard   *qwenEmptyUsageGuardReceipt            `json:"empty_usage_policy,omitempty"`
+	EmptyUsagePolicy  *qwenEmptyUsagePolicyReceipt           `json:"empty_usage_policy,omitempty"`
 }
 
 func orchestrationDegradationNames(items []orchestration.Degradation) []string {
@@ -189,18 +189,18 @@ func qwenUsageMonitoringEnabled(workload *orchestrationWorkloadReceipt) bool {
 		workload.UsageExpectation == trajectory.QwenUsageExpectationProvider
 }
 
-func qwenEmptyUsageGuardFromEnv() (qwenEmptyUsageGuardReceipt, time.Duration, error) {
+func qwenEmptyUsageGuardFromEnv() (qwenEmptyUsagePolicyReceipt, time.Duration, error) {
 	windowRaw := strings.TrimSpace(os.Getenv(qwenEmptyUsageWindowEnv))
 	window, err := time.ParseDuration(windowRaw)
 	if windowRaw == "" || err != nil || window <= 0 {
-		return qwenEmptyUsageGuardReceipt{}, 0, fmt.Errorf("%s must be configured as a positive duration", qwenEmptyUsageWindowEnv)
+		return qwenEmptyUsagePolicyReceipt{}, 0, fmt.Errorf("%s must be configured as a positive duration", qwenEmptyUsageWindowEnv)
 	}
 	recoveryRaw := strings.TrimSpace(os.Getenv(qwenEmptyUsageRecoveryAttemptsEnv))
 	recoveryAttempts, err := strconv.Atoi(recoveryRaw)
 	if recoveryRaw == "" || err != nil || recoveryAttempts < 0 || recoveryAttempts > maxQwenEmptyUsageRecoveryAttempts {
-		return qwenEmptyUsageGuardReceipt{}, 0, fmt.Errorf("%s must be configured as 0 or 1", qwenEmptyUsageRecoveryAttemptsEnv)
+		return qwenEmptyUsagePolicyReceipt{}, 0, fmt.Errorf("%s must be configured as 0 or 1", qwenEmptyUsageRecoveryAttemptsEnv)
 	}
-	return qwenEmptyUsageGuardReceipt{
+	return qwenEmptyUsagePolicyReceipt{
 		Window:              window.String(),
 		MaxRecoveryAttempts: recoveryAttempts,
 		ValidExclusions: []string{
@@ -318,7 +318,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
 			return receipt, policyErr
 		}
-		receipt.EmptyUsageGuard = &guardReceipt
+		receipt.EmptyUsagePolicy = &guardReceipt
 		emptyUsageWindow = configuredWindow
 	}
 	for _, role := range resolution.Resolved.Roles {
@@ -385,8 +385,8 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			return launched
 		}
 		maxRecoveryAttempts := 0
-		if receipt.EmptyUsageGuard != nil {
-			maxRecoveryAttempts = receipt.EmptyUsageGuard.MaxRecoveryAttempts
+		if receipt.EmptyUsagePolicy != nil {
+			maxRecoveryAttempts = receipt.EmptyUsagePolicy.MaxRecoveryAttempts
 		}
 		attemptLogs := []string{}
 		for attempt := 1; attempt <= maxRecoveryAttempts+1; attempt++ {
@@ -460,7 +460,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
 				return receipt, fmt.Errorf("launch %s attempt %d: %w", role.ID, attempt, launchErr)
 			}
-			if receipt.EmptyUsageGuard == nil {
+			if receipt.EmptyUsagePolicy == nil {
 				break
 			}
 			assessment, monitorErr := orchestrationWorkerUsageMonitor(request, launched, emptyUsageWindow, receipt.Workload)

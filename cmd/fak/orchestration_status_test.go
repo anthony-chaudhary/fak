@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -229,6 +230,9 @@ func TestOrchestrationStatusProjectsTypedQwenEmptyUsageTerminal(t *testing.T) {
 		got.Workers[0].Terminal == nil || got.Workers[0].Terminal.Reason != qwenEmptyUsageTerminalReason {
 		t.Fatalf("status = %+v", got)
 	}
+	if !reflect.DeepEqual(got.EmptyUsagePolicy, receipt.EmptyUsagePolicy) {
+		t.Fatalf("status empty-usage policy = %+v, want %+v", got.EmptyUsagePolicy, receipt.EmptyUsagePolicy)
+	}
 	var out, stderr bytes.Buffer
 	if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
 		t.Fatal(err)
@@ -240,6 +244,18 @@ func TestOrchestrationStatusProjectsTypedQwenEmptyUsageTerminal(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, out.String())
 		}
+	}
+	out.Reset()
+	stderr.Reset()
+	if code := runOrchestrationStatus(&out, &stderr, []string{"--home", home, "--session", receipt.SessionID, "--json"}); code != 0 {
+		t.Fatalf("json code=%d stderr=%s", code, stderr.String())
+	}
+	var rendered orchestrationRunStatus
+	if err := json.Unmarshal(out.Bytes(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(rendered.EmptyUsagePolicy, receipt.EmptyUsagePolicy) {
+		t.Fatalf("rendered empty-usage policy = %+v, want %+v", rendered.EmptyUsagePolicy, receipt.EmptyUsagePolicy)
 	}
 }
 

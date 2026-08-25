@@ -224,6 +224,10 @@ func TestOrchestrationLaunchBoundsConfiguredQwenEmptyUsage(t *testing.T) {
 	if launches != 2 || stops != 2 || receipt.Status != "terminal" || len(receipt.Workers) != 1 {
 		t.Fatalf("launches=%d stops=%d receipt=%+v", launches, stops, receipt)
 	}
+	if receipt.EmptyUsagePolicy == nil || receipt.EmptyUsagePolicy.MaxRecoveryAttempts != 1 ||
+		len(receipt.EmptyUsagePolicy.ValidExclusions) != 3 {
+		t.Fatalf("empty-usage policy = %+v", receipt.EmptyUsagePolicy)
+	}
 	worker := receipt.Workers[0]
 	if worker.Terminal == nil || worker.Terminal.Schema != qwenEmptyUsageTerminalSchema ||
 		worker.Terminal.Reason != qwenEmptyUsageTerminalReason || worker.Terminal.Attempts != 2 ||
@@ -231,8 +235,16 @@ func TestOrchestrationLaunchBoundsConfiguredQwenEmptyUsage(t *testing.T) {
 		len(worker.AttemptLogs) != 2 || worker.AttemptLogs[0] == worker.AttemptLogs[1] {
 		t.Fatalf("terminal worker = %+v", worker)
 	}
+	raw, err := os.ReadFile(filepath.Join(home, "fak-orchestration-launches", "session-qwen-empty.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"empty_usage_policy"`)) {
+		t.Fatalf("persisted launch receipt lacks empty_usage_policy: %s", raw)
+	}
 	persisted, ok := readCodexOrchestrationLaunchReceipt(home, "session-qwen-empty")
-	if !ok || persisted.Workers[0].Terminal == nil || persisted.Workers[0].Terminal.Reason != qwenEmptyUsageTerminalReason {
+	if !ok || persisted.Workers[0].Terminal == nil || persisted.Workers[0].Terminal.Reason != qwenEmptyUsageTerminalReason ||
+		!reflect.DeepEqual(persisted.EmptyUsagePolicy, receipt.EmptyUsagePolicy) {
 		t.Fatalf("persisted=%+v ok=%v", persisted, ok)
 	}
 }
@@ -304,7 +316,7 @@ func TestOrchestrationLaunchDoesNotInferQwenFromTaskProse(t *testing.T) {
 		orchestrationWorkerUsageMonitor = oldMonitor
 	})
 	receipt, err := launchCodexOrchestrationWorkers(home, "session-prose-only", "ultracode", "native", "Qwen Qwen Qwen", qwenEmptyUsageResolution())
-	if err != nil || receipt.EmptyUsageGuard != nil || receipt.Workload != nil {
+	if err != nil || receipt.EmptyUsagePolicy != nil || receipt.Workload != nil {
 		t.Fatalf("receipt=%+v err=%v", receipt, err)
 	}
 }
