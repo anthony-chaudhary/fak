@@ -143,7 +143,7 @@ func q4kUseMultiVector(out, in, n int) bool {
 	return out == q4kMultiVectorHidden || out == q4kMultiVectorIntermediate
 }
 
-func (w *Q4KWeight) gemvBatchRepeated(Xcat []float32, n int, Ycat []float32) {
+func (w *Q4KWeight) gemvBatchRepeated(Xcat []float32, n int, Ycat []float32, observation *ExecutionObservation) {
 	var event C.mg_execution_event
 	C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
 	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
@@ -163,7 +163,7 @@ func (w *Q4KWeight) GEMVBatchWithEvents(Xcat []float32, n int, Ycat []float32, o
 		observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 		return
 	}
-	w.gemvBatchRepeated(Xcat, n, Ycat)
+	w.gemvBatchRepeated(Xcat, n, Ycat, observation)
 }
 
 // GEMVGroup runs one decode GEMV per weight in ws — all reading the SAME activation x (length
