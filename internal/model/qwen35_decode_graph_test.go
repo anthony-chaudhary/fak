@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 func TestQwen35DecodeGraphTraceTokenHiddenQLifecycleExactlyOnce(t *testing.T) {
@@ -97,6 +99,41 @@ func TestQwen35DecodeGraphTraceDoesNotOverwriteActiveOwner(t *testing.T) {
 	assertQwen35GraphLifecycleAt(t, s, 2, 1, true, 13)
 	thirdFinish(false)
 	assertQwen35GraphLifecycle(t, s, 2, 2, false)
+}
+
+func TestQwen35DecodeGraphNativeAttributionIsCallOwned(t *testing.T) {
+	cfg := qwen35HybridQ4KTestCfg()
+	cfg.NumLayers = 1
+	cfg.LayerTypes = []string{"linear_attention"}
+	s := NewSynthetic(cfg).NewSession()
+	s.EnableQwen35DecodeGraphTrace()
+	finish := s.beginQwen35DecodeGraph(7)
+
+	s.observeQwen35MetalExecutionSnapshot(metalgemm.ExecutionSnapshot{Events: []metalgemm.ExecutionEvent{{
+		Operation:       metalgemm.ExecutionQ4KGEMV,
+		CommandBufferID: 1,
+		Committed:       true,
+		CompletedWait:   true,
+		HostReadback:    true,
+	}}})
+	s.recordQwen35ModelGraphNode(0, "observed")
+	s.recordQwen35ModelGraphNode(0, "unobserved")
+	finish(false)
+
+	trace := s.LastQwen35DecodeGraphTrace()
+	if len(trace.Nodes) != 2 {
+		t.Fatalf("nodes = %d, want 2", len(trace.Nodes))
+	}
+	observed, unobserved := trace.Nodes[0], trace.Nodes[1]
+	if observed.NativeAttributionStatus != Qwen35DecodeGraphNativeAttributionAvailable || len(observed.NativeEvents) != 1 {
+		t.Fatalf("observed attribution = %+v", observed)
+	}
+	if unobserved.NativeAttributionStatus != Qwen35DecodeGraphNativeAttributionUnavailable || unobserved.UnavailableReason != Qwen35DecodeGraphMetalEventSourceUnavailable {
+		t.Fatalf("unobserved attribution = %+v", unobserved)
+	}
+	if unobserved.HostRead != nil || unobserved.Syncs != nil || len(unobserved.NativeEvents) != 0 {
+		t.Fatalf("unobserved node inherited prior call: %+v", unobserved)
+	}
 }
 
 func TestQwen35DecodeGraphTraceNativeMetadataUnavailable(t *testing.T) {

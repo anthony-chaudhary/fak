@@ -44,6 +44,12 @@ var (
 	q4kMMOnce sync.Once
 )
 
+func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call func(*metalgemm.ExecutionObservation)) {
+	observation := metalgemm.NewExecutionObservation(operation)
+	call(observation)
+	s.observeQwen35MetalExecution(observation)
+}
+
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
 	if !s.MetalQ4K || !metalgemm.Available() {
 		return q4kGemm(qt, Xf, P)
@@ -98,9 +104,13 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 	}
 	var grouped [][]float32
 	if P == 1 {
-		grouped = metalgemm.GEMVGroup(ws, Xf)
+		s.metalExecution(metalgemm.ExecutionQ4KGEMVGroup, func(observation *metalgemm.ExecutionObservation) {
+			grouped = metalgemm.GEMVGroupWithEvents(ws, Xf, observation)
+		})
 	} else {
-		grouped = metalgemm.GEMMGroup(ws, Xf, P)
+		s.metalExecution(metalgemm.ExecutionQ4KGEMMGroup, func(observation *metalgemm.ExecutionObservation) {
+			grouped = metalgemm.GEMMGroupWithEvents(ws, Xf, P, observation)
+		})
 	}
 	if grouped == nil {
 		return nil
@@ -127,7 +137,9 @@ func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float
 		return qGemm8(qt, Xq)
 	}
 	Y := make([]float32, Xq.P*qt.out)
-	w.GEMM(Xq.q, Xq.d, Xq.P, Y)
+	s.metalExecution(metalgemm.ExecutionQ8GEMM, func(observation *metalgemm.ExecutionObservation) {
+		w.GEMMWithEvents(Xq.q, Xq.d, Xq.P, Y, observation)
+	})
 	return Y
 }
 
@@ -160,7 +172,10 @@ func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]fl
 	if len(ws) < 2 {
 		return nil
 	}
-	grouped := metalgemm.GEMMGroupQ8(ws, Xq.q, Xq.d, P)
+	var grouped [][]float32
+	s.metalExecution(metalgemm.ExecutionQ8GEMMGroup, func(observation *metalgemm.ExecutionObservation) {
+		grouped = metalgemm.GEMMGroupQ8WithEvents(ws, Xq.q, Xq.d, P, observation)
+	})
 	if grouped == nil {
 		return nil
 	}
@@ -215,7 +230,11 @@ func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) [
 		return q4kMatRows(qt, xf)
 	}
 	y := make([]float32, qt.out)
-	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) { w.GEMV(xf, y) }) {
+	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) {
+		s.metalExecution(metalgemm.ExecutionQ4KGEMV, func(observation *metalgemm.ExecutionObservation) {
+			w.GEMVWithEvents(xf, y, observation)
+		})
+	}) {
 		if qt.lazy != nil {
 			panic("model: lazy Q4_K Metal GEMV upload failed: " + name)
 		}
@@ -289,7 +308,11 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 	}
 
 	if len(q4ws) >= 2 {
-		if grouped := metalgemm.GEMVGroup(q4ws, xf); grouped != nil {
+		var grouped [][]float32
+		s.metalExecution(metalgemm.ExecutionQ4KGEMVGroup, func(observation *metalgemm.ExecutionObservation) {
+			grouped = metalgemm.GEMVGroupWithEvents(q4ws, xf, observation)
+		})
+		if grouped != nil {
 			for j, i := range q4pos {
 				out[i] = grouped[j]
 			}
@@ -308,7 +331,11 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 	}
 	if len(q8ws) > 0 {
 		q := getQ8()
-		if grouped := metalgemm.GEMVGroupQ8(q8ws, q.q, q.d); grouped != nil {
+		var grouped [][]float32
+		s.metalExecution(metalgemm.ExecutionQ8GEMVGroup, func(observation *metalgemm.ExecutionObservation) {
+			grouped = metalgemm.GEMVGroupQ8WithEvents(q8ws, q.q, q.d, observation)
+		})
+		if grouped != nil {
 			for j, i := range q8pos {
 				out[i] = grouped[j]
 			}

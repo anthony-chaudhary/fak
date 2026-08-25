@@ -11,20 +11,27 @@
 package metalgemm
 
 /*
+#include <stdint.h>
+typedef struct {
+    uintptr_t command_buffer;
+    int committed;
+    int completed_wait;
+    int host_readback;
+} mg_execution_event;
 int  mg_q4k_upload(const unsigned char* raw, int out, int in);
 int  mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in);
-void mg_q4k_gemv(int wid, const float* x, float* y);
-void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
-void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat);
-void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff);
+void mg_q4k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
+void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
+void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
+void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
 void mg_q6k_gemv(int wid, const float* x, float* y);
 void mg_q6k_gemm(int wid, const float* X, int P, float* Y);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat);
-void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms);
-void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff, double* out_gpu_ms);
+void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, mg_execution_event* event);
+void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff, double* out_gpu_ms, mg_execution_event* event);
 void mg_q4k_set_use_mm(int on);
 void mg_q4k_release(int wid);
 void mg_q4k_reset(void);
@@ -113,11 +120,13 @@ func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
 
 // GEMV computes y[Out] = W · x for one f32 activation row x (length In). y must have length
 // >= Out. Both slices are accessed only during the call. This is the decode GEMV.
-func (w *Q4KWeight) GEMV(x, y []float32) {
+func (w *Q4KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
 	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
 		return
 	}
-	C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+	var event C.mg_execution_event
+	C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 }
 
 const (
@@ -135,19 +144,23 @@ func q4kUseMultiVector(out, in, n int) bool {
 }
 
 func (w *Q4KWeight) gemvBatchRepeated(Xcat []float32, n int, Ycat []float32) {
-	C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])))
+	var event C.mg_execution_event
+	C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 }
 
 // GEMVBatch runs n decode GEMVs of this same weight in ONE command buffer: Xcat is n contiguous
 // activation rows (n*In floats), Ycat receives n result rows (n*Out floats). Batches of 4-8 on
 // the measured Qwen projection shapes use the multi-vector kernel that dequantizes each Q4_K tile
 // once for all rows. Every other batch and shape keeps the original repeated-GEMV encoder path.
-func (w *Q4KWeight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
+func (w *Q4KWeight) GEMVBatchWithEvents(Xcat []float32, n int, Ycat []float32, observation *ExecutionObservation) {
 	if w == nil || w.id < 0 || n <= 0 || len(Xcat) < n*w.In || len(Ycat) < n*w.Out {
 		return
 	}
 	if q4kUseMultiVector(w.Out, w.In, n) {
-		C.mg_q4k_gemv_batch_multi(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])))
+		var event C.mg_execution_event
+		C.mg_q4k_gemv_batch_multi(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+		observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 		return
 	}
 	w.gemvBatchRepeated(Xcat, n, Ycat)
@@ -158,7 +171,7 @@ func (w *Q4KWeight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
 // length ws[i].Out). Every weight must share x's In. This is the live decode group pattern
 // (q/k/v, gate/up, the GDN in_proj quad): it pays the per-command-buffer submit/sync once for the
 // whole group and pipelines the dispatches. Returns nil on a shape mismatch or empty input.
-func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32 {
+func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObservation) [][]float32 {
 	n := len(ws)
 	if n == 0 || ws[0] == nil || len(x) < ws[0].In {
 		return nil
@@ -177,8 +190,10 @@ func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32 {
 	}
 	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
+	var event C.mg_execution_event
 	C.mg_q4k_gemv_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&x[0])),
-		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0])
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 	out := make([][]float32, n)
 	o := 0
 	for i, w := range ws {
@@ -322,12 +337,14 @@ func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []flo
 // dispatch's on-GPU execute window into the package-level LastGEMMGPUMs (readable immediately after
 // the call) so the model side can, under FAK_QPROFILE, split its wall time into compute vs
 // roundtrip. The recorded time is instrumentation only — it does not change the GEMM numerics.
-func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) {
+func (w *Q4KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation *ExecutionObservation) {
 	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
 		return
 	}
 	var gpuMs C.double
-	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &gpuMs)
+	var event C.mg_execution_event
+	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &gpuMs, &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 }
 
@@ -338,7 +355,7 @@ func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) {
 // read the same post-norm panel), paying the per-command-buffer submit/sync once for the whole
 // group instead of once per weight — the fix for the ~7-submits-per-layer prefill wall. Returns nil
 // on a shape mismatch or empty input, so the caller falls back to per-weight GEMM.
-func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
+func GEMMGroupWithEvents(ws []*Q4KWeight, X []float32, P int, observation *ExecutionObservation) [][]float32 {
 	n := len(ws)
 	if n == 0 || P <= 0 || ws[0] == nil || len(X) < P*ws[0].In {
 		return nil
@@ -358,8 +375,10 @@ func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
 	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
 	var gpuMs C.double
+	var event C.mg_execution_event
 	C.mg_q4k_gemm_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
-		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &gpuMs)
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &gpuMs, &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 	out := make([][]float32, n)
 	o := 0
@@ -416,4 +435,14 @@ func ResetQ4K() {
 		pinned.pin.Unpin()
 		delete(q4kPins, id)
 	}
+}
+
+func (w *Q4KWeight) GEMV(x, y []float32) { w.GEMVWithEvents(x, y, nil) }
+func (w *Q4KWeight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
+	w.GEMVBatchWithEvents(Xcat, n, Ycat, nil)
+}
+func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32  { return GEMVGroupWithEvents(ws, x, nil) }
+func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) { w.GEMMWithEvents(X, P, Y, nil) }
+func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
+	return GEMMGroupWithEvents(ws, X, P, nil)
 }

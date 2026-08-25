@@ -12,11 +12,18 @@
 package metalgemm
 
 /*
+#include <stdint.h>
+typedef struct {
+    uintptr_t command_buffer;
+    int committed;
+    int completed_wait;
+    int host_readback;
+} mg_execution_event;
 int  mg_q8_upload(const signed char* codes, const float* scales, int out, int in);
-void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y);
-void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff);
-void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y);
-void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff);
+void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event);
+void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event);
+void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event);
+void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q8_reset(void);
 */
 import "C"
@@ -53,12 +60,14 @@ func UploadQ8(codes []int8, scales []float32, out, in int) *Q8Weight {
 
 // GEMV computes y[Out] = W · x for one Q8_0-quantized activation: xq are the in int8 codes, xd the
 // nblk per-block f32 scales. y must have length >= Out. All slices are accessed only during the call.
-func (w *Q8Weight) GEMV(xq []int8, xd []float32, y []float32) {
+func (w *Q8Weight) GEMVWithEvents(xq []int8, xd []float32, y []float32, observation *ExecutionObservation) {
 	if w == nil || w.id < 0 || len(xq) < w.In || len(xd) < w.Nblk || len(y) < w.Out {
 		return
 	}
+	var event C.mg_execution_event
 	C.mg_q8_gemv(w.id, (*C.schar)(unsafe.Pointer(&xq[0])), (*C.float)(unsafe.Pointer(&xd[0])),
-		(*C.float)(unsafe.Pointer(&y[0])))
+		(*C.float)(unsafe.Pointer(&y[0])), &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 }
 
 // GEMVGroupQ8 runs one decode GEMV per weight in ws — all reading the SAME Q8_0 activation (xq
@@ -66,7 +75,7 @@ func (w *Q8Weight) GEMV(xq []int8, xd []float32, y []float32) {
 // slice per weight (each length ws[i].Out). Every weight must share the activation's In. This is the
 // live GDN decode group (the in_proj quad): it pays the per-command-buffer submit/sync once for the
 // whole group and pipelines the dispatches. Returns nil on a shape mismatch or empty input.
-func GEMVGroupQ8(ws []*Q8Weight, xq []int8, xd []float32) [][]float32 {
+func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation *ExecutionObservation) [][]float32 {
 	n := len(ws)
 	if n == 0 || ws[0] == nil || len(xq) < ws[0].In || len(xd) < ws[0].Nblk {
 		return nil
@@ -85,8 +94,10 @@ func GEMVGroupQ8(ws []*Q8Weight, xq []int8, xd []float32) [][]float32 {
 	}
 	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
+	var event C.mg_execution_event
 	C.mg_q8_gemv_group(&wids[0], C.int(n), (*C.schar)(unsafe.Pointer(&xq[0])), (*C.float)(unsafe.Pointer(&xd[0])),
-		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0])
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 	out := make([][]float32, n)
 	o := 0
 	for i, w := range ws {
@@ -99,19 +110,21 @@ func GEMVGroupQ8(ws []*Q8Weight, xq []int8, xd []float32) [][]float32 {
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ for a Q8_0-quantized activation panel: Xq are
 // P*In int8 codes, Xd are P*Nblk per-block f32 scales. Y must have length >= P*Out. The
 // call is the prefill twin of GEMV and runs the whole panel in one Metal command buffer.
-func (w *Q8Weight) GEMM(Xq []int8, Xd []float32, P int, Y []float32) {
+func (w *Q8Weight) GEMMWithEvents(Xq []int8, Xd []float32, P int, Y []float32, observation *ExecutionObservation) {
 	if w == nil || w.id < 0 || P <= 0 || len(Xq) < P*w.In || len(Xd) < P*w.Nblk || len(Y) < P*w.Out {
 		return
 	}
+	var event C.mg_execution_event
 	C.mg_q8_gemm(w.id, (*C.schar)(unsafe.Pointer(&Xq[0])), (*C.float)(unsafe.Pointer(&Xd[0])),
-		C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+		C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 }
 
 // GEMMGroupQ8 runs one batched prefill GEMM per weight in ws, all reading the SAME Q8_0 activation
 // panel X[P, In], in a SINGLE Metal command buffer. It is the prefill twin of GEMVGroupQ8 for
 // Qwen3.6's linear_attn in-proj groups: one upload of the activation panel and one submit/sync
 // covers several Q8-minority projections.
-func GEMMGroupQ8(ws []*Q8Weight, Xq []int8, Xd []float32, P int) [][]float32 {
+func GEMMGroupQ8WithEvents(ws []*Q8Weight, Xq []int8, Xd []float32, P int, observation *ExecutionObservation) [][]float32 {
 	n := len(ws)
 	if n == 0 || P <= 0 || ws[0] == nil || len(Xq) < P*ws[0].In || len(Xd) < P*ws[0].Nblk {
 		return nil
@@ -130,8 +143,10 @@ func GEMMGroupQ8(ws []*Q8Weight, Xq []int8, Xd []float32, P int) [][]float32 {
 	}
 	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
+	var event C.mg_execution_event
 	C.mg_q8_gemm_group(&wids[0], C.int(n), (*C.schar)(unsafe.Pointer(&Xq[0])), (*C.float)(unsafe.Pointer(&Xd[0])),
-		C.int(P), (*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0])
+		C.int(P), (*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
 	out := make([][]float32, n)
 	o := 0
 	for i, w := range ws {
@@ -148,3 +163,14 @@ func (w *Q8Weight) ID() int { return int(w.id) }
 // ResetQ8 releases every resident Q8 weight buffer and the reused scratch (the Q8 twin of
 // ResetQ4K). Call only when no Q8Weight handle is still in use — every prior handle is invalidated.
 func ResetQ8() { C.mg_q8_reset() }
+
+func (w *Q8Weight) GEMV(xq []int8, xd []float32, y []float32) { w.GEMVWithEvents(xq, xd, y, nil) }
+func GEMVGroupQ8(ws []*Q8Weight, xq []int8, xd []float32) [][]float32 {
+	return GEMVGroupQ8WithEvents(ws, xq, xd, nil)
+}
+func (w *Q8Weight) GEMM(Xq []int8, Xd []float32, P int, Y []float32) {
+	w.GEMMWithEvents(Xq, Xd, P, Y, nil)
+}
+func GEMMGroupQ8(ws []*Q8Weight, Xq []int8, Xd []float32, P int) [][]float32 {
+	return GEMMGroupQ8WithEvents(ws, Xq, Xd, P, nil)
+}

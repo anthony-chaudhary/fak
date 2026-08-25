@@ -1,6 +1,10 @@
 package model
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+)
 
 type Qwen35DecodeGraphNativeAttributionStatus string
 
@@ -21,6 +25,7 @@ type Qwen35DecodeGraphNode struct {
 	UnavailableReason       Qwen35DecodeGraphNativeAttributionReason `json:"unavailable_reason,omitempty"`
 	HostRead                *bool                                    `json:"host_read,omitempty"`
 	Syncs                   *int                                     `json:"syncs,omitempty"`
+	NativeEvents            []metalgemm.ExecutionEvent               `json:"native_events,omitempty"`
 }
 
 type Qwen35DecodeGraphTrace struct {
@@ -39,8 +44,9 @@ type qwen35DecodeGraphRecorder struct {
 }
 
 type qwen35DecodeGraphActive struct {
-	owner uint64
-	trace Qwen35DecodeGraphTrace
+	owner        uint64
+	trace        Qwen35DecodeGraphTrace
+	nativeEvents []metalgemm.ExecutionEvent
 }
 
 func (s *Session) EnableQwen35DecodeGraphTrace() {
@@ -103,6 +109,29 @@ func (s *Session) recordQwen35DecodeGraph(n Qwen35DecodeGraphNode) {
 		r.active.trace.Nodes = append(r.active.trace.Nodes, n)
 	}
 }
+func (s *Session) observeQwen35MetalExecution(observation *metalgemm.ExecutionObservation) {
+	if observation == nil || s.qwen35DecodeGraph == nil {
+		return
+	}
+	snapshot, err := observation.Snapshot()
+	if err != nil {
+		return
+	}
+	s.observeQwen35MetalExecutionSnapshot(snapshot)
+}
+
+func (s *Session) observeQwen35MetalExecutionSnapshot(snapshot metalgemm.ExecutionSnapshot) {
+	if len(snapshot.Events) == 0 || s.qwen35DecodeGraph == nil {
+		return
+	}
+	r := s.qwen35DecodeGraph
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active != nil {
+		r.active.nativeEvents = append(r.active.nativeEvents, snapshot.Events...)
+	}
+}
+
 func (s *Session) recordQwen35LayerGraph(l int, linear bool) {
 	kind := "full-attention"
 	if linear {
@@ -116,13 +145,35 @@ func (s *Session) recordQwen35LayerGraph(l int, linear bool) {
 }
 
 func (s *Session) recordQwen35ModelGraphNode(layer int, operation string, dependsOn ...string) {
-	s.recordQwen35DecodeGraph(Qwen35DecodeGraphNode{
-		Layer:                   layer,
-		Operation:               operation,
-		DependsOn:               dependsOn,
+	n := Qwen35DecodeGraphNode{
+		Layer: layer, Operation: operation, DependsOn: dependsOn,
 		NativeAttributionStatus: Qwen35DecodeGraphNativeAttributionUnavailable,
 		UnavailableReason:       Qwen35DecodeGraphMetalEventSourceUnavailable,
-	})
+	}
+	r := s.qwen35DecodeGraph
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.active == nil {
+		return
+	}
+	if len(r.active.nativeEvents) != 0 {
+		n.NativeAttributionStatus = Qwen35DecodeGraphNativeAttributionAvailable
+		n.UnavailableReason = ""
+		n.NativeEvents = append([]metalgemm.ExecutionEvent(nil), r.active.nativeEvents...)
+		r.active.nativeEvents = nil
+		hostRead, syncs := false, 0
+		for _, event := range n.NativeEvents {
+			hostRead = hostRead || event.HostReadback
+			if event.CompletedWait {
+				syncs++
+			}
+		}
+		n.HostRead, n.Syncs = &hostRead, &syncs
+	}
+	r.active.trace.Nodes = append(r.active.trace.Nodes, n)
 }
 
 func cloneQwen35DecodeGraphTrace(in Qwen35DecodeGraphTrace) Qwen35DecodeGraphTrace {
@@ -130,6 +181,7 @@ func cloneQwen35DecodeGraphTrace(in Qwen35DecodeGraphTrace) Qwen35DecodeGraphTra
 	out.Nodes = append([]Qwen35DecodeGraphNode(nil), in.Nodes...)
 	for i := range out.Nodes {
 		out.Nodes[i].DependsOn = append([]string(nil), in.Nodes[i].DependsOn...)
+		out.Nodes[i].NativeEvents = append([]metalgemm.ExecutionEvent(nil), in.Nodes[i].NativeEvents...)
 	}
 	return out
 }

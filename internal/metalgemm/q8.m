@@ -19,6 +19,29 @@
 // teardown via mg_q8_reset.
 
 #import <Metal/Metal.h>
+
+typedef struct {
+    uintptr_t command_buffer;
+    int committed;
+    int completed_wait;
+    int host_readback;
+} mg_execution_event;
+
+static inline void mg_execution_event_reset(mg_execution_event* event) {
+    if (event == NULL) return;
+    event->command_buffer = 0;
+    event->committed = 0;
+    event->completed_wait = 0;
+    event->host_readback = 0;
+}
+
+static inline void mg_execution_event_finish(mg_execution_event* event, id<MTLCommandBuffer> cmd) {
+    if (event == NULL) return;
+    event->command_buffer = (uintptr_t)(__bridge void*)cmd;
+    event->committed = 1;
+    event->completed_wait = 1;
+    event->host_readback = 1;
+}
 #include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
 
@@ -213,7 +236,8 @@ int mg_q8_upload(const signed char* codes, const float* scales, int out, int in)
 
 // mg_q8_gemv computes y[out] = W[wid] · x for one Q8_0-quantized activation (xq codes [in],
 // xd block scales [nblk]). f32 result.
-void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y) {
+void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < 0 || wid >= gNQ8) return;
     @autoreleasepool {
         Q8W W = gQ8[wid];
@@ -238,14 +262,16 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y) {
         [cmd waitUntilCompleted];
 
         memcpy(y, gQ8YBuf.contents, (size_t)W.out * 4);
-    }
+    mg_execution_event_finish(event, cmd);
+        }
 }
 
 // mg_q8_gemv_group runs n decode GEMVs that SHARE one Q8_0 activation (xq/xd, same in) but apply
 // n DIFFERENT resident Q8 weights, into ONE command buffer (one commit/waitUntilCompleted). This
 // is the live GDN decode access pattern — the in_proj quad (qkv,z,b,a) all read the same post-norm
 // activation. Each weight i writes Ycat[yoff[i] .. yoff[i]+out_i); yoff has n+1 entries.
-void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff) {
+void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (n <= 0) return;
     @autoreleasepool {
         int in   = gQ8[wids[0]].in;
@@ -275,13 +301,15 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         [cmd waitUntilCompleted];
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
-    }
+    mg_execution_event_finish(event, cmd);
+        }
 }
 
 // mg_q8_gemm computes Y[P,out] = X[P,in] * W[wid]^T for a Q8_0 activation panel in one command
 // buffer. This is the Metal prefill primitive for Q8-minority projections in the resident-Q4_K
 // lane (#1087): full-attn q/k and Qwen3.6 linear_attn.* no longer have to fall back to CPU qGemm8.
-void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y) {
+void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < 0 || wid >= gNQ8 || P <= 0) return;
     @autoreleasepool {
         Q8W W = gQ8[wid];
@@ -317,7 +345,8 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         [cmd waitUntilCompleted];
 
         memcpy(Y, gQ8YBuf.contents, (size_t)P * W.out * 4);
-    }
+    mg_execution_event_finish(event, cmd);
+        }
 }
 
 // mg_q8_gemm_group runs n batched prefill GEMMs that SHARE one activation panel X[P,in] but apply
@@ -325,7 +354,8 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
 // mg_q8_gemv_group and the grouped sibling of mg_q8_gemm: Qwen3.6 linear_attn in-proj groups pay one
 // X upload and one submit/sync instead of one per projection. Each weight writes a token-major
 // [P,out_i] block into Ycat at yoff[i] (element offset).
-void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff) {
+void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (n <= 0 || P <= 0) return;
     @autoreleasepool {
         Q8W W0 = gQ8[wids[0]];
@@ -365,7 +395,8 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         [cmd waitUntilCompleted];
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
-    }
+    mg_execution_event_finish(event, cmd);
+        }
 }
 
 // --- accessors for the GPU-resident decode forward (decode.m) ---

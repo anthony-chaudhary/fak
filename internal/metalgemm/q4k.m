@@ -20,6 +20,29 @@
 // from the f16 table (it holds raw bytes, not f16), with its own teardown via mg_q4k_reset.
 
 #import <Metal/Metal.h>
+
+typedef struct {
+    uintptr_t command_buffer;
+    int committed;
+    int completed_wait;
+    int host_readback;
+} mg_execution_event;
+
+static inline void mg_execution_event_reset(mg_execution_event* event) {
+    if (event == NULL) return;
+    event->command_buffer = 0;
+    event->committed = 0;
+    event->completed_wait = 0;
+    event->host_readback = 0;
+}
+
+static inline void mg_execution_event_finish(mg_execution_event* event, id<MTLCommandBuffer> cb) {
+    if (event == NULL) return;
+    event->command_buffer = (uintptr_t)(__bridge void*)cb;
+    event->committed = 1;
+    event->completed_wait = 1;
+    event->host_readback = 1;
+}
 #include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
 #include <unistd.h>
@@ -1007,7 +1030,8 @@ int mg_q4k_upload(const unsigned char* raw, int out, int in) {
 }
 
 // mg_q4k_gemv computes y[out] = W[wid] · x (one f32 activation row, length in). f32 in/out.
-void mg_q4k_gemv(int wid, const float* x, float* y) {
+void mg_q4k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < 0 || wid >= gNQ4) return;
     @autoreleasepool {
         Q4KW W = gQ4[wid];
@@ -1035,6 +1059,7 @@ void mg_q4k_gemv(int wid, const float* x, float* y) {
         [cb waitUntilCompleted];
 
         memcpy(y, yb.contents, (size_t)W.out * 4);
+    mg_execution_event_finish(event, cb);
     }
 }
 
@@ -1045,7 +1070,8 @@ void mg_q4k_gemv(int wid, const float* x, float* y) {
 // ~n*kernel + one round-trip (not n round-trips), the decode wall is the per-op command buffer,
 // and the fix is a one-command-buffer resident forward (issue #67). The encoder re-binds only
 // the X/Y offsets between dispatches; the weight + dims are set once.
-void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat) {
+void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < 0 || wid >= gNQ4 || n <= 0) return;
     @autoreleasepool {
         Q4KW W = gQ4[wid];
@@ -1072,12 +1098,14 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat) {
         [cb waitUntilCompleted];
 
         memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
+    mg_execution_event_finish(event, cb);
     }
 }
 
 // mg_q4k_gemv_batch_multi applies one Q4_K weight to 4-8 activation rows in a single dispatch.
 // q4k_gemv_multi owns the tile-reuse contract; the host side only copies the panel and binds it.
-void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat) {
+void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < 0 || wid >= gNQ4 || n < 4 || n > 8) return;
     @autoreleasepool {
         Q4KW W = gQ4[wid];
@@ -1102,6 +1130,7 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat) {
         [cb waitUntilCompleted];
 
         memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
+    mg_execution_event_finish(event, cb);
     }
 }
 
@@ -1111,7 +1140,8 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat) {
 // read the same post-norm activation. Each weight i writes Ycat[yoff[i] .. yoff[i]+out_i); yoff
 // has n+1 entries (yoff[n] = total y elems). The fixed ~submit/sync overhead is paid ONCE for the
 // group and the GPU pipelines the n dispatches — the per-token win the resident forward needs.
-void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff) {
+void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (n <= 0) return;
     @autoreleasepool {
         int in = gQ4[wids[0]].in;
@@ -1139,6 +1169,7 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
         [cb waitUntilCompleted];
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
+    mg_execution_event_finish(event, cb);
     }
 }
 
@@ -1147,7 +1178,8 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
 // command buffer's on-GPU execution window (cb.GPUEndTime - cb.GPUStartTime, in ms), valid after
 // waitUntilCompleted returns — the true compute time excluding the CPU-side encode/commit/sync/H2D
 // round-trip. Callers passing NULL are unaffected (the profile path is opt-in).
-void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms) {
+void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < 0 || wid >= gNQ4 || P <= 0) return;
     @autoreleasepool {
         Q4KW W = gQ4[wid];
@@ -1191,6 +1223,7 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms) {
         if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
 
         memcpy(Y, yb.contents, (size_t)P * W.out * 4);
+    mg_execution_event_finish(event, cb);
     }
 }
 
@@ -1204,7 +1237,8 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms) {
 // out_gpu_ms is nullable: when non-NULL it receives the whole group's on-GPU execution window
 // (cb.GPUEndTime - cb.GPUStartTime, in ms), valid after waitUntilCompleted returns. NULL is inert.
 void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff,
-                       double* out_gpu_ms) {
+                       double* out_gpu_ms, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (n <= 0 || P <= 0) return;
     @autoreleasepool {
         int in = gQ4[wids[0]].in;
@@ -1249,6 +1283,7 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
         if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
+    mg_execution_event_finish(event, cb);
     }
 }
 
