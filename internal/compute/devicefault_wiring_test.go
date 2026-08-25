@@ -75,6 +75,21 @@ func countLatchCalls(root ast.Node, method string) int {
 	return count
 }
 
+func countSelectorCalls(root ast.Node, method string) int {
+	count := 0
+	ast.Inspect(root, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == method {
+			count++
+		}
+		return true
+	})
+	return count
+}
+
 func TestCUDAInitConstructsSessionFaultLatch(t *testing.T) {
 	file := parseCUDAWiringSource(t, "cuda.go")
 	for _, decl := range file.Decls {
@@ -121,7 +136,15 @@ func TestCUDAQwen35GDNDecodeAdmitsThroughLatchFirst(t *testing.T) {
 	if got := countLatchCalls(fn.Body.List[0], "Admit"); got != 1 {
 		t.Fatalf("Qwen35GDNDecode first statement contains %d faultLatch.Admit calls, want exactly 1", got)
 	}
-	if got := countLatchCalls(fn.Body, "ObserveError"); got < 2 {
-		t.Fatalf("Qwen35GDNDecode observes %d fault sites into the latch, want >= 2 (strict allocation + kernel status)", got)
+	observations := 0
+	for _, helperName := range []string{"allocateQwen35GDN", "failQwen35GDN"} {
+		if got := countSelectorCalls(fn.Body, helperName); got != 1 {
+			t.Fatalf("Qwen35GDNDecode calls %s %d times, want exactly 1", helperName, got)
+		}
+		helper := cudaBackendFuncDecl(t, file, helperName)
+		observations += countLatchCalls(helper.Body, "ObserveError")
+	}
+	if observations < 2 {
+		t.Fatalf("Qwen35GDNDecode helpers observe %d fault sites into the latch, want >= 2 (strict allocation + kernel status)", observations)
 	}
 }

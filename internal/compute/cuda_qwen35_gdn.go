@@ -69,10 +69,16 @@ func (c *cudaBackend) validateQwen35GDNTensor(name string, t Tensor) error {
 	return nil
 }
 
-func (c *cudaBackend) validateQwen35GDNStateOperands(operands []struct {
-	name string
-	t    Tensor
-}, convState, recurrentState Tensor) error {
+func (c *cudaBackend) validateQwen35GDNOperands(operands []qwen35GDNOperand, convState, recurrentState Tensor) error {
+	for _, operand := range operands {
+		if err := c.validateQwen35GDNTensor(operand.name, operand.t); err != nil {
+			return err
+		}
+	}
+	return c.validateQwen35GDNStateOperands(operands, convState, recurrentState)
+}
+
+func (c *cudaBackend) validateQwen35GDNStateOperands(operands []qwen35GDNOperand, convState, recurrentState Tensor) error {
 	convBuf := convState.buf.(*cudaBuf)
 	recurrentBuf := recurrentState.buf.(*cudaBuf)
 	states := []struct {

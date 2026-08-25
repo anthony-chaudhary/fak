@@ -392,12 +392,7 @@ func (c *cudaBackend) Upload(t Tensor, as Dtype) Tensor {
 }
 
 func (c *cudaBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
-	if class == "" {
-		class = MemoryUnknown
-	}
-	if site == "" {
-		site = "upload-" + string(class)
-	}
+	class, site = normalizeUploadClass(class, site, "upload-")
 	return c.uploadClass(t, as, class, site)
 }
 
@@ -436,11 +431,10 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 		}
 		f := hb.F32()
 		buf := c.dallocClass(t.Numel()*F32.Bytes(), class, site)
-		out := makeTensor(c, F32, RowMajor, append([]int(nil), t.Shape...), nil, buf)
-		if len(f) > 0 {
-			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-		}
-		return out
+		out := makeF32TensorLike(c, t, buf)
+		return finishF32Upload(out, f, func(values []float32) {
+			C.fcuda_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
+		})
 	}
 	store := F32 // the resident dtype the `as` request narrows f32 host weights to
 	switch as {
@@ -486,6 +480,11 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 // (d=amax/127, q8round), and both narrow operands are uploaded — codes to the buffer's ptr, scales
 // to its scale side-channel. The f32 weight never becomes resident, so the VRAM footprint is the
 // int8 size (codes) + a thin per-block scale band, not the f32 size. `in` must be divisible by 32.
+func cudaUploadQuantPayload(buf *cudaBuf, codes []int8, scales []float32) {
+	C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
+	C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*F32.Bytes()))
+}
+
 func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr) Tensor {
 	if len(t.Shape) != 2 {
 		panic("compute: cuda Upload(_, Q8_0) expects a 2-D [out,in] weight (got rank " + itoaC(len(t.Shape)) + ")")
@@ -520,8 +519,7 @@ func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr)
 		}
 	}
 	res, buf := c.devQ8(t.Shape, blk, len(scales))
-	C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
-	C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
+	cudaUploadQuantPayload(buf, codes, scales)
 	buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q8_0, t.Layout
 	uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	return res
@@ -563,8 +561,7 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 	}
 	res, buf := c.devQ8(t.Shape, blk, len(scales))
 	if len(codes) > 0 {
-		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
-		C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
+		cudaUploadQuantPayload(buf, codes, scales)
 		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q8_0, t.Layout
 		uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	}
@@ -610,8 +607,7 @@ func (c *cudaBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
 	}
 	res, buf := c.devQ2(t.Shape, blk, len(scales))
 	if len(codes) > 0 {
-		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
-		C.fcuda_h2d(buf.scales, unsafe.Pointer(&scales[0]), C.size_t(len(scales)*4))
+		cudaUploadQuantPayload(buf, codes, scales)
 		buf.host, buf.hostDt, buf.hostLo = hp, Q2_0, t.Layout
 		uploadCache[ucKey{hp, Q2_0, t.Layout}] = res
 	}
@@ -1349,12 +1345,7 @@ func (k *cudaKV) Free() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	free := func(d *dslice) {
-		if d.ptr != nil {
-			C.fcuda_free(d.ptr)
-			d.ptr = nil
-		}
-		d.len = 0
-		d.cap = 0
+		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fcuda_free(pointer) })
 	}
 	for l := range k.K {
 		free(&k.K[l])

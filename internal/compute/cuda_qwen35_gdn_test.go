@@ -459,10 +459,7 @@ func TestCUDAQwen35GDNTensorMetadataRefusals(t *testing.T) {
 		buf.n++
 	})
 
-	operands := []struct {
-		name string
-		t    Tensor
-	}{
+	operands := []qwen35GDNOperand{
 		{"normalized_input", tensors[0]}, {"in_proj_qkv", tensors[1]},
 		{"in_proj_z", tensors[2]}, {"in_proj_b", tensors[3]}, {"in_proj_a", tensors[4]},
 		{"conv1d", tensors[5]}, {"A_log", tensors[6]}, {"dt_bias", tensors[7]},

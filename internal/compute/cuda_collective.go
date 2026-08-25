@@ -67,10 +67,10 @@ func (c *cudaBackend) UploadRank(t Tensor, as Dtype, rank int) (Tensor, error) {
 	if err != nil {
 		return Tensor{}, err
 	}
-	out := makeTensor(c, F32, RowMajor, append([]int(nil), t.Shape...), nil, buf)
-	if len(f) > 0 {
-		C.fcuda_h2d_on(C.int(rank), buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-	}
+	out := makeF32TensorLike(c, t, buf)
+	finishF32Upload(out, f, func(values []float32) {
+		C.fcuda_h2d_on(C.int(rank), buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
+	})
 	return out, nil
 }
 
@@ -167,6 +167,16 @@ func (c *cudaBackend) collectDevice(parts []Tensor, requireEqualLen bool) ([]uns
 	return ptrs, count0, nil
 }
 
+func (c *cudaBackend) singletonCollective(parts []Tensor, requireEqualLen bool) (Tensor, bool, error) {
+	if len(parts) != 1 {
+		return Tensor{}, false, nil
+	}
+	if _, _, err := c.collectDevice(parts, requireEqualLen); err != nil {
+		return Tensor{}, true, err
+	}
+	return parts[0], true, nil
+}
+
 // AllReduceSum reduces the equal-length per-rank device partials with a real NCCL all-reduce-SUM
 // (each part r resident on device r), returning a NEW device tensor on device 0 holding the sum.
 // It is the device twin of cpuBackend.AllReduceSum: same fail-closed contract, same SUM, but the
@@ -174,11 +184,8 @@ func (c *cudaBackend) collectDevice(parts []Tensor, requireEqualLen bool) ([]uns
 func (c *cudaBackend) AllReduceSum(parts []Tensor) (Tensor, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if len(parts) == 1 {
-		if _, _, err := c.collectDevice(parts, true); err != nil {
-			return Tensor{}, err
-		}
-		return parts[0], nil
+	if singleton, ok, err := c.singletonCollective(parts, true); ok {
+		return singleton, err
 	}
 	if err := ensureNCCL(len(parts)); err != nil {
 		return Tensor{}, err
@@ -208,11 +215,8 @@ func (c *cudaBackend) AllReduceSum(parts []Tensor) (Tensor, error) {
 func (c *cudaBackend) AllGather(parts []Tensor) (Tensor, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if len(parts) == 1 {
-		if _, _, err := c.collectDevice(parts, false); err != nil {
-			return Tensor{}, err
-		}
-		return parts[0], nil
+	if singleton, ok, err := c.singletonCollective(parts, false); ok {
+		return singleton, err
 	}
 	if err := ensureNCCL(len(parts)); err != nil {
 		return Tensor{}, err
@@ -248,11 +252,11 @@ func (c *cudaBackend) AllGather(parts []Tensor) (Tensor, error) {
 func (c *cudaBackend) ReduceScatter(parts []Tensor) ([]Tensor, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if len(parts) == 1 {
-		if _, _, err := c.collectDevice(parts, true); err != nil {
+	if singleton, ok, err := c.singletonCollective(parts, true); ok {
+		if err != nil {
 			return nil, err
 		}
-		return []Tensor{parts[0]}, nil
+		return []Tensor{singleton}, nil
 	}
 	if err := ensureNCCL(len(parts)); err != nil {
 		return nil, err
@@ -292,11 +296,11 @@ func (c *cudaBackend) ReduceScatter(parts []Tensor) ([]Tensor, error) {
 func (c *cudaBackend) AllToAll(parts []Tensor) ([]Tensor, error) {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	if len(parts) == 1 {
-		if _, _, err := c.collectDevice(parts, true); err != nil {
+	if singleton, ok, err := c.singletonCollective(parts, true); ok {
+		if err != nil {
 			return nil, err
 		}
-		return []Tensor{parts[0]}, nil
+		return []Tensor{singleton}, nil
 	}
 	return nil, fmt.Errorf("compute: cuda AllToAll (grouped ncclSend/ncclRecv) is not yet implemented; use AllReduceSum/AllGather/ReduceScatter (#971)")
 }

@@ -239,10 +239,7 @@ func (c *cudaBackend) qwen35SequenceGDNLocked(x Tensor, layer Qwen35SequenceLaye
 	keyDim := req.NumKeyHeads * req.KeyHeadDim
 	valueDim := req.NumValueHeads * req.ValueHeadDim
 	convDim := 2*keyDim + valueDim
-	allocations := []struct {
-		name  string
-		shape []int
-	}{{"gdn-mixed", []int{tokens, convDim}}, {"gdn-z", []int{tokens, valueDim}}, {"gdn-b", []int{tokens, req.NumValueHeads}}, {"gdn-a", []int{tokens, req.NumValueHeads}}, {"gdn-conv-out", []int{tokens, convDim}}, {"gdn-q-norm", []int{tokens, keyDim}}, {"gdn-k-norm", []int{tokens, keyDim}}, {"gdn-core", []int{tokens, valueDim}}, {"gdn-output", []int{tokens, req.Hidden}}}
+	allocations := qwen35GDNAllocations("gdn-", "-", tokens, tokens, req.Hidden, keyDim, valueDim, req.NumValueHeads, convDim)
 	tensors := make([]Tensor, 0, len(allocations))
 	buffers := make([]*cudaBuf, 0, len(allocations))
 	for _, allocation := range allocations {
@@ -254,28 +251,14 @@ func (c *cudaBackend) qwen35SequenceGDNLocked(x Tensor, layer Qwen35SequenceLaye
 		tensors = append(tensors, t)
 		buffers = append(buffers, b)
 	}
-	q8Args := func(t Tensor) (unsafe.Pointer, *C.float, C.int) {
-		buf := t.buf.(*cudaBuf)
-		if t.Dtype == Q8_0 {
-			return buf.ptr, (*C.float)(buf.scales), 1
-		}
-		return buf.ptr, nil, 0
-	}
-	qkvPtr, qkvScale, qkvQ8 := q8Args(layer.GDNInQKV)
-	zPtr, zScale, zQ8 := q8Args(layer.GDNInZ)
-	bPtr, bScale, bQ8 := q8Args(layer.GDNInB)
-	aPtr, aScale, aQ8 := q8Args(layer.GDNInA)
-	outPtr, outScale, outQ8 := q8Args(layer.GDNOut)
+	qkvPtr, qkvScale, qkvQ8 := c.qwen35GDNQ8Args(layer.GDNInQKV)
+	zPtr, zScale, zQ8 := c.qwen35GDNQ8Args(layer.GDNInZ)
+	bPtr, bScale, bQ8 := c.qwen35GDNQ8Args(layer.GDNInB)
+	aPtr, aScale, aQ8 := c.qwen35GDNQ8Args(layer.GDNInA)
+	outPtr, outScale, outQ8 := c.qwen35GDNQ8Args(layer.GDNOut)
 	status := int(C.fcuda_qwen35_gdn_sequence_f32(c.cf(x), C.int(tokens), qkvPtr, qkvScale, qkvQ8, zPtr, zScale, zQ8, bPtr, bScale, bQ8, aPtr, aScale, aQ8, c.cf(layer.GDNConv), c.cf(layer.GDNALog), c.cf(layer.GDNDTBias), c.cf(layer.GDNNorm), outPtr, outScale, outQ8, c.cf(state.Conv), c.cf(state.Recurrent), c.cf(tensors[8]), c.cf(tensors[0]), c.cf(tensors[1]), c.cf(tensors[2]), c.cf(tensors[3]), c.cf(tensors[4]), c.cf(tensors[5]), c.cf(tensors[6]), c.cf(tensors[7]), C.int(req.Hidden), C.int(req.NumKeyHeads), C.int(req.NumValueHeads), C.int(req.KeyHeadDim), C.int(req.ValueHeadDim), C.int(req.ConvKernel), C.float(req.RMSNormEpsilon)))
 	if status != 0 {
-		for _, b := range buffers {
-			atomic.StoreUint32(&b.invalid, 1)
-		}
-		atomic.StoreUint32(&state.Conv.buf.(*cudaBuf).invalid, 1)
-		atomic.StoreUint32(&state.Recurrent.buf.(*cudaBuf).invalid, 1)
-		c.releaseTransientBuffers(buffers)
-		kernelErr := &Qwen35GDNKernelError{Stage: qwen35GDNKernelStage(status), Code: status}
-		c.faultLatch.ObserveError(kernelErr, "qwen35-sequence-gdn")
+		kernelErr := c.failQwen35GDN(buffers, state.Conv, state.Recurrent, status, "qwen35-sequence-gdn")
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: "gdn", Layer: layerIndex, Cause: kernelErr}
 	}
 	atomic.AddUint64(&c.fenceGen, 1)

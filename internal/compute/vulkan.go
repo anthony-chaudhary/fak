@@ -452,11 +452,10 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 			panic("compute: vulkan classed Upload supports only F32 activation/runtime uploads")
 		}
 		buf := v.dallocForClass(t.Numel()*F32.Bytes(), class, what)
-		out := makeTensor(v, F32, RowMajor, append([]int(nil), t.Shape...), nil, buf)
-		if len(f) > 0 {
-			C.fvk_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-		}
-		return out
+		out := makeF32TensorLike(v, t, buf)
+		return finishF32Upload(out, f, func(values []float32) {
+			C.fvk_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
+		})
 	}
 	if as == Q8_0 {
 		q := QuantizeQ8(Default(), t.Shape, f, 32)
@@ -464,11 +463,10 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 		return v.uploadQ8Locked(q.Shape, qh.I8(), q.Quant.Scale, q.Quant.Block)
 	}
 	buf := v.dallocForClass(t.Numel()*F32.Bytes(), MemoryWeights, what)
-	out := makeTensor(v, F32, RowMajor, append([]int(nil), t.Shape...), nil, buf)
-	if len(f) > 0 {
-		C.fvk_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
-	}
-	return out
+	out := makeF32TensorLike(v, t, buf)
+	return finishF32Upload(out, f, func(values []float32) {
+		C.fvk_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
+	})
 }
 
 func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float32, block int) Tensor {
@@ -572,15 +570,12 @@ func (v *vulkanBackend) Host(t Tensor) ([]float32, bool) {
 func (v *vulkanBackend) Read(t Tensor) []float32 {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
-	if hb, ok := t.buf.(*hostBuf); ok {
-		return hb.f32
-	}
-	db := t.buf.(*vulkanBuf)
-	out := make([]float32, t.Numel())
-	if len(out) > 0 {
-		C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
-	}
-	return out
+	return readF32Tensor(t, func(buf Buffer, out []float32) {
+		db := buf.(*vulkanBuf)
+		if len(out) > 0 {
+			C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+		}
+	})
 }
 
 // Free releases the tensor's device buffer (and its companion Q8 scale buffer, if any)
@@ -1330,12 +1325,7 @@ func (k *vulkanKV) Free() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	free := func(d *vslice) {
-		if d.ptr != nil {
-			C.fvk_free(d.ptr)
-			d.ptr = nil
-		}
-		d.len = 0
-		d.cap = 0
+		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fvk_free(pointer) })
 	}
 	for l := range k.K {
 		free(&k.K[l])

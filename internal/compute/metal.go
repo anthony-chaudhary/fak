@@ -191,12 +191,7 @@ func (c *metalBackend) Upload(t Tensor, as Dtype) Tensor {
 }
 
 func (c *metalBackend) UploadClass(t Tensor, as Dtype, class MemoryClass, site string) Tensor {
-	if class == "" {
-		class = MemoryUnknown
-	}
-	if site == "" {
-		site = "metal-upload-" + string(class)
-	}
+	class, site = normalizeUploadClass(class, site, "metal-upload-")
 	return c.uploadClass(t, as, class, site)
 }
 
@@ -247,15 +242,12 @@ func (c *metalBackend) Host(t Tensor) ([]float32, bool) {
 func (c *metalBackend) Read(t Tensor) []float32 {
 	metalMu.Lock()
 	defer metalMu.Unlock()
-	if hb, ok := t.buf.(*hostBuf); ok {
-		return hb.f32
-	}
-	db := t.buf.(*metalBuf)
-	out := make([]float32, t.Numel())
-	if len(out) > 0 {
-		C.fmetal_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
-	}
-	return out
+	return readF32Tensor(t, func(buf Buffer, out []float32) {
+		db := buf.(*metalBuf)
+		if len(out) > 0 {
+			C.fmetal_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
+		}
+	})
 }
 
 // Free releases the tensor's device buffer, evicting it from the upload cache so a
@@ -536,12 +528,7 @@ func (k *metalKV) Free() {
 	metalMu.Lock()
 	defer metalMu.Unlock()
 	free := func(d *mslice) {
-		if d.ptr != nil {
-			C.fmetal_free(d.ptr)
-			d.ptr = nil
-		}
-		d.len = 0
-		d.cap = 0
+		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fmetal_free(pointer) })
 	}
 	for l := range k.K {
 		free(&k.K[l])

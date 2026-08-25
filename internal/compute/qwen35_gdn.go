@@ -141,6 +141,56 @@ func qwen35GDNShapeBytes(shape []int, bytesPerElement int) (int, bool) {
 	return int(bytes), true
 }
 
+type qwen35GDNOperand struct {
+	name string
+	t    Tensor
+}
+
+func qwen35GDNOperands(
+	normalizedInput,
+	inProjQKV, inProjZ, inProjB, inProjA,
+	conv1D, aLog, dtBias, norm, outProj,
+	convState, recurrentState Tensor,
+) []qwen35GDNOperand {
+	return []qwen35GDNOperand{
+		{"normalized_input", normalizedInput},
+		{"in_proj_qkv", inProjQKV}, {"in_proj_z", inProjZ},
+		{"in_proj_b", inProjB}, {"in_proj_a", inProjA},
+		{"conv1d", conv1D}, {"A_log", aLog}, {"dt_bias", dtBias},
+		{"norm", norm}, {"out_proj", outProj},
+		{"conv_state", convState}, {"recurrent_state", recurrentState},
+	}
+}
+
+type qwen35GDNAllocation struct {
+	name  string
+	shape []int
+}
+
+// qwen35GDNAllocations describes the nine scratch/output buffers shared by the
+// decode and sequence kernels. A zero row count preserves the single-row decode
+// layout; sequence callers independently select whether scratch and output are
+// panel-shaped because both native entry points intentionally support that mix.
+func qwen35GDNAllocations(namePrefix, nameSeparator string, scratchRows, outputRows, hidden, keyDim, valueDim, numValueHeads, convDim int) []qwen35GDNAllocation {
+	shape := func(rows, width int) []int {
+		if rows > 0 {
+			return []int{rows, width}
+		}
+		return []int{width}
+	}
+	return []qwen35GDNAllocation{
+		{namePrefix + "mixed", shape(scratchRows, convDim)},
+		{namePrefix + "z", shape(scratchRows, valueDim)},
+		{namePrefix + "b", shape(scratchRows, numValueHeads)},
+		{namePrefix + "a", shape(scratchRows, numValueHeads)},
+		{namePrefix + "conv" + nameSeparator + "out", shape(scratchRows, convDim)},
+		{namePrefix + "q" + nameSeparator + "norm", shape(scratchRows, keyDim)},
+		{namePrefix + "k" + nameSeparator + "norm", shape(scratchRows, keyDim)},
+		{namePrefix + "core", shape(scratchRows, valueDim)},
+		{namePrefix + "output", shape(outputRows, hidden)},
+	}
+}
+
 func validateQwen35GDNGeometry(
 	normalizedInput,
 	inProjQKV, inProjZ, inProjB, inProjA,

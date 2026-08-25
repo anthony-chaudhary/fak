@@ -3,6 +3,7 @@ package compute
 import (
 	"errors"
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,39 @@ func TestQwen35GDNGeometryAcceptsCPUValidKernelOne(t *testing.T) {
 	}
 	if err := validateQwen35GDNTensors(tensors, hidden, nK, nV, kHd, vHd, kernel, 1e-5); err != nil {
 		t.Fatalf("CPU-valid K=1 geometry refused: %v", err)
+	}
+}
+
+func TestQwen35GDNAllocationsPreserveDecodeAndSequenceLayouts(t *testing.T) {
+	const hidden, keyDim, valueDim, valueHeads, convDim = 8, 2, 4, 2, 8
+	tests := []struct {
+		name                  string
+		prefix                string
+		separator             string
+		scratchRows, outRows  int
+		wantFirst, wantOutput []int
+		wantFirstName, wantQ  string
+	}{
+		{"decode", "", "_", 0, 0, []int{convDim}, []int{hidden}, "mixed", "q_norm"},
+		{"sequence-api", "", "_", 0, 3, []int{convDim}, []int{3, hidden}, "mixed", "q_norm"},
+		{"resident-panel", "gdn-", "-", 3, 3, []int{3, convDim}, []int{3, hidden}, "gdn-mixed", "gdn-q-norm"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := qwen35GDNAllocations(tt.prefix, tt.separator, tt.scratchRows, tt.outRows, hidden, keyDim, valueDim, valueHeads, convDim)
+			if len(got) != 9 {
+				t.Fatalf("allocation count = %d, want 9", len(got))
+			}
+			if got[0].name != tt.wantFirstName || !reflect.DeepEqual(got[0].shape, tt.wantFirst) {
+				t.Fatalf("first allocation = %#v, want name=%q shape=%v", got[0], tt.wantFirstName, tt.wantFirst)
+			}
+			if got[8].name != tt.prefix+"output" || !reflect.DeepEqual(got[8].shape, tt.wantOutput) {
+				t.Fatalf("output allocation = %#v, want name=%q shape=%v", got[8], tt.prefix+"output", tt.wantOutput)
+			}
+			if got[5].name != tt.wantQ {
+				t.Fatalf("q-norm allocation name = %q, want %q", got[5].name, tt.wantQ)
+			}
+		})
 	}
 }
 

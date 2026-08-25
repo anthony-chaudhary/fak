@@ -166,6 +166,45 @@ func qwen35GDNInjectFaultForTest(stage int) {
 	C.fcuda_qwen35_gdn_test_fault(C.int(stage))
 }
 
+func (c *cudaBackend) allocateQwen35GDN(allocations []qwen35GDNAllocation, sitePrefix string) ([]Tensor, []*cudaBuf, error) {
+	tensors := make([]Tensor, 0, len(allocations))
+	buffers := make([]*cudaBuf, 0, len(allocations))
+	for _, allocation := range allocations {
+		site := sitePrefix + allocation.name
+		tensor, buffer, err := c.devTrDeviceOnly(allocation.shape, F32, site)
+		if err != nil {
+			c.releaseTransientBuffers(buffers)
+			c.faultLatch.ObserveError(err, site)
+			return nil, nil, err
+		}
+		tensors = append(tensors, tensor)
+		buffers = append(buffers, buffer)
+	}
+	return tensors, buffers, nil
+}
+
+func (c *cudaBackend) qwen35GDNQ8Args(t Tensor) (unsafe.Pointer, *C.float, C.int) {
+	buf := c.cudaBufForSubmit(t)
+	if t.Dtype == Q8_0 {
+		return buf.ptr, (*C.float)(buf.scales), 1
+	}
+	return buf.ptr, nil, 0
+}
+
+// failQwen35GDN invalidates every possibly partial result and both mutable
+// states before releasing operation-owned buffers and poisoning the session.
+func (c *cudaBackend) failQwen35GDN(buffers []*cudaBuf, convState, recurrentState Tensor, status int, site string) *Qwen35GDNKernelError {
+	for _, buffer := range buffers {
+		atomic.StoreUint32(&buffer.invalid, 1)
+	}
+	atomic.StoreUint32(&convState.buf.(*cudaBuf).invalid, 1)
+	atomic.StoreUint32(&recurrentState.buf.(*cudaBuf).invalid, 1)
+	c.releaseTransientBuffers(buffers)
+	kernelErr := &Qwen35GDNKernelError{Stage: qwen35GDNKernelStage(status), Code: status}
+	c.faultLatch.ObserveError(kernelErr, site)
+	return kernelErr
+}
+
 // Qwen35GDNDecode executes one complete recurrent linear-attention token mixer:
 // one fused qkv/z/b/a projection launch, causal depthwise conv + conv-state
 // update, q/k L2 normalization, decay/beta delta-rule state update fused with
@@ -199,72 +238,29 @@ func (c *cudaBackend) Qwen35GDNDecode(
 	if err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
-	operands := []struct {
-		name string
-		t    Tensor
-	}{
-		{"normalized_input", normalizedInput},
-		{"in_proj_qkv", inProjQKV}, {"in_proj_z", inProjZ},
-		{"in_proj_b", inProjB}, {"in_proj_a", inProjA},
-		{"conv1d", conv1D}, {"A_log", aLog}, {"dt_bias", dtBias},
-		{"norm", norm}, {"out_proj", outProj},
-		{"conv_state", convState}, {"recurrent_state", recurrentState},
-	}
+	operands := qwen35GDNOperands(normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState)
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	for _, operand := range operands {
-		if err := c.validateQwen35GDNTensor(operand.name, operand.t); err != nil {
-			return Tensor{}, Tensor{}, Tensor{}, err
-		}
-	}
-	if err := c.validateQwen35GDNStateOperands(operands, convState, recurrentState); err != nil {
+	if err := c.validateQwen35GDNOperands(operands, convState, recurrentState); err != nil {
 		return Tensor{}, Tensor{}, Tensor{}, err
 	}
 
 	// All scratch/output must be cudaMalloc-backed device memory. The general
 	// allocator's managed-memory fallback is deliberately not available here.
-	type strictAllocation struct {
-		name  string
-		shape []int
-	}
-	allocations := []strictAllocation{
-		{"mixed", []int{convDim}}, {"z", []int{valueDim}},
-		{"b", []int{numValueHeads}}, {"a", []int{numValueHeads}},
-		{"conv_out", []int{convDim}}, {"q_norm", []int{keyDim}},
-		{"k_norm", []int{keyDim}}, {"core", []int{valueDim}},
-		{"output", []int{hidden}},
-	}
-	strictTensors := make([]Tensor, 0, len(allocations))
-	strictBuffers := make([]*cudaBuf, 0, len(allocations))
-	for _, allocation := range allocations {
-		tensor, buffer, allocErr := c.devTrDeviceOnly(allocation.shape, F32, "qwen35-gdn-"+allocation.name)
-		if allocErr != nil {
-			c.releaseTransientBuffers(strictBuffers)
-			// A cudaMalloc that fails AFTER pre-flight admitted the plan may be a context
-			// already poisoned by an earlier async fault, not a capacity miss; ObserveError
-			// poisons the session only when the error is device-fault evidence.
-			c.faultLatch.ObserveError(allocErr, "qwen35-gdn-"+allocation.name)
-			return Tensor{}, Tensor{}, Tensor{}, allocErr
-		}
-		strictTensors = append(strictTensors, tensor)
-		strictBuffers = append(strictBuffers, buffer)
+	allocations := qwen35GDNAllocations("", "_", 0, 0, hidden, keyDim, valueDim, numValueHeads, convDim)
+	strictTensors, strictBuffers, allocErr := c.allocateQwen35GDN(allocations, "qwen35-gdn-")
+	if allocErr != nil {
+		return Tensor{}, Tensor{}, Tensor{}, allocErr
 	}
 	mixed, z, b, a := strictTensors[0], strictTensors[1], strictTensors[2], strictTensors[3]
 	convOut, qNorm, kNorm, core := strictTensors[4], strictTensors[5], strictTensors[6], strictTensors[7]
 	output = strictTensors[8]
 
-	q8Args := func(t Tensor) (unsafe.Pointer, *C.float, C.int) {
-		buf := c.cudaBufForSubmit(t)
-		if t.Dtype == Q8_0 {
-			return buf.ptr, (*C.float)(buf.scales), 1
-		}
-		return buf.ptr, nil, 0
-	}
-	qkvPtr, qkvScale, qkvQ8 := q8Args(inProjQKV)
-	zPtr, zScale, zQ8 := q8Args(inProjZ)
-	bPtr, bScale, bQ8 := q8Args(inProjB)
-	aPtr, aScale, aQ8 := q8Args(inProjA)
-	outPtr, outScale, outQ8 := q8Args(outProj)
+	qkvPtr, qkvScale, qkvQ8 := c.qwen35GDNQ8Args(inProjQKV)
+	zPtr, zScale, zQ8 := c.qwen35GDNQ8Args(inProjZ)
+	bPtr, bScale, bQ8 := c.qwen35GDNQ8Args(inProjB)
+	aPtr, aScale, aQ8 := c.qwen35GDNQ8Args(inProjA)
+	outPtr, outScale, outQ8 := c.qwen35GDNQ8Args(outProj)
 	status := int(C.fcuda_qwen35_gdn_decode_f32(
 		c.cf(normalizedInput),
 		qkvPtr, qkvScale, qkvQ8,
@@ -285,24 +281,9 @@ func (c *cudaBackend) Qwen35GDNDecode(
 		// once at the end to surface asynchronous execution errors. A failed
 		// in-place update may therefore be partial: invalidate both mutable states
 		// plus all outputs/scratch so no caller can observe or reuse them as valid.
-		for _, buffer := range strictBuffers {
-			atomic.StoreUint32(&buffer.invalid, 1)
-		}
-		atomic.StoreUint32(&convState.buf.(*cudaBuf).invalid, 1)
-		atomic.StoreUint32(&recurrentState.buf.(*cudaBuf).invalid, 1)
-		// The ABI has drained/fenced the stream on every failure return, so all
-		// operation-owned buffers are safe to free immediately. Durable mutable
-		// state remains caller-owned, allocated, and poisoned for explicit cleanup.
-		c.releaseTransientBuffers(strictBuffers)
-		kernelErr := &Qwen35GDNKernelError{
-			Stage: qwen35GDNKernelStage(status),
-			Code:  status,
-		}
-		// Poison the SESSION, not just the touched buffers: a launch or asynchronous
-		// execution failure (the live Xid-31 class) leaves the whole CUDA context suspect,
-		// so the latch makes the next gated operation refuse typed instead of computing
-		// plausible garbage (#6412).
-		c.faultLatch.ObserveError(kernelErr, "qwen35-gdn-decode")
+		// The ABI drained the stream, so operation-owned buffers are safe to free;
+		// durable state remains caller-owned but invalid for explicit cleanup.
+		kernelErr := c.failQwen35GDN(strictBuffers, convState, recurrentState, status, "qwen35-gdn-decode")
 		return Tensor{}, Tensor{}, Tensor{}, kernelErr
 	}
 	// fcuda_qwen35_gdn_decode_f32 synchronized g_stream successfully. Record the
