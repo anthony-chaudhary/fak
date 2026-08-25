@@ -1,0 +1,160 @@
+[
+  {
+    "experiment_id": "cold-unique-r1",
+    "arm": "cold-unique",
+    "rep": 1,
+    "prompt": "Reply with exactly Q38 and nothing else. Nonce 1.",
+    "latency_ms": 23812.112478073686,
+    "content": "Q38",
+    "quality_pass": true,
+    "usage": {
+      "prompt_tokens": 27,
+      "completion_tokens": 3,
+      "total_tokens": 30,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "experiment_id": "cold-unique-r2",
+    "arm": "cold-unique",
+    "rep": 2,
+    "prompt": "Reply with exactly Q38 and nothing else. Nonce 2.",
+    "latency_ms": 14226.722362916917,
+    "content": "Q38",
+    "quality_pass": true,
+    "usage": {
+      "prompt_tokens": 27,
+      "completion_tokens": 3,
+      "total_tokens": 30,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "experiment_id": "cold-unique-r3",
+    "arm": "cold-unique",
+    "rep": 3,
+    "prompt": "Reply with exactly Q38 and nothing else. Nonce 3.",
+    "latency_ms": 15357.123993802816,
+    "content": "Q38",
+    "quality_pass": true,
+    "usage": {
+      "prompt_tokens": 27,
+      "completion_tokens": 3,
+      "total_tokens": 30,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "experiment_id": "cold-unique-r4",
+    "arm": "cold-unique",
+    "rep": 4,
+    "prompt": "Reply with exactly Q38 and nothing else. Nonce 4.",
+    "latency_ms": 12534.491900820285,
+    "content": "Q38",
+    "quality_pass": true,
+    "usage": {
+      "prompt_tokens": 27,
+      "completion_tokens": 3,
+      "total_tokens": 30,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "experiment_id": "cold-unique-r5",
+    "arm": "cold-unique",
+    "rep": 5,
+    "prompt": "Reply with exactly Q38 and nothing else. Nonce 5.",
+    "latency_ms": 11837.736893445253,
+    "content": "Q38",
+    "quality_pass": true,
+    "usage": {
+      "prompt_tokens": 27,
+      "completion_tokens": 3,
+      "total_tokens": 30,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "experiment_id": "cache-identical-r1",
+    "arm": "cache-identical",
+    "rep": 1,
+    "prompt": "Reply with exactly Q38 and nothing else. Stable.",
+    "latency_ms": 11539.447227027267,
+    "content": "Stable",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 24,
+      "completion_tokens": 2,
+      "total_tokens": 26,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "experiment_id": "cache-identical-r2",
+    "arm": "cache-identical",
+    "rep": 2,
+    "prompt": "Reply with exactly Q38 and nothing else. Stable.",
+    "latency_ms": 9921.167304273695,
+    "content": "Stable",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 24,
+      "completion_tokens": 2,
+      "total_tokens": 26,
+      "prompt_tokens_details": {
+        "cached_tokens": 24
+      }
+    }
+  },
+  {
+    "experiment_id": "cache-identical-r3",
+    "arm": "cache-identical",
+    "rep": 3,
+    "prompt": "Reply with exactly Q38 and nothing else. Stable.",
+    "latency_ms": 9669.091776944697,
+    "content": "Stable",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 24,
+      "completion_tokens": 2,
+      "total_tokens": 26,
+      "prompt_tokens_details": {
+        "cached_tokens": 24
+      }
+    }
+  },
+  {
+    "experiment_id": "cache-identical-r4",
+    "arm": "cache-identical",
+    "rep": 4,
+    "prompt": "Reply with exactly Q38 and nothing else. Stable.",
+    "latency_ms": 9729.241509921849,
+    "content": "Stable",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 24,
+      "completion_tokens": 2,
+      "total_tokens": 26,
+      "prompt_tokens_details": {
+        "cached_tokens": 24
+      }
+    }
+  },
+  {
+    "experiment_id": "cache-identical-r5",
+    "arm": "cache-identical",
+    "rep": 5,
+    "prompt": "Reply with exactly Q38 and nothing else. Stable.",
+    "latency_ms": 9863.742989022285,
+    "content": "Stable",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 24,
+      "completion_tokens": 2,
+      "total_tokens": 26,
+      "prompt_tokens_details": {
+        "cached_tokens": 24
+      }
+    }
+  }
+]

@@ -1,0 +1,44 @@
+{
+  "schema": "fak.qwen38.cache_attribution.v1",
+  "issue": 8819,
+  "campaign_issue": 8848,
+  "captured_at": "2026-08-25T17:20:16Z",
+  "engine": "fak-native",
+  "backend": "cuda",
+  "forward_path": "cuda/qwen35-gdn-ssm-decode-v1",
+  "artifact": {
+    "format": "GGUF Q4_K_M",
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+  },
+  "runtime": {
+    "build": "607a8a292448",
+    "go": "go1.26.6 linux/amd64"
+  },
+  "accelerator": "NVIDIA A100-SXM4-40GB",
+  "source": {
+    "archive_sha256": "5644b66807fc3fc5eb69036808986079acfdf75588aec622a07621f198ab2a97",
+    "rows_sha256": "a5bd1e274c6bd49ffedc29342da097f28876b59f0b2021dcbaf71079bab233ba",
+    "identity_sha256": "ea2abc28036cae46bd4904f61496820eb81bc5157c11b33c22276c2798b4e715",
+    "server_log_sha256": "db21e023d2f4a2d62803fb63db4ee4c0e6f8c588149548dc9b0d88d7a3c05479"
+  },
+  "arms": {
+    "cold_unique": {
+      "experiments": 5,
+      "quality_passes": 5,
+      "median_e2e_ms": 14226.72,
+      "observed_decode_tok_s_range": [11.8, 12.1]
+    },
+    "cache_identical": {
+      "experiments": 5,
+      "quality_passes": 0,
+      "first_response": "Stable",
+      "cache_hit_repetitions": 4,
+      "cached_tokens_each_hit": 24,
+      "median_cache_hit_e2e_ms": 9796.49,
+      "observed_cache_hit_decode_tok_s": 0.2
+    }
+  },
+  "verdict": "HOLD_CACHE_RESTORE_REGRESSION",
+  "parity": "HOLD_BELOW_PARITY",
+  "selected_next_experiment": "Instrument prefix snapshot and recurrent-state clone, host staging, restore, and backend copy bytes/time; then rerun five cold and five identical cache-hit requests with an unambiguous exact-output prompt."
+}
