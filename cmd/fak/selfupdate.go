@@ -233,61 +233,74 @@ func cmdSelfUpdate(argv []string) {
 		defer os.Remove(companionBinary)
 	}
 
-	fmt.Printf("self-update: building origin/main + gating, then swapping %s …\n", installTarget)
-	res := selfinstall.Install(ctx, selfinstall.RealRunner, selfinstall.OSSwap, selfinstall.Options{
+	// Select every hot-copy target before changing any deployed bytes. The transaction must use
+	// one pre-update census or a successful early swap can hide a stale later target.
+	census := selfinstall.Census(selfUpdateHost(repoRoot), selfUpdateProbe)
+	staleSiblings := []string{}
+	for _, sib := range selfUpdateSiblings(repoRoot, installTarget) {
+		if selfinstall.NeedsConverge(census, sib, headRev) {
+			staleSiblings = append(staleSiblings, sib)
+		}
+	}
+
+	fmt.Printf("self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
+	candidate := ""
+	res := selfinstall.Install(ctx, selfinstall.RealRunner, func(source, _ string) error {
+		candidate = source
+		return nil
+	}, selfinstall.Options{
 		RepoRoot: buildDir,
 		Target:   installTarget,
 	})
-	fmt.Println(selfinstall.FormatResult(res))
-	if !res.Installed {
-		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, string(res.Stage)+": "+res.Detail)
+	if !res.Installed || candidate == "" {
+		detail := string(res.Stage) + ": " + res.Detail
+		if candidate == "" && res.Installed {
+			detail = "swap: gated candidate was not captured"
+		}
+		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, detail)
 		cleanup() // os.Exit skips deferred functions; source cleanup must run first.
 		os.Exit(1)
 	}
+	defer os.Remove(candidate)
 
-	// Converge the OTHER hot copies too. --target is ONE path; a real host runs several fak
-	// binaries and the fleet does not load the one this flag names. internal/selfinstall's role
-	// table (roles.go) declares them: the invoker/scheduled binary, the in-tree
-	// <root>/tools/.bin/fak[.exe] every dispatched worker is fronted by, the installed PATH copy,
-	// and the Go-bin copy scheduled tasks execute. Nothing else on the host refreshes them, and
-	// the omission is invisible: the tick still exits 0, because from --target's point of view
-	// everything worked (#6508 found four binaries on three builds after a "successful" tick).
-	//
-	// The census — not a freshness guess about the invoker — decides who needs a swap, so a copy
-	// already on origin/main is skipped and a stale one is never missed. We already hold the
-	// single-flight lock and already have a gated origin/main worktree, so each convergence costs
-	// one cache-warm rebuild and reuses the SAME build->vet->smoke ladder. A non-green tree still
-	// installs nothing.
-	census := selfinstall.Census(selfUpdateHost(repoRoot), selfUpdateProbe)
-	stragglers := []string{}
-	for _, sib := range selfUpdateSiblings(repoRoot, installTarget) {
-		if !selfinstall.NeedsConverge(census, sib, headRev) {
-			continue // provably already on origin/main
-		}
-		fmt.Printf("self-update: hot copy %s is not converged by anything else — converging it too …\n", sib)
-		// The primary target above is already the exact gated origin/main artifact. Copy those
-		// verified bytes instead of repeating build/vet/smoke for every host role; on a four-copy
-		// host this removes three cache-warm Go builds from every successful update.
-		sres := selfinstall.InstallVerifiedCopy(selfinstall.OSSwap, installTarget, sib)
-		fmt.Println("self-update: hot copy " + filepath.Base(sib) + " — " + selfinstall.FormatResult(sres))
-		if !sres.Installed {
-			stragglers = append(stragglers, sib+" ("+string(sres.Stage)+": "+sres.Detail+")")
-		}
+	copies := make([]selfinstall.Copy, 0, 1+len(staleSiblings)+len(companionPaths))
+	copies = append(copies, selfinstall.Copy{Source: candidate, Target: installTarget})
+	for _, target := range staleSiblings {
+		copies = append(copies, selfinstall.Copy{Source: candidate, Target: target})
 	}
 	for _, target := range companionPaths {
-		fmt.Printf("self-update: companion %s is installed beside fak - converging it too ...\n", target)
-		dres := selfinstall.InstallVerifiedCopy(selfinstall.OSSwap, companionBinary, target)
-		fmt.Println("self-update: companion " + filepath.Base(target) + " - " + selfinstall.FormatResult(dres))
-		if !dres.Installed {
-			stragglers = append(stragglers, target+" ("+string(dres.Stage)+": "+dres.Detail+")")
-		}
+		copies = append(copies, selfinstall.Copy{Source: companionBinary, Target: target})
 	}
-	if len(stragglers) > 0 {
-		// --target DID land, so this is not a failed build — but a host where the fleet's own
-		// binary stayed behind is exactly the silent staleness above. Name it and exit non-zero
-		// rather than reporting success for a half-converged host.
-		emitSelfUpdateOutcome(outcomeSiblingStale, installTarget, "not converged: "+strings.Join(stragglers, "; "))
-		cleanup() // os.Exit skips deferred functions; source cleanup must run first.
+
+	transaction := selfinstall.RunTransaction(copies, selfinstall.OSSwap)
+	switch result := transaction.(type) {
+	case selfinstall.Updated:
+		fmt.Printf("self-update: updated %d target(s)\n", result.Changed)
+	case selfinstall.RolledBack:
+		detail := selfUpdateTransactionDetail(result.Err, result.RollbackErrors)
+		emitSelfUpdateOutcome(outcomeRolledBack, installTarget, detail)
+		_ = os.Remove(candidate)
+		if companionBinary != "" {
+			_ = os.Remove(companionBinary)
+		}
+		cleanup()
+		os.Exit(1)
+	case selfinstall.RollbackFailed:
+		detail := selfUpdateTransactionDetail(result.Err, result.RollbackErrors)
+		emitSelfUpdateOutcome(outcomeRollbackFailed, installTarget, detail)
+		_ = os.Remove(candidate)
+		if companionBinary != "" {
+			_ = os.Remove(companionBinary)
+		}
+		cleanup()
+		os.Exit(1)
+	default:
+		emitSelfUpdateOutcome(outcomeRollbackFailed, installTarget, "unknown transaction result")
+		_ = os.Remove(candidate)
+		if companionBinary != "" {
+			_ = os.Remove(companionBinary)
+		}
+		cleanup()
 		os.Exit(1)
 	}
 	// Re-census and AUDIT: every configured hot copy is either converged above or named here with
@@ -433,17 +446,18 @@ func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string,
 type selfUpdateOutcome string
 
 const (
-	outcomeInstalled     selfUpdateOutcome = "installed"      // target swapped to a fresh gated build
-	outcomeTargetCurrent selfUpdateOutcome = "target-current" // --target already at origin/main
-	outcomeSelfFresh     selfUpdateOutcome = "self-fresh"     // SELF mode, running binary is trunk tip
-	outcomeSelfAhead     selfUpdateOutcome = "self-ahead"     // SELF mode, local build newer than trunk
-	outcomeSelfLocal     selfUpdateOutcome = "self-local"     // SELF mode, dirty/unstamped/diverged
-	outcomeSelfUnknown   selfUpdateOutcome = "self-unknown"   // SELF mode, freshness unresolvable
-	outcomeBusy          selfUpdateOutcome = "busy"           // single-flight lock held by a live build
-	outcomeCheckOnly     selfUpdateOutcome = "check-only"     // --check reported and exited
-	outcomeGateFailed    selfUpdateOutcome = "gate-failed"    // build/vet/smoke/swap refused the candidate
-	outcomePrepareFailed selfUpdateOutcome = "prepare-failed" // could not stage the origin/main worktree
-	outcomeSiblingStale  selfUpdateOutcome = "sibling-stale"  // --target landed, a fleet-loaded sibling did not
+	outcomeInstalled      selfUpdateOutcome = "installed"       // target swapped to a fresh gated build
+	outcomeTargetCurrent  selfUpdateOutcome = "target-current"  // --target already at origin/main
+	outcomeSelfFresh      selfUpdateOutcome = "self-fresh"      // SELF mode, running binary is trunk tip
+	outcomeSelfAhead      selfUpdateOutcome = "self-ahead"      // SELF mode, local build newer than trunk
+	outcomeSelfLocal      selfUpdateOutcome = "self-local"      // SELF mode, dirty/unstamped/diverged
+	outcomeSelfUnknown    selfUpdateOutcome = "self-unknown"    // SELF mode, freshness unresolvable
+	outcomeBusy           selfUpdateOutcome = "busy"            // single-flight lock held by a live build
+	outcomeCheckOnly      selfUpdateOutcome = "check-only"      // --check reported and exited
+	outcomeGateFailed     selfUpdateOutcome = "gate-failed"     // build/vet/smoke refused the candidate
+	outcomePrepareFailed  selfUpdateOutcome = "prepare-failed"  // could not stage the origin/main worktree
+	outcomeRolledBack     selfUpdateOutcome = "rolled-back"     // activation failed and all changed targets were restored
+	outcomeRollbackFailed selfUpdateOutcome = "rollback-failed" // activation failed and at least one restore failed
 	// outcomeHotCopyDivergent: everything this tick was allowed to swap landed, but the role
 	// census still shows a declared hot copy on another build (typically the audit-only repo-root
 	// gate binary). Distinct from sibling-stale, which is a FAILED swap (#6508).
@@ -452,6 +466,26 @@ const (
 	// pinned, so it refused to adjudicate the fleet's binary at all (#6508).
 	outcomePinSkew selfUpdateOutcome = "pin-skew"
 )
+
+func selfUpdateTransactionDetail(err error, rollbackErrors []error) string {
+	detail := "transaction failed"
+	if err != nil {
+		detail = err.Error()
+	}
+	if len(rollbackErrors) == 0 {
+		return detail
+	}
+	parts := make([]string, 0, len(rollbackErrors))
+	for _, rollbackErr := range rollbackErrors {
+		if rollbackErr != nil {
+			parts = append(parts, rollbackErr.Error())
+		}
+	}
+	if len(parts) == 0 {
+		return detail
+	}
+	return detail + "; rollback: " + strings.Join(parts, "; ")
+}
 
 // emitSelfUpdateOutcome prints the single machine-readable outcome line for this tick. It
 // carries its own UTC timestamp so the record is self-describing wherever it is captured — the
