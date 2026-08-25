@@ -16,8 +16,8 @@ func TestQ4KRepeatedBatchForwardsExecutionObservation(t *testing.T) {
 	}
 	text := string(source)
 	for _, want := range []string{
-		"func (w *Q4KWeight) gemvBatchRepeated(Xcat []float32, n int, Ycat []float32, observation *ExecutionObservation)",
-		"w.gemvBatchRepeated(Xcat, n, Ycat, observation)",
+		"func (w *Q4KWeight) gemvBatchRepeatedWithEvents(Xcat []float32, n int, Ycat []float32, observation *ExecutionObservation)",
+		"w.gemvBatchRepeatedWithEvents(Xcat, n, Ycat, observation)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("q4k repeated-batch observation forwarding missing %q", want)
