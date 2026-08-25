@@ -42,7 +42,26 @@
       "last_checked": "2026-08-14",
       "checked_revision": "ee2c58a577317d4480a2b2ee5ff77f25e5307af9",
       "stars_at_check": 9518,
-      "last_push_at_check": "2026-08-14T21:55:27Z"
+      "last_push_at_check": "2026-08-14T21:55:27Z",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/untrivial-ai-agent-orchestrator.json",
+        "indexed_revision": "ee2c58a577317d4480a2b2ee5ff77f25e5307af9",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "roadmap_todos",
+          "license_provenance",
+          "completeness_critic"
+        ],
+        "subsystem_count": 14,
+        "candidate_count": 0,
+        "filed_issue_count": 0,
+        "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; classes with partial local evidence still requiring non-tree completion: open_closed_issues_prs_discussions; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+      }
     },
     {
       "repository": "langchain-ai/open-swe",
