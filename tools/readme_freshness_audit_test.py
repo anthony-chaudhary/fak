@@ -121,6 +121,34 @@ def test_native_status_warns_without_authority_or_hold() -> None:
     assert "qwen38_authority" in c["items"]
     assert "honest_hold" in c["items"]
 
+def _project_status(date: str = "2026-06-20") -> str:
+    return f"""<!-- project-status: {date} -->
+### Project status — {date}
+**Shipped:** crash-safe queue ([#1](https://github.com/o/r/issues/1)).
+**In flight:** metrics ([#2](https://github.com/o/r/issues/2)), controls ([#3](https://github.com/o/r/issues/3)), and native work ([#4](https://github.com/o/r/issues/4)).
+**Goal:** useful agent kernel; direction, not a promise. See [goal](docs/goal.md).
+**Limitation:** native speed remains below parity. See [status](STATUS.md).
+Refresh contract: reconcile links and update the marker.
+"""
+
+
+def test_project_status_ok_when_fresh_complete_and_sourced() -> None:
+    c = rfa.check_project_status(_project_status(), today=TODAY, max_age_days=14)
+    assert c["status"] == "OK", c["detail"]
+
+
+def test_project_status_fails_when_lane_or_evidence_missing() -> None:
+    text = _project_status().replace("**Limitation:** native speed remains below parity. See [status](STATUS.md).", "")
+    c = rfa.check_project_status(text, today=TODAY, max_age_days=14)
+    assert c["status"] == "FAIL"
+    assert "Limitation" in c["detail"]
+
+
+def test_project_status_fails_when_stale() -> None:
+    c = rfa.check_project_status(_project_status("2026-06-01"), today=TODAY, max_age_days=14)
+    assert c["status"] == "FAIL"
+    assert "old" in c["detail"]
+
 def test_freshness_stamp_warn_when_absent() -> None:
     c = rfa.check_freshness_stamp("no stamp here", today=TODAY, max_age_days=14)
     assert c["status"] == "WARN", c

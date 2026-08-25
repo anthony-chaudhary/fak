@@ -519,6 +519,41 @@ def check_native_status(readme: str, *, today: _dt.date,
     return {"check": "native_status", "status": status, "detail": detail,
             "items": missing}
 
+def check_project_status(readme: str, *, today: _dt.date,
+                         max_age_days: int) -> dict[str, Any]:
+    """Require fresh shipped, in-flight, goal, and limitation lanes."""
+    marker = re.search(r"<!--\s*project-status:\s*(\d{4}-\d{2}-\d{2})\s*-->", readme)
+    heading = re.search(r"^### Project status(?:\s+[—-]\s+\d{4}-\d{2}-\d{2})?\s*$", readme, re.MULTILINE)
+    if not marker or not heading:
+        return {"check": "project_status", "status": "FAIL", "detail": "missing dated Project status section"}
+    start = heading.end()
+    following = re.search(r"^##{1,3}\s+", readme[start:], re.MULTILINE)
+    section = readme[start:start + following.start()] if following else readme[start:]
+    required = ("Shipped", "In flight", "Goal", "Limitation", "Refresh contract")
+    missing = [x for x in required if not re.search(rf"\b{re.escape(x)}\b", section, re.IGNORECASE)]
+    links = re.findall(r"\[[^]\n]+\]\(([^)]+)\)", section)
+    issues = [x for x in links if "/issues/" in x]
+    authorities = [x for x in links if x.startswith(("docs/", "STATUS.md", "CLAIMS.md"))]
+    try:
+        stamped = _dt.date.fromisoformat(marker.group(1))
+    except ValueError:
+        return {"check": "project_status", "status": "FAIL", "detail": "invalid project-status date"}
+    age = (today - stamped).days
+    defects: list[str] = []
+    if age > max_age_days:
+        defects.append(f"status is {age}d old (> {max_age_days}d)")
+    if missing:
+        defects.append("missing " + ", ".join(missing))
+    if len(issues) < 4:
+        defects.append("needs evidence links for shipped and in-flight tickets")
+    if not authorities:
+        defects.append("needs a durable goal or limitation authority")
+    if "not a promise" not in section.lower():
+        defects.append("must say goals are not promises")
+    if defects:
+        return {"check": "project_status", "status": "FAIL", "detail": "; ".join(defects)}
+    return {"check": "project_status", "status": "OK", "detail": f"status dated {stamped.isoformat()} ({age}d old) with all four evidence lanes"}
+
 def check_showcase_sync(readme: str, showcase: str | None, *,
                         version: str = "",
                         dataset_versions: set[str] | None = None,
@@ -1370,6 +1405,7 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_headline_authority(readme, authority),
         check_freshness_stamp(readme, today=today, max_age_days=max_age_days),
         check_native_status(readme, today=today, max_age_days=max_age_days),
+        check_project_status(readme, today=today, max_age_days=max_age_days),
         check_showcase_sync(readme, showcase, version=version,
                             dataset_versions=dataset_versions, dispatch=dispatch),
         check_jargon_density(readme, first_screen_lines=FIRST_SCREEN_LINES),
