@@ -232,6 +232,31 @@ func TestClaudeGuardCompactHistoryBudget(t *testing.T) {
 //
 // Both numbers are asserted against the DERIVATION rather than a literal so a future
 // envelope change moves all three launch paths together instead of re-opening this gap.
+
+func TestLaunchGoalDetachedSupportsExplicitProducts(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "tools", "launch_goal_detached.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"[ValidateSet('claude','codex','opencode')]",
+		"[string]$Product     = 'claude'",
+		"'--product', $Product",
+		"if ($Product -ne 'claude')",
+		"fleet-accounts exec --product '$quotedProduct'",
+		"-WindowStyle Hidden",
+		"LAUNCH_WITNESS pid={0}",
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("launch_goal_detached.ps1 missing provider-neutral contract %q", want)
+		}
+	}
+	if strings.Contains(s, "--product', 'claude'") {
+		t.Fatal("account resolution remains hard-coded to Claude")
+	}
+}
+
 func TestLaunchGoalDetachedGuardBudgetsMirrorDispatchWorker(t *testing.T) {
 	path := filepath.Join("..", "..", "tools", "launch_goal_detached.ps1")
 	b, err := os.ReadFile(path)

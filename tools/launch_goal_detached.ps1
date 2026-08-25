@@ -72,6 +72,10 @@ param(
   # tools/proc_resource_guard.py, so dispatch_preflight fail-safed to REFUSE_INSPECT
   # (cap=4, granted=0) and refused the spawn. An explicit -Workspace still overrides.
   [string]$Workspace   = (Split-Path -Parent $PSScriptRoot),
+  # Explicit worker product. Claude remains the compatibility default; provider choice
+  # never falls back silently because it may be part of the task contract.
+  [ValidateSet('claude','codex','opencode')]
+  [string]$Product     = 'claude',
   # Where the worker's logs + pid breadcrumb land. Empty derives <Workspace>\.goal-runs
   # — the SAME dir dispatch_preflight.py scans for live /goal pid breadcrumbs (#2226).
   # Point it elsewhere only if you accept that the spawn gate then cannot see these
@@ -193,7 +197,7 @@ $body = Get-Content -Raw $PointerFile
 $cond = "/goal $body"
 if ($cond.Length -gt 4000) { throw "goal condition is $($cond.Length) chars (>4000 cap) -- shrink the pointer" }
 
-$claude = (Get-Command claude).Source
+$claude = if ($Product -eq 'claude') { (Get-Command claude).Source } else { '' }
 
 # --- Spawn gate: dispatch_preflight.py must say SPAWN_OK (the no-DoS floor) -----------
 # The same gate issue_dispatch.py re-checks per spawn, now fronting THIS spawn point
@@ -233,7 +237,7 @@ if (-not $SkipPreflight) {
 $fak = Resolve-FakExe -RepoRoot $repoRoot -Explicit $FakExe
 $tmpOut = Join-Path ([System.IO.Path]::GetTempPath()) ("goal-route-{0}.json" -f ([Guid]::NewGuid().ToString('N')))
 
-$resolveArgs = @('fleet-accounts', 'resolve', '--product', 'claude')
+$resolveArgs = @('fleet-accounts', 'resolve', '--product', $Product)
 if ($Account)          { $resolveArgs += @('--account', $Account) }
 elseif ($WorkKind)     { $resolveArgs += @('--work-kind', $WorkKind) }
 else {
@@ -262,6 +266,7 @@ if (-not $configDir) { throw "resolved account $($r.account) has no config dir" 
 if ($PlanOnly) {
   [pscustomobject]@{
     plan_only     = $true
+    product       = $Product
     account       = $acct.account
     account_tag   = $acct.tag
     config_dir    = $configDir
@@ -291,6 +296,45 @@ $inF    = Join-Path $LogDir "$tag-$stamp.in.txt"
 # (no BOM) and redirect it in.
 [IO.File]::WriteAllText($inF, $cond, [Text.UTF8Encoding]::new($false))
 
+# Non-Claude products reuse the account router's launch decision rather than restating
+# provider-specific command/env rules here. The prompt stays out of the command line:
+# fak fleet-accounts exec receives it from this UTF-8 file through PowerShell's native
+# argument binding, while Start-Process detaches a tiny hidden PowerShell host. This keeps
+# the same preflight, pid, log, and process-lifetime contract as the Claude path.
+if ($Product -ne 'claude') {
+  $tierNumber = [int]$tierSel
+  $quotedPromptFile = $inF.Replace("'", "''")
+  $quotedFak = $fak.Replace("'", "''")
+  $quotedProduct = $Product.Replace("'", "''")
+  $quotedAccount = "$($acct.account)".Replace("'", "''")
+  $quotedModel = "$Model".Replace("'", "''")
+  $tier3Flag = if ($tierNumber -eq 3) { " --allow-tier3-narrow" } else { "" }
+  $workerScript = @"
+`$prompt = [IO.File]::ReadAllText('$quotedPromptFile')
+& '$quotedFak' fleet-accounts exec --product '$quotedProduct' --account '$quotedAccount' --task-tier $tierNumber$tier3Flag --invoked-model '$quotedModel' --prompt `$prompt --json
+exit `$LASTEXITCODE
+"@
+  $workerScriptFile = Join-Path $LogDir "$tag-$stamp.worker.ps1"
+  [IO.File]::WriteAllText($workerScriptFile, $workerScript, [Text.UTF8Encoding]::new($false))
+  $pwsh = (Get-Command pwsh).Source
+  $p = Start-Process -FilePath $pwsh `
+    -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-File',$workerScriptFile) `
+    -WorkingDirectory $Workspace `
+    -RedirectStandardOutput $logOut `
+    -RedirectStandardError $logErr `
+    -WindowStyle Hidden `
+    -PassThru
+  $p.Id | Out-File -FilePath $pidF -Encoding ascii
+  Write-Output ("LAUNCH_WITNESS pid={0} tag={1} run_id={2}" -f $p.Id, $acct.tag, "$tag-$stamp")
+  [pscustomobject]@{
+    pid = $p.Id; product = $Product; account = $acct.account; account_tag = $acct.tag
+    config_dir = $configDir; work_kind = $WorkKind; tier = "t$tierSel"
+    tier_fallback = $fellBack; model = $acct.model; cond_chars = $cond.Length
+    out_log = $logOut; err_log = $logErr; pid_file = $pidF
+  } | Format-List
+  "DETACHED -- $Product worker survives this session, pinned to account '$($acct.tag)' (t$tierSel). Stop with: Stop-Process -Id $($p.Id)"
+  return
+}
 # OWN THE SEAT: strip guarded-session wiring BEFORE pinning the account. A parent
 # running under `fak guard` exports ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY aimed at
 # its session-local loopback gateway; env precedence beats the seat's OAuth login, so
@@ -404,6 +448,7 @@ Write-Output ("LAUNCH_WITNESS pid={0} tag={1} run_id={2}" -f $p.Id, $acct.tag, "
 
 [pscustomobject]@{
   pid         = $p.Id
+  product     = $Product
   account     = $acct.account
   account_tag = $acct.tag
   config_dir  = $configDir
