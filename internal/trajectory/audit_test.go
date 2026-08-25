@@ -567,3 +567,84 @@ func auditSession(t *testing.T, result AuditResult, source string) AuditTranscri
 	t.Fatalf("missing %s session", source)
 	return AuditTranscriptRow{}
 }
+
+func TestQwenTopContributorTokenConcentration(t *testing.T) {
+	row := func(id string, tokens int64) AuditTranscriptRow {
+		return AuditTranscriptRow{Source: AuditSourceCodex, TranscriptID: id, Models: []string{"Qwen3"}, Tokens: AuditTokens{InputTokens: tokens}}
+	}
+	balanced := 0.5
+	concentrated := 0.8
+	for _, tc := range []struct {
+		name         string
+		rows         []AuditTranscriptRow
+		want         *float64
+		concentrated bool
+	}{
+		{name: "balanced", rows: []AuditTranscriptRow{row("a", 50), row("b", 50)}, want: &balanced},
+		{name: "concentrated", rows: []AuditTranscriptRow{row("a", 80), row("b", 20)}, want: &concentrated, concentrated: true},
+		{name: "missing"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			summary := summarizeAudit(nil, tc.rows, nil)
+			if summary.QwenTokenConcentrationThreshold != 0.5 {
+				t.Fatalf("threshold = %v", summary.QwenTokenConcentrationThreshold)
+			}
+			if tc.want == nil {
+				if summary.QwenTopContributor != nil || summary.QwenTopContributorTokenFraction != nil || summary.QwenTopContributorTokenConcentrated != nil {
+					t.Fatalf("missing Qwen usage must remain unknown: %+v", summary)
+				}
+				return
+			}
+			if summary.QwenTopContributor == nil || *summary.QwenTopContributor != "codex:a" {
+				t.Fatalf("top contributor = %v", summary.QwenTopContributor)
+			}
+			if summary.QwenTopContributorTokenFraction == nil || *summary.QwenTopContributorTokenFraction != *tc.want {
+				t.Fatalf("fraction = %v, want %v", summary.QwenTopContributorTokenFraction, *tc.want)
+			}
+			if summary.QwenTopContributorTokenConcentrated == nil || *summary.QwenTopContributorTokenConcentrated != tc.concentrated {
+				t.Fatalf("concentrated = %v, want %t", summary.QwenTopContributorTokenConcentrated, tc.concentrated)
+			}
+		})
+	}
+}
+
+func TestQwenTopContributorConcentrationJSONAndRendering(t *testing.T) {
+	balanced := summarizeAudit(nil, []AuditTranscriptRow{
+		{Source: AuditSourceCodex, TranscriptID: "b", Models: []string{"qwen3"}, Tokens: AuditTokens{InputTokens: 50}},
+		{Source: AuditSourceCodex, TranscriptID: "a", Models: []string{"qwen3"}, Tokens: AuditTokens{InputTokens: 50}},
+	}, nil)
+	encoded, err := json.Marshal(balanced)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"qwen_top_contributor":"codex:a"`, `"qwen_top_contributor_token_fraction":0.5`, `"qwen_token_concentration_threshold":0.5`, `"qwen_top_contributor_token_concentrated":false`} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Fatalf("JSON %s missing %s", encoded, want)
+		}
+	}
+	var rendered bytes.Buffer
+	if err := WriteAuditMarkdown(&rendered, AuditResult{Summary: balanced}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered.String(), "Qwen top contributor: `codex:a` with 50/100 tokens (50.00%); concentrated: false (threshold: 50%).") {
+		t.Fatalf("rendered output:\n%s", rendered.String())
+	}
+
+	missing := summarizeAudit(nil, nil, nil)
+	encoded, err = json.Marshal(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"qwen_top_contributor":null`, `"qwen_top_contributor_token_fraction":null`, `"qwen_top_contributor_token_concentrated":null`} {
+		if !bytes.Contains(encoded, []byte(want)) {
+			t.Fatalf("missing JSON %s lacks %s", encoded, want)
+		}
+	}
+	rendered.Reset()
+	if err := WriteAuditMarkdown(&rendered, AuditResult{Summary: missing}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rendered.String(), "Qwen top-contributor token concentration: unknown") {
+		t.Fatalf("missing render:\n%s", rendered.String())
+	}
+}

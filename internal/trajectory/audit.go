@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const qwenTopContributorConcentrationThreshold = 0.50
+
 // AuditSchema versions every row emitted by the cross-harness efficiency audit.
 const AuditSchema = "fak-trajectory-audit/1"
 
@@ -120,30 +122,36 @@ type AuditBottleneckRow struct {
 
 // AuditSummaryRow is the machine-wide exact rollup and baseline input.
 type AuditSummaryRow struct {
-	Schema               string      `json:"schema"`
-	Kind                 string      `json:"kind"`
-	Sources              int         `json:"sources"`
-	Transcripts          int         `json:"sessions"`
-	FilesDiscovered      int         `json:"files_discovered"`
-	FilesScanned         int         `json:"files_scanned"`
-	FixtureFilesExcluded int         `json:"fixture_files_excluded"`
-	FilesMatched         int         `json:"files_matched,omitempty"`
-	Records              int         `json:"records"`
-	UsageRecordsExact    int         `json:"usage_records_exact"`
-	RefusedRecords       int         `json:"refused_records"`
-	Tokens               AuditTokens `json:"tokens"`
-	InputOutputRatio     *float64    `json:"input_output_ratio"`
-	PromptWriteFraction  *float64    `json:"prompt_write_fraction"`
-	RepeatedFailures     int         `json:"repeated_failures"`
-	MutationChurn        int         `json:"mutation_churn"`
-	HookP95MS            *int64      `json:"hook_p95_ms"`
-	DistinctTranscripts  int         `json:"distinct_transcripts"`
-	DuplicateFragments   int         `json:"duplicate_fragments"`
-	EmptyUsageFiles      int         `json:"empty_usage_files"`
-	ToolCalls            int         `json:"tool_calls"`
-	ToolErrors           int         `json:"tool_errors"`
-	ToolErrorFraction    *float64    `json:"tool_error_fraction"`
-	TopTenTokenFraction  *float64    `json:"top_ten_token_fraction"`
+	Schema                              string      `json:"schema"`
+	Kind                                string      `json:"kind"`
+	Sources                             int         `json:"sources"`
+	Transcripts                         int         `json:"sessions"`
+	FilesDiscovered                     int         `json:"files_discovered"`
+	FilesScanned                        int         `json:"files_scanned"`
+	FixtureFilesExcluded                int         `json:"fixture_files_excluded"`
+	FilesMatched                        int         `json:"files_matched,omitempty"`
+	Records                             int         `json:"records"`
+	UsageRecordsExact                   int         `json:"usage_records_exact"`
+	RefusedRecords                      int         `json:"refused_records"`
+	Tokens                              AuditTokens `json:"tokens"`
+	InputOutputRatio                    *float64    `json:"input_output_ratio"`
+	PromptWriteFraction                 *float64    `json:"prompt_write_fraction"`
+	RepeatedFailures                    int         `json:"repeated_failures"`
+	MutationChurn                       int         `json:"mutation_churn"`
+	HookP95MS                           *int64      `json:"hook_p95_ms"`
+	DistinctTranscripts                 int         `json:"distinct_transcripts"`
+	DuplicateFragments                  int         `json:"duplicate_fragments"`
+	EmptyUsageFiles                     int         `json:"empty_usage_files"`
+	ToolCalls                           int         `json:"tool_calls"`
+	ToolErrors                          int         `json:"tool_errors"`
+	ToolErrorFraction                   *float64    `json:"tool_error_fraction"`
+	TopTenTokenFraction                 *float64    `json:"top_ten_token_fraction"`
+	QwenTopContributor                  *string     `json:"qwen_top_contributor"`
+	QwenTopContributorTokens            *int64      `json:"qwen_top_contributor_tokens"`
+	QwenTotalTokens                     *int64      `json:"qwen_total_tokens"`
+	QwenTopContributorTokenFraction     *float64    `json:"qwen_top_contributor_token_fraction"`
+	QwenTokenConcentrationThreshold     float64     `json:"qwen_token_concentration_threshold"`
+	QwenTopContributorTokenConcentrated *bool       `json:"qwen_top_contributor_token_concentrated"`
 }
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
@@ -410,6 +418,46 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 		}
 		transcriptIDs[transcript.Source+"\x00"+transcript.TranscriptID] = struct{}{}
 		accountedTokens = append(accountedTokens, transcript.Tokens.accountedTotal())
+	}
+	qwenTotals := make(map[string]int64)
+	for _, transcript := range transcripts {
+		isQwen := false
+		for _, model := range transcript.Models {
+			if strings.Contains(strings.ToLower(model), "qwen") {
+				isQwen = true
+				break
+			}
+		}
+		if isQwen {
+			contributor := transcript.Source + ":" + transcript.TranscriptID
+			qwenTotals[contributor] += transcript.Tokens.accountedTotal()
+		}
+	}
+	summary.QwenTokenConcentrationThreshold = qwenTopContributorConcentrationThreshold
+	if len(qwenTotals) > 0 {
+		contributors := make([]string, 0, len(qwenTotals))
+		var total int64
+		for contributor, tokens := range qwenTotals {
+			contributors = append(contributors, contributor)
+			total += tokens
+		}
+		sort.Strings(contributors)
+		top := contributors[0]
+		for _, contributor := range contributors[1:] {
+			if qwenTotals[contributor] > qwenTotals[top] {
+				top = contributor
+			}
+		}
+		topTokens := qwenTotals[top]
+		summary.QwenTopContributor = &top
+		summary.QwenTopContributorTokens = &topTokens
+		summary.QwenTotalTokens = &total
+		if total > 0 {
+			fraction := float64(topTokens) / float64(total)
+			concentrated := fraction > qwenTopContributorConcentrationThreshold
+			summary.QwenTopContributorTokenFraction = &fraction
+			summary.QwenTopContributorTokenConcentrated = &concentrated
+		}
 	}
 	summary.DistinctTranscripts = len(transcriptIDs)
 	summary.DuplicateFragments = summary.Transcripts - summary.DistinctTranscripts

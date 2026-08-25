@@ -22,6 +22,11 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Repeated failures: %d; mutation churn: %d; hook p95: %s ms.\n", summary.RepeatedFailures, summary.MutationChurn, auditInt(summary.HookP95MS))
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
+	if summary.QwenTopContributorTokenFraction == nil {
+		out.WriteString("- Qwen top-contributor token concentration: unknown (no Qwen token usage).\n")
+	} else {
+		fmt.Fprintf(&out, "- Qwen top contributor: `%s` with %d/%d tokens (%s); concentrated: %t (threshold: %.0f%%).\n", *summary.QwenTopContributor, *summary.QwenTopContributorTokens, *summary.QwenTotalTokens, auditPercent(summary.QwenTopContributorTokenFraction), *summary.QwenTopContributorTokenConcentrated, summary.QwenTokenConcentrationThreshold*100)
+	}
 
 	out.WriteString("\n## Source denominator\n\n")
 	out.WriteString("| Source | Root | Present | Files scanned/matched/non-session/discovered | Records | Exact usage | Applied usage | Duplicates | Refused |\n")
