@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"os/exec"
 	"testing"
 
@@ -8,17 +9,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
 
-// TestLaunchGuardChildWindowlessOnlyHeadless pins the #3597 gate: a headless
-// (dispatched, non-attended) wrapped agent is launched windowless so no per-worker
-// conhost/OpenConsole pane is allocated, while an attended/interactive session is
-// byte-for-byte unchanged (the window-mode seam is NOT applied on that branch).
+// TestLaunchGuardChildHiddenConsoleScope pins both sides of the launch gate:
+// headless harnesses keep #3597's no-window posture, attended Codex receives the
+// #8853 hidden inherited-console posture, and unrelated attended commands remain
+// untouched.
 //
-// The seam is asserted through the injectable guardHeadlessChildWindowMode var rather
+// The seam is asserted through the injectable configureManagedHiddenConsole var rather
 // than the platform SysProcAttr fields, so the gate is observable on the Linux CI host
 // where the underlying ConfigureBackgroundCommand is a no-op.
-func TestLaunchGuardChildWindowlessOnlyHeadless(t *testing.T) {
-	orig := guardHeadlessChildWindowMode
-	t.Cleanup(func() { guardHeadlessChildWindowMode = orig })
+func TestLaunchGuardChildHiddenConsoleScope(t *testing.T) {
+	orig := configureManagedHiddenConsole
+	t.Cleanup(func() { configureManagedHiddenConsole = orig })
 
 	meta := guardChildSpawnMetadata{
 		AgentRunID:   "agent-run-1",
@@ -28,22 +29,27 @@ func TestLaunchGuardChildWindowlessOnlyHeadless(t *testing.T) {
 		Envelope:     toolprocgate.CapabilityEnvelope{Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn}},
 	}
 	launcher := func(g toolprocgate.SpawnGrant) (*exec.Cmd, error) {
-		return exec.Command(g.Argv[0], g.Argv[1:]...), nil
+		cmd := exec.Command(g.Argv[0], g.Argv[1:]...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return cmd, nil
 	}
 
 	cases := []struct {
-		name    string
-		command []string
-		want    int // times the windowless seam is applied
+		name           string
+		command        []string
+		want           int // times the hidden-console seam is applied
+		wantTerminalIO bool
 	}{
-		{"headless one-shot", []string{"claude", "-p", "resolve #1"}, 1},
-		{"headless print-eq", []string{"claude", "--print=resolve #1"}, 1},
-		{"attended interactive", []string{"claude"}, 0},
+		{"headless one-shot", []string{"claude", "-p", "resolve #1"}, 1, false},
+		{"headless print-eq", []string{"claude", "--print=resolve #1"}, 1, false},
+		{"attended managed Codex", []string{"codex"}, 1, true},
+		{"attended Claude unchanged", []string{"claude"}, 0, false},
+		{"attended git unchanged", []string{"git", "status"}, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			applied := 0
-			guardHeadlessChildWindowMode = func(cmd *exec.Cmd) {
+			configureManagedHiddenConsole = func(cmd *exec.Cmd) {
 				applied++
 				orig(cmd) // still exercise the real (no-op off-Windows) configuration
 			}
@@ -56,7 +62,12 @@ func TestLaunchGuardChildWindowlessOnlyHeadless(t *testing.T) {
 				t.Fatalf("launchGuardChildWithBroker(%v): nil child", tc.command)
 			}
 			if applied != tc.want {
-				t.Fatalf("windowless seam applied %d time(s), want %d for %v", applied, tc.want, tc.command)
+				t.Fatalf("hidden-console seam applied %d time(s), want %d for %v", applied, tc.want, tc.command)
+			}
+			if tc.wantTerminalIO &&
+				(child.Stdin != os.Stdin || child.Stdout != os.Stdout || child.Stderr != os.Stderr) {
+				t.Fatalf("attended Codex terminal handles changed: stdin=%v stdout=%v stderr=%v",
+					child.Stdin, child.Stdout, child.Stderr)
 			}
 		})
 	}

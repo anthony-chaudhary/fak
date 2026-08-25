@@ -12,11 +12,13 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
-	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -24,6 +26,8 @@ var desktopConsoleDLL = syscall.NewLazyDLL("kernel32.dll")
 
 func runDesktopConsoleSelfcheckChild(stdout, stderr io.Writer) (int, bool) {
 	switch os.Getenv(desktopConsoleSelfcheckRoleEnv) {
+	case "controller":
+		return runDesktopConsoleSelfcheckController(stdout, stderr), true
 	case "root":
 		return runDesktopConsoleSelfcheckRoot(stdout, stderr), true
 	case "child":
@@ -45,23 +49,73 @@ func runDesktopConsoleSelfcheck(stdout, stderr io.Writer, asJSON bool) int {
 		return failDesktopConsoleSelfcheck(stderr, err)
 	}
 	env := envMap(os.Environ())
-	env[desktopConsoleSelfcheckRoleEnv] = "root"
+	env[desktopConsoleSelfcheckRoleEnv] = "controller"
 	env[desktopConsoleSelfcheckDirEnv] = tmp
 	env[desktopConsoleSelfcheckReleaseEnv] = release
-	spawned, err := spawnDispatchIssueWorker(
-		[]string{exe, "windowgate", "--selfcheck"}, env, tmp, tmp,
-		8252, "cmd", "codex", "windowgate-selfcheck", []string{"cmd/fak/**"},
-		dispatchtick.Account{}, nil, "", "", 0,
-	)
+	logPath := filepath.Join(tmp, "controller.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return failDesktopConsoleSelfcheck(stderr, err)
 	}
-	defer releaseDesktopConsoleSelfcheck(spawned.PID, release)
+	controller := exec.Command(exe, "windowgate", "--selfcheck")
+	controller.Env = envSliceFromMap(env)
+	controller.Dir = tmp
+	controller.Stdout, controller.Stderr = logFile, logFile
+	// The outer controller has no console but keeps inherited file handles. This
+	// makes an unconfigured attended console root allocate a visible HWND, so the
+	// witness deterministically fails on the pre-#8853 branch.
+	windowgate.ConfigureDetachedCommand(controller)
+
+	beforeWindows := codexMCPVisibleConsoleWindows()
+	var visibleMu sync.Mutex
+	visibleHandles := map[uintptr]bool{}
+	stopCapture := make(chan struct{})
+	captureDone := make(chan struct{})
+	go func() {
+		defer close(captureDone)
+		ticker := time.NewTicker(15 * time.Millisecond)
+		defer ticker.Stop()
+		capture := func() {
+			visibleMu.Lock()
+			defer visibleMu.Unlock()
+			for hwnd := range codexMCPVisibleConsoleWindows() {
+				if !beforeWindows[hwnd] {
+					visibleHandles[hwnd] = true
+				}
+			}
+		}
+		for {
+			select {
+			case <-ticker.C:
+				capture()
+			case <-stopCapture:
+				capture()
+				return
+			}
+		}
+	}()
+	captureStopped := false
+	stopWindowCapture := func() {
+		if captureStopped {
+			return
+		}
+		captureStopped = true
+		close(stopCapture)
+		<-captureDone
+	}
+	defer stopWindowCapture()
+
+	if err := controller.Start(); err != nil {
+		_ = logFile.Close()
+		return failDesktopConsoleSelfcheck(stderr, err)
+	}
+	_ = logFile.Close()
+	defer releaseDesktopConsoleSelfcheck(controller.Process.Pid, release)
 
 	labels := []string{"codex-root", "pwsh", "node", "fak-mcp"}
 	var transcript string
 	if !waitForDesktopConsoleSelfcheck(30*time.Second, func() bool {
-		b, _ := os.ReadFile(spawned.Log)
+		b, _ := os.ReadFile(logPath)
 		transcript = string(b)
 		for _, label := range labels {
 			if !strings.Contains(transcript, `"label":"`+label+`"`) {
@@ -73,31 +127,42 @@ func runDesktopConsoleSelfcheck(stdout, stderr io.Writer, asJSON bool) int {
 		fmt.Fprintf(stderr, "fak windowgate --selfcheck: timed out waiting for descendant reports\n%s", transcript)
 		return 1
 	}
+	stopWindowCapture()
 
 	processes := parseDesktopConsoleSelfcheckProcesses(transcript)
-	rootPID := spawned.PID
+	rootPID := 0
 	seen := map[string]bool{}
-	visible := 0
 	shared := true
 	for _, p := range processes {
 		seen[p.Label] = true
+		if p.Label == "codex-root" {
+			rootPID = p.PID
+		}
 		if p.WindowHandle != 0 {
-			visible++
+			visibleHandles[p.WindowHandle] = true
 		}
-		if !containsSelfcheckPID(p.ConsolePIDs, uint32(p.PID)) ||
-			!containsSelfcheckPID(p.ConsolePIDs, uint32(rootPID)) {
-			shared = false
-		}
+	}
+	if rootPID == 0 {
+		shared = false
 	}
 	for _, label := range labels {
 		if !seen[label] {
 			shared = false
 		}
 	}
+	for _, p := range processes {
+		if !containsSelfcheckPID(p.ConsolePIDs, uint32(p.PID)) ||
+			!containsSelfcheckPID(p.ConsolePIDs, uint32(rootPID)) {
+			shared = false
+		}
+	}
+	visibleMu.Lock()
+	visible := len(visibleHandles)
+	visibleMu.Unlock()
 	ok := shared && visible == 0
-	reason := "Codex plus pwsh/node/fak-mcp descendants share one hidden console; zero visible console windows"
+	reason := "attended managed Codex plus pwsh/node/fak-mcp descendants share one hidden console; 15ms capture saw zero visible console windows"
 	if !ok {
-		reason = "a representative Codex descendant did not inherit the hidden console or gained a visible window"
+		reason = "the attended managed Codex root or a representative descendant did not share one hidden console without a visible HWND"
 	}
 	rep := desktopConsoleSelfcheckReport{
 		Schema: desktopConsoleSelfcheckSchema, OK: ok, Applicable: true, Platform: runtime.GOOS,
@@ -111,6 +176,71 @@ func runDesktopConsoleSelfcheck(stdout, stderr io.Writer, asJSON bool) int {
 	}
 	if !ok {
 		return 1
+	}
+	return 0
+}
+
+// runDesktopConsoleSelfcheckController launches the Codex-like root through the
+// real attended guard-child seam. Its own DETACHED_PROCESS parent still supplies
+// stdout/stderr files, matching an attended harness with usable inherited handles
+// but no console available for ordinary console descendants to inherit.
+func runDesktopConsoleSelfcheckController(stdout, stderr io.Writer) int {
+	dir := os.Getenv(desktopConsoleSelfcheckDirEnv)
+	release := os.Getenv(desktopConsoleSelfcheckReleaseEnv)
+	if dir == "" || release == "" {
+		fmt.Fprintln(stderr, "windowgate selfcheck controller is missing its private paths")
+		return 2
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	codexPath := filepath.Join(dir, "codex.exe")
+	if err := os.Link(exe, codexPath); err != nil {
+		fmt.Fprintf(stderr, "link codex selfcheck: %v\n", err)
+		return 2
+	}
+	command := []string{codexPath, "windowgate", "--selfcheck"}
+	meta := guardChildSpawnMetadata{
+		AgentRunID:   "windowgate-selfcheck",
+		ToolCallID:   "guard-child:windowgate-selfcheck",
+		PolicyDigest: "sha256:windowgate-selfcheck",
+		Backend:      "codex",
+		Envelope: toolprocgate.CapabilityEnvelope{
+			Capabilities: []abi.Capability{toolprocgate.CapAgentRunSpawn},
+		},
+		RegistryPath: filepath.Join(dir, "guard-child-registry.jsonl"),
+		LaunchPlan:   newGuardLaunchPlan(command),
+	}
+	_, child, err := launchGuardChildWithBroker(
+		command, nil, false, meta, toolprocgate.NewSpawnBroker(), nil,
+		[2]string{desktopConsoleSelfcheckRoleEnv, "root"},
+		[2]string{desktopConsoleSelfcheckDirEnv, dir},
+		[2]string{desktopConsoleSelfcheckReleaseEnv, release},
+		// The worker may itself be running beneath a registered agent. This
+		// self-contained witness uses its private registry, so clear ambient
+		// lineage rather than naming a parent absent from that store.
+		[2]string{"FAK_REGISTRATION_ID", ""},
+		[2]string{"FAK_PARENT_REGISTRATION_ID", ""},
+		[2]string{"FAK_ATTEMPT_ID", ""},
+		[2]string{"FAK_PARENT_ATTEMPT_ID", ""},
+		[2]string{"FAK_ROOT_REGISTRATION_ID", ""},
+	)
+	if err != nil {
+		fmt.Fprintf(stderr, "prepare attended Codex selfcheck root: %v\n", err)
+		return 2
+	}
+	job, err := windowgate.StartInNewJob(child)
+	if err != nil {
+		fmt.Fprintf(stderr, "start attended Codex selfcheck root: %v\n", err)
+		return 2
+	}
+	waitErr := child.Wait()
+	_ = job.Close()
+	if waitErr != nil {
+		fmt.Fprintf(stderr, "wait attended Codex selfcheck root: %v\n", waitErr)
+		return 2
 	}
 	return 0
 }
@@ -148,7 +278,6 @@ func runDesktopConsoleSelfcheckRoot(stdout, stderr io.Writer) int {
 		childEnv[desktopConsoleSelfcheckLabelEnv] = label
 		childEnv[desktopConsoleSelfcheckDirEnv] = dir
 		cmd := exec.Command(path, "windowgate", "--selfcheck")
-		windowgate.ConfigureBackgroundCommand(cmd)
 		cmd.Env = envSliceFromMap(childEnv)
 		cmd.Stdout, cmd.Stderr = stdout, stderr
 		if err := cmd.Start(); err != nil {

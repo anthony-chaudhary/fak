@@ -916,12 +916,22 @@ func guardChildSpawnAttempt(plan guardLaunchPlan, injected [][2]string, pinUpstr
 
 var guardPromptTransportOS = runtime.GOOS
 
-// guardHeadlessChildWindowMode applies the windowless launch flags to a headless
-// (dispatched, non-attended) worker's wrapped agent (#3597). It is indirected through
-// a var so the launch gate is unit-testable on any host: the underlying
-// windowgate.ConfigureBackgroundCommand only sets Windows creation flags
-// (HideWindow + CREATE_NO_WINDOW) and is a no-op on every other platform.
-var guardHeadlessChildWindowMode = windowgate.ConfigureBackgroundCommand
+// configureManagedHiddenConsole gives a managed console-subsystem root a hidden
+// console on Windows. It is indirected so the launch gate stays unit-testable on
+// non-Windows CI, where the underlying windowgate hook is a no-op.
+var configureManagedHiddenConsole = windowgate.ConfigureBackgroundCommand
+
+// managedLaunchNeedsHiddenConsole keeps the existing #3597 headless behavior for
+// every harness and adds the narrow #8853 attended case: a recognized Codex root.
+// Unknown attended commands (including a user-invoked `fak m git`) remain
+// unchanged; this is a managed-Codex containment rule, not a global foreground
+// process policy.
+func managedLaunchNeedsHiddenConsole(plan guardLaunchPlan) bool {
+	if !plan.interactive() {
+		return true
+	}
+	return plan.recognized() && plan.harnessProfile().Name == "codex"
+}
 
 func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, broker *toolprocgate.SpawnBroker, launcher guardChildLauncher, extraEnv ...[2]string) (toolprocgate.SpawnGrant, *exec.Cmd, error) {
 	plan := meta.LaunchPlan
@@ -929,12 +939,10 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 		plan = newGuardLaunchPlan(command)
 	}
 	plan = plan.withExecutableCommand(command)
-	// #3597: decide headless-ness from the ORIGINAL wrapped argv, before the prompt
-	// transport below can move a `-p` prompt off argv (#4852). A headless one-shot
-	// (`claude -p …`, the shape a dispatched worker launches) paints no attended
-	// console, so its child is launched windowless just below; an attended session
-	// stays interactive and unchanged.
-	headlessChild := !guardChildInteractive(plan.semanticCommand())
+	// Decide from the semantic command before prompt transport can move a `-p`
+	// prompt off argv (#4852). Headless runs remain windowless; attended Codex
+	// roots receive the hidden inherited-console posture below.
+	hiddenConsoleChild := managedLaunchNeedsHiddenConsole(plan)
 	executable, stdinPrompt, promptOnStdin := guardPromptStdinTransportForOS(plan.executableCommand(), guardPromptTransportOS)
 	plan = plan.withExecutableCommand(executable)
 	if broker == nil {
@@ -968,17 +976,15 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	if promptOnStdin {
 		child.Stdin = strings.NewReader(stdinPrompt)
 	}
-	// #3597: a headless dispatched worker has no human attached to a console. The
-	// dispatch seam already launches THIS `fak guard` windowless (configureDispatchSpawn),
-	// but guard then spawns a console `claude` child which — under a windowless parent —
-	// still materializes its own per-worker conhost/OpenConsole pane, pure overhead when
-	// nobody is attached (#2340: 87 stranded panes = 2,829 threads / 54k handles / 2 GB;
-	// #3405: the cost scales linearly with fleet size). Launch that child windowless too.
-	// StartInNewJob/RunInNewJob preserve these creation flags (they only OR in
-	// CREATE_SUSPENDED). Left OFF for an attended/interactive session, which must keep its
-	// inherited terminal handles and visible window; a no-op on non-Windows.
-	if headlessChild {
-		guardHeadlessChildWindowMode(child)
+	// #3597: headless workers must not allocate an unattended pane. #8853 extends
+	// the same root-level containment to attended Codex only: guardExecLauncher has
+	// already bound stdin/stdout/stderr to the operator's terminal, so changing the
+	// Windows console creation mode does not remove the interactive I/O channel.
+	// Ordinary Codex tool descendants then inherit this non-visible console instead
+	// of allocating transient desktop windows. StartInNewJob preserves the flags by
+	// only OR-ing CREATE_SUSPENDED. Other attended commands stay unchanged.
+	if hiddenConsoleChild {
+		configureManagedHiddenConsole(child)
 	}
 	return grant, child, nil
 }
