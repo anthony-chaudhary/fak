@@ -180,11 +180,24 @@ func launchSkipPermsFlag(command string) string {
 	}
 }
 
+// resolveAccountsLaunchSkipPermissions preserves the shared launcher's historical Claude
+// posture while making interactive Codex bypass an explicit operator choice. requested is
+// the parsed boolean value; explicit reports whether --skip-permissions appeared on argv.
+// Low-level and headless callers that already pass launchOpts remain unchanged.
+func resolveAccountsLaunchSkipPermissions(command string, requested, explicit bool) bool {
+	if explicit {
+		return requested
+	}
+	if guardAgentBaseName(command) == "codex" {
+		return false
+	}
+	return requested
+}
+
 // buildLaunchArgv constructs the process argv for an account-switched launch. With useGuard
 // the agent runs UNDER `fak guard` (this same binary), so the kernel adjudicates every tool
 // call and the prompt-cache/compaction (vCache) layer is on; the agent itself is started with
-// its permission-bypass flag (when skipPermissions) so fak's capability floor — not the
-// agent's own prompts — is the permission system. The flag is resolved PER AGENT
+// its permission-bypass flag only when skipPermissions was resolved on. The flag is resolved PER AGENT
 // (launchSkipPermsFlag), so a Claude launch gets --dangerously-skip-permissions while a Codex
 // launch gets --dangerously-bypass-approvals-and-sandbox; an agent with no known flag simply
 // gets none. fakBin is the path to this binary (os.Executable), used only for the guard wrap.
@@ -244,7 +257,7 @@ type launchParams struct {
 	after            string
 	useHeadroom      bool   // default true — order the rotation by the live runtime headroom signal
 	useGuard         bool   // default true
-	skipPerms        bool   // default true
+	skipPerms        bool   // resolved per harness: Claude defaults true; Codex defaults false
 	ultracodePosture string // ultracode posture: auto|on|off (default on — resolved by resolveUltracodePosture)
 	model            string // default Opus 4.8 — the model a switched Claude launch pins via --model ("" => seat default)
 	modelExplicit    bool
@@ -293,7 +306,7 @@ func defaultAccountsLaunchAssess() versionskew.Assessment {
 	return versionskew.AssessStamp(context.Background(), versionskew.RealRunner, "", "origin/main", accountsLaunchStamp())
 }
 
-// runAccountsLaunch resolves the seat, builds the (guard-wrapped, skip-permissions) launch
+// runAccountsLaunch resolves the seat and builds the guard-wrapped launch
 // argv, and execs it under that seat's CLAUDE_CONFIG_DIR. With dryRun it prints the plan and
 // returns without launching.
 func runAccountsLaunch(stdout, stderr io.Writer, p launchParams) int {
@@ -639,10 +652,17 @@ func printAccountsLaunchPlan(stderr io.Writer, p launchParams, command string, h
 	if p.useGuard {
 		guardWord = "on (fak guard — kernel adjudicates every tool call; prompt-cache/compaction vCache layer on)"
 	}
-	permWord := command + " prompts per tool (--skip-permissions=false)"
+	permWord := command + " keeps its native permission prompts"
+	if guardAgentBaseName(command) == "codex" {
+		permWord = "Codex native approvals + sandbox (default); fak gates remain active"
+	}
 	if p.skipPerms {
 		if flag := launchSkipPermsFlag(command); flag != "" {
-			permWord = fmt.Sprintf("fak floor is the permission system (%s passed to %s)", flag, command)
+			if guardAgentBaseName(command) == "codex" {
+				permWord = fmt.Sprintf("Codex full approval/sandbox bypass explicitly requested (%s passed); fak gates remain active", flag)
+			} else {
+				permWord = fmt.Sprintf("fak floor is the permission system (%s passed to %s)", flag, command)
+			}
 		} else {
 			permWord = fmt.Sprintf("fak floor is the permission system; %s keeps its own prompts (no known kernel-bypass flag)", command)
 		}

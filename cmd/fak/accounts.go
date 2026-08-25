@@ -44,7 +44,8 @@ import (
 //	fak accounts set-default --name <n> alias for `set-role active` (the launch/active seat)
 //	fak accounts launch [--name <n>]   start claude UNDER `fak guard` on a seat (the active role by
 //	                                   default): cache/vCache ON + the kernel as the permission system
-//	                                   (--dangerously-skip-permissions). Claude launches default to Opus 4.8
+//	                                   (--dangerously-skip-permissions). A named Codex launch instead keeps
+//	                                   native approvals+sandbox unless --skip-permissions is explicit. Claude launches default to Opus 4.8
 //	                                   (--model claude-opus-4-8) with a startup fallback to Fable 5;
 //	                                   --model '' uses the seat's own saved default.
 //	                                   --guard=false / --skip-permissions=false opt out
@@ -167,7 +168,7 @@ func parseAccountsCmd(stderr io.Writer, sub string, rest []string) (accountsCmd,
 	rmByAccount := fs.String("by-account", "", "(remove) retire the WHOLE account: tombstone EVERY active seat that resolves to this account bucket (an email, account UUID, raw bucket key, or seat name), with one --rehome-to + --reason. Refuses if --rehome-to resolves back into the account being retired (#4669)")
 	roleFlag := fs.String("role", "", "(set-role) the role to point at --name (active|anchor); may also be given as the first positional")
 	launchGuard := fs.Bool("guard", true, "(launch) wrap the agent in `fak guard` so the kernel adjudicates every tool call and the prompt-cache/compaction (vCache) layer is on; --guard=false launches the agent directly")
-	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) pass --dangerously-skip-permissions to claude so fak's capability floor — not Claude's own prompts — is the permission system; --skip-permissions=false lets Claude prompt")
+	launchSkipPerms := fs.Bool("skip-permissions", true, "(launch) explicitly bypass the selected agent's native permission layer; omitted preserves Claude's historical --dangerously-skip-permissions default but keeps Codex native approvals + sandbox. Codex's full bypass does not bypass fak routing, capacity, policy, hook, or loop gates; =false keeps native prompts")
 	launchCommand := fs.String("command", "claude", "(launch) the agent command to start under the resolved seat")
 	launchUltracode := fs.String("ultracode", "on", "(launch) ultracode posture auto|on|off (default on): run Claude in ultracode (xhigh reasoning + dynamic multi-agent workflow orchestration) via --settings '{\"ultracode\":true}'. on is the default so every instance this launcher starts is ALREADY in ultracode and nobody has to type /effort ultracode into a fresh session; off disables it; auto defers to the work class and turns it on only for rigor-class work, so `--ultracode=auto` is the lean/fast posture for a grind or unclassified launch. true/false are accepted as on/off aliases. Claude-only; ignored for other agents")
 	launchModel := fs.String("model", defaultLaunchModel, "(launch) model id a switched Claude launch pins via --model; defaults to Opus 5 ("+defaultLaunchModel+") so every seat starts on it regardless of its own saved default; --model '' launches with the seat's saved default. Claude-only; ignored for other agents")
@@ -536,12 +537,14 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 	case "launch":
 		// The account-switcher LAUNCHER: resolve a seat (the active role by default, or
 		// --name <seat>, or a leading positional) and start the agent UNDER `fak guard` with
-		// that seat's CLAUDE_CONFIG_DIR — cache/vCache ON and the kernel as the permission
-		// system by default. Everything after `--` is passed through to the agent.
+		// that seat's config home. Claude keeps its historical permission-bypass default;
+		// Codex keeps native approvals+sandbox unless --skip-permissions was explicit.
+		// Everything after `--` is passed through to the agent.
 		seat := strings.TrimSpace(*addName)
 		if seat == "" && lead > 0 {
 			seat = strings.TrimSpace(rest[0])
 		}
+		skipPerms := resolveAccountsLaunchSkipPermissions(*launchCommand, *launchSkipPerms, flagSet(fs, "skip-permissions"))
 		return runAccountsLaunch(stdout, stderr, launchParams{
 			name:             seat,
 			command:          *launchCommand,
@@ -549,7 +552,7 @@ func runAccounts(stdout, stderr io.Writer, argv []string) int {
 			after:            strings.TrimSpace(*afterSeat),
 			useHeadroom:      !*noHeadroom,
 			useGuard:         *launchGuard,
-			skipPerms:        *launchSkipPerms,
+			skipPerms:        skipPerms,
 			ultracodePosture: strings.TrimSpace(*launchUltracode),
 			model:            strings.TrimSpace(*launchModel),
 			modelExplicit:    flagSet(fs, "model"),

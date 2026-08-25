@@ -16,9 +16,9 @@ import (
 // fak codex is the short, operator-facing Codex launcher. It intentionally does not
 // reimplement guard: it builds the same `fak guard -- codex` argv the long form uses, then
 // lets guard own the in-process gateway, Codex provider injection, audit journal, and 80/20
-// fak-info split pane. The only Codex-specific default here is permission authority: Codex is
-// launched with its own bypass flag so fak's capability floor, not Codex's prompt/sandbox
-// layer, is the permission system for this dogfood path.
+// fak-info split pane. Interactive launches retain Codex's native approval and sandbox layer
+// by default. An operator can explicitly request Codex's full bypass mode without bypassing
+// fak's independent routing, capacity, policy, hook, or loop gates.
 
 type codexLaunchOptions struct {
 	dryRun          bool
@@ -77,7 +77,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	dryRun := fs.Bool("dry-run", false, "print the guarded Codex command and exit without launching")
 	_ = fs.String("freshness-gate", "on", "require a current checkout launcher before admission (on|off; off is an explicit recovery override)")
-	skipPermissions := fs.Bool("skip-permissions", true, "pass Codex's --dangerously-bypass-approvals-and-sandbox so fak's capability floor is the permission system")
+	skipPermissions := fs.Bool("skip-permissions", false, "explicitly pass Codex's --dangerously-bypass-approvals-and-sandbox for a full native approval/sandbox bypass; fak routing, capacity, policy, hook, and loop gates still apply (default false: native Codex approvals + sandbox)")
 	splitMode := fs.String("split", "auto", "open the 20% fak-info pane when possible: auto|on|off")
 	splitWhere := fs.String("split-where", "bottom", "with --split: place the 20% fak-info pane as a bottom strip or right column")
 	splitInterval := fs.Duration("split-interval", 2*time.Second, "with --split: fak-info refresh interval")
@@ -171,9 +171,9 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintln(stderr, "fak codex: launching Codex through fak guard")
 	fmt.Fprintln(stderr, "  view        = agent 80% / fak info 20% (--split "+launch.splitMode+")")
 	if launch.skipPermissions {
-		fmt.Fprintln(stderr, "  permissions = fak floor is the permission system (Codex bypass flag passed)")
+		fmt.Fprintln(stderr, "  permissions = Codex full approval/sandbox bypass explicitly requested; fak gates remain active")
 	} else {
-		fmt.Fprintln(stderr, "  permissions = Codex keeps its own approval/sandbox layer (--skip-permissions=false)")
+		fmt.Fprintln(stderr, "  permissions = Codex native approvals + sandbox (default); fak gates remain active")
 	}
 	fmt.Fprintln(stderr, "  command     = "+strings.Join(argvOut, " "))
 	if launch.dryRun {
