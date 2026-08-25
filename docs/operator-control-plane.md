@@ -157,3 +157,7 @@ The rest of `fak session` — `audit`, `compact-audit`, `gate-fatigue`, `reset-d
 - `fak help session` · `fak help signal` · `fak help ps` each point back at this page.
 - The concept expansion, SOTA survey, and coverage table:
   [OUT-OF-BAND-OPERATOR-CONTROL-2026-07-05](notes/OUT-OF-BAND-OPERATOR-CONTROL-2026-07-05.md)
+
+### Lifecycle refusal recovery schema
+
+Ordinary `409 session_paused`, `session_draining`, and `session_stopped` responses include a stable `recovery` object with `state`, `terminal`, `retryable`, `session_id`, and a typed `next_action`. A paused session is held, not killed: continuity remains available, retries stay disabled while paused, and clients resume it through the control API using `next_action: "resume"` and the returned session id. Draining advertises `wait_for_drain`; stopped is terminal and advertises `start_new_session`. Clients must branch on these tokens rather than parse message prose. The schema adds fields compatibly and never exposes configuration paths or command strings.

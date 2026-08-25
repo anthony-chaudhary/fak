@@ -5548,6 +5548,16 @@
           "category": "incidental",
           "reason": "Timestamp field on runtime identity; not a distinct session lifecycle concept.",
           "token": "SessionStarted"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8754 wire-contract identifier for existing session lifecycle recovery, not a distinct runtime concept.",
+          "token": "SessionLifecycleRecovery"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8754 wire-contract identifier for existing session lifecycle recovery, not a distinct runtime concept.",
+          "token": "start_new_session"
         }
       ],
       "id": "session-runtime",
@@ -5633,6 +5643,7 @@
         "SessionEffectVerdict",
         "SessionFlags",
         "SessionInteractive",
+        "SessionLifecycleRecovery",
         "SessionMoveCheckpoint",
         "SessionMoveCheckpointed",
         "SessionMoveCutoverCommitted",
@@ -5901,6 +5912,7 @@
         "spawnSession",
         "splitSessionMoveCSV",
         "stagesFor",
+        "start_new_session",
         "stopDispHandoffSessionGiveUp",
         "tSESSION",
         "tailTrial",

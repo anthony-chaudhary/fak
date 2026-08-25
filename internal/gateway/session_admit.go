@@ -393,11 +393,31 @@ func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
 		return
 	}
 	msg := "session " + st.TraceID + " is " + st.Run + " (operator control); request refused"
+	recovery := SessionLifecycleRecovery{State: st.Run, SessionID: st.TraceID}
+	switch st.Run {
+	case "paused":
+		msg = "session " + st.TraceID + " is held, not killed; session continuity is preserved until an operator resumes it"
+		recovery.Terminal = false
+		recovery.Retryable = false
+		recovery.NextAction = "resume"
+	case "draining":
+		recovery.Terminal = false
+		recovery.Retryable = false
+		recovery.NextAction = "wait_for_drain"
+	case "stopped":
+		recovery.Terminal = true
+		recovery.Retryable = false
+		recovery.NextAction = "start_new_session"
+	default:
+		recovery.Terminal = true
+		recovery.Retryable = false
+	}
 	if st.Reason != "" {
 		msg += ": " + st.Reason
 	}
 	body := map[string]any{
-		"error": map[string]any{"message": msg, "type": errType(http.StatusConflict), "code": "session_" + st.Run, "param": nil},
+		"error":    map[string]any{"message": msg, "type": errType(http.StatusConflict), "code": "session_" + st.Run, "param": nil},
+		"recovery": recovery,
 	}
 	if st.ContinuationID != "" || st.Reason == sessionReasonBudgetContext {
 		body["session"] = st
@@ -417,6 +437,17 @@ func writeSessionRefusal(w http.ResponseWriter, st SessionState) {
 		}
 	}
 	writeJSON(w, http.StatusConflict, body)
+}
+
+// SessionLifecycleRecovery is the stable recovery contract attached to ordinary
+// operator-controlled lifecycle refusals. NextAction is a typed token, never a
+// shell command; clients target SessionID through the control API.
+type SessionLifecycleRecovery struct {
+	State      string `json:"state"`
+	Terminal   bool   `json:"terminal"`
+	Retryable  bool   `json:"retryable"`
+	SessionID  string `json:"session_id"`
+	NextAction string `json:"next_action,omitempty"`
 }
 
 // SessionResetDirective is the machine-readable handoff a supervisor gets when the
