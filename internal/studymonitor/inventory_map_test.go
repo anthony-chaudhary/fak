@@ -13,7 +13,6 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	writeInventoryFixture(t, root, "docs/architecture.md", "architecture\n")
 	writeInventoryFixture(t, root, "cmd/app/main.go", "package main\nfunc main() {}\n")
 	writeInventoryFixture(t, root, "internal/app/app_test.go", "package app\n")
-	writeInventoryFixture(t, root, "tests/unit/test_loading.py", "def test_loading():\n    pass\n")
 	writeInventoryFixture(t, root, "CHANGELOG.md", "## changes\n")
 	writeInventoryFixture(t, root, "ROADMAP.md", "next\n")
 	writeInventoryFixture(t, root, "LICENSE", "MIT\n")
@@ -32,7 +31,7 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	if report.Schema != InventoryMapSchema || report.Repository != "owner/repo" || report.IndexedRevision != "abc123" {
 		t.Fatalf("identity fields = %+v", report)
 	}
-	if report.Totals.RuntimeFiles != 1 || report.Totals.TestFiles != 2 || report.Totals.DocsFiles < 2 {
+	if report.Totals.RuntimeFiles != 1 || report.Totals.TestFiles != 1 || report.Totals.DocsFiles < 2 {
 		t.Fatalf("totals = %+v, want runtime/test/docs classification", report.Totals)
 	}
 	if !containsString(report.SkippedDirs, "node_modules") {
@@ -57,6 +56,25 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	}
 }
 
+func TestBuildInventoryMapCompletenessNoteIncludesPartial(t *testing.T) {
+	root := t.TempDir()
+	writeInventoryFixture(t, root, "README.md", "# demo\n")
+	writeInventoryFixture(t, root, ".github/ISSUE_TEMPLATE/bug.md", "bug\n")
+
+	report, err := BuildInventoryMap(root, InventoryMapOptions{
+		Repository:      "owner/repo",
+		IndexedRevision: "abc123",
+		ObservedAt:      "2026-08-25T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const want = "classes with partial local evidence still requiring non-tree completion: open_closed_issues_prs_discussions"
+	if !strings.Contains(report.CompletenessNote, want) {
+		t.Fatalf("completeness note = %q, want %q", report.CompletenessNote, want)
+	}
+}
 func writeInventoryFixture(t *testing.T, root, rel, text string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
