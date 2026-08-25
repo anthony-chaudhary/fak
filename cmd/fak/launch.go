@@ -43,7 +43,7 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 		case "enable", "disable":
 			return runLaunchToggle(stdout, stderr, argv[0] == "disable")
 		case "status":
-			return runLaunchStatus(stdout, stderr)
+			return runLaunchStatus(stdout, stderr, argv[1:])
 		case "doctor":
 			return runLaunchDoctor(stdout, stderr, argv[1:])
 		case "stats":
@@ -395,7 +395,11 @@ func runLaunchToggle(stdout, stderr io.Writer, disabled bool) int {
 	}
 	return 0
 }
-func runLaunchStatus(stdout, stderr io.Writer) int {
+func runLaunchStatus(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) != 0 {
+		fmt.Fprintf(stderr, "fak launch status: unexpected argument %q\n", argv[0])
+		return 2
+	}
 	c, e := launchshim.Load()
 	if e != nil {
 		fmt.Fprintln(stderr, e)
@@ -406,7 +410,13 @@ func runLaunchStatus(stdout, stderr io.Writer) int {
 		ks = append(ks, k)
 	}
 	sort.Strings(ks)
-	fmt.Fprintf(stdout, "default: %s\ninterception: %s\n", firstNonEmpty(c.Default, "(unset)"), map[bool]string{true: "disabled", false: "enabled"}[c.Disabled])
+	interception := "active"
+	if c.Disabled {
+		interception = "disabled"
+	} else if len(c.Providers) == 0 {
+		interception = "inactive (no configured providers)"
+	}
+	fmt.Fprintf(stdout, "default: %s\ninterception: %s\nbuild: %s\n", firstNonEmpty(c.Default, "(unset)"), interception, firstNonEmpty(buildIdentityFromRuntime().CommitShort, "unknown"))
 	for _, k := range ks {
 		fmt.Fprintf(stdout, "%s: %s\n", k, c.Providers[k].Command)
 	}

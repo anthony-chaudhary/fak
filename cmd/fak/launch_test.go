@@ -340,3 +340,21 @@ func TestLaunchBypassScopesAndExitPropagation(t *testing.T) {
 		})
 	}
 }
+
+func TestLaunchStatusEmptyConfigIsInactiveAndRejectsProviderArg(t *testing.T) {
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	var out, errb bytes.Buffer
+	if code := runLaunch(&out, &errb, []string{"status"}); code != 0 {
+		t.Fatalf("status code=%d stderr=%s", code, errb.String())
+	}
+	for _, want := range []string{"default: (unset)", "interception: inactive (no configured providers)", "build: unknown"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("status missing %q: %s", want, out.String())
+		}
+	}
+	out.Reset()
+	errb.Reset()
+	if code := runLaunch(&out, &errb, []string{"status", "codex"}); code != 2 || !strings.Contains(errb.String(), `unexpected argument "codex"`) {
+		t.Fatalf("provider arg code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
+	}
+}

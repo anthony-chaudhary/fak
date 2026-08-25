@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -114,3 +115,34 @@ func (fakeLaunchInfo) Mode() os.FileMode  { return 0o755 }
 func (fakeLaunchInfo) ModTime() time.Time { return time.Time{} }
 func (fakeLaunchInfo) IsDir() bool        { return false }
 func (fakeLaunchInfo) Sys() any           { return nil }
+
+func TestLaunchDoctorNamesExistingUnmanagedPathWinner(t *testing.T) {
+	root := t.TempDir()
+	shimDir := filepath.Join(root, "bin")
+	underlying := filepath.Join(root, "npm", "codex.cmd")
+	if err := os.MkdirAll(filepath.Dir(underlying), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(underlying, []byte("@echo off\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	look := func(name string) (string, error) {
+		if name == "codex" {
+			return underlying, nil
+		}
+		return "", exec.ErrNotFound
+	}
+	report := buildLaunchDoctor(launchshim.Config{Providers: map[string]launchshim.Provider{}}, nil, filepath.Join(root, "launch.json"), shimDir, look, os.Stat)
+	var codex launchDoctorRow
+	for _, row := range report.Rows {
+		if row.Provider == "codex" {
+			codex = row
+		}
+	}
+	if codex.Reason != "UNMANAGED" || codex.PathWinner != "<local>/codex.cmd" || codex.InterceptReady {
+		t.Fatalf("codex row=%+v", codex)
+	}
+	if report.Binary.AppVersion == "" || report.Binary.Go == "" {
+		t.Fatalf("binary provenance missing: %+v", report.Binary)
+	}
+}

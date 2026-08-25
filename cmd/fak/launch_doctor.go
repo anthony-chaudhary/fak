@@ -43,6 +43,7 @@ type launchDoctorReport struct {
 	ConfigPath string            `json:"config_path"`
 	ShimDir    string            `json:"shim_dir"`
 	Default    string            `json:"default_provider,omitempty"`
+	Binary     binaryIdentity    `json:"binary"`
 	Rows       []launchDoctorRow `json:"providers"`
 }
 
@@ -123,7 +124,7 @@ type launchLookPath func(string) (string, error)
 type launchStat func(string) (os.FileInfo, error)
 
 func buildLaunchDoctor(c launchshim.Config, loadErr error, configPath, shimDir string, look launchLookPath, stat launchStat) launchDoctorReport {
-	report := launchDoctorReport{Schema: launchDoctorSchema, ConfigPath: redactLocalPath(configPath), ShimDir: redactLocalPath(shimDir), Default: c.Default}
+	report := launchDoctorReport{Schema: launchDoctorSchema, ConfigPath: redactLocalPath(configPath), ShimDir: redactLocalPath(shimDir), Default: c.Default, Binary: buildIdentityFromRuntime()}
 	providers := []string{"claude", "codex"}
 	for p := range c.Providers {
 		if p != "claude" && p != "codex" {
@@ -154,6 +155,8 @@ func buildLaunchDoctor(c launchshim.Config, loadErr error, configPath, shimDir s
 		switch {
 		case c.Disabled:
 			row.Reason, row.Action = "DISABLED", "fak launch enable"
+		case command == "" && winnerErr == nil:
+			row.Reason, row.Action = "UNMANAGED", recovery
 		case command == "":
 			row.Reason, row.Action = "UNDERLYING_MISSING", recovery
 		case samePath(command, shim) || sameLaunchDir(command, shimDir):

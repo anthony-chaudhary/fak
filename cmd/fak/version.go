@@ -225,6 +225,11 @@ type binaryIdentity struct {
 // / vcs.modified / vcs.time), but structured for a consumer instead of a human line.
 // A nil BuildInfo (ReadBuildInfo reported no embedded info) yields an unstamped
 // identity — Stamped=false, Commit="" — rather than a lie about the commit.
+func buildIdentityFromRuntime() binaryIdentity {
+	bi, _ := debug.ReadBuildInfo()
+	return buildIdentity(bi)
+}
+
 func buildIdentity(bi *debug.BuildInfo) binaryIdentity {
 	id := binaryIdentity{
 		AppVersion: appversion.Current(),
