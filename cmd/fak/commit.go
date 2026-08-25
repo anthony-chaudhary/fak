@@ -282,13 +282,10 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	if *asJSON {
-		if encErr := writeIndentedJSON(stdout, res); encErr != nil {
-			fmt.Fprintf(stderr, "fak commit: %v\n", encErr)
-			return 1
-		}
-	} else {
-		renderCommitResult(stdout, res)
+	if code := emitJSONOrRenderPrefixed(stdout, stderr, "fak commit", *asJSON, res, func(w io.Writer) {
+		renderCommitResult(w, res)
+	}); code != 0 {
+		return code
 	}
 	return commitExitCode(res)
 }

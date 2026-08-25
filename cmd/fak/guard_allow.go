@@ -525,10 +525,7 @@ func cmdGuardAllow(argv []string) {
 		if *remove {
 			before := len(ov.Allow) + len(ov.AllowPrefix)
 			guardAllowRemove(&ov, names)
-			if err := saveGuardAllowOverlay(path, ov); err != nil {
-				fmt.Fprintln(os.Stderr, "fak guard allow:", err)
-				os.Exit(1)
-			}
+			saveGuardAllowOverlayOrExit(path, ov)
 			fmt.Printf("fak guard allow: removed %d entr(ies) — overlay now:\n", before-(len(ov.Allow)+len(ov.AllowPrefix)))
 			printGuardAllowOverlay(os.Stdout, path, ov)
 			return
@@ -542,10 +539,7 @@ func cmdGuardAllow(argv []string) {
 		// --ttl clears any prior stamp, so an operator can promote a "just for now" widening
 		// back to permanent by adding it again (#5179).
 		stamp := guardAllowStampExpiry(&ov, names, *ttl, guardAllowNow())
-		if err := saveGuardAllowOverlay(path, ov); err != nil {
-			fmt.Fprintln(os.Stderr, "fak guard allow:", err)
-			os.Exit(1)
-		}
+		saveGuardAllowOverlayOrExit(path, ov)
 		fmt.Printf("fak guard allow: added %s to the operator allow overlay.\n", strings.Join(names, ", "))
 		if stamp != "" {
 			fmt.Printf("  Expires in %s (at %s) — auto-reverted on the first `fak guard` launch after that.\n", *ttl, stamp)
@@ -555,6 +549,13 @@ func cmdGuardAllow(argv []string) {
 		}
 		fmt.Println("  Takes effect on the next `fak guard` launch (or POST /v1/fak/policy/reload on a running gateway).")
 		printGuardAllowOverlay(os.Stdout, path, ov)
+	}
+}
+
+func saveGuardAllowOverlayOrExit(path string, overlay guardAllowOverlay) {
+	if err := saveGuardAllowOverlay(path, overlay); err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard allow:", err)
+		os.Exit(1)
 	}
 }
 

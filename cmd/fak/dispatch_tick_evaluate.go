@@ -489,12 +489,7 @@ func completeDispatchTickEvaluation(root, runsDir string, opts dispatchTickOptio
 
 	if !opts.Live {
 		lease := inspectDispatchLaneLease(root, pick.Lane, pick.Tree, opts.Goal)
-		payload["lease"] = lease
-		if refused, _ := lease["refused"].(bool); refused {
-			payload["ok"] = false
-			payload["action"] = "lane_leased"
-			payload["verdict"] = "LANE_LEASE_HELD"
-			payload["reason"] = fmt.Sprintf("lane %q lease is held by a live peer", pick.Lane)
+		if applyDispatchLaneLease(payload, lease, fmt.Sprintf("lane %q lease is held by a live peer", pick.Lane)) {
 			return finish(payload), nil
 		}
 		payload["ok"] = true

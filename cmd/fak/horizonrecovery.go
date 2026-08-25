@@ -21,11 +21,11 @@ import (
 func cmdHorizonRecovery(argv []string) { os.Exit(runHorizonRecovery(os.Stdout, os.Stderr, argv)) }
 
 func runHorizonRecovery(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runReportSelfcheck(stdout, stderr, argv[1:], "horizon-recovery", horizonrecovery.Selfcheck,
-			"SELFCHECK OK -- band emits no r/horizon_multiplier (r stays structural); "+
-				"recovery operand and its fault-rate fence co-occur; every field measured; "+
-				"a single session never yields a population band (floor refuses it).")
+	if code, handled := runReportSelfcheckRequest(stdout, stderr, argv, "horizon-recovery", horizonrecovery.Selfcheck,
+		"SELFCHECK OK -- band emits no r/horizon_multiplier (r stays structural); "+
+			"recovery operand and its fault-rate fence co-occur; every field measured; "+
+			"a single session never yields a population band (floor refuses it)."); handled {
+		return code
 	}
 
 	fs := flag.NewFlagSet("fak horizon-recovery", flag.ContinueOnError)

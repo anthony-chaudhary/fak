@@ -26,10 +26,10 @@ import (
 func cmdCadence(argv []string) { os.Exit(runCadence(os.Stdout, os.Stderr, argv)) }
 
 func runCadence(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runReportSelfcheck(stdout, stderr, argv[1:], "cadence", cadencereport.TriageSelfcheck,
-			"SELFCHECK OK -- decenter-the-human at the cadence gate: an incomplete report with a "+
-				"runnable rerun routes to the fleet; one that names authority still pages.")
+	if code, handled := runReportSelfcheckRequest(stdout, stderr, argv, "cadence", cadencereport.TriageSelfcheck,
+		"SELFCHECK OK -- decenter-the-human at the cadence gate: an incomplete report with a "+
+			"runnable rerun routes to the fleet; one that names authority still pages."); handled {
+		return code
 	}
 	fs := flag.NewFlagSet("cadence", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -98,18 +98,9 @@ func runCadence(stdout, stderr io.Writer, argv []string) int {
 	row = cadencereport.ProjectStanding(row, prior)
 	trend := cadencereport.TrendVsLast(row, prior)
 	report.Trend = &trend
-	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, row, trendreport.AppendLedgerLine); err != nil {
-			fmt.Fprintf(stderr, "fak cadence: append ledger: %v\n", err)
-			return 1
-		}
-		if !*asJSON && !*check {
-			rel, _ := filepath.Rel(root, ledgerPath)
-			if rel == "" {
-				rel = ledgerPath
-			}
-			fmt.Fprintf(stdout, "appended cadence row -> %s\n", filepath.ToSlash(rel))
-		}
+	if code := appendReportHistory(stdout, stderr, *appendHistory, !*asJSON && !*check, root, ledgerPath,
+		"cadence", "cadence", row, trendreport.AppendLedgerLine); code != 0 {
+		return code
 	}
 
 	if *check {

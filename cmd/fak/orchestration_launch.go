@@ -384,6 +384,13 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			receipt.Workers = joinCodexOrchestrationWorker(receipt.Workers, launched)
 			return launched
 		}
+		failWorker := func(launched codexOrchestrationWorkerLaunch, attempt int, stage string, cause error) (codexOrchestrationLaunchReceipt, error) {
+			launched.Status = "failed"
+			joinWorker(launched)
+			receipt.Status = "partial"
+			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+			return receipt, fmt.Errorf("%s %s attempt %d: %w", stage, role.ID, attempt, cause)
+		}
 		maxRecoveryAttempts := 0
 		if receipt.EmptyUsagePolicy != nil {
 			maxRecoveryAttempts = receipt.EmptyUsagePolicy.MaxRecoveryAttempts
@@ -454,11 +461,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			launched.AttemptLogs = append([]string(nil), attemptLogs...)
 			launched = joinWorker(launched)
 			if launchErr != nil {
-				launched.Status = "failed"
-				joinWorker(launched)
-				receipt.Status = "partial"
-				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
-				return receipt, fmt.Errorf("launch %s attempt %d: %w", role.ID, attempt, launchErr)
+				return failWorker(launched, attempt, "launch", launchErr)
 			}
 			if receipt.EmptyUsagePolicy == nil {
 				break
@@ -468,11 +471,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			launched = joinWorker(launched)
 			if monitorErr != nil {
 				_ = orchestrationWorkerStopper(launched.PID)
-				launched.Status = "failed"
-				joinWorker(launched)
-				receipt.Status = "partial"
-				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
-				return receipt, fmt.Errorf("monitor %s attempt %d: %w", role.ID, attempt, monitorErr)
+				return failWorker(launched, attempt, "monitor", monitorErr)
 			}
 			if assessment.State == trajectory.QwenUsageStateUnobservable {
 				_ = orchestrationWorkerStopper(launched.PID)
@@ -583,20 +582,20 @@ func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath str
 	)
 }
 
-func orchestrationWorkerLogPath(req orchestrationWorkerLaunchRequest) string {
-	name := req.Role.ID + ".jsonl"
+func orchestrationWorkerAttemptPath(req orchestrationWorkerLaunchRequest, suffix string) string {
+	name := req.Role.ID
 	if req.Attempt > 1 {
-		name = fmt.Sprintf("%s.attempt-%d.jsonl", req.Role.ID, req.Attempt)
+		name = fmt.Sprintf("%s.attempt-%d", req.Role.ID, req.Attempt)
 	}
-	return filepath.Join(req.RunDir, name)
+	return filepath.Join(req.RunDir, name+suffix)
+}
+
+func orchestrationWorkerLogPath(req orchestrationWorkerLaunchRequest) string {
+	return orchestrationWorkerAttemptPath(req, ".jsonl")
 }
 
 func orchestrationWorkerAuditPath(req orchestrationWorkerLaunchRequest) string {
-	name := req.Role.ID + "-guard.audit.jsonl"
-	if req.Attempt > 1 {
-		name = fmt.Sprintf("%s.attempt-%d-guard.audit.jsonl", req.Role.ID, req.Attempt)
-	}
-	return filepath.Join(req.RunDir, name)
+	return orchestrationWorkerAttemptPath(req, "-guard.audit.jsonl")
 }
 
 func monitorQwenOrchestrationWorker(req orchestrationWorkerLaunchRequest, launched codexOrchestrationWorkerLaunch, window time.Duration, workload *orchestrationWorkloadReceipt) (trajectory.QwenEmptyUsageAssessment, error) {

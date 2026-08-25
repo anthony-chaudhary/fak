@@ -339,9 +339,7 @@ func probeAuth(token, apiBase string) *authReport {
 	if err != nil {
 		return &authReport{OK: false, Err: err.Error()}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	info, err := c.AuthTest(ctx)
+	info, err := slackCallWithTimeout(10*time.Second, c.AuthTest)
 	if err != nil {
 		return &authReport{OK: false, Err: err.Error()}
 	}
@@ -375,17 +373,27 @@ func runChannelAccessChecks(reports []*surfaceReport, apiBase string) {
 }
 
 func probeChannelAccess(token, channel, apiBase string) *channelAccessReport {
+	client := slackWireClient(token, apiBase)
+	if _, err := slackCallWithTimeout(10*time.Second, func(ctx context.Context) ([]slackwire.Message, error) {
+		return client.History(ctx, channel, "", 1)
+	}); err != nil {
+		return classifyChannelAccessError(err)
+	}
+	return &channelAccessReport{OK: true, Reason: "CHANNEL_ACCESS_OK"}
+}
+
+func slackWireClient(token, apiBase string) *slackwire.Client {
 	var opts []slackwire.Option
 	if apiBase != "" {
 		opts = append(opts, slackwire.WithAPIBase(apiBase))
 	}
-	client := slackwire.New(token, opts...)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return slackwire.New(token, opts...)
+}
+
+func slackCallWithTimeout[T any](timeout time.Duration, call func(context.Context) (T, error)) (T, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if _, err := client.History(ctx, channel, "", 1); err != nil {
-		return classifyChannelAccessError(err)
-	}
-	return &channelAccessReport{OK: true, Reason: "CHANNEL_ACCESS_OK"}
+	return call(ctx)
 }
 
 func classifyChannelAccessError(err error) *channelAccessReport {

@@ -71,12 +71,7 @@ func dispatchTickHostEnroll(root, runsDir string, opts dispatchTickOptions, pick
 	// disjointness (M11) is enforced identically — a held peer lease refuses here
 	// exactly as it refuses a detached spawn.
 	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS, opts.Goal)
-	payload["lease"] = lease
-	if refused, _ := lease["refused"].(bool); refused {
-		payload["ok"] = false
-		payload["action"] = "lane_leased"
-		payload["verdict"] = "LANE_LEASE_HELD"
-		payload["reason"] = fmt.Sprintf("lane %q lease is held by a live peer; not enrolling issue #%d into the host", pick.Lane, target)
+	if applyDispatchLaneLease(payload, lease, fmt.Sprintf("lane %q lease is held by a live peer; not enrolling issue #%d into the host", pick.Lane, target)) {
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload)
 	}

@@ -90,24 +90,15 @@ func runGoal(stdout, stderr io.Writer, args []string) int {
 		}
 		_ = enc.Encode(goals)
 	case "update":
-		if err := requireID(); err != nil {
-			return fail(err)
-		}
-		return writeGoalMutation(enc, fail, func() (goalregistry.Goal, error) {
+		return writeGoalMutationRequiringID(enc, fail, requireID, func() (goalregistry.Goal, error) {
 			return s.Update(*id, *title, *summary, goalregistry.Lifecycle(*lifecycle))
 		})
 	case "transition":
-		if err := requireID(); err != nil {
-			return fail(err)
-		}
-		return writeGoalMutation(enc, fail, func() (goalregistry.Goal, error) {
+		return writeGoalMutationRequiringID(enc, fail, requireID, func() (goalregistry.Goal, error) {
 			return s.Transition(*id, goalregistry.Lifecycle(*lifecycle), goalregistry.OutcomeEvidence{Class: goalregistry.EvidenceClass(*evidenceClass), Author: *evidenceAuthor, Reference: *evidenceRef})
 		})
 	case "reopen":
-		if err := requireID(); err != nil {
-			return fail(err)
-		}
-		return writeGoalMutation(enc, fail, func() (goalregistry.Goal, error) {
+		return writeGoalMutationRequiringID(enc, fail, requireID, func() (goalregistry.Goal, error) {
 			return s.Reopen(*id, *evidenceAuthor, *evidenceRef)
 		})
 	case "bind":
@@ -215,4 +206,11 @@ func writeGoalMutation(enc *json.Encoder, fail func(error) int, mutate func() (g
 	}
 	_ = enc.Encode(goal)
 	return 0
+}
+
+func writeGoalMutationRequiringID(enc *json.Encoder, fail func(error) int, requireID func() error, mutate func() (goalregistry.Goal, error)) int {
+	if err := requireID(); err != nil {
+		return fail(err)
+	}
+	return writeGoalMutation(enc, fail, mutate)
 }

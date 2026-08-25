@@ -63,15 +63,14 @@ func runSEOAEOScore(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 1
 	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak score seo: encode json: %v\n", err)
-			return 1
+	if code := emitJSONOrRender(stdout, stderr, "fak score seo", *asJSON, payload, func(w io.Writer) {
+		if *asMarkdown {
+			fmt.Fprintln(w, seoaeoscore.Markdown(payload, *stamp))
+		} else {
+			fmt.Fprintln(w, seoaeoscore.Render(payload))
 		}
-	} else if *asMarkdown {
-		fmt.Fprintln(stdout, seoaeoscore.Markdown(payload, *stamp))
-	} else {
-		fmt.Fprintln(stdout, seoaeoscore.Render(payload))
+	}); code != 0 {
+		return code
 	}
 	if payload.OK {
 		return 0

@@ -64,13 +64,10 @@ func runMerge(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak merge: %v\n", err)
 		return 1
 	}
-	if *asJSON {
-		if encErr := writeIndentedJSON(stdout, res); encErr != nil {
-			fmt.Fprintf(stderr, "fak merge: %v\n", encErr)
-			return 1
-		}
-	} else {
-		renderMergePreview(stdout, res)
+	if code := emitJSONOrRenderPrefixed(stdout, stderr, "fak merge", *asJSON, res, func(w io.Writer) {
+		renderMergePreview(w, res)
+	}); code != 0 {
+		return code
 	}
 	if res.Outcome == mergepreview.OutcomeConflicts {
 		return 3

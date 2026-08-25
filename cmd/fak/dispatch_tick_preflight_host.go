@@ -1067,8 +1067,7 @@ var dispatchTreeBuildSuccesses struct {
 	byRoot map[string]dispatchTreeBuildSuccess
 }
 
-var dispatchTreeBuildHead = func(root string) string {
-	cmd := exec.Command("git", "-C", root, "rev-parse", "HEAD")
+func gitHeadFromCommand(cmd *exec.Cmd) string {
 	configureDispatchHelperCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -1077,14 +1076,12 @@ var dispatchTreeBuildHead = func(root string) string {
 	return strings.TrimSpace(string(out))
 }
 
+var dispatchTreeBuildHead = func(root string) string {
+	return gitHeadFromCommand(exec.Command("git", "-C", root, "rev-parse", "HEAD"))
+}
+
 var dispatchTreeBuildHeadContext = func(ctx context.Context, root string) string {
-	cmd := exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "HEAD")
-	configureDispatchHelperCommand(cmd)
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return gitHeadFromCommand(exec.CommandContext(ctx, "git", "-C", root, "rev-parse", "HEAD"))
 }
 
 var dispatchTreeBuildStamp = binstamp.Self

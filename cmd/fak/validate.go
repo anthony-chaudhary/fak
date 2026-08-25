@@ -197,22 +197,16 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	}
 	phase = recorder.start("resolve_ref")
 	tip, err := gitRevParseWithin(ctx, r, *ref)
-	if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "resolve_ref", err, *asJSON); timedOut {
+	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "resolve_ref", err, *asJSON,
+		fmt.Sprintf("fak validate: cannot resolve ref %q: %v", *ref, err)); failed {
 		return code
-	}
-	if err != nil {
-		fmt.Fprintf(stderr, "fak validate: cannot resolve ref %q: %v\n", *ref, err)
-		return 2
 	}
 	res.Tip = tip
 	phase = recorder.start("normalize_mine")
 	paths, err := normalizeMinePathsWithin(ctx, r, mine)
-	if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "normalize_mine", err, *asJSON); timedOut {
+	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "normalize_mine", err, *asJSON,
+		fmt.Sprintf("fak validate: %v", err)); failed {
 		return code
-	}
-	if err != nil {
-		fmt.Fprintf(stderr, "fak validate: %v\n", err)
-		return 2
 	}
 	res.Mine = paths
 	res.Overlays.Skipped = append([]string(nil), paths...)
@@ -280,19 +274,15 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	} else {
 		err = overlayMinePathsWithin(ctx, r, dir, paths, checked)
 	}
-	if code, timedOut := finishValidatePhaseOrTimeout(stdout, &res, &recorder, phase, "overlay", err, *asJSON); timedOut {
+	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "overlay", err, *asJSON,
+		fmt.Sprintf("fak validate: cannot overlay owned paths: %v", err)); failed {
 		return code
-	}
-	if err != nil {
-		fmt.Fprintf(stderr, "fak validate: cannot overlay owned paths: %v\n", err)
-		return 2
 	}
 	if !*testOnly {
 		phase = recorder.start("gofmt")
 		files, ferr := validateGofmtOwnedPathsWithin(ctx, r, dir, paths, wslWorkspace)
-		if ctx.Err() != nil {
-			phase.finish(ctx.Err())
-			return finishValidateTimeout(stdout, &res, &recorder, "gofmt", *asJSON)
+		if code, timedOut := finishValidateContextPhase(stdout, &res, &recorder, phase, "gofmt", *asJSON); timedOut {
+			return code
 		}
 		if ferr != nil {
 			recordValidateFailure(&res, phase, "gofmt", ferr.Error(), ferr)
@@ -341,27 +331,17 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			// can become newly red. Rebuilding ./... made two-file checks scale with the
 			// entire repository and was the dominant #6568 timeout signature.
 			phase = recorder.start("build")
-			detail, ok := validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"build"}, testTargets...)...)
-			if ctx.Err() != nil {
-				phase.finish(ctx.Err())
-				return finishValidateTimeout(stdout, &res, &recorder, "build", *asJSON)
-			}
-			if !ok {
-				recordValidateFailure(&res, phase, "build", detail, errors.New("affected package build failed"))
-			} else {
-				phase.finish(nil)
+			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "build", errors.New("affected package build failed"), *asJSON, func() (string, bool) {
+				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"build"}, testTargets...)...)
+			}); timedOut {
+				return code
 			}
 
 			phase = recorder.start("vet")
-			detail, ok = validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"vet"}, testTargets...)...)
-			if ctx.Err() != nil {
-				phase.finish(ctx.Err())
-				return finishValidateTimeout(stdout, &res, &recorder, "vet", *asJSON)
-			}
-			if !ok {
-				recordValidateFailure(&res, phase, "vet", detail, errors.New("affected package vet failed"))
-			} else {
-				phase.finish(nil)
+			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "vet", errors.New("affected package vet failed"), *asJSON, func() (string, bool) {
+				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"vet"}, testTargets...)...)
+			}); timedOut {
+				return code
 			}
 		} else if !*testOnly {
 			recorder.skip("build", "no affected package")
@@ -375,21 +355,13 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			}
 			args = append(args, testTargets...)
 			phase = recorder.start("test")
-			var detail string
-			var ok bool
-			if wslWorkspace {
-				detail, ok = runValidateTestsInWSLWorkspaceWithin(ctx, dir, args)
-			} else {
-				detail, ok = runValidateTestsWithin(ctx, r, dir, tip, args, *wslTests)
-			}
-			if ctx.Err() != nil {
-				phase.finish(ctx.Err())
-				return finishValidateTimeout(stdout, &res, &recorder, "test", *asJSON)
-			}
-			if !ok {
-				recordValidateFailure(&res, phase, "test", detail, errors.New("affected tests failed"))
-			} else {
-				phase.finish(nil)
+			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "test", errors.New("affected tests failed"), *asJSON, func() (string, bool) {
+				if wslWorkspace {
+					return runValidateTestsInWSLWorkspaceWithin(ctx, dir, args)
+				}
+				return runValidateTestsWithin(ctx, r, dir, tip, args, *wslTests)
+			}); timedOut {
+				return code
 			}
 		} else {
 			recorder.skip("test", "no affected test-bearing package")
@@ -1175,6 +1147,38 @@ func finishValidatePhaseOrTimeout(stdout io.Writer, res *validateResult, recorde
 		return 0, false
 	}
 	return finishValidateTimeout(stdout, res, recorder, name, asJSON), true
+}
+
+func finishValidateRequiredPhase(stdout, stderr io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, err error, asJSON bool, failureMessage string) (int, bool) {
+	if code, timedOut := finishValidatePhaseOrTimeout(stdout, res, recorder, phase, name, err, asJSON); timedOut {
+		return code, true
+	}
+	if err == nil {
+		return 0, false
+	}
+	fmt.Fprintln(stderr, failureMessage)
+	return 2, true
+}
+
+func finishValidateContextPhase(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, asJSON bool) (int, bool) {
+	if recorder.ctx.Err() == nil {
+		return 0, false
+	}
+	phase.finish(recorder.ctx.Err())
+	return finishValidateTimeout(stdout, res, recorder, name, asJSON), true
+}
+
+func runValidateCheckPhase(stdout io.Writer, res *validateResult, recorder *validateRecorder, phase validateActivePhase, name string, failure error, asJSON bool, run func() (string, bool)) (int, bool) {
+	detail, ok := run()
+	if code, timedOut := finishValidateContextPhase(stdout, res, recorder, phase, name, asJSON); timedOut {
+		return code, true
+	}
+	if ok {
+		phase.finish(nil)
+	} else {
+		recordValidateFailure(res, phase, name, detail, failure)
+	}
+	return 0, false
 }
 
 func validateTimeoutPhase(res validateResult) string {

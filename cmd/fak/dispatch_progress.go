@@ -100,13 +100,10 @@ func runDispatchProgress(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak dispatch progress: %v\n", err)
 		return 1
 	}
-	if opts.AsJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch progress: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprint(stdout, renderDispatchProgress(payload))
+	if code := emitJSONOrRender(stdout, stderr, "fak dispatch progress", opts.AsJSON, payload, func(w io.Writer) {
+		fmt.Fprint(w, renderDispatchProgress(payload))
+	}); code != 0 {
+		return code
 	}
 	if dispatchMapBool(payload, "ok") {
 		return 0

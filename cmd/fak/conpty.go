@@ -100,13 +100,10 @@ func runConPTY(stdout, stderr io.Writer, argv []string) int {
 		Issue:      "https://github.com/anthony-chaudhary/fak/issues/3402",
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak conpty: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, renderConPTY(payload))
+	if code := emitJSONOrRender(stdout, stderr, "fak conpty", *asJSON, payload, func(w io.Writer) {
+		fmt.Fprintln(w, renderConPTY(payload))
+	}); code != 0 {
+		return code
 	}
 	if !payload.OK {
 		return 1

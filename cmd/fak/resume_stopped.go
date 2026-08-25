@@ -44,10 +44,10 @@ var stoppedUUIDStemRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}
 // runResumeStopped classifies and triages the recently-stopped sessions. Exit codes:
 // 0 ok, 1 runtime error, 2 usage error.
 func runResumeStopped(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runReportSelfcheck(stdout, stderr, argv[1:], "resume stopped", stopped.TriageSelfcheck,
-			"SELFCHECK OK -- decenter-the-human at resume-stopped: an auth/subscription wall "+
-				"waits on a person; an account/session throttle clears on its own and the fleet waits.")
+	if code, handled := runReportSelfcheckRequest(stdout, stderr, argv, "resume stopped", stopped.TriageSelfcheck,
+		"SELFCHECK OK -- decenter-the-human at resume-stopped: an auth/subscription wall "+
+			"waits on a person; an account/session throttle clears on its own and the fleet waits."); handled {
+		return code
 	}
 	fs := flag.NewFlagSet("resume stopped", flag.ContinueOnError)
 	fs.SetOutput(stderr)

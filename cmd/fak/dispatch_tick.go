@@ -195,13 +195,10 @@ func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
 		return 1
 	}
-	if asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch tick: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprint(stdout, renderDispatchTick(payload))
+	if code := emitJSONOrRender(stdout, stderr, "fak dispatch tick", asJSON, payload, func(w io.Writer) {
+		fmt.Fprint(w, renderDispatchTick(payload))
+	}); code != 0 {
+		return code
 	}
 	return dispatchTickExitCode(payload)
 }
@@ -772,15 +769,11 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		return finish(payload), nil
 	}
 	lease := acquireDispatchLaneLease(root, leaseID, pick.Lane, pick.Tree, opts.WorkerTimeoutS+dispatchtick.LeaseTTLMarginS, opts.Goal)
-	payload["lease"] = lease
+	refused := applyDispatchLaneLease(payload, lease, fmt.Sprintf("lane %q lease is held by a live peer", pick.Lane))
 	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {
 		bundle["lease"] = lease
 	}
-	if refused, _ := lease["refused"].(bool); refused {
-		payload["ok"] = false
-		payload["action"] = "lane_leased"
-		payload["verdict"] = "LANE_LEASE_HELD"
-		payload["reason"] = fmt.Sprintf("lane %q lease is held by a live peer", pick.Lane)
+	if refused {
 		recordDispatchPayload(runsDir, opts.Backend, payload)
 		return finish(payload), nil
 	}
@@ -930,6 +923,19 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 	payload["reason"] = fmt.Sprintf("spawned %s issue-resolution worker pid %d on #%d (lane %q) under %q", opts.Backend, spawned.PID, target, pick.Lane, account.Tag)
 	recordDispatchPayload(runsDir, opts.Backend, payload)
 	return finish(payload), nil
+}
+
+func applyDispatchLaneLease(payload, lease map[string]any, reason string) bool {
+	payload["lease"] = lease
+	refused, _ := lease["refused"].(bool)
+	if !refused {
+		return false
+	}
+	payload["ok"] = false
+	payload["action"] = "lane_leased"
+	payload["verdict"] = "LANE_LEASE_HELD"
+	payload["reason"] = reason
+	return true
 }
 
 func handoffDispatchWorktreeOwner(payload map[string]any, pid int) error {

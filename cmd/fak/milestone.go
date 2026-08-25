@@ -129,31 +129,18 @@ func runMilestoneReport(stdout, stderr io.Writer, argv []string) int {
 	row := milestonereport.RowFromReport(report)
 	prior := readLedgerFile(ledgerPath, milestonereport.ParseLedger)
 	report = report.WithTrend(milestonereport.TrendVsLast(row, prior))
-	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, row, milestonereport.AppendLedgerLine); err != nil {
-			fmt.Fprintf(stderr, "fak milestone report: append ledger: %v\n", err)
-			return 1
-		}
-		if !*asJSON && !*check {
-			rel, _ := filepath.Rel(root, ledgerPath)
-			if rel == "" {
-				rel = ledgerPath
-			}
-			fmt.Fprintf(stdout, "appended milestone row -> %s\n", filepath.ToSlash(rel))
-		}
+	if code := appendReportHistory(stdout, stderr, *appendHistory, !*asJSON && !*check, root, ledgerPath,
+		"milestone report", "milestone", row, milestonereport.AppendLedgerLine); code != 0 {
+		return code
 	}
 
 	if *check {
 		// Decenter the human at the source: under FAK_MILESTONE_TRIAGE_GATE=enforce an
 		// incomplete report whose NextAction is a runnable regenerate routes to the
 		// fleet instead of paging. Default ("", "warn") is the unchanged advisory gate.
-		code, message := milestonereport.CheckGateTriaged(report, trendreport.TriageEnforced(os.Getenv("FAK_MILESTONE_TRIAGE_GATE")))
-		if *asJSON {
-			_ = writeIndentedJSONNoEscape(stdout, report.WithGate(code, message))
-		} else {
-			fmt.Fprintln(stdout, message)
-		}
-		return code
+		return checkAndEmitReportGate(stdout, *asJSON, report, func(report milestonereport.Report) (int, string) {
+			return milestonereport.CheckGateTriaged(report, trendreport.TriageEnforced(os.Getenv("FAK_MILESTONE_TRIAGE_GATE")))
+		}, milestonereport.Report.WithGate)
 	}
 
 	if *asJSON {

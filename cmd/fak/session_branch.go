@@ -61,17 +61,15 @@ func runSessionBranch(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	parentDir := pathutil.ExpandTilde(parentArg)
-	if strings.TrimSpace(*out) == "" {
-		fmt.Fprintln(stderr, "fak session branch: --out <branch-dir> is required")
+	branchDir, ok := requiredSessionChildDir(stderr, "branch", *out)
+	if !ok {
 		return 2
 	}
-	branchDir := pathutil.ExpandTilde(*out)
 
 	// The parent's checkpoint must be a whole bundle dir; loading it (BranchDir does this)
 	// fails closed on a truncated/tampered image. Derive the branch id when not pinned.
-	parent, err := sessionimage.LoadDir(parentDir)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak session branch: load parent %q: %v\n", parentDir, err)
+	parent, ok := loadSessionParent(stderr, "branch", parentDir)
+	if !ok {
 		return 1
 	}
 	target := newSessionChildTarget(*id, parent.Meta.SessionID, "branch", *toModel, *toHost, *reason)
@@ -98,6 +96,23 @@ func runSessionBranch(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "  registry: new descriptor %s registered with parent_id=%s\n", meta.SessionID, meta.ParentID)
 	}
 	return 0
+}
+
+func loadSessionParent(stderr io.Writer, command, parentDir string) (*sessionimage.Image, bool) {
+	parent, err := sessionimage.LoadDir(parentDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak session %s: load parent %q: %v\n", command, parentDir, err)
+		return nil, false
+	}
+	return parent, true
+}
+
+func requiredSessionChildDir(stderr io.Writer, command, value string) (string, bool) {
+	if strings.TrimSpace(value) == "" {
+		fmt.Fprintf(stderr, "fak session %s: --out <%s-dir> is required\n", command, command)
+		return "", false
+	}
+	return pathutil.ExpandTilde(value), true
 }
 
 // registerBranchDescriptor writes a NEW durable descriptor for the branch into the C1

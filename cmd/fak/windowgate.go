@@ -157,13 +157,10 @@ func runWindowgate(stdout, stderr io.Writer, argv []string) int {
 		}
 		attachLiveProcessPayload(&payload, processes, *failCandidates)
 	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak windowgate: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, renderWindowgate(payload))
+	if code := emitJSONOrRender(stdout, stderr, "fak windowgate", *asJSON, payload, func(w io.Writer) {
+		fmt.Fprintln(w, renderWindowgate(payload))
+	}); code != 0 {
+		return code
 	}
 	if !payload.OK {
 		return 1

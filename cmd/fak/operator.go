@@ -182,13 +182,7 @@ func runOperatorBrief(stdout, stderr io.Writer, argv []string) int {
 
 	report := operatorbrief.Fold(in)
 	if *check {
-		code, message := operatorbrief.CheckGate(report)
-		if *asJSON {
-			_ = writeIndentedJSONNoEscape(stdout, report.WithGate(code, message))
-		} else {
-			fmt.Fprintln(stdout, message)
-		}
-		return code
+		return checkAndEmitReportGate(stdout, *asJSON, report, operatorbrief.CheckGate, operatorbrief.Report.WithGate)
 	}
 	if *asJSON {
 		_ = writeIndentedJSONNoEscape(stdout, report)
@@ -216,10 +210,10 @@ type operatorTriageView struct {
 // to the fleet (act directly, spawn a fresh-context judge, or file a ticket). It
 // always enforces — the env soak switch governs only the brief's own gate.
 func runOperatorTriage(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runReportSelfcheck(stdout, stderr, argv[1:], "operator triage", operatorbrief.TriageSelfcheck,
-			"SELFCHECK OK -- decenter-the-human gate: a genuine authority decision keeps "+
-				"paging; a knowable evaluation routes to the fleet and stops paging.")
+	if code, handled := runReportSelfcheckRequest(stdout, stderr, argv, "operator triage", operatorbrief.TriageSelfcheck,
+		"SELFCHECK OK -- decenter-the-human gate: a genuine authority decision keeps "+
+			"paging; a knowable evaluation routes to the fleet and stops paging."); handled {
+		return code
 	}
 	fs := flag.NewFlagSet("operator triage", flag.ContinueOnError)
 	fs.SetOutput(stderr)

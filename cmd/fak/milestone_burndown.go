@@ -84,18 +84,9 @@ func runMilestoneBurndown(stdout, stderr io.Writer, argv []string) int {
 	row := milestoneburndown.RowFromReport(report)
 	prior := readLedgerFile(ledgerPath, milestoneburndown.ParseLedger)
 	report = report.WithTrend(milestoneburndown.TrendVsLast(row, prior))
-	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, row, trendreport.AppendLedgerLine); err != nil {
-			fmt.Fprintf(stderr, "fak milestone burndown: append ledger: %v\n", err)
-			return 1
-		}
-		if !*asJSON && !*check {
-			rel, _ := filepath.Rel(root, ledgerPath)
-			if rel == "" {
-				rel = ledgerPath
-			}
-			fmt.Fprintf(stdout, "appended burndown row -> %s\n", filepath.ToSlash(rel))
-		}
+	if code := appendReportHistory(stdout, stderr, *appendHistory, !*asJSON && !*check, root, ledgerPath,
+		"milestone burndown", "burndown", row, trendreport.AppendLedgerLine); code != 0 {
+		return code
 	}
 
 	if *check {

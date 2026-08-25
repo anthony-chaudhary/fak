@@ -41,6 +41,11 @@ func guardAdoptRecoveredCommand(command *[]string, next []string, ok bool) bool 
 	return ok
 }
 
+func guardRecoverCapCrash(command *[]string, runErr error, agentName string, childStarted time.Time, quiet bool, maxWait time.Duration, stderr io.Writer) bool {
+	next, recovered := guardMaybeRecoverCapCrash(runErr, *command, agentName, childStarted, quiet, maxWait, nil, nil, stderr)
+	return guardAdoptRecoveredCommand(command, next, recovered)
+}
+
 // guardGoalParked answers "is THIS account still walled off this goal?" — never
 // the account-blind "is this lane parked?" it used to answer. Every branch below
 // consults it BEFORE rotation.rotateAfterExit, so a positive verdict
@@ -160,8 +165,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			command, injected = nextCommand, nextInjected
 			continue
 		}
-		next, recovered := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, 0, nil, nil, os.Stderr)
-		if guardAdoptRecoveredCommand(&command, next, recovered) {
+		if guardRecoverCapCrash(&command, runErr, agentName, childStarted, quiet, 0, os.Stderr) {
 			continue
 		}
 		if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {
@@ -330,7 +334,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				command, injected = nextCommand, nextInjected
 				continue
 			}
-			next, recovered := guardMaybeRecoverCapCrash(runErr, command, agentName, childStarted, quiet, func() time.Duration {
+			if guardRecoverCapCrash(&command, runErr, agentName, childStarted, quiet, func() time.Duration {
 				v := serveSessions.QueryTimeBudget(guardTraceID, time.Now())
 				if !v.Bounded {
 					return 0
@@ -339,8 +343,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 					return -1
 				}
 				return v.Remaining
-			}(), nil, nil, os.Stderr)
-			if guardAdoptRecoveredCommand(&command, next, recovered) {
+			}(), os.Stderr) {
 				continue
 			}
 			if class, code, ok := guardMaybeRestartOnCrash(runErr, child.ProcessState, crashRestarts, crashLimit); ok {

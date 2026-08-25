@@ -97,31 +97,18 @@ func runProgramReport(stdout, stderr io.Writer, argv []string) int {
 	row := programreport.RowFromReport(report)
 	prior := readProgramLedgerRows(ledgerPath)
 	report = report.WithTrend(programreport.TrendVsLast(row, prior))
-	if *appendHistory {
-		if err := appendProgramLedgerRow(ledgerPath, row); err != nil {
-			fmt.Fprintf(stderr, "fak program report: append ledger: %v\n", err)
-			return 1
-		}
-		if !*asJSON && !*check {
-			rel, _ := filepath.Rel(root, ledgerPath)
-			if rel == "" {
-				rel = ledgerPath
-			}
-			fmt.Fprintf(stdout, "appended program row -> %s\n", filepath.ToSlash(rel))
-		}
+	if code := appendReportHistory(stdout, stderr, *appendHistory, !*asJSON && !*check, root, ledgerPath,
+		"program report", "program", row, programreport.AppendLedgerLine); code != 0 {
+		return code
 	}
 
 	if *check {
 		// Decenter the human at the source: under FAK_PROGRAM_TRIAGE_GATE=enforce an
 		// incomplete report whose NextAction is a runnable rerun routes to the fleet
 		// instead of paging. Default ("", "warn") is the unchanged advisory gate.
-		code, message := programreport.CheckGateTriaged(report, trendreport.TriageEnforced(os.Getenv("FAK_PROGRAM_TRIAGE_GATE")))
-		if *asJSON {
-			_ = writeIndentedJSONNoEscape(stdout, report.WithGate(code, message))
-		} else {
-			fmt.Fprintln(stdout, message)
-		}
-		return code
+		return checkAndEmitReportGate(stdout, *asJSON, report, func(report programreport.Report) (int, string) {
+			return programreport.CheckGateTriaged(report, trendreport.TriageEnforced(os.Getenv("FAK_PROGRAM_TRIAGE_GATE")))
+		}, programreport.Report.WithGate)
 	}
 
 	if *asJSON {
@@ -143,23 +130,4 @@ func readProgramLedgerRows(path string) []programreport.LedgerRow {
 		return nil
 	}
 	return programreport.ParseLedger(string(raw))
-}
-
-// appendProgramLedgerRow appends one JSONL row to the ledger, creating the parent
-// directory on first write.
-func appendProgramLedgerRow(path string, row programreport.LedgerRow) error {
-	line, err := programreport.AppendLedgerLine(row)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString(line + "\n")
-	return err
 }

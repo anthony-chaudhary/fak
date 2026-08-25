@@ -49,15 +49,14 @@ func runConceptUsageScore(stdout, stderr io.Writer, argv []string) int {
 		}
 		return 1
 	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak concept-usage-score: encode json: %v\n", err)
-			return 1
+	if code := emitJSONOrRender(stdout, stderr, "fak concept-usage-score", *asJSON, payload, func(w io.Writer) {
+		if *asMarkdown {
+			fmt.Fprint(w, conceptusage.Markdown(payload))
+		} else {
+			fmt.Fprintln(w, conceptusage.Render(payload))
 		}
-	} else if *asMarkdown {
-		fmt.Fprint(stdout, conceptusage.Markdown(payload))
-	} else {
-		fmt.Fprintln(stdout, conceptusage.Render(payload))
+	}); code != 0 {
+		return code
 	}
 	if payload.OK {
 		return 0

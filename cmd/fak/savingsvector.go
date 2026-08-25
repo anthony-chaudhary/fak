@@ -23,11 +23,11 @@ import (
 func cmdSavingsVector(argv []string) { os.Exit(runSavingsVector(os.Stdout, os.Stderr, argv)) }
 
 func runSavingsVector(stdout, stderr io.Writer, argv []string) int {
-	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runReportSelfcheck(stdout, stderr, argv[1:], "savings-vector", savingsvector.Selfcheck,
-			"SELFCHECK OK -- vector decomposes Net (does not inflate); local_cpu "+
-				"surfaced and measured; gpu_prefill/wall_clock honestly modeled; happy control saves 0; "+
-				"binding account follows the profile.")
+	if code, handled := runReportSelfcheckRequest(stdout, stderr, argv, "savings-vector", savingsvector.Selfcheck,
+		"SELFCHECK OK -- vector decomposes Net (does not inflate); local_cpu "+
+			"surfaced and measured; gpu_prefill/wall_clock honestly modeled; happy control saves 0; "+
+			"binding account follows the profile."); handled {
+		return code
 	}
 
 	fs := flag.NewFlagSet("fak savings-vector", flag.ContinueOnError)
@@ -182,6 +182,13 @@ func runReportSelfcheck(stdout, stderr io.Writer, argv []string, cmdName string,
 	}
 	fmt.Fprintln(stdout, okMsg)
 	return 0
+}
+
+func runReportSelfcheckRequest(stdout, stderr io.Writer, argv []string, cmdName string, selfcheck func() error, okMsg string) (int, bool) {
+	if len(argv) == 0 || argv[0] != "selfcheck" {
+		return 0, false
+	}
+	return runReportSelfcheck(stdout, stderr, argv[1:], cmdName, selfcheck, okMsg), true
 }
 
 // reorderLeadingPositional moves a single leading non-flag token (the Report path)

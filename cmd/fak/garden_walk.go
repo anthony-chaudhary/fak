@@ -44,9 +44,9 @@ func runGardenWalk(stdout, stderr io.Writer, argv []string) int {
 	// needs-area/needs-kind/likely-dup review is the fleet's to drive in a fresh
 	// context, and only an unset-priority review genuinely waits on a person. Mirrors
 	// the `blockers|cadence|fleetpane selfcheck` sibling seams exactly.
-	if len(argv) > 0 && argv[0] == "selfcheck" {
-		return runReportSelfcheck(stdout, stderr, argv[1:], "garden-walk", gardenbundle.TriageSelfcheck,
-			"garden-walk triage selfcheck OK: act -> fleet, knowable review -> fresh context, only unset-priority waits on a person")
+	if code, handled := runReportSelfcheckRequest(stdout, stderr, argv, "garden-walk", gardenbundle.TriageSelfcheck,
+		"garden-walk triage selfcheck OK: act -> fleet, knowable review -> fresh context, only unset-priority waits on a person"); handled {
+		return code
 	}
 	fs := flag.NewFlagSet("garden walk", flag.ContinueOnError)
 	fs.SetOutput(stderr)

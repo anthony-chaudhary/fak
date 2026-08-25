@@ -60,23 +60,21 @@ func runSessionFork(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	parentDir := pathutil.ExpandTilde(parentArg)
-	if strings.TrimSpace(*out) == "" {
-		fmt.Fprintln(stderr, "fak session fork: --out <fork-dir> is required")
+	forkDir, ok := requiredSessionChildDir(stderr, "fork", *out)
+	if !ok {
 		return 2
 	}
 	if strings.TrimSpace(*checkpoint) == "" {
 		fmt.Fprintln(stderr, "fak session fork: --checkpoint <branch-point-dir> is required (fork pins the branch point before it diverges)")
 		return 2
 	}
-	forkDir := pathutil.ExpandTilde(*out)
 	checkpointDir := pathutil.ExpandTilde(*checkpoint)
 
 	// Load the parent to derive the fork id default (and fail closed early on a truncated or
 	// missing bundle, with a clearer message than the op's wrapped error). ForkDir re-loads and
 	// re-verifies it, so this is a convenience read, not the integrity gate.
-	parent, err := sessionimage.LoadDir(parentDir)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak session fork: load parent %q: %v\n", parentDir, err)
+	parent, ok := loadSessionParent(stderr, "fork", parentDir)
+	if !ok {
 		return 1
 	}
 	target := newSessionChildTarget(*id, parent.Meta.SessionID, "fork", *toModel, *toHost, *reason)

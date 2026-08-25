@@ -89,18 +89,9 @@ func runProjectReport(stdout, stderr io.Writer, argv []string) int {
 	// --append-history -- durably append this tick so the trend accrues across weeks.
 	ledgerPath := projectLedgerPath(*ledger)
 	report = attachProjectTrend(report, ledgerPath)
-	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, projectreport.RowFromReport(report), trendreport.AppendLedgerLine); err != nil {
-			fmt.Fprintf(stderr, "fak project report: append ledger: %v\n", err)
-			return 1
-		}
-		if !*asJSON && !*check {
-			rel, relErr := filepath.Rel(repoRoot(), ledgerPath)
-			if relErr != nil || rel == "" {
-				rel = ledgerPath
-			}
-			fmt.Fprintf(stdout, "appended project row -> %s\n", filepath.ToSlash(rel))
-		}
+	if code := appendReportHistory(stdout, stderr, *appendHistory, !*asJSON && !*check, repoRoot(), ledgerPath,
+		"project report", "project", projectreport.RowFromReport(report), trendreport.AppendLedgerLine); code != 0 {
+		return code
 	}
 
 	if *asJSON {

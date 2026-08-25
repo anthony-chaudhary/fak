@@ -65,41 +65,27 @@ const teamEnv = "FAK_SLACK_TEAM"
 // slackShotHistory reads a channel's recent messages. It is a package var so tests inject
 // a fixed transcript without a network or a token (mirrors trajectoryPost's seam).
 var slackShotHistory = func(token, apiBase, channel string, limit int) ([]slackwire.Message, error) {
-	var opts []slackwire.Option
-	if apiBase != "" {
-		opts = append(opts, slackwire.WithAPIBase(apiBase))
-	}
-	c := slackwire.New(token, opts...)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return c.History(ctx, channel, "", limit)
+	c := slackWireClient(token, apiBase)
+	return slackCallWithTimeout(30*time.Second, func(ctx context.Context) ([]slackwire.Message, error) {
+		return c.History(ctx, channel, "", limit)
+	})
 }
 
 // slackShotReplies reads one thread. Kept as a separate seam so tests can prove the
 // operator capture nests real replies without touching Slack.
 var slackShotReplies = func(token, apiBase, channel, threadTS string, limit int) ([]slackwire.Message, error) {
-	var opts []slackwire.Option
-	if apiBase != "" {
-		opts = append(opts, slackwire.WithAPIBase(apiBase))
-	}
-	c := slackwire.New(token, opts...)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	return c.Replies(ctx, channel, threadTS, limit)
+	c := slackWireClient(token, apiBase)
+	return slackCallWithTimeout(30*time.Second, func(ctx context.Context) ([]slackwire.Message, error) {
+		return c.Replies(ctx, channel, threadTS, limit)
+	})
 }
 
 // slackShotTeam resolves the workspace team id (for the launch URLs) from auth.test. It is
 // a package var so tests skip the network; a failure yields "" and the URLs fall back to a
 // <team> placeholder rather than erroring — the transcript is the point, the URLs a bonus.
 var slackShotTeam = func(token, apiBase string) string {
-	var opts []slackwire.Option
-	if apiBase != "" {
-		opts = append(opts, slackwire.WithAPIBase(apiBase))
-	}
-	c := slackwire.New(token, opts...)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	info, err := c.AuthTest(ctx)
+	c := slackWireClient(token, apiBase)
+	info, err := slackCallWithTimeout(10*time.Second, c.AuthTest)
 	if err != nil || info == nil {
 		return ""
 	}

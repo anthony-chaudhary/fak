@@ -85,9 +85,8 @@ func runMilestoneScorecard(stdout, stderr io.Writer, argv []string) int {
 		return code
 	}
 	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak milestone-scorecard: encode json: %v\n", err)
-			return 1
+		if code := encodeJSONOrFail(stdout, stderr, payload, "fak milestone-scorecard"); code != 0 {
+			return code
 		}
 		return okExit(payload.OK)
 	}

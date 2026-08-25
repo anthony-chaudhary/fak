@@ -188,18 +188,9 @@ func runDojoRun(stdout, stderr io.Writer, argv []string) int {
 	prior := readLedgerFile(ledgerPath, dojo.ParseLedger)
 	trend := dojo.TrendVsLast(row, prior)
 	report.Trend = &trend
-	if *appendHistory {
-		if err := appendLedgerFile(ledgerPath, row, dojo.AppendLedgerLine); err != nil {
-			fmt.Fprintf(stderr, "fak dojo run: append ledger: %v\n", err)
-			return 1
-		}
-		if !*asJSON && !*check {
-			rel, _ := filepath.Rel(root, ledgerPath)
-			if rel == "" {
-				rel = ledgerPath
-			}
-			fmt.Fprintf(stdout, "appended dojo row -> %s\n", filepath.ToSlash(rel))
-		}
+	if code := appendReportHistory(stdout, stderr, *appendHistory, !*asJSON && !*check, root, ledgerPath,
+		"dojo run", "dojo", row, dojo.AppendLedgerLine); code != 0 {
+		return code
 	}
 
 	if *check {

@@ -212,15 +212,7 @@ func orchestrationChildProcess() bool {
 }
 
 func codexOrchestrationInvocationReceiptPath(codexHome, sessionID string) (string, error) {
-	home, err := resolvedCodexLoopHome(codexHome)
-	if err != nil {
-		return "", err
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || filepath.Base(sessionID) != sessionID {
-		return "", errors.New("invalid Codex session id for orchestration receipt")
-	}
-	return filepath.Join(home, "fak-orchestration-invocations", sessionID+".json"), nil
+	return codexSessionArtifactPath(codexHome, sessionID, "fak-orchestration-invocations", "invalid Codex session id for orchestration receipt")
 }
 
 func writeCodexOrchestrationInvocationReceipt(codexHome string, receipt codexOrchestrationInvocationReceipt) error {

@@ -64,3 +64,31 @@ func encodeJSONOrFailPrefixed(stdout, stderr io.Writer, v any, errPrefix string)
 	}
 	return 0
 }
+
+// emitJSONOrRender centralizes the common command boundary where --json selects the
+// indented machine payload and the default path invokes a command-specific renderer.
+func emitJSONOrRender(stdout, stderr io.Writer, label string, asJSON bool, value any, render func(io.Writer)) int {
+	return emitJSONOrRenderPrefixed(stdout, stderr, label+": encode json", asJSON, value, render)
+}
+
+func emitJSONOrRenderPrefixed(stdout, stderr io.Writer, errPrefix string, asJSON bool, value any, render func(io.Writer)) int {
+	if asJSON {
+		return encodeJSONOrFailPrefixed(stdout, stderr, value, errPrefix)
+	}
+	render(stdout)
+	return 0
+}
+
+func emitReportGate(stdout io.Writer, asJSON bool, code int, message string, gated any) int {
+	if asJSON {
+		_ = writeIndentedJSONNoEscape(stdout, gated)
+	} else {
+		fmt.Fprintln(stdout, message)
+	}
+	return code
+}
+
+func checkAndEmitReportGate[T any](stdout io.Writer, asJSON bool, report T, check func(T) (int, string), withGate func(T, int, string) T) int {
+	code, message := check(report)
+	return emitReportGate(stdout, asJSON, code, message, withGate(report, code, message))
+}

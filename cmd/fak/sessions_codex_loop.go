@@ -259,14 +259,10 @@ func sessionsCodexLoop(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintln(stderr, "fak sessions codex-loop: use only one of --path or --session")
 		return 2
 	}
-	resolved, ok := resolveCodexLoopSessionPathReported(stderr, *codexHome, *sessionID, *path, "fak sessions codex-loop: %v\n")
+	resolved, fh, code, ok := openCodexLoopSessionReported(stderr, *codexHome, *sessionID, *path,
+		"fak sessions codex-loop: %v\n", "fak sessions codex-loop: open %s: %v\n", 2, 1)
 	if !ok {
-		return 2
-	}
-	fh, err := os.Open(resolved)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop: open %s: %v\n", resolved, err)
-		return 1
+		return code
 	}
 	defer fh.Close()
 	d, err := diagnoseCodexLoop(fh, resolved)
@@ -384,16 +380,20 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 	}
 }
 
-func codexGuardWitnessPath(codexHome, sessionID string) (string, error) {
+func codexSessionArtifactPath(codexHome, sessionID, dir, invalidMessage string) (string, error) {
 	home, err := resolvedCodexLoopHome(codexHome)
 	if err != nil {
 		return "", err
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" || filepath.Base(sessionID) != sessionID {
-		return "", errors.New("invalid Codex session id for guard witness")
+		return "", errors.New(invalidMessage)
 	}
-	return filepath.Join(home, "fak-guarded-sessions", sessionID+".json"), nil
+	return filepath.Join(home, dir, sessionID+".json"), nil
+}
+
+func codexGuardWitnessPath(codexHome, sessionID string) (string, error) {
+	return codexSessionArtifactPath(codexHome, sessionID, "fak-guarded-sessions", "invalid Codex session id for guard witness")
 }
 
 func writeCodexGuardWitness(codexHome, sessionID string) error {
@@ -417,15 +417,7 @@ func writeCodexGuardWitness(codexHome, sessionID string) error {
 }
 
 func codexWorkflowDefaultWitnessPath(codexHome, sessionID string) (string, error) {
-	home, err := resolvedCodexLoopHome(codexHome)
-	if err != nil {
-		return "", err
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || filepath.Base(sessionID) != sessionID {
-		return "", errors.New("invalid Codex session id for workflow-default witness")
-	}
-	return filepath.Join(home, "fak-workflow-defaults", sessionID+".json"), nil
+	return codexSessionArtifactPath(codexHome, sessionID, "fak-workflow-defaults", "invalid Codex session id for workflow-default witness")
 }
 
 func writeCodexWorkflowDefaultWitness(codexHome string, witness codexWorkflowDefaultWitness) error {
@@ -536,6 +528,19 @@ func resolveCodexLoopSessionPathReported(stderr io.Writer, codexHome, sessionID,
 	return resolved, true
 }
 
+func openCodexLoopSessionReported(stderr io.Writer, codexHome, sessionID, path, resolveFormat, openFormat string, resolveCode, openCode int) (string, *os.File, int, bool) {
+	resolved, ok := resolveCodexLoopSessionPathReported(stderr, codexHome, sessionID, path, resolveFormat)
+	if !ok {
+		return "", nil, resolveCode, false
+	}
+	fh, err := os.Open(resolved)
+	if err != nil {
+		fmt.Fprintf(stderr, openFormat, resolved, err)
+		return "", nil, openCode, false
+	}
+	return resolved, fh, 0, true
+}
+
 func emitCodexWorkflowDefault(stdout, stderr io.Writer, in *codexLoopHookInput, codexHome, sessionID string) int {
 	in.SessionID = sessionID
 	if output, ok := codexWorkflowDefaultOutput(*in, codexHome); ok {
@@ -578,14 +583,11 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		return 0
 	}
 
-	resolved, ok := resolveCodexLoopSessionPathReported(stderr, *codexHome, sessionID, "", "fak sessions codex-loop-hook: %v (allowing turn; recovery: verify --codex-home/CODEX_HOME and relaunch with `fak codex`)\n")
+	resolved, fh, code, ok := openCodexLoopSessionReported(stderr, *codexHome, sessionID, "",
+		"fak sessions codex-loop-hook: %v (allowing turn; recovery: verify --codex-home/CODEX_HOME and relaunch with `fak codex`)\n",
+		"fak sessions codex-loop-hook: open %s: %v (allowing turn; recovery: verify the transcript is readable and relaunch with `fak codex`)\n", 0, 0)
 	if !ok {
-		return 0
-	}
-	fh, err := os.Open(resolved)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak sessions codex-loop-hook: open %s: %v (allowing turn; recovery: verify the transcript is readable and relaunch with `fak codex`)\n", resolved, err)
-		return 0
+		return code
 	}
 	// Snapshot and close before diagnosis. An injected/slow/panicking diagnose path
 	// must never retain a Windows file handle after the outer budget allows the turn:

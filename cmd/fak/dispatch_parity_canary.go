@@ -527,13 +527,10 @@ func runDispatchParityCanary(stdout, stderr io.Writer, argv []string) int {
 		LaneTree: *laneTree,
 	})
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak dispatch parity-canary: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, renderParityCanary(payload))
+	if code := emitJSONOrRender(stdout, stderr, "fak dispatch parity-canary", *asJSON, payload, func(w io.Writer) {
+		fmt.Fprintln(w, renderParityCanary(payload))
+	}); code != 0 {
+		return code
 	}
 	if payload.OK {
 		return 0

@@ -51,6 +51,31 @@ func guardReadPriorAuditEntries(auditPath string) (string, []os.DirEntry, bool) 
 	return dir, entries, true
 }
 
+type guardPriorAuditEntry struct {
+	path  string
+	entry os.DirEntry
+}
+
+func guardFilteredPriorAuditEntries(auditPath, current, suffix string) ([]guardPriorAuditEntry, bool) {
+	dir, entries, ok := guardReadPriorAuditEntries(auditPath)
+	if !ok {
+		return nil, false
+	}
+	current = filepath.Clean(current)
+	filtered := make([]guardPriorAuditEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), suffix) {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		if current != "." && filepath.Clean(path) == current {
+			continue
+		}
+		filtered = append(filtered, guardPriorAuditEntry{path: path, entry: entry})
+	}
+	return filtered, true
+}
+
 func guardReadRefusalCarryForward(auditPath, traceID, root string) []guardRefusalCarry {
 	path := guardRefusalCarryForwardPath(auditPath)
 	if path == "" {
@@ -102,11 +127,10 @@ func guardLoadRefusalCarryForwardFile(path, traceID, root string) ([]guardRefusa
 }
 
 func guardReadLatestRefusalCarryForwardSidecar(auditPath, traceID, root string) ([]guardRefusalCarry, bool) {
-	dir, entries, ok := guardReadPriorAuditEntries(auditPath)
+	entries, ok := guardFilteredPriorAuditEntries(auditPath, guardRefusalCarryForwardPath(auditPath), ".jsonl.refusals.json")
 	if !ok {
 		return nil, false
 	}
-	current := filepath.Clean(guardRefusalCarryForwardPath(auditPath))
 	type candidate struct {
 		path string
 		when int64
@@ -114,23 +138,16 @@ func guardReadLatestRefusalCarryForwardSidecar(auditPath, traceID, root string) 
 	}
 	var candidates []candidate
 	for _, ent := range entries {
-		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".jsonl.refusals.json") {
-			continue
-		}
-		path := filepath.Join(dir, ent.Name())
-		if current != "." && filepath.Clean(path) == current {
-			continue
-		}
-		out, when, ok := guardLoadRefusalCarryForwardFile(path, traceID, root)
+		out, when, ok := guardLoadRefusalCarryForwardFile(ent.path, traceID, root)
 		if !ok {
 			continue
 		}
 		if when == 0 {
-			if info, err := ent.Info(); err == nil {
+			if info, err := ent.entry.Info(); err == nil {
 				when = info.ModTime().Unix()
 			}
 		}
-		candidates = append(candidates, candidate{path: path, when: when, out: out})
+		candidates = append(candidates, candidate{path: ent.path, when: when, out: out})
 	}
 	if len(candidates) == 0 {
 		return nil, false
@@ -145,29 +162,21 @@ func guardReadLatestRefusalCarryForwardSidecar(auditPath, traceID, root string) 
 }
 
 func guardReadLatestRefusalCarryForwardJournal(auditPath, traceID, root string) ([]guardRefusalCarry, bool) {
-	dir, entries, ok := guardReadPriorAuditEntries(auditPath)
+	entries, ok := guardFilteredPriorAuditEntries(auditPath, auditPath, ".jsonl")
 	if !ok {
 		return nil, false
 	}
-	current := filepath.Clean(auditPath)
 	type candidate struct {
 		path string
 		mod  time.Time
 	}
 	var candidates []candidate
 	for _, ent := range entries {
-		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".jsonl") {
-			continue
-		}
-		path := filepath.Join(dir, ent.Name())
-		if current != "." && filepath.Clean(path) == current {
-			continue
-		}
-		info, err := ent.Info()
+		info, err := ent.entry.Info()
 		if err != nil {
 			continue
 		}
-		candidates = append(candidates, candidate{path: path, mod: info.ModTime()})
+		candidates = append(candidates, candidate{path: ent.path, mod: info.ModTime()})
 	}
 	if len(candidates) == 0 {
 		return nil, false

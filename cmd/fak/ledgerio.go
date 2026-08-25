@@ -9,6 +9,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 )
@@ -80,4 +82,25 @@ func appendLedgerFile[T any](path string, row T, render func(T) (string, error))
 	defer f.Close()
 	_, err = f.WriteString(line + "\n")
 	return err
+}
+
+// appendReportHistory owns the common operator contract around the report ledgers:
+// append only when requested, preserve the command-specific error prefix, and announce
+// the repository-relative ledger only for human non-gating output.
+func appendReportHistory[T any](stdout, stderr io.Writer, enabled, announce bool, root, ledgerPath, command, rowName string, row T, render func(T) (string, error)) int {
+	if !enabled {
+		return 0
+	}
+	if err := appendLedgerFile(ledgerPath, row, render); err != nil {
+		fmt.Fprintf(stderr, "fak %s: append ledger: %v\n", command, err)
+		return 1
+	}
+	if announce {
+		rel, err := filepath.Rel(root, ledgerPath)
+		if err != nil || rel == "" {
+			rel = ledgerPath
+		}
+		fmt.Fprintf(stdout, "appended %s row -> %s\n", rowName, filepath.ToSlash(rel))
+	}
+	return 0
 }

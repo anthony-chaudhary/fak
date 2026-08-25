@@ -255,18 +255,14 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			if err != nil {
 				requests[i].Status = "receipt_failed"
 				requests[i].Reason = err.Error()
-				summary.Results[resultIndex] = sessionRecoveryResult(requests[i])
-				if err := persistRecoverySummary(&summary); err != nil {
-					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
 					return 1
 				}
 				continue
 			}
 			if !wrote {
 				requests[i].Status = "already_receipted"
-				summary.Results[resultIndex] = sessionRecoveryResult(requests[i])
-				if err := persistRecoverySummary(&summary); err != nil {
-					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
 					return 1
 				}
 				continue
@@ -274,9 +270,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 			intent := sessionRecoveryResult(requests[i])
 			intent.Status = "launch_intent"
 			intent.Reason = "receipt persisted before visible launch"
-			summary.Results[resultIndex] = intent
-			if err := persistRecoverySummary(&summary); err != nil {
-				fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+			if !persistRecoveryResult(stderr, &summary, resultIndex, intent) {
 				return 1
 			}
 			launchedAt := recoveryNow()
@@ -284,9 +278,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 				requests[i].Status = "launch_failed"
 				requests[i].Reason = err.Error()
 				_ = sessionrecovery.FinalizeReceipt(requests[i], requests[i].Status, requests[i].Reason, recoveryNow())
-				summary.Results[resultIndex] = sessionRecoveryResult(requests[i])
-				if err := persistRecoverySummary(&summary); err != nil {
-					fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+				if !persistRecoveryResult(stderr, &summary, resultIndex, sessionRecoveryResult(requests[i])) {
 					return 1
 				}
 				continue
@@ -375,6 +367,15 @@ func persistRecoverySummary(summary *sessionrecovery.Summary) error {
 	summary.FinishedAt = recoveryNow().UTC().Format(time.RFC3339Nano)
 	summary.Recount()
 	return sessionrecovery.WriteSummary(summary.WitnessPath, *summary)
+}
+
+func persistRecoveryResult(stderr io.Writer, summary *sessionrecovery.Summary, index int, result sessionrecovery.Result) bool {
+	summary.Results[index] = result
+	if err := persistRecoverySummary(summary); err != nil {
+		fmt.Fprintln(stderr, "fak session recover: update run witness:", err)
+		return false
+	}
+	return true
 }
 
 func sessionRecoveryResult(req sessionrecovery.Request) sessionrecovery.Result {

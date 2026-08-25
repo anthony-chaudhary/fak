@@ -64,15 +64,14 @@ func runAgentReadinessScore(stdout, stderr io.Writer, argv []string) int {
 	}); done {
 		return code
 	}
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, payload); err != nil {
-			fmt.Fprintf(stderr, "fak score agent-readiness: encode json: %v\n", err)
-			return 1
+	if code := emitJSONOrRender(stdout, stderr, "fak score agent-readiness", *asJSON, payload, func(w io.Writer) {
+		if *asMarkdown {
+			fmt.Fprint(w, agentreadinessscore.Markdown(payload, *stamp))
+		} else {
+			fmt.Fprintln(w, agentreadinessscore.Render(payload))
 		}
-	} else if *asMarkdown {
-		fmt.Fprint(stdout, agentreadinessscore.Markdown(payload, *stamp))
-	} else {
-		fmt.Fprintln(stdout, agentreadinessscore.Render(payload))
+	}); code != 0 {
+		return code
 	}
 	if payload.OK {
 		return 0
