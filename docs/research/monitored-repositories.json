@@ -64,7 +64,30 @@
       "last_checked": "2026-08-14",
       "checked_revision": "345e2bea42cabea2f32d25a68fd1739e8e92cd03",
       "stars_at_check": 24259,
-      "last_push_at_check": "2026-08-14T22:46:18Z"
+      "last_push_at_check": "2026-08-14T22:46:18Z",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/everyinc-compound-engineering-plugin.json",
+        "indexed_revision": "345e2bea42cabea2f32d25a68fd1739e8e92cd03",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 22,
+        "candidate_count": 0,
+        "filed_issue_count": 0,
+        "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+      }
     },
     {
       "repository": "obra/superpowers",
