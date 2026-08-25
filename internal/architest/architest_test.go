@@ -639,6 +639,7 @@ var tier = map[string]int{
 	"tempartifact":          1, // stdlib-only exact-path OS-temp artifact lifecycle; process inspection stays in its off-path platform adapter.
 	"managedocs":            1,
 	"humanctl":              1,
+	"frontmatter":           1, // stdlib-only flat YAML scalar decoder shared by skill metadata readers.
 	"toolcatalog":           1,
 	"projectassets":         1, // stdlib-only project asset registry and parity adapter; off the runtime hot path.
 	"wavefuel":              1, // stdlib-only fleet-wave operator-receipt contract witness.
