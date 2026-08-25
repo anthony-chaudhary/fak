@@ -68,7 +68,7 @@ func TestGuardSessionStartClearCreatesFakSessionBoundary(t *testing.T) {
 	if _, ok := serveSessions.SetBudget(oldTrace, budget); !ok {
 		t.Fatal("stage old session budget")
 	}
-	recordGuardSessionStartIdentityFor(oldTrace, "provider-thread-1")
+	recordGuardSessionStartIdentityFor(oldTrace, "provider-thread-1", "claude", "startup")
 	recordGuardSessionStartJournalFor(oldTrace, "provider-thread-1", "claude", 0)
 	srv, err := gateway.New(gateway.Config{ExposeProfile: "headless", DefaultTraceID: "launch-placeholder"})
 	if err != nil {

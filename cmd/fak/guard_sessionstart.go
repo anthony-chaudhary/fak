@@ -140,7 +140,7 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	// Record the uuid<->trace join first (best-effort, fail-open), so it is written on EVERY
 	// SessionStart source — independent of the affordance mode below. The affordance "off" knob
 	// governs the injected hint, not the durable identity store the watchdog depends on.
-	driverPID := recordGuardSessionStartIdentityFor(effectiveTrace, sessionID)
+	driverPID := recordGuardSessionStartIdentityFor(effectiveTrace, sessionID, provider, hookStart.Source)
 	// …then register the session in the crash-survivable journal (C3, #3787), on the same terms:
 	// every SessionStart source, ahead of the affordance knob, best-effort. It reuses the driver
 	// pid the join above already witnessed rather than paying a second process census.
@@ -228,7 +228,7 @@ func parseGuardProviderSessionStart(payload []byte) guardProviderSessionStart {
 	return guardProviderSessionStart{Source: strings.ToLower(strings.TrimSpace(in.Source)), SessionID: id}
 }
 
-func recordGuardSessionStartIdentityFor(traceID, sessionID string) int {
+func recordGuardSessionStartIdentityFor(traceID, sessionID, provider, source string) int {
 	uuid := strings.TrimSpace(sessionID)
 	traceID = strings.TrimSpace(traceID)
 	if uuid == "" || traceID == "" {
@@ -236,10 +236,12 @@ func recordGuardSessionStartIdentityFor(traceID, sessionID string) int {
 	}
 	path := resume.IdentityLedgerPath(resolveSweepRegDir(""))
 	row := resume.IdentityRow{
-		TS:    time.Now().UTC().Format(time.RFC3339),
-		UUID:  uuid,
-		Trace: traceID,
-		Via:   "guard-sessionstart",
+		TS:       time.Now().UTC().Format(time.RFC3339),
+		UUID:     uuid,
+		Trace:    traceID,
+		Via:      "guard-sessionstart",
+		Provider: strings.ToLower(strings.TrimSpace(provider)),
+		Source:   strings.ToLower(strings.TrimSpace(source)),
 	}
 	// The join row goes down FIRST, carrying no pid, because it is the fact the resume
 	// watchdog depends on (#4112) and the driver witness below reads the host process table —

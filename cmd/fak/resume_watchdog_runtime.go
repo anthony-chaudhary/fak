@@ -676,11 +676,13 @@ func rwRefreshResumeIdentity(regDir string, p resume.WatchdogPlanRow) {
 		account = strings.TrimSpace(p.Account)
 	}
 	_ = appendJSONL(resume.IdentityLedgerPath(regDir), resume.IdentityRow{
-		TS:      rwNowISO(),
-		UUID:    uuid,
-		Trace:   rwLoadIdentity(regDir)[uuid], // carry the known trace; "" = a half row the fold skips
-		Account: account,
-		Via:     "resume-watchdog",
+		TS:       rwNowISO(),
+		UUID:     uuid,
+		Trace:    rwLoadIdentity(regDir)[uuid], // carry the known trace; "" = a half row the fold skips
+		Account:  account,
+		Via:      "resume-watchdog",
+		Provider: "claude",
+		Source:   "resume",
 	})
 }
 

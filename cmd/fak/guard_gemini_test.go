@@ -76,7 +76,7 @@ func TestGuardGeminiClearAndNewCreateOneBoundedChildEach(t *testing.T) {
 	if _, ok := serveSessions.SetBudget(oldTrace, budget); !ok {
 		t.Fatal("stage old Gemini session budget")
 	}
-	recordGuardSessionStartIdentityFor(oldTrace, "gemini-session-old")
+	recordGuardSessionStartIdentityFor(oldTrace, "gemini-session-old", "gemini", "startup")
 	recordGuardSessionStartJournalFor(oldTrace, "gemini-session-old", "gemini", 0)
 
 	srv, err := gateway.New(gateway.Config{ExposeProfile: "headless", DefaultTraceID: oldTrace})

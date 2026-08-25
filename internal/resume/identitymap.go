@@ -27,6 +27,8 @@
 package resume
 
 import (
+	"bufio"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +69,13 @@ type IdentityRow struct {
 	Account string `json:"account,omitempty"`
 	// Via names what wrote the row (e.g. "guard SessionStart"), for provenance.
 	Via string `json:"via,omitempty"`
+	// Provider names the provider that emitted the exact session identity. Older rows
+	// omit it; audit readers then resolve the provider only through an exact journal
+	// match, never from a path prefix, timestamp, or newest-session guess.
+	Provider string `json:"provider,omitempty"`
+	// Source is the provider's SessionStart source (startup, resume, compact, clear)
+	// when the producer supplied one. It is audit provenance, not a fold key.
+	Source string `json:"source,omitempty"`
 }
 
 // FoldIdentity folds the append-only rows into the two lookup directions every
@@ -147,6 +156,36 @@ func LoadIdentity(regDir string) (traceByUUID, uuidByTrace map[string]string) {
 func LoadIdentityRows(regDir string) []IdentityRow {
 	raw, _ := os.ReadFile(IdentityLedgerPath(regDir))
 	return jsonlledger.Parse[IdentityRow](string(raw), nil)
+}
+
+// LoadIdentityRowsStrict is the fail-closed reader for audit surfaces. The operational
+// watchdog intentionally uses LoadIdentityRows/LoadIdentity and remains fail-open, but an
+// audit cannot turn an unreadable or malformed authority into an empty healthy cohort.
+// Blank and comment lines are ignored; every other invalid JSON line is counted.
+func LoadIdentityRowsStrict(regDir string) (rows []IdentityRow, invalidLines int, err error) {
+	f, err := os.Open(IdentityLedgerPath(regDir))
+	if err != nil {
+		return nil, 0, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		var row IdentityRow
+		if json.Unmarshal([]byte(line), &row) != nil {
+			invalidLines++
+			continue
+		}
+		rows = append(rows, row)
+	}
+	if err := scanner.Err(); err != nil {
+		return rows, invalidLines, err
+	}
+	return rows, invalidLines, nil
 }
 
 // IdentityMatch is the resolved join a lookup returns: the query id, the id it pairs to, the

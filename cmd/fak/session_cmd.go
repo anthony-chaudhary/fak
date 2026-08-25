@@ -25,6 +25,7 @@ package main
 //	fak session audit [summary|actions|discover|audit|deep] ...  # offline transcript audit alias
 //	fak session observe [--days N] [--json]  # zero-config recent Codex context health
 //	fak session compact-audit [--since D] [--json]  # expert Codex-rollout compaction health (#4763)
+//	fak session journal-audit [--since 24h] [--json] # read-only recent identity -> transcript advancement audit
 //	fak session gate-fatigue [--json]      # offline per-gate approval-without-inspection rate (#4427)
 //	fak session reset-diff [--in FILE] [--json] [--md]  # offline before/after reset diff (#1575, see session_reset_diff.go)
 //
@@ -152,6 +153,9 @@ func runSession(stdout, stderr io.Writer, argv []string) int {
 	}
 	if verb == "recover" {
 		return runSessionRecover(stdout, stderr, args)
+	}
+	if verb == "journal-audit" {
+		return runSessionJournalAudit(stdout, stderr, args)
 	}
 	// compact-audit (#4763) mines native Codex rollout JSONL for compaction health —
 	// offline, streaming, no gateway — so it dispatches with the other offline verbs.
@@ -926,6 +930,10 @@ func sessionUsage(w io.Writer) {
   fak session priority <id> <N>               re-set the scheduling rank (lower yields first)
   fak session recover [--thread ID] [--limit N] [--apply]
                                                preview crashed Codex sessions; --apply restores each once in a guarded tab
+  fak session journal-audit [--since 24h] [--reg-dir DIR] [--home DIR] [--json]
+                                               read-only exact join from recent live resume identities
+                                               to every local Claude transcript and Codex rollout;
+                                               exits nonzero on missing, non-advancing, or unreadable evidence
   fak session audit [summary|actions|discover|audit|deep] [--days N] [--json] [--fail-on high]
                                                offline recent transcript audit; defaults to summary --here
   fak session observe [--days N] [--json] [--all-workspaces]

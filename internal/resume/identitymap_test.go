@@ -163,6 +163,23 @@ func TestLoadIdentity(t *testing.T) {
 	assertMapEqual(t, "uuidByTrace", byTrace, map[string]string{"t1": "u1", "t2": "u2", "t3": "u1"})
 }
 
+func TestLoadIdentityRowsStrictReportsMalformedAuthorityAndProviderProvenance(t *testing.T) {
+	dir := t.TempDir()
+	content := `{"ts":"2026-08-25T10:00:00Z","uuid":"u1","trace":"t1","provider":"codex","source":"startup"}
+not-json
+`
+	if err := os.WriteFile(IdentityLedgerPath(dir), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rows, invalid, err := LoadIdentityRowsStrict(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalid != 1 || len(rows) != 1 || rows[0].Provider != "codex" || rows[0].Source != "startup" {
+		t.Fatalf("rows=%+v invalid=%d", rows, invalid)
+	}
+}
+
 // ResolveIdentity resolves a query id against the append-only rows in either direction,
 // honoring last-row-wins, skipping half rows, surfacing the winning row's provenance, and
 // reporting OK=false (never inventing a join) for a blank or unknown query.

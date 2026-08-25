@@ -103,6 +103,9 @@ func TestGuardSessionStartIdentity(t *testing.T) {
 	if rows[0].UUID != uuid || rows[0].Trace != trace {
 		t.Fatalf("the first row is not a complete join: %+v", rows[0])
 	}
+	if rows[0].Provider != "claude" {
+		t.Fatalf("the first row provider = %q, want claude: %+v", rows[0].Provider, rows[0])
+	}
 	if rows[1].PID != 9001 {
 		t.Fatalf("the second row carries pid %d, want 9001\n%s", rows[1].PID, raw)
 	}

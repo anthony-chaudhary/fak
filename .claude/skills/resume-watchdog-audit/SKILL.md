@@ -23,12 +23,20 @@ nothing-to-do watchdog look identical from the outside. This pass distinguishes 
 ## Run it (one authoritative cohort command)
 
 ```powershell
+fak session journal-audit --since 24h --json           # read-only launch -> exact provider-journal proof
 fak session recover --json                         # preview only; writes a durable run witness, launches nothing
 # After reviewing every row and completing any named login:
 fak session recover --live --all --json            # all actionable exact sessions; add --limit N only to cap the wave
 ```
 
-The preview is the authority for the Claude transcript cohort and the Codex
+The journal audit sources recent launch identities only from the resolved live
+`resume_identity.jsonl`, discovers every local Claude project root and Codex home,
+and exact-joins each full identity to provider-owned transcript/turn cursors. Its
+versioned JSON distinguishes `advanced`, `missing_transcript`, and
+`present_no_post_launch_progress`; RED/nonzero on any unproven row or unreadable authority is deliberate.
+Use its rows instead of a hand-written cross-root join or a newest-session guess.
+
+The recovery preview is the authority for the Claude transcript cohort and the Codex
 guard/host-resurrection cohort. Its versioned JSON retains probes, live rows, reset
 waiters, and identity-blocked rows instead of hiding them; only substantive actionable
 rows receive argv. Codex argv uses `codex exec --cd <exact cwd> resume <exact UUID>` and never a picker,
@@ -152,6 +160,17 @@ cursors, `advanced`, and evidence source. The run witness is written before the 
 window opens and updated atomically after each launch and observation. Claude requires a real non-error assistant transcript record newer
 than launch; Codex requires a newer exact thread/turn cursor. A visible wrapper, idle
 shell, guard receipt, or process is liveness context only and can never set `advanced`.
+
+Reconcile the recent launch cohort natively before interpreting the longer-horizon
+watchdog ledger:
+
+```powershell
+fak session journal-audit --since 24h --json
+```
+
+Require `verdict: green`. For RED, repair every `missing_transcript` or
+`present_no_post_launch_progress` row and any named unreadable authority; an empty result
+produced by a failed identity/provider read is never healthy.
 
 The automatic Claude watchdog's longer-horizon status ledger remains useful for drain
 capacity. Quantify today's automatic work:
