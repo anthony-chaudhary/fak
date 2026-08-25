@@ -134,6 +134,7 @@ _SPAWN_LANE_RE = re.compile(r"\blane=(\S+)")
 _WITNESS_STAMP_RE = re.compile(r"^resolve-(\d+)-(\d{8})-(\d{6})\.witness$")
 _RID_RE = re.compile(r"^RID-[A-Z0-9]+$")
 DEFAULT_WORKER_TIMEOUT_S = dispatch_worker.DEFAULT_TIMEOUT_S
+DEFAULT_FIRST_EDIT_DEADLINE_S = 300
 DEFAULT_SPAWN_PROBE_S = 5.0
 # Hard ceiling on how many extra worker slots a healthy backend may claim from dead
 # siblings in one tick — bounds the blast radius so a transient mass-death can't blow
@@ -1610,6 +1611,52 @@ def terminate_issue_worker_tree(pid: int) -> dict[str, Any]:
         return {"ok": False, "returncode": None, "error": str(exc)}
 
 
+_EDIT_EVENT_RE = re.compile(r"(?i)(apply_patch|write_file|edit_file|create_file|git\s+apply|set-content|add-content)")
+_TEST_EVENT_RE = re.compile(r"(?i)(go\s+test|make\s+(?:ci|test)|test\.ps1|python\s+tools/\S+_test\.py|fak\s+validate)")
+_COMMIT_EVENT_RE = re.compile(r"(?i)(fak\s+commit|git\s+commit)")
+_PLANNING_EVENT_RE = re.compile(r"(?i)(update_plan|ultracode|workflow|capabilities|tools_search|web_search)")
+_TOOL_EVENT_RE = re.compile(r"(?i)(tool_call|exec_command|apply_patch|write_file|update_plan|mcp__|functions\.)")
+_TYPED_ESCALATION_RE = re.compile(r"(?i)ESCALATION_NEED:\s*(missing-path|missing-acceptance|missing-capability|unsafe-scope)")
+
+
+def bounded_worker_progress(log_text: str, *, age_s: float,
+                            first_edit_deadline_s: int) -> dict[str, Any]:
+    """Derive bounded-worker progress only from transcript events, never prose status."""
+    edit = _EDIT_EVENT_RE.search(log_text)
+    test = _TEST_EVENT_RE.search(log_text)
+    commit = _COMMIT_EVENT_RE.search(log_text)
+    planning = len(_PLANNING_EVENT_RE.findall(log_text))
+    tools = len(_TOOL_EVENT_RE.findall(log_text))
+    escalation = _TYPED_ESCALATION_RE.search(log_text)
+    if commit:
+        status = "committing"
+    elif test:
+        status = "testing"
+    elif edit:
+        status = "editing"
+    elif age_s >= first_edit_deadline_s:
+        status = "stalled"
+    else:
+        status = "investigating"
+    terminal = "STALLED_NO_EDIT" if status == "stalled" else None
+    return {
+        "status": status,
+        "terminal_state": terminal,
+        "time_to_first_edit_s": None if edit is None else round(age_s, 1),
+        "planning_tool_ratio": round(planning / tools, 3) if tools else 0.0,
+        "tool_events": tools,
+        "planning_events": planning,
+        "typed_escalation_need": escalation.group(1).lower() if escalation else None,
+    }
+
+
+def _compact_investigation_summary(log_text: str, *, limit: int = 12) -> list[str]:
+    """Keep the useful tail without replaying a worker's full transcript."""
+    useful = [line.strip() for line in log_text.splitlines()
+              if line.strip() and not line.startswith("fak guard:")]
+    return useful[-limit:]
+
+
 def reap_timed_out_workers(
     runs_dir: Path,
     *,
@@ -1618,6 +1665,7 @@ def reap_timed_out_workers(
     now_ts: float | None = None,
     probe: Any | None = None,
     killer: Any | None = None,
+    first_edit_deadline_s: int = DEFAULT_FIRST_EDIT_DEADLINE_S,
 ) -> dict[str, Any]:
     """Find resolver workers older than the wall-clock cap and optionally reap.
 
@@ -1650,7 +1698,16 @@ def reap_timed_out_workers(
         except (OSError, ValueError):
             continue
         age_s = max(0.0, now - st.st_mtime)
-        if age_s < timeout_s:
+        log_path = pid_file.with_suffix(".log")
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            log_text = ""
+        progress = bounded_worker_progress(
+            log_text, age_s=age_s, first_edit_deadline_s=first_edit_deadline_s)
+        no_edit_timeout = progress["terminal_state"] == "STALLED_NO_EDIT"
+        wall_timeout = age_s >= timeout_s
+        if not (no_edit_timeout or wall_timeout):
             continue
         if not dispatch_preflight.resolve_sidecar_pid_is_live(pid_file, probe=probe):
             continue
@@ -1658,8 +1715,11 @@ def reap_timed_out_workers(
             "issue": int(m.group(1)),
             "pid": pid,
             "pid_file": pid_file.name,
-            "log": pid_file.with_suffix(".log").name,
+            "log": log_path.name,
             "age_s": round(age_s, 1),
+            "reason": "STALLED_NO_EDIT" if no_edit_timeout else "WORKER_TIMEOUT",
+            "progress": progress,
+            "investigation_summary": _compact_investigation_summary(log_text),
         }
         candidates.append(dict(rec))
         if live:
@@ -6818,6 +6878,16 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, lane: str | None,
         return finish(payload)
 
     rec = issue_worker_prompt.build(target, chosen_lane, workspace=root)
+    rec["prompt"] += (
+        "\n\nimplementation-first budget (#8816): investigate for at most 5 minutes "
+        "and make the first declared-path edit by then. Status is inferred from "
+        "tool events as investigating/editing/testing/committing/stalled; do not "
+        "self-report it. Do not launch a planner, fleet, or nested orchestration. "
+        "Escalate only by emitting ESCALATION_NEED: followed by one of "
+        "missing-path, missing-acceptance, missing-capability, or unsafe-scope, "
+        "then wait for coordinator admission. A no-edit timeout preserves a compact "
+        "investigation summary for one resume or reassignment.\n"
+    )
     contract = issue_contract_review(root, rec.get("issue_record"), target)
     dirty_paths_doc = dirty_repo_paths(root)
 

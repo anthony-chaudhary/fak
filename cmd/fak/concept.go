@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -34,6 +35,8 @@ func runConcept(stdout, stderr io.Writer, args []string) int {
 		return runConceptPosition(stdout, stderr, c, args[1:])
 	case "classify":
 		return runConceptClassify(stdout, stderr, c, args[1:])
+	case "admission":
+		return runConceptAdmission(stdout, stderr, root, args[1:])
 	case "freshness":
 		fs := flag.NewFlagSet("concept freshness", flag.ContinueOnError)
 		fs.SetOutput(stderr)
@@ -161,22 +164,86 @@ func runConceptGenerate(out, errw io.Writer, c conceptcatalog.Catalog, args []st
 	return 0
 }
 
+func runConceptAdmission(out, errw io.Writer, root string, args []string) int {
+	fs := flag.NewFlagSet("concept admission", flag.ContinueOnError)
+	fs.SetOutput(errw)
+	jsonOut := fs.Bool("json", false, "emit all staged findings as JSON")
+	if fs.Parse(args) != nil {
+		return 2
+	}
+	d, err := hooks.ReadStagedDiff(root)
+	if err != nil {
+		fmt.Fprintln(errw, "fak concept admission:", err)
+		return 1
+	}
+	findings, err := hooks.CheckConceptAdmission(d)
+	if err != nil {
+		fmt.Fprintln(errw, "fak concept admission:", err)
+		return 1
+	}
+	if *jsonOut {
+		_ = json.NewEncoder(out).Encode(struct {
+			Schema   string          `json:"schema"`
+			OK       bool            `json:"ok"`
+			Findings []hooks.Finding `json:"findings"`
+		}{"fak.concept_admission.v1", len(findings) == 0, findings})
+		return 0
+	}
+	for _, f := range findings {
+		fmt.Fprintf(out, "CONCEPT_ADMISSION %s:%d: %s\n", f.File, f.Line, f.Detail)
+	}
+	return 0
+}
+
+type classifyRowsFlag []conceptcatalog.ClassifyRequest
+
+func (f *classifyRowsFlag) String() string { return "" }
+func (f *classifyRowsFlag) Set(value string) error {
+	var row conceptcatalog.ClassifyRequest
+	if err := json.Unmarshal([]byte(value), &row); err != nil {
+		return fmt.Errorf("--row must be a JSON classification object: %w", err)
+	}
+	*f = append(*f, row)
+	return nil
+}
+
+type conceptClassifyReceipt struct {
+	Schema     string                          `json:"schema"`
+	OK         bool                            `json:"ok"`
+	DryRun     bool                            `json:"dry_run"`
+	Staged     bool                            `json:"staged"`
+	Idempotent bool                            `json:"idempotent"`
+	Rows       []conceptcatalog.ClassifyResult `json:"rows"`
+	Files      []string                        `json:"files"`
+	Timings    conceptcatalog.PhaseTimings     `json:"phase_timings"`
+}
+
 func runConceptClassify(out, errw io.Writer, c conceptcatalog.Catalog, args []string) int {
 	fs := flag.NewFlagSet("concept classify", flag.ContinueOnError)
 	fs.SetOutput(errw)
 	var r conceptcatalog.ClassifyRequest
+	var rows classifyRowsFlag
 	var dry, jsonOut, stage bool
 	fs.StringVar(&r.Family, "family", "", "family ID")
 	fs.StringVar(&r.Token, "token", "", "token to classify")
 	fs.StringVar(&r.Category, "category", "", "incidental|false-positive|test-only|build-tag-only")
 	fs.StringVar(&r.Reason, "reason", "", "explicit classification reason")
+	fs.Var(&rows, "row", `repeatable JSON row: {"family":"...","token":"...","category":"...","reason":"..."}`)
 	fs.BoolVar(&dry, "dry-run", false, "show plan without writing")
 	fs.BoolVar(&jsonOut, "json", false, "emit JSON plan")
 	fs.BoolVar(&stage, "stage", false, "stage exactly the corpus files written so index-aware admission sees the remedy; use only in an isolated checkout")
 	if fs.Parse(args) != nil {
 		return 2
 	}
-	p, e := conceptcatalog.PlanClassify(c, r)
+	if len(rows) > 0 {
+		if r.Family != "" || r.Token != "" || r.Category != "" || r.Reason != "" {
+			fmt.Fprintln(errw, "fak concept classify: --row cannot be combined with scalar classification flags")
+			return 2
+		}
+	} else {
+		rows = append(rows, r)
+	}
+	p, e := conceptcatalog.PlanClassifyMany(c, rows)
 	if e != nil {
 		fmt.Fprintln(errw, "fak concept classify:", e)
 		return 1
@@ -201,7 +268,7 @@ func emitConceptPlan(out, errw io.Writer, root string, p conceptcatalog.Plan, dr
 		}
 	}
 	if jsonOut {
-		_ = json.NewEncoder(out).Encode(map[string]any{"ok": true, "dry_run": dry, "staged": stage, "mode": p.Mode, "family": p.Family, "before_family_count": p.BeforeFamilyCount, "after_family_count": p.AfterFamilyCount, "files": relFiles(p.Files)})
+		_ = json.NewEncoder(out).Encode(conceptClassifyReceipt{Schema: "fak.concept_classify_receipt.v1", OK: true, DryRun: dry, Staged: stage, Idempotent: len(p.Files) == 0, Rows: p.Classifications, Files: relFiles(p.Files), Timings: p.Timings})
 		return 0
 	}
 	fmt.Fprintf(out, "%s %s: family %d -> %d\n", map[bool]string{true: "PLAN", false: "APPLIED"}[dry], p.Mode, p.BeforeFamilyCount, p.AfterFamilyCount)

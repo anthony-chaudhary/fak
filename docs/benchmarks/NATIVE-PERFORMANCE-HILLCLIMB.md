@@ -176,3 +176,68 @@ The baseline command emits a deliberately incomplete template: `FILL_*` values a
 cannot validate. This shifts the evidence contract before the edit without pretending a template
 is a measurement. Profiler paths must be relative and scrubbed; raw private logs remain in the
 private companion repository.
+
+
+## Phase/profile bundles and bottleneck-selected work
+
+`fak-native-performance-profile/v1` binds a scrubbed profile to the same envelope and
+`fak-native` execution identity as its experiment receipt. The execution forward path must
+equal the selected envelope's path exactly and fallback count must be zero.
+
+```bash
+fak native-performance --profile profile.json
+fak native-performance --profile-next profile.json
+```
+
+Every bundle carries the ordered phase boundaries `load-setup`, `prefill`, `first-token`,
+`steady-decode`, `verification`, and `teardown`. Starts are finite and non-negative,
+durations are finite and positive, and phase intervals may not overlap. Missing numeric
+fields are rejected rather than treated as zero.
+
+The classifier preserves unlike counters rather than manufacturing a cross-backend score:
+
+- Metal bundles carry positive command-buffer and encoder counts, positive dispatch time,
+  non-negative wait time, and positive resident and working-set bytes.
+- CUDA bundles carry positive launch count, occupancy in `[0,100]`, non-negative achieved
+  bandwidth and compute, positive corresponding peaks, and non-negative synchronization
+  time. Achieved values cannot exceed their matching declared peaks.
+
+All floating-point values must be finite. Profile v1 requires the complete backend counter
+block and never substitutes a missing value with numeric zero. An incomplete capture remains
+explicitly unclassified until a compatible capture or a future typed counter-unavailability
+contract exists. Manifest-declared `counter_comparisons` are unsupported in v1 and rejected;
+classification only applies the committed, unit-compatible within-backend thresholds. Those
+thresholds classify launch, bandwidth, compute, synchronization, or CPU-orchestration limits
+and name evidence and confidence.
+
+Dispatch attribution is not optional-by-omission. A profile must contain nonempty records
+whose typed lever is known, belongs to the selected envelope, and is consistent across the
+capture. If a backend or capture export cannot expose attribution, the profile instead uses
+`attribution_unavailable` with a closed reason code and scrubbed detail. It cannot claim both
+states.
+
+`--profile-next` compares a measured recommendation with the selected envelope's first
+dependency-ready graph-order lever. It refuses a different recommendation unless the scrubbed
+manifest records a positive issue number and an issue-backed reason, and it never returns a
+recommendation whose own dependencies are not enabled. When an override is accepted, the JSON
+output retains that `selection_override` beside the classification and lever.
+
+Capture Metal through the sanctioned Apple node and xctrace/Instruments guidance; capture CUDA
+through the sanctioned GPU node and Nsight guidance in `docs/fleet-compute-nodes.md`. Public
+manifests contain scrubbed counters and relative artifact digests only. These manifests explain
+why a run is limited; only end-to-end experiment receipts may claim a throughput gain.
+
+### Acceptance status
+
+| Evidence | Status on August 25, 2026 | Meaning |
+|---|---|---|
+| Synthetic Metal fixture | Committed under `internal/nativeperf/testdata/native-performance-profile/` | Parser, validator, backend-counter preservation, and deterministic launch-bound classification witness only. |
+| Synthetic CUDA fixture | Committed under `internal/nativeperf/testdata/native-performance-profile/` | Parser, validator, backend-counter preservation, deterministic bandwidth-bound classification, and envelope-local next-selection witness only. |
+| Rejection fixtures | Committed under the same directory | Fail-closed witnesses for mixed envelopes, missing/overlapping phases, non-finite or negative counters, invalid identity, absent attribution state, unknown/mixed levers, unsupported counter comparisons, and an unbacked contradiction. |
+| Real sanctioned Metal bundle | **OPEN** | No real Metal profiler capture is claimed or committed by this change. |
+| Real sanctioned CUDA bundle | **OPEN** | No real CUDA profiler capture is claimed or committed by this change. |
+
+The scrubbed status record is
+[`docs/_witnesses/native-performance-profile/README.md`](../_witnesses/native-performance-profile/README.md).
+Synthetic fixtures are not hardware measurements, profiler artifacts, throughput evidence, or
+substitutes for the still-open sanctioned captures.

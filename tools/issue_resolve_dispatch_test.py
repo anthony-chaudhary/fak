@@ -8516,5 +8516,68 @@ class CapHoldLengthTest(unittest.TestCase):
         self.assertGreater(self._hold_hours(mod, hit), 24.0)
 
 
+class ImplementationFirstProgressTests(unittest.TestCase):
+    def test_process_only_trace_stalls_and_preserves_compact_summary(self) -> None:
+        mod = load()
+        trace = "\n".join([
+            'tool_call functions.update_plan',
+            'tool_call mcp__fak__fak_capabilities',
+            'tool_call web_search',
+            'finding: existing reaper is the correct integration seam',
+        ])
+        progress = mod.bounded_worker_progress(
+            trace, age_s=301, first_edit_deadline_s=300)
+        self.assertEqual(progress["status"], "stalled")
+        self.assertEqual(progress["terminal_state"], "STALLED_NO_EDIT")
+        self.assertEqual(progress["time_to_first_edit_s"], None)
+        self.assertGreater(progress["planning_tool_ratio"], 0)
+        self.assertIn("integration seam", mod._compact_investigation_summary(trace)[-1])
+
+    def test_short_investigation_then_edit_test_commit_remains_productive(self) -> None:
+        mod = load()
+        trace = "\n".join([
+            'tool_call functions.exec_command Select-String declared.py',
+            'tool_call functions.apply_patch declared.py',
+            'tool_call functions.exec_command python tools/declared_test.py',
+            'tool_call functions.exec_command git commit -s',
+        ])
+        progress = mod.bounded_worker_progress(
+            trace, age_s=90, first_edit_deadline_s=300)
+        self.assertEqual(progress["status"], "committing")
+        self.assertIsNone(progress["terminal_state"])
+        self.assertEqual(progress["time_to_first_edit_s"], 90)
+        self.assertEqual(progress["planning_tool_ratio"], 0)
+
+    def test_no_edit_reaper_stops_worker_before_wall_timeout(self) -> None:
+        import tempfile
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            runs = Path(td)
+            pid_file = runs / "resolve-8816-20260824-120000.pid"
+            pid_file.write_text("4321\n", encoding="utf-8")
+            pid_file.with_suffix(".log").write_text(
+                "tool_call functions.update_plan\nfinding: reaper seam\n",
+                encoding="utf-8")
+            os.utime(pid_file, (1000.0, 1000.0))
+            killed: list[int] = []
+            report = mod.reap_timed_out_workers(
+                runs, timeout_s=3600, first_edit_deadline_s=300, live=True,
+                now_ts=1301.0, probe=lambda _pid: {"alive": True, "cmdline": ["fak", "guard", "--", "codex", "resolve GitHub issue #8816"]},
+                killer=lambda pid: killed.append(pid) or {"ok": True})
+            self.assertEqual(killed, [4321])
+            self.assertEqual(report["reaped"][0]["reason"], "STALLED_NO_EDIT")
+            self.assertEqual(report["reaped"][0]["progress"]["status"], "stalled")
+            self.assertIn("reaper seam", report["reaped"][0]["investigation_summary"][-1])
+
+    def test_escalation_requires_a_closed_typed_need(self) -> None:
+        mod = load()
+        admitted = mod.bounded_worker_progress(
+            "ESCALATION_NEED: missing-path", age_s=10, first_edit_deadline_s=300)
+        prose = mod.bounded_worker_progress(
+            "I need another planner", age_s=10, first_edit_deadline_s=300)
+        self.assertEqual(admitted["typed_escalation_need"], "missing-path")
+        self.assertIsNone(prose["typed_escalation_need"])
+
+
 if __name__ == "__main__":
     unittest.main()

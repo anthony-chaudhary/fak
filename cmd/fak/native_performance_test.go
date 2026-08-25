@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -100,12 +101,20 @@ func TestNativePerformanceJSONOutputIsDeterministic(t *testing.T) {
 }
 
 func TestNativePerformanceRejectsInvalidArguments(t *testing.T) {
-	for _, args := range [][]string{{"extra"}, {"--json", "--next"}, {"--next", "--dot"}} {
+	for _, args := range [][]string{
+		{"extra"},
+		{"--json", "--next"},
+		{"--next", "--dot"},
+		{"--profile="},
+		{"--profile-next="},
+		{"--profile", "profile.json", "--json"},
+		{"--profile", "profile.json", "--profile-next", "profile.json"},
+	} {
 		var stdout, stderr bytes.Buffer
 		if code := runNativePerformance(&stdout, &stderr, args); code != 2 {
 			t.Fatalf("args=%v exit=%d, want 2", args, code)
 		}
-		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE]") {
+		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE]") {
 			t.Fatalf("args=%v stderr=%q", args, stderr.String())
 		}
 	}
@@ -179,35 +188,146 @@ func TestNativePerformanceCompareReceipts(t *testing.T) {
 	}
 }
 
-func TestNativePerformanceProfileClassifyAndNext(t *testing.T) {
-	graph := nativeperf.ActiveGraph()
-	envelope := graph.Envelopes[0]
-	profile := nativeperf.ProfileBundle{Schema: nativeperf.ProfileSchema, EnvelopeID: envelope.ID, Execution: nativeperf.ExecutionIdentity{Engine: "fak-native", ForwardPath: envelope.ForwardPath}, Metal: &nativeperf.MetalCounters{CommandBuffers: 40, Encoders: 40, DispatchMilliseconds: 40, WaitMilliseconds: 1, ResidentBytes: 100, WorkingSetBytes: 100}, Attributions: []nativeperf.DispatchAttribution{{Name: "projection", Layer: 1, LeverID: "metal.command-buffer-amortization", Count: 40}}}
-	for i, name := range nativeperf.RequiredPhases {
-		profile.Phases = append(profile.Phases, nativeperf.ProfilePhase{Name: name, StartMilliseconds: float64(i * 10), DurationMilliseconds: 10})
+func TestNativePerformanceProfileFixturesClassifyAndSelectNext(t *testing.T) {
+	tests := []struct {
+		name          string
+		class         string
+		lever         string
+		overrideIssue int
+	}{
+		{name: "synthetic-metal-launch-bound.json", class: "launch-bound", lever: "metal.command-buffer-amortization"},
+		{name: "synthetic-cuda-bandwidth-bound.json", class: "bandwidth-bound", lever: "cuda.q8_1-activation-quant"},
+		{name: "synthetic-metal-bandwidth-override.json", class: "bandwidth-bound", lever: "metal.paged-kv", overrideIssue: 8395},
 	}
-	data, _ := json.Marshal(profile)
-	path := t.TempDir() + "/profile.json"
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		t.Fatal(err)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := nativePerformanceProfileFixture(test.name)
+			var first, second, stderr bytes.Buffer
+			if code := runNativePerformance(&first, &stderr, []string{"--profile", path}); code != 0 {
+				t.Fatalf("profile exit=%d stderr=%s", code, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("profile stderr=%q", stderr.String())
+			}
+			stderr.Reset()
+			if code := runNativePerformance(&second, &stderr, []string{"--profile", path}); code != 0 {
+				t.Fatalf("second profile exit=%d stderr=%s", code, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("second profile stderr=%q", stderr.String())
+			}
+			if first.String() != second.String() {
+				t.Fatalf("profile output changed across identical calls:\nfirst=%s\nsecond=%s", first.String(), second.String())
+			}
+			var classification nativeperf.BottleneckClassification
+			if err := json.Unmarshal(first.Bytes(), &classification); err != nil {
+				t.Fatal(err)
+			}
+			if classification.Schema != nativeperf.ClassificationSchema || classification.Class != test.class || classification.RecommendedLeverID != test.lever {
+				t.Fatalf("classification=%+v", classification)
+			}
+
+			first.Reset()
+			second.Reset()
+			stderr.Reset()
+			if code := runNativePerformance(&first, &stderr, []string{"--profile-next", path}); code != 0 {
+				t.Fatalf("profile-next exit=%d stderr=%s", code, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("profile-next stderr=%q", stderr.String())
+			}
+			stderr.Reset()
+			if code := runNativePerformance(&second, &stderr, []string{"--profile-next", path}); code != 0 {
+				t.Fatalf("second profile-next exit=%d stderr=%s", code, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Fatalf("second profile-next stderr=%q", stderr.String())
+			}
+			if first.String() != second.String() {
+				t.Fatalf("profile-next output changed across identical calls:\nfirst=%s\nsecond=%s", first.String(), second.String())
+			}
+			var next struct {
+				Classification nativeperf.BottleneckClassification `json:"classification"`
+				Lever          nativeperf.Lever                    `json:"lever"`
+				Override       *nativeperf.SelectionOverride       `json:"selection_override"`
+			}
+			if err := json.Unmarshal(first.Bytes(), &next); err != nil {
+				t.Fatal(err)
+			}
+			if next.Classification.RecommendedLeverID != test.lever || next.Lever.ID != test.lever {
+				t.Fatalf("profile-next=%+v", next)
+			}
+			if test.overrideIssue > 0 {
+				if next.Override == nil || next.Override.IssueNumber != test.overrideIssue || strings.TrimSpace(next.Override.Reason) == "" {
+					t.Fatalf("profile-next lost override provenance: %+v", next)
+				}
+			} else if next.Override != nil {
+				t.Fatalf("profile-next unexpectedly emitted override: %+v", next.Override)
+			}
+		})
 	}
-	var stdout, stderr bytes.Buffer
-	if code := runNativePerformance(&stdout, &stderr, []string{"--profile", path}); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+}
+
+func TestNativePerformanceProfileRejectionFixtures(t *testing.T) {
+	tests := []struct {
+		name string
+		mode string
+		want string
+	}{
+		{name: "reject-forward-path-envelope-mismatch.json", mode: "--profile", want: "forward_path must exactly match"},
+		{name: "reject-mixed-backend-counters.json", mode: "--profile", want: "only Metal counters"},
+		{name: "reject-mixed-envelope-lever.json", mode: "--profile", want: "mixes envelope"},
+		{name: "reject-missing-phase.json", mode: "--profile", want: "every ordered phase"},
+		{name: "reject-overlapping-phases.json", mode: "--profile", want: "overlaps the previous phase"},
+		{name: "reject-non-finite-counter.json", mode: "--profile", want: "cannot unmarshal number"},
+		{name: "reject-negative-counter.json", mode: "--profile", want: "finite and non-negative"},
+		{name: "reject-invalid-native-identity.json", mode: "--profile", want: "fak-native execution identity"},
+		{name: "reject-invalid-fallback-identity.json", mode: "--profile", want: "zero fallback"},
+		{name: "reject-missing-attribution-state.json", mode: "--profile", want: "typed unavailable reason"},
+		{name: "reject-missing-counter.json", mode: "--profile", want: "missing required field"},
+		{name: "reject-unknown-lever.json", mode: "--profile", want: "unknown lever"},
+		{name: "reject-mixed-levers.json", mode: "--profile", want: "mixes lever"},
+		{name: "reject-unsupported-counter-comparison.json", mode: "--profile", want: "counter comparisons are unsupported"},
+		{name: "reject-profile-next-contradiction-without-override.json", mode: "--profile-next", want: "issue-backed reason"},
 	}
-	var class nativeperf.BottleneckClassification
-	if err := json.Unmarshal(stdout.Bytes(), &class); err != nil {
-		t.Fatal(err)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runNativePerformance(&stdout, &stderr, []string{test.mode, nativePerformanceProfileFixture(test.name)}); code != 1 {
+				t.Fatalf("exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("failure wrote stdout=%q", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("stderr=%q, want substring %q", stderr.String(), test.want)
+			}
+		})
 	}
-	if class.Class != "launch-bound" || class.RecommendedLeverID != "metal.command-buffer-amortization" {
-		t.Fatalf("class=%+v", class)
+}
+
+func TestNativePerformanceProfileReadAndDecodeErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "missing", path: filepath.Join(t.TempDir(), "missing.json"), want: "read profile"},
+		{name: "malformed", path: nativePerformanceProfileFixture("reject-non-finite-counter.json"), want: "decode profile"},
 	}
-	stdout.Reset()
-	stderr.Reset()
-	if code := runNativePerformance(&stdout, &stderr, []string{"--profile-next", path}); code != 0 {
-		t.Fatalf("next exit=%d stderr=%s", code, stderr.String())
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := runNativePerformance(&stdout, &stderr, []string{"--profile", test.path}); code != 1 {
+				t.Fatalf("exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if stdout.Len() != 0 || !strings.Contains(stderr.String(), test.want) {
+				t.Fatalf("stdout=%q stderr=%q want=%q", stdout.String(), stderr.String(), test.want)
+			}
+		})
 	}
-	if !strings.Contains(stdout.String(), "metal.command-buffer-amortization") {
-		t.Fatalf("next=%s", stdout.String())
-	}
+}
+
+func nativePerformanceProfileFixture(name string) string {
+	return filepath.Join("..", "..", "internal", "nativeperf", "testdata", "native-performance-profile", name)
 }

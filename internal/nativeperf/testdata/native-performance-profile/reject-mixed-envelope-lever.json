@@ -1,0 +1,29 @@
+{
+  "schema": "fak-native-performance-profile/v1",
+  "envelope_id": "qwen38-27b-q4km-m3pro-p32-t64",
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "metal/qwen35-hybrid-session-v1",
+    "fallback_count": 0
+  },
+  "phases": [
+    {"name": "load-setup", "start_milliseconds": 0, "duration_milliseconds": 12},
+    {"name": "prefill", "start_milliseconds": 12, "duration_milliseconds": 10},
+    {"name": "first-token", "start_milliseconds": 22, "duration_milliseconds": 6},
+    {"name": "steady-decode", "start_milliseconds": 28, "duration_milliseconds": 40},
+    {"name": "verification", "start_milliseconds": 68, "duration_milliseconds": 5},
+    {"name": "teardown", "start_milliseconds": 73, "duration_milliseconds": 3}
+  ],
+  "metal": {
+    "command_buffers": 40,
+    "encoders": 48,
+    "dispatch_milliseconds": 34.5,
+    "wait_milliseconds": 4,
+    "resident_bytes": 24000000000,
+    "working_set_bytes": 24000000000
+  },
+  "attributions": [
+    {"name": "q4k-projection", "layer": 0, "lever_id": "cuda.q8_1-activation-quant", "count": 20},
+    {"name": "q4k-projection", "layer": 1, "lever_id": "cuda.q8_1-activation-quant", "count": 20}
+  ]
+}

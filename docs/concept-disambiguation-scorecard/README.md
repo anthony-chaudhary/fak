@@ -17,7 +17,7 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **94** (clarity 29 + coverage 65) |
 | **Crystal-clear concepts (and climbing)** | **762** crystal of 2475 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2601 / 2666** (97.6% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2600 / 2665** (97.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **1** of 198 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **74** of 3438 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
@@ -63,7 +63,7 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   guard-gate       ###########################. 462/478
-  plan             ###########################. 363/374
+  plan             ###########################. 362/373
   policy-capability ##########################.. 183/194
   cache            ###########################. 281/291
   session-runtime  ###########################. 252/260
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.6%  (2601/2666 confusable tokens positioned)
+namespace coverage  [###############################.] 97.6%  (2600/2665 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -2765,7 +2765,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | guard-gate | 462 | 478 | 16 |
-| plan | 363 | 374 | 11 |
+| plan | 362 | 373 | 11 |
 | policy-capability | 183 | 194 | 11 |
 | cache | 281 | 291 | 10 |
 | session-runtime | 252 | 260 | 8 |

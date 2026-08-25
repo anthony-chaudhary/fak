@@ -42,6 +42,42 @@ dependency-ready unwitnessed lever, its owning issue, and exact receipt requirem
 `--dot` emits deterministic Graphviz DOT with dependency/conflict edges and separate
 envelope clusters; fak does not invoke Graphviz.
 
+`--baseline LEVER` emits the versioned pre-change receipt template for that lever and
+pinned envelope. `--compare BASELINE --candidate CANDIDATE` validates both receipts and
+emits a deterministic JSON comparison. It refuses envelope/control drift, absent
+repetitions or native execution identity, nonzero fallback, private path/host details,
+and undeclared multi-axis changes. Templates contain `FILL_*` placeholders and are not
+benchmark evidence until capture fills every required field and validation succeeds.
+
+`--profile FILE` strictly decodes `fak-native-performance-profile/v1`, validates it, and
+emits a deterministic bottleneck classification as JSON. `--profile-next FILE` also
+returns the recommended lever and preserves any accepted `selection_override` in the
+JSON result. These modes already select JSON output, require a nonempty path, and cannot
+be combined with `--json` or another output mode. A recommendation that contradicts the
+selected envelope's dependency-ready graph-order lever is refused unless
+`selection_override` carries a positive issue number and a nonempty, scrubbed
+issue-backed reason. A recommendation whose own dependencies are not enabled is never
+returned as “next,” even with an override.
+
+Profile execution must name `fak-native`, use zero fallback, and match the selected
+envelope's `forward_path` exactly. The six phase starts are finite and non-negative,
+durations are finite and positive, and phases may not overlap. Every backend counter is
+required: count and capacity fields that form the capture are positive; non-negative
+elapsed or achieved values may be zero only where zero is semantically meaningful; CUDA
+occupancy stays in `[0,100]`, peaks are positive, and achieved values cannot exceed their
+matching peaks.
+
+Metal and CUDA counter blocks remain separate and are never normalized into a synthetic
+cross-backend score. Manifest-declared `counter_comparisons` are unsupported in v1 and
+fail closed. Dispatch attribution must either contain nonempty, single-lever records for
+the selected envelope or use `attribution_unavailable` with one of the closed typed
+reasons and a scrubbed detail; omission is not treated as unavailability.
+
+Profile v1 requires the complete backend counter block and never substitutes a missing
+counter with numeric zero. A capture tool that cannot expose a required counter may still
+retain its scrubbed artifact, but it remains explicitly unclassified until a compatible
+capture or a future typed counter-unavailability schema exists.
+
 Each lever reports a stable ID, platform/envelope applicability, independent enabled
 state and present/partial/absent status, dependency and conflict IDs, a
 provenance-labelled expected planning effect, a separately receipt-backed witnessed
@@ -55,7 +91,7 @@ current 3.3 tok/s Metal fak-native witness and 6.966061 tok/s llama.cpp comparis
 remain separately classified and only approximately comparable until #8697 captures
 a joint matched receipt. CUDA #8635 targets are hypotheses, not measurements, and are
 never combined with the Metal throughput curve. Graph semantics, the update checklist,
-and source provenance are in
+strict synthetic fixture status, and source provenance are in
 [`NATIVE-PERFORMANCE-HILLCLIMB.md`](benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md).
 
 ## `dup cache-maintain`: bound the shared token-window cache
@@ -1365,18 +1401,3 @@ fak server down --dir DIR --json
 ```
 
 `init` records immutable model and executable identity. `up` starts only the declared executable and waits within its readiness deadline; `status` reports the typed lifecycle state; `down` signals only the process proven by the instance receipt. Each subcommand emits JSON. Run `fak server` with no subcommand for the live usage text.
-
-
-`--baseline LEVER` emits the versioned pre-change receipt template for that lever and pinned
-envelope. `--compare BASELINE --candidate CANDIDATE` validates both receipts and emits a
-deterministic JSON comparison. It refuses envelope/control drift, absent repetitions or native
-execution identity, nonzero fallback, private path/host details, and undeclared multi-axis
-changes. Templates contain `FILL_*` placeholders and are not benchmark evidence until capture
-fills every required field and validation succeeds.
-
-
-`--profile FILE` validates a backend-specific profile manifest and emits its deterministic
-bottleneck classification. `--profile-next FILE` returns the measured recommended lever and
-refuses disagreement with graph-order selection unless the manifest carries an issue-backed
-reason. Metal and CUDA counters remain backend-specific; phase names and evidence semantics are
-shared, not counter values.
