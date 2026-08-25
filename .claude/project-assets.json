@@ -14,7 +14,7 @@
   },
   "goal_prompts": {
     "canonical_root": ".claude/goal-prompts",
-    "include": ["ask-hard-questions.md", "fix-reversibility-classifier.md", "port-python-to-go-witnessed.md", "questions-to-tickets.md", "resolve-cache-value-issue-witnessed.md", "resolve-dispatch-program-issue-witnessed.md", "resolve-modeltier-issue-witnessed.md", "resolve-top-issue-fable.md", "resolve-top-issue-ultracode.md", "resolve-top-issue-witnessed.md", "scout-and-study-witnessed.md"],
+    "include": ["ask-hard-questions.md", "fix-reversibility-classifier.md", "issue-owner-lifecycle.md", "port-python-to-go-witnessed.md", "questions-to-tickets.md", "resolve-cache-value-issue-witnessed.md", "resolve-dispatch-program-issue-witnessed.md", "resolve-modeltier-issue-witnessed.md", "resolve-top-issue-fable.md", "resolve-top-issue-ultracode.md", "resolve-top-issue-witnessed.md", "scout-and-study-witnessed.md"],
     "exclude": [
       {"pattern": "resolve-[0-9]*.md", "reason": "issue-numbered run fuel is ephemeral, not a reusable template"}
     ]
