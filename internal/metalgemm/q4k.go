@@ -20,7 +20,7 @@ typedef struct {
 } mg_execution_event;
 int  mg_q4k_upload(const unsigned char* raw, int out, int in);
 int  mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in);
-void mg_q4k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
+int  mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execution_event* event);
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff, mg_execution_event* event);
@@ -64,6 +64,33 @@ var lastGEMMGPUMs atomic.Uint64
 // command-buffer timestamps is cheap, so the profile path costs one extra out-param write per call
 // and nothing when unused.
 func LastGEMMGPUMs() float64 { return math.Float64frombits(lastGEMMGPUMs.Load()) }
+
+// SetGEMVUseVectorized selects the experimental vectorized P=1 Q4_K kernel. The scalar
+// q4k_gemv pipeline remains the default and is restored by passing false. Selection affects only
+// Q4KWeight.GEMV; grouped, batched, fused-MLP, and prefill dispatch retain their existing kernels.
+func SetGEMVUseVectorized(on bool) {
+	q4kUseVectorized.Store(on)
+}
+
+var q4kUseVectorized atomic.Bool
+
+type q4kGEMVExecution int
+
+const (
+	q4kGEMVNotExecuted q4kGEMVExecution = iota
+	q4kGEMVExecutedScalar
+	q4kGEMVExecutedVectorized
+)
+
+type q4kGEMVMode int
+
+const (
+	q4kGEMVModeScalar q4kGEMVMode = iota
+	q4kGEMVModeVectorized
+	// q4kGEMVModeVectorizedUnavailable exercises the native fail-closed branch without
+	// mutating the process-global Metal pipeline table. Production selection never emits it.
+	q4kGEMVModeVectorizedUnavailable = -1
+)
 
 // Q4KWeight is a handle to a raw q4_k weight matrix [Out, In] resident on the GPU. In must be
 // a multiple of 256 (the q4_k super-block size); the resident byte cost is Out*(In/256)*144.
@@ -120,13 +147,26 @@ func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
 
 // GEMV computes y[Out] = W · x for one f32 activation row x (length In). y must have length
 // >= Out. Both slices are accessed only during the call. This is the decode GEMV.
-func (w *Q4KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
+func (w *Q4KWeight) gemvWithEventsMode(x, y []float32, observation *ExecutionObservation, mode q4kGEMVMode) q4kGEMVExecution {
 	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
-		return
+		return q4kGEMVNotExecuted
 	}
 	var event C.mg_execution_event
-	C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	executed := C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), C.int(mode), &event)
 	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	return q4kGEMVExecution(executed)
+}
+
+func (w *Q4KWeight) gemvWithEvents(x, y []float32, observation *ExecutionObservation) q4kGEMVExecution {
+	mode := q4kGEMVModeScalar
+	if q4kUseVectorized.Load() {
+		mode = q4kGEMVModeVectorized
+	}
+	return w.gemvWithEventsMode(x, y, observation, mode)
+}
+
+func (w *Q4KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
+	w.gemvWithEvents(x, y, observation)
 }
 
 const (

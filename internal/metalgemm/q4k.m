@@ -101,6 +101,32 @@ inline float q4k_block_dot(device const uchar* blk, device const float* xs) {
     return acc;
 }
 
+// q4k_tile_dot_vectorized is an opt-in P=1 experiment adapted from llama.cpp's Q4_K
+// float4x4 dequant tile and vector-dot topology in ggml-metal.metal at
+// 17197474510622a3b4ea7d0909d70b606f542b96 (MIT; Copyright (c) 2023-2026 The ggml authors).
+// Upstream selects that exact float4x4 path for small batches and a separate packed-vector
+// kernel for P=1. This bounded candidate deliberately applies the tile technique at fak's
+// existing P=1 seam without changing resident bytes, row geometry, or the scalar control.
+inline float q4k_tile_dot_vectorized(device const uchar* blk, device const float* xs, uint tile) {
+    float d  = (float)(*(device const half*)(blk + 0));
+    float dm = (float)(*(device const half*)(blk + 2));
+    device const uchar* scales = blk + 4;
+    device const uchar* q = blk + 16 + (tile / 4) * 32 + (tile & 1) * 16;
+    float2 sm = q4k_scale_min(tile / 2, scales);
+    float ds = d * sm.x;
+    float ms = dm * sm.y;
+    float4x4 weights;
+    for (int k = 0; k < 4; k++) {
+        packed_uchar4 packed = *(device const packed_uchar4*)(q + 4*k);
+        uchar4 codes = uchar4(packed);
+        codes = (tile & 2) ? codes >> 4 : codes & uchar4(0x0f);
+        weights[k] = ds * float4(codes) - ms;
+    }
+    device const float4x4* xv = (device const float4x4*)(xs + tile * 16);
+    return dot(weights[0], (*xv)[0]) + dot(weights[1], (*xv)[1]) +
+           dot(weights[2], (*xv)[2]) + dot(weights[3], (*xv)[3]);
+}
+
 // q4k_row_dot: serial dot of a whole weight row (nblk super-blocks) — used by the batched GEMM
 // where the P (token) axis already provides the GPU's parallelism.
 inline float q4k_row_dot(device const uchar* row, device const float* x, int nblk) {
@@ -127,6 +153,26 @@ kernel void q4k_gemv(device const uchar* W [[buffer(0)]],
     float acc = 0.0f;
     for (int b = (int)lid; b < nblk; b += 32) {
         acc += q4k_block_dot(row + (long)b * 144, X + (long)b * 256);
+    }
+    acc = simd_sum(acc);
+    if (lid == 0) Y[o] = acc;
+}
+
+// q4k_gemv_vectorized keeps q4k_gemv's proven one-SIMD-group-per-row control geometry and
+// changes only the inner unpack/MAC. It is never selected unless the host explicitly opts in.
+kernel void q4k_gemv_vectorized(device const uchar* W [[buffer(0)]],
+                                device const float* X [[buffer(1)]],
+                                device float*       Y [[buffer(2)]],
+                                constant int&    nblk [[buffer(3)]],
+                                constant int&     out [[buffer(4)]],
+                                uint o   [[threadgroup_position_in_grid]],
+                                uint lid [[thread_index_in_threadgroup]]) {
+    if (o >= (uint)out) return;
+    device const uchar* row = W + (long)o * nblk * 144;
+    float acc = 0.0f;
+    const uint tile = lid & 15;
+    for (int b = (int)(lid >> 4); b < nblk; b += 2) {
+        acc += q4k_tile_dot_vectorized(row + (long)b * 144, X + (long)b * 256, tile);
     }
     acc = simd_sum(acc);
     if (lid == 0) Y[o] = acc;
@@ -534,9 +580,24 @@ kernel void q6k_gemm(device const uchar* W [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
 static int gQ4KReady;
 static int gQ4KUseMM = 0; // 1 → prefer the simdgroup-matrix GEMM (mg_q4k_set_use_mm / FAK_Q4K_MM)
+
+// q4k_gemv_pso binds selection to an executed-kernel status. A vector request never falls back:
+// nil means the caller must return before allocating a command buffer or touching the output.
+// vectorized_mode < 0 is the focused witness's unavailable-PSO injection; production sends 0/1.
+static id<MTLComputePipelineState> q4k_gemv_pso(int vectorized_mode, int* executed) {
+    *executed = 0;
+    if (vectorized_mode == 0) {
+        if (psoQ4KGemv == nil) return nil;
+        *executed = 1;
+        return psoQ4KGemv;
+    }
+    if (vectorized_mode < 0 || psoQ4KGemvVectorized == nil) return nil;
+    *executed = 2;
+    return psoQ4KGemvVectorized;
+}
 
 // mg_q4k_set_use_mm selects the batched-GEMM kernel: nonzero → the simdgroup-matrix q4k_gemm_mm when
 // its pipeline built, else the scalar-tile q4k_gemm. Gated so the proven scalar kernel stays default
@@ -557,6 +618,7 @@ static int q4k_init(void) {
     id<MTLLibrary> lib = [gDev newLibraryWithSource:kQ4KSrc options:nil error:&err];
     if (lib == nil) { NSLog(@"q4k: library compile failed: %@", err); return 0; }
     psoQ4KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv"] error:&err];
+    psoQ4KGemvVectorized = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemv_vectorized"] error:&err];
     for (int n = 4; n <= 8; n++) {
         NSString *name = [NSString stringWithFormat:@"q4k_gemv_multi%d", n];
         psoQ4KGemvMulti[n - 4] = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:name] error:&err];
@@ -1029,11 +1091,15 @@ int mg_q4k_upload(const unsigned char* raw, int out, int in) {
     return q4k_register_buffer(b, out, in, nblk);
 }
 
-// mg_q4k_gemv computes y[out] = W[wid] · x (one f32 activation row, length in). f32 in/out.
-void mg_q4k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
+// mg_q4k_gemv computes y[out] = W[wid] · x (one f32 activation row, length in). It returns
+// 1 for scalar execution, 2 for vectorized execution, and 0 when no dispatch occurred.
+int mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < 0 || wid >= gNQ4) return;
+    if (wid < 0 || wid >= gNQ4) return 0;
     @autoreleasepool {
+        int executed = 0;
+        id<MTLComputePipelineState> pso = q4k_gemv_pso(vectorized_mode, &executed);
+        if (pso == nil) return 0;
         Q4KW W = gQ4[wid];
         q4k_grow_scratch(W.in, W.out);
         id<MTLBuffer> wbuf = (__bridge id<MTLBuffer>)W.buf;
@@ -1043,7 +1109,7 @@ void mg_q4k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
-        [e setComputePipelineState:psoQ4KGemv];
+        [e setComputePipelineState:pso];
         [e setBuffer:wbuf offset:0 atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
         [e setBuffer:yb   offset:0 atIndex:2];
@@ -1060,6 +1126,7 @@ void mg_q4k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
 
         memcpy(y, yb.contents, (size_t)W.out * 4);
     mg_execution_event_finish(event, cb);
+    return executed;
     }
 }
 
