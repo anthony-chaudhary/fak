@@ -140,6 +140,9 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Codex shell command rm -rf denied", "shell_command", `{"command":"rm -rf /tmp/x"}`, abi.VerdictDeny},
 		{"Codex shell command Remove-Item -Recurse denied", "shell_command", `{"command":"Remove-Item -Recurse -Force C:\\work"}`, abi.VerdictDeny},
 		{"Codex namespaced update_plan allowed", "functions.update_plan", `{"plan":[{"step":"inspect","status":"in_progress"}]}`, abi.VerdictAllow},
+		// PTY continuation is required when startup exceeds the harness's first wait window (#8864).
+		{"Codex write_stdin allowed (startup continuation)", "write_stdin", "{}", abi.VerdictAllow},
+		{"Codex namespaced write_stdin allowed", "functions.write_stdin", "{}", abi.VerdictAllow},
 		{"Codex namespaced goal read allowed", "functions.get_goal", `{}`, abi.VerdictAllow},
 		{"Codex namespaced tool search allowed", "tool_search.tool_search_tool", `{"query":"dos verify"}`, abi.VerdictAllow},
 		{"Codex namespaced parallel wrapper allowed", "multi_tool_use.parallel", `{"tool_uses":[]}`, abi.VerdictAllow},

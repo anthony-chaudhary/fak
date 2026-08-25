@@ -33,6 +33,31 @@ func problemsContain(problems []string, want string) bool {
 // alias lost an inherited rule, a harness's required tool fell off the allow
 // list, or an unclassified shell-program name slipped in. It also proves the
 // deny_regex values in harness-profiles.json match the floor verbatim.
+func TestCodexHarnessRequiresPTYContinuationTools(t *testing.T) {
+	var profiles harnessProfilesDoc
+	err := json.Unmarshal(harnessProfilesJSON, &profiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var required map[string]bool
+	for _, harness := range profiles.Harnesses {
+		if harness.Name != "codex" {
+			continue
+		}
+		required = make(map[string]bool, len(harness.RequiredTools))
+		for _, tool := range harness.RequiredTools {
+			required[tool] = true
+		}
+	}
+	if required == nil {
+		t.Fatal("codex harness profile missing")
+	}
+	for _, tool := range []string{"write_stdin", "functions.write_stdin"} {
+		if !required[tool] {
+			t.Errorf("Codex PTY continuation tool %q is off the built-in floor", tool)
+		}
+	}
+}
 func TestLintHarnessProfilesCurrentFloorIsClean(t *testing.T) {
 	for _, p := range LintHarnessProfiles(realFloor(t)) {
 		t.Errorf("harness-profile lint defect: %s", p)

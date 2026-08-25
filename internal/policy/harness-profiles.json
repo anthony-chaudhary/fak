@@ -57,6 +57,7 @@
       "required_tools": [
         "shell_command", "functions.shell_command", "exec_command",
         "update_plan", "functions.update_plan",
+        "write_stdin", "functions.write_stdin",
         "request_user_input", "functions.request_user_input",
         "view_image", "functions.view_image",
         "get_goal", "functions.get_goal",
