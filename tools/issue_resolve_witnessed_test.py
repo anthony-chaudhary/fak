@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -452,6 +454,8 @@ class PushedGateTest(unittest.TestCase):
         mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         # only "onmain" is an ancestor of origin/main; "localonly" is not.
         mod.reachable_from_origin = lambda root, sha: sha == "onmain"
+        mod.closure_tip = lambda root: "tip"
+        mod.effect_survives_at_tip = lambda root, sha, tip: (True, None)
 
     def test_unpushed_commit_is_skipped_not_closed(self) -> None:
         mod = load()
@@ -1683,6 +1687,102 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
         self.assertEqual(p["counts"]["skipped_incomplete_evidence"], 0)
         self.assertTrue(any(mod.EVIDENCE_UNREADABLE_NOTE in n
                             for n in r.get("gate_notes", [])))
+
+
+class EffectSurvivalRepositoryFixtureTest(unittest.TestCase):
+    def test_base_candidate_exact_revert_and_surviving_control(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            def git(*args):
+                return subprocess.check_output(
+                    ["git", *args], cwd=repo, text=True).strip()
+            git("init", "-q")
+            git("config", "user.name", "fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            path = repo / "effect.txt"
+            path.write_text("base\n")
+            git("add", "effect.txt")
+            git("commit", "-q", "-m", "base")
+            path.write_text("candidate\n")
+            git("commit", "-q", "-am", "candidate")
+            candidate = git("rev-parse", "HEAD")
+            path.write_text("base\n")
+            git("commit", "-q", "-am", "exact revert")
+            revert_tip = git("rev-parse", "HEAD")
+            ok, reason = mod.effect_survives_at_tip(repo, candidate, revert_tip)
+            self.assertFalse(ok)
+            self.assertIn(mod.EFFECT_REVERTED_HOLD, reason)
+            path.write_text("survives\n")
+            git("commit", "-q", "-am", "new surviving effect")
+            surviving_tip = git("rev-parse", "HEAD")
+            self.assertEqual(mod.effect_survives_at_tip(
+                repo, candidate, surviving_tip), (True, None))
+
+
+class EffectSurvivalGateTest(unittest.TestCase):
+    def test_exact_revert_at_tip_is_held_with_bound_ids(self) -> None:
+        mod = load()
+        calls = []
+
+        def run(cmd, cwd, timeout):
+            calls.append(cmd)
+            if cmd[:3] == ["git", "rev-parse", "--verify"]:
+                return 0, "base000\n", ""
+            if cmd[:2] == ["git", "diff-tree"]:
+                return 0, "internal/model/hot.go\n", ""
+            if cmd[:3] == ["git", "diff", "--quiet"]:
+                return 0, "", ""  # tip restored candidate parent on touched path
+            raise AssertionError(cmd)
+
+        mod.run_capture = run
+        ok, reason = mod.effect_survives_at_tip(ROOT, "candidate123", "revert456")
+        self.assertFalse(ok)
+        self.assertIn(mod.EFFECT_REVERTED_HOLD, reason)
+        self.assertIn("candidate=candidate123", reason)
+        self.assertIn("tip=revert456", reason)
+        self.assertEqual(calls[-1], ["git", "diff", "--quiet", "base000",
+                                    "revert456", "--", "internal/model/hot.go"])
+
+    def test_surviving_candidate_at_tip_passes(self) -> None:
+        mod = load()
+
+        def run(cmd, cwd, timeout):
+            if cmd[:3] == ["git", "rev-parse", "--verify"]:
+                return 0, "base000\n", ""
+            if cmd[:2] == ["git", "diff-tree"]:
+                return 0, "internal/model/hot.go\n", ""
+            if cmd[:3] == ["git", "diff", "--quiet"]:
+                return 1, "", ""  # candidate effect differs from parent at tip
+            raise AssertionError(cmd)
+
+        mod.run_capture = run
+        self.assertEqual(mod.effect_survives_at_tip(
+            ROOT, "candidate123", "tip789"), (True, None))
+
+    def test_unreadable_comparison_fails_closed(self) -> None:
+        mod = load()
+
+        def run(cmd, cwd, timeout):
+            if cmd[:3] == ["git", "rev-parse", "--verify"]:
+                return 0, "base000\n", ""
+            if cmd[:2] == ["git", "diff-tree"]:
+                return 0, "internal/model/hot.go\n", ""
+            if cmd[:3] == ["git", "diff", "--quiet"]:
+                return 128, "", "fatal: bad object"
+            raise AssertionError(cmd)
+
+        mod.run_capture = run
+        ok, reason = mod.effect_survives_at_tip(ROOT, "candidate123", "tip789")
+        self.assertFalse(ok)
+        self.assertIn(mod.EFFECT_SURVIVAL_UNKNOWN_HOLD, reason)
+        self.assertIn("candidate=candidate123", reason)
+        self.assertIn("tip=tip789", reason)
+
+    def test_close_decision_holds_survival_failures(self) -> None:
+        mod = load()
+        self.assertEqual(mod.close_decision("skip_effect_reverted"), "hold")
+        self.assertEqual(mod.close_decision("skip_effect_survival_unknown"), "hold")
 
 
 if __name__ == "__main__":

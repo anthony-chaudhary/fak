@@ -761,6 +761,45 @@ def latest_reopen_ts(root: Path, number: Any) -> tuple[bool | None, datetime | N
     return True, (max(stamps) if stamps else None)
 
 
+EFFECT_REVERTED_HOLD = "EFFECT_REVERTED_AT_TIP"
+EFFECT_SURVIVAL_UNKNOWN_HOLD = "EFFECT_SURVIVAL_UNKNOWN"
+
+
+def closure_tip(root: Path) -> str | None:
+    """Resolve the exact remote trunk tip used for closure admission."""
+    rc, out, _ = run_capture(
+        ["git", "rev-parse", "--verify", "origin/main^{commit}"], root, timeout=15)
+    tip = (out or "").strip()
+    return tip if rc == 0 and tip else None
+
+
+def effect_survives_at_tip(root: Path, candidate: str,
+                           tip: str) -> tuple[bool, str | None]:
+    """Prove candidate-touched paths have not all returned to the parent state."""
+    if not candidate or not tip:
+        return False, (f"{EFFECT_SURVIVAL_UNKNOWN_HOLD}: candidate={candidate or '?'} "
+                       f"tip={tip or '?'}; explicit candidate and tip are required")
+    rc, out, err = run_capture(
+        ["git", "rev-parse", "--verify", f"{candidate}^{{commit}}^"], root, timeout=15)
+    parent = (out or "").strip()
+    if rc != 0 or not parent:
+        return False, (f"{EFFECT_SURVIVAL_UNKNOWN_HOLD}: candidate={candidate} tip={tip}; "
+                       f"candidate parent unreadable: {(err or 'git rev-parse failed').strip()}")
+    paths = commit_touched_paths(root, candidate)
+    if not paths:
+        return False, (f"{EFFECT_SURVIVAL_UNKNOWN_HOLD}: candidate={candidate} tip={tip}; "
+                       "candidate changed-path set is empty or unreadable")
+    rc, _, err = run_capture(
+        ["git", "diff", "--quiet", parent, tip, "--", *paths], root, timeout=30)
+    if rc == 0:
+        return False, (f"{EFFECT_REVERTED_HOLD}: candidate={candidate} tip={tip}; "
+                       "all candidate-touched paths equal the candidate parent at closure tip")
+    if rc == 1:
+        return True, None
+    return False, (f"{EFFECT_SURVIVAL_UNKNOWN_HOLD}: candidate={candidate} tip={tip}; "
+                   f"tip comparison failed: {(err or f'git diff rc={rc}').strip()}")
+
+
 def commit_committer_ts(root: Path, sha: str) -> datetime | None:
     """The committer date of ``sha`` as an aware datetime, or None if unreadable."""
     if not sha:
@@ -880,6 +919,7 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
     planned, results = [], []
     closed = skipped = skipped_nonresolving = skipped_unpushed = failed = 0
     skipped_disclaimed = skipped_incomplete_evidence = 0
+    skipped_effect_reverted = skipped_effect_survival_unknown = 0
     close_not_persistent = already_counted = 0
     skipped_partial = skipped_coverage_unknown = 0
     skipped_reopened = skipped_reopen_unknown = 0
@@ -939,6 +979,21 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             skipped_unpushed += 1
             results.append(item)
             continue
+        tip = closure_tip(root) if gate_active else None
+        if gate_active:
+            survives, survival_reason = effect_survives_at_tip(
+                root, row.get("sha", ""), tip or "")
+            item["closure_tip"] = tip
+            if not survives:
+                item["reason"] = survival_reason
+                if survival_reason and survival_reason.startswith(EFFECT_REVERTED_HOLD):
+                    item["action"] = "skip_effect_reverted"
+                    skipped_effect_reverted += 1
+                else:
+                    item["action"] = "skip_effect_survival_unknown"
+                    skipped_effect_survival_unknown += 1
+                results.append(item)
+                continue
         # #4374: an auto-reclose may not override a `reopened` event unless a commit
         # landed AFTER it. The arm cites a witnessing commit; if that commit predates
         # the most recent reopen, re-closing silently undoes a correction reopen (and
@@ -1058,6 +1113,8 @@ def evaluate(root: Path, *, limit: int, live: bool, audit_json: str | None,
             "skipped_effect_unobserved": skipped_effect_unobserved,
             "skipped_effect_unknown": skipped_effect_unknown,
             "skipped_unpushed": skipped_unpushed,
+            "skipped_effect_reverted": skipped_effect_reverted,
+            "skipped_effect_survival_unknown": skipped_effect_survival_unknown,
             "close_not_persistent": close_not_persistent,
             "already_counted": already_counted,
             "failed": failed},
@@ -1111,7 +1168,8 @@ def close_decision(action: str) -> str:
                   "skip_incomplete_evidence", "skip_partial",
                   "skip_coverage_unknown", "skip_reopened", "skip_reopen_unknown",
                   "skip_effect_unobserved", "skip_effect_unknown",
-                  "skip_unpushed", CLOSE_ALREADY_COUNTED}:
+                  "skip_unpushed", "skip_effect_reverted",
+                  "skip_effect_survival_unknown", CLOSE_ALREADY_COUNTED}:
         return "hold"
     if action == CLOSE_NOT_PERSISTENT:
         return "reopened"
