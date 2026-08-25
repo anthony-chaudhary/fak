@@ -6860,6 +6860,11 @@
           "category": "incidental",
           "reason": "Native-performance schema record for receipt-backed lever evidence; it reuses existing witness semantics.",
           "token": "WitnessedEffect"
+        },
+        {
+          "category": "incidental",
+          "reason": "Concrete receipt field type whose semantics are defined by the effect receipt contract, not a second witness-proof root concept",
+          "token": "EffectWitnessAuthority"
         }
       ],
       "id": "witness-proof",
@@ -6870,6 +6875,7 @@
         "CoreLockWitnessTrailer",
         "DebtWitnessRecord",
         "DebtWitnesses",
+        "EffectWitnessAuthority",
         "FAK_WITNESS_REF",
         "FairnessWitnessed",
         "GATED_UNWITNESSED",
@@ -10370,6 +10376,11 @@
           "category": "incidental",
           "reason": "Serialized reason token for one schema-version branch, not a reusable support-maturity concept",
           "token": "ULTRACODE_SCHEMA_UNSUPPORTED"
+        },
+        {
+          "category": "incidental",
+          "reason": "Decode sentinel for rejected extra JSON fields, not a reusable support-maturity concept",
+          "token": "UnsupportedFields"
         }
       ],
       "exclude": [
@@ -10488,6 +10499,7 @@
         "UNSUPPORTED_FORMAT",
         "UNSUPPORTED_MEDIA_TYPE",
         "UNSUPPORTED_SESSION_KIND",
+        "UnsupportedFields",
         "VerdictParityOK",
         "VerdictPartialCoverage",
         "VerdictSetupParityClean",
