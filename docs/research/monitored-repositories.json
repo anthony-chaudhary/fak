@@ -87,7 +87,8 @@
       "checked_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
       "stars_at_check": 0,
       "last_push_at_check": "",
-      "study_note": "docs/research/tensor-build-local-study-2026-08-15.md"
+      "study_note": "docs/research/tensor-build-local-study-2026-08-15.md",
+      "refresh_issue": "#8985"
     },
     {
       "repository": "strukto-ai/mirage",
@@ -99,7 +100,8 @@
       "checked_revision": "e0a4f51109cbe6b8a239700d8348f0cbebd70b26",
       "stars_at_check": 3499,
       "last_push_at_check": "2026-08-17T23:41:51Z",
-      "study_note": "docs/research/mirage-study-2026-08-17.md"
+      "study_note": "docs/research/mirage-study-2026-08-17.md",
+      "refresh_issue": "#8986"
     },
     {
       "repository": "agent0ai/agent-zero",
@@ -111,7 +113,8 @@
       "checked_revision": "baadd0dd0b09fa769a1027c183b964be85d5c8cc",
       "stars_at_check": 18903,
       "last_push_at_check": "2026-08-16T17:45:50Z",
-      "study_note": "docs/research/agent-zero-study-2026-08-18.md"
+      "study_note": "docs/research/agent-zero-study-2026-08-18.md",
+      "refresh_issue": "#8987"
     },
     {
       "repository": "llm-d/llm-d",
@@ -123,7 +126,8 @@
       "checked_revision": "48fa8c0a76012038c76f30936fff9727c2e6909d",
       "stars_at_check": 4051,
       "last_push_at_check": "2026-08-18T18:05:57Z",
-      "study_note": "docs/research/llm-d-study-2026-08-18.md"
+      "study_note": "docs/research/llm-d-study-2026-08-18.md",
+      "refresh_issue": "#8988"
     },
     {
       "repository": "deepseek-ai/deepseek-harness",
@@ -135,7 +139,8 @@
       "checked_revision": "141eb6fef83422698aef7a981029e843e8161534",
       "stars_at_check": 172283,
       "last_push_at_check": "2026-08-19T15:37:57Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md",
+      "refresh_issue": "#8989"
     },
     {
       "repository": "rdi-berkeley/agents-last-exam",
@@ -147,7 +152,8 @@
       "checked_revision": "75a3f866535946b67f9a57e4f158eb30ad50be8a",
       "stars_at_check": 955,
       "last_push_at_check": "2026-08-16T04:18:19Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-AGENTS-LAST-EXAM-2026-08-20.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-AGENTS-LAST-EXAM-2026-08-20.md",
+      "refresh_issue": "#8990"
     },
     {
       "repository": "llm-as-a-verifier/llm-as-a-verifier",
@@ -159,7 +165,8 @@
       "checked_revision": "8db8a114355a9d7fdf9a8d1d5c87f6aeebd18770",
       "stars_at_check": 2438,
       "last_push_at_check": "2026-08-20T07:01:30Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md",
+      "refresh_issue": "#8991"
     },
     {
       "repository": "hiraditya/hiraditya.github.io",
@@ -171,7 +178,8 @@
       "checked_revision": "2547c55f35391c210d274fa7ea36fcbc383b5d8a",
       "stars_at_check": 2,
       "last_push_at_check": "2026-08-20T16:34:48Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md",
+      "refresh_issue": "#8992"
     },
     {
       "repository": "ai-dynamo/nixl",
@@ -183,7 +191,8 @@
       "checked_revision": "aecbc3846d92c34c7507a58d776e1fda50ff4fba",
       "stars_at_check": 1203,
       "last_push_at_check": "2026-08-20T19:14:30Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md",
+      "refresh_issue": "#8993"
     },
     {
       "repository": "z-lab/dflash",
@@ -195,7 +204,8 @@
       "checked_revision": "07ebd93db9f472af339b644bb70221ad8428328a",
       "stars_at_check": 5809,
       "last_push_at_check": "2026-08-18T21:14:10Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md",
+      "refresh_issue": "#8994"
     },
     {
       "repository": "anthropics/claude-code",
@@ -207,7 +217,8 @@
       "checked_revision": "16440d0f6ee8c47f34169687044b89eafa8b0f8d",
       "stars_at_check": 142314,
       "last_push_at_check": "2026-08-21T19:54:23Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
+      "refresh_issue": "#8995"
     },
     {
       "repository": "langchain-ai/langgraph",
@@ -219,7 +230,8 @@
       "checked_revision": "f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
       "stars_at_check": 40204,
       "last_push_at_check": "2026-08-21T20:04:35Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
+      "refresh_issue": "#8996"
     },
     {
       "repository": "a2aproject/A2A",
@@ -231,7 +243,8 @@
       "checked_revision": "16ba52690519bf55b9388e34d4db356efa88aa51",
       "stars_at_check": 25448,
       "last_push_at_check": "2026-08-21T19:46:58Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
+      "refresh_issue": "#8997"
     },
     {
       "repository": "openai/codex",
@@ -243,7 +256,8 @@
       "checked_revision": "9bf673718a4605b49e47d00762121d372af95439",
       "stars_at_check": 111909,
       "last_push_at_check": "2026-08-22T05:57:03Z",
-      "study_note": "docs/integrations/provider-session-reset.md"
+      "study_note": "docs/integrations/provider-session-reset.md",
+      "refresh_issue": "#8998"
     },
     {
       "repository": "google-gemini/gemini-cli",
@@ -255,7 +269,8 @@
       "checked_revision": "e90c63fa158b8facd1872d32b34b07e516308f2b",
       "stars_at_check": 106610,
       "last_push_at_check": "2026-08-22T01:10:05Z",
-      "study_note": "docs/integrations/provider-session-reset.md"
+      "study_note": "docs/integrations/provider-session-reset.md",
+      "refresh_issue": "#8999"
     },
     {
       "repository": "sgl-project/mini-sglang",
@@ -267,7 +282,8 @@
       "checked_revision": "9a91cfafe754aa85daee49998176275667eb58f2",
       "stars_at_check": 4794,
       "last_push_at_check": "2026-05-17T12:37:42Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md",
+      "refresh_issue": "#9000"
     },
     {
       "repository": "fla-org/flash-linear-attention",
@@ -279,7 +295,8 @@
       "checked_revision": "bc3b101dcb713ddc5bd8924b66754eb68b5ccf89",
       "stars_at_check": 5600,
       "last_push_at_check": "2026-08-22T12:16:00Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md",
+      "refresh_issue": "#9001"
     },
     {
       "repository": "flashinfer-ai/flashinfer",
@@ -291,7 +308,8 @@
       "checked_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
       "stars_at_check": 6209,
       "last_push_at_check": "2026-08-22T11:34:52Z",
-      "study_note": "docs/research/flashinfer-study-2026-08-22.md"
+      "study_note": "docs/research/flashinfer-study-2026-08-22.md",
+      "refresh_issue": "#9002"
     },
     {
       "repository": "SemiAnalysisAI/InferenceX",
@@ -303,7 +321,8 @@
       "checked_revision": "0b0138fd7de0a6f927f9769b19d594d01f586107",
       "stars_at_check": 1480,
       "last_push_at_check": "2026-08-24T18:19:19Z",
-      "study_note": "docs/notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md"
+      "study_note": "docs/notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md",
+      "refresh_issue": "#9003"
     },
     {
       "repository": "Mchicao/endless",
@@ -315,7 +334,8 @@
       "checked_revision": "bbf449ca624aca90d8cda0bc21100f2a73a56bf4",
       "stars_at_check": 2,
       "last_push_at_check": "2026-08-21T14:38:07Z",
-      "study_note": "docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md"
+      "study_note": "docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md",
+      "refresh_issue": "#9004"
     },
     {
       "repository": "vllm-project/vllm",

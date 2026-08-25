@@ -52,6 +52,7 @@ type Repository struct {
 	StarsAtCheck    int                `json:"stars_at_check"`
 	LastPushAtCheck string             `json:"last_push_at_check"`
 	StudyNote       string             `json:"study_note,omitempty"`
+	RefreshIssue    string             `json:"refresh_issue,omitempty"`
 	Inventory       *InventoryContract `json:"inventory,omitempty"`
 }
 
@@ -92,6 +93,7 @@ type InventoryRow struct {
 	CandidateCount       int                       `json:"candidate_count,omitempty"`
 	FiledIssueCount      int                       `json:"filed_issue_count,omitempty"`
 	IssueRefs            []string                  `json:"issue_refs,omitempty"`
+	RefreshIssue         string                    `json:"refresh_issue,omitempty"`
 	CompletenessCritic   string                    `json:"completeness_critic,omitempty"`
 	SourceClasses        []string                  `json:"source_classes,omitempty"`
 	SourceEvidence       []InventorySourceEvidence `json:"source_evidence,omitempty"`
@@ -350,10 +352,11 @@ func addInventoryRowReason(row *InventoryRow, reason string) {
 func inventoryBaseRow(repo Repository) InventoryRow {
 	mode := effectiveInventoryMode(repo)
 	row := InventoryRow{
-		Repository: repo.Repository,
-		Status:     repo.Status,
-		Mode:       mode,
-		Ready:      true,
+		Repository:   repo.Repository,
+		RefreshIssue: repo.RefreshIssue,
+		Status:       repo.Status,
+		Mode:         mode,
+		Ready:        true,
 	}
 	if repo.Inventory != nil {
 		row.MapPath = strings.TrimSpace(repo.Inventory.MapPath)
@@ -392,6 +395,9 @@ func finalizeInventoryRow(row *InventoryRow, repo Repository, inventoryMap *Inve
 	if len(missing) > 0 {
 		row.MissingSourceClasses = missing
 		row.Reasons = append(row.Reasons, "missing source classes: "+strings.Join(missing, ","))
+	}
+	if repo.Status == "studied" && len(row.Reasons) > 0 && strings.TrimSpace(row.RefreshIssue) == "" {
+		row.Reasons = append(row.Reasons, "missing refresh_issue for incomplete studied row")
 	}
 	validateInventoryDeclaredSourceClasses(row, inventoryMap)
 	row.Ready = len(row.Reasons) == 0
