@@ -9,11 +9,13 @@ import (
 const InventorySchema = "fak.modelaccept.inventory/1"
 
 type InventoryOptions struct {
-	Artifact         string
-	ArtifactRevision string
-	ExpectedCorpusID string
-	AsOf             time.Time
-	MaxEvidenceAge   time.Duration
+	Artifact               string
+	ArtifactRevision       string
+	ExpectedCorpusID       string
+	AsOf                   time.Time
+	MaxEvidenceAge         time.Duration
+	LadderEvidenceDir      string
+	LadderChecksumManifest string
 }
 
 type InventoryRow struct {
@@ -36,11 +38,12 @@ type InventoryRow struct {
 }
 
 type Inventory struct {
-	Schema   string         `json:"schema"`
-	Verdict  Verdict        `json:"verdict"`
-	CorpusID string         `json:"corpus_id"`
-	Rows     []InventoryRow `json:"rows"`
-	Reasons  []string       `json:"reasons,omitempty"`
+	Schema         string                   `json:"schema"`
+	Verdict        Verdict                  `json:"verdict"`
+	CorpusID       string                   `json:"corpus_id"`
+	Rows           []InventoryRow           `json:"rows"`
+	Reasons        []string                 `json:"reasons,omitempty"`
+	LadderEvidence *LadderEvidenceAdmission `json:"ladder_evidence,omitempty"`
 }
 
 // BuildInventory joins an acceptance fold to exact model IDs. It never borrows
@@ -50,6 +53,13 @@ func BuildInventory(in Input, opts InventoryOptions) Inventory {
 	out := Inventory{Schema: InventorySchema, Verdict: Pass, CorpusID: in.Corpus.ID, Rows: []InventoryRow{}}
 	decision := Evaluate(in)
 	global := append([]string(nil), decision.Reasons...)
+	if strings.TrimSpace(opts.LadderEvidenceDir) != "" || strings.TrimSpace(opts.LadderChecksumManifest) != "" {
+		ladder := verifyLadderEvidence(opts.LadderEvidenceDir, opts.LadderChecksumManifest)
+		out.LadderEvidence = &ladder
+		if ladder.Verdict != Pass {
+			global = append(global, ladder.Reason)
+		}
+	}
 	if strings.TrimSpace(opts.Artifact) == "" {
 		global = append(global, "acceptance artifact path is missing")
 	}
@@ -126,6 +136,7 @@ func BuildInventory(in Input, opts InventoryOptions) Inventory {
 		} else if md.Verdict == Pass && len(row.Reasons) == 0 {
 			row.CapabilityGate = Pass
 		} else {
+			row.WitnessedTier = nil
 			out.Verdict = Hold
 		}
 		out.Rows = append(out.Rows, row)
