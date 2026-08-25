@@ -98,8 +98,11 @@ func RunCodexHookProfile(stdout, stderr io.Writer, args []string) int {
 	workspace := fs.String("workspace", ".", "workspace whose effective hooks are resolved")
 	binary := fs.String("codex-binary", "", "Codex executable")
 	asJSON := fs.Bool("json", false, "emit JSON")
-	if fs.Parse(args) != nil || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "usage: fak-dev codex-hook-profile [--codex-home DIR] [--workspace DIR] [--codex-binary FILE] [--json]")
+	canary := fs.Bool("canary", false, "run installed-profile allow/deny canary")
+	receipt := fs.String("receipt", "", "durable canary receipt path")
+	timeout := fs.Duration("timeout", 2*time.Minute, "canary timeout")
+	if fs.Parse(args) != nil || fs.NArg() != 0 || *timeout <= 0 || (*receipt != "" && !*canary) {
+		fmt.Fprintln(stderr, "usage: fak-dev codex-hook-profile [--codex-home DIR] [--workspace DIR] [--codex-binary FILE] [--canary] [--receipt FILE] [--timeout 2m] [--json]")
 		return 2
 	}
 	if *home == "" {
@@ -116,6 +119,26 @@ func RunCodexHookProfile(stdout, stderr io.Writer, args []string) int {
 	if e != nil {
 		fmt.Fprintf(stderr, "codex-hook-profile: %v\n", e)
 		return 1
+	}
+	if *canary {
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		defer cancel()
+		runtime := appServerCanaryRuntime{binary: r.CodexExecutable.Path, home: r.CodexHome}
+		result := runHookCanary(ctx, r, runtime, r.Workspace)
+		if *receipt == "" {
+			*receipt = filepath.Join(r.CodexHome, "receipts", "codex-hook-canary.json")
+		}
+		if err := writeHookCanaryReceipt(*receipt, result); err != nil {
+			fmt.Fprintf(stderr, "codex-hook-profile canary: %v\n", err)
+			return 1
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(result)
+		if result.State != canaryGreen {
+			return 1
+		}
+		return 0
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
