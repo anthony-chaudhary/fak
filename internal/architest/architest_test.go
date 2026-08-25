@@ -692,6 +692,7 @@ var tier = map[string]int{
 	"scratchmark":                1, // #6616 stdlib-only bounded detector for source artifacts self-declared disposable in their leading comment block.
 	"fleetsearch":                3, // read-only join over lifecycle/sessionjournal/toolproc evidence; no runtime kernel.
 	"nativefirst":                1, // stdlib-only native-engine substitution policy shared by CLI lint and commit gates.
+	"agentqueue":                 1, // stdlib-only deterministic desired-state planner for bounded agent populations (#8875).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
