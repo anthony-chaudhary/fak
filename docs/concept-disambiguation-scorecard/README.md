@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **105** (clarity 29 + coverage 76) |
+| **Disambiguation-debt (drive to 0)** | **110** (clarity 29 + coverage 81) |
 | **Crystal-clear concepts (and climbing)** | **763** crystal of 2476 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2599 / 2675** (97.2% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2599 / 2680** (97.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **1** of 198 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **74** of 3439 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 85.1/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 85.0/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2476 concepts - score 85.1/100 (grade B) - disambiguation-debt 105
+concept-disambiguation chart - 2476 concepts - score 85.0/100 (grade B) - disambiguation-debt 110
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ############................ 763
@@ -62,15 +62,15 @@ clarity mix by family (each cell = one concept):
   witness-proof    *********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (149 concept(s); 69 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ###########################. 462/481
-  plan             ###########################. 362/373
+  guard-gate       ###########################. 462/482
+  plan             ###########################. 362/374
+  cache            ###########################. 281/292
   policy-capability ##########################.. 184/195
-  cache            ###########################. 281/291
   session-runtime  ###########################. 252/260
   attention        ##########################.. 76/83
   support-maturity #########################... 55/61
+  render-materialize ###########################. 198/203
   context-ctx      ############################ 227/231
-  render-materialize ############################ 198/201
   score-debt       ###########################. 87/90
   pool             ###########################. 38/40
   witness-proof    ############################ 156/158
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.2%  (2599/2675 confusable tokens positioned)
+namespace coverage  [###############################.] 97.0%  (2599/2680 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -2765,15 +2765,15 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 462 | 481 | 19 |
-| plan | 362 | 373 | 11 |
+| guard-gate | 462 | 482 | 20 |
+| plan | 362 | 374 | 12 |
+| cache | 281 | 292 | 11 |
 | policy-capability | 184 | 195 | 11 |
-| cache | 281 | 291 | 10 |
 | session-runtime | 252 | 260 | 8 |
 | attention | 76 | 83 | 7 |
 | support-maturity | 55 | 61 | 6 |
+| render-materialize | 198 | 203 | 5 |
 | context-ctx | 227 | 231 | 4 |
-| render-materialize | 198 | 201 | 3 |
 | score-debt | 87 | 90 | 3 |
 | pool | 38 | 40 | 2 |
 | witness-proof | 156 | 158 | 2 |
