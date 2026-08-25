@@ -481,3 +481,26 @@ func DecideAll(inputs []Input) Report {
 	}
 	return rep
 }
+
+// RepeatedFailureTracker reports when the same failure key occurs three times
+// in a row. A success or a changed key starts a new sequence.
+type RepeatedFailureTracker struct {
+	key      string
+	failures int
+}
+
+// Record adds one result and reports whether the identical-failure budget is
+// exhausted.
+func (t *RepeatedFailureTracker) Record(key string, success bool) bool {
+	if success {
+		t.key = ""
+		t.failures = 0
+		return false
+	}
+	if key != t.key {
+		t.key = key
+		t.failures = 0
+	}
+	t.failures++
+	return t.failures >= 3
+}
