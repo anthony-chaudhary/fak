@@ -18,11 +18,12 @@ func runStudyMonitor(stdout, stderr io.Writer, args []string) int {
 	dueDays := fs.Int("due-days", 14, "mark a repository due after this many days without a check")
 	asOf := fs.String("as-of", "", "report date in YYYY-MM-DD (defaults to today)")
 	jsonOutput := fs.Bool("json", false, "emit JSON")
+	inventoryCheck := fs.Bool("inventory-check", false, "check that candidate/studied repositories carry an exhaustive inventory map")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if fs.NArg() != 0 || *dueDays < 1 {
-		fmt.Fprintln(stderr, "usage: fak study-monitor [--registry PATH] [--due-days N] [--as-of YYYY-MM-DD] [--json]")
+		fmt.Fprintln(stderr, "usage: fak study-monitor [--registry PATH] [--due-days N] [--as-of YYYY-MM-DD] [--json] [--inventory-check]")
 		return 2
 	}
 	now := time.Now().UTC()
@@ -38,6 +39,21 @@ func runStudyMonitor(stdout, stderr io.Writer, args []string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "study-monitor: %v\n", err)
 		return 1
+	}
+	if *inventoryCheck {
+		report := studymonitor.BuildInventoryReportWithMapFiles(registry, ".")
+		if *jsonOutput {
+			if err := studymonitor.WriteInventoryJSON(stdout, report); err != nil {
+				fmt.Fprintf(stderr, "study-monitor: %v\n", err)
+				return 1
+			}
+		} else {
+			studymonitor.RenderInventoryHuman(stdout, report)
+		}
+		if !report.OK {
+			return 1
+		}
+		return 0
 	}
 	report := studymonitor.BuildReport(*registryPath, registry, now, *dueDays)
 	if *jsonOutput {

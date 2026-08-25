@@ -42,6 +42,7 @@ var portableDevPatterns = map[string]string{
 
 var maintainerDevCommands = []string{
 	"accounts",
+	"agent-queue",
 	"agents",
 	"ailuminate",
 	"answer-shape",
@@ -198,6 +199,8 @@ var maintainerDevCommands = []string{
 	"model-observe",
 	"multisubmit",
 	"native-benchmarks",
+	"native-first-lint",
+	"native-performance",
 	"negate",
 	"new-leaf",
 	"new-model",
@@ -270,6 +273,7 @@ var maintainerDevCommands = []string{
 	"steer",
 	"steering",
 	"stopfailure",
+	"study-inventory",
 	"study-monitor",
 	"superloop",
 	"support",
@@ -293,6 +297,7 @@ var maintainerDevCommands = []string{
 	"tree-doctor",
 	"trunk-build-probe",
 	"trunk-red",
+	"turnavoid",
 	"turntax",
 	"ui-quality-scorecard",
 	"unwired-debt-dispatch",
