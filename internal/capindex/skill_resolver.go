@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	frontmatteryaml "github.com/anthony-chaudhary/fak/internal/frontmatter"
 )
 
 // SkillResolver is the `skill` kind: a Resolver over a directory of
@@ -218,8 +219,7 @@ func parseFrontmatter(body []byte) skillFrontmatter {
 			continue
 		}
 		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		val = strings.Trim(val, `"'`)
+		val, _ = frontmatteryaml.DecodeScalar(val)
 		switch key {
 		case "name":
 			fm.name = val
@@ -339,10 +339,9 @@ func parseInlineList(val string) []string {
 	parts := strings.Split(val, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		p = strings.Trim(p, `"'`)
-		if p != "" {
-			out = append(out, p)
+		decoded, _ := frontmatteryaml.DecodeScalar(p)
+		if decoded != "" {
+			out = append(out, decoded)
 		}
 	}
 	return out

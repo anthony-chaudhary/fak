@@ -40,6 +40,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/capindex"
+	frontmatteryaml "github.com/anthony-chaudhary/fak/internal/frontmatter"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -96,7 +97,8 @@ func Scan(root string) []Scanned {
 		}
 		text := string(b)
 		s.Readable = true
-		s.HasDescription = strings.Contains(text, "description:")
+		description, hasDescription := frontmatterDescription(text)
+		s.HasDescription = hasDescription && strings.TrimSpace(description) != ""
 		low := strings.ToLower(text)
 		s.HasTrigger = hasTrigger(low)
 		s.MetaWords, s.BodyWords = TierWordCounts(text)
@@ -126,19 +128,34 @@ func TierWordCounts(text string) (metaWords, bodyWords int) {
 	body := t
 	if strings.HasPrefix(t, "---\n") {
 		if end := strings.Index(t[4:], "\n---"); end >= 0 {
-			fm := t[4 : 4+end]
 			body = t[4+end+len("\n---"):]
-			for _, line := range strings.Split(fm, "\n") {
-				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "description:") {
-					desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "description:"))
-					metaWords = len(strings.Fields(desc))
-				}
+			if description, ok := frontmatterDescription(t); ok {
+				metaWords = len(strings.Fields(description))
 			}
 		}
 	}
 	bodyWords = len(strings.Fields(body))
 	return
+}
+
+func frontmatterDescription(text string) (string, bool) {
+	t := strings.ReplaceAll(text, "\r\n", "\n")
+	if !strings.HasPrefix(t, "---\n") {
+		return "", false
+	}
+	end := strings.Index(t[4:], "\n---")
+	if end < 0 {
+		return "", false
+	}
+	for _, line := range strings.Split(t[4:4+end], "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(key) != "description" {
+			continue
+		}
+		decoded, _ := frontmatteryaml.DecodeScalar(value)
+		return decoded, true
+	}
+	return "", false
 }
 
 // Loader is the queried-loader dimension, scored against the real capindex catalog.
