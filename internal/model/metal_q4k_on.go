@@ -49,7 +49,13 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 		return q4kGemm(qt, Xf, P)
 	}
 	Y := make([]float32, P*qt.out)
-	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) { w.GEMM(Xf, P, Y) }) {
+	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) {
+		if P == 1 {
+			w.GEMV(Xf, Y)
+			return
+		}
+		w.GEMM(Xf, P, Y)
+	}) {
 		if qt.lazy != nil {
 			panic("model: lazy Q4_K Metal GEMM upload failed: " + name)
 		}
@@ -58,16 +64,16 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 	return Y
 }
 
-// q4kGemmGroupDispatch is the PREFILL twin of q4kGroupDispatch: it runs a group of batched GEMMs
-// that share one f32 activation panel Xf[P, in] (a layer's q/k/v, gate/up, or the GDN in_proj quad)
-// in ONE Metal command buffer via metalgemm.GEMMGroup, collapsing the ~7 per-weight submit/sync
-// round-trips per layer that are the measured prefill wall (~97% of prefill is GEMM+roundtrip).
+// q4kGemmGroupDispatch groups Q4_K projections that share one f32 activation panel Xf[P, in].
+// Single-row panels use decode GEMV; larger panels use batched GEMM. Typical groups are a
+// layer's q/k/v, gate/up, or GDN in_proj quad. Each group uses one Metal command buffer,
+// collapsing the per-weight submit/sync round-trips that dominate this path.
 // It returns one result slice per name with the q4_k-resident members filled and every other member
 // (Q8/Q6_K minority, or a declined upload) left nil, so the caller fills those via its existing
 // per-weight `proj`. Returns nil entirely — caller loops per-weight — unless MetalQ4K is on, a
 // device is present, AND at least two members are q4_k-resident (so a command buffer is worth
-// amortizing). Each filled slice is [P*out] token-major, bit-identical to calling q4kGemmDispatch
-// per name (same q4k_gemm kernel, just grouped into one command buffer).
+// amortizing). Each filled slice is [P*out] token-major and uses the same P-specific kernel as
+// q4kGemmDispatch.
 func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]float32 {
 	if !s.MetalQ4K || !metalgemm.Available() || P <= 0 {
 		return nil
@@ -90,7 +96,12 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 	if len(ws) < 2 {
 		return nil // not enough resident members to amortize a command buffer
 	}
-	grouped := metalgemm.GEMMGroup(ws, Xf, P)
+	var grouped [][]float32
+	if P == 1 {
+		grouped = metalgemm.GEMVGroup(ws, Xf)
+	} else {
+		grouped = metalgemm.GEMMGroup(ws, Xf, P)
+	}
 	if grouped == nil {
 		return nil
 	}

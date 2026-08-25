@@ -830,3 +830,54 @@ func BenchmarkMetalQ4KGemmPSweep(b *testing.B) {
 		})
 	}
 }
+
+// TestMetalQ4KSingleRowGemmDispatchMatchesGEMM pins the P=1 dispatch seam used by cached
+// Qwen3.5/Qwen3.8 decode. The optimized path must preserve both single-weight values and grouped
+// result ordering relative to the prior one-row GEMM implementation.
+func TestMetalQ4KSingleRowGemmDispatchMatchesGEMM(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+
+	const in = 1024
+	outs := []int{512, 1024, 256}
+	names := []string{"single-row-a", "single-row-b", "single-row-c"}
+	x := randomVecF(in, 41)
+	m := &Model{q4kw: make(map[string]*q4kTensor)}
+	s := m.NewSession()
+	s.MetalQ4K = true
+	want := make([][]float32, len(names))
+	for i, name := range names {
+		qt := randomQ4KTensor(outs[i], in, int64(200+i))
+		m.q4kw[name] = qt
+		w := m.metalQ4KWeight(name, qt)
+		if w == nil {
+			t.Fatalf("metalQ4KWeight(%q) returned nil", name)
+		}
+		want[i] = make([]float32, outs[i])
+		w.GEMM(x, 1, want[i])
+	}
+
+	gotSingle := s.q4kGemmDispatch(names[0], m.q4kw[names[0]], x, 1)
+	assertClose := func(label string, got, expected []float32) {
+		t.Helper()
+		if len(got) != len(expected) {
+			t.Fatalf("%s len=%d want %d", label, len(got), len(expected))
+		}
+		for i := range got {
+			if d := got[i] - expected[i]; d > 5e-3 || d < -5e-3 {
+				t.Fatalf("%s[%d]=%g want %g", label, i, got[i], expected[i])
+			}
+		}
+	}
+	assertClose("single", gotSingle, want[0])
+
+	gotGroup := s.q4kGemmGroupDispatch(names, x, 1)
+	if len(gotGroup) != len(names) {
+		t.Fatalf("group len=%d want %d", len(gotGroup), len(names))
+	}
+	for i := range names {
+		assertClose(names[i], gotGroup[i], want[i])
+	}
+}
