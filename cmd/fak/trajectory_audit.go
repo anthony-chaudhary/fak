@@ -22,12 +22,16 @@ func runTrajectory(stdout, stderr io.Writer, args []string) int {
 		printTrajectoryUsage(stdout)
 		return 0
 	}
-	if args[0] != "audit" {
+	switch args[0] {
+	case "audit":
+		return runTrajectoryAudit(stdout, stderr, args[1:])
+	case "assurance":
+		return runTrajectoryAssurance(os.Stdin, stdout, stderr, args[1:])
+	default:
 		fmt.Fprintf(stderr, "fak trajectory: unknown subcommand %q\n", args[0])
 		printTrajectoryUsage(stderr)
 		return 2
 	}
-	return runTrajectoryAudit(stdout, stderr, args[1:])
 }
 
 func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
@@ -149,7 +153,9 @@ func writeTrajectoryAuditFile(path string, write func(io.Writer) error) error {
 }
 
 func printTrajectoryUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak trajectory audit [--since 7d] [--jsonl OUT] [--md OUT] [--baseline PRIOR.jsonl]")
+	fmt.Fprintln(w, "usage: fak trajectory <audit|assurance> [options]")
+	fmt.Fprintln(w, "  audit      audit transcript usage and behavior")
+	fmt.Fprintln(w, "  assurance  read typed evidence JSON on stdin and emit a shadow health receipt")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Audit exact Claude and Codex transcript usage, source denominators, behavior, and baseline regressions.")
 }

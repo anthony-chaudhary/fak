@@ -165,3 +165,24 @@ func TestParseTrajectoryAuditSinceDays(t *testing.T) {
 		t.Fatalf("duration = %s", duration)
 	}
 }
+
+func TestRunTrajectoryRoutesAssurance(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runTrajectory(&stdout, &stderr, []string{"assurance", "unexpected"})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "usage: fak trajectory assurance") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestTrajectoryUsageListsAssurance(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runTrajectory(&stdout, &stderr, []string{"--help"}); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(stdout.String(), "assurance") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
