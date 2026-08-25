@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -154,4 +156,129 @@ func TestGuardResourceReceiptPathDefaultsDurably(t *testing.T) {
 	if got != want {
 		t.Fatalf("default receipt path=%q want=%q", got, want)
 	}
+}
+
+func TestGuardResourcePolicyEdgeAndAdversarialInputs(t *testing.T) {
+	const maxSafeMB = ^uint64(0) >> 20
+	for _, key := range []string{"FAK_CHILD_MAX_MEMORY_MB", "FAK_CHILD_MAX_COMMIT_MB", "FAK_CHILD_MAX_RSS_MB", "FAK_SYSTEM_COMMIT_HEADROOM_MB", "FAK_CHILD_RESOURCE_POLL"} {
+		t.Setenv(key, "")
+	}
+	defaults := guardResourcePolicyFromEnv()
+	tests := []struct {
+		name       string
+		memory     string
+		headroom   string
+		poll       string
+		wantMemory uint64
+		wantHead   uint64
+		wantPoll   time.Duration
+		override   bool
+	}{
+		{name: "empty"},
+		{name: "whitespace", memory: "  ", headroom: "\t", poll: "\n"},
+		{name: "malformed", memory: "twelve", headroom: "1GB", poll: "soon"},
+		{name: "hostile signs", memory: "-1", headroom: "+1", poll: "-1s"},
+		{name: "zero cannot disable containment", memory: "0", headroom: "0", poll: "0s"},
+		{name: "oversized memory cannot wrap", memory: "17592186044416", headroom: "17592186044416", poll: "999999999999999999999h"},
+		{name: "largest safe memory", memory: strconv.FormatUint(maxSafeMB, 10), headroom: strconv.FormatUint(maxSafeMB, 10), poll: "100ms", wantMemory: maxSafeMB << 20, wantHead: maxSafeMB << 20, wantPoll: 100 * time.Millisecond, override: true},
+		{name: "poll below floor", poll: "99ms"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("FAK_CHILD_MAX_MEMORY_MB", tt.memory)
+			t.Setenv("FAK_CHILD_MAX_COMMIT_MB", "")
+			t.Setenv("FAK_CHILD_MAX_RSS_MB", "")
+			t.Setenv("FAK_SYSTEM_COMMIT_HEADROOM_MB", tt.headroom)
+			t.Setenv("FAK_CHILD_RESOURCE_POLL", tt.poll)
+			wantMemory, wantHead, wantPoll := defaults.MaxTreeBytes, defaults.MinSystemHeadroom, defaults.PollInterval
+			if tt.override {
+				wantMemory, wantHead, wantPoll = tt.wantMemory, tt.wantHead, tt.wantPoll
+			}
+			got := guardResourcePolicyFromEnv()
+			if got.MaxTreeBytes != wantMemory || got.MinSystemHeadroom != wantHead || got.PollInterval != wantPoll {
+				t.Fatalf("policy=%+v, want memory=%d headroom=%d poll=%s", got, wantMemory, wantHead, wantPoll)
+			}
+		})
+	}
+}
+
+func TestDecideGuardResourceEdgeAndAdversarialSnapshots(t *testing.T) {
+	tests := []struct {
+		name       string
+		policy     guardResourcePolicy
+		snapshot   procguard.MemorySnapshot
+		wantStop   bool
+		wantReason string
+		wantPID    int
+		wantHead   uint64
+	}{
+		{name: "empty snapshot", policy: guardResourcePolicy{MaxTreeBytes: 100}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS}, wantStop: false},
+		{name: "one byte below tree limit", policy: guardResourcePolicy{MaxTreeBytes: 100}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS, TreeBytes: 99}, wantStop: false},
+		{name: "exact tree limit", policy: guardResourcePolicy{MaxTreeBytes: 100}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS, TreeBytes: 100}, wantStop: true, wantReason: "CHILD_TREE_RSS_LIMIT"},
+		{name: "system counters cannot underflow", policy: guardResourcePolicy{MaxTreeBytes: 1000, MinSystemHeadroom: 1}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, SystemBytes: 101, SystemLimit: 100}, wantStop: true, wantReason: "SYSTEM_COMMIT_HEADROOM", wantHead: 0},
+		{name: "headroom exact threshold", policy: guardResourcePolicy{MaxTreeBytes: 1000, MinSystemHeadroom: 10}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricCommit, SystemBytes: 90, SystemLimit: 100}, wantStop: true, wantReason: "SYSTEM_COMMIT_HEADROOM", wantHead: 10},
+		{name: "hostile duplicate and negative pids remain attributed", policy: guardResourcePolicy{MaxTreeBytes: 1}, snapshot: procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS, TreeBytes: 1, Processes: []procguard.MemoryProcess{{PID: -1, Bytes: 9}, {PID: -1, Bytes: 10}, {PID: 0, Bytes: 8}}}, wantStop: true, wantReason: "CHILD_TREE_RSS_LIMIT", wantPID: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := decideGuardResource(tt.policy, tt.snapshot)
+			if d.Stop != tt.wantStop || d.Reason != tt.wantReason || d.Offender.PID != tt.wantPID || d.HeadroomBytes != tt.wantHead {
+				t.Fatalf("decision=%+v", d)
+			}
+			if len(d.OwnedPIDs) != len(tt.snapshot.Processes) {
+				t.Fatalf("owned pids=%v, processes=%v", d.OwnedPIDs, tt.snapshot.Processes)
+			}
+		})
+	}
+}
+
+func TestGuardResourceReceiptAdversarialStringsRemainOneJSONRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "receipts.jsonl")
+	d := guardResourceDecision{
+		Stop: true, Reason: "HOSTILE\nREASON", Metric: procguard.MemoryMetricRSS,
+		Offender:  procguard.MemoryProcess{PID: 7, Name: "name\n{\"forged\":true}", CommandLine: "cmd\r\nnext"},
+		TreeBytes: 123, ThresholdBytes: 100,
+	}
+	if err := appendGuardResourceReceipt(path, newGuardResourceReceipt("trace\nnext", "agent\tname", 7, d)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n"); len(lines) != 1 {
+		t.Fatalf("hostile fields forged extra JSONL records: %q", data)
+	}
+	var got guardResourceReceipt
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("receipt is not valid JSON: %v: %q", err, data)
+	}
+	if got.TraceID != "trace\nnext" || got.OffenderName != "name\n{\"forged\":true}" || got.TreeRSSBytes == nil || *got.TreeRSSBytes != 123 {
+		t.Fatalf("receipt=%+v", got)
+	}
+}
+
+func TestGuardResourceErrorPathsEdgeAndAdversarial(t *testing.T) {
+	t.Run("empty receipt path", func(t *testing.T) {
+		if err := appendGuardResourceReceipt(" \t\n", guardResourceReceipt{}); err == nil || !strings.Contains(err.Error(), "path is empty") {
+			t.Fatalf("err=%v", err)
+		}
+	})
+	t.Run("directory in place of receipt", func(t *testing.T) {
+		path := t.TempDir()
+		if err := appendGuardResourceReceipt(path, guardResourceReceipt{}); err == nil || !strings.Contains(err.Error(), "open child resource receipt") {
+			t.Fatalf("err=%v", err)
+		}
+	})
+	t.Run("receipt missing decision", func(t *testing.T) {
+		if err := guardWriteResourceReceipt(guardChildWaitEvent{}, "trace", "agent", 1); err == nil || !strings.Contains(err.Error(), "missing decision") {
+			t.Fatalf("err=%v", err)
+		}
+	})
+	t.Run("collector failure without processes keeps root", func(t *testing.T) {
+		event := guardResourceMonitorFailure(-7, procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS}, "MONITOR_ERROR", "malformed\noutput")
+		if event.Resource == nil || event.Resource.Offender.PID != -7 || !slices.Equal(event.Resource.OwnedPIDs, []int{-7}) || event.Reason != "MONITOR_ERROR: malformed\noutput" {
+			t.Fatalf("event=%+v", event)
+		}
+	})
 }
