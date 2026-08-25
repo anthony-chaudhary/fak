@@ -10,8 +10,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	frontmatteryaml "github.com/anthony-chaudhary/fak/internal/frontmatter"
 )
 
 const (
@@ -443,14 +441,11 @@ func frontmatter(src []byte) (string, string, error) {
 		if !ok {
 			continue
 		}
-		key = strings.TrimSpace(key)
-		switch key {
+		switch strings.TrimSpace(key) {
 		case "name":
-			decoded, _ := frontmatteryaml.DecodeScalar(value)
-			name = decoded
+			name = strings.Trim(strings.TrimSpace(value), `"'`)
 		case "description":
-			decoded, _ := frontmatteryaml.DecodeScalar(value)
-			description = decoded
+			description = strings.Trim(strings.TrimSpace(value), `"'`)
 		}
 	}
 	if !closed || name == "" {

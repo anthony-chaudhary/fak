@@ -49,8 +49,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	frontmatteryaml "github.com/anthony-chaudhary/fak/internal/frontmatter"
 )
 
 // HardlineDescriptionMaxLen is the documented skill-authoring ceiling on a
@@ -139,7 +137,7 @@ func ParseQuarantineCandidate(rawSkillMd string, shippedScripts []string) Quaran
 			if !ok {
 				continue
 			}
-			val, _ = frontmatteryaml.DecodeScalar(val)
+			val = strings.Trim(strings.TrimSpace(val), `"'`)
 			switch strings.TrimSpace(key) {
 			case "name":
 				c.Name = val
