@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -36,10 +40,12 @@ func cmdSelfUpdate(argv []string) {
 	verbFlagUsage(fs, "self-update") // #2232: overview verb -> deep help above the flag dump
 	check := fs.Bool("check", false, "report whether this binary is stale vs HEAD and exit (no build)")
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
+	jsonMode := fs.Bool("json", false, "emit one versioned JSON receipt")
 	root := fs.String("root", "", "repo root to build from (default: discover from cwd)")
 	target := fs.String("target", "", "binary path to replace (default: this binary's own path). Lets a scheduler update the FLEET binary regardless of which fak it invokes.")
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
 	_ = fs.Parse(argv)
+	beginSelfUpdateOutput(*jsonMode)
 
 	// Scheduled-task provenance skew, checked BEFORE anything else: the task pinned one
 	// reviewed absolute path at registration, and a tick executing anything else — or executing
@@ -96,6 +102,8 @@ func cmdSelfUpdate(argv []string) {
 	skew := versionskew.AssessStamp(context.Background(), selfinstall.RealRunner, repoRoot, "origin/main", stamp)
 
 	stampRev := stamp.Revision
+	selfUpdateReceiptOldRevision = stampRev
+	selfUpdateReceiptNewRevision = headRev
 	if stampRev == "" {
 		stampRev = "(unstamped)"
 	} else if len(stampRev) > 12 {
@@ -105,7 +113,7 @@ func cmdSelfUpdate(argv []string) {
 	if len(head) > 12 {
 		head = head[:12]
 	}
-	fmt.Printf("%s: %s%s   origin/main: %s   => %s (skew: %s)\n",
+	fmt.Fprintf(selfUpdateProgress, "%s: %s%s   origin/main: %s   => %s (skew: %s)\n",
 		subject, stampRev, dirtyMark(stamp.Dirty), head, verdict, skew.Verdict)
 
 	if *check {
@@ -128,15 +136,15 @@ func cmdSelfUpdate(argv []string) {
 		emitSelfUpdateOutcome(selfUpdateSkipOutcome(fleetTarget, skew.Verdict), installTargetOr(*target), fmt.Sprintf("%s", skew.Verdict))
 		switch {
 		case fleetTarget:
-			fmt.Println("self-update: target already current — nothing to do.")
+			fmt.Fprintln(selfUpdateProgress, "self-update: target already current — nothing to do.")
 		case skew.Verdict == versionskew.Ahead:
-			fmt.Println("self-update: running binary is AHEAD of origin/main (a local build not yet pushed) — not rebuilding (pass --force to build+gate+install origin/main anyway).")
+			fmt.Fprintln(selfUpdateProgress, "self-update: running binary is AHEAD of origin/main (a local build not yet pushed) — not rebuilding (pass --force to build+gate+install origin/main anyway).")
 		case skew.Verdict == versionskew.Fresh:
-			fmt.Println("self-update: already current — nothing to do.")
+			fmt.Fprintln(selfUpdateProgress, "self-update: already current — nothing to do.")
 		case skew.Verdict == versionskew.Dirty, skew.Verdict == versionskew.Unstamped, skew.Verdict == versionskew.Diverged:
-			fmt.Printf("self-update: running binary is %s vs origin/main — not auto-rebuilding a local/off-trunk build (pass --force to build+gate+install origin/main).\n", skew.Verdict)
+			fmt.Fprintf(selfUpdateProgress, "self-update: running binary is %s vs origin/main — not auto-rebuilding a local/off-trunk build (pass --force to build+gate+install origin/main).\n", skew.Verdict)
 		default:
-			fmt.Println("self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
+			fmt.Fprintln(selfUpdateProgress, "self-update: freshness unknown — not rebuilding (pass --force to build+gate+install anyway).")
 		}
 		return
 	}
@@ -158,7 +166,7 @@ func cmdSelfUpdate(argv []string) {
 	release, lerr := selfinstall.TrySingleFlight("")
 	if lerr != nil {
 		if lerr == selfinstall.ErrBusy {
-			fmt.Println("self-update: another self-update is already building — skipping this run.")
+			fmt.Fprintln(selfUpdateProgress, "self-update: another self-update is already building — skipping this run.")
 			emitSelfUpdateOutcome(outcomeBusy, installTarget, "single-flight lock held")
 			return
 		}
@@ -188,10 +196,10 @@ func cmdSelfUpdate(argv []string) {
 		ProcessAlive: safecommit.ProcessAlive,
 	})
 	if buildGC.Reaped > 0 {
-		fmt.Printf("self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", buildGC.Reaped)
+		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale build worktree(s) leaked by killed prior runs\n", buildGC.Reaped)
 	}
 	if len(buildGC.Failures) > 0 {
-		fmt.Printf("self-update: kept %d stale-build candidate(s) after apply-time revalidation/removal failure\n", len(buildGC.Failures))
+		fmt.Fprintf(selfUpdateProgress, "self-update: kept %d stale-build candidate(s) after apply-time revalidation/removal failure\n", len(buildGC.Failures))
 	}
 
 	// Also reap the "<binary>.old.<pid>.<i>" swap-aside files OSSwap leaks on Windows when the
@@ -199,13 +207,13 @@ func cmdSelfUpdate(argv []string) {
 	// per tick (a real host accumulated 211 of them, ~9 GB). We delete only asides whose owning
 	// PID is provably dead — so the old .exe is no longer mapped and the file is safe to remove.
 	if reaped := selfinstall.ReapStaleAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); len(reaped) > 0 {
-		fmt.Printf("self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
+		fmt.Fprintf(selfUpdateProgress, "self-update: reaped %d stale swap-aside binary file(s) leaked by prior swaps\n", len(reaped))
 	}
 	// After reaping, report any REMAINING footprint: asides pinned by still-live owners that we
 	// could not reclaim. A large surviving count is the early signal that swaps are outrunning
 	// exits (the leak's leading edge) — visible now instead of after it reaches gigabytes.
 	if fp := selfinstall.MeasureAsides(installTarget, os.Getpid(), safecommit.ProcessAlive); fp.Count >= 8 {
-		fmt.Printf("self-update: NOTE — %d swap-aside file(s) still next to the binary (%s); %d reclaimable once their owners exit\n",
+		fmt.Fprintf(selfUpdateProgress, "self-update: NOTE — %d swap-aside file(s) still next to the binary (%s); %d reclaimable once their owners exit\n",
 			fp.Count, humanBytes(fp.Bytes), fp.DeadCount)
 	}
 
@@ -243,7 +251,7 @@ func cmdSelfUpdate(argv []string) {
 		}
 	}
 
-	fmt.Printf("self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
+	fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
 	candidate := ""
 	res := selfinstall.Install(ctx, selfinstall.RealRunner, func(source, _ string) error {
 		candidate = source
@@ -272,11 +280,25 @@ func cmdSelfUpdate(argv []string) {
 		copies = append(copies, selfinstall.Copy{Source: companionBinary, Target: target})
 	}
 
+	selfUpdateReceiptTargets = make([]selfUpdateReceiptTarget, 0, len(copies))
+	for i, copy := range copies {
+		role := "hot_copy"
+		switch {
+		case i == 0:
+			role = "primary"
+		case i > len(staleSiblings):
+			role = "companion"
+		}
+		selfUpdateReceiptTargets = append(selfUpdateReceiptTargets, selfUpdateReceiptTarget{Role: role, Path: filepath.Clean(copy.Target)})
+	}
+	selfUpdateReceiptAttempted = len(copies)
 	transaction := selfinstall.RunTransaction(copies, selfinstall.OSSwap)
 	switch result := transaction.(type) {
 	case selfinstall.Updated:
-		fmt.Printf("self-update: updated %d target(s)\n", result.Changed)
+		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
+		fmt.Fprintf(selfUpdateProgress, "self-update: updated %d target(s)\n", result.Changed)
 	case selfinstall.RolledBack:
+		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
 		detail := selfUpdateTransactionDetail(result.Err, result.RollbackErrors)
 		emitSelfUpdateOutcome(outcomeRolledBack, installTarget, detail)
 		_ = os.Remove(candidate)
@@ -286,6 +308,7 @@ func cmdSelfUpdate(argv []string) {
 		cleanup()
 		os.Exit(1)
 	case selfinstall.RollbackFailed:
+		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
 		detail := selfUpdateTransactionDetail(result.Err, result.RollbackErrors)
 		emitSelfUpdateOutcome(outcomeRollbackFailed, installTarget, detail)
 		_ = os.Remove(candidate)
@@ -360,7 +383,7 @@ func selfUpdateAudit(repoRoot, headRev string) selfinstall.Audit {
 // printHotCopyAudit prints one greppable line per hot copy plus the verdict.
 func printHotCopyAudit(a selfinstall.Audit) {
 	for _, line := range a.Lines() {
-		fmt.Println("self-update: " + line)
+		fmt.Fprintln(selfUpdateProgress, "self-update: "+line)
 	}
 }
 
@@ -492,12 +515,116 @@ func selfUpdateTransactionDetail(err error, rollbackErrors []error) string {
 // scheduler's "Last Result" is one overwritten integer with no history, so a tick that leaves
 // only an exit code cannot answer "when did the fleet binary last actually advance?".
 func emitSelfUpdateOutcome(cause selfUpdateOutcome, target, detail string) {
+	if selfUpdateJSON != nil {
+		receipt := newSelfUpdateReceipt(cause, target, detail)
+		_ = json.NewEncoder(selfUpdateJSON).Encode(receipt)
+		selfUpdateJSON = nil
+		return
+	}
 	line := fmt.Sprintf("self-update: at=%s outcome=%s target=%s",
 		time.Now().UTC().Format(time.RFC3339), cause, target)
 	if d := strings.TrimSpace(detail); d != "" {
 		line += " detail=" + strconv.Quote(d)
 	}
-	fmt.Println(line)
+	fmt.Fprintln(selfUpdateProgress, line)
+}
+
+const selfUpdateReceiptSchema = "fak.self-update.receipt/v1"
+
+type selfUpdateReceipt struct {
+	Schema          string                    `json:"schema"`
+	SchemaVersion   int                       `json:"schema_version"`
+	CorrelationID   string                    `json:"correlation_id"`
+	Status          string                    `json:"status"`
+	OldRevision     *string                   `json:"old_revision"`
+	NewRevision     *string                   `json:"new_revision"`
+	Targets         []selfUpdateReceiptTarget `json:"targets"`
+	Attempted       int                       `json:"attempted"`
+	Changed         int                       `json:"changed"`
+	RollbackStatus  string                    `json:"rollback_status"`
+	RollbackErrors  []string                  `json:"rollback_errors"`
+	RestartRequired bool                      `json:"restart_required"`
+	NextCommand     string                    `json:"next_command"`
+}
+
+type selfUpdateReceiptTarget struct {
+	Role string `json:"role"`
+	Path string `json:"path"`
+}
+
+var selfUpdateProgress io.Writer = os.Stdout
+var selfUpdateJSON io.Writer
+var selfUpdateCorrelationID = randomSelfUpdateCorrelationID
+var selfUpdateReceiptOldRevision string
+var selfUpdateReceiptNewRevision string
+var selfUpdateReceiptTargets []selfUpdateReceiptTarget
+var selfUpdateReceiptAttempted int
+var selfUpdateReceiptChanged int
+
+func beginSelfUpdateOutput(enabled bool) {
+	selfUpdateProgress = os.Stdout
+	selfUpdateJSON = nil
+	selfUpdateReceiptOldRevision = ""
+	selfUpdateReceiptNewRevision = ""
+	selfUpdateReceiptTargets = nil
+	selfUpdateReceiptAttempted = 0
+	selfUpdateReceiptChanged = 0
+	if !enabled {
+		return
+	}
+	selfUpdateProgress = os.Stderr
+	selfUpdateJSON = os.Stdout
+}
+
+func randomSelfUpdateCorrelationID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("pid-%d", os.Getpid())
+}
+
+func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUpdateReceipt {
+	status := "current"
+	rollbackStatus := "not_attempted"
+	restartRequired := false
+	nextCommand := "fak version"
+	switch cause {
+	case outcomeInstalled:
+		status = "updated"
+	case outcomeRolledBack:
+		status, rollbackStatus, nextCommand = "rolled_back", "succeeded", "fak self-update"
+	case outcomeRollbackFailed:
+		status, rollbackStatus, nextCommand = "rollback_failed", "failed", "fak self-update --check"
+	case outcomeBusy:
+		status, nextCommand = "busy", "fak self-update"
+	case selfUpdateOutcome("restart_required"):
+		status, restartRequired, nextCommand = "restart_required", true, "fak self-update --check"
+	}
+	rollbackErrors := []string{}
+	if status == "rollback_failed" && strings.TrimSpace(detail) != "" {
+		rollbackErrors = append(rollbackErrors, detail)
+	}
+	targets := append([]selfUpdateReceiptTarget(nil), selfUpdateReceiptTargets...)
+	if len(targets) == 0 && strings.TrimSpace(target) != "" && target != "<self>" {
+		targets = append(targets, selfUpdateReceiptTarget{Role: "primary", Path: filepath.Clean(target)})
+	}
+	if targets == nil {
+		targets = []selfUpdateReceiptTarget{}
+	}
+	return selfUpdateReceipt{
+		Schema: selfUpdateReceiptSchema, SchemaVersion: 1, CorrelationID: selfUpdateCorrelationID(), Status: status,
+		OldRevision: optionalRevision(selfUpdateReceiptOldRevision), NewRevision: optionalRevision(selfUpdateReceiptNewRevision),
+		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
+		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand,
+	}
+}
+
+func optionalRevision(revision string) *string {
+	if strings.TrimSpace(revision) == "" {
+		return nil
+	}
+	return &revision
 }
 
 // selfUpdateSkipOutcome names WHY a tick decided not to build, mirroring the branches of the
@@ -566,7 +693,7 @@ func reportAsideFootprint(target string) {
 	if fp.Count == 0 {
 		return
 	}
-	fmt.Printf("self-update: swap-aside footprint next to %s — %d file(s), %s (%d reclaimable, %s); the next self-update reaps the reclaimable ones\n",
+	fmt.Fprintf(selfUpdateProgress, "self-update: swap-aside footprint next to %s — %d file(s), %s (%d reclaimable, %s); the next self-update reaps the reclaimable ones\n",
 		filepath.Base(target), fp.Count, humanBytes(fp.Bytes), fp.DeadCount, humanBytes(fp.DeadBytes))
 }
 
