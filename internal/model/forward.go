@@ -117,9 +117,7 @@ func (m *Model) logitsFromHidden(x []float32) []float32 {
 // Llama instruction stream so the oracle rungs stay bit-exact.
 func (m *Model) layer(l int, x [][]float32, rp rope) {
 	cfg := m.Cfg
-	H := cfg.HiddenSize
 	eps := float32(cfg.RMSNormEps)
-	seq := len(x)
 	attnNorm := m.attentionNorms(l)
 	topo := cfg.BlockTopology
 
@@ -148,30 +146,12 @@ func (m *Model) layer(l int, x [][]float32, rp rope) {
 		return
 	}
 
-	if topo == ParallelResidual {
-		// Both branches read the original residual. GPT-NeoX has separate attention
-		// and MLP LayerNorms; Cohere reuses the attention norm when the MLP norm is
-		// absent.
-		mlpNorm := m.parallelMLPNorms(l, attnNorm)
-		o := attnSub(normSeq(x, attnNorm, eps, cfg))
-		d := mlpSub(normSeq(x, mlpNorm, eps, cfg))
-		for t := 0; t < seq; t++ {
-			for i := 0; i < H; i++ {
-				x[t][i] += o[t][i] + d[t][i]
-			}
-		}
-		return
-	}
-	mlpNorm := m.mlpNorms(l)
-	composeSeqSublayer(topo, x, attnNorm, eps, cfg, attnSub)
-	composeSeqSublayer(topo, x, mlpNorm, eps, cfg, mlpSub)
+	m.composeSeqBlock(l, topo, x, attnNorm, eps, cfg, attnSub, mlpSub)
 }
 
 func (m *Model) layerGLMDsa(l int, x [][]float32, rp rope, sharedTopK *[][]int) {
 	cfg := m.Cfg
-	H := cfg.HiddenSize
 	eps := float32(cfg.RMSNormEps)
-	seq := len(x)
 	attnNorm := m.attentionNorms(l)
 	topo := cfg.BlockTopology
 	attnSub := func(xn [][]float32) [][]float32 {
@@ -179,20 +159,7 @@ func (m *Model) layerGLMDsa(l int, x [][]float32, rp rope, sharedTopK *[][]int) 
 	}
 	mlpSub := func(xn [][]float32) [][]float32 { return m.mlpSeq(l, xn) }
 
-	if topo == ParallelResidual {
-		mlpNorm := m.parallelMLPNorms(l, attnNorm)
-		o := attnSub(normSeq(x, attnNorm, eps, cfg))
-		d := mlpSub(normSeq(x, mlpNorm, eps, cfg))
-		for t := 0; t < seq; t++ {
-			for i := 0; i < H; i++ {
-				x[t][i] += o[t][i] + d[t][i]
-			}
-		}
-		return
-	}
-	mlpNorm := m.mlpNorms(l)
-	composeSeqSublayer(topo, x, attnNorm, eps, cfg, attnSub)
-	composeSeqSublayer(topo, x, mlpNorm, eps, cfg, mlpSub)
+	m.composeSeqBlock(l, topo, x, attnNorm, eps, cfg, attnSub, mlpSub)
 }
 
 // attnSeq computes causal GQA attention over a whole sequence of already-normalized
@@ -230,13 +197,7 @@ func (m *Model) attnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 		xp := mat.prep(xn[t])
 		if gated {
 			qf := mat.mul(p("self_attn.q_proj.weight"), xp, qWidth, H)
-			qv := make([]float32, nH*hd)
-			gv := make([]float32, nH*hd)
-			for h := 0; h < nH; h++ {
-				copy(qv[h*hd:(h+1)*hd], qf[h*2*hd:h*2*hd+hd])
-				copy(gv[h*hd:(h+1)*hd], qf[h*2*hd+hd:h*2*hd+2*hd])
-			}
-			q[t], gates[t] = qv, gv
+			q[t], gates[t] = splitPackedQueryGate(qf, nH, hd)
 		} else {
 			q[t] = mat.mul(p("self_attn.q_proj.weight"), xp, nH*hd, H)
 		}
@@ -285,9 +246,7 @@ func (m *Model) attnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 			for j := lo; j <= t; j++ {
 				vh := v[j][kvh*hd : (kvh+1)*hd]
 				w := scores[j-lo]
-				for d := 0; d < hd; d++ {
-					o[d] += w * vh[d]
-				}
+				saxpy(o, vh, w)
 			}
 		}
 		if gated {
@@ -300,6 +259,19 @@ func (m *Model) attnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 		m.addBiasIfPresent(attnOut[t], p("self_attn.o_proj.bias"))
 	}
 	return attnOut
+}
+
+// splitPackedQueryGate separates a projection laid out as interleaved
+// [query|gate] heads into the two ordinary packed-head vectors consumed by the
+// attention and output-gate paths.
+func splitPackedQueryGate(packed []float32, heads, headDim int) ([]float32, []float32) {
+	query := make([]float32, heads*headDim)
+	gate := make([]float32, heads*headDim)
+	for h := 0; h < heads; h++ {
+		copy(vectorHead(query, h, headDim), packed[h*2*headDim:h*2*headDim+headDim])
+		copy(vectorHead(gate, h, headDim), packed[h*2*headDim+headDim:h*2*headDim+2*headDim])
+	}
+	return query, gate
 }
 
 func (m *Model) glmDsaAttnSeqShared(l int, xn [][]float32, sharedTopK *[][]int) [][]float32 {
@@ -373,6 +345,26 @@ func normSeq(x [][]float32, n normWeights, eps float32, cfg Config) [][]float32 
 // seqSublayer is one whole-sequence residual sub-layer body: normalized per-position
 // inputs in, raw per-position outputs out (pre residual/post-norm).
 type seqSublayer func(xn [][]float32) [][]float32
+
+// composeSeqBlock applies the attention and MLP sublayers with one owner for the
+// topology-dependent residual wiring. ParallelResidual is special: both branches
+// consume the original residual before their deltas are added together. All other
+// topologies keep the sequential attention-then-MLP composition.
+func (m *Model) composeSeqBlock(l int, topo BlockTopology, x [][]float32, attnNorm normWeights, eps float32, cfg Config, attnSub, mlpSub seqSublayer) {
+	if topo == ParallelResidual {
+		mlpNorm := m.parallelMLPNorms(l, attnNorm)
+		o := attnSub(normSeq(x, attnNorm, eps, cfg))
+		d := mlpSub(normSeq(x, mlpNorm, eps, cfg))
+		for t := range x {
+			for i := range x[t] {
+				x[t][i] += o[t][i] + d[t][i]
+			}
+		}
+		return
+	}
+	composeSeqSublayer(topo, x, attnNorm, eps, cfg, attnSub)
+	composeSeqSublayer(topo, x, m.mlpNorms(l), eps, cfg, mlpSub)
+}
 
 // composeSeqSublayer applies ONE residual sub-layer (norm placement + body + add)
 // across a whole sequence under topology t. PreNorm: x += body(norm(x)) — the

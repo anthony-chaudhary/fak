@@ -53,19 +53,7 @@ func qGemm8Tile4x2Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	}
 
 	// Remainder rows (out % MR): every token, via the matching scalar reference.
-	for o := nTiles * qgemmTile42MR; o < out; o++ {
-		qw := qt.q[o*in : o*in+in]
-		dw := qt.d[o*nblk : o*nblk+nblk]
-		for t := 0; t < P; t++ {
-			Y[t*out+o] = qgemm8cell(qw, dw, qp.q[t*in:t*in+in], qp.d[t*nblk:t*nblk+nblk], nblk, 4)
-		}
-	}
+	qGemm8CellRect(qt, qp, Y, nTiles*qgemmTile42MR, out, 0, P, 4, false)
 	// Remainder tokens (P % NR): the tiled rows still need these columns.
-	for t := Pmain; t < P; t++ {
-		qx := qp.q[t*in : t*in+in]
-		dx := qp.d[t*nblk : t*nblk+nblk]
-		for o := 0; o < nTiles*qgemmTile42MR; o++ {
-			Y[t*out+o] = qgemm8cell(qt.q[o*in:o*in+in], qt.d[o*nblk:o*nblk+nblk], qx, dx, nblk, 4)
-		}
-	}
+	qGemm8CellRect(qt, qp, Y, 0, nTiles*qgemmTile42MR, Pmain, P, 4, true)
 }

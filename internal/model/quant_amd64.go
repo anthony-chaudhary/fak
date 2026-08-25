@@ -272,18 +272,10 @@ func qGemm8avx512Remainder(qt *q8Tensor, qp *q8Panel, Y []float32, out, in, nblk
 		for t := 0; t < Pmain; t += 4 {
 			qgemm8tile512x1(&qw[0], &qp.q[t*in], &dw[0], &qp.d[t*nblk], in, nblk, out, &Y[t*out+o])
 		}
-		for t := Pmain; t < P; t++ {
-			Y[t*out+o] = qgemm8cell(qw, dw, qp.q[t*in:t*in+in], qp.d[t*nblk:t*nblk+nblk], nblk, 16)
-		}
+		qGemm8CellRect(qt, qp, Y, o, o+1, Pmain, P, 16, false)
 	}
 	// Remainder tokens (P % 4): the tiled rows still need these columns.
-	for t := Pmain; t < P; t++ {
-		qx := qp.q[t*in : t*in+in]
-		dx := qp.d[t*nblk : t*nblk+nblk]
-		for o := 0; o < nTiles*qgemmMR; o++ {
-			Y[t*out+o] = qgemm8cell(qt.q[o*in:o*in+in], qt.d[o*nblk:o*nblk+nblk], qx, dx, nblk, 16)
-		}
-	}
+	qGemm8CellRect(qt, qp, Y, 0, nTiles*qgemmMR, Pmain, P, 16, true)
 }
 
 // qGemm8avx2Into runs the Q8 prefill GEMM with the AVX2 register-blocked tile (qgemm8tile256,
@@ -318,21 +310,9 @@ func qGemm8avx2Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 	}
 
 	// Remainder rows (out % MR): every token, via the matching lanes=8 scalar reference.
-	for o := nTiles * qgemmMR256; o < out; o++ {
-		qw := qt.q[o*in : o*in+in]
-		dw := qt.d[o*nblk : o*nblk+nblk]
-		for t := 0; t < P; t++ {
-			Y[t*out+o] = qgemm8cell(qw, dw, qp.q[t*in:t*in+in], qp.d[t*nblk:t*nblk+nblk], nblk, 8)
-		}
-	}
+	qGemm8CellRect(qt, qp, Y, nTiles*qgemmMR256, out, 0, P, 8, false)
 	// Remainder tokens (P % NR): the tiled rows still need these columns.
-	for t := Pmain; t < P; t++ {
-		qx := qp.q[t*in : t*in+in]
-		dx := qp.d[t*nblk : t*nblk+nblk]
-		for o := 0; o < nTiles*qgemmMR256; o++ {
-			Y[t*out+o] = qgemm8cell(qt.q[o*in:o*in+in], qt.d[o*nblk:o*nblk+nblk], qx, dx, nblk, 8)
-		}
-	}
+	qGemm8CellRect(qt, qp, Y, 0, nTiles*qgemmMR256, Pmain, P, 8, true)
 }
 
 // qGemm8IntoMany runs several GEMMs that share the same quantized activation panel under

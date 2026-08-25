@@ -161,13 +161,7 @@ func (m *Model) tpAttnBandPreProj(l int, xn [][]float32, rp rope, band attnHeadB
 			// span [QLo*2*hd, QHi*2*hd). Split per head into the query and the sigmoid gate,
 			// exactly as attnSeq does (just over this band's heads).
 			qf := matRows(shardWeightRows(qW, H, band.QLo*2*hd, band.QHi*2*hd), x, bandNQ*2*hd, H)
-			qv := make([]float32, bandNQ*hd)
-			gv := make([]float32, bandNQ*hd)
-			for h := 0; h < bandNQ; h++ {
-				copy(qv[h*hd:(h+1)*hd], qf[h*2*hd:h*2*hd+hd])
-				copy(gv[h*hd:(h+1)*hd], qf[h*2*hd+hd:h*2*hd+2*hd])
-			}
-			q[t], gates[t] = qv, gv
+			q[t], gates[t] = splitPackedQueryGate(qf, bandNQ, hd)
 		} else {
 			q[t] = matRows(shardWeightRows(qW, H, band.QLo*hd, band.QHi*hd), x, bandNQ*hd, H)
 		}
@@ -209,9 +203,7 @@ func (m *Model) tpAttnBandPreProj(l int, xn [][]float32, rp rope, band attnHeadB
 			for j := lo; j <= t; j++ {
 				vh := v[j][localKV*hd : (localKV+1)*hd]
 				w := scores[j-lo]
-				for d := 0; d < hd; d++ {
-					o[d] += w * vh[d]
-				}
+				saxpy(o, vh, w)
 			}
 		}
 		if gated {

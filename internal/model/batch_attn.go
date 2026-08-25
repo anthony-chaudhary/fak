@@ -47,23 +47,9 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 			visible := nPos - j0
 			if attnGQAFuse && grp == 3 && scoreDot3 != nil {
 				h0 := kvh * grp
-				q0 := Q[b*nH*hd+h0*hd : b*nH*hd+(h0+1)*hd]
-				q1 := Q[b*nH*hd+(h0+1)*hd : b*nH*hd+(h0+2)*hd]
-				q2 := Q[b*nH*hd+(h0+2)*hd : b*nH*hd+(h0+3)*hd]
-				sc0 := scoreScratch[wkr*grp+0][:visible]
-				sc1 := scoreScratch[wkr*grp+1][:visible]
-				sc2 := scoreScratch[wkr*grp+2][:visible]
-				for j := j0; j < nPos; j++ {
-					kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-					s0, s1, s2 := scoreDot3(q0, q1, q2, kh)
-					i := j - j0
-					sc0[i] = s0 * scale
-					sc1[i] = s1 * scale
-					sc2[i] = s2 * scale
-				}
-				softmaxInPlace(sc0)
-				softmaxInPlace(sc1)
-				softmaxInPlace(sc2)
+				q0, q1, q2 := packedHead3(Q, b, nH*hd, h0, hd)
+				sc0, sc1, sc2 := scoreScratchHead3(scoreScratch, wkr, grp, visible)
+				fillSoftmaxAttentionScores3(sc0, sc1, sc2, q0, q1, q2, Kl, j0, nPos, w, kvh, hd, scale, scoreDot3)
 				if obs != nil { // #852: query is the just-appended row at abs pos nPos-1
 					emitAttnRow(obs, l, nPos-1, h0+0, j0, sc0)
 					emitAttnRow(obs, l, nPos-1, h0+1, j0, sc1)
@@ -72,13 +58,9 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 			} else {
 				for g := 0; g < grp; g++ {
 					h := kvh*grp + g
-					qh := Q[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
-					sc := scoreScratch[wkr*grp+g][:visible]
-					for j := j0; j < nPos; j++ {
-						kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-						sc[j-j0] = scoreDot(qh, kh) * scale
-					}
-					softmaxInPlace(sc)
+					qh := packedHead(Q, b, nH*hd, h, hd)
+					sc := scoreScratchHead(scoreScratch, wkr, grp, g, visible)
+					fillSoftmaxAttentionScores(sc, qh, Kl, j0, nPos, w, kvh, hd, scale, scoreDot)
 					if obs != nil { // #852: query is the just-appended row at abs pos nPos-1
 						emitAttnRow(obs, l, nPos-1, h, j0, sc)
 					}
@@ -88,81 +70,15 @@ func attnDecodeBatch(attnOut, Q []float32, caches []*KVCache, l, B, nH, hd, w, g
 			// below adds into them. Both score branches above leave attnOut untouched, and
 			// the fused branch's h0 is kvh*grp, so the rows to clear are the same set either
 			// way — one loop, not one per branch.
-			for g := 0; g < grp; g++ {
-				h := kvh*grp + g
-				out := attnOut[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
-				for i := range out {
-					out[i] = 0
-				}
-			}
+			zeroPackedHeads(attnOut, b, nH*hd, kvh*grp, grp, hd)
 			if grp == 3 {
-				out0 := attnOut[b*nH*hd+(kvh*grp+0)*hd : b*nH*hd+(kvh*grp+1)*hd]
-				out1 := attnOut[b*nH*hd+(kvh*grp+1)*hd : b*nH*hd+(kvh*grp+2)*hd]
-				out2 := attnOut[b*nH*hd+(kvh*grp+2)*hd : b*nH*hd+(kvh*grp+3)*hd]
-				sc0 := scoreScratch[wkr*grp+0][:visible]
-				sc1 := scoreScratch[wkr*grp+1][:visible]
-				sc2 := scoreScratch[wkr*grp+2][:visible]
-				if !useSaxpy3SIMD || visible < attnSaxpy3SIMDMinPos {
-					for j := j0; j < nPos; j++ {
-						vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-						i := j - j0
-						a0, a1, a2 := sc0[i], sc1[i], sc2[i]
-						d := 0
-						for ; d+8 <= hd; d += 8 {
-							x0, x1, x2, x3 := vh[d], vh[d+1], vh[d+2], vh[d+3]
-							x4, x5, x6, x7 := vh[d+4], vh[d+5], vh[d+6], vh[d+7]
-							out0[d] += a0 * x0
-							out1[d] += a1 * x0
-							out2[d] += a2 * x0
-							out0[d+1] += a0 * x1
-							out1[d+1] += a1 * x1
-							out2[d+1] += a2 * x1
-							out0[d+2] += a0 * x2
-							out1[d+2] += a1 * x2
-							out2[d+2] += a2 * x2
-							out0[d+3] += a0 * x3
-							out1[d+3] += a1 * x3
-							out2[d+3] += a2 * x3
-							out0[d+4] += a0 * x4
-							out1[d+4] += a1 * x4
-							out2[d+4] += a2 * x4
-							out0[d+5] += a0 * x5
-							out1[d+5] += a1 * x5
-							out2[d+5] += a2 * x5
-							out0[d+6] += a0 * x6
-							out1[d+6] += a1 * x6
-							out2[d+6] += a2 * x6
-							out0[d+7] += a0 * x7
-							out1[d+7] += a1 * x7
-							out2[d+7] += a2 * x7
-						}
-						for ; d < hd; d++ {
-							v := vh[d]
-							out0[d] += a0 * v
-							out1[d] += a1 * v
-							out2[d] += a2 * v
-						}
-					}
-					continue
-				}
-				for j := j0; j < nPos; j++ {
-					vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-					i := j - j0
-					saxpy3(out0, out1, out2, vh, sc0[i], sc1[i], sc2[i])
-				}
+				h0 := kvh * grp
+				sc0, sc1, sc2 := scoreScratchHead3(scoreScratch, wkr, grp, visible)
+				accumulatePackedAttentionValues3(attnOut, b, nH*hd, h0, hd, Vl, sc0, sc1, sc2, j0, nPos, w, kvh,
+					useSaxpy3SIMD && visible >= attnSaxpy3SIMDMinPos)
 				continue
 			}
-			for j := j0; j < nPos; j++ {
-				vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				for d := 0; d < hd; d++ {
-					v := vh[d]
-					for g := 0; g < grp; g++ {
-						h := kvh*grp + g
-						out := attnOut[b*nH*hd+h*hd : b*nH*hd+(h+1)*hd]
-						out[d] += scoreScratch[wkr*grp+g][j-j0] * v
-					}
-				}
-			}
+			accumulateAttentionGroup(attnOut, b, nH*hd, kvh*grp, grp, hd, Vl, scoreScratch, wkr*grp, j0, nPos, w, kvh)
 		}
 	}
 
@@ -222,18 +138,12 @@ func attnPrefillMultiInto(attnOut, Q []float32, caches []*KVCache, baseB []int, 
 			// prefill cache. j0=0 (full causal) when W<0.
 			j0 := windowLoContig(nPos, baseB[b]+t, W)
 			kvh := h / grp
-			qh := Q[row*nH*hd+h*hd : row*nH*hd+(h+1)*hd]
+			qh := packedHead(Q, row, nH*hd, h, hd)
 			sc := scores[:nPos-j0]
-			for j := j0; j < nPos; j++ {
-				kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				sc[j-j0] = scoreDot(qh, kh) * scale
-			}
+			fillAttentionScores(sc, qh, Kl, j0, nPos, w, kvh, hd, scale, scoreDot)
 			softmaxInPlace(sc)
-			out := attnOut[row*nH*hd+h*hd : row*nH*hd+(h+1)*hd]
-			for j := j0; j < nPos; j++ {
-				vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				saxpy(out, vh, sc[j-j0])
-			}
+			out := packedHead(attnOut, row, nH*hd, h, hd)
+			accumulateAttentionValues(out, Vl, sc, j0, nPos, w, kvh, hd)
 		}
 	}
 
@@ -288,96 +198,25 @@ func attnPrefillMultiGQAInto(attnOut, Q []float32, caches []*KVCache, baseB []in
 			span := nPos - j0
 			if attnGQAFuse && grp == 3 && scoreDot3 != nil {
 				h0 := kvh * grp
-				q0 := Q[row*nH*hd+h0*hd : row*nH*hd+(h0+1)*hd]
-				q1 := Q[row*nH*hd+(h0+1)*hd : row*nH*hd+(h0+2)*hd]
-				q2 := Q[row*nH*hd+(h0+2)*hd : row*nH*hd+(h0+3)*hd]
-				sc0 := scoreScratch[wkr*grp+0][:span]
-				sc1 := scoreScratch[wkr*grp+1][:span]
-				sc2 := scoreScratch[wkr*grp+2][:span]
-				for j := j0; j < nPos; j++ {
-					kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-					s0, s1, s2 := scoreDot3(q0, q1, q2, kh)
-					i := j - j0
-					sc0[i] = s0 * scale
-					sc1[i] = s1 * scale
-					sc2[i] = s2 * scale
+				q0, q1, q2 := packedHead3(Q, row, nH*hd, h0, hd)
+				sc0, sc1, sc2 := scoreScratchHead3(scoreScratch, wkr, grp, span)
+				fillSoftmaxAttentionScores3(sc0, sc1, sc2, q0, q1, q2, Kl, j0, nPos, w, kvh, hd, scale, scoreDot3)
+			} else {
+				for g := 0; g < grp; g++ {
+					h := kvh*grp + g
+					qh := packedHead(Q, row, nH*hd, h, hd)
+					sc := scoreScratchHead(scoreScratch, wkr, grp, g, span)
+					fillSoftmaxAttentionScores(sc, qh, Kl, j0, nPos, w, kvh, hd, scale, scoreDot)
 				}
-				softmaxInPlace(sc0)
-				softmaxInPlace(sc1)
-				softmaxInPlace(sc2)
-				out0 := attnOut[row*nH*hd+(h0+0)*hd : row*nH*hd+(h0+1)*hd]
-				out1 := attnOut[row*nH*hd+(h0+1)*hd : row*nH*hd+(h0+2)*hd]
-				out2 := attnOut[row*nH*hd+(h0+2)*hd : row*nH*hd+(h0+3)*hd]
-				if !useSaxpy3SIMD || span < attnSaxpy3SIMDMinPos {
-					for j := j0; j < nPos; j++ {
-						vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-						i := j - j0
-						a0, a1, a2 := sc0[i], sc1[i], sc2[i]
-						for d, v := range vh {
-							out0[d] += a0 * v
-							out1[d] += a1 * v
-							out2[d] += a2 * v
-						}
-					}
-					continue
-				}
-				for j := j0; j < nPos; j++ {
-					vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-					i := j - j0
-					saxpy3(out0, out1, out2, vh, sc0[i], sc1[i], sc2[i])
-				}
-				continue
-			}
-
-			for g := 0; g < grp; g++ {
-				h := kvh*grp + g
-				qh := Q[row*nH*hd+h*hd : row*nH*hd+(h+1)*hd]
-				sc := scoreScratch[wkr*grp+g][:span]
-				for j := j0; j < nPos; j++ {
-					kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-					sc[j-j0] = scoreDot(qh, kh) * scale
-				}
-				softmaxInPlace(sc)
 			}
 			if grp == 3 {
 				h0 := kvh * grp
-				out0 := attnOut[row*nH*hd+(h0+0)*hd : row*nH*hd+(h0+1)*hd]
-				out1 := attnOut[row*nH*hd+(h0+1)*hd : row*nH*hd+(h0+2)*hd]
-				out2 := attnOut[row*nH*hd+(h0+2)*hd : row*nH*hd+(h0+3)*hd]
-				sc0 := scoreScratch[wkr*grp+0][:span]
-				sc1 := scoreScratch[wkr*grp+1][:span]
-				sc2 := scoreScratch[wkr*grp+2][:span]
-				if !useSaxpy3SIMD || span < attnSaxpy3SIMDMinPos {
-					for j := j0; j < nPos; j++ {
-						vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-						i := j - j0
-						a0, a1, a2 := sc0[i], sc1[i], sc2[i]
-						for d, v := range vh {
-							out0[d] += a0 * v
-							out1[d] += a1 * v
-							out2[d] += a2 * v
-						}
-					}
-					continue
-				}
-				for j := j0; j < nPos; j++ {
-					vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-					i := j - j0
-					saxpy3(out0, out1, out2, vh, sc0[i], sc1[i], sc2[i])
-				}
+				sc0, sc1, sc2 := scoreScratchHead3(scoreScratch, wkr, grp, span)
+				accumulatePackedAttentionValues3(attnOut, row, nH*hd, h0, hd, Vl, sc0, sc1, sc2, j0, nPos, w, kvh,
+					useSaxpy3SIMD && span >= attnSaxpy3SIMDMinPos)
 				continue
 			}
-			for j := j0; j < nPos; j++ {
-				vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				i := j - j0
-				for d, v := range vh {
-					for g := 0; g < grp; g++ {
-						h := kvh*grp + g
-						out := attnOut[row*nH*hd+h*hd : row*nH*hd+(h+1)*hd]
-						out[d] += scoreScratch[wkr*grp+g][i] * v
-					}
-				}
-			}
+			accumulateAttentionGroup(attnOut, row, nH*hd, kvh*grp, grp, hd, Vl, scoreScratch, wkr*grp, j0, nPos, w, kvh)
 		}
 	}
 

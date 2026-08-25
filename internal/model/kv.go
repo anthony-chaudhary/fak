@@ -619,12 +619,7 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		var gate []float32
 		if cfg.AttnOutputGate {
 			qf := mat.mul(p("self_attn.q_proj.weight"), xp, 2*qWidth, H)
-			q = make([]float32, qWidth)
-			gate = make([]float32, qWidth)
-			for h := 0; h < nH; h++ {
-				copy(q[h*hd:(h+1)*hd], qf[h*2*hd:h*2*hd+hd])
-				copy(gate[h*hd:(h+1)*hd], qf[h*2*hd+hd:h*2*hd+2*hd])
-			}
+			q, gate = splitPackedQueryGate(qf, nH, hd)
 		} else {
 			q = mat.mul(p("self_attn.q_proj.weight"), xp, qWidth, H)
 		}
@@ -675,9 +670,7 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 			for j := lo; j < nPos; j++ {
 				vh := s.Cache.V[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
 				wj := scores[j-lo]
-				for d := 0; d < hd; d++ {
-					out[d] += wj * vh[d]
-				}
+				saxpy(out, vh, wj)
 			}
 		}
 		s.phaseEnd("full_attn_decode", t)

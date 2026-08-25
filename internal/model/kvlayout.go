@@ -217,9 +217,7 @@ func attendOne(m *Model, layout kvLayout, layer int, q []float32, rows [][]float
 		for j := 0; j < nPos; j++ {
 			vh := vs[j][kvh*hd : (kvh+1)*hd]
 			wj := scores[j]
-			for d := 0; d < hd; d++ {
-				oh[d] += wj * vh[d]
-			}
+			saxpy(oh, vh, wj)
 		}
 	}
 	return out
@@ -306,9 +304,7 @@ func attendOneAbsorbed(m *Model, _ int, q []float32, rows [][]float32, positions
 		for j := 0; j < nPos; j++ {
 			wj := scores[j]
 			cj := latents[j]
-			for c := 0; c < latent; c++ {
-				ctx[c] += wj * cj[c]
-			}
+			saxpy(ctx, cj, wj)
 		}
 		oh := out[h*hd : (h+1)*hd]
 		for d := 0; d < hd; d++ {

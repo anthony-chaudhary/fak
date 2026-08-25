@@ -145,13 +145,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 			}
 		})
 
-		s.Cache.Kraw[l] = append(s.Cache.Kraw[l], Kraw...)
-		s.Cache.K[l] = append(s.Cache.K[l], K...)
-		s.Cache.V[l] = append(s.Cache.V[l], V...)
-		Kl, Vl := s.Cache.K[l], s.Cache.V[l]
-
-		Wl := cfg.windowForLayer(l)
-		attnOut := make([]float32, P*nH*hd)
+		Kl, Vl, Wl, attnOut := preparePrefillAttention(s.Cache, l, Kraw, K, V, cfg, P, nH, hd)
 		if allow == nil {
 			// CHAIN: byte-identical to prefillBatched's contiguous-causal attention — query
 			// q (absolute base+q) attends to cached keys [j0, base+q] inclusive.
@@ -161,22 +155,13 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 					j0 := windowLoContig(nPos, base+q, Wl)
 					for h := 0; h < nH; h++ {
 						kvh := h / grp
-						qh := Q[q*nH*hd+h*hd : q*nH*hd+(h+1)*hd]
+						qh := packedHead(Q, q, nH*hd, h, hd)
 						scores := make([]float32, nPos-j0)
-						for j := j0; j < nPos; j++ {
-							kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-							scores[j-j0] = dot(qh, kh) * scale
-						}
+						fillAttentionScores(scores, qh, Kl, j0, nPos, w, kvh, hd, scale, dot)
 						softcapInPlace(scores, attnCap)
 						softmaxInPlace(scores)
-						out := attnOut[q*nH*hd+h*hd : q*nH*hd+(h+1)*hd]
-						for j := j0; j < nPos; j++ {
-							vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-							wj := scores[j-j0]
-							for d := 0; d < hd; d++ {
-								out[d] += wj * vh[d]
-							}
-						}
+						out := packedHead(attnOut, q, nH*hd, h, hd)
+						accumulateAttentionValues(out, Vl, scores, j0, nPos, w, kvh, hd)
 					}
 				}
 			})
@@ -211,9 +196,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 						for idx, j := range keys {
 							vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
 							wj := scores[idx]
-							for d := 0; d < hd; d++ {
-								out[d] += wj * vh[d]
-							}
+							saxpy(out, vh, wj)
 						}
 					}
 				}

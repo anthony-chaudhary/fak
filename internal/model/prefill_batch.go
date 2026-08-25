@@ -96,10 +96,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		})
 
 		// append all P positions' K/V (and pre-RoPE Kraw) to the kernel-owned cache.
-		s.Cache.Kraw[l] = append(s.Cache.Kraw[l], Kraw...)
-		s.Cache.K[l] = append(s.Cache.K[l], K...)
-		s.Cache.V[l] = append(s.Cache.V[l], V...)
-		Kl, Vl := s.Cache.K[l], s.Cache.V[l]
+		Kl, Vl, Wl, attnOut := preparePrefillAttention(s.Cache, l, Kraw, K, V, cfg, P, nH, hd)
 
 		// causal GQA attention for each new position t (absolute base+t), attending to
 		// cached keys [j0, base+t] inclusive — identical to the per-token path. Parallel
@@ -108,33 +105,22 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 		// cache is contiguous (pos[j]==j: a prior Evict renumbers pos[i]=i and prefill
 		// appends at Cache.Len()), so the index IS the absolute position and the lower
 		// bound max(0, base+t-W+1) equals the keyed-off-pos[] bound.
-		Wl := cfg.windowForLayer(l)
-		attnOut := make([]float32, P*nH*hd)
 		parFor(P, numWorkers, func(lo, hi int) {
 			for t := lo; t < hi; t++ {
 				nPos := base + t + 1
 				j0 := windowLoContig(nPos, base+t, Wl)
 				for h := 0; h < nH; h++ {
 					kvh := h / grp
-					qh := Q[t*nH*hd+h*hd : t*nH*hd+(h+1)*hd]
+					qh := packedHead(Q, t, nH*hd, h, hd)
 					scores := make([]float32, nPos-j0)
-					for j := j0; j < nPos; j++ {
-						kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-						scores[j-j0] = dot(qh, kh) * scale
-					}
+					fillAttentionScores(scores, qh, Kl, j0, nPos, w, kvh, hd, scale, dot)
 					softcapInPlace(scores, attnCap)
 					softmaxInPlace(scores)
 					if m.attnObs != nil { // #852: emit the post-softmax row (copy-out, math untouched)
 						emitAttnRow(m.attnObs, l, base+t, h, j0, scores)
 					}
-					out := attnOut[t*nH*hd+h*hd : t*nH*hd+(h+1)*hd]
-					for j := j0; j < nPos; j++ {
-						vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-						wj := scores[j-j0]
-						for d := 0; d < hd; d++ {
-							out[d] += wj * vh[d]
-						}
-					}
+					out := packedHead(attnOut, t, nH*hd, h, hd)
+					accumulateAttentionValues(out, Vl, scores, j0, nPos, w, kvh, hd)
 				}
 			}
 		})

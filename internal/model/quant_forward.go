@@ -374,82 +374,24 @@ func attnDecodeOne(attnOut, Q []float32, cache *KVCache, layer, nH, hd, w, grp i
 	for kvh := 0; kvh < nKV; kvh++ {
 		if attnGQAFuse && grp == 3 && scoreDot3 != nil {
 			h0 := kvh * grp
-			q0 := Q[(h0+0)*hd : (h0+1)*hd]
-			q1 := Q[(h0+1)*hd : (h0+2)*hd]
-			q2 := Q[(h0+2)*hd : (h0+3)*hd]
-			sc0 := scoreScratch[0][:nPos]
-			sc1 := scoreScratch[1][:nPos]
-			sc2 := scoreScratch[2][:nPos]
-			for j := 0; j < nPos; j++ {
-				kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				s0, s1, s2 := scoreDot3(q0, q1, q2, kh)
-				sc0[j] = s0 * scale
-				sc1[j] = s1 * scale
-				sc2[j] = s2 * scale
+			q0, q1, q2 := packedHead3(Q, 0, len(Q), h0, hd)
+			sc0, sc1, sc2 := scoreScratchHead3(scoreScratch, 0, 1, nPos)
+			fillSoftmaxAttentionScores3(sc0, sc1, sc2, q0, q1, q2, Kl, 0, nPos, w, kvh, hd, scale, scoreDot3)
+		} else {
+			for g := 0; g < grp; g++ {
+				h := kvh*grp + g
+				qh := vectorHead(Q, h, hd)
+				sc := scoreScratch[g][:nPos]
+				fillSoftmaxAttentionScores(sc, qh, Kl, 0, nPos, w, kvh, hd, scale, scoreDot)
 			}
-			softmaxInPlace(sc0)
-			softmaxInPlace(sc1)
-			softmaxInPlace(sc2)
-			out0 := attnOut[(h0+0)*hd : (h0+1)*hd]
-			out1 := attnOut[(h0+1)*hd : (h0+2)*hd]
-			out2 := attnOut[(h0+2)*hd : (h0+3)*hd]
-			for j := 0; j < nPos; j++ {
-				vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				if useSaxpy3SIMD && saxpy3Fast(out0, out1, out2, vh, sc0[j], sc1[j], sc2[j]) {
-					continue
-				}
-				a0, a1, a2 := sc0[j], sc1[j], sc2[j]
-				for d, v := range vh {
-					out0[d] += a0 * v
-					out1[d] += a1 * v
-					out2[d] += a2 * v
-				}
-			}
-			continue
-		}
-
-		for g := 0; g < grp; g++ {
-			h := kvh*grp + g
-			qh := Q[h*hd : (h+1)*hd]
-			sc := scoreScratch[g][:nPos]
-			for j := 0; j < nPos; j++ {
-				kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				sc[j] = scoreDot(qh, kh) * scale
-			}
-			softmaxInPlace(sc)
 		}
 		if grp == 3 {
 			h0 := kvh * grp
-			out0 := attnOut[(h0+0)*hd : (h0+1)*hd]
-			out1 := attnOut[(h0+1)*hd : (h0+2)*hd]
-			out2 := attnOut[(h0+2)*hd : (h0+3)*hd]
-			sc0 := scoreScratch[0][:nPos]
-			sc1 := scoreScratch[1][:nPos]
-			sc2 := scoreScratch[2][:nPos]
-			for j := 0; j < nPos; j++ {
-				vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				if useSaxpy3SIMD && saxpy3Fast(out0, out1, out2, vh, sc0[j], sc1[j], sc2[j]) {
-					continue
-				}
-				a0, a1, a2 := sc0[j], sc1[j], sc2[j]
-				for d, v := range vh {
-					out0[d] += a0 * v
-					out1[d] += a1 * v
-					out2[d] += a2 * v
-				}
-			}
+			sc0, sc1, sc2 := scoreScratchHead3(scoreScratch, 0, 1, nPos)
+			accumulatePackedAttentionValues3(attnOut, 0, len(attnOut), h0, hd, Vl, sc0, sc1, sc2, 0, nPos, w, kvh, useSaxpy3SIMD)
 			continue
 		}
-		for j := 0; j < nPos; j++ {
-			vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-			for d, v := range vh {
-				for g := 0; g < grp; g++ {
-					h := kvh*grp + g
-					out := attnOut[h*hd : (h+1)*hd]
-					out[d] += scoreScratch[g][j] * v
-				}
-			}
-		}
+		accumulateAttentionGroup(attnOut, 0, len(attnOut), kvh*grp, grp, hd, Vl, scoreScratch, 0, 0, nPos, w, kvh)
 	}
 	return scoreScratch
 }

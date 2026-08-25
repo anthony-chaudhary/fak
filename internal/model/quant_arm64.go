@@ -215,9 +215,7 @@ func qGemm8Into(qt *q8Tensor, qp *q8Panel, Y []float32) {
 		for t := 0; t < Pmain; t += 4 {
 			qgemm8row4NEON(&qw[0], &qp.q[t*in], &dw[0], &qp.d[t*nblk], in, nblk, out, &Y[t*out+o])
 		}
-		for t := Pmain; t < P; t++ {
-			Y[t*out+o] = qgemm8cell(qw, dw, qp.q[t*in:t*in+in], qp.d[t*nblk:t*nblk+nblk], nblk, 4)
-		}
+		qGemm8CellRect(qt, qp, Y, o, o+1, Pmain, P, 4, false)
 	}
 }
 

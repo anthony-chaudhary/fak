@@ -212,6 +212,33 @@ func qgemm8cell(qw []int8, dw []float32, qx []int8, dx []float32, nblk, lanes in
 	return acc[0] + acc[1]
 }
 
+// qGemm8CellRect writes a rectangular scalar-reference remainder. tokenMajor
+// preserves the caller's original traversal order: tiled token tails walk
+// tokens first, while row tails and the scalar oracle walk rows first.
+func qGemm8CellRect(qt *q8Tensor, qp *q8Panel, dst []float32, rowLo, rowHi, tokenLo, tokenHi, lanes int, tokenMajor bool) {
+	if tokenMajor {
+		for token := tokenLo; token < tokenHi; token++ {
+			qx := qp.q[token*qp.in : (token+1)*qp.in]
+			dx := qp.d[token*qp.nblk : (token+1)*qp.nblk]
+			for row := rowLo; row < rowHi; row++ {
+				qw := qt.q[row*qt.in : (row+1)*qt.in]
+				dw := qt.d[row*qt.nblk : (row+1)*qt.nblk]
+				dst[token*qt.out+row] = qgemm8cell(qw, dw, qx, dx, qt.nblk, lanes)
+			}
+		}
+		return
+	}
+	for row := rowLo; row < rowHi; row++ {
+		qw := qt.q[row*qt.in : (row+1)*qt.in]
+		dw := qt.d[row*qt.nblk : (row+1)*qt.nblk]
+		for token := tokenLo; token < tokenHi; token++ {
+			qx := qp.q[token*qp.in : (token+1)*qp.in]
+			dx := qp.d[token*qp.nblk : (token+1)*qp.nblk]
+			dst[token*qt.out+row] = qgemm8cell(qw, dw, qx, dx, qt.nblk, lanes)
+		}
+	}
+}
+
 // qGemm8scalar is the fully-portable batched Q8_0 GEMM: Y[t·out+o] = qgemm8cell(weight row
 // o, token t), row-parallel across output rows. It is the non-amd64 path and the test
 // oracle the amd64 tile kernel is pinned against (run with the matching lane count). Output
@@ -226,15 +253,9 @@ func qGemm8scalar(qt *q8Tensor, qp *q8Panel, lanes int) []float32 {
 // hot decode loop can reuse one buffer across steps instead of allocating P*out floats per
 // GEMM. Identical arithmetic — only the output's backing memory changes.
 func qGemm8scalarInto(qt *q8Tensor, qp *q8Panel, lanes int, Y []float32) {
-	out, in, nblk, P := qt.out, qt.in, qt.nblk, qp.P
+	out, in, P := qt.out, qt.in, qp.P
 	body := func(lo, hi int) {
-		for o := lo; o < hi; o++ {
-			qw := qt.q[o*in : o*in+in]
-			dw := qt.d[o*nblk : o*nblk+nblk]
-			for t := 0; t < P; t++ {
-				Y[t*out+o] = qgemm8cell(qw, dw, qp.q[t*in:t*in+in], qp.d[t*nblk:t*nblk+nblk], nblk, lanes)
-			}
-		}
+		qGemm8CellRect(qt, qp, Y, lo, hi, 0, P, lanes, false)
 	}
 	if out*in*P < parThreshold {
 		body(0, out)

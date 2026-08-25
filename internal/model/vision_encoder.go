@@ -351,9 +351,7 @@ func (e *visionEncoder) attention(q, k, v [][]float32) [][]float32 {
 			for j := 0; j < seq; j++ {
 				w := scores[j]
 				vj := v[j][off : off+hd]
-				for d := 0; d < hd; d++ {
-					acc[d] += w * vj[d]
-				}
+				saxpy(acc, vj, w)
 			}
 		}
 	}

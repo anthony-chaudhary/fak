@@ -168,9 +168,7 @@ func (m *Model) minimaxMSAAttnSeq(l int, xn [][]float32, rp rope) [][]float32 {
 			for i, kp := range admitted {
 				vh := v[kp][kvh*hd : (kvh+1)*hd]
 				w := scores[i]
-				for d := 0; d < hd; d++ {
-					o[d] += w * vh[d]
-				}
+				saxpy(o, vh, w)
 			}
 		}
 		attnOut[t] = m.residentMatRows(p("self_attn.o_proj.weight"), attnOut[t], H, nH*hd)
@@ -244,15 +242,19 @@ func (m *Model) minimaxIndexerSelectBlocks(l int, xn [][]float32, rp rope) [][]i
 			if !ok {
 				panic("model: minimax_m3 indexer block-score failed")
 			}
-			for b, s := range bs {
-				if cur, seen := merged[b]; !seen || s > cur {
-					merged[b] = s
-				}
-			}
+			mergeMaxBlockScores(merged, bs)
 		}
 		out[qpos] = minimaxSelectBlocks(merged, qpos, blockSize, topK, local)
 	}
 	return out
+}
+
+func mergeMaxBlockScores(dst, src map[int]float64) {
+	for block, score := range src {
+		if current, seen := dst[block]; !seen || score > current {
+			dst[block] = score
+		}
+	}
 }
 
 // minimaxSelectBlocks reproduces HF's MiniMax-M3 lightning-indexer block selection

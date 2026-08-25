@@ -152,20 +152,7 @@ func (m *Model) ForwardEP(ids []int, ep EPConfig) (*Activations, error) {
 			return m.epMoeLayer(l, xn, mat, plan, coll)
 		})
 
-		if topo == ParallelResidual {
-			// Both branches read the original residual (mirrors layerGLMDsa's ParallelResidual leg).
-			mlpNorm := m.parallelMLPNorms(l, attnNorm)
-			o := attnSub(normSeq(x, attnNorm, eps, cfg))
-			d := mlpSub(normSeq(x, mlpNorm, eps, cfg))
-			for t := 0; t < seq; t++ {
-				for i := 0; i < H; i++ {
-					x[t][i] += o[t][i] + d[t][i]
-				}
-			}
-		} else {
-			composeSeqSublayer(topo, x, attnNorm, eps, cfg, attnSub)
-			composeSeqSublayer(topo, x, m.mlpNorms(l), eps, cfg, mlpSub)
-		}
+		m.composeSeqBlock(l, topo, x, attnNorm, eps, cfg, attnSub, mlpSub)
 		if subErr != nil {
 			return nil, subErr
 		}

@@ -195,9 +195,7 @@ func (m *Model) minimaxDenseAttnStep(cache *KVCache, layer, pos int, xn, cos, si
 		for j := 0; j < nPos; j++ {
 			vh := cache.V[layer][j*w+kvh*hd : j*w+(kvh+1)*hd]
 			wj := scores[j]
-			for d := 0; d < hd; d++ {
-				o[d] += wj * vh[d]
-			}
+			saxpy(o, vh, wj)
 		}
 	}
 	out := m.residentMatRows(p("self_attn.o_proj.weight"), attnOut, H, nH*hd)
@@ -258,9 +256,7 @@ func (m *Model) minimaxMSAStep(cache *KVCache, layer, pos int, xn, cos, sin []fl
 		for i, kp := range admitted {
 			vh := cache.V[layer][kp*w+kvh*hd : kp*w+(kvh+1)*hd]
 			wt := scores[i]
-			for d := 0; d < hd; d++ {
-				o[d] += wt * vh[d]
-			}
+			saxpy(o, vh, wt)
 		}
 	}
 	out := m.residentMatRows(p("self_attn.o_proj.weight"), attnOut, H, nH*hd)
@@ -333,11 +329,7 @@ func (m *Model) minimaxSelectCachedKeys(msa *minimaxKVCache, layer, pos int, xn,
 		if !ok {
 			return nil, false
 		}
-		for b, s := range bs {
-			if cur, seen := merged[b]; !seen || s > cur {
-				merged[b] = s
-			}
-		}
+		mergeMaxBlockScores(merged, bs)
 	}
 	blocks := minimaxSelectBlocks(merged, pos, blockSize, cfg.IndexTopKBlocks, cfg.IndexLocalBlocks)
 	admitted, ok := msaSelectedKeyPositions(keyPos, pos, blockSize, blocks)

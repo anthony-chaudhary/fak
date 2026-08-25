@@ -303,9 +303,7 @@ func (s *Session) profToken(p *profiler, id, pos int, withHead bool) []float32 {
 			for j := 0; j < nPos; j++ {
 				vh := s.Cache.V[l][j*w+kvh*hd : j*w+(kvh+1)*hd]
 				wj := scores[j]
-				for d := 0; d < hd; d++ {
-					out[d] += wj * vh[d]
-				}
+				saxpy(out, vh, wj)
 			}
 		}
 		// attn LOADS K and V from the cache once per QUERY head (nH), not per KV head:

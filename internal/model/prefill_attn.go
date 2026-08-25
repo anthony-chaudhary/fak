@@ -2,6 +2,20 @@ package model
 
 import "sync"
 
+func appendLayerKV(cache *KVCache, layer int, rawKey, key, value []float32) ([]float32, []float32) {
+	cache.Kraw[layer] = append(cache.Kraw[layer], rawKey...)
+	cache.K[layer] = append(cache.K[layer], key...)
+	cache.V[layer] = append(cache.V[layer], value...)
+	return cache.K[layer], cache.V[layer]
+}
+
+func preparePrefillAttention(cache *KVCache, layer int, rawKey, key, value []float32, cfg Config, rows, heads, headDim int) (keys, values []float32, window int, output []float32) {
+	keys, values = appendLayerKV(cache, layer, rawKey, key, value)
+	window = cfg.windowForLayer(layer)
+	output = make([]float32, rows*heads*headDim)
+	return
+}
+
 // prefill_attn.go — the balanced, allocation-free batched causal GQA attention used by the
 // prefill paths. It replaces the per-token parFor that profiling (FAK_QPROFILE) exposed as
 // the second-largest prefill cost — ~27% of Q8 prefill, despite attention being ~25x fewer
@@ -47,22 +61,16 @@ func attnPrefillInto(attnOut, Q, Kl, Vl []float32, P, base, nH, hd, w, grp, W, l
 			nPos := base + t + 1
 			j0 := windowLoContig(nPos, base+t, W)
 			kvh := h / grp
-			qh := Q[t*nH*hd+h*hd : t*nH*hd+(h+1)*hd]
+			qh := packedHead(Q, t, nH*hd, h, hd)
 			sc := scores[:nPos-j0]
-			for j := j0; j < nPos; j++ {
-				kh := Kl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				sc[j-j0] = scoreDot(qh, kh) * scale
-			}
+			fillAttentionScores(sc, qh, Kl, j0, nPos, w, kvh, hd, scale, scoreDot)
 			softcapInPlace(sc, attnCap)
 			softmaxInPlace(sc)
 			if obs != nil { // #852: prefill token t sits at absolute position base+t
 				emitAttnRow(obs, layer, base+t, h, j0, sc)
 			}
-			out := attnOut[t*nH*hd+h*hd : t*nH*hd+(h+1)*hd]
-			for j := j0; j < nPos; j++ {
-				vh := Vl[j*w+kvh*hd : j*w+(kvh+1)*hd]
-				saxpy(out, vh, sc[j-j0])
-			}
+			out := packedHead(attnOut, t, nH*hd, h, hd)
+			accumulateAttentionValues(out, Vl, sc, j0, nPos, w, kvh, hd)
 		}
 	}
 
@@ -105,6 +113,106 @@ func saxpy(out, x []float32, a float32) {
 	for ; i < n; i++ {
 		out[i] += a * x[i]
 	}
+}
+
+// packedHead returns one head from a row-major panel whose rows have rowWidth
+// elements. Keeping the stride arithmetic here prevents the decode, prefill, and
+// verification attention loops from each transcribing the same slice bounds.
+func packedHead(panel []float32, row, rowWidth, head, headDim int) []float32 {
+	start := row*rowWidth + head*headDim
+	return panel[start : start+headDim]
+}
+
+func vectorHead(vector []float32, head, headDim int) []float32 {
+	return packedHead(vector, 0, len(vector), head, headDim)
+}
+
+func packedHead3(panel []float32, row, rowWidth, firstHead, headDim int) ([]float32, []float32, []float32) {
+	return packedHead(panel, row, rowWidth, firstHead, headDim),
+		packedHead(panel, row, rowWidth, firstHead+1, headDim),
+		packedHead(panel, row, rowWidth, firstHead+2, headDim)
+}
+
+func zeroPackedHeads(panel []float32, row, rowWidth, firstHead, heads, headDim int) {
+	for head := firstHead; head < firstHead+heads; head++ {
+		clear(packedHead(panel, row, rowWidth, head, headDim))
+	}
+}
+
+func scoreScratchHead(scratch [][]float32, worker, groupSize, groupHead, n int) []float32 {
+	return scratch[worker*groupSize+groupHead][:n]
+}
+
+func scoreScratchHead3(scratch [][]float32, worker, groupSize, n int) ([]float32, []float32, []float32) {
+	return scoreScratchHead(scratch, worker, groupSize, 0, n),
+		scoreScratchHead(scratch, worker, groupSize, 1, n),
+		scoreScratchHead(scratch, worker, groupSize, 2, n)
+}
+
+func fillAttentionScores(scores, query, keys []float32, first, end, rowWidth, kvHead, headDim int, scale float32, scoreDot func(a, b []float32) float32) {
+	for pos := first; pos < end; pos++ {
+		scores[pos-first] = scoreDot(query, packedHead(keys, pos, rowWidth, kvHead, headDim)) * scale
+	}
+}
+
+func fillAttentionScores3(scores0, scores1, scores2, query0, query1, query2, keys []float32, first, end, rowWidth, kvHead, headDim int, scale float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32)) {
+	for pos := first; pos < end; pos++ {
+		s0, s1, s2 := scoreDot3(query0, query1, query2, packedHead(keys, pos, rowWidth, kvHead, headDim))
+		i := pos - first
+		scores0[i], scores1[i], scores2[i] = s0*scale, s1*scale, s2*scale
+	}
+}
+
+func fillSoftmaxAttentionScores(scores, query, keys []float32, first, end, rowWidth, kvHead, headDim int, scale float32, scoreDot func(a, b []float32) float32) {
+	fillAttentionScores(scores, query, keys, first, end, rowWidth, kvHead, headDim, scale, scoreDot)
+	softmaxInPlace(scores)
+}
+
+func fillSoftmaxAttentionScores3(scores0, scores1, scores2, query0, query1, query2, keys []float32, first, end, rowWidth, kvHead, headDim int, scale float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32)) {
+	fillAttentionScores3(scores0, scores1, scores2, query0, query1, query2, keys, first, end, rowWidth, kvHead, headDim, scale, scoreDot3)
+	softmaxInPlace(scores0)
+	softmaxInPlace(scores1)
+	softmaxInPlace(scores2)
+}
+
+func accumulateAttentionValues(out, values, scores []float32, first, end, rowWidth, kvHead, headDim int) {
+	for pos := first; pos < end; pos++ {
+		saxpy(out, packedHead(values, pos, rowWidth, kvHead, headDim), scores[pos-first])
+	}
+}
+
+// accumulateAttentionGroup preserves the generic GQA traversal: stream each V
+// head once per position, then update every query head that shares it. Keeping
+// position and dimension outside the group loop avoids rereading the KV cache
+// groupSize times while preserving each output element's position order.
+func accumulateAttentionGroup(outPanel []float32, outRow, outRowWidth, firstHead, groupSize, headDim int, values []float32, scores [][]float32, scoreBase, first, end, valueRowWidth, kvHead int) {
+	for pos := first; pos < end; pos++ {
+		value := packedHead(values, pos, valueRowWidth, kvHead, headDim)
+		i := pos - first
+		for dim, x := range value {
+			for groupHead := 0; groupHead < groupSize; groupHead++ {
+				out := packedHead(outPanel, outRow, outRowWidth, firstHead+groupHead, headDim)
+				out[dim] += scores[scoreBase+groupHead][i] * x
+			}
+		}
+	}
+}
+
+func accumulateAttentionValues3(out0, out1, out2, values, scores0, scores1, scores2 []float32, first, end, rowWidth, kvHead, headDim int, useSIMD bool) {
+	for pos := first; pos < end; pos++ {
+		value := packedHead(values, pos, rowWidth, kvHead, headDim)
+		i := pos - first
+		if useSIMD {
+			saxpy3(out0, out1, out2, value, scores0[i], scores1[i], scores2[i])
+		} else {
+			saxpy3scalar(out0, out1, out2, value, scores0[i], scores1[i], scores2[i])
+		}
+	}
+}
+
+func accumulatePackedAttentionValues3(outPanel []float32, outRow, outRowWidth, firstHead, headDim int, values, scores0, scores1, scores2 []float32, first, end, valueRowWidth, kvHead int, useSIMD bool) {
+	out0, out1, out2 := packedHead3(outPanel, outRow, outRowWidth, firstHead, headDim)
+	accumulateAttentionValues3(out0, out1, out2, values, scores0, scores1, scores2, first, end, valueRowWidth, kvHead, headDim, useSIMD)
 }
 
 func saxpy3(out0, out1, out2, x []float32, a0, a1, a2 float32) {

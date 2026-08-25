@@ -205,9 +205,7 @@ func (m *Model) gemma4AttnSeq(l int, xn [][]float32, ropeFreqs []float64) [][]fl
 			for j := lo; j <= t; j++ {
 				vh := v[j][kvh*hd : (kvh+1)*hd]
 				w := scores[j-lo]
-				for d := 0; d < hd; d++ {
-					o[d] += w * vh[d]
-				}
+				saxpy(o, vh, w)
 			}
 		}
 		attnOut[t] = mat.mul(p("self_attn.o_proj.weight"), mat.prep(out), H, nH*hd)

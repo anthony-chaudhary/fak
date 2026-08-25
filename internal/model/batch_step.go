@@ -234,9 +234,7 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		Xn := make([]float32, B*H)
 		wIn := m.tensor(lp("input_layernorm.weight"))
 		bIn := m.tensorOptional(lp("input_layernorm.bias"))
-		for b := 0; b < B; b++ {
-			copy(Xn[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wIn, bIn, eps, cfg))
-		}
+		normalizeBatchRows(Xn, X, wIn, bIn, B, H, eps, cfg, false)
 
 		// batched q/k/v projections: one weight stream, B rows.
 		Q := matMulBatch(m.tensor(lp("self_attn.q_proj.weight")), Xn, nH*hd, H, B)
@@ -267,9 +265,7 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 		Xn2 := make([]float32, B*H)
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
-		for b := 0; b < B; b++ {
-			copy(Xn2[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wPost, bPost, eps, cfg))
-		}
+		normalizeBatchRows(Xn2, X, wPost, bPost, B, H, eps, cfg, false)
 		Down := m.batchedGatedMLP(lp, Xn2, B, H, cfg.IntermediateSize, cfg)
 		for i := range X {
 			X[i] += Down[i]
@@ -383,13 +379,7 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		// keeps out of this quantized lane. Passing it anyway keeps the norm call identical to
 		// the f32 twin, so relaxing that gate can never silently drop the bias.
 		bIn := m.tensorOptional(lp("input_layernorm.bias"))
-		for b := 0; b < B; b++ {
-			if cfg.NormGain1p || cfg.LayerNorm {
-				copy(Xn[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wIn, bIn, eps, cfg))
-			} else {
-				rmsnormInto(Xn[b*H:(b+1)*H], X[b*H:(b+1)*H], wIn, eps)
-			}
-		}
+		normalizeBatchRows(Xn, X, wIn, bIn, B, H, eps, cfg, true)
 		// q/k/v share one quantized panel of Xn (built once, reused across the three GEMMs).
 		if bs.scratch == nil {
 			bs.scratch = &q8Panel{}
@@ -435,13 +425,7 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		db.Xn2 = Xn2
 		wPost := m.tensor(lp("post_attention_layernorm.weight"))
 		bPost := m.tensorOptional(lp("post_attention_layernorm.bias"))
-		for b := 0; b < B; b++ {
-			if cfg.NormGain1p || cfg.LayerNorm {
-				copy(Xn2[b*H:(b+1)*H], normCfg(X[b*H:(b+1)*H], wPost, bPost, eps, cfg))
-			} else {
-				rmsnormInto(Xn2[b*H:(b+1)*H], X[b*H:(b+1)*H], wPost, eps)
-			}
-		}
+		normalizeBatchRows(Xn2, X, wPost, bPost, B, H, eps, cfg, true)
 		I := cfg.IntermediateSize
 		quantizeBatchPanelInto(bs.scratch, Xn2, B, H)
 		G := grow(db.G, B*I)
@@ -486,4 +470,19 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 	db.out = out
 	bs.recordStepMACs(B) // B-proportional projection MAC count for this step (see LastStepMACs)
 	return out
+}
+
+// normalizeBatchRows applies one norm to a row-major batch. The quantized
+// decode lane may use rmsnormInto for ordinary RMSNorm; gain-1p/LayerNorm and
+// the f32 lane retain normCfg's exact allocation and bias semantics.
+func normalizeBatchRows(dst, src, weight, bias []float32, rows, width int, eps float32, cfg Config, fastRMS bool) {
+	for row := 0; row < rows; row++ {
+		dstRow := dst[row*width : (row+1)*width]
+		srcRow := src[row*width : (row+1)*width]
+		if fastRMS && !cfg.NormGain1p && !cfg.LayerNorm {
+			rmsnormInto(dstRow, srcRow, weight, eps)
+			continue
+		}
+		copy(dstRow, normCfg(srcRow, weight, bias, eps, cfg))
+	}
 }
