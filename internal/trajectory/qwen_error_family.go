@@ -7,18 +7,18 @@ import (
 
 // QwenToolErrorEvent identifies a tool error and its position in a trajectory.
 type QwenToolErrorEvent struct {
-	Content string
-	Index   int
-	Tokens  uint64
+	Content string `json:"content"`
+	Index   int    `json:"index"`
+	Tokens  uint64 `json:"tokens"`
 }
 
 // QwenToolErrorFamily summarizes occurrences of one classified error family.
 type QwenToolErrorFamily struct {
-	Family     string
-	Count      int
-	FirstIndex int
-	LastIndex  int
-	Tokens     uint64
+	Family     string `json:"family"`
+	Count      int    `json:"count"`
+	FirstIndex int    `json:"first_index"`
+	LastIndex  int    `json:"last_index"`
+	Tokens     uint64 `json:"tokens"`
 }
 
 func classifyQwenToolError(content string) string {

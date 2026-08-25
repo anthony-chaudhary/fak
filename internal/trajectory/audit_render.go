@@ -52,6 +52,15 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		fmt.Fprintf(&out, "\nHighest-cost bottleneck: %s/`%s` with %d accounted tokens; deterministic ties sort by source, transcript, then relative path.\n", first.Source, first.TranscriptID, first.AccountedTokens)
 	}
 
+	if len(result.ToolErrorFamilies) > 0 {
+		out.WriteString("\n## Tool error families\n\n")
+		out.WriteString("| Family | Count | First event | Last event | Tokens |\n")
+		out.WriteString("|---|---:|---:|---:|---:|\n")
+		for _, family := range result.ToolErrorFamilies {
+			fmt.Fprintf(&out, "| %s | %d | %d | %d | %d |\n", family.Family, family.Count, family.FirstIndex, family.LastIndex, family.Tokens)
+		}
+	}
+
 	if len(result.Baseline) > 0 {
 		out.WriteString("\n## Baseline deltas\n\n")
 		out.WriteString("| Metric | Current | Baseline | Delta | Comparable | Regression |\n")

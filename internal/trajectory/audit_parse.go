@@ -41,6 +41,7 @@ type auditParseState struct {
 	usageSeen       int
 	usageExact      int
 	usageDuplicates int
+	toolErrorEvents []QwenToolErrorEvent
 }
 
 type auditCodexRawTokens struct {
@@ -50,10 +51,10 @@ type auditCodexRawTokens struct {
 	CacheWrite int64
 }
 
-func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) (AuditTranscriptRow, []AuditRefusalRow, []int64, error) {
+func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) (AuditTranscriptRow, []AuditRefusalRow, []int64, []QwenToolErrorEvent, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return AuditTranscriptRow{}, nil, nil, fmt.Errorf("trajectory audit: open transcript: %w", err)
+		return AuditTranscriptRow{}, nil, nil, nil, fmt.Errorf("trajectory audit: open transcript: %w", err)
 	}
 	defer file.Close()
 
@@ -106,7 +107,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	}
 	if err := scanner.Err(); err != nil {
 		if !errors.Is(err, bufio.ErrTooLong) {
-			return AuditTranscriptRow{}, nil, nil, fmt.Errorf("trajectory audit: scan transcript: %w", err)
+			return AuditTranscriptRow{}, nil, nil, nil, fmt.Errorf("trajectory audit: scan transcript: %w", err)
 		}
 		lineNumber++
 		denominator.Records++
@@ -138,7 +139,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		state.row.UsageRecords++
 		denominator.UsageRecordsApplied++
 	}
-	return state.row, refusals, append([]int64(nil), state.hookDurations...), nil
+	return state.row, refusals, append([]int64(nil), state.hookDurations...), append([]QwenToolErrorEvent(nil), state.toolErrorEvents...), nil
 }
 
 func parseClaudeAuditRecord(record map[string]any, line int, rel string, state *auditParseState, refusals *[]AuditRefusalRow) {
@@ -162,7 +163,7 @@ func parseClaudeAuditRecord(record map[string]any, line int, rel string, state *
 		return
 	}
 	if recordType == "user" {
-		parseClaudeToolResults(message["content"], state)
+		parseClaudeToolResults(message["content"], line, state)
 	}
 }
 
@@ -239,7 +240,7 @@ func parseClaudeToolCalls(content any, line int, state *auditParseState) {
 	}
 }
 
-func parseClaudeToolResults(content any, state *auditParseState) {
+func parseClaudeToolResults(content any, line int, state *auditParseState) {
 	blocks, _ := content.([]any)
 	for _, raw := range blocks {
 		block, _ := raw.(map[string]any)
@@ -251,7 +252,7 @@ func parseClaudeToolResults(content any, state *auditParseState) {
 			continue
 		}
 		id, _ := block["tool_use_id"].(string)
-		auditRecordToolFailure(state, state.calls[id], block["content"])
+		auditRecordToolFailure(state, state.calls[id], block["content"], line)
 	}
 }
 
@@ -398,17 +399,19 @@ func parseCodexResponseItem(payload map[string]any, line int, rel string, state 
 			return
 		}
 		id, _ := payload["call_id"].(string)
-		auditRecordToolFailure(state, state.calls[id], payload["output"])
+		auditRecordToolFailure(state, state.calls[id], payload["output"], line)
 	}
 }
 
-func auditRecordToolFailure(state *auditParseState, call auditToolCall, output any) {
+func auditRecordToolFailure(state *auditParseState, call auditToolCall, output any, line int) {
 	state.row.ToolErrors++
+	content := auditText(output)
+	state.toolErrorEvents = append(state.toolErrorEvents, QwenToolErrorEvent{Content: content, Index: line})
 	name := call.name
 	if name == "" {
 		name = "unknown"
 	}
-	signature := name + "\x00" + call.args + "\x00" + auditNormalizedHead(auditText(output), 200)
+	signature := name + "\x00" + call.args + "\x00" + auditNormalizedHead(content, 200)
 	state.failureCounts[signature]++
 }
 

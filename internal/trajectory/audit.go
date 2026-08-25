@@ -179,12 +179,13 @@ type AuditRefusalRow struct {
 
 // AuditResult is the complete versioned artifact before rendering.
 type AuditResult struct {
-	Summary      AuditSummaryRow
-	Denominators []AuditDenominatorRow
-	Transcripts  []AuditTranscriptRow
-	Bottlenecks  []AuditBottleneckRow
-	Baseline     []AuditDeltaRow
-	Refusals     []AuditRefusalRow
+	Summary           AuditSummaryRow
+	Denominators      []AuditDenominatorRow
+	Transcripts       []AuditTranscriptRow
+	Bottlenecks       []AuditBottleneckRow
+	Baseline          []AuditDeltaRow
+	Refusals          []AuditRefusalRow     `json:"refusals,omitempty"`
+	ToolErrorFamilies []QwenToolErrorFamily `json:"tool_error_families,omitempty"`
 }
 
 // DefaultAuditSources discovers the two supported harness homes.
@@ -215,14 +216,16 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 
 	result := AuditResult{}
 	allHookDurations := []int64{}
+	allToolErrorEvents := []QwenToolErrorEvent{}
 	for _, source := range opts.Sources {
-		denominator, transcripts, refusals, hookDurations, err := auditSource(source, opts)
+		denominator, transcripts, refusals, hookDurations, toolErrorEvents, err := auditSource(source, opts)
 		if err != nil {
 			return AuditResult{}, err
 		}
 		result.Denominators = append(result.Denominators, denominator)
 		result.Transcripts = append(result.Transcripts, transcripts...)
 		result.Refusals = append(result.Refusals, refusals...)
+		allToolErrorEvents = append(allToolErrorEvents, toolErrorEvents...)
 		allHookDurations = append(allHookDurations, hookDurations...)
 	}
 
@@ -257,13 +260,14 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 
 	result.Summary = summarizeAudit(result.Denominators, result.Transcripts, allHookDurations)
 	result.Bottlenecks = rankAuditBottlenecks(result.Transcripts)
+	result.ToolErrorFamilies = rankQwenToolErrorFamilies(allToolErrorEvents)
 	if opts.Baseline != nil {
 		result.Baseline = auditBaselineDeltas(result.Summary, *opts.Baseline)
 	}
 	return result, nil
 }
 
-func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []AuditTranscriptRow, []AuditRefusalRow, []int64, error) {
+func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []AuditTranscriptRow, []AuditRefusalRow, []int64, []QwenToolErrorEvent, error) {
 	denominator := AuditDenominatorRow{
 		Schema: AuditSchema, Kind: "source_denominator", Source: source.Name,
 		Root: source.RootLabel, RecordTypes: map[string]int{},
@@ -274,18 +278,18 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 	case AuditSourceCodex:
 		denominator.TokenSemantics = "final cumulative input per segment; only a versioned task_started boundary may begin a segment after a decrease; cached/cache-write subsets remain exact subtraction"
 	default:
-		return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
+		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: source %q has no parser", source.Name)
 	}
 
 	info, err := os.Stat(source.Root)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return denominator, nil, nil, nil, nil
+			return denominator, nil, nil, nil, nil, nil
 		}
-		return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: stat %s root: %w", source.Name, err)
+		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: stat %s root: %w", source.Name, err)
 	}
 	if !info.IsDir() {
-		return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: %s root is not a directory", source.Name)
+		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: %s root is not a directory", source.Name)
 	}
 	denominator.RootPresent = true
 
@@ -300,7 +304,7 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 		return nil
 	})
 	if err != nil {
-		return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: discover %s transcripts: %w", source.Name, err)
+		return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: discover %s transcripts: %w", source.Name, err)
 	}
 	sort.Strings(files)
 	denominator.FilesDiscovered = len(files)
@@ -308,11 +312,12 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 	var transcripts []AuditTranscriptRow
 	var refusals []AuditRefusalRow
 	var hookDurations []int64
+	var toolErrorEvents []QwenToolErrorEvent
 	for _, path := range files {
 		if opts.Since > 0 {
 			stat, statErr := os.Stat(path)
 			if statErr != nil {
-				return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: stat transcript: %w", statErr)
+				return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: stat transcript: %w", statErr)
 			}
 			if stat.ModTime().Before(opts.Now.Add(-opts.Since)) {
 				continue
@@ -320,13 +325,13 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 		}
 		rel, relErr := filepath.Rel(source.Root, path)
 		if relErr != nil {
-			return denominator, nil, nil, nil, fmt.Errorf("trajectory audit: relativize transcript: %w", relErr)
+			return denominator, nil, nil, nil, nil, fmt.Errorf("trajectory audit: relativize transcript: %w", relErr)
 		}
 		rel = filepath.ToSlash(rel)
 		if opts.UserContains != "" {
 			matched, matchErr := auditFileUserContains(path, opts.UserContains)
 			if matchErr != nil {
-				return denominator, nil, nil, nil, matchErr
+				return denominator, nil, nil, nil, nil, matchErr
 			}
 			if !matched {
 				continue
@@ -337,16 +342,17 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 			denominator.FixtureFilesExcluded++
 			continue
 		}
-		row, fileRefusals, fileHooks, parseErr := parseAuditFile(source.Name, path, rel, &denominator)
+		row, fileRefusals, fileHooks, fileToolErrors, parseErr := parseAuditFile(source.Name, path, rel, &denominator)
 		if parseErr != nil {
-			return denominator, nil, nil, nil, parseErr
+			return denominator, nil, nil, nil, nil, parseErr
 		}
 		denominator.FilesScanned++
 		transcripts = append(transcripts, row)
 		refusals = append(refusals, fileRefusals...)
 		hookDurations = append(hookDurations, fileHooks...)
+		toolErrorEvents = append(toolErrorEvents, fileToolErrors...)
 	}
-	return denominator, transcripts, refusals, hookDurations, nil
+	return denominator, transcripts, refusals, hookDurations, toolErrorEvents, nil
 }
 
 func auditFileUserContains(path, needle string) (bool, error) {
@@ -616,6 +622,13 @@ func WriteAuditJSONL(w io.Writer, result AuditResult) error {
 	}
 	for _, row := range result.Refusals {
 		rows = append(rows, row)
+	}
+	for _, row := range result.ToolErrorFamilies {
+		rows = append(rows, struct {
+			Schema string `json:"schema"`
+			Kind   string `json:"kind"`
+			QwenToolErrorFamily
+		}{AuditSchema, "tool_error_family", row})
 	}
 	for _, row := range rows {
 		if err := encoder.Encode(row); err != nil {

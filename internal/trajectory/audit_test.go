@@ -7,9 +7,55 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestAuditIntegratesToolErrorFamilies(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	lines := []string{
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"one","name":"exec_command","input":{}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"one","is_error":true,"content":"permission denied"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"two","name":"exec_command","input":{}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"two","is_error":true,"content":"deadline exceeded"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"three","name":"exec_command","input":{}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"three","is_error":true,"content":"permission denied"}]}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceClaude, Root: root, RootLabel: "fixture"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []QwenToolErrorFamily{
+		{Family: "permission", Count: 2, FirstIndex: 2, LastIndex: 6},
+		{Family: "timeout", Count: 1, FirstIndex: 4, LastIndex: 4},
+	}
+	if !reflect.DeepEqual(result.ToolErrorFamilies, want) {
+		t.Fatalf("tool error families = %#v, want %#v", result.ToolErrorFamilies, want)
+	}
+
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{`"tool_error_families"`, `"family":"permission"`, `"first_index":2`, `"tokens":0`} {
+		if !bytes.Contains(encoded, []byte(fragment)) {
+			t.Fatalf("JSON missing %s: %s", fragment, encoded)
+		}
+	}
+	var markdown bytes.Buffer
+	if err := WriteAuditMarkdown(&markdown, result); err != nil {
+		t.Fatal(err)
+	}
+	wantTable := "| Family | Count | First event | Last event | Tokens |\n|---|---:|---:|---:|---:|\n| permission | 2 | 2 | 6 | 0 |\n| timeout | 1 | 4 | 4 | 0 |"
+	if !strings.Contains(markdown.String(), wantTable) {
+		t.Fatalf("Markdown missing ranked tool-error table:\n%s", markdown.String())
+	}
+}
 
 func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	result := runPinnedAudit(t, nil)
@@ -493,7 +539,7 @@ func TestAuditRefusalMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 				denominator := AuditDenominatorRow{Schema: AuditSchema, Kind: "source_denominator", Source: test.source.Name, Root: test.source.RootLabel, RootPresent: true, FilesDiscovered: 1, RecordTypes: map[string]int{}}
-				row, refusals, hooks, err := parseAuditFile(test.source.Name, path, "fak/oversized.jsonl", &denominator)
+				row, refusals, hooks, _, err := parseAuditFile(test.source.Name, path, "fak/oversized.jsonl", &denominator)
 				if err != nil {
 					t.Fatal(err)
 				}
