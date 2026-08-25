@@ -62,7 +62,7 @@ func DefaultDiscoveryQuestions() []DiscoveryQuestion {
 		{"architecture", "docs", "kernel architecture subsystems", []string{"ARCHITECTURE.md"}, 5},
 		{"extending", "docs", "extend kernel new leaf", []string{"EXTENDING.md"}, 5},
 		{"learning-path", "docs", "learning path course", []string{"LEARNING-PATH.md"}, 5},
-		{"wiki", "docs", "wiki freshness structure verify", []string{"docs/wiki.md", "internal/wiki/doc.go"}, 5},
+		{"wiki", "docs", "wiki freshness structure verify", []string{"internal/wiki/doc.go", "internal/wiki/structure.go", "internal/wiki/freshness.go", "internal/wiki/verify.go"}, 5},
 	}
 }
 

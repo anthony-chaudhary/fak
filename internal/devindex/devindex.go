@@ -906,6 +906,11 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 			}
 		}
 		if score > 0 {
+			// Multi-term intent can use canonicality to break close ties. Preserve
+			// the established single-term title/path weights exactly.
+			if len(toks) > 1 {
+				score += canonicalDocBonus(d)
+			}
 			hits = append(hits, scored{d: d, s: score, coverage: coverage})
 		}
 	}
@@ -939,6 +944,20 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 		out[i] = h.d
 	}
 	return out
+}
+
+func canonicalDocBonus(d Doc) int {
+	bonus := 2 * len(d.Sources)
+	p := strings.ToLower(normPath(d.Path))
+	switch {
+	case strings.HasPrefix(p, "docs/notes/"), strings.HasPrefix(p, "docs/_witnesses/"), strings.HasPrefix(p, "docs/generated/"):
+		bonus -= 3
+	case !strings.Contains(p, "/"):
+		bonus += 3
+	case strings.Count(p, "/") == 1:
+		bonus += 2
+	}
+	return bonus
 }
 
 // fuzzyDocs is SearchDocs' near-miss fallback: trigram similarity over each doc's

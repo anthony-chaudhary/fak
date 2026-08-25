@@ -590,3 +590,18 @@ func TestLoadIndexesInlineFrontDoorLinks(t *testing.T) {
 		t.Fatalf("sources=%v", hits[0].Sources)
 	}
 }
+
+func TestSearchDocsCanonicalMultiTermTieBreakerPreservesSingleTermWeights(t *testing.T) {
+	c := &Catalog{Docs: []Doc{
+		{Title: "Shared validation incident", Path: "docs/notes/SHARED-INCIDENT.md", Blurb: "shared tree validation"},
+		{Title: "Developer tooling", Path: "docs/dev-tooling.md", Blurb: "shared tree validation", Sources: []string{"INDEX.md", "AGENTS.md"}},
+	}}
+	multi := c.SearchDocs("shared tree validation")
+	if len(multi) != 2 || multi[0].Path != "docs/dev-tooling.md" {
+		t.Fatalf("multi=%+v", multi)
+	}
+	single := c.SearchDocs("shared")
+	if len(single) != 2 || single[0].Path != "docs/notes/SHARED-INCIDENT.md" {
+		t.Fatalf("single=%+v", single)
+	}
+}
