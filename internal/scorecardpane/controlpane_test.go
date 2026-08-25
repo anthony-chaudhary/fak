@@ -25,6 +25,7 @@ func fixtureMetrics() []Metric {
 func TestMetricFromPayloadExtractsCorpusDebt(t *testing.T) {
 	card := Card{Key: "code", Debt: "code_debt", Label: "code"}
 	payload := map[string]any{
+		"schema": "fak-code-quality-scorecard/7",
 		"corpus": map[string]any{"code_debt": float64(15), "grade": "B", "value": 0.81, "score": 81.0},
 		"ok":     false, "verdict": "ACTION",
 	}
@@ -40,6 +41,9 @@ func TestMetricFromPayloadExtractsCorpusDebt(t *testing.T) {
 	}
 	if m.Verdict != "ACTION" || m.OK {
 		t.Fatalf("ok/verdict mismatch: ok=%v verdict=%q", m.OK, m.Verdict)
+	}
+	if m.DetectorVersion != "fak-code-quality-scorecard/7" {
+		t.Fatalf("detector version not preserved: %q", m.DetectorVersion)
 	}
 }
 
@@ -171,6 +175,11 @@ func TestFoldSumsPortfolioDebt(t *testing.T) {
 	if p.Measured != 4 || p.Errored != 0 {
 		t.Fatalf("measured/errored: got %d/%d", p.Measured, p.Errored)
 	}
+	if p.TotalDebtSemantics != TotalDebtSemantics ||
+		!strings.Contains(Render(p), "observational total debt") ||
+		!strings.Contains(Render(p), "not a gate") {
+		t.Fatalf("heterogeneous total is not labelled observational:\n%s", Render(p))
+	}
 	if p.Verdict != "ACTION" || p.Finding != "scorecard_debt" {
 		t.Fatalf("nonzero unpinned debt should be scorecard_debt/ACTION, got %s/%s", p.Verdict, p.Finding)
 	}
@@ -201,26 +210,33 @@ func TestFoldRegressionVerdict(t *testing.T) {
 	}
 }
 
-func TestFoldEarlyWarningHiddenUnderGreenPortfolio(t *testing.T) {
-	// seo rose 0->1 but the portfolio total FELL (slop 600->535): the ratchet stays
-	// green, but the per-metric rise must surface as an early-warning.
+func TestAggregateCancellationCannotMaskPerMetricRegression(t *testing.T) {
+	// seo rose 0->1 while the high-cardinality slop detector fell 600->535.
+	// The heterogeneous total improves by 64, but the same-version seo series must
+	// still hard-fail: unlike raw units cannot cancel each other at the gate.
+	metrics := fixtureMetrics()
+	for i := range metrics {
+		metrics[i].DetectorVersion = "detector/1"
+	}
 	base := &Baseline{
 		Schema: BaselineSchema, Commit: "old0000", TotalDebt: 615, GradeDebt: 9,
-		Metrics: map[string]int{"code": 15, "slop": 600, "seo": 0, "readme": 0},
+		Metrics:          map[string]int{"code": 15, "slop": 600, "seo": 0, "readme": 0},
+		DetectorVersions: map[string]string{"code": "detector/1", "slop": "detector/1", "seo": "detector/1", "readme": "detector/1"},
 	}
-	p := Fold(fixtureMetrics(), base, "/repo", "new1111")
-	if p.Trend.Direction != "improved" {
-		t.Fatalf("portfolio total fell, want improved, got %q", p.Trend.Direction)
+	p := Fold(metrics, base, "/repo", "new1111")
+	if p.Trend.TotalDelta == nil || *p.Trend.TotalDelta != -64 {
+		t.Fatalf("observational total must preserve its -64 delta, got %v", p.Trend.TotalDelta)
+	}
+	if p.Trend.Direction != "regressed" || p.Finding != "scorecard_regressed" {
+		t.Fatalf("per-metric rise must win over aggregate cancellation: direction=%q finding=%q",
+			p.Trend.Direction, p.Finding)
 	}
 	if len(p.EarlyWarning) != 1 || p.EarlyWarning[0].Key != "seo" {
-		t.Fatalf("seo rise must surface as early-warning, got %+v", p.EarlyWarning)
+		t.Fatalf("seo rise must remain attributable, got %+v", p.EarlyWarning)
 	}
 	code, msg := CheckGate(p)
-	if code != 0 {
-		t.Fatalf("gate must stay GREEN under a hidden per-metric rise, got code %d", code)
-	}
-	if !strings.Contains(msg, "EARLY-WARNING") {
-		t.Fatalf("gate message must carry the advisory early-warning: %q", msg)
+	if code != 1 || !strings.Contains(msg, "RATCHET FAIL") || !strings.Contains(msg, "seo") {
+		t.Fatalf("aggregate cancellation masked seo regression: code=%d msg=%q", code, msg)
 	}
 }
 
@@ -335,6 +351,74 @@ func TestBaselineDocRoundTrip(t *testing.T) {
 	}
 	if len(p2.Trend.GradeRegressed) != 0 {
 		t.Fatalf("fresh baseline should have no grade regressions, got %+v", p2.Trend.GradeRegressed)
+	}
+}
+
+func TestRawMetricDebtRemainsUnboundedAndUnchanged(t *testing.T) {
+	const rawDebt = 1_500_000_000
+	metric := MetricFromPayload(Card{Key: "wide", Debt: "wide_debt", Label: "wide"}, map[string]any{
+		"schema": "wide-detector/1",
+		"corpus": map[string]any{"wide_debt": float64(rawDebt), "grade": "F"},
+	}, "")
+	if metric.Debt == nil || *metric.Debt != rawDebt {
+		t.Fatalf("raw debt was capped or normalized: got %v want %d", metric.Debt, rawDebt)
+	}
+	p := Fold([]Metric{metric}, nil, "/repo", "abc1234")
+	doc := BaselineDoc(p)
+	if *p.Metrics[0].Debt != rawDebt || doc.Metrics["wide"] != rawDebt || p.TotalDebt != rawDebt {
+		t.Fatalf("raw debt changed across extract/fold/pin: metric=%d pin=%d total=%d",
+			*p.Metrics[0].Debt, doc.Metrics["wide"], p.TotalDebt)
+	}
+	if doc.DetectorVersions["wide"] != "wide-detector/1" {
+		t.Fatalf("detector version not pinned with raw debt: %+v", doc.DetectorVersions)
+	}
+}
+
+func TestDetectorVersionChangeIsIncomparableUntilRepin(t *testing.T) {
+	card := Card{Key: "demo", Debt: "demo_debt", Label: "demo"}
+	v1 := MetricFromPayload(card, map[string]any{
+		"schema": "demo-scorecard/1",
+		"corpus": map[string]any{"demo_debt": float64(2), "grade": "B"},
+	}, "")
+	baseline := BaselineDoc(Fold([]Metric{v1}, nil, "/repo", "old0000"))
+	if baseline.Schema != BaselineSchema || baseline.DetectorVersions["demo"] != "demo-scorecard/1" {
+		t.Fatalf("versioned baseline malformed: %+v", baseline)
+	}
+
+	v2 := MetricFromPayload(card, map[string]any{
+		"schema": "demo-scorecard/2",
+		"corpus": map[string]any{"demo_debt": float64(9), "grade": "D"},
+	}, "")
+	p := Fold([]Metric{v2}, &baseline, "/repo", "new1111")
+	if p.Trend.Direction != "incomparable" || p.Trend.Comparable || p.Trend.TotalDelta != nil {
+		t.Fatalf("version change compared as a debt delta: trend=%+v", p.Trend)
+	}
+	if p.Finding != "scorecard_incomparable" || len(p.Trend.VersionChanged) != 1 {
+		t.Fatalf("version change not surfaced: finding=%q changes=%+v", p.Finding, p.Trend.VersionChanged)
+	}
+	if len(p.Trend.Worsened) != 0 || len(p.Trend.Deltas) != 0 {
+		t.Fatalf("incomparable metric entered comparable deltas: worsened=%v deltas=%v",
+			p.Trend.Worsened, p.Trend.Deltas)
+	}
+	code, msg := CheckGate(p)
+	if code != 2 || !strings.Contains(msg, "INCOMPARABLE") || !strings.Contains(msg, "re-pin") {
+		t.Fatalf("version change must stop for review/re-pin: code=%d msg=%q", code, msg)
+	}
+	if !strings.Contains(Render(p), "INCOMPARABLE: demo detector changed") {
+		t.Fatalf("human render hides detector-version change:\n%s", Render(p))
+	}
+}
+
+func TestLegacyBaselineWithoutDetectorVersionsRemainsComparable(t *testing.T) {
+	metric := Metric{Key: "demo", Label: "demo", DebtKey: "demo_debt", Debt: intp(1),
+		DetectorVersion: "demo-scorecard/2", Grade: strp("A")}
+	legacy := &Baseline{
+		Schema: LegacyBaselineSchema, Commit: "old0000", TotalDebt: 2, GradeDebt: 1,
+		Metrics: map[string]int{"demo": 2}, GradeWeights: map[string]int{"demo": 1},
+	}
+	p := Fold([]Metric{metric}, legacy, "/repo", "new1111")
+	if p.Trend.Direction != "improved" || !p.Trend.Comparable || len(p.Trend.VersionChanged) != 0 {
+		t.Fatalf("legacy baseline migration became incomparable: %+v", p.Trend)
 	}
 }
 

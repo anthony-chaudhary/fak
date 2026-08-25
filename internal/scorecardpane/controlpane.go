@@ -5,11 +5,9 @@
 //
 // This file ports the CONTROL-PANE fold: read each per-scorecard control-pane
 // payload (schema/ok/verdict/finding/reason/next_action + a *_debt integer),
-// fold every debt key into one portfolio total_debt, compute a scale-invariant
-// grade_debt companion, compare against a pinned per-metric baseline, and emit
-// the ratchet verdict. The JSON shapes are byte-compatible with the Python
-// contract (same field names, same nesting) so a loop runner that read the
-// Python --json reads this identically.
+// preserve every raw debt in its metric-specific unit, compute an observational
+// heterogeneous total plus a scale-invariant grade_debt companion, compare only
+// same-metric/same-detector-version baselines, and emit the ratchet verdict.
 //
 // The pure surface (the tested core) is: MetricFromPayload, Fold, ComputeTrend,
 // CheckGate, BaselineDoc, and the three-tier grade derivation. The impure shell
@@ -29,7 +27,16 @@ import (
 // consumer keyed on the schema string does not need to special-case the port.
 const (
 	Schema         = "fak-scorecard-control-pane/1"
-	BaselineSchema = "fak-scorecard-control-pane.baseline/1"
+	BaselineSchema = "fak-scorecard-control-pane.baseline/2"
+	// LegacyBaselineSchema predates per-metric detector-version pins. It remains
+	// readable so an existing baseline can be migrated intentionally on --pin.
+	LegacyBaselineSchema = "fak-scorecard-control-pane.baseline/1"
+	// TotalDebtSemantics labels the compatibility total everywhere it appears. The
+	// component integers have different detector-specific units, so their sum is a
+	// useful observational inventory only, never a quality quantity or gate.
+	TotalDebtSemantics = "observational heterogeneous sum; not a comparable quality unit or gate"
+	// MetricComparisonBasis is the only valid raw-debt ratchet comparison.
+	MetricComparisonBasis = "same metric + same detector version"
 	// BaselineRel is the tracked baseline file the trend is pinned in.
 	BaselineRel = "tools/scorecard_baseline.json"
 	// GradeRatchetEnv demotes the native grade ratchet to advisory when set to 0/false/no/off.
@@ -234,20 +241,21 @@ func deriveGrade(debt int) string {
 // Score are pointers so a missing/null value serializes as JSON null (the Python
 // contract: an errored card has "debt": null), distinct from a measured zero.
 type Metric struct {
-	Key          string   `json:"key"`
-	Label        string   `json:"label"`
-	DebtKey      string   `json:"debt_key"`
-	Debt         *int     `json:"debt"`
-	Grade        *string  `json:"grade"`
-	RatchetGrade *string  `json:"ratchet_grade,omitempty"`
-	RatchetScore *float64 `json:"ratchet_score,omitempty"`
-	Value        *float64 `json:"value"`
-	Score        *float64 `json:"score"`
-	OK           bool     `json:"ok"`
-	Verdict      string   `json:"verdict"`
-	Error        string   `json:"error,omitempty"`
-	EffGrade     string   `json:"eff_grade,omitempty"`
-	GradeWeight  *int     `json:"grade_weight,omitempty"`
+	Key             string   `json:"key"`
+	Label           string   `json:"label"`
+	DebtKey         string   `json:"debt_key"`
+	Debt            *int     `json:"debt"`
+	DetectorVersion string   `json:"detector_version"`
+	Grade           *string  `json:"grade"`
+	RatchetGrade    *string  `json:"ratchet_grade,omitempty"`
+	RatchetScore    *float64 `json:"ratchet_score,omitempty"`
+	Value           *float64 `json:"value"`
+	Score           *float64 `json:"score"`
+	OK              bool     `json:"ok"`
+	Verdict         string   `json:"verdict"`
+	Error           string   `json:"error,omitempty"`
+	EffGrade        string   `json:"eff_grade,omitempty"`
+	GradeWeight     *int     `json:"grade_weight,omitempty"`
 	// Carried marks a metric NOT freshly measured this run but reproduced from the
 	// pinned baseline because its corpus was untouched by the --since diff (its debt
 	// provably could not have moved). Zero-value (a measured metric) omits the field,
@@ -318,14 +326,15 @@ func MetricFromPayload(card Card, payload map[string]any, errMsg string) Metric 
 	}
 	m := Metric{
 		Key: card.Key, Label: card.Label, DebtKey: card.Debt, Origin: card.Origin,
-		Debt:         debt,
-		Grade:        findGrade(payload),
-		RatchetGrade: findString(payload, "ratchet_grade"),
-		RatchetScore: ratchetScorePtr,
-		Value:        valuePtr,
-		Score:        scorePtr,
-		OK:           scorecard.True(payload["ok"]),
-		Verdict:      asString(payload["verdict"]),
+		Debt:            debt,
+		DetectorVersion: asString(payload["schema"]),
+		Grade:           findGrade(payload),
+		RatchetGrade:    findString(payload, "ratchet_grade"),
+		RatchetScore:    ratchetScorePtr,
+		Value:           valuePtr,
+		Score:           scorePtr,
+		OK:              scorecard.True(payload["ok"]),
+		Verdict:         asString(payload["verdict"]),
 	}
 	if debt == nil {
 		m.Error = "missing " + card.Debt + " in payload"
@@ -379,54 +388,72 @@ type GradeRegression struct {
 	ToGrade    string `json:"to_grade"`
 }
 
+// DetectorVersionChange identifies a raw-debt series that cannot be compared to
+// its pin. A detector/schema revision can legitimately reveal a different amount
+// of debt, so it must be reviewed and re-pinned rather than called a regression or
+// improvement.
+type DetectorVersionChange struct {
+	Key      string `json:"key"`
+	Label    string `json:"label"`
+	Baseline string `json:"baseline"`
+	Current  string `json:"current"`
+}
+
 // Trend is the per-metric + portfolio delta vs a pinned baseline. Field tags and
 // shape match the Python compute_trend return dict.
 type Trend struct {
-	Direction      string            `json:"direction"`
-	Summary        string            `json:"summary"`
-	TotalDelta     int               `json:"total_delta"`
-	GradeDelta     int               `json:"grade_delta"`
-	BaselineCommit string            `json:"baseline_commit"`
-	BaselineTotal  *int              `json:"baseline_total"`
-	BaselineGrade  *int              `json:"baseline_grade"`
-	GradeDebt      int               `json:"grade_debt"`
-	Deltas         map[string]int    `json:"deltas"`
-	Worsened       []string          `json:"worsened"`
-	Improved       []string          `json:"improved"`
-	EarlyWarning   []EarlyWarning    `json:"early_warning"`
-	GradeRegressed []GradeRegression `json:"grade_regressed"`
+	Direction          string                  `json:"direction"`
+	Summary            string                  `json:"summary"`
+	ComparisonBasis    string                  `json:"comparison_basis"`
+	Comparable         bool                    `json:"comparable"`
+	TotalDelta         *int                    `json:"total_delta"`
+	TotalDebtSemantics string                  `json:"total_debt_semantics"`
+	GradeDelta         *int                    `json:"grade_delta"`
+	BaselineCommit     string                  `json:"baseline_commit"`
+	BaselineTotal      *int                    `json:"baseline_total"`
+	BaselineGrade      *int                    `json:"baseline_grade"`
+	GradeDebt          int                     `json:"grade_debt"`
+	Deltas             map[string]int          `json:"deltas"`
+	Worsened           []string                `json:"worsened"`
+	Improved           []string                `json:"improved"`
+	EarlyWarning       []EarlyWarning          `json:"early_warning"`
+	GradeRegressed     []GradeRegression       `json:"grade_regressed"`
+	VersionChanged     []DetectorVersionChange `json:"version_changed"`
 }
 
 // Baseline is the pinned per-metric baseline body (the tracked baseline file shape).
 type Baseline struct {
-	Schema       string         `json:"schema"`
-	Commit       string         `json:"commit"`
-	TotalDebt    int            `json:"total_debt"`
-	GradeDebt    int            `json:"grade_debt"`
-	Metrics      map[string]int `json:"metrics"`
-	GradeWeights map[string]int `json:"grade_weights,omitempty"`
-	Doc          string         `json:"_doc,omitempty"`
+	Schema             string            `json:"schema"`
+	Commit             string            `json:"commit"`
+	TotalDebt          int               `json:"total_debt"`
+	TotalDebtSemantics string            `json:"total_debt_semantics,omitempty"`
+	GradeDebt          int               `json:"grade_debt"`
+	Metrics            map[string]int    `json:"metrics"`
+	GradeWeights       map[string]int    `json:"grade_weights,omitempty"`
+	DetectorVersions   map[string]string `json:"detector_versions,omitempty"`
+	Doc                string            `json:"_doc,omitempty"`
 }
 
 // Payload is the folded control-pane payload. Field order/tags match the Python
 // fold() return dict so the --json bytes are contract-compatible.
 type Payload struct {
-	Schema         string         `json:"schema"`
-	OK             bool           `json:"ok"`
-	Verdict        string         `json:"verdict"`
-	Finding        string         `json:"finding"`
-	Reason         string         `json:"reason"`
-	NextAction     string         `json:"next_action"`
-	Workspace      string         `json:"workspace"`
-	Commit         string         `json:"commit"`
-	TotalDebt      int            `json:"total_debt"`
-	GradeDebt      int            `json:"grade_debt"`
-	GradeBreakdown string         `json:"grade_breakdown"`
-	Measured       int            `json:"measured"`
-	Errored        int            `json:"errored"`
-	EarlyWarning   []EarlyWarning `json:"early_warning"`
-	Metrics        []Metric       `json:"metrics"`
-	Trend          Trend          `json:"trend"`
+	Schema             string         `json:"schema"`
+	OK                 bool           `json:"ok"`
+	Verdict            string         `json:"verdict"`
+	Finding            string         `json:"finding"`
+	Reason             string         `json:"reason"`
+	NextAction         string         `json:"next_action"`
+	Workspace          string         `json:"workspace"`
+	Commit             string         `json:"commit"`
+	TotalDebt          int            `json:"total_debt"`
+	TotalDebtSemantics string         `json:"total_debt_semantics"`
+	GradeDebt          int            `json:"grade_debt"`
+	GradeBreakdown     string         `json:"grade_breakdown"`
+	Measured           int            `json:"measured"`
+	Errored            int            `json:"errored"`
+	EarlyWarning       []EarlyWarning `json:"early_warning"`
+	Metrics            []Metric       `json:"metrics"`
+	Trend              Trend          `json:"trend"`
 	// GateExit/GateMessage are populated only under --check (the ratchet contract),
 	// matching the Python gated payload.
 	GateExit    *int   `json:"gate_exit,omitempty"`
@@ -492,6 +519,7 @@ func Fold(metrics []Metric, baseline *Baseline, workspace, commit string) Payloa
 	}
 
 	regressed := trend.Direction == "regressed"
+	incomparable := trend.Direction == "incomparable"
 	earlyWarning := trend.EarlyWarning
 	ewNote := ""
 	if len(earlyWarning) > 0 && !regressed {
@@ -514,30 +542,42 @@ func Fold(metrics []Metric, baseline *Baseline, workspace, commit string) Payloa
 			labels = append(labels, m.Label)
 		}
 		reason = fmt.Sprintf("%d scorecard(s) failed to report a debt integer "+
-			"(%s); portfolio debt %d across %d measured",
+			"(%s); observational heterogeneous total %d across %d measured",
 			len(errors), strings.Join(labels, ", "), totalDebt, len(measured))
 		nextAction = "repair the failing scorecard(s) so the fold is complete; " +
 			"re-run python tools/scorecard_control_pane.py" + buildBreakHint(errors)
+	case incomparable:
+		ok, verdict, finding = false, "ACTION", "scorecard_incomparable"
+		var changed []string
+		for _, v := range trend.VersionChanged {
+			changed = append(changed, fmt.Sprintf("%s %s->%s", v.Label, v.Baseline, v.Current))
+		}
+		reason = "detector version changed for " + strings.Join(changed, ", ") +
+			"; raw debt deltas are incomparable"
+		nextAction = "review the detector change, then intentionally re-pin: " +
+			"fak scorecard control-pane --pin"
 	case regressed:
 		ok, verdict, finding = false, "ACTION", "scorecard_regressed"
 		worsened := strings.Join(trend.Worsened, ", ")
 		if worsened == "" {
 			worsened = "see deltas"
 		}
-		reason = fmt.Sprintf("portfolio debt rose %+d to %d vs baseline @%s (%s); "+
-			"worsened: %s", trend.TotalDelta, totalDebt, trend.BaselineCommit, breakdown, worsened)
+		reason = fmt.Sprintf("same-version per-metric debt rose vs baseline @%s; "+
+			"worsened: %s; observational heterogeneous total %d (%s)",
+			trend.BaselineCommit, worsened, totalDebt, breakdown)
 		nextAction = "retire the regressed metric(s) worst-first with the owning " +
 			"scorecard's skill, then re-pin: " +
-			"python tools/scorecard_control_pane.py --pin"
+			"fak scorecard control-pane --pin"
 	case totalDebt > 0:
 		ok, verdict, finding = false, "ACTION", "scorecard_debt"
-		reason = fmt.Sprintf("portfolio debt %d across %d scorecards (%s); trend %s",
+		reason = fmt.Sprintf("observational heterogeneous total debt %d across %d scorecards "+
+			"(%s); per-metric trend %s",
 			totalDebt, len(measured), breakdown, trend.Summary)
 		nextAction = fmt.Sprintf("retire debt worst-first (heaviest: %s %d) with that "+
 			"scorecard's skill; re-run to prove the portfolio drop", byDebt[0].Label, *byDebt[0].Debt)
 	default:
 		ok, verdict, finding = true, "OK", "all_clear"
-		reason = fmt.Sprintf("zero portfolio debt across %d scorecards; trend %s",
+		reason = fmt.Sprintf("zero raw debt in all %d measured scorecards; per-metric trend %s",
 			len(measured), trend.Summary)
 		nextAction = "hold the line; re-pin the baseline to lock the clean state"
 	}
@@ -556,21 +596,24 @@ func Fold(metrics []Metric, baseline *Baseline, workspace, commit string) Payloa
 	return Payload{
 		Schema: Schema, OK: ok, Verdict: verdict, Finding: finding,
 		Reason: reason, NextAction: nextAction, Workspace: workspace, Commit: commit,
-		TotalDebt: totalDebt, GradeDebt: gradeDebtTotal, GradeBreakdown: gradeBreakdown,
+		TotalDebt: totalDebt, TotalDebtSemantics: TotalDebtSemantics,
+		GradeDebt: gradeDebtTotal, GradeBreakdown: gradeBreakdown,
 		Measured: len(measured), Errored: len(errors), EarlyWarning: earlyWarning,
 		Metrics: metrics, Trend: trend,
 	}
 }
 
-// ComputeTrend folds the per-metric + portfolio delta vs a pinned baseline. Ported
-// from the Python compute_trend: tracks total_debt (the raw-unit ratchet gate) and
-// grade_debt (the scale-invariant severity sum), and builds the early-warning list.
+// ComputeTrend compares raw debt only within the same metric and detector version.
+// totalDebt is retained as an observational compatibility summary; it does not
+// decide Direction because unlike metric units cannot cancel each other honestly.
 func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTotal int) Trend {
 	baseMetrics := map[string]int{}
+	baseVersions := map[string]string{}
 	baseCommit := ""
 	var baseTotal, baseGrade *int
 	if baseline != nil {
 		baseMetrics = baseline.Metrics
+		baseVersions = baseline.DetectorVersions
 		baseCommit = baseline.Commit
 		bt := baseline.TotalDebt
 		baseTotal = &bt
@@ -579,12 +622,16 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 	}
 
 	if len(baseMetrics) == 0 || baseTotal == nil {
+		zero := 0
 		return Trend{
 			Direction: "unpinned", Summary: "unpinned (no baseline; run --pin)",
-			TotalDelta: 0, GradeDelta: 0, BaselineCommit: baseCommit,
-			BaselineTotal: baseTotal, BaselineGrade: baseGrade, GradeDebt: gradeDebtTotal,
+			ComparisonBasis: MetricComparisonBasis, Comparable: false,
+			TotalDelta: &zero, TotalDebtSemantics: TotalDebtSemantics, GradeDelta: &zero,
+			BaselineCommit: baseCommit,
+			BaselineTotal:  baseTotal, BaselineGrade: baseGrade, GradeDebt: gradeDebtTotal,
 			Deltas: map[string]int{}, Worsened: []string{}, Improved: []string{},
 			EarlyWarning: []EarlyWarning{}, GradeRegressed: []GradeRegression{},
+			VersionChanged: []DetectorVersionChange{},
 		}
 	}
 
@@ -593,12 +640,23 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 	improved := []string{}
 	earlyWarning := []EarlyWarning{}
 	gradeRegressed := []GradeRegression{}
+	versionChanged := []DetectorVersionChange{}
 	for _, m := range metrics {
 		if m.Debt == nil {
 			continue
 		}
 		prior, ok := baseMetrics[m.Key]
 		if !ok {
+			continue
+		}
+		priorVersion := baseVersions[m.Key]
+		// A legacy pin has no detector_versions map. Keep it readable for one
+		// intentional migration pin; once both sides name versions, equality is
+		// mandatory and a change is neither improvement nor regression.
+		if priorVersion != "" && m.DetectorVersion != "" && priorVersion != m.DetectorVersion {
+			versionChanged = append(versionChanged, DetectorVersionChange{
+				Key: m.Key, Label: m.Label, Baseline: priorVersion, Current: m.DetectorVersion,
+			})
 			continue
 		}
 		delta := *m.Debt - prior
@@ -618,31 +676,43 @@ func ComputeTrend(metrics []Metric, baseline *Baseline, totalDebt, gradeDebtTota
 		}
 	}
 
-	totalDelta := totalDebt - *baseTotal
-	gradeDelta := 0
+	totalDeltaValue := totalDebt - *baseTotal
+	gradeDeltaValue := 0
 	if baseGrade != nil {
-		gradeDelta = gradeDebtTotal - *baseGrade
+		gradeDeltaValue = gradeDebtTotal - *baseGrade
+	}
+	var totalDelta, gradeDelta *int
+	if len(versionChanged) == 0 {
+		totalDelta = &totalDeltaValue
+		gradeDelta = &gradeDeltaValue
 	}
 	direction := "flat"
-	if totalDelta > 0 {
+	if len(versionChanged) > 0 {
+		direction = "incomparable"
+	} else if len(worsened) > 0 {
 		direction = "regressed"
-	} else if totalDelta < 0 {
+	} else if len(improved) > 0 {
 		direction = "improved"
 	}
 	bc := baseCommit
 	if bc == "" {
 		bc = "baseline"
 	}
-	summary := fmt.Sprintf("%s %+d vs @%s (was %d, now %d)",
-		direction, totalDelta, bc, *baseTotal, totalDebt)
-	if baseGrade != nil && gradeDelta != 0 {
-		summary += fmt.Sprintf("; grade-debt %d->%d (%+d)", *baseGrade, gradeDebtTotal, gradeDelta)
+	summary := "incomparable: detector version changed; review and re-pin"
+	if direction != "incomparable" {
+		summary = fmt.Sprintf("%s by %s vs @%s; observational total %d->%d (%+d)",
+			direction, MetricComparisonBasis, bc, *baseTotal, totalDebt, totalDeltaValue)
+	}
+	if baseGrade != nil && gradeDelta != nil && *gradeDelta != 0 {
+		summary += fmt.Sprintf("; grade-debt %d->%d (%+d)", *baseGrade, gradeDebtTotal, *gradeDelta)
 	}
 	return Trend{
-		Direction: direction, Summary: summary, TotalDelta: totalDelta, GradeDelta: gradeDelta,
+		Direction: direction, Summary: summary, ComparisonBasis: MetricComparisonBasis,
+		Comparable: len(versionChanged) == 0, TotalDelta: totalDelta,
+		TotalDebtSemantics: TotalDebtSemantics, GradeDelta: gradeDelta,
 		BaselineCommit: baseCommit, BaselineTotal: baseTotal, BaselineGrade: baseGrade,
 		GradeDebt: gradeDebtTotal, Deltas: deltas, Worsened: worsened, Improved: improved,
-		EarlyWarning: earlyWarning, GradeRegressed: gradeRegressed,
+		EarlyWarning: earlyWarning, GradeRegressed: gradeRegressed, VersionChanged: versionChanged,
 	}
 }
 
@@ -659,34 +729,41 @@ func baseGradeWeight(baseline *Baseline, key string) (int, bool) {
 func BaselineDoc(p Payload) Baseline {
 	metrics := map[string]int{}
 	gradeWeights := map[string]int{}
+	detectorVersions := map[string]string{}
 	for _, m := range p.Metrics {
 		if m.Debt != nil {
 			metrics[m.Key] = *m.Debt
 			if m.GradeWeight != nil {
 				gradeWeights[m.Key] = *m.GradeWeight
 			}
+			if m.DetectorVersion != "" {
+				detectorVersions[m.Key] = m.DetectorVersion
+			}
 		}
 	}
 	return Baseline{
 		Schema: BaselineSchema, Commit: p.Commit, TotalDebt: p.TotalDebt,
-		GradeDebt: p.GradeDebt, Metrics: metrics, GradeWeights: gradeWeights,
+		TotalDebtSemantics: TotalDebtSemantics, GradeDebt: p.GradeDebt,
+		Metrics: metrics, GradeWeights: gradeWeights, DetectorVersions: detectorVersions,
 		Doc: "Pinned per-metric scorecard-debt baseline for the unified " +
-			"control pane. total_debt is the raw-unit ratchet gate; grade_debt " +
-			"is the scale-invariant severity companion, and grade_weights pins " +
+			"control pane. Each raw debt is unbounded by the pane and gates only " +
+			"against the same metric and detector version. total_debt is an observational " +
+			"heterogeneous sum, not a gate or universal quality unit. grade_debt " +
+			"is the scale-invariant severity companion; grade_weights pins " +
 			"each metric's letter-grade severity so an A->B slip reds the gate " +
-			"even at flat raw debt. Re-pin after a debt drop to ratchet the trend down: " +
-			"python tools/scorecard_control_pane.py --pin",
+			"even at flat raw debt. Review detector-version changes before re-pinning: " +
+			"fak scorecard control-pane --pin",
 	}
 }
 
 // CheckGate is the CI ratchet decision over a folded payload (pure: exit code +
-// message). Ported from the Python check_gate: green while debt holds at-or-below
-// the pinned baseline, red only on a regression (or an unmeasured card), 2 when
-// unpinned. Surfaces the per-metric early-warning and grade-debt advisories.
+// message). The raw-debt gate is per metric and detector version: any comparable
+// metric rise is red even when another metric falls by more. Version changes are
+// incomparable until reviewed/re-pinned. The heterogeneous total is observational.
 //
-//	0  flat / improved   — the ratchet held (green even with nonzero debt)
-//	1  regressed         — debt rose above the pinned baseline (or unmeasured)
-//	2  unpinned          — no baseline to ratchet against; run --pin first
+//	0  flat / improved   — every comparable per-metric ratchet held
+//	1  regressed         — at least one comparable metric rose (or is unmeasured)
+//	2  unpinned/incomparable — establish or intentionally refresh the pin
 func CheckGate(p Payload) (int, string) {
 	if p.Errored > 0 {
 		var errored []Metric
@@ -699,6 +776,13 @@ func CheckGate(p Payload) (int, string) {
 			p.Errored, p.Reason) + buildBreakHint(errored)
 	}
 	switch p.Trend.Direction {
+	case "incomparable":
+		var changed []string
+		for _, v := range p.Trend.VersionChanged {
+			changed = append(changed, fmt.Sprintf("%s %s->%s", v.Label, v.Baseline, v.Current))
+		}
+		return 2, "RATCHET INCOMPARABLE: detector version changed for " +
+			strings.Join(changed, ", ") + "; review the detector and intentionally re-pin"
 	case "unpinned":
 		return 2, "RATCHET UNPINNED: no baseline to ratchet against; run " +
 			"`python tools/scorecard_control_pane.py --pin` to set one"
@@ -707,9 +791,15 @@ func CheckGate(p Payload) (int, string) {
 		if worsened == "" {
 			worsened = "see deltas"
 		}
-		return 1, fmt.Sprintf("RATCHET FAIL: %s; worsened: %s", p.Trend.Summary, worsened)
+		return 1, fmt.Sprintf("RATCHET FAIL: same-version per-metric debt regressed; "+
+			"worsened: %s; %s (total_debt=%d)",
+			worsened, TotalDebtSemantics, p.TotalDebt)
 	}
-	if (len(p.Trend.GradeRegressed) > 0 || p.Trend.GradeDelta > 0) && gradeRatchetHard() {
+	gradeDelta := 0
+	if p.Trend.GradeDelta != nil {
+		gradeDelta = *p.Trend.GradeDelta
+	}
+	if (len(p.Trend.GradeRegressed) > 0 || gradeDelta > 0) && gradeRatchetHard() {
 		who := p.GradeBreakdown
 		if len(p.Trend.GradeRegressed) > 0 {
 			parts := make([]string, 0, len(p.Trend.GradeRegressed))
@@ -722,10 +812,10 @@ func CheckGate(p Payload) (int, string) {
 			"-- a scorecard slipped a letter the raw-unit total held flat: %s. Retire it with "+
 			"the owning scorecard's skill, then re-pin (`--pin`); or set %s=0 to demote this "+
 			"gate to advisory for a deliberate one-off pin.",
-			p.Trend.GradeDelta, p.GradeDebt, p.Trend.BaselineCommit, who, GradeRatchetEnv)
+			gradeDelta, p.GradeDebt, p.Trend.BaselineCommit, who, GradeRatchetEnv)
 	}
-	msg := fmt.Sprintf("RATCHET OK: %s (debt %d held at-or-below baseline)",
-		p.Trend.Summary, p.TotalDebt)
+	msg := fmt.Sprintf("RATCHET OK: every comparable per-metric debt held "+
+		"(%s); total_debt=%d is %s", MetricComparisonBasis, p.TotalDebt, TotalDebtSemantics)
 	if len(p.Trend.EarlyWarning) > 0 {
 		var ws []string
 		for _, e := range p.Trend.EarlyWarning {
@@ -734,10 +824,10 @@ func CheckGate(p Payload) (int, string) {
 		msg += "; EARLY-WARNING (advisory, gate still green): " + strings.Join(ws, ", ") +
 			" rose vs baseline — a hidden per-metric regression; review before --pin"
 	}
-	if p.Trend.GradeDelta > 0 && !gradeRatchetHard() {
+	if gradeDelta > 0 && !gradeRatchetHard() {
 		msg += fmt.Sprintf("; GRADE-DEBT WARN (advisory -- ratchet demoted via %s=0): severity rose "+
 			"%+d to %d vs baseline (%s) -- review before --pin",
-			GradeRatchetEnv, p.Trend.GradeDelta, p.GradeDebt, p.GradeBreakdown)
+			GradeRatchetEnv, gradeDelta, p.GradeDebt, p.GradeBreakdown)
 	}
 	return 0, msg
 }
@@ -768,8 +858,10 @@ func weightLetter(weight int) string {
 func Render(p Payload) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "scorecard control pane — %s (%s)\n", p.Verdict, p.Finding)
-	fmt.Fprintf(&b, "  portfolio debt: %d (raw units)  grade-debt: %d (severity, scale-invariant)  "+
+	fmt.Fprintf(&b, "  observational total debt: %d (heterogeneous raw-unit sum; not a gate)  "+
+		"grade-debt: %d (severity, scale-invariant)  "+
 		"(%d measured, %d errored)  @%s\n", p.TotalDebt, p.GradeDebt, p.Measured, p.Errored, p.Commit)
+	fmt.Fprintf(&b, "  raw-debt gate: %s\n", MetricComparisonBasis)
 	fmt.Fprintf(&b, "  grade severity: %s\n", p.GradeBreakdown)
 	fmt.Fprintf(&b, "  trend: %s\n\n", p.Trend.Summary)
 	for _, m := range p.Metrics {
@@ -797,6 +889,13 @@ func Render(p Payload) string {
 		for _, g := range p.Trend.GradeRegressed {
 			fmt.Fprintf(&b, "  GRADE REGRESSION: %s slipped to %s vs pinned grade — reds the grade ratchet\n",
 				g.Label, g.ToGrade)
+		}
+	}
+	if len(p.Trend.VersionChanged) > 0 {
+		b.WriteString("\n")
+		for _, v := range p.Trend.VersionChanged {
+			fmt.Fprintf(&b, "  INCOMPARABLE: %s detector changed %s->%s — review, then re-pin\n",
+				v.Label, v.Baseline, v.Current)
 		}
 	}
 	fmt.Fprintf(&b, "\n  → %s\n", p.NextAction)

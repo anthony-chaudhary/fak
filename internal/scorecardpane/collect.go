@@ -131,6 +131,9 @@ func LoadBaseline(path string) *Baseline {
 	if err := json.Unmarshal(b, &doc); err != nil {
 		return nil
 	}
+	if doc.Schema != BaselineSchema && doc.Schema != LegacyBaselineSchema {
+		return nil
+	}
 	return &doc
 }
 

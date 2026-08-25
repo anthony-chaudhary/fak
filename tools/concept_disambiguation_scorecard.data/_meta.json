@@ -9409,6 +9409,16 @@
           "category": "incidental",
           "reason": "Issue #1984 operator-brief input, projection, or rendering symbol for the origin-versus-late debt split; not a new scoring system or proof protocol",
           "token": "splitDebtWitnesses"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8767 implementation identifier for existing scorecard debt comparison semantics, not a distinct debt concept.",
+          "token": "TotalDebtSemantics"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8767 implementation identifier for existing scorecard debt comparison semantics, not a distinct debt concept.",
+          "token": "scorecard_incomparable"
         }
       ],
       "id": "score-debt",
@@ -9427,6 +9437,7 @@
         "ScorecardAxis",
         "ScorecardAxisOracle",
         "TestModeDebtGradeInvariants",
+        "TotalDebtSemantics",
         "addDebtWitnesses",
         "appendDebtSection",
         "appendFullDebtSection",
@@ -9444,6 +9455,7 @@
         "negation_operator_debt",
         "pluralDebt",
         "scorecardPath",
+        "scorecard_incomparable",
         "scorecard_since",
         "scorecard_since_test",
         "scorecards",
