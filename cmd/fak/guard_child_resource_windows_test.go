@@ -41,7 +41,8 @@ func TestGuardChildResourceMonitorReapsOwnedTreeAndReceipts(t *testing.T) {
 	started := time.Now()
 	resource := startGuardChildResourceMonitor(cmd.Process.Pid, "trace-witness", "codex", guardResourcePolicy{
 		PollInterval:      100 * time.Millisecond,
-		MaxTreeCommit:     96 << 20,
+		Metric:            procguard.MemoryMetricCommit,
+		MaxTreeBytes:      96 << 20,
 		MinSystemHeadroom: 1,
 		Stop:              stop,
 	})
@@ -67,8 +68,11 @@ func TestGuardChildResourceMonitorReapsOwnedTreeAndReceipts(t *testing.T) {
 	if err := json.Unmarshal(data, &receipt); err != nil {
 		t.Fatalf("decode resource receipt: %v\n%s", err, data)
 	}
-	if receipt.RootPID != cmd.Process.Pid || receipt.OffenderPID == 0 || receipt.ThresholdBytes != 96<<20 || receipt.TreeCommitBytes <= receipt.ThresholdBytes {
+	if receipt.RootPID != cmd.Process.Pid || receipt.OffenderPID == 0 || receipt.ThresholdBytes != 96<<20 || receipt.TreeCommitBytes == nil || *receipt.TreeCommitBytes <= receipt.ThresholdBytes {
 		t.Fatalf("receipt lacks identity/threshold/usage evidence: %+v", receipt)
+	}
+	if receipt.MemoryMetric != string(procguard.MemoryMetricCommit) || receipt.TreeRSSBytes != nil {
+		t.Fatalf("Windows receipt changed metric schema: %+v", receipt)
 	}
 	if receipt.Action != "reap_tree" || receipt.DescendantsSurvive {
 		t.Fatalf("receipt lacks successful reap readback: %+v", receipt)

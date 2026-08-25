@@ -1,7 +1,11 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package procguard
 
-func collectCommitSnapshot(rootPID int) (CommitSnapshot, bool, string) {
-	return CommitSnapshot{RootPID: rootPID}, false, "commit accounting unsupported on this platform"
+func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
+	return MemorySnapshot{RootPID: rootPID}, false, "memory accounting unsupported on this platform"
+}
+
+func hostPhysicalMemoryBytes() (uint64, string) {
+	return 0, "physical memory accounting unsupported on this platform"
 }

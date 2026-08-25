@@ -19,52 +19,79 @@ const (
 	guardResourcePollDefault   = time.Second
 	guardTreeCommitDefault     = uint64(64) << 30
 	guardSystemHeadroomDefault = uint64(16) << 30
+	guardTreeRSSFallback       = uint64(4) << 30
+	guardTreeRSSMinimum        = uint64(1) << 30
 )
 
 type guardResourcePolicy struct {
 	PollInterval      time.Duration
-	MaxTreeCommit     uint64
+	Metric            procguard.MemoryMetric
+	MaxTreeBytes      uint64
 	MinSystemHeadroom uint64
 	Stop              <-chan struct{}
 }
 
 type guardResourceDecision struct {
-	Stop              bool
-	Reason            string
-	Offender          procguard.CommitProcess
-	TreeCommitBytes   uint64
-	SystemCommitBytes uint64
-	SystemCommitLimit uint64
-	ThresholdBytes    uint64
-	HeadroomBytes     uint64
-	OwnedPIDs         []int
+	Stop           bool
+	Reason         string
+	Metric         procguard.MemoryMetric
+	Offender       procguard.MemoryProcess
+	TreeBytes      uint64
+	SystemBytes    uint64
+	SystemLimit    uint64
+	ThresholdBytes uint64
+	HeadroomBytes  uint64
+	OwnedPIDs      []int
 }
 
 type guardResourceReceipt struct {
-	Schema             string `json:"schema"`
-	At                 string `json:"at"`
-	TraceID            string `json:"trace_id"`
-	Agent              string `json:"agent"`
-	RootPID            int    `json:"root_pid"`
-	OffenderPID        int    `json:"offender_pid"`
-	OffenderPPID       int    `json:"offender_ppid"`
-	OffenderName       string `json:"offender_name"`
-	OffenderCommand    string `json:"offender_command,omitempty"`
-	TreeCommitBytes    uint64 `json:"tree_commit_bytes"`
-	SystemCommitBytes  uint64 `json:"system_commit_bytes"`
-	SystemCommitLimit  uint64 `json:"system_commit_limit"`
-	ThresholdBytes     uint64 `json:"threshold_bytes"`
-	HeadroomBytes      uint64 `json:"headroom_bytes"`
-	Reason             string `json:"reason"`
-	Action             string `json:"action"`
-	DescendantsSurvive bool   `json:"descendants_survive"`
-	Detail             string `json:"detail,omitempty"`
+	Schema             string  `json:"schema"`
+	At                 string  `json:"at"`
+	TraceID            string  `json:"trace_id"`
+	Agent              string  `json:"agent"`
+	RootPID            int     `json:"root_pid"`
+	OffenderPID        int     `json:"offender_pid"`
+	OffenderPPID       int     `json:"offender_ppid"`
+	OffenderName       string  `json:"offender_name"`
+	OffenderCommand    string  `json:"offender_command,omitempty"`
+	MemoryMetric       string  `json:"memory_metric"`
+	TreeMemoryBytes    uint64  `json:"tree_memory_bytes"`
+	SystemMemoryBytes  uint64  `json:"system_memory_bytes,omitempty"`
+	SystemMemoryLimit  uint64  `json:"system_memory_limit,omitempty"`
+	TreeCommitBytes    *uint64 `json:"tree_commit_bytes,omitempty"`
+	SystemCommitBytes  *uint64 `json:"system_commit_bytes,omitempty"`
+	SystemCommitLimit  *uint64 `json:"system_commit_limit,omitempty"`
+	TreeRSSBytes       *uint64 `json:"tree_rss_bytes,omitempty"`
+	ThresholdBytes     uint64  `json:"threshold_bytes"`
+	HeadroomBytes      uint64  `json:"headroom_bytes"`
+	Reason             string  `json:"reason"`
+	Action             string  `json:"action"`
+	DescendantsSurvive bool    `json:"descendants_survive"`
+	Detail             string  `json:"detail,omitempty"`
 }
 
 func guardResourcePolicyFromEnv() guardResourcePolicy {
-	p := guardResourcePolicy{PollInterval: guardResourcePollDefault, MaxTreeCommit: guardTreeCommitDefault, MinSystemHeadroom: guardSystemHeadroomDefault}
-	if n, err := strconv.ParseUint(strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_COMMIT_MB")), 10, 64); err == nil && n > 0 {
-		p.MaxTreeCommit = n << 20
+	metric := procguard.MemoryMetricCommit
+	maxTree := guardTreeCommitDefault
+	headroom := guardSystemHeadroomDefault
+	if runtime.GOOS == "darwin" {
+		metric = procguard.MemoryMetricRSS
+		hostBytes, _ := procguard.HostPhysicalMemoryBytes()
+		maxTree = guardTreeRSSDefault(hostBytes)
+		headroom = 0 // physical capacity is not a current system-RSS pressure sample.
+	}
+	p := guardResourcePolicy{PollInterval: guardResourcePollDefault, Metric: metric, MaxTreeBytes: maxTree, MinSystemHeadroom: headroom}
+	// The generic name is preferred. Metric-specific names retain compatibility
+	// with the Windows spine and give Darwin an RSS-honest override.
+	override := strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_MEMORY_MB"))
+	if override == "" && metric == procguard.MemoryMetricRSS {
+		override = strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_RSS_MB"))
+	}
+	if override == "" {
+		override = strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_COMMIT_MB"))
+	}
+	if n, err := strconv.ParseUint(override, 10, 64); err == nil && n > 0 {
+		p.MaxTreeBytes = n << 20
 	}
 	if n, err := strconv.ParseUint(strings.TrimSpace(os.Getenv("FAK_SYSTEM_COMMIT_HEADROOM_MB")), 10, 64); err == nil && n > 0 {
 		p.MinSystemHeadroom = n << 20
@@ -75,24 +102,38 @@ func guardResourcePolicyFromEnv() guardResourcePolicy {
 	return p
 }
 
-func decideGuardResource(p guardResourcePolicy, s procguard.CommitSnapshot) guardResourceDecision {
-	d := guardResourceDecision{TreeCommitBytes: s.TreeCommitBytes, SystemCommitBytes: s.SystemCommitBytes, SystemCommitLimit: s.SystemCommitLimit, ThresholdBytes: p.MaxTreeCommit}
+func guardTreeRSSDefault(hostPhysicalBytes uint64) uint64 {
+	if hostPhysicalBytes == 0 {
+		return guardTreeRSSFallback
+	}
+	limit := hostPhysicalBytes / 4
+	if limit < guardTreeRSSMinimum {
+		limit = guardTreeRSSMinimum
+	}
+	if limit > guardTreeCommitDefault {
+		limit = guardTreeCommitDefault
+	}
+	return limit
+}
+
+func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guardResourceDecision {
+	d := guardResourceDecision{Metric: s.Metric, TreeBytes: s.TreeBytes, SystemBytes: s.SystemBytes, SystemLimit: s.SystemLimit, ThresholdBytes: p.MaxTreeBytes}
 	for _, process := range s.Processes {
 		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
 	}
-	if s.SystemCommitLimit >= s.SystemCommitBytes {
-		d.HeadroomBytes = s.SystemCommitLimit - s.SystemCommitBytes
+	if s.SystemLimit >= s.SystemBytes {
+		d.HeadroomBytes = s.SystemLimit - s.SystemBytes
 	}
 	if len(s.Processes) > 0 {
-		sort.Slice(s.Processes, func(i, j int) bool { return s.Processes[i].CommitBytes > s.Processes[j].CommitBytes })
+		sort.Slice(s.Processes, func(i, j int) bool { return s.Processes[i].Bytes > s.Processes[j].Bytes })
 		d.Offender = s.Processes[0]
 	}
-	if p.MaxTreeCommit > 0 && s.TreeCommitBytes >= p.MaxTreeCommit {
+	if p.MaxTreeBytes > 0 && s.TreeBytes >= p.MaxTreeBytes {
 		d.Stop = true
-		d.Reason = "CHILD_TREE_COMMIT_LIMIT"
+		d.Reason = "CHILD_TREE_" + strings.ToUpper(string(s.Metric)) + "_LIMIT"
 		return d
 	}
-	if p.MinSystemHeadroom > 0 && s.SystemCommitLimit > 0 && d.HeadroomBytes <= p.MinSystemHeadroom {
+	if s.Metric == procguard.MemoryMetricCommit && p.MinSystemHeadroom > 0 && s.SystemLimit > 0 && d.HeadroomBytes <= p.MinSystemHeadroom {
 		d.Stop = true
 		d.Reason = "SYSTEM_COMMIT_HEADROOM"
 	}
@@ -134,7 +175,16 @@ func guardResourceReceiptPath() string {
 }
 
 func guardResourceReason(d guardResourceDecision) string {
-	return fmt.Sprintf("%s tree_commit=%d threshold=%d system_commit=%d limit=%d headroom=%d offender_pid=%d", d.Reason, d.TreeCommitBytes, d.ThresholdBytes, d.SystemCommitBytes, d.SystemCommitLimit, d.HeadroomBytes, d.Offender.PID)
+	metric := d.Metric
+	if metric == "" {
+		metric = procguard.MemoryMetricCommit
+	}
+	if metric == procguard.MemoryMetricCommit {
+		// Preserve the Windows v1 reason text byte-for-byte for existing journal
+		// consumers while Darwin gets an RSS-honest label below.
+		return fmt.Sprintf("%s tree_commit=%d threshold=%d system_commit=%d limit=%d headroom=%d offender_pid=%d", d.Reason, d.TreeBytes, d.ThresholdBytes, d.SystemBytes, d.SystemLimit, d.HeadroomBytes, d.Offender.PID)
+	}
+	return fmt.Sprintf("%s metric=%s tree_bytes=%d threshold=%d system_bytes=%d limit=%d headroom=%d offender_pid=%d", d.Reason, metric, d.TreeBytes, d.ThresholdBytes, d.SystemBytes, d.SystemLimit, d.HeadroomBytes, d.Offender.PID)
 }
 
 func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy guardResourcePolicy) <-chan guardChildWaitEvent {
@@ -148,17 +198,15 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 				return
 			case <-ticker.C:
 			}
-			snapshot, supported, detail := procguard.CollectCommitSnapshot(rootPID)
+			snapshot, supported, detail := procguard.CollectMemorySnapshot(rootPID)
 			if !supported {
 				if runtime.GOOS == "windows" {
-					out <- guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: "CHILD_RESOURCE_MONITOR_UNAVAILABLE: " + detail, Resource: &guardResourceDecision{Stop: true, Reason: "CHILD_RESOURCE_MONITOR_UNAVAILABLE", Offender: procguard.CommitProcess{PID: rootPID}, OwnedPIDs: []int{rootPID}}}
+					out <- guardResourceMonitorFailure(rootPID, snapshot, "CHILD_RESOURCE_MONITOR_UNAVAILABLE", detail)
 				}
 				return
 			}
 			if detail != "" {
-				if runtime.GOOS == "windows" {
-					out <- guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: "CHILD_RESOURCE_MONITOR_ERROR: " + detail, Resource: &guardResourceDecision{Stop: true, Reason: "CHILD_RESOURCE_MONITOR_ERROR", Offender: procguard.CommitProcess{PID: rootPID}, OwnedPIDs: []int{rootPID}}}
-				}
+				out <- guardResourceMonitorFailure(rootPID, snapshot, "CHILD_RESOURCE_MONITOR_ERROR", detail)
 				return
 			}
 			decision := decideGuardResource(policy, snapshot)
@@ -170,6 +218,20 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 		}
 	}()
 	return out
+}
+
+func guardResourceMonitorFailure(rootPID int, snapshot procguard.MemorySnapshot, reason, detail string) guardChildWaitEvent {
+	d := guardResourceDecision{Stop: true, Reason: reason, Metric: snapshot.Metric, TreeBytes: snapshot.TreeBytes, SystemBytes: snapshot.SystemBytes, SystemLimit: snapshot.SystemLimit, Offender: procguard.MemoryProcess{PID: rootPID}}
+	for _, process := range snapshot.Processes {
+		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
+		if process.PID == rootPID {
+			d.Offender = process
+		}
+	}
+	if len(d.OwnedPIDs) == 0 {
+		d.OwnedPIDs = []int{rootPID}
+	}
+	return guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: reason + ": " + detail, Resource: &d}
 }
 
 func guardWriteResourceReceipt(event guardChildWaitEvent, traceID, agent string, rootPID int) error {
@@ -195,7 +257,7 @@ func guardWriteResourceReceipt(event guardChildWaitEvent, traceID, agent string,
 			}
 		}
 		if !survives {
-			return appendGuardResourceReceipt(guardResourceReceiptPath(), guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, OffenderCommand: d.Offender.CommandLine, TreeCommitBytes: d.TreeCommitBytes, SystemCommitBytes: d.SystemCommitBytes, SystemCommitLimit: d.SystemCommitLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: "reap_tree", DescendantsSurvive: false})
+			return appendGuardResourceReceipt(guardResourceReceiptPath(), newGuardResourceReceipt(traceID, agent, rootPID, d))
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("verify child resource reap: owned processes still alive: %v", d.OwnedPIDs)
@@ -203,3 +265,18 @@ func guardWriteResourceReceipt(event guardChildWaitEvent, traceID, agent string,
 		time.Sleep(25 * time.Millisecond)
 	}
 }
+
+func newGuardResourceReceipt(traceID, agent string, rootPID int, d guardResourceDecision) guardResourceReceipt {
+	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, OffenderCommand: d.Offender.CommandLine, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: "reap_tree", DescendantsSurvive: false}
+	if d.Metric == procguard.MemoryMetricRSS {
+		receipt.TreeRSSBytes = uint64Pointer(d.TreeBytes)
+	} else {
+		receipt.MemoryMetric = string(procguard.MemoryMetricCommit)
+		receipt.TreeCommitBytes = uint64Pointer(d.TreeBytes)
+		receipt.SystemCommitBytes = uint64Pointer(d.SystemBytes)
+		receipt.SystemCommitLimit = uint64Pointer(d.SystemLimit)
+	}
+	return receipt
+}
+
+func uint64Pointer(v uint64) *uint64 { return &v }
