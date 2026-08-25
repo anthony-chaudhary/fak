@@ -38,26 +38,27 @@ type ContractFact[T any] struct {
 
 // ProviderContract is the lifecycle-wide provider truth from which routing profiles are projected.
 type ProviderContract struct {
-	Provider            string               `json:"provider"`
-	Family              string               `json:"family"`
-	ModelScope          string               `json:"model_scope"`
-	Endpoint            ContractFact[string] `json:"endpoint"`
-	AuthEnv             ContractFact[string] `json:"auth_env"`
-	APIDialect          ContractFact[string] `json:"api_dialect"`
-	ContextTokens       ContractFact[int]    `json:"context_tokens"`
-	MaxOutputTokens     ContractFact[int]    `json:"max_output_tokens"`
-	ToolCalls           ContractFact[bool]   `json:"tool_calls"`
-	ParallelToolCalls   ContractFact[bool]   `json:"parallel_tool_calls"`
-	StructuredOutput    ContractFact[bool]   `json:"structured_output"`
-	StreamingEvents     ContractFact[string] `json:"streaming_events"`
-	PromptCaching       ContractFact[bool]   `json:"prompt_caching"`
-	CacheTTLSeconds     ContractFact[int]    `json:"cache_ttl_seconds"`
-	MaxCacheBreakpoints ContractFact[int]    `json:"max_cache_breakpoints"`
-	UsageDetails        ContractFact[string] `json:"cache_accounting"`
-	RetryStatusCodes    ContractFact[string] `json:"retry_status_codes"`
-	RateLimitHeaders    ContractFact[string] `json:"rate_limit_headers"`
-	SessionResume       ContractFact[string] `json:"session_resume"`
-	SupportMaturity     ContractFact[string] `json:"support_maturity"`
+	Provider            string                            `json:"provider"`
+	Family              string                            `json:"family"`
+	ModelScope          string                            `json:"model_scope"`
+	Endpoint            ContractFact[string]              `json:"endpoint"`
+	AuthEnv             ContractFact[string]              `json:"auth_env"`
+	APIDialect          ContractFact[string]              `json:"api_dialect"`
+	ContextTokens       ContractFact[int]                 `json:"context_tokens"`
+	MaxOutputTokens     ContractFact[int]                 `json:"max_output_tokens"`
+	ToolCalls           ContractFact[bool]                `json:"tool_calls"`
+	ParallelToolCalls   ContractFact[bool]                `json:"parallel_tool_calls"`
+	StructuredOutput    ContractFact[bool]                `json:"structured_output"`
+	StreamingEvents     ContractFact[string]              `json:"streaming_events"`
+	PromptCaching       ContractFact[bool]                `json:"prompt_caching"`
+	CacheTTLSeconds     ContractFact[int]                 `json:"cache_ttl_seconds"`
+	MaxCacheBreakpoints ContractFact[int]                 `json:"max_cache_breakpoints"`
+	UsageDetails        ContractFact[string]              `json:"cache_accounting"`
+	RetryStatusCodes    ContractFact[string]              `json:"retry_status_codes"`
+	RateLimitHeaders    ContractFact[string]              `json:"rate_limit_headers"`
+	SessionResume       ContractFact[string]              `json:"session_resume"`
+	SupportMaturity     ContractFact[string]              `json:"support_maturity"`
+	ServiceTiers        ContractFact[ServiceTierContract] `json:"service_tiers"`
 }
 
 var providerContracts = []ProviderContract{
@@ -113,6 +114,7 @@ func ValidateProviderContracts(contracts []ProviderContract) error {
 			wrapFact("streaming_events", contract.StreamingEvents), wrapFact("prompt_caching", contract.PromptCaching), wrapFact("cache_ttl_seconds", contract.CacheTTLSeconds),
 			wrapFact("max_cache_breakpoints", contract.MaxCacheBreakpoints), wrapFact("cache_accounting", contract.UsageDetails), wrapFact("retry_status_codes", contract.RetryStatusCodes),
 			wrapFact("rate_limit_headers", contract.RateLimitHeaders), wrapFact("session_resume", contract.SessionResume), wrapFact("support_maturity", contract.SupportMaturity),
+			wrapServiceTierFact("service_tiers", contract.ServiceTiers),
 		}
 		for _, fact := range facts {
 			if err := fact.validate(); err != nil {
@@ -133,6 +135,10 @@ type factValidator struct {
 func wrapFact[T comparable](name string, fact ContractFact[T]) factValidator {
 	var zero T
 	return factValidator{name: name, state: fact.State, source: fact.Source, hasValue: fact.Value != zero}
+}
+
+func wrapServiceTierFact(name string, fact ContractFact[ServiceTierContract]) factValidator {
+	return factValidator{name: name, state: fact.State, source: fact.Source, hasValue: len(fact.Value.Supported) != 0 || fact.Value.RequestField != "" || fact.Value.RealizedField != ""}
 }
 
 func (f factValidator) validate() error {
@@ -174,6 +180,7 @@ func openAIProviderContract() ProviderContract {
 		CacheTTLSeconds: notApplicable[int](sdk), MaxCacheBreakpoints: notApplicable[int](sdk), UsageDetails: known("input_tokens_details.cache_write_tokens+cached_tokens", sdk),
 		RetryStatusCodes: known("408,409,429,5xx; x-should-retry overrides", retry), RateLimitHeaders: unknown[string](retry), SessionResume: known("previous_response_id", sdk),
 		SupportMaturity: known("production", audit),
+		ServiceTiers:    known(ServiceTierContract{Supported: []ServiceTierBinding{{Mode: ServiceModeStandard, WireValue: "default"}, {Mode: ServiceModeFast, WireValue: "priority"}}, RequestField: "service_tier", RealizedField: "service_tier", CacheOnSwitch: "preserved", PremiumPrice: KnowledgeUnknown, Fallback: "provider_may_realize_default"}, FactSource{URL: "https://platform.openai.com/docs/api-reference/responses/create#responses-create-service_tier", Ref: "observed-2026-08-25", Path: "service_tier", ObservedAt: "2026-08-25"}),
 	}
 }
 
@@ -192,6 +199,7 @@ func anthropicProviderContract() ProviderContract {
 		CacheTTLSeconds: known(300, docs), MaxCacheBreakpoints: known(4, docs), UsageDetails: known("cache_creation_input_tokens+cache_read_input_tokens", sdk),
 		RetryStatusCodes: known("408,409,429,5xx; x-should-retry overrides", retry), RateLimitHeaders: unknown[string](retry), SessionResume: notApplicable[string](sdk),
 		SupportMaturity: known("production", audit),
+		ServiceTiers:    known(ServiceTierContract{Supported: []ServiceTierBinding{{Mode: ServiceModeStandard}, {Mode: ServiceModeFast, WireValue: "auto"}}, RequestField: "service_tier", RealizedField: "usage.service_tier", CacheOnSwitch: "invalidates", PremiumPrice: KnowledgeUnknown, Fallback: "provider_may_realize_standard"}, FactSource{URL: "https://docs.anthropic.com/en/api/service-tiers", Ref: "observed-2026-08-25", Path: "service_tier", ObservedAt: "2026-08-25"}),
 	}
 }
 

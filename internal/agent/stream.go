@@ -415,6 +415,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		}
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:                    modelID,
+			ServiceTier:              sp.ServiceTier,
 			Messages:                 safeMessages,
 			Tools:                    tools,
 			Temperature:              temperature,

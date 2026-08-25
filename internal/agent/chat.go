@@ -20,6 +20,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/httptrust"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
 // Role constants for chat messages.
@@ -393,6 +394,7 @@ type Completion struct {
 	// benign empty turn — the kernel's permission floor must never be bypassed by a
 	// format it failed to parse. Set by normalizeCompletionToolCalls.
 	ToolCallsDropped bool
+	ServiceTier      modelroute.ServiceMode
 }
 
 // SampleParams are the per-request sampling overrides a CALLER may attach to one
@@ -403,6 +405,7 @@ type Completion struct {
 // planner like HTTPPlanner already runs temperature 0, so the two only differ when
 // the caller also wants top_p/stop, and a bare float64 could not carry that intent.
 type SampleParams struct {
+	ServiceTier modelroute.ServiceMode
 	// Model, when non-empty, overrides the planner's configured ModelID for THIS
 	// request — the gateway's request-model pass-through (#82). It is the model id
 	// that reaches the upstream request body (and, for a path-templated provider
