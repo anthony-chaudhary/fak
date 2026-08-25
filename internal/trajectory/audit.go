@@ -35,7 +35,7 @@ type AuditOptions struct {
 	Since    time.Duration
 	Now      time.Time
 	Baseline *AuditSummaryRow
-	// UserContains keeps only transcripts whose user-authored prompts contain this case-insensitive literal.
+	// UserContains keeps only transcripts whose user-authored prompts contain this case-insensitive literal. Tool output, system text, and injected context never select a transcript; there is no raw-byte fallback.
 	UserContains string
 }
 

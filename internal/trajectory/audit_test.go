@@ -310,6 +310,41 @@ func TestAuditUserContainsSelectsTopicalCohort(t *testing.T) {
 	}
 }
 
+func TestAuditUserContainsRejectsNonUserEchoesAcrossSources(t *testing.T) {
+	root := t.TempDir()
+	rows := map[string]string{
+		"codex-user.jsonl": `{"type":"session_meta","payload":{"id":"codex-user"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"qwen task"}]}}`,
+		"codex-tool.jsonl": `{"type":"session_meta","payload":{"id":"codex-tool"}}
+{"type":"response_item","payload":{"type":"function_call_output","output":"qwen echoed by tool"}}`,
+		"codex-system.jsonl": `{"type":"session_meta","payload":{"id":"codex-system"}}
+{"type":"response_item","payload":{"type":"message","role":"system","content":[{"type":"input_text","text":"qwen injected context"}]}}`,
+	}
+	for name, body := range rows {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceCodex, Root: root, RootLabel: "codex/sessions"}}, UserContains: "QWEN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Transcripts) != 1 || result.Transcripts[0].TranscriptID != "codex-user" {
+		t.Fatalf("transcripts=%+v", result.Transcripts)
+	}
+	if got := result.Denominators[0]; got.FilesDiscovered != 3 || got.FilesMatched != 1 || got.FilesScanned != 1 {
+		t.Fatalf("denominator=%+v", got)
+	}
+}
+
+func TestAuditUserTextRejectsClaudeToolAndInjectedRows(t *testing.T) {
+	user := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "qwen task"}}
+	tool := map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "content": "qwen tool echo"}}
+	injected := map[string]any{"type": "user", "message": map[string]any{"role": "system", "content": "qwen injected"}}
+	if auditUserText(user) != "qwen task" || auditUserText(tool) != "" || auditUserText(injected) != "" {
+		t.Fatal("only user-authored Claude text may select the cohort")
+	}
+}
 func TestAuditEdgeMatrix(t *testing.T) {
 	fixtureRoot := filepath.Join("testdata", "audit", "issue-8493", "edge", "empty")
 	for _, test := range []struct {
