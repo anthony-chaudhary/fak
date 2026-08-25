@@ -317,6 +317,25 @@ var matrix = []Op{
 		Oracle:      "cpuref (GEMV cosine 1.000000)",
 		Note:        "Borrow the one-command-buffer resident-decode fusion; the per-token launch is the cost (epics #59/#67).",
 	},
+	{
+		Slug:  "metal-qwen-gdn",
+		Title: "Metal Qwen3.5 Gated-DeltaNet decode",
+		FileGlobs: []string{
+			"internal/model/qwen35.go",
+			"internal/model/qwen35_gdn.go",
+			"internal/metalgemm/qwen35_decode*",
+		},
+		FakPath:     "internal/model/qwen35.go (CPU GDN reference: linearAttnSeq / linearAttnStep)",
+		SOTA:        "llama.cpp@ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0 Qwen3.5 graph semantics; MLX@43d2f06cb87e76895bf9a152bade4fee83408643 Metal CommandEncoder ownership; MLX-LM@cc8521569694a3240b52c98acffd100d59b4c755 GDN semantics",
+		PrimaryLink: "https://github.com/ggml-org/llama.cpp/blob/ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0/src/models/qwen35.cpp",
+		Route:       RouteBorrow,
+		Oracle:      "internal/model/qwen35.go CPU reference: per-step output parity, convolution-state parity, and recurrent-state parity at predeclared tolerances; exact greedy-token equality over the accepted deterministic continuation; any fallback invalidates the witness",
+		Papers: []string{
+			"MLX Metal CommandEncoder ownership (43d2f06cb87e76895bf9a152bade4fee83408643): https://github.com/ml-explore/mlx/blob/43d2f06cb87e76895bf9a152bade4fee83408643/mlx/backend/metal/device.cpp",
+			"MLX-LM Qwen3.5 GDN semantics (cc8521569694a3240b52c98acffd100d59b4c755): https://github.com/ml-explore/mlx-lm/blob/cc8521569694a3240b52c98acffd100d59b4c755/mlx_lm/models/qwen3_5.py",
+		},
+		Note: "Borrow the graph/state-order and encoder-ownership invariants from pinned llama.cpp ebd048f, MLX 43d2f06, and MLX-LM cc85215 only; keep execution fak-native, with no runtime or backend fallback.",
+	},
 }
 
 // Operations returns every matrix row, sorted by Slug. The returned slice is a

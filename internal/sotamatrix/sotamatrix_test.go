@@ -40,6 +40,48 @@ func TestCollectiveCommRowCoversNCCLProcessGroup(t *testing.T) {
 	}
 }
 
+func TestMetalQwenGDNPriorArt(t *testing.T) {
+	op, ok := BySlug("metal-qwen-gdn")
+	if !ok {
+		t.Fatal("metal-qwen-gdn row missing from the SOTA matrix")
+	}
+	for _, p := range []string{
+		"internal/model/qwen35.go",
+		"internal/model/qwen35_gdn.go",
+		"internal/metalgemm/qwen35_decode.m",
+	} {
+		if !anyGlobMatches(op.FileGlobs, p) {
+			t.Errorf("metal-qwen-gdn FileGlobs %v do not cover %s", op.FileGlobs, p)
+		}
+	}
+	if op.Route != RouteBorrow {
+		t.Errorf("metal-qwen-gdn route = %q, want %q", op.Route, RouteBorrow)
+	}
+	for _, pin := range []string{
+		"llama.cpp@ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0",
+		"MLX@43d2f06cb87e76895bf9a152bade4fee83408643",
+		"MLX-LM@cc8521569694a3240b52c98acffd100d59b4c755",
+	} {
+		if !strings.Contains(op.SOTA, pin) {
+			t.Errorf("metal-qwen-gdn SOTA %q does not name pinned source %q", op.SOTA, pin)
+		}
+	}
+	for _, obligation := range []string{
+		"CPU reference",
+		"per-step output parity",
+		"convolution-state parity",
+		"recurrent-state parity",
+		"exact greedy-token equality",
+	} {
+		if !strings.Contains(op.Oracle, obligation) {
+			t.Errorf("metal-qwen-gdn oracle %q does not name %q", op.Oracle, obligation)
+		}
+	}
+	if !strings.Contains(op.Note, "no runtime or backend fallback") {
+		t.Errorf("metal-qwen-gdn note %q does not reject runtime/backend fallback", op.Note)
+	}
+}
+
 // TestEveryRowResolvesAndIsComplete mirrors the coverage scorecard's per-row HARD KPIs
 // in-binary: every row resolves by its own slug and carries a primary http(s) link, an
 // oracle, and a fak-path. A row that fails this is a matrix that silently stopped being
