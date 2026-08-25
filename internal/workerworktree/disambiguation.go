@@ -22,6 +22,7 @@ type DisambiguationWitness struct {
 	Fresh          bool               `json:"fresh"`
 	SemanticValid  bool               `json:"semantic_valid"`
 	CriticalClean  bool               `json:"critical_clean"`
+	ClarityDebt    int                `json:"clarity_debt"`
 	Coverage       float64            `json:"coverage"`
 	CoverageDebt   int                `json:"coverage_debt"`
 	FamilyCoverage map[string]float64 `json:"family_coverage,omitempty"`
@@ -60,9 +61,13 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 	// unrelated doc-regen left the tree stale at HEAD (before.Fresh already false), even for a
 	// diff that regressed nothing. See #5359.
 	freshNonRegress := post.Fresh || !before.Fresh
-	ok := freshNonRegress && post.SemanticValid && post.CriticalClean && post.Coverage+0.0001 >= before.Coverage && post.CoverageDebt <= before.CoverageDebt && !coverageFamilyRegressed(before.FamilyCoverage, post.FamilyCoverage)
+	// Clarity is also a non-regression gate. A clean HEAD must remain clean, while a HEAD
+	// with pre-existing clarity debt may land an unrelated change provided the candidate
+	// does not increase that debt. Semantic validity remains an absolute requirement.
+	clarityNonRegress := post.CriticalClean || (!before.CriticalClean && post.ClarityDebt <= before.ClarityDebt)
+	ok := freshNonRegress && post.SemanticValid && clarityNonRegress && post.Coverage+0.0001 >= before.Coverage && post.CoverageDebt <= before.CoverageDebt && !coverageFamilyRegressed(before.FamilyCoverage, post.FamilyCoverage)
 	if !ok && post.Detail == "" {
-		all.PostApply.Detail = fmt.Sprintf("coverage %.2f -> %.2f; coverage debt %d -> %d", before.Coverage, post.Coverage, before.CoverageDebt, post.CoverageDebt)
+		all.PostApply.Detail = fmt.Sprintf("clarity debt %d -> %d; coverage %.2f -> %.2f; coverage debt %d -> %d", before.ClarityDebt, post.ClarityDebt, before.Coverage, post.Coverage, before.CoverageDebt, post.CoverageDebt)
 	}
 	return all, ok
 }
@@ -109,6 +114,7 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 	w.Fresh = inv.Freshness.Fresh
 	w.SemanticValid = inv.SemanticValid
 	w.CriticalClean = inv.CriticalClean
+	w.ClarityDebt = inv.ClarityDebt
 	w.Coverage = inv.Coverage
 	w.CoverageDebt = inv.CoverageDebt
 	w.FamilyCoverage = inv.FamilyCoverage

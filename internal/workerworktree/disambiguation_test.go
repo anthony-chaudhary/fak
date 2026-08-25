@@ -95,3 +95,49 @@ func TestVerifyAppliedDisambiguationFreshnessIsNonRegression(t *testing.T) {
 		})
 	}
 }
+
+// TestVerifyAppliedDisambiguationClarityIsNonRegression pins #8957: a land may preserve
+// or reduce pre-existing clarity debt, but it may neither make a clean HEAD dirty nor add
+// debt to an already-dirty HEAD. All other invariant fields stay valid and unchanged so the
+// table isolates the clarity decision.
+func TestVerifyAppliedDisambiguationClarityIsNonRegression(t *testing.T) {
+	cases := []struct {
+		name                string
+		beforeCriticalClean bool
+		beforeClarityDebt   int
+		postCriticalClean   bool
+		postClarityDebt     int
+		wantOK              bool
+	}{
+		{"clean HEAD stays clean -> admitted", true, 0, true, 0, true},
+		{"clean HEAD becomes dirty -> refused", true, 0, false, 1, false},
+		{"dirty HEAD gains debt -> refused", false, 2, false, 3, false},
+		{"dirty HEAD keeps equal debt -> admitted", false, 2, false, 2, true},
+		{"dirty HEAD reduces debt but remains dirty -> admitted", false, 2, false, 1, true},
+		{"dirty HEAD becomes clean -> admitted", false, 2, true, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			old := readDisambiguation
+			defer func() { readDisambiguation = old }()
+			calls := 0
+			readDisambiguation = func(repo, tree string) DisambiguationWitness {
+				calls++
+				w := DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, CoverageDebt: 0, FamilyCoverage: map[string]float64{"loop": 100}}
+				if calls == 1 {
+					w.CriticalClean = tc.beforeCriticalClean
+					w.ClarityDebt = tc.beforeClarityDebt
+				}
+				if calls == 3 {
+					w.CriticalClean = tc.postCriticalClean
+					w.ClarityDebt = tc.postClarityDebt
+				}
+				return w
+			}
+			got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
+			if ok != tc.wantOK {
+				t.Fatalf("clarity non-regression: got ok=%v want %v (before clean=%v debt=%d; post clean=%v debt=%d; witness=%+v)", ok, tc.wantOK, tc.beforeCriticalClean, tc.beforeClarityDebt, tc.postCriticalClean, tc.postClarityDebt, got)
+			}
+		})
+	}
+}
