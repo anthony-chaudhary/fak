@@ -164,6 +164,7 @@ func gather(root string) ([]KPI, map[string]int) {
 		kpiRefusalRecoveryMapped(unmappedReasons, len(reasonTokens)),
 		kpiQuickstartSuccessSignal(qsFound, qsSignal),
 		kpiToolchainPinned(goDirective, goDocNamed),
+		launchEntryContractKPI(root),
 	}
 
 	substantiveConfigs := 0

@@ -200,7 +200,7 @@ var kpiWeightOrder = []string{
 	"honesty_ledger", "integration_recipes", "codex_recipe_current", "install_oneliner",
 	"quickstart_success_signal", "toolchain_pinned",
 	"guardrails_surfaced", "contributor_contract", "extension_scaffold",
-	"platform_guidance_consistent", "machine_consumable", "refusal_recovery_mapped",
+	"platform_guidance_consistent", "machine_consumable", "refusal_recovery_mapped", "launch_entry_contract",
 }
 
 var kpiWeights = map[string]float64{
@@ -211,7 +211,7 @@ var kpiWeights = map[string]float64{
 	"codex_recipe_current": 0.04, "install_oneliner": 0.03, "quickstart_success_signal": 0.03,
 	"toolchain_pinned": 0.03, "guardrails_surfaced": 0.06, "contributor_contract": 0.05,
 	"extension_scaffold": 0.05, "platform_guidance_consistent": 0.05, "machine_consumable": 0.05,
-	"refusal_recovery_mapped": 0.05,
+	"refusal_recovery_mapped": 0.04, "launch_entry_contract": 0.01,
 }
 
 // frontierDims is the ordered set of unbounded-frontier dimensions; frontierUnits the

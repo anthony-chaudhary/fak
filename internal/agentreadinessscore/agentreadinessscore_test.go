@@ -162,6 +162,7 @@ func cleanKPIs() []KPI {
 		kpiRefusalRecoveryMapped(nil, 6),
 		kpiQuickstartSuccessSignal(true, true),
 		kpiToolchainPinned(true, true),
+		{Kpi: "launch_entry_contract", Group: "adopt", Score: 100, Detail: "clean", Defects: []string{}, Soft: []string{}},
 	}
 }
 
