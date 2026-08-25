@@ -12454,6 +12454,11 @@
           "category": "incidental",
           "reason": "Implementation helper for atomic multi-token classification, not a distinct operator concept.",
           "token": "PlanClassifyMany"
+        },
+        {
+          "category": "incidental",
+          "reason": "exported provenance field names the exact alias candidates inspected by the speculator receipt guard; it is not a planning concept",
+          "token": "CandidateAliases"
         }
       ],
       "exclude": [
@@ -12469,6 +12474,7 @@
         "BaselineDecodeMicroseconds",
         "BaselineTaskAccuracy",
         "BuildSweepPlan",
+        "CandidateAliases",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
         "CandidateMeanTokensPerS",
