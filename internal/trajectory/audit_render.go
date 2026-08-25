@@ -11,6 +11,11 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	var out strings.Builder
 	summary := result.Summary
 	out.WriteString("# Cross-harness trajectory audit\n\n")
+	status := "blocked"
+	if result.ConclusionStatus.BroadEfficiencySupported {
+		status = "supported"
+	}
+	fmt.Fprintf(&out, "Broad efficiency conclusions: **%s** (refusals: %d).\n\n", status, result.ConclusionStatus.RefusalCount)
 	fmt.Fprintf(&out, "Schema: `%s`\n\n", AuditSchema)
 	out.WriteString("## Exact totals\n\n")
 	fmt.Fprintf(&out, "- Sources: %d; sessions: %d; files scanned: %d/%d; records: %d.\n", summary.Sources, summary.Transcripts, summary.FilesScanned, summary.FilesDiscovered, summary.Records)

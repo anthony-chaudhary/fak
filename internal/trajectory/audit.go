@@ -178,7 +178,13 @@ type AuditRefusalRow struct {
 }
 
 // AuditResult is the complete versioned artifact before rendering.
+type AuditConclusionStatus struct {
+	BroadEfficiencySupported bool `json:"broad_efficiency_supported"`
+	RefusalCount             int  `json:"refusal_count"`
+}
+
 type AuditResult struct {
+	ConclusionStatus  AuditConclusionStatus `json:"conclusion_status"`
 	Summary           AuditSummaryRow
 	Denominators      []AuditDenominatorRow
 	Transcripts       []AuditTranscriptRow
@@ -258,6 +264,10 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		return a.Code < b.Code
 	})
 
+	result.ConclusionStatus = AuditConclusionStatus{
+		BroadEfficiencySupported: len(result.Refusals) == 0,
+		RefusalCount:             len(result.Refusals),
+	}
 	result.Summary = summarizeAudit(result.Denominators, result.Transcripts, allHookDurations)
 	result.Bottlenecks = rankAuditBottlenecks(result.Transcripts)
 	result.ToolErrorFamilies = rankQwenToolErrorFamilies(allToolErrorEvents)
