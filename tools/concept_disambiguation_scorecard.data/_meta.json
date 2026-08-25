@@ -12449,6 +12449,11 @@
           "category": "incidental",
           "reason": "JSON spelling of a computed comparison metric, not a planning workflow concept.",
           "token": "candidate_mean_tokens_per_second"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation helper for atomic multi-token classification, not a distinct operator concept.",
+          "token": "PlanClassifyMany"
         }
       ],
       "exclude": [
@@ -12499,6 +12504,7 @@
         "OwnershipLaneMismatch",
         "PLAN_CONTRACT_INCOMPATIBLE",
         "PLAN_SCHEMA_INCOMPATIBLE",
+        "PlanClassifyMany",
         "PlanDecodeInterleave",
         "PlanEviction",
         "PlanGoTmp",

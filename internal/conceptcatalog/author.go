@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
@@ -21,6 +22,20 @@ type PositionRequest struct {
 	RowFile                                                                                  string
 }
 type ClassifyRequest struct{ Family, Token, Category, Reason string }
+
+type ClassifyResult struct {
+	Family   string `json:"family"`
+	Token    string `json:"token"`
+	Category string `json:"category"`
+	Changed  bool   `json:"changed"`
+}
+
+type PhaseTimings struct {
+	Load     time.Duration `json:"load"`
+	Validate time.Duration `json:"validate"`
+	Render   time.Duration `json:"render"`
+	Total    time.Duration `json:"total"`
+}
 type Change struct {
 	Path        string `json:"path"`
 	BeforeCount int    `json:"before_count,omitempty"`
@@ -28,12 +43,14 @@ type Change struct {
 	Content     []byte `json:"-"`
 }
 type Plan struct {
-	Mode              string   `json:"mode"`
-	Family            string   `json:"family"`
-	BeforeFamilyCount int      `json:"before_family_count"`
-	AfterFamilyCount  int      `json:"after_family_count"`
-	Files             []string `json:"files"`
-	Changes           []Change `json:"-"`
+	Mode              string           `json:"mode"`
+	Family            string           `json:"family"`
+	BeforeFamilyCount int              `json:"before_family_count"`
+	AfterFamilyCount  int              `json:"after_family_count"`
+	Files             []string         `json:"files"`
+	Changes           []Change         `json:"-"`
+	Classifications   []ClassifyResult `json:"classifications,omitempty"`
+	Timings           PhaseTimings     `json:"timings,omitempty"`
 }
 
 func PlanPosition(c Catalog, req PositionRequest) (Plan, error) {
@@ -368,19 +385,16 @@ func generateShadow(c Catalog, plan Plan) (Plan, shadowSnapshot, error) {
 var categories = map[string]bool{"incidental": true, "false-positive": true, "test-only": true, "build-tag-only": true}
 
 func PlanClassify(c Catalog, req ClassifyRequest) (Plan, error) {
-	if strings.TrimSpace(req.Family) == "" || strings.TrimSpace(req.Token) == "" || strings.TrimSpace(req.Reason) == "" {
-		return Plan{}, fmt.Errorf("family, token, and reason are required")
+	return PlanClassifyMany(c, []ClassifyRequest{req})
+}
+
+// PlanClassifyMany validates and applies a complete classification batch in memory,
+// then renders committed derivatives once. No destination is touched until Apply.
+func PlanClassifyMany(c Catalog, reqs []ClassifyRequest) (Plan, error) {
+	started := time.Now()
+	if len(reqs) == 0 {
+		return Plan{}, fmt.Errorf("at least one classification row is required")
 	}
-	if !categories[req.Category] {
-		return Plan{}, fmt.Errorf("category must be incidental, false-positive, test-only, or build-tag-only")
-	}
-	// Every top-level key of _meta.json must be declared here. This struct is not a
-	// projection for reading — the file is DECODED into it and RE-ENCODED from it, so a
-	// key that is absent from the struct is silently deleted from the file a classify
-	// writes. "meta" carries {as_of, fak_version}, the dating block the canonical
-	// generator REFUSES to render a scorecard without, so dropping it turned every
-	// `fak concept classify` into a generator crash. Held verbatim as RawMessage rather
-	// than a typed struct: this code has no business reshaping a block it only carries.
 	var meta struct {
 		Schema   string           `json:"schema"`
 		Meta     json.RawMessage  `json:"meta,omitempty"`
@@ -395,46 +409,73 @@ func PlanClassify(c Catalog, req ClassifyRequest) (Plan, error) {
 	if err = json.Unmarshal(b, &meta); err != nil {
 		return Plan{}, err
 	}
-	before := 0
-	found := false
-	for _, r := range c.Rows {
-		if norm(r.Family) == norm(req.Family) {
-			before++
-		}
-		if norm(r.Family) == norm(req.Family) && token(r.Grounding) == token(req.Token) {
-			return Plan{}, fmt.Errorf("token %q grounds positioned concept %s and cannot be classified away", req.Token, r.ID)
-		}
-	}
+	loaded := time.Now()
+
+	families := make(map[string]map[string]any, len(meta.Families))
 	for _, f := range meta.Families {
-		if norm(fmt.Sprint(f["id"])) != norm(req.Family) {
-			continue
+		families[norm(fmt.Sprint(f["id"]))] = f
+	}
+	seen := make(map[string]ClassifyRequest, len(reqs))
+	results := make([]ClassifyResult, 0, len(reqs))
+	for _, req := range reqs {
+		req.Family, req.Token, req.Category, req.Reason = strings.TrimSpace(req.Family), strings.TrimSpace(req.Token), strings.TrimSpace(req.Category), strings.TrimSpace(req.Reason)
+		if req.Family == "" || req.Token == "" || req.Reason == "" {
+			return Plan{}, fmt.Errorf("family, token, and reason are required")
 		}
-		found = true
-		key := "ignore"
-		if req.Category == "false-positive" {
-			key = "exclude"
+		if !categories[req.Category] {
+			return Plan{}, fmt.Errorf("category must be incidental, false-positive, test-only, or build-tag-only")
 		}
-		vals := toStrings(f[key])
-		for _, v := range vals {
-			if token(v) == token(req.Token) {
-				return Plan{}, fmt.Errorf("token %q is already classified", req.Token)
+		f := families[norm(req.Family)]
+		if f == nil {
+			return Plan{}, fmt.Errorf("unknown family %q", req.Family)
+		}
+		for _, row := range c.Rows {
+			if norm(row.Family) == norm(req.Family) && token(row.Grounding) == token(req.Token) {
+				return Plan{}, fmt.Errorf("token %q grounds positioned concept %s and cannot be classified away", req.Token, row.ID)
 			}
 		}
-		vals = append(vals, req.Token)
+		key := norm(req.Family) + "\x00" + token(req.Token)
+		if prior, ok := seen[key]; ok {
+			if prior.Category != req.Category || prior.Reason != req.Reason {
+				return Plan{}, fmt.Errorf("conflicting classifications for %s/%s", req.Family, req.Token)
+			}
+			continue
+		}
+		seen[key] = req
+		bucket := "ignore"
+		if req.Category == "false-positive" {
+			bucket = "exclude"
+		}
+		already := false
+		for _, v := range toStrings(f[bucket]) {
+			if token(v) == token(req.Token) {
+				already = true
+				break
+			}
+		}
+		if already {
+			exact := false
+			if notes, ok := f["classifications"].([]any); ok {
+				for _, n := range notes {
+					if m, ok := n.(map[string]any); ok && token(fmt.Sprint(m["token"])) == token(req.Token) && fmt.Sprint(m["category"]) == req.Category && fmt.Sprint(m["reason"]) == req.Reason {
+						exact = true
+					}
+				}
+			}
+			if !exact {
+				return Plan{}, fmt.Errorf("token %q already has a conflicting classification in family %q", req.Token, req.Family)
+			}
+			results = append(results, ClassifyResult{Family: req.Family, Token: req.Token, Category: req.Category})
+			continue
+		}
+		vals := append(toStrings(f[bucket]), req.Token)
 		sort.Strings(vals)
-		f[key] = vals
+		f[bucket] = vals
 		notes, _ := f["classifications"].([]any)
-		notes = append(notes, map[string]any{"token": req.Token, "category": req.Category, "reason": req.Reason})
-		f["classifications"] = notes
+		f["classifications"] = append(notes, map[string]any{"token": req.Token, "category": req.Category, "reason": req.Reason})
+		results = append(results, ClassifyResult{Family: req.Family, Token: req.Token, Category: req.Category, Changed: true})
 	}
-	if !found {
-		return Plan{}, fmt.Errorf("unknown family %q", req.Family)
-	}
-	// Encode rather than MarshalIndent: Marshal escapes <, > and & into <-style
-	// sequences, and this file is full of prose reasons that legitimately contain them
-	// ("path helper naming <git-common-dir>/fak/token-cache"). Escaping is valid JSON but
-	// it rewrites human-authored text into an unreadable form on every classify, so a
-	// two-token edit would arrive as a corpus-wide diff nobody can review.
+	validated := time.Now()
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -442,13 +483,30 @@ func PlanClassify(c Catalog, req ClassifyRequest) (Plan, error) {
 	if err = enc.Encode(meta); err != nil {
 		return Plan{}, err
 	}
-	out := buf.Bytes() // Encode already terminates with a newline.
-	plan := Plan{Mode: "classify", Family: req.Family, BeforeFamilyCount: before, AfterFamilyCount: before, Files: []string{filepath.ToSlash(p)}, Changes: []Change{{Path: p, BeforeCount: before, AfterCount: before, Content: out}}}
-	// Deliberately NOT AddGeneratedArtifacts: unlike a position, a classification is not
-	// graded against the snapshot it renders, so the only reason to run the generator is
-	// to refresh the two COMMITTED docs - and those must be rendered from the git tree the
-	// freshness gate scores, never from this shared worktree (#6521).
-	return addClassifyGeneratedArtifacts(c, plan)
+	plan := Plan{Mode: "classify", Classifications: results}
+	if !bytes.Equal(b, buf.Bytes()) {
+		plan.Files = []string{filepath.ToSlash(p)}
+		plan.Changes = []Change{{Path: p, Content: buf.Bytes()}}
+	}
+	plan, err = addClassifyGeneratedArtifacts(c, plan)
+	if err != nil {
+		return Plan{}, err
+	}
+	// An idempotent rerun emits no writes, including byte-identical derivatives.
+	kept := plan.Changes[:0]
+	files := plan.Files[:0]
+	for _, ch := range plan.Changes {
+		old, readErr := os.ReadFile(ch.Path)
+		if readErr == nil && bytes.Equal(old, ch.Content) {
+			continue
+		}
+		kept = append(kept, ch)
+		files = append(files, filepath.ToSlash(ch.Path))
+	}
+	plan.Changes, plan.Files = kept, files
+	done := time.Now()
+	plan.Timings = PhaseTimings{Load: loaded.Sub(started), Validate: validated.Sub(loaded), Render: done.Sub(validated), Total: done.Sub(started)}
+	return plan, nil
 }
 func toStrings(v any) []string {
 	var out []string

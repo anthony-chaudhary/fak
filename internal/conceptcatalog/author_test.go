@@ -101,6 +101,57 @@ func TestPlanPositionSkipsBackReferenceForRowNoFileOwns(t *testing.T) {
 		}
 	}
 }
+func TestPlanClassifyManyIsAtomicIdempotentAndBounded(t *testing.T) {
+	c, _ := fixture(t)
+	rows := []ClassifyRequest{
+		{Family: "cache", Token: "cache_batch", Category: "incidental", Reason: "batch fixture"},
+		{Family: "cache", Token: "gate_batch", Category: "test-only", Reason: "batch fixture"},
+		{Family: "cache", Token: "session_batch", Category: "build-tag-only", Reason: "batch fixture"},
+	}
+	before, err := os.ReadFile(filepath.Join(c.Dir, "_meta.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	plan, err := PlanClassifyMany(c, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("batch planning exceeded bound: %s", elapsed)
+	}
+	afterPlan, _ := os.ReadFile(filepath.Join(c.Dir, "_meta.json"))
+	if !bytes.Equal(before, afterPlan) {
+		t.Fatal("planner wrote partial corpus state")
+	}
+	if len(plan.Classifications) != 3 {
+		t.Fatalf("rows=%d", len(plan.Classifications))
+	}
+	if err := Apply(plan); err != nil {
+		t.Fatal(err)
+	}
+	c2, err := Load(filepath.Dir(filepath.Dir(c.Dir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := PlanClassifyMany(c2, rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Files) != 0 {
+		t.Fatalf("idempotent transaction would rewrite %v", again.Files)
+	}
+	bad := append(append([]ClassifyRequest{}, rows...), ClassifyRequest{Family: "missing", Token: "x", Category: "incidental", Reason: "bad"})
+	stable, _ := os.ReadFile(filepath.Join(c.Dir, "_meta.json"))
+	if _, err := PlanClassifyMany(c2, bad); err == nil {
+		t.Fatal("invalid batch accepted")
+	}
+	got, _ := os.ReadFile(filepath.Join(c.Dir, "_meta.json"))
+	if !bytes.Equal(stable, got) {
+		t.Fatal("invalid batch changed corpus")
+	}
+}
+
 func TestPlanClassifyAndRefuseGroundedConcept(t *testing.T) {
 	c, _ := fixture(t)
 	p, err := PlanClassify(c, ClassifyRequest{Family: "cache", Token: "cache_helper_test", Category: "test-only", Reason: "only a fixture helper"})
