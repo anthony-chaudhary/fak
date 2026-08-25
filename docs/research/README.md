@@ -15,6 +15,8 @@ description: "Index of fak research notes and captured stage witnesses, with the
 
 ## Active focus
 
+- [Related-system inventory maps](inventory/) — pinned local-checkout maps generated with `fak study-inventory` before deep `study-repo` borrowing, so broad source coverage has a concrete denominator.
+
 - [Structured session intent](structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
 
 - [Micro-context fabrics for 100–10,000 parallel agents](micro-context-fabrics.md) — split one cached agent base into many bounded logical contexts; includes the runnable 10k synthetic spine and controlled-kernel/API-only research ladder.

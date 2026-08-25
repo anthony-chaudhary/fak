@@ -1325,6 +1325,18 @@ missing fields, nonzero exits, and non-JSON output.
 Runnable hidden/exposed example and self-check:
 [`examples/skill-program/`](../examples/skill-program/).
 
+## `fak study-inventory`
+
+Render a deterministic local-checkout map for an exhaustive `study-repo` pass:
+
+```bash
+fak study-inventory --root /tmp/study-repo --repository owner/name --revision <sha>
+fak study-inventory --root /tmp/study-repo --repository owner/name --revision <sha> --json
+fak study-inventory --root /tmp/study-repo --repository owner/name --revision <sha> --json --out docs/research/inventory/owner-name.json
+```
+
+The command walks the checked-out tree, groups immediate subsystems, counts runtime/test/doc files, records representative paths, and emits one status row for every source class required by the exhaustive study contract. Use JSON for the registry `map_path`; Markdown is a human rendering. Non-tree classes such as open/closed issue history, the fak self-query witness, candidate matrix, and issue tracking are called out as follow-up requirements instead of being silently treated as covered.
+
 ## `fak study-monitor`
 
 Render and validate the durable external-repository queue used by the `study-repo` and `scout-loop` skills:
@@ -1333,9 +1345,12 @@ Render and validate the durable external-repository queue used by the `study-rep
 fak study-monitor
 fak study-monitor --due-days 7 --json
 fak study-monitor --registry docs/research/monitored-repositories.json --as-of 2026-08-14
+fak study-monitor --inventory-check --json
 ```
 
 The command reads `docs/research/monitored-repositories.json` by default, sorts by priority, and reports each source's status, pinned checked revision, `last_checked` age, and whether it is due for refresh. `--as-of` exists for deterministic witnesses and tests. The command does not contact GitHub or mutate the registry; scouts update all check fields together after inspecting the source.
+
+`--inventory-check` switches the readout to the stricter exhaustive-inventory contract. Candidate and studied rows are treated as needing a machine-readable map by default; the check exits nonzero until each row has an `inventory` block with a map path, matching indexed revision, positive subsystem count, completeness-critic result, and the required source-class coverage set.
 
 ## `fak vcache session-history`
 

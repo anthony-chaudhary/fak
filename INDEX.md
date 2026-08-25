@@ -275,6 +275,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Performance borrow map: current agentic and model-runtime practice](docs/notes/CONCEPT-PERFORMANCE-BORROW-MAP-2026-08-25.md) -- auto-indexed dated note.
+- [Related-system inventory: make deep study measurable before borrowing](docs/notes/CONCEPT-RELATED-SYSTEM-INVENTORY-2026-08-25.md) -- auto-indexed dated note.
 - [Top-50 documentation refresh audit — 2026-08-24](docs/notes/TOP-50-DOC-REFRESH-AUDIT-2026-08-24.md) -- auto-indexed dated note.
 - [Live dashboard dogfood — 2026-08-23](docs/notes/LIVE-DASHBOARD-DOGFOOD-2026-08-23.md) -- auto-indexed dated note.
 - [KV capacity normalization dogfood — 2026-08-23](docs/notes/KV-CAPACITY-NORMALIZATION-DOGFOOD-2026-08-23.md) — two committed metric dialects normalize to matching token, byte, and occupancy values.

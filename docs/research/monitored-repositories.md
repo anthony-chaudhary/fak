@@ -1,10 +1,12 @@
-# Monitored harness repositories
+# Monitored related repositories
 
-**Checked:** 2026-08-24
-**Machine source:** [`monitored-repositories.json`](monitored-repositories.json)  
+**Checked:** 2026-08-25
+**Machine source:** [`monitored-repositories.json`](monitored-repositories.json)
 **Refresh view:** `fak study-monitor --due-days 14` (add `--json` for automation)
+**Inventory gate:** `fak study-monitor --inventory-check --json`
+**Inventory map:** `fak study-inventory --root <scratch-clone> --repository owner/name --revision <sha> --json --out docs/research/inventory/owner-name.json`
 
-This is the durable discovery queue for external harness repositories. It complements dated deep-study notes: the registry records candidates before a full study, pins what was actually checked, and keeps `last_checked` visible so a scout can distinguish a fresh lead from a stale one. Exact `owner/name` is the deduplication key.
+This is the durable discovery queue for external harness, model-serving, and agentic-performance repositories. It complements dated deep-study notes: the registry records candidates before a full study, pins what was actually checked, and keeps `last_checked` visible so a scout can distinguish a fresh lead from a stale one. Exact `owner/name` is the deduplication key.
 
 ## Current ranking
 
@@ -26,8 +28,9 @@ The GitHub API's 100-item page cap means “at least 100” is deliberate. Stars
 3. On every meaningful check, update `last_checked`, `checked_revision`, `stars_at_check`, and `last_push_at_check` together.
 4. Use `candidate` for an unstudied lead, `studied` only with `study_note`, `watch` when no present borrow survives, and `dismissed` only with the reason retained in `why`.
 5. A completed `study-repo` pass updates this row in the same commit as its dated study note. A `scout-loop` pass selects due candidates before opening a fresh outward search.
+6. Candidate and studied rows default to **exhaustive inventory** for `fak study-monitor --inventory-check`. Start each pass by generating the local map with `fak study-inventory`, then complete the non-tree classes. To clear the gate, add an `inventory` block with `map_path`, `indexed_revision` equal to `checked_revision`, positive `subsystem_count`, a `completeness_critic`, and every required source class: `readme_docs`, `architecture_design`, `runtime_source`, `tests_fixtures`, `history_changelog_releases`, `open_closed_issues_prs_discussions`, `roadmap_todos`, `license_provenance`, `fak_selfquery_witness`, `candidate_matrix`, `completeness_critic`, and `issue_tracking`.
 
-This list intentionally does not claim that these repositories contain a borrowable gap. It proves only that they were fresh, relevant, previously untracked by exact source identity, and worth the next disciplined study pass on 2026-08-14.
+This list intentionally does not claim that these repositories contain a borrowable gap. It proves only that they were fresh, relevant, deduped by exact source identity, and worth a disciplined study pass or refresh. The 2026-08-25 update added current model-serving and agentic-performance candidates for the Qwen3.8/native-performance, discovery, and queue/supervision lanes.
 
 ## Newly studied source
 
