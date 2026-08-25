@@ -106,9 +106,12 @@ mix your work with peers' WIP. Use the matching isolated verb:
 | Will my push break another worker's graph? | `fak hooks pre-push` |
 
 Compile verification must never write the in-tree binary: prefer `fak-dev buildcheck`; if the
-binary itself is broken, use a unique temp output. On Windows, native `go test` is blocked by
-Application Control: run `./test.ps1` under WSL, use fleet nodes for real serves, and follow
+binary itself is broken, use a unique temp output. On this Windows box, Microsoft Defender
+Antivirus real-time ML has repeatedly quarantined transient native Go test executables; the
+August 25 audit for issue #8919 supersedes the earlier Application Control diagnosis. Run
+`./test.ps1` under WSL, use fleet nodes for real serves, and follow
 [`docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md`](docs/notes/AVOID-TESTING-ON-THIS-MACHINE-2026-06-25.md).
+Do not disable Defender or add broad exclusions.
 ## The 60-second proof (no key, no model, no GPU — verified)
 
 This is the canonical first command. Run it before anything else:
