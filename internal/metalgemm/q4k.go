@@ -17,11 +17,6 @@ void mg_q4k_gemv(int wid, const float* x, float* y);
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat);
 void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat);
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff);
-int  mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_y, const int* q4_yoff,
-                          const int* q8_wids, int nq8, const signed char* xq, const float* xd,
-                          float* q8_y, const int* q8_yoff);
-void mg_quant_event_snapshot(unsigned long long* command_buffers, unsigned long long* commits,
-                             unsigned long long* waits);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
 void mg_q6k_gemv(int wid, const float* x, float* y);
@@ -191,91 +186,6 @@ func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32 {
 		o += w.Out
 	}
 	return out
-}
-
-// NativeEvents is the deterministic host-side count of q4_k/Q8 Metal command-buffer lifecycle
-// events. The bridge increments these counters exactly where it creates, commits, and waits on a
-// native command buffer; callers compare snapshots rather than inferred graph metadata.
-type NativeEvents struct {
-	CommandBuffers uint64
-	Commits        uint64
-	Waits          uint64
-}
-
-// QuantNativeEvents snapshots the q4_k/Q8 native command-buffer counters.
-func QuantNativeEvents() NativeEvents {
-	var commandBuffers, commits, waits C.ulonglong
-	C.mg_quant_event_snapshot(&commandBuffers, &commits, &waits)
-	return NativeEvents{
-		CommandBuffers: uint64(commandBuffers),
-		Commits:        uint64(commits),
-		Waits:          uint64(waits),
-	}
-}
-
-// GEMVGroupMixedQ4KQ8 applies at least one Q4_K and one Q8 weight that share the same activation
-// in one native Metal command buffer. status is 0 when native preflight declined before a command
-// buffer existed, 1 on success, and -1 when submitted candidate work failed (callers must fail
-// closed, never fall back mid-batch).
-func GEMVGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []int8, xd []float32) (q4out, q8out [][]float32, status int) {
-	if len(q4ws) == 0 || len(q8ws) == 0 || q4ws[0] == nil || q8ws[0] == nil {
-		return nil, nil, 0
-	}
-	in := q4ws[0].In
-	if q8ws[0].In != in || len(x) < in || len(xq) < in || len(xd) < q8ws[0].Nblk {
-		return nil, nil, 0
-	}
-	q4ids := make([]C.int, len(q4ws))
-	q4off := make([]C.int, len(q4ws)+1)
-	q4total := 0
-	for i, w := range q4ws {
-		if w == nil || w.id < 0 || w.In != in {
-			return nil, nil, 0
-		}
-		q4ids[i] = w.id
-		q4off[i] = C.int(q4total)
-		q4total += w.Out
-	}
-	q4off[len(q4ws)] = C.int(q4total)
-
-	q8ids := make([]C.int, len(q8ws))
-	q8off := make([]C.int, len(q8ws)+1)
-	q8total := 0
-	for i, w := range q8ws {
-		if w == nil || w.id < 0 || w.In != in || w.Nblk != q8ws[0].Nblk {
-			return nil, nil, 0
-		}
-		q8ids[i] = w.id
-		q8off[i] = C.int(q8total)
-		q8total += w.Out
-	}
-	q8off[len(q8ws)] = C.int(q8total)
-
-	q4cat := make([]float32, q4total)
-	q8cat := make([]float32, q8total)
-	rc := C.mg_q4k_q8_gemv_group(
-		&q4ids[0], C.int(len(q4ids)), (*C.float)(unsafe.Pointer(&x[0])),
-		(*C.float)(unsafe.Pointer(&q4cat[0])), &q4off[0],
-		&q8ids[0], C.int(len(q8ids)), (*C.schar)(unsafe.Pointer(&xq[0])),
-		(*C.float)(unsafe.Pointer(&xd[0])), (*C.float)(unsafe.Pointer(&q8cat[0])), &q8off[0],
-	)
-	status = int(rc)
-	if status != 1 {
-		return nil, nil, status
-	}
-	q4out = make([][]float32, len(q4ws))
-	off := 0
-	for i, w := range q4ws {
-		q4out[i] = q4cat[off : off+w.Out : off+w.Out]
-		off += w.Out
-	}
-	q8out = make([][]float32, len(q8ws))
-	off = 0
-	for i, w := range q8ws {
-		q8out[i] = q8cat[off : off+w.Out : off+w.Out]
-		off += w.Out
-	}
-	return q4out, q8out, 1
 }
 
 // FusedMLP runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) * (up·x) )

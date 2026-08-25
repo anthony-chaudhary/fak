@@ -174,14 +174,11 @@ func q8FastDecodeSessionOK(s *Session, cfg Config) bool {
 // per (qkv / gate-up) group exactly as the prior hand-copy did. Appends this position's
 // (f32) K/V to the kernel-owned cache, so Evict/Clone and the KV semantics are unchanged;
 // returns the post-final-norm hidden (caller applies headQ).
-func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
+func (s *Session) tokenHiddenQ(id, pos int) []float32 {
 	// Fail closed BY NAME for a per-layer-head_dim arch (gemma4) whose q_norm/k_norm the
 	// generic block path's scalar-HeadDim qk-norm band cannot express — instead of the
 	// cryptic deep panic in applyQKNormCfg on the first token (issue #4274).
 	s.requireResidentQuantForwardSupported()
-	finishBatch := s.beginQwen35ProjectionBatch()
-	aborted := true
-	defer func() { finishBatch(aborted) }()
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -237,9 +234,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 		// biased Cohere) decodes here by construction, and rmsnormCfg's hard-coded nil bias
 		// threw its learned model.norm.bias away after blockStep had applied every per-layer
 		// norm bias correctly.
-		out = m.finalNorm(x)
-		aborted = false
-		return out
+		return m.finalNorm(x)
 	}
 	w := nKV * hd
 	scale := cfg.attnScale()
@@ -359,9 +354,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 	xnorm := grow(db.Xnorm, H)
 	db.Xnorm = xnorm
 	rmsnormInto(xnorm, x, m.tensor("model.norm.weight"), eps)
-	out = xnorm
-	aborted = false
-	return out
+	return xnorm
 }
 
 func attnDecodeOne(attnOut, Q []float32, cache *KVCache, layer, nH, hd, w, grp int, scale float32, scoreDot func(a, b []float32) float32, scoreDot3 func(a, b, c, x []float32) (float32, float32, float32), scoreScratch [][]float32) [][]float32 {
