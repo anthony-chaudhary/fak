@@ -243,6 +243,7 @@ func TestLaunchGoalDetachedSupportsExplicitProducts(t *testing.T) {
 		"[ValidateSet('claude','codex','opencode')]",
 		"[string]$Product     = 'claude'",
 		"'--product', $Product",
+		"$pfArgs += @('--product', $Product)",
 		"if ($Product -ne 'claude')",
 		"fleet-accounts exec --product '$quotedProduct'",
 		"-WindowStyle Hidden",

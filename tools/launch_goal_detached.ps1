@@ -212,6 +212,7 @@ if (-not $SkipPreflight) {
     throw "spawn gate needs python on PATH and none was found (fail-safe: REFUSE_INSPECT) -- fix python, or pass -SkipPreflight to explicitly accept an ungated spawn"
   }
   $pfArgs = $pyPre + @((Join-Path $repoRoot 'tools\dispatch_preflight.py'), '--json', '--workspace', "$Workspace")
+  $pfArgs += @('--product', $Product)
   if ($WorkKind)                  { $pfArgs += @('--work-kind', $WorkKind) }
   if ($PreflightMaxWorkers -gt 0) { $pfArgs += @('--max-workers', "$PreflightMaxWorkers") }
   $pfRaw = & $pyCmd.Source @pfArgs 2>$null | Out-String
