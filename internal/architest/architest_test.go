@@ -693,6 +693,7 @@ var tier = map[string]int{
 	"fleetsearch":                3, // read-only join over lifecycle/sessionjournal/toolproc evidence; no runtime kernel.
 	"nativefirst":                1, // stdlib-only native-engine substitution policy shared by CLI lint and commit gates.
 	"agentqueue":                 1, // stdlib-only deterministic desired-state planner for bounded agent populations (#8875).
+	"supervisionpolicy":          1, // stdlib-only typed fault-domain and bounded restart policy (#8909).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

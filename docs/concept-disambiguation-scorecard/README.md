@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **105** (clarity 29 + coverage 76) |
-| **Crystal-clear concepts (and climbing)** | **762** crystal of 2475 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2598 / 2674** (97.2% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **763** crystal of 2476 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2599 / 2675** (97.2% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **1** of 198 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **74** of 3438 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **74** of 3439 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 85.1/100 (grade B) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2475 concepts - score 85.1/100 (grade B) - disambiguation-debt 105
+concept-disambiguation chart - 2476 concepts - score 85.1/100 (grade B) - disambiguation-debt 105
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ############................ 762
+  * crystal       ############................ 763
   o defined       ############################ 1713
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -51,7 +51,7 @@ clarity mix by family (each cell = one concept):
   layout           *****ooooooooo     (14 concept(s); 5 crystal)
   loop             ****************************************oooooooooooooooooooooooooooooooooooooo (78 concept(s); 40 crystal)
   plan             *****************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (306 concept(s); 65 crystal)
-  policy-capability ************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (165 concept(s); 60 crystal)
+  policy-capability *************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (166 concept(s); 61 crystal)
   pool             ******oooooooooooooooooooooooooooooo (36 concept(s); 6 crystal)
   render-materialize *****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (182 concept(s); 29 crystal)
   score-debt       *********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (73 concept(s); 9 crystal)
@@ -64,7 +64,7 @@ clarity mix by family (each cell = one concept):
 coverage by family (positioned / discovered):
   guard-gate       ###########################. 462/481
   plan             ###########################. 362/373
-  policy-capability ##########################.. 183/194
+  policy-capability ##########################.. 184/195
   cache            ###########################. 281/291
   session-runtime  ###########################. 252/260
   attention        ##########################.. 76/83
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 97.2%  (2598/2674 confusable tokens positioned)
+namespace coverage  [###############################.] 97.2%  (2599/2675 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      #........................... 1
   pairs separated   [################################] 197/198
 
-name index: 3438 lookup name(s) -> 2475 concept(s), 74 ambiguous
+name index: 3439 lookup name(s) -> 2476 concept(s), 74 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **197 / 198** (196 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **1** |
 | Entangled concepts (own twin undrawn) | 5 |
-| Boundaries drawn (mutual / total) | 1608 / 4440 |
+| Boundaries drawn (mutual / total) | 1610 / 4442 |
 | Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3438 over 2475 concepts |
+| Lookup names indexed | 3439 over 2476 concepts |
 | Lookup names landing on several concepts | 74 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **2** |
-| Concepts carrying a contrast set | 2474 |
+| Concepts carrying a contrast set | 2475 |
 
 ## The concepts (best verdict first)
 
@@ -683,6 +683,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | policy-capability | **CrossAuditPolicy** - The shipgate enforcement policy for high-risk issue closures: the calibrated auditor-family allowlist, required calibration version, receipt freshness window, and staged-enablement prerequisites that decide whether a closure receipt opens the gate (#3860). |
 | * | crystal | symbol | policy-capability | **DefaultCrossAuditPolicy** - The calibrated CrossAuditPolicy instance built from the measured issue-3854 calibration evidence (two independent families at issue-resolution-audit/v2) with the issue-3859 dogfood loop not green, so the closure gate ships enforcement-capable but in dry-run (#3860). |
 | * | crystal | symbol | policy-capability | **AdjudicateClosure** - The fail-closed shipgate decision function for a high-risk issue closure: structural deny first, then a calibrated, independent, fresh PASS receipt or an audited break-glass; runs dry-run while the calibration and dogfood prerequisites are unmet (#3860). |
+| * | crystal | symbol | policy-capability | **supervision policy** - Typed platform-neutral decision policy for fault-domain restart, reattach, hold, and escalation. |
 | * | crystal | config | pool | **DISPATCH_POOL** - The env var (DISPATCH_POOL) naming which dispatch worker POOL a worker belongs to, forwarded into the guard Pool field alongside DISPATCH_LEASE. |
 | * | crystal | symbol | pool | **Pool (session)** - Bounded-LRU session state container with a fixed ceiling on concurrent sessions |
 | * | crystal | symbol | pool | **PoolProfile** - Pooling character of a residency tier describing host count, coherence model, and shareability |
@@ -2755,7 +2756,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2832/4440 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2832/4442 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
@@ -2766,7 +2767,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---:|---:|---:|
 | guard-gate | 462 | 481 | 19 |
 | plan | 362 | 373 | 11 |
-| policy-capability | 183 | 194 | 11 |
+| policy-capability | 184 | 195 | 11 |
 | cache | 281 | 291 | 10 |
 | session-runtime | 252 | 260 | 8 |
 | attention | 76 | 83 | 7 |

@@ -2358,3 +2358,10 @@ The stable benchmark preflight refusal emitted when the provider environment exp
 Reconciliation receipt that binds a read-only child result to its observed state epoch and read set, then marks it current or stale from relevant post-start workspace changes.
 
 **Distinct from:** Unlike StaleFactDecision, which evaluates one recalled memory fact, this decision validates a child observation against workspace-change evidence and carries the exact invalidating paths plus rerun-or-abstain guidance.
+
+
+### supervision policy
+
+Typed platform-neutral decision policy for fault-domain restart, reattach, hold, and escalation.
+
+**Distinct from:** Unlike dispatch admission policy, it decides process recovery from role, generation, checkpoint, effect certainty, backoff, and restart intensity; it does not authorize execution.
