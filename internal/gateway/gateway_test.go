@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -2971,4 +2972,60 @@ func unwrapToolResult(t *testing.T, r rpcDecoded) SyscallResponse {
 		t.Fatalf("decode tool result text: %v (%s)", err, text)
 	}
 	return sc
+}
+
+func TestGatewayReplicaBaseURLsSelectiveHedge(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	abi.RegisterAdjudicator(0, toolAdj{})
+
+	var slowHits, fastHits atomic.Int64
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		slowHits.Add(1)
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"model":"fleet-model","choices":[{"message":{"role":"assistant","content":"slow"},"finish_reason":"stop"}]}`)
+	}))
+	defer slow.Close()
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fastHits.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"model":"fleet-model","choices":[{"message":{"role":"assistant","content":"fast"},"finish_reason":"stop"}]}`)
+	}))
+	defer fast.Close()
+
+	var receipt HedgeReceipt
+	srv, err := New(Config{
+		EngineID:        "test",
+		Model:           "fleet-model",
+		BaseURL:         "slow=" + slow.URL,
+		ReplicaBaseURLs: []string{"fast=" + fast.URL},
+		Provider:        "openai",
+		VDSO:            true,
+		HedgePolicy: &HedgePolicy{
+			Enabled: true, PolicyVersion: "gateway-test/v1", ProviderContract: "openai-buffered/v1",
+			ReadOnly: true, Deterministic: true, Delay: 5 * time.Millisecond, Deadline: time.Second,
+			DrainTimeout: 50 * time.Millisecond, DuplicateWorkBudget: 1,
+			SpareCapacity: func() bool { return true }, Observe: func(got HedgeReceipt) { receipt = got },
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(srv.Close)
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	zero := 0.0
+	var resp ChatResponse
+	code := postJSON(t, ts.URL+"/v1/chat/completions", ChatRequest{
+		Model: "fleet-model", Messages: []agent.Message{{Role: agent.RoleUser, Content: "read-only"}}, Temperature: &zero,
+	}, &resp)
+	if code != http.StatusOK || len(resp.Choices) != 1 || resp.Choices[0].Message.Content != "fast" {
+		t.Fatalf("status=%d response=%+v", code, resp)
+	}
+	if slowHits.Load() != 1 || fastHits.Load() != 1 || receipt.Winner != "hedge" || receipt.ProviderWorkAfterCancel != "unknown" || receipt.CancelledBilling != "unknown" {
+		t.Fatalf("hits=%d/%d receipt=%+v", slowHits.Load(), fastHits.Load(), receipt)
+	}
 }
