@@ -2,12 +2,25 @@ package model
 
 import "sync"
 
+type Qwen35DecodeGraphNativeAttributionStatus string
+
+const (
+	Qwen35DecodeGraphNativeAttributionAvailable   Qwen35DecodeGraphNativeAttributionStatus = "available"
+	Qwen35DecodeGraphNativeAttributionUnavailable Qwen35DecodeGraphNativeAttributionStatus = "unavailable"
+)
+
+type Qwen35DecodeGraphNativeAttributionReason string
+
+const Qwen35DecodeGraphMetalEventSourceUnavailable Qwen35DecodeGraphNativeAttributionReason = "metal-event-source-unavailable:#8844"
+
 type Qwen35DecodeGraphNode struct {
-	Layer     int      `json:"layer"`
-	Operation string   `json:"operation"`
-	DependsOn []string `json:"depends_on,omitempty"`
-	HostRead  bool     `json:"host_read"`
-	Syncs     int      `json:"syncs"`
+	Layer                   int                                      `json:"layer"`
+	Operation               string                                   `json:"operation"`
+	DependsOn               []string                                 `json:"depends_on,omitempty"`
+	NativeAttributionStatus Qwen35DecodeGraphNativeAttributionStatus `json:"native_attribution_status"`
+	UnavailableReason       Qwen35DecodeGraphNativeAttributionReason `json:"unavailable_reason,omitempty"`
+	HostRead                *bool                                    `json:"host_read,omitempty"`
+	Syncs                   *int                                     `json:"syncs,omitempty"`
 }
 
 type Qwen35DecodeGraphTrace struct {
@@ -17,9 +30,17 @@ type Qwen35DecodeGraphTrace struct {
 }
 
 type qwen35DecodeGraphRecorder struct {
-	mu     sync.Mutex
-	active *Qwen35DecodeGraphTrace
-	last   Qwen35DecodeGraphTrace
+	mu        sync.Mutex
+	nextOwner uint64
+	begins    uint64
+	finishes  uint64
+	active    *qwen35DecodeGraphActive
+	last      Qwen35DecodeGraphTrace
+}
+
+type qwen35DecodeGraphActive struct {
+	owner uint64
+	trace Qwen35DecodeGraphTrace
 }
 
 func (s *Session) EnableQwen35DecodeGraphTrace() {
@@ -34,9 +55,7 @@ func (s *Session) LastQwen35DecodeGraphTrace() Qwen35DecodeGraphTrace {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	out := r.last
-	out.Nodes = append([]Qwen35DecodeGraphNode(nil), out.Nodes...)
-	return out
+	return cloneQwen35DecodeGraphTrace(r.last)
 }
 func (s *Session) beginQwen35DecodeGraph(pos int) func(bool) {
 	r := s.qwen35DecodeGraph
@@ -44,18 +63,33 @@ func (s *Session) beginQwen35DecodeGraph(pos int) func(bool) {
 		return func(bool) {}
 	}
 	r.mu.Lock()
-	r.active = &Qwen35DecodeGraphTrace{Position: pos}
+	if r.active != nil {
+		r.mu.Unlock()
+		return func(bool) {}
+	}
+	r.nextOwner++
+	owner := r.nextOwner
+	r.begins++
+	r.active = &qwen35DecodeGraphActive{
+		owner: owner,
+		trace: Qwen35DecodeGraphTrace{Position: pos},
+	}
 	r.mu.Unlock()
+	finished := false
 	return func(aborted bool) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
-		if r.active == nil {
+		if finished {
 			return
 		}
-		r.active.Aborted = aborted
-		r.last = *r.active
-		r.last.Nodes = append([]Qwen35DecodeGraphNode(nil), r.active.Nodes...)
+		finished = true
+		if r.active == nil || r.active.owner != owner {
+			return
+		}
+		r.active.trace.Aborted = aborted
+		r.last = cloneQwen35DecodeGraphTrace(r.active.trace)
 		r.active = nil
+		r.finishes++
 	}
 }
 func (s *Session) recordQwen35DecodeGraph(n Qwen35DecodeGraphNode) {
@@ -66,7 +100,7 @@ func (s *Session) recordQwen35DecodeGraph(n Qwen35DecodeGraphNode) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.active != nil {
-		r.active.Nodes = append(r.active.Nodes, n)
+		r.active.trace.Nodes = append(r.active.trace.Nodes, n)
 	}
 }
 func (s *Session) recordQwen35LayerGraph(l int, linear bool) {
@@ -74,8 +108,28 @@ func (s *Session) recordQwen35LayerGraph(l int, linear bool) {
 	if linear {
 		kind = "linear-attention"
 	}
-	s.recordQwen35DecodeGraph(Qwen35DecodeGraphNode{Layer: l, Operation: kind, DependsOn: []string{"layer-input"}, HostRead: true, Syncs: 2})
-	s.recordQwen35DecodeGraph(Qwen35DecodeGraphNode{Layer: l, Operation: "post-attention-residual-norm", DependsOn: []string{kind}, HostRead: true})
-	s.recordQwen35DecodeGraph(Qwen35DecodeGraphNode{Layer: l, Operation: "mlp", DependsOn: []string{"post-attention-residual-norm"}, HostRead: true, Syncs: 1})
-	s.recordQwen35DecodeGraph(Qwen35DecodeGraphNode{Layer: l, Operation: "next-layer-handoff", DependsOn: []string{"mlp"}, HostRead: true})
+	s.recordQwen35ModelGraphNode(l, kind, "layer-input")
+	s.recordQwen35ModelGraphNode(l, "post-attention-residual-norm", kind)
+	// blockStep dispatches ordinary FFN primitives here; do not label the operation fused.
+	s.recordQwen35ModelGraphNode(l, "mlp", "post-attention-residual-norm")
+	s.recordQwen35ModelGraphNode(l, "next-layer-handoff", "mlp")
+}
+
+func (s *Session) recordQwen35ModelGraphNode(layer int, operation string, dependsOn ...string) {
+	s.recordQwen35DecodeGraph(Qwen35DecodeGraphNode{
+		Layer:                   layer,
+		Operation:               operation,
+		DependsOn:               dependsOn,
+		NativeAttributionStatus: Qwen35DecodeGraphNativeAttributionUnavailable,
+		UnavailableReason:       Qwen35DecodeGraphMetalEventSourceUnavailable,
+	})
+}
+
+func cloneQwen35DecodeGraphTrace(in Qwen35DecodeGraphTrace) Qwen35DecodeGraphTrace {
+	out := in
+	out.Nodes = append([]Qwen35DecodeGraphNode(nil), in.Nodes...)
+	for i := range out.Nodes {
+		out.Nodes[i].DependsOn = append([]string(nil), in.Nodes[i].DependsOn...)
+	}
+	return out
 }

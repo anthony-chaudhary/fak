@@ -525,9 +525,6 @@ func (s *Session) head(xf []float32) []float32 {
 // the post-final-norm hidden vector (NOT yet projected to logits). This is the single
 // shared code path for prefill and decode; the head is applied by the caller.
 func (s *Session) tokenHidden(id, pos int) (out []float32) {
-	finishGraph := s.beginQwen35DecodeGraph(pos)
-	aborted := true
-	defer func() { finishGraph(aborted) }()
 	if s.Quant {
 		return s.tokenHiddenQ(id, pos)
 	}
@@ -554,7 +551,6 @@ func (s *Session) tokenHidden(id, pos int) (out []float32) {
 		tap.writeMeta(cfg, H, pos)
 	}
 	out = m.finalNorm(x)
-	aborted = false
 	return out
 }
 
