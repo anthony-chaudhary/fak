@@ -101,6 +101,19 @@ func TestBuildInventoryMapClassifiesTestdataWithoutFixturePrefixFalsePositive(t 
 	}
 }
 
+func TestBuildInventoryMapCompletenessNoteIncludesPartial(t *testing.T) {
+	root := t.TempDir()
+	writeInventoryFixture(t, root, "README.md", "# demo\n")
+	writeInventoryFixture(t, root, ".github/ISSUE_TEMPLATE/bug.md", "bug\n")
+	report, err := BuildInventoryMap(root, InventoryMapOptions{Repository: "owner/repo", IndexedRevision: "abc123", ObservedAt: "2026-08-25T00:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "classes with partial local evidence still requiring non-tree completion: open_closed_issues_prs_discussions"
+	if !strings.Contains(report.CompletenessNote, want) {
+		t.Fatalf("completeness note = %q, want %q", report.CompletenessNote, want)
+	}
+}
 func writeInventoryFixture(t *testing.T, root, rel, text string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(rel))
