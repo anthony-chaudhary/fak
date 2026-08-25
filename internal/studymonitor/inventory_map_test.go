@@ -13,7 +13,6 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	writeInventoryFixture(t, root, "docs/architecture.md", "architecture\n")
 	writeInventoryFixture(t, root, "cmd/app/main.go", "package main\nfunc main() {}\n")
 	writeInventoryFixture(t, root, "internal/app/app_test.go", "package app\n")
-	writeInventoryFixture(t, root, "tests/unit/test_loading.py", "def test_loading():\n    pass\n")
 	writeInventoryFixture(t, root, "CHANGELOG.md", "## changes\n")
 	writeInventoryFixture(t, root, "ROADMAP.md", "next\n")
 	writeInventoryFixture(t, root, "LICENSE", "MIT\n")
@@ -32,7 +31,7 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	if report.Schema != InventoryMapSchema || report.Repository != "owner/repo" || report.IndexedRevision != "abc123" {
 		t.Fatalf("identity fields = %+v", report)
 	}
-	if report.Totals.RuntimeFiles != 1 || report.Totals.TestFiles != 2 || report.Totals.DocsFiles < 2 {
+	if report.Totals.RuntimeFiles != 1 || report.Totals.TestFiles != 1 || report.Totals.DocsFiles < 2 {
 		t.Fatalf("totals = %+v, want runtime/test/docs classification", report.Totals)
 	}
 	if !containsString(report.SkippedDirs, "node_modules") {
@@ -54,6 +53,51 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	cmd := findSubsystem(t, report, "cmd")
 	if cmd.RuntimeFiles != 1 || len(cmd.ExamplePaths) == 0 {
 		t.Fatalf("cmd subsystem = %+v, want runtime example", cmd)
+	}
+}
+
+func TestBuildInventoryMapClassifiesTestdataWithoutFixturePrefixFalsePositive(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{
+		"fixturedb/client.go",
+		"pkg/testdata/input.json",
+		"pkg/fixture/input.json",
+		"pkg/fixtures/input.json",
+		"pkg/app_test.go",
+		"pkg/test_client.py",
+		"pkg/client.test.js",
+		"pkg/client.spec.ts",
+	} {
+		writeInventoryFixture(t, root, rel, "fixture\n")
+	}
+
+	report, err := BuildInventoryMap(root, InventoryMapOptions{
+		Repository:      "owner/repo",
+		IndexedRevision: "abc123",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Totals.RuntimeFiles != 1 || report.Totals.TestFiles != 7 {
+		t.Fatalf("totals = %+v, want fixturedb runtime and exact test-data components plus test filenames classified as tests", report.Totals)
+	}
+	fixtureDB := findSubsystem(t, report, "fixturedb")
+	if fixtureDB.RuntimeFiles != 1 || fixtureDB.TestFiles != 0 {
+		t.Fatalf("fixturedb subsystem = %+v, want runtime-only classification", fixtureDB)
+	}
+	for _, path := range []string{
+		"pkg/testdata/input.json",
+		"pkg/fixture/input.json",
+		"pkg/fixtures/input.json",
+		"pkg/app_test.go",
+		"pkg/test_client.py",
+		"pkg/client.test.js",
+		"pkg/client.spec.ts",
+	} {
+		class := classifyInventoryFile(path)
+		if !class.Test || class.Runtime {
+			t.Fatalf("classification for %s = %+v, want test-only", path, class)
+		}
 	}
 }
 

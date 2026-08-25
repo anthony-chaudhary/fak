@@ -486,18 +486,14 @@ func isInventoryDoc(lower, base, ext string) bool {
 }
 
 func isInventoryTest(lower, base string) bool {
-	return strings.Contains(lower, "/test/") ||
-		strings.HasPrefix(lower, "test/") ||
-		strings.Contains(lower, "/tests/") ||
-		strings.HasPrefix(lower, "tests/") ||
-		strings.Contains(lower, "/__tests__/") ||
-		strings.HasPrefix(lower, "__tests__/") ||
-		strings.Contains(lower, "/fixture") ||
-		strings.HasPrefix(lower, "fixture") ||
-		strings.Contains(lower, "/fixtures/") ||
-		strings.HasPrefix(lower, "fixtures/") ||
-		strings.HasPrefix(base, "test_") ||
-		strings.HasSuffix(base, "_test.py") ||
+	components := strings.Split(lower, "/")
+	for _, component := range components[:len(components)-1] {
+		switch component {
+		case "test", "tests", "__tests__", "testdata", "fixture", "fixtures":
+			return true
+		}
+	}
+	return strings.HasPrefix(base, "test_") ||
 		strings.Contains(base, "_test.") ||
 		strings.Contains(base, ".test.") ||
 		strings.Contains(base, ".spec.")
