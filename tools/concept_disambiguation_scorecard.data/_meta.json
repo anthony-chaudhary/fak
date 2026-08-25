@@ -10360,6 +10360,16 @@
           "category": "false-positive",
           "reason": "Fixed rubric JSON field, not a support-maturity lifecycle concept",
           "token": "factual_correctness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constant naming a bounded adapter result, not a reusable support-maturity concept",
+          "token": "ReasonUltracodeSchemaUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized reason token for one schema-version branch, not a reusable support-maturity concept",
+          "token": "ULTRACODE_SCHEMA_UNSUPPORTED"
         }
       ],
       "exclude": [
@@ -10435,6 +10445,7 @@
         "RUNTIME_NATIVE_PROBE_REQUIRED",
         "ReasonRuntimeDelegation",
         "ReasonSupported",
+        "ReasonUltracodeSchemaUnsupported",
         "ReasonUnknownScheme",
         "ReasonUnsupportedActivation",
         "ReasonUnsupportedEncoding",
@@ -10470,6 +10481,7 @@
         "TierStatusUnsupported",
         "TorchAOUnsupportedVersion",
         "TransitionUnsupported",
+        "ULTRACODE_SCHEMA_UNSUPPORTED",
         "UNKNOWN_FORMAT",
         "UNKNOWN_RUNTIME",
         "UNSUPPORTED_COMBINATION",

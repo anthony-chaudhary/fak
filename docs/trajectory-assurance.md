@@ -12,7 +12,7 @@ Efficiency is quality-constrained, not a raw usage score. It requires an observe
 
 The schema intentionally has no raw prompt, raw tool payload, tool input, transcript body, or arbitrary metadata fields. The decoder rejects unknown fields, preventing accidental serialization of sensitive payloads. Inputs should contain stable identifiers and typed summaries only.
 
-The package API is `trajectoryassurance.Assess` followed by `trajectoryassurance.Marshal`. A package-local CLI seam accepts one strict JSON input and writes one compact JSON receipt. Registration of `fak trajectory assurance` requires changing `cmd/fak/trajectory_audit.go`, which is outside this issue worker's file ownership and is therefore not included here.
+The package API is `trajectoryassurance.Assess` followed by `trajectoryassurance.Marshal`. The registered `fak trajectory assurance` command accepts one strict JSON input and writes one compact JSON receipt. It can also strictly adapt the public `fak.ultracode_status.v1` schema with `--ultracode-status FILE`; direct stdin behavior remains unchanged.`r`n`r`nThe v1 ultracode producer currently emits `unverified` with `not_observed` effect-readback, witness, and reconciliation fields, and it can emit explicit invalid/budget/activation failures. The adapter therefore reads identity and failure evidence but deliberately returns `UNKNOWN` rather than accepting speculative positive aliases. Issue #8834 tracks the missing authoritative positive terminal contract and the completed-worker activation contradiction.
 
 ## Command
 

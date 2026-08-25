@@ -60,6 +60,8 @@ type EfficiencyInput struct {
 type Input struct {
 	ObjectiveID         string               `json:"objective_id"`
 	TrajectoryID        string               `json:"trajectory_id"`
+	SessionID           string               `json:"session_id,omitempty"`
+	RunID               string               `json:"run_id,omitempty"`
 	ObservationWindow   string               `json:"observation_window"`
 	DeterministicFloor  []DeterministicCheck `json:"deterministic_floor"`
 	ObjectiveProgress   Observation          `json:"objective_progress"`
@@ -88,6 +90,8 @@ type Conflict struct {
 type Receipt struct {
 	ObjectiveID       string     `json:"objective_id"`
 	TrajectoryID      string     `json:"trajectory_id"`
+	SessionID         string     `json:"session_id,omitempty"`
+	RunID             string     `json:"run_id,omitempty"`
 	ObservationWindow string     `json:"observation_window"`
 	SchemaVersion     string     `json:"schema_version"`
 	Shadow            bool       `json:"shadow"`
@@ -131,6 +135,8 @@ func Assess(in Input) Receipt {
 	return Receipt{
 		ObjectiveID:       in.ObjectiveID,
 		TrajectoryID:      in.TrajectoryID,
+		SessionID:         in.SessionID,
+		RunID:             in.RunID,
 		ObservationWindow: in.ObservationWindow,
 		SchemaVersion:     SchemaVersion,
 		Shadow:            true,
