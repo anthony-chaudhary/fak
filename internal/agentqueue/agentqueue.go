@@ -42,6 +42,7 @@ type Intent struct {
 	ID            string      `json:"id"`
 	State         IntentState `json:"state"`
 	RetryEligible bool        `json:"retry_eligible,omitempty"`
+	Launch        LaunchSpec  `json:"launch,omitempty"`
 }
 type AttemptState string
 
