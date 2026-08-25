@@ -275,6 +275,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Portable fast mode: provider, model, and agent latency controls](docs/notes/CONCEPT-PORTABLE-FAST-MODE-2026-08-25.md) -- official-source and FAK-gap map behind #8959, #8960-#8963, and #8975, with typed requested/realized speed, quality-constrained routing, adaptive agent width, and net time-to-accepted-outcome witnesses.
 - [Speculators study: DSpark confidence, P-EAGLE parallel drafting, and alias-drift guards](docs/notes/CONCEPT-STUDY-SPECULATORS-2026-08-25.md) -- pinned vLLM Speculators study; filed #8938, #8939, and #8940 after deduping #8258, #5154, #4202, and #3197.
 - [Performance borrow map: current agentic and model-runtime practice](docs/notes/CONCEPT-PERFORMANCE-BORROW-MAP-2026-08-25.md) -- auto-indexed dated note.
 - [Related-system inventory: make deep study measurable before borrowing](docs/notes/CONCEPT-RELATED-SYSTEM-INVENTORY-2026-08-25.md) -- auto-indexed dated note.
