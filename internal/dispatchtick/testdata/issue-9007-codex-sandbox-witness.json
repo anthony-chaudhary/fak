@@ -1,0 +1,33 @@
+{
+  "schema": "fak-dispatchtick-codex-sandbox-witness/1",
+  "issue": 9007,
+  "observed_at": "2026-08-25T23:13:38Z",
+  "platform": "windows",
+  "codex_version": "0.149.1",
+  "task": "edit value.go so Value returns after; run go test ./... and git status --short",
+  "arms": [
+    {
+      "name": "full-bypass",
+      "argv": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"],
+      "reported_sandbox": "danger-full-access",
+      "guard_audit_rows": 10,
+      "guard_tip_hash": "33912c0b3e008ffa050615a32e35359e168746478ec3eded7d37979d10a6247d",
+      "edit_completed": true,
+      "tests_green": true,
+      "timed_out": false
+    },
+    {
+      "name": "workspace-write",
+      "argv": ["codex", "--ask-for-approval", "never", "--sandbox", "workspace-write", "exec", "--skip-git-repo-check"],
+      "reported_sandbox": "workspace-write",
+      "guard_audit_rows": 5,
+      "guard_tip_hash": "5cd70104b100652fd2544ae5e8a8792a3e8e84e74d97fd9c1448ad021562e0f7",
+      "edit_completed": false,
+      "tests_green": false,
+      "timed_out": true,
+      "timeout_seconds": 180,
+      "last_observed_effect": "read value.go"
+    }
+  ],
+  "decision": "retain-full-bypass"
+}

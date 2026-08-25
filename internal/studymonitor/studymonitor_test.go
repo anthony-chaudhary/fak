@@ -48,6 +48,45 @@ func TestBuildReportSortsAndRenderMarksDue(t *testing.T) {
 	}
 }
 
+func TestInventoryReportCarriesRefreshIssueForStudiedRow(t *testing.T) {
+	registry := Registry{Repositories: []Repository{{
+		Repository:   "example/studied",
+		Status:       "studied",
+		RefreshIssue: "#8985",
+	}}}
+
+	report := BuildInventoryReport(registry)
+	if len(report.Repositories) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(report.Repositories))
+	}
+	row := report.Repositories[0]
+	if row.Ready {
+		t.Fatal("row unexpectedly ready without inventory metadata")
+	}
+	if row.RefreshIssue != "#8985" {
+		t.Fatalf("refresh_issue = %q, want #8985", row.RefreshIssue)
+	}
+	for _, reason := range row.Reasons {
+		if reason == "missing refresh_issue for incomplete studied row" {
+			t.Fatalf("unexpected refresh issue reason: %v", row.Reasons)
+		}
+	}
+}
+
+func TestInventoryReportRequiresRefreshIssueForIncompleteStudiedRow(t *testing.T) {
+	report := BuildInventoryReport(Registry{Repositories: []Repository{{
+		Repository: "example/studied",
+		Status:     "studied",
+	}}})
+
+	for _, reason := range report.Repositories[0].Reasons {
+		if reason == "missing refresh_issue for incomplete studied row" {
+			return
+		}
+	}
+	t.Fatalf("reasons = %v, want missing refresh_issue", report.Repositories[0].Reasons)
+}
+
 func TestInventoryReportDefaultsCandidateToExhaustiveAndBlocksMissingMap(t *testing.T) {
 	r := Registry{Schema: Schema, Methodology: "ranked", Repositories: []Repository{
 		{Repository: "owner/repo", URL: "https://example/repo", Status: "candidate", Priority: 1, Why: "fresh", LastChecked: "2026-08-14", CheckedRevision: "abc"},
