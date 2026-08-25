@@ -11534,6 +11534,11 @@
           "category": "incidental",
           "reason": "CLI-local serializer for the native-performance next-arm view; it does not introduce a domain concept.",
           "token": "renderNextNativePerformance"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local CLI formatting helper for the #8777 safe-sync advisory, not a distinct render or materialization concept.",
+          "token": "renderCommitSyncAdvisory"
         }
       ],
       "id": "render-materialize",
@@ -11583,6 +11588,7 @@
         "renderChatTermination",
         "renderCheckpointWitness",
         "renderCommitDrainResult",
+        "renderCommitSyncAdvisory",
         "renderCommitVelocity",
         "renderConcepts",
         "renderContrastIndex",

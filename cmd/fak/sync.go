@@ -26,6 +26,7 @@ const (
 var syncAheadAudit = defaultSyncAheadAudit
 var syncWorktree = defaultSyncWorktree
 var (
+	syncAssess        = safesync.Assess
 	syncSafePush      = safesync.SafePush
 	syncCaptureSource = func(repo string) (string, error) { return gitOut(repo, "rev-parse", "HEAD") }
 )
@@ -157,7 +158,7 @@ func runSync(stdout, stderr io.Writer, argv []string) int {
 	if command == "apply" {
 		info, err = safesync.Apply(context.Background(), opts)
 	} else {
-		info, err = safesync.Assess(context.Background(), opts)
+		info, err = syncAssess(context.Background(), opts)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "fak sync: %v\n", err)

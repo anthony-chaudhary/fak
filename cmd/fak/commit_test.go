@@ -15,22 +15,211 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/safesync"
 )
 
 // withCommitFn swaps the commitFn seam for the duration of a test.
 func withCommitFn(t *testing.T, fn func(context.Context, safecommit.Options) (safecommit.Result, error)) {
 	t.Helper()
-	prevCommit, prevBusy, prevWait := commitFn, commitLaneBusyFn, commitLaneWaitFn
+	prevCommit, prevBusy, prevWait, prevAssess := commitFn, commitLaneBusyFn, commitLaneWaitFn, syncAssess
 	commitFn = fn
 	commitLaneBusyFn = func(string) (bool, int) { return false, 0 }
 	commitLaneWaitFn = func(string, time.Duration) (bool, safecommit.LockWaitReceipt) {
 		return true, safecommit.LockWaitReceipt{}
 	}
+	syncAssess = func(context.Context, safesync.Options) (safesync.Assessment, error) {
+		return safesync.Assessment{OK: true, State: safesync.StateInSync, TargetRef: "origin/main", Branch: "main"}, nil
+	}
 	t.Cleanup(func() {
 		commitFn = prevCommit
 		commitLaneBusyFn = prevBusy
 		commitLaneWaitFn = prevWait
+		syncAssess = prevAssess
 	})
+}
+
+func TestRenderCommitSyncAdvisoryUsesCurrentRefsWithoutFetch(t *testing.T) {
+	tests := []struct {
+		name string
+		info safesync.Assessment
+		want []string
+	}{
+		{
+			name: "up to date",
+			info: safesync.Assessment{OK: true, State: safesync.StateInSync, TargetRef: "origin/main", Branch: "main"},
+			want: []string{"in-sync with origin/main", "current remote-tracking refs", "no fetch"},
+		},
+		{
+			name: "behind",
+			info: safesync.Assessment{State: safesync.StateBehind, TargetRef: "origin/main", Branch: "main"},
+			want: []string{"behind origin/main", "fak sync check --fetch --remote origin --branch main", "integrate origin/main in place"},
+		},
+		{
+			name: "diverged",
+			info: safesync.Assessment{State: safesync.StateDiverged, TargetRef: "origin/main", Branch: "main"},
+			want: []string{"diverged origin/main", "fak sync check --fetch --remote origin --branch main", "integrate origin/main in place"},
+		},
+		{
+			name: "unavailable upstream",
+			info: safesync.Assessment{State: safesync.StateNoRemoteRef, TargetRef: "origin/main", Branch: "main", Reason: "remote-tracking ref origin/main not found; fetch first"},
+			want: []string{"unavailable origin/main", "no fetch", "fak sync check --fetch --remote origin --branch main"},
+		},
+	}
+
+	oldAssess := syncAssess
+	t.Cleanup(func() { syncAssess = oldAssess })
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			syncAssess = func(_ context.Context, opts safesync.Options) (safesync.Assessment, error) {
+				calls++
+				if opts.Fetch {
+					t.Fatal("commit advisory must not fetch")
+				}
+				if opts.Remote != "origin" {
+					t.Fatalf("remote = %q, want origin", opts.Remote)
+				}
+				if opts.Branch != "main" {
+					t.Fatalf("branch = %q, want main", opts.Branch)
+				}
+				return tt.info, nil
+			}
+			var out bytes.Buffer
+			renderCommitSyncAdvisory(context.Background(), &out, t.TempDir(), "main")
+			if calls != 1 {
+				t.Fatalf("assessment calls = %d, want 1", calls)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("advisory = %q, want %q", out.String(), want)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderCommitSyncAdvisoryAssessmentRunsNoFetchOrMutation(t *testing.T) {
+	oldAssess := syncAssess
+	t.Cleanup(func() { syncAssess = oldAssess })
+
+	var commands [][]string
+	syncAssess = func(ctx context.Context, opts safesync.Options) (safesync.Assessment, error) {
+		if opts.Fetch {
+			t.Fatal("commit advisory requested a fetch")
+		}
+		opts.Runner = func(_ context.Context, _ string, args ...string) safesync.RunResult {
+			commands = append(commands, append([]string(nil), args...))
+			command := strings.Join(args, " ")
+			switch command {
+			case "rev-parse --verify HEAD":
+				return safesync.RunResult{Stdout: []byte("local-head\n")}
+			case "rev-parse --verify origin/main":
+				return safesync.RunResult{Stdout: []byte("remote-head\n")}
+			case "merge-base --is-ancestor remote-head local-head":
+				return safesync.RunResult{Code: 1}
+			case "merge-base --is-ancestor local-head remote-head":
+				return safesync.RunResult{}
+			case "diff --name-status -z local-head remote-head":
+				return safesync.RunResult{}
+			default:
+				return safesync.RunResult{Code: 2, Stderr: []byte("unexpected git command")}
+			}
+		}
+		return safesync.Assess(ctx, opts)
+	}
+
+	var out bytes.Buffer
+	renderCommitSyncAdvisory(context.Background(), &out, "repo", "main")
+	if !strings.Contains(out.String(), "behind origin/main") {
+		t.Fatalf("advisory = %q, want runner-backed behind assessment", out.String())
+	}
+	if len(commands) == 0 {
+		t.Fatal("assessment issued no read commands")
+	}
+	mutating := map[string]bool{
+		"fetch": true, "pull": true, "merge": true, "stash": true, "reset": true,
+		"clean": true, "add": true, "commit": true, "push": true,
+	}
+	for _, args := range commands {
+		if len(args) > 0 && mutating[args[0]] {
+			t.Fatalf("commit advisory issued mutating git command: git %s", strings.Join(args, " "))
+		}
+	}
+}
+
+func TestRunCommitPreviewReportsUpstreamWithoutFetch(t *testing.T) {
+	oldAssess := syncAssess
+	t.Cleanup(func() { syncAssess = oldAssess })
+	fetched := false
+	syncAssess = func(_ context.Context, opts safesync.Options) (safesync.Assessment, error) {
+		fetched = opts.Fetch
+		return safesync.Assessment{State: safesync.StateBehind, TargetRef: "origin/main", Branch: "main"}, nil
+	}
+
+	var out, errOut bytes.Buffer
+	code := runCommit(&out, &errOut, []string{
+		"--preview",
+		"--dir", t.TempDir(),
+		"--trunk", "main",
+		"--path", "cmd/fak/commit.go",
+		"-m", "feat(commit): surface remote divergence before local commits accumulate (fak commit)\n\nCloses #8777",
+	})
+	if code != 0 {
+		t.Fatalf("preview code = %d, want 0; stdout=%q stderr=%q", code, out.String(), errOut.String())
+	}
+	if fetched {
+		t.Fatal("preview advisory requested a fetch")
+	}
+	if !strings.Contains(errOut.String(), "behind origin/main") || !strings.Contains(errOut.String(), "fak sync check --fetch") {
+		t.Fatalf("preview stderr = %q, want behind advisory and fetch next step", errOut.String())
+	}
+}
+
+func TestRunCommitAdvisesImmediatelyBeforeCommitWithoutBlocking(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		info safesync.Assessment
+		want string
+	}{
+		{name: "behind", info: safesync.Assessment{State: safesync.StateBehind, TargetRef: "origin/main", Branch: "main"}, want: "behind origin/main"},
+		{name: "diverged", info: safesync.Assessment{State: safesync.StateDiverged, TargetRef: "origin/main", Branch: "main"}, want: "diverged origin/main"},
+		{name: "unavailable", info: safesync.Assessment{State: safesync.StateNoRemoteRef, TargetRef: "origin/main", Branch: "main"}, want: "unavailable origin/main"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var events []string
+			withCommitFn(t, func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
+				events = append(events, "commit")
+				return safecommit.Result{Committed: true, Verified: true, SHA: "abc123", Paths: opts.Paths}, nil
+			})
+			fetched := false
+			syncAssess = func(_ context.Context, opts safesync.Options) (safesync.Assessment, error) {
+				events = append(events, "assess")
+				fetched = opts.Fetch
+				return tt.info, nil
+			}
+
+			var out, errOut bytes.Buffer
+			code := runCommit(&out, &errOut, []string{
+				"--no-build-check",
+				"--dir", t.TempDir(),
+				"--trunk", "main",
+				"--path", "cmd/fak/commit.go",
+				"-m", "feat(commit): surface remote divergence before local commits accumulate (fak commit)\n\nCloses #8777",
+			})
+			if code != 0 {
+				t.Fatalf("commit code = %d, want 0; stdout=%q stderr=%q", code, out.String(), errOut.String())
+			}
+			if fetched {
+				t.Fatal("real commit advisory requested a fetch")
+			}
+			if got := strings.Join(events, ","); got != "assess,commit" {
+				t.Fatalf("event order = %q, want assessment immediately before commit", got)
+			}
+			if !strings.Contains(errOut.String(), tt.want) {
+				t.Fatalf("stderr = %q, want %q advisory", errOut.String(), tt.want)
+			}
+		})
+	}
 }
 
 func TestRunCommitBusyLaneSkipsBuildCheckAndCommit(t *testing.T) {
@@ -118,9 +307,9 @@ func TestWaitForCommitLaneBoundsLiveHolderAndLetsDeadHolderThrough(t *testing.T)
 }
 
 func TestRunCommitLaneClearStillBuildChecksAndCommits(t *testing.T) {
-	oldBusy, oldBuild, oldCommit := commitLaneBusyFn, commitBuildCheckGate, commitFn
+	oldBusy, oldBuild, oldCommit, oldAssess := commitLaneBusyFn, commitBuildCheckGate, commitFn, syncAssess
 	t.Cleanup(func() {
-		commitLaneBusyFn, commitBuildCheckGate, commitFn = oldBusy, oldBuild, oldCommit
+		commitLaneBusyFn, commitBuildCheckGate, commitFn, syncAssess = oldBusy, oldBuild, oldCommit, oldAssess
 	})
 
 	commitLaneBusyFn = func(string) (bool, int) { return false, 0 }
@@ -133,6 +322,9 @@ func TestRunCommitLaneClearStillBuildChecksAndCommits(t *testing.T) {
 	commitFn = func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
 		commitCalled = true
 		return safecommit.Result{Committed: true, SHA: "abc123", Paths: opts.Paths}, nil
+	}
+	syncAssess = func(context.Context, safesync.Options) (safesync.Assessment, error) {
+		return safesync.Assessment{OK: true, State: safesync.StateInSync, TargetRef: "origin/main", Branch: "main"}, nil
 	}
 
 	var out, errOut bytes.Buffer
@@ -891,9 +1083,9 @@ type errTestErr struct{}
 func (errTestErr) Error() string { return "test infra failure" }
 
 func TestRunCommitRecordsTreeReceiptOnlyAfterSuccessfulBuildAndCommit(t *testing.T) {
-	oldBusy, oldBuild, oldCommit, oldRecord := commitLaneBusyFn, commitBuildCheckGate, commitFn, commitRecordTreeReceipt
+	oldBusy, oldBuild, oldCommit, oldRecord, oldAssess := commitLaneBusyFn, commitBuildCheckGate, commitFn, commitRecordTreeReceipt, syncAssess
 	t.Cleanup(func() {
-		commitLaneBusyFn, commitBuildCheckGate, commitFn, commitRecordTreeReceipt = oldBusy, oldBuild, oldCommit, oldRecord
+		commitLaneBusyFn, commitBuildCheckGate, commitFn, commitRecordTreeReceipt, syncAssess = oldBusy, oldBuild, oldCommit, oldRecord, oldAssess
 	})
 	commitLaneBusyFn = func(string) (bool, int) { return false, 0 }
 	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
@@ -901,6 +1093,9 @@ func TestRunCommitRecordsTreeReceiptOnlyAfterSuccessfulBuildAndCommit(t *testing
 	}
 	commitFn = func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
 		return safecommit.Result{Committed: true, Verified: true, SHA: "abc", Paths: opts.Paths}, nil
+	}
+	syncAssess = func(context.Context, safesync.Options) (safesync.Assessment, error) {
+		return safesync.Assessment{OK: true, State: safesync.StateInSync, TargetRef: "origin/main", Branch: "main"}, nil
 	}
 	var recorded int
 	commitRecordTreeReceipt = func(string, time.Time) { recorded++ }

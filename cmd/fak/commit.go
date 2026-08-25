@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/safesync"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workdelivery"
 )
@@ -155,7 +156,9 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 			return code
 		}
 		root := resolveRoot(*dir)
-		return runCommitPreview(stdout, stderr, message, paths, root, safecommit.ExpectedTrunk(root, *trunk), *asJSON, *requireIssue)
+		expectedTrunk := safecommit.ExpectedTrunk(root, *trunk)
+		renderCommitSyncAdvisory(context.Background(), stderr, root, expectedTrunk)
+		return runCommitPreview(stdout, stderr, message, paths, root, expectedTrunk, *asJSON, *requireIssue)
 	}
 
 	if len(paths) == 0 {
@@ -230,6 +233,11 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		return refuseCommitBuildCheck(stdout, stderr, paths, buildCheck, buildReason, *asJSON)
 	}
 
+	// Assess immediately before the writer enters safecommit. This deliberately uses only the
+	// current remote-tracking ref: committing must never hide an implicit fetch or become blocked
+	// solely because origin is behind/unavailable. The advisory gives agents who skipped preview
+	// the same early integration signal while preserving the local commit needed for recovery.
+	renderCommitSyncAdvisory(context.Background(), stderr, root, safecommit.ExpectedTrunk(root, *trunk))
 	res, err := commitFn(context.Background(), safecommit.Options{
 		Dir:                        *dir,
 		Paths:                      paths,
@@ -283,6 +291,45 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		renderCommitResult(stdout, res)
 	}
 	return commitExitCode(res)
+}
+
+// renderCommitSyncAdvisory reports the relationship to origin using safesync's existing
+// assessment and vocabulary. It is intentionally output-only: every state, including a missing
+// or unreadable upstream, leaves commit admission to the existing safecommit gates.
+func renderCommitSyncAdvisory(ctx context.Context, w io.Writer, repo, branch string) {
+	info, err := syncAssess(ctx, safesync.Options{
+		Repo:   repo,
+		Remote: "origin",
+		Branch: branch,
+		Fetch:  false,
+	})
+	target := "origin/" + branch
+	check := fmt.Sprintf("fak sync check --fetch --remote origin --branch %s", branch)
+	if err != nil {
+		fmt.Fprintf(w, "commit upstream advisory: unavailable %s using current remote-tracking refs (no fetch): %v\n", target, err)
+		fmt.Fprintf(w, "  next: run `%s`; integrate %s in place if needed before accumulating more local commits\n", check, target)
+		return
+	}
+
+	if info.TargetRef != "" {
+		target = info.TargetRef
+	}
+	if target == "origin/" || target == "" {
+		target = "origin upstream"
+	}
+
+	switch info.State {
+	case safesync.StateInSync:
+		fmt.Fprintf(w, "commit upstream advisory: in-sync with %s using current remote-tracking refs (no fetch)\n", target)
+	case safesync.StateBehind, safesync.StateDiverged:
+		fmt.Fprintf(w, "commit upstream advisory: %s %s using current remote-tracking refs (no fetch)\n", info.State, target)
+		fmt.Fprintf(w, "  next: run `%s`; if still behind or diverged, integrate %s in place before accumulating more local commits\n", check, target)
+	case safesync.StateNoRemoteRef:
+		fmt.Fprintf(w, "commit upstream advisory: unavailable %s using current remote-tracking refs (no fetch): %s\n", target, info.Reason)
+		fmt.Fprintf(w, "  next: run `%s` to refresh and reassess upstream before accumulating more local commits\n", check)
+	default:
+		fmt.Fprintf(w, "commit upstream advisory: %s %s using current remote-tracking refs (no fetch)\n", info.State, target)
+	}
 }
 
 func recordCommittedTreeReceipt(root string, now time.Time) {
