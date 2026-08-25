@@ -1,0 +1,474 @@
+{
+  "schema": "fak-devindex-discovery-benchmark/1",
+  "source": "INDEX.md curated lexical docs",
+  "coverage": "curated_docs_only",
+  "questions": 24,
+  "successes": 3,
+  "top_k_rate": 0.125,
+  "total_results": 120,
+  "rendered_bytes": 11805,
+  "cases": [
+    {
+      "id": "shared-tree-validation",
+      "category": "ownership",
+      "query": "shared tree validation",
+      "owners": [
+        "docs/dev-tooling.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 772,
+      "top_paths": [
+        "docs/notes/SHARED-TRUNK-VS-PER-AGENT-ISOLATION-2026-06-25.md",
+        "docs/notes/RESEARCH-DURABLE-SESSION-STATE-SHARED-MEMORY-2026-07-01.md",
+        "docs/notes/SHARED-TRUNK-COMPILE-INTEGRITY-GAP-2026-07-06.md",
+        "docs/notes/WORKTREE-LAND-MERGE-RECONCILIATION-2026-07-10.md",
+        "docs/notes/ULTRACODE-WORKFLOW-PROOF-HARNESS-2026-07-01.md"
+      ]
+    },
+    {
+      "id": "commit-explicit-paths",
+      "category": "ownership",
+      "query": "commit explicit paths",
+      "owners": [
+        "CONTRIBUTING.md",
+        "docs/dev-tooling.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 655,
+      "top_paths": [
+        "docs/notes/SHARED-CLONE-INTEGRATION-PASS-2026-06-29.md",
+        "docs/notes/DECISIONS-AUDIT-LOG-2026-06-26.md",
+        "docs/notes/RESEARCH-cot-training-gains-agents-triage-2026-06-27.md",
+        "docs/notes/IN-FLIGHT-REPAIR-SANCTIONED-SIDESTEP-2026-07-15.md",
+        "docs/adoption/install-paths.md"
+      ]
+    },
+    {
+      "id": "native-inference",
+      "category": "concept",
+      "query": "native inference llama fallback",
+      "owners": [
+        "docs/native-inference-goal.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 642,
+      "top_paths": [
+        "docs/adoption/compare/matrix.md",
+        "docs/adoption/compare/vs-serving-engines.md",
+        "docs/notes/GLM52-CPU-LLAMACPP-BASELINE-2026-06-29.md",
+        "docs/notes/GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md",
+        "docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md"
+      ]
+    },
+    {
+      "id": "fleet-compute",
+      "category": "runtime",
+      "query": "gpu fleet compute nodes",
+      "owners": [
+        "docs/fleet-compute-nodes.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 580,
+      "top_paths": [
+        "docs/notes/GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md",
+        "docs/notes/BLACKWELL-NVL72-READINESS-MAP-2026-06-29.md",
+        "docs/fak/neo-cloud-deploy.md",
+        "docs/explainers/what-is-a-cuda-kernel.md",
+        "docs/notes/AFFORDABLE-HARDWARE-AGENT-FLEETS-2026-06-28.md"
+      ]
+    },
+    {
+      "id": "private-comms",
+      "category": "runtime",
+      "query": "private comms gpu bridge",
+      "owners": [
+        "docs/private-comms-channel.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 560,
+      "top_paths": [
+        "docs/notes/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md",
+        "docs/notes/LIVECODEBENCH-SMOKE-GPU-SERVER-2026-08-05.md",
+        "docs/notes/L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md",
+        "docs/notes/GPU-SERVER-CROSS-ENGINE-DATA-2026-06-25.md",
+        "GPU.md"
+      ]
+    },
+    {
+      "id": "spine-first",
+      "category": "concept",
+      "query": "spine first fanout",
+      "owners": [
+        "docs/spine-first-defaults.md"
+      ],
+      "top_k": 5,
+      "success": true,
+      "rank": 1,
+      "result_count": 5,
+      "rendered_bytes": 590,
+      "top_paths": [
+        "docs/spine-first-defaults.md",
+        "docs/notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md",
+        "docs/notes/L3REGIONBACKEND-CHILD-B-DESIGN-55-2026-06-28.md",
+        "docs/notes/MANAGED-CACHE-PROVING-GROUND-2026-07-03.md",
+        "docs/notes/native-harness-progress-tracking-1315.md"
+      ]
+    },
+    {
+      "id": "scratch-lifecycle",
+      "category": "ownership",
+      "query": "scratch allocation generated output",
+      "owners": [
+        "docs/generated-output-defaults.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 320,
+      "top_paths": [
+        "docs/generated/verb-surface.md",
+        "docs/generated/disambiguation/canonical-terms.md",
+        "docs/generated/disambiguation/contrast-index.md",
+        "docs/marketing/README.md",
+        "docs/adoption/compare/matrix.md"
+      ]
+    },
+    {
+      "id": "ci-contract",
+      "category": "ownership",
+      "query": "ci workflow contract migration",
+      "owners": [
+        "docs/ci/ci-spec-change-migration.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 408,
+      "top_paths": [
+        "docs/notes/DECISION-fak-dos-hook-boundary-2026-07-07.md",
+        "docs/notes/SESSION-LIFECYCLE-IS-SERVING-ADMISSION-2026-06-26.md",
+        "docs/provider-cost-reconciliation.md",
+        "docs/branch-regime.md",
+        "docs/ticket-scope.md"
+      ]
+    },
+    {
+      "id": "trajectory-observability",
+      "category": "runtime",
+      "query": "trajectory corpus similarity",
+      "owners": [
+        "docs/observability/trajectory.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 499,
+      "top_paths": [
+        "docs/observability/trajectory-control.md",
+        "docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md",
+        "docs/notes/VERIFIED-RESUME-PACKET-CHECKPOINT-2026-06-26.md",
+        "docs/_witnesses/issue-8494/trajectory-audit-2026-08-21.md",
+        "docs/adoption/stories/cache-cliff.md"
+      ]
+    },
+    {
+      "id": "opencode-integration",
+      "category": "cli",
+      "query": "opencode integration",
+      "owners": [
+        "docs/integrations/opencode.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 285,
+      "top_paths": [
+        "docs/integrations/codex-mcp-warning.md",
+        "docs/integrations/dos-decisions.md",
+        "docs/integrations/harness-classification.md",
+        "docs/integrations/harness-composition.md",
+        "docs/integrations/harness-derive.md"
+      ]
+    },
+    {
+      "id": "cli-reference",
+      "category": "cli",
+      "query": "every cli verb reference",
+      "owners": [
+        "docs/cli-reference.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 300,
+      "top_paths": [
+        "docs/standards/agent-grammar.md",
+        "docs/explainers/context-shedding.md",
+        "docs/fak/neo-cloud-deploy.md",
+        "docs/sota/README.md",
+        "docs/explainers/what-is-a-cuda-kernel.md"
+      ]
+    },
+    {
+      "id": "policy-floor",
+      "category": "concept",
+      "query": "default deny capability policy",
+      "owners": [
+        "POLICY.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 707,
+      "top_paths": [
+        "docs/adoption/troubleshooting-first-run.md",
+        "docs/notes/RESEARCH-mcp-security-hub-offensive-tooling-triage-2026-06-29.md",
+        "docs/notes/RESEARCH-out-of-band-injection-defense-taxonomy-triage-2026-06-26.md",
+        "docs/notes/RESEARCH-sharelock-multitool-threshold-poisoning-triage-2026-06-26.md",
+        "docs/explainers/default-deny-vs-classifier.md"
+      ]
+    },
+    {
+      "id": "claims-status",
+      "category": "history",
+      "query": "real simulated stub claims",
+      "owners": [
+        "CLAIMS.md",
+        "STATUS.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 455,
+      "top_paths": [
+        "docs/notes/CONCEPT-STUDY-DEEPWIKI-2026-07-11.md",
+        "docs/notes/CONCEPT-DOS-READINESS-VERDICT-LADDER-2026-06-26.md",
+        "docs/EXECUTIVE-ROLLUP.md",
+        "docs/supported/features.md",
+        "docs/adoption/launch-kit.md"
+      ]
+    },
+    {
+      "id": "benchmark-authority",
+      "category": "history",
+      "query": "benchmark authority numbers",
+      "owners": [
+        "BENCHMARK-AUTHORITY.md"
+      ],
+      "top_k": 5,
+      "success": true,
+      "rank": 2,
+      "result_count": 5,
+      "rendered_bytes": 266,
+      "top_paths": [
+        "docs/adoption/launch-kit.md",
+        "BENCHMARK-AUTHORITY.md",
+        "BENCHMARK-AUTHORITY.md",
+        "docs/explainers/context-shedding.md",
+        "docs/EXECUTIVE-ROLLUP.md"
+      ]
+    },
+    {
+      "id": "rollback",
+      "category": "runtime",
+      "query": "rollback downgrade pin",
+      "owners": [
+        "docs/ROLLBACK.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 493,
+      "top_paths": [
+        "docs/notes/DECISION-fak-dos-hook-boundary-2026-07-07.md",
+        "docs/notes/MODELOPS-TOP3-DOGFOOD-2026-07-15.md",
+        "docs/notes/FUSION-REFCOUNT-GC-FOR-THE-AGENT-LOOP-2026-06-25.md",
+        "docs/notes/native-harness-progress-tracking-1315.md",
+        "docs/spine-first-defaults.md"
+      ]
+    },
+    {
+      "id": "release-channel",
+      "category": "history",
+      "query": "release channel contract",
+      "owners": [
+        "docs/releases-channel.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 681,
+      "top_paths": [
+        "docs/notes/GENERATION-RELEASE-READINESS-CONTRACT-2026-08-16.md",
+        "docs/notes/RESEARCH-agent-privacy-data-centric-survey-triage-2026-06-27.md",
+        "docs/notes/MANAGED-CACHE-PROVING-GROUND-2026-07-03.md",
+        "docs/notes/SLACK-CONTROL-FOUNDATION-2026-07-02.md",
+        "docs/notes/WORKER-UNIT-CONSERVATION-BACKLOG-2026-07-02.md"
+      ]
+    },
+    {
+      "id": "problem-frame",
+      "category": "concept",
+      "query": "problems we solve p1 p4",
+      "owners": [
+        "docs/problems-we-solve.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 671,
+      "top_paths": [
+        "docs/notes/CONCEPT-STUDY-VLLM-DSD-WITNESSED-2026-07-11.md",
+        "docs/notes/BLACKWELL-NVL72-READINESS-MAP-2026-06-29.md",
+        "docs/notes/CONCEPT-STUDY-DEEPWIKI-2026-07-11.md",
+        "docs/notes/RESEARCH-DURABLE-SESSION-STATE-SHARED-MEMORY-2026-07-01.md",
+        "docs/fak/concept-glossary.md"
+      ]
+    },
+    {
+      "id": "supported-features",
+      "category": "concept",
+      "query": "supported features status",
+      "owners": [
+        "docs/supported/features.md"
+      ],
+      "top_k": 5,
+      "success": true,
+      "rank": 1,
+      "result_count": 5,
+      "rendered_bytes": 361,
+      "top_paths": [
+        "docs/supported/features.md",
+        "docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md",
+        "docs/notes/track-d-agent-framework-parity-tracking-304.md",
+        "docs/milestones/STATUS.md",
+        "docs/dev-status-checkpoints.md"
+      ]
+    },
+    {
+      "id": "repro-packet",
+      "category": "docs",
+      "query": "sixty second proof offline",
+      "owners": [
+        "docs/repro-packet.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 384,
+      "top_paths": [
+        "docs/explainers/agent-runtime.md",
+        "docs/adoption/concept-card.md",
+        "docs/i18n/README.md",
+        "docs/adoption/casts/README.md",
+        "docs/notes/CONCEPT-STUDY-HEADROOM-2026-07-08.md"
+      ]
+    },
+    {
+      "id": "contributing",
+      "category": "docs",
+      "query": "human contribution guide",
+      "owners": [
+        "CONTRIBUTING.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 353,
+      "top_paths": [
+        "AGENTS.md",
+        "docs/explainers/engineering-is-building-loops.md",
+        "docs/adoption/compare/vs-routers.md",
+        "docs/adoption/good-first-tasks.md",
+        "docs/adoption/launch-kit.md"
+      ]
+    },
+    {
+      "id": "architecture",
+      "category": "docs",
+      "query": "kernel architecture subsystems",
+      "owners": [
+        "ARCHITECTURE.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 454,
+      "top_paths": [
+        "docs/fak/neo-cloud-deploy.md",
+        "docs/supported/models.md",
+        "docs/notes/D-006-TOOL-ECOSYSTEM-ARCH-FIT-243-2026-06-28.md",
+        "docs/notes/RESEARCH-agenticos-intent-os-triage-2026-06-26.md",
+        "docs/fak/in-kernel-model.md"
+      ]
+    },
+    {
+      "id": "extending",
+      "category": "docs",
+      "query": "extend kernel new leaf",
+      "owners": [
+        "EXTENDING.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 391,
+      "top_paths": [
+        "docs/notes/study-openshell-borrow-scout-2026-07-10.md",
+        "docs/fak/in-kernel-model.md",
+        "docs/explainers/what-is-a-cuda-kernel.md",
+        "docs/dos-kernel-transfer-playbook.md",
+        "docs/extension-seams.md"
+      ]
+    },
+    {
+      "id": "learning-path",
+      "category": "docs",
+      "query": "learning path course",
+      "owners": [
+        "LEARNING-PATH.md"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 348,
+      "top_paths": [
+        "docs/LEARNING-SCORECARD.md",
+        "docs/adoption/install-paths.md",
+        "docs/learning-observation.md",
+        "docs/fak/neo-cloud-deploy.md",
+        "docs/adoption/compare/vs-serving-engines.md"
+      ]
+    },
+    {
+      "id": "wiki",
+      "category": "docs",
+      "query": "wiki freshness structure verify",
+      "owners": [
+        "docs/wiki.md",
+        "internal/wiki/doc.go"
+      ],
+      "top_k": 5,
+      "success": false,
+      "result_count": 5,
+      "rendered_bytes": 630,
+      "top_paths": [
+        "docs/notes/CONCEPT-STUDY-DEEPWIKI-2026-07-11.md",
+        "docs/adoption/compare/matrix.md",
+        "docs/notes/2026-07-10-kernelwiki-study.md",
+        "docs/notes/context-safety-dos-refusal-tokens-1217.md",
+        "docs/notes/context-safety-rederivation-checker-1217.md"
+      ]
+    }
+  ]
+}
