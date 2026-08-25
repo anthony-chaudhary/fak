@@ -275,6 +275,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Speculators study: DSpark confidence, P-EAGLE parallel drafting, and alias-drift guards](docs/notes/CONCEPT-STUDY-SPECULATORS-2026-08-25.md) -- pinned vLLM Speculators study; filed #8938, #8939, and #8940 after deduping #8258, #5154, #4202, and #3197.
 - [Performance borrow map: current agentic and model-runtime practice](docs/notes/CONCEPT-PERFORMANCE-BORROW-MAP-2026-08-25.md) -- auto-indexed dated note.
 - [Related-system inventory: make deep study measurable before borrowing](docs/notes/CONCEPT-RELATED-SYSTEM-INVENTORY-2026-08-25.md) -- auto-indexed dated note.
 - [Top-50 documentation refresh audit — 2026-08-24](docs/notes/TOP-50-DOC-REFRESH-AUDIT-2026-08-24.md) -- auto-indexed dated note.
@@ -298,6 +299,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [DFlash 2: parallel path selection, suffix decay, and the FAK measurement seam](docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md) -- auto-indexed dated note.
 - [Claude Code Concise study: result-first parity and persistent-selection gap (2026-08-20)](docs/notes/CONCEPT-STUDY-CLAUDE-CODE-CONCISE-2026-08-20.md) -- pinned v2.1.237 release/settings evidence; FAK response shaping is already default and independently implemented, while persistent config remains filed as #8288.
 - [Native Ultracode runtime audit — 2026-08-20](docs/notes/ULTRACODE-NATIVE-RUNTIME-AUDIT-2026-08-20.md) -- auto-indexed dated note.
+- [llama.cpp study: the Metal residency pattern behind native Qwen3.8](docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-20.md) -- pinned llama.cpp study; records the Metal residency borrow, native FAK boundary, and #8324-#8326 follow-ons.
 - [There Is No Address study: consumer-owned locality and the FAK ready-endpoint seam (2026-08-20)](docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md) -- pinned essay/NIXL audit with factual corrections; FAK reuses `fabricmap` to govern consumer-ready KV routes and filed #8259/#8261 for terminal receipts and byte-sized route economics.
 - [LLM-as-a-Verifier study: same-model selection, evidence gaps, and the FAK replay seam (2026-08-20)](docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md) -- pinned implementation, paper, history, and 445-trajectory label audit; Pass@1/oracle reproduce, verifier means/error bars do not, and one provenance-bound selector-replay spine survived as #8230.
 - [Versioned Codex and Claude host components (2026-08-20)](docs/notes/HARNESS-HOST-COMPONENTS-2026-08-20.md) — pinned upstream source ledger and lifecycle decision for projecting the first-party harness profiles through init, dependency resolution, lock verification, and launch receipts; the spine shipped as #8212 and its durability portfolio is #8226–#8229.

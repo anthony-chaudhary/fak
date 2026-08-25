@@ -103,10 +103,87 @@ func TestInventoryReportWithMapFilesValidatesMachineMap(t *testing.T) {
 	mapPath := filepath.Join(dir, "owner-repo.json")
 	var mapBytes bytes.Buffer
 	if err := WriteInventoryMapJSON(&mapBytes, InventoryMap{
-		Schema:          InventoryMapSchema,
-		Repository:      "owner/repo",
-		IndexedRevision: "abc",
-		Subsystems:      []InventorySubsystem{{Path: "cmd"}},
+		Schema:           InventoryMapSchema,
+		Repository:       "owner/repo",
+		IndexedRevision:  "abc",
+		Totals:           InventoryMapTotals{Files: 1},
+		CompletenessNote: "local tree inventory completed",
+		SourceClasses: []InventoryClassStatus{
+			{Class: "readme_docs", Status: InventoryClassCovered},
+			{Class: "architecture_design", Status: InventoryClassCovered},
+			{Class: "runtime_source", Status: InventoryClassCovered},
+			{Class: "tests_fixtures", Status: InventoryClassCovered},
+			{Class: "history_changelog_releases", Status: InventoryClassCheckedAbsent},
+			{Class: "open_closed_issues_prs_discussions", Status: InventoryClassExternalRequired},
+			{Class: "roadmap_todos", Status: InventoryClassCheckedAbsent},
+			{Class: "license_provenance", Status: InventoryClassCovered},
+			{Class: "fak_selfquery_witness", Status: InventoryClassExternalRequired},
+			{Class: "candidate_matrix", Status: InventoryClassExternalRequired},
+			{Class: "completeness_critic", Status: InventoryClassCovered},
+			{Class: "issue_tracking", Status: InventoryClassExternalRequired},
+		},
+		Subsystems: []InventorySubsystem{{Path: "cmd"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mapPath, mapBytes.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := Registry{Schema: Schema, Methodology: "ranked", Repositories: []Repository{
+		{
+			Repository:      "owner/repo",
+			URL:             "https://example/repo",
+			Status:          "candidate",
+			Priority:        1,
+			Why:             "fresh",
+			LastChecked:     "2026-08-14",
+			CheckedRevision: "abc",
+			Inventory: &InventoryContract{
+				MapPath:         mapPath,
+				IndexedRevision: "abc",
+				SourceClasses:   append([]string(nil), RequiredInventorySourceClasses...),
+				SourceEvidence: []InventorySourceEvidence{
+					{Class: "open_closed_issues_prs_discussions", Evidence: []string{"gh issue list --state all --repo owner/repo"}},
+					{Class: "fak_selfquery_witness", Evidence: []string{"fak capabilities speculator"}},
+					{Class: "candidate_matrix", Evidence: []string{"docs/notes/CONCEPT-STUDY-OWNER-REPO.md#candidate-matrix"}},
+					{Class: "issue_tracking", Evidence: []string{"#123"}},
+				},
+				SubsystemCount:     1,
+				CompletenessCritic: "all local and non-tree classes complete",
+			},
+		},
+	}}
+	report := BuildInventoryReportWithMapFiles(r, ".")
+	if !report.OK {
+		t.Fatalf("report = %+v, want map-backed ok", report)
+	}
+}
+
+func TestInventoryReportWithMapFilesRejectsBareExternalClassClaim(t *testing.T) {
+	dir := t.TempDir()
+	mapPath := filepath.Join(dir, "owner-repo.json")
+	var mapBytes bytes.Buffer
+	if err := WriteInventoryMapJSON(&mapBytes, InventoryMap{
+		Schema:           InventoryMapSchema,
+		Repository:       "owner/repo",
+		IndexedRevision:  "abc",
+		Totals:           InventoryMapTotals{Files: 1},
+		CompletenessNote: "local tree inventory completed",
+		SourceClasses: []InventoryClassStatus{
+			{Class: "readme_docs", Status: InventoryClassCovered},
+			{Class: "architecture_design", Status: InventoryClassCovered},
+			{Class: "runtime_source", Status: InventoryClassCovered},
+			{Class: "tests_fixtures", Status: InventoryClassCovered},
+			{Class: "history_changelog_releases", Status: InventoryClassCheckedAbsent},
+			{Class: "open_closed_issues_prs_discussions", Status: InventoryClassPartial},
+			{Class: "roadmap_todos", Status: InventoryClassCheckedAbsent},
+			{Class: "license_provenance", Status: InventoryClassCovered},
+			{Class: "fak_selfquery_witness", Status: InventoryClassExternalRequired},
+			{Class: "candidate_matrix", Status: InventoryClassExternalRequired},
+			{Class: "completeness_critic", Status: InventoryClassCovered},
+			{Class: "issue_tracking", Status: InventoryClassExternalRequired},
+		},
+		Subsystems: []InventorySubsystem{{Path: "cmd"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +209,18 @@ func TestInventoryReportWithMapFilesValidatesMachineMap(t *testing.T) {
 		},
 	}}
 	report := BuildInventoryReportWithMapFiles(r, ".")
-	if !report.OK {
-		t.Fatalf("report = %+v, want map-backed ok", report)
+	if report.OK {
+		t.Fatalf("report = %+v, want bare external class claim blocked", report)
+	}
+	reasons := strings.Join(report.Repositories[0].Reasons, "\n")
+	for _, want := range []string{
+		"source class open_closed_issues_prs_discussions is only partial",
+		"source class fak_selfquery_witness requires explicit source_evidence",
+		"source class candidate_matrix requires explicit source_evidence",
+		"source class issue_tracking requires explicit source_evidence",
+	} {
+		if !strings.Contains(reasons, want) {
+			t.Fatalf("reasons missing %q:\n%s", want, reasons)
+		}
 	}
 }

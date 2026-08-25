@@ -13,6 +13,7 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	writeInventoryFixture(t, root, "docs/architecture.md", "architecture\n")
 	writeInventoryFixture(t, root, "cmd/app/main.go", "package main\nfunc main() {}\n")
 	writeInventoryFixture(t, root, "internal/app/app_test.go", "package app\n")
+	writeInventoryFixture(t, root, "tests/unit/test_loading.py", "def test_loading():\n    pass\n")
 	writeInventoryFixture(t, root, "CHANGELOG.md", "## changes\n")
 	writeInventoryFixture(t, root, "ROADMAP.md", "next\n")
 	writeInventoryFixture(t, root, "LICENSE", "MIT\n")
@@ -31,7 +32,7 @@ func TestBuildInventoryMapClassifiesSourceSurface(t *testing.T) {
 	if report.Schema != InventoryMapSchema || report.Repository != "owner/repo" || report.IndexedRevision != "abc123" {
 		t.Fatalf("identity fields = %+v", report)
 	}
-	if report.Totals.RuntimeFiles != 1 || report.Totals.TestFiles != 1 || report.Totals.DocsFiles < 2 {
+	if report.Totals.RuntimeFiles != 1 || report.Totals.TestFiles != 2 || report.Totals.DocsFiles < 2 {
 		t.Fatalf("totals = %+v, want runtime/test/docs classification", report.Totals)
 	}
 	if !containsString(report.SkippedDirs, "node_modules") {
