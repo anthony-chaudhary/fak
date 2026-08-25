@@ -292,9 +292,16 @@ func guardInfoObservationSummary(view *guardInfoObservationView) string {
 	if view.Transport == guardInfoObservationTransportLegacy {
 		transport = "legacy/unknown"
 	}
-	return transport + " · " +
-		guardInfoObservationMetricText("sessions", view.Sessions) + " · " +
+	metrics := guardInfoObservationMetricText("sessions", view.Sessions) + " · " +
 		guardInfoObservationMetricText("cache", view.CacheAttribution)
+	if zeroObservationGap(view) {
+		// Compact panes truncate the tail, so lead with the diagnosis and the
+		// short next check before preserving the authoritative metric text.
+		return "transport only; cache NOT OBSERVED · bypass/no traffic · next: turn + info JSON · " +
+			metrics
+	}
+	return "observation transport available · " + transport + " · " +
+		metrics
 }
 
 func guardInfoObservationRows(view *guardInfoObservationView) []string {
@@ -305,11 +312,40 @@ func guardInfoObservationRows(view *guardInfoObservationView) []string {
 	if view.Transport == guardInfoObservationTransportLegacy {
 		transport = "legacy/unknown"
 	}
-	return []string{
-		" source   " + transport,
+	rows := []string{
+		" observation transport available · " + transport,
 		" " + guardInfoObservationMetricText("sessions", view.Sessions),
 		" " + guardInfoObservationMetricText("cache", view.CacheAttribution),
 	}
+	for _, row := range zeroObservationRows(view) {
+		rows = append(rows, " "+row)
+	}
+	return rows
+}
+
+func zeroObservationRows(view *guardInfoObservationView) []string {
+	if !zeroObservationGap(view) {
+		return nil
+	}
+	return []string{
+		"cache operation is NOT OBSERVED",
+		"likely: child bypasses this gateway",
+		"or no cache-accounting traffic yet",
+		"next: send one guarded child turn",
+		"then run: fak info --gateway-url",
+		"<url> --once --json",
+	}
+}
+
+func zeroObservationGap(view *guardInfoObservationView) bool {
+	if view == nil {
+		return false
+	}
+	return isObservedZero(view.Sessions) && isObservedZero(view.CacheAttribution)
+}
+
+func isObservedZero(metric guardInfoObservationMetric) bool {
+	return metric.Availability == guardvars.AvailabilityObserved && metric.Value != nil && *metric.Value == 0
 }
 
 // guardInfoCacheSourceWord returns the semantic cache posture when the typed
@@ -317,6 +353,9 @@ func guardInfoObservationRows(view *guardInfoObservationView) []string {
 func guardInfoCacheSourceWord(v guardInfoVars) string {
 	if v.Observation == nil {
 		return ""
+	}
+	if zeroObservationGap(v.Observation) {
+		return "operation is NOT OBSERVED"
 	}
 	if v.Observation.Transport == guardInfoObservationTransportLegacy && v.VCache != nil {
 		return ""
@@ -347,9 +386,9 @@ func guardInfoCacheSourceWord(v guardInfoVars) string {
 }
 
 func guardInfoCacheSourceObserved(v guardInfoVars) bool {
-	return v.Observation == nil ||
+	return !zeroObservationGap(v.Observation) && (v.Observation == nil ||
 		(v.Observation.Transport == guardInfoObservationTransportLegacy && v.VCache != nil) ||
-		v.Observation.CacheAttribution.Availability == guardvars.AvailabilityObserved
+		v.Observation.CacheAttribution.Availability == guardvars.AvailabilityObserved)
 }
 
 func guardInfoObservationMetricText(name string, metric guardInfoObservationMetric) string {

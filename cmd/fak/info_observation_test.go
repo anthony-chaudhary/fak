@@ -61,7 +61,7 @@ func TestInfoObservationStateRenderMatrix(t *testing.T) {
 
 			tr := newGuardInfoTrend(guardInfoTrendCap)
 			tr.push(v)
-			wantTransport := "source   typed"
+			wantTransport := "observation transport available · typed"
 			wantSessions := guardInfoObservationMetricText("sessions", view.Sessions)
 			wantCache := guardInfoObservationMetricText("cache", view.CacheAttribution)
 			surfaces := map[string]string{
@@ -131,6 +131,85 @@ func TestInfoObservationStateRenderMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGuardInfoCacheTabDiagnosesReachableButColdGateway(t *testing.T) {
+	zero := 0.0
+	view := &guardInfoObservationView{
+		Transport: guardInfoObservationTransportTyped,
+		Sessions: guardInfoObservationMetric{
+			Availability: guardvars.AvailabilityObserved,
+			Value:        &zero,
+			Unit:         "live sessions",
+			Provenance:   "gateway.session_registry",
+		},
+		CacheAttribution: guardInfoObservationMetric{
+			Availability: guardvars.AvailabilityObserved,
+			Value:        &zero,
+			Unit:         "token-equivalent",
+			Provenance:   "gateway.cache_accounting",
+		},
+	}
+	v := provenVisualVars()
+	v.Observation = view
+	before, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := renderGuardInfoInteractiveBlock(
+		infoViewState{active: viewCache},
+		v,
+		newGuardInfoTrend(guardInfoTrendCap),
+		240,
+		0,
+	)
+	for _, want := range []string{
+		"observation transport available · typed",
+		"sessions 0 live sessions OBSERVED (cold)",
+		"cache 0 token-equivalent OBSERVED (cold)",
+		"cache operation is NOT OBSERVED",
+		"likely: child bypasses this gateway",
+		"or no cache-accounting traffic yet",
+		"next: send one guarded child turn",
+		"then run: fak info --gateway-url",
+		"<url> --once --json",
+	} {
+		if !strings.Contains(captured, want) {
+			t.Fatalf("captured cache tab omitted %q:\n%s", want, captured)
+		}
+	}
+	for _, misleading := range []string{"saving money", "+12,345", "88%", "×2.10", "█", "░"} {
+		if strings.Contains(captured, misleading) {
+			t.Fatalf("zero-traffic cache tab still implies operation via %q:\n%s", misleading, captured)
+		}
+	}
+	after, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("presentation diagnosis mutated JSON semantics:\nbefore %s\nafter  %s", before, after)
+	}
+	narrow := renderGuardInfoInteractiveBlock(
+		infoViewState{active: viewCache},
+		v,
+		newGuardInfoTrend(guardInfoTrendCap),
+		36,
+		0,
+	)
+	for _, want := range []string{
+		"cache operation is NOT OBSERVED",
+		"likely: child bypasses this gateway",
+		"or no cache-accounting traffic yet",
+		"next: send one guarded child turn",
+		"then run: fak info --gateway-url",
+		"<url> --once --json",
+	} {
+		if !strings.Contains(narrow, want) {
+			t.Fatalf("36-cell cache tab truncated actionable diagnosis %q:\n%s", want, narrow)
+		}
+	}
+	t.Logf("captured contradictory cache tab:\n%s", captured)
 }
 
 func TestInfoObservationClientPrefersTypedAndMarksLegacyFallback(t *testing.T) {

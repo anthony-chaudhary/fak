@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/guardvars"
 )
 
 // TestSparklineTUI pins the sparkline contract: empty/zero-width render nothing, the output is
@@ -123,6 +125,69 @@ func TestManagedCodexAgentAndSavingsCapturedRender(t *testing.T) {
 	}
 	if strings.Contains(captured, "nothing yet") {
 		t.Fatalf("live managed Codex capture regressed to an empty producer state:\n%s", captured)
+	}
+}
+
+func TestGuardedCodexReachableButCacheOperationUnobservedCapturedRender(t *testing.T) {
+	v := provenVisualVars() // Includes the previously misleading PROVEN cache detail.
+	v.Sessions = []guardInfoSession{{
+		TraceID: "codex-live", Run: "running", ElapsedSeconds: 42, TurnsLeft: 7,
+		LastTool: "Read", InflightSeconds: 3,
+	}}
+	v.Observation = &guardInfoObservationView{
+		Schema:    guardInfoObservationViewSchema,
+		Transport: guardInfoObservationTransportTyped,
+		Sessions: guardInfoObservationMetric{
+			Availability: guardvars.AvailabilityObserved,
+			Value:        guardInfoObservationNumber(0),
+			Unit:         "live sessions",
+			Provenance:   "gateway.session_registry",
+		},
+		CacheAttribution: guardInfoObservationMetric{
+			Availability: guardvars.AvailabilityObserved,
+			Value:        guardInfoObservationNumber(0),
+			Unit:         "token-equivalent",
+			Provenance:   "gateway.cache_accounting",
+		},
+	}
+	tr := newGuardInfoTrend(guardInfoTrendCap)
+	tr.push(v)
+
+	captured := renderGuardInfoInteractiveBlock(
+		infoViewState{
+			active:       viewCache,
+			launchNotice: " guarded Codex active · gateway http://127.0.0.1:50542",
+		},
+		v,
+		tr,
+		160,
+		0,
+	)
+	for _, want := range []string{
+		"guarded Codex active · gateway http://127.0.0.1:50542",
+		"observation transport available · typed",
+		"sessions 0 live sessions OBSERVED (cold)",
+		"cache 0 token-equivalent OBSERVED (cold)",
+		"cache operation is NOT OBSERVED",
+		"likely: child bypasses this gateway",
+		"or no cache-accounting traffic yet",
+		"next: send one guarded child turn",
+		"then run: fak info --gateway-url",
+		"<url> --once --json",
+	} {
+		if !strings.Contains(captured, want) {
+			t.Fatalf("guarded Codex zero-observation capture missing %q:\n%s", want, captured)
+		}
+	}
+	for _, misleading := range []string{"saving money", "+12,345 tok", "88%", "×2.10", "█", "░"} {
+		if strings.Contains(captured, misleading) {
+			t.Fatalf("reachable zero-observation capture still implies cache operation via %q:\n%s", misleading, captured)
+		}
+	}
+	for _, row := range strings.Split(captured, "\n") {
+		if got := dispWidthTUI(row); got > 160 {
+			t.Fatalf("captured row escaped its 160-cell bound (%d): %q", got, row)
+		}
 	}
 }
 

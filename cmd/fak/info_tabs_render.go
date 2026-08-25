@@ -276,6 +276,11 @@ func guardInfoSeatDetail(a gateway.SessionAccount) string {
 // place instead of split across the overview's trends + tasks panels.
 func renderInfoCacheView(ctx guardInfoPanelCtx) []string {
 	v := ctx.v
+	if zeroObservationGap(v.Observation) {
+		// The pinned observation rows carry causes and the next command. Do not
+		// follow them with gauges or savings detail that imply cache traffic.
+		return nil
+	}
 	cacheRow := " cache  " + guardInfoSavingWord(v)
 	if guardInfoCacheSourceObserved(v) {
 		cacheRow = fmt.Sprintf(" cache  %s %.0f%%  %s", gaugeBarTUI(guardInfoHitFrac(v), ctx.gaugeW), guardInfoHitPct(v), guardInfoSavingWord(v))
