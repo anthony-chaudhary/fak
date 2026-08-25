@@ -360,8 +360,9 @@ type Completion struct {
 	FinishReason       string
 	Usage              Usage
 	ProviderCache      *cachemeta.Entry
-	Raw                []byte // the raw response body (transcript witness for the live seam)
-	PreSendQuarantines int    // tool-result payloads held out before provider serialization
+	CacheHint          *CacheHintResult // requested/emitted/effective provider-cache receipt
+	Raw                []byte           // the raw response body (transcript witness for the live seam)
+	PreSendQuarantines int              // tool-result payloads held out before provider serialization
 	// PreSendRedactions counts the outbound messages whose content was span-redacted
 	// (rung 5, #572) before provider serialization on the re-marshal path. It mirrors
 	// PreSendQuarantines so a caller can observe that something was redacted, not only
@@ -530,6 +531,8 @@ type HTTPPlanner struct {
 	Provider             Provider
 	Adapter              TranscriptAdapter
 	ExtraBody            json.RawMessage
+	// CacheIntent negotiates provider-owned prompt-cache behavior. Nil preserves the legacy wire.
+	CacheIntent *CacheIntent
 	// OpenAIToolMessagesAsText is an opt-in compatibility mode for OpenAI-compatible
 	// upstreams whose chat template accepts Qwen text tool blocks but rejects native
 	// role=tool continuation messages. Default false preserves the normal OpenAI wire.
@@ -1014,6 +1017,10 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		comp = normalizeCompletionToolCalls(comp)
 		attachProviderReportedCost(comp, raw)
 		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
+		if call.cacheHint.Requested != nil {
+			hint := call.cacheHint
+			comp.CacheHint = &hint
+		}
 		comp.Raw = raw
 		comp.PreSendQuarantines = call.quarantined
 		comp.PreSendRedactions = call.redacted
