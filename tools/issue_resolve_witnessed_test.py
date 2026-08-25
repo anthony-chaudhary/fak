@@ -22,6 +22,10 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "issue_resolve_witnessed.py"
 
 
+def no_window_creationflags() -> int:
+    return getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
+
+
 def load():
     sys.path.insert(0, str(SCRIPT.parent))
     spec = importlib.util.spec_from_file_location("issue_resolve_witnessed", SCRIPT)
@@ -454,6 +458,8 @@ class PushedGateTest(unittest.TestCase):
         mod.evidence_binds_closure = lambda root, row: (True, None)  # inert evidence gate
         # only "onmain" is an ancestor of origin/main; "localonly" is not.
         mod.reachable_from_origin = lambda root, sha: sha == "onmain"
+        mod.closure_tip = lambda root: "tip"
+        mod.effect_survives_at_tip = lambda root, sha, tip: (True, None)
         mod.closure_tip = lambda root: "tip"
         mod.effect_survives_at_tip = lambda root, sha, tip: (True, None)
 
@@ -1696,7 +1702,8 @@ class EffectSurvivalRepositoryFixtureTest(unittest.TestCase):
             repo = Path(td)
             def git(*args):
                 return subprocess.check_output(
-                    ["git", *args], cwd=repo, text=True).strip()
+                    ["git", *args], cwd=repo, text=True,
+                    creationflags=no_window_creationflags()).strip()
             git("init", "-q")
             git("config", "user.name", "fixture")
             git("config", "user.email", "fixture@example.invalid")
