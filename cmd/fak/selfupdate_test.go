@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,5 +209,88 @@ func TestSelfUpdateSkipOutcome(t *testing.T) {
 		if got := selfUpdateSkipOutcome(c.fleet, c.skew); got != c.want {
 			t.Errorf("selfUpdateSkipOutcome(fleet=%v, %v) = %q; want %q", c.fleet, c.skew, got, c.want)
 		}
+	}
+}
+
+func TestSelfUpdateReceiptPostures(t *testing.T) {
+	oldCorrelation := selfUpdateCorrelationID
+	selfUpdateCorrelationID = func() string { return "corr-123" }
+	defer func() { selfUpdateCorrelationID = oldCorrelation }()
+	selfUpdateReceiptOldRevision = "oldrev"
+	selfUpdateReceiptNewRevision = "newrev"
+	selfUpdateReceiptTargets = []selfUpdateReceiptTarget{{Role: "primary", Path: filepath.Clean("bin/fak")}}
+
+	cases := []struct {
+		name    string
+		outcome selfUpdateOutcome
+		status  string
+		restart bool
+		roll    string
+	}{
+		{"current", outcomeSelfFresh, "current", false, "not_attempted"},
+		{"updated", outcomeInstalled, "updated", false, "not_attempted"},
+		{"rolled_back", outcomeRolledBack, "rolled_back", false, "succeeded"},
+		{"rollback_failed", outcomeRollbackFailed, "rollback_failed", false, "failed"},
+		{"busy", outcomeBusy, "busy", false, "not_attempted"},
+		{"restart_required", selfUpdateOutcome("restart_required"), "restart_required", true, "not_attempted"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			receipt := newSelfUpdateReceipt(tc.outcome, "bin/fak", "rollback detail")
+			encoded, err := json.Marshal(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal(encoded, &parsed); err != nil {
+				t.Fatalf("receipt is not JSON: %v\n%s", err, encoded)
+			}
+			if receipt.Schema != selfUpdateReceiptSchema || receipt.SchemaVersion != 1 || receipt.CorrelationID != "corr-123" {
+				t.Fatalf("unstable envelope: %+v", receipt)
+			}
+			if receipt.Status != tc.status || receipt.RestartRequired != tc.restart || receipt.RollbackStatus != tc.roll {
+				t.Fatalf("posture = %+v", receipt)
+			}
+			if receipt.OldRevision == nil || *receipt.OldRevision != "oldrev" || receipt.NewRevision == nil || *receipt.NewRevision != "newrev" {
+				t.Fatalf("revision fields = %+v", receipt)
+			}
+			if receipt.NextCommand == "" || len(receipt.Targets) != 1 {
+				t.Fatalf("action/targets missing: %+v", receipt)
+			}
+		})
+	}
+}
+
+func TestEmitSelfUpdateJSONIsOneObjectWithoutProse(t *testing.T) {
+	oldCorrelation := selfUpdateCorrelationID
+	oldProgress, oldJSON := selfUpdateProgress, selfUpdateJSON
+	selfUpdateCorrelationID = func() string { return "corr-123" }
+	t.Cleanup(func() {
+		selfUpdateCorrelationID = oldCorrelation
+		selfUpdateProgress, selfUpdateJSON = oldProgress, oldJSON
+	})
+
+	var stdout, stderr strings.Builder
+	selfUpdateJSON = &stdout
+	selfUpdateProgress = &stderr
+	fmt.Fprintln(selfUpdateProgress, "self-update: checking transaction")
+	emitSelfUpdateOutcome(outcomeBusy, "bin/fak", "single-flight lock held")
+	if strings.Count(stdout.String(), "\n") != 1 {
+		t.Fatalf("stdout must contain exactly one JSON line: %q", stdout.String())
+	}
+	decoder := json.NewDecoder(strings.NewReader(stdout.String()))
+	var receipt selfUpdateReceipt
+	if err := decoder.Decode(&receipt); err != nil {
+		t.Fatalf("stdout contains prose or invalid JSON: %v: %q", err, stdout.String())
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		t.Fatalf("stdout contains more than one object: %v: %q", err, stdout.String())
+	}
+	if receipt.Status != "busy" {
+		t.Fatalf("status = %q", receipt.Status)
+	}
+	if got := stderr.String(); !strings.Contains(got, "checking transaction") || strings.Contains(stdout.String(), "checking transaction") {
+		t.Fatalf("progress routing: stdout=%q stderr=%q", stdout.String(), got)
 	}
 }

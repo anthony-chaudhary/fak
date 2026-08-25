@@ -6,7 +6,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -45,7 +48,10 @@ const createSuspended = 0x00000004
 // process still assigned to the job is terminated in one syscall. This is the
 // seam that makes `kill == kill the tree` on Windows, where killing a worker's
 // top process otherwise strands its conhost/node/python descendants.
-const jobObjectLimitKillOnJobClose = 0x00002000
+const (
+	jobObjectLimitKillOnJobClose = 0x00002000
+	jobObjectLimitJobMemory      = 0x00000200
+)
 
 // jobObjectExtendedLimitInformationClass is the JOBOBJECTINFOCLASS selector
 // (JobObjectExtendedLimitInformation) passed to SetInformationJobObject.
@@ -219,6 +225,17 @@ func ConfigureWorkerCommand(cmd *exec.Cmd) {
 // This intentionally does not call ConfigureWorkerCommand: guard children are
 // interactive and must retain their inherited terminal handles and window mode.
 func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
+	return startInNewJob(cmd, 0)
+}
+
+// StartManagedAgentInNewJob starts a child-agent tree with both kill-on-close
+// ownership and the aggregate commit ceiling. Callers opt in explicitly so an
+// unrelated command-line argument cannot accidentally select or evade the cap.
+func StartManagedAgentInNewJob(cmd *exec.Cmd) (*JobObject, error) {
+	return startInNewJob(cmd, managedJobMemoryLimitBytes())
+}
+
+func startInNewJob(cmd *exec.Cmd, memoryLimit uint64) (*JobObject, error) {
 	if cmd == nil {
 		return nil, errors.New("windowgate: StartInNewJob requires a command")
 	}
@@ -229,7 +246,13 @@ func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	job, err := assignToNewJobObject(cmd)
+	var job *JobObject
+	var err error
+	if memoryLimit > 0 {
+		job, err = assignProcessToNewJobObject(cmd, memoryLimit)
+	} else {
+		job, err = assignToNewJobObject(cmd)
+	}
 	if err != nil {
 		// Assignment is the teardown invariant. Do not leave an uncontained child
 		// running when that invariant cannot be established.
@@ -303,6 +326,10 @@ func resumeSuspendedProcess(pid int) error {
 //
 // On failure the caller still owns the started process and should terminate it.
 func AssignToNewJobObject(cmd *exec.Cmd) (*JobObject, error) {
+	return assignProcessToNewJobObject(cmd, 0)
+}
+
+func assignProcessToNewJobObject(cmd *exec.Cmd, memoryLimit uint64) (*JobObject, error) {
 	if cmd == nil || cmd.Process == nil {
 		return nil, errors.New("windowgate: AssignToNewJobObject requires a started process")
 	}
@@ -314,6 +341,10 @@ func AssignToNewJobObject(cmd *exec.Cmd) (*JobObject, error) {
 
 	info := jobObjectExtendedLimitInformation{}
 	info.BasicLimitInformation.LimitFlags = jobObjectLimitKillOnJobClose
+	if memoryLimit > 0 {
+		info.BasicLimitInformation.LimitFlags |= jobObjectLimitJobMemory
+		info.JobMemoryLimit = uintptr(memoryLimit)
+	}
 	ok, _, callErr := procSetInformationJobObject.Call(
 		hJob,
 		uintptr(jobObjectExtendedLimitInformationClass),
@@ -338,4 +369,17 @@ func AssignToNewJobObject(cmd *exec.Cmd) (*JobObject, error) {
 		return nil, fmt.Errorf("windowgate: AssignProcessToJobObject: %w", callErr)
 	}
 	return job, nil
+}
+
+func managedJobMemoryLimitBytes() uint64 {
+	const defaultLimit = uint64(64) << 30
+	raw := strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_COMMIT_MB"))
+	if raw == "" {
+		return defaultLimit
+	}
+	mb, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || mb == 0 || mb > ^uint64(0)>>20 {
+		return defaultLimit
+	}
+	return mb << 20
 }

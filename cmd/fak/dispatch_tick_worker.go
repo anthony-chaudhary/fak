@@ -321,8 +321,8 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	configureDispatchSpawn(cmd)
 	configureDispatchWorkerConsole(cmd, backend)
 	var job *windowgate.JobObject
-	if runtime.GOOS == "windows" && dispatchWorkerNeedsHiddenConsole(backend) {
-		job, err = windowgate.StartInNewJob(cmd)
+	if runtime.GOOS == "windows" {
+		job, err = windowgate.StartManagedAgentInNewJob(cmd)
 	} else {
 		err = cmd.Start()
 	}

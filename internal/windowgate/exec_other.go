@@ -49,6 +49,11 @@ func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
 	return nil, cmd.Start()
 }
 
+// StartManagedAgentInNewJob preserves the ordinary process lifecycle off Windows.
+func StartManagedAgentInNewJob(cmd *exec.Cmd) (*JobObject, error) {
+	return StartInNewJob(cmd)
+}
+
 // RunInNewJob is the cross-platform guard-child runner. Non-Windows platforms
 // use the ordinary exec lifecycle; Windows supplies job-object containment.
 func RunInNewJob(cmd *exec.Cmd) error {

@@ -119,7 +119,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
-		job, startErr := windowgate.StartInNewJob(child)
+		job, startErr := windowgate.StartManagedAgentInNewJob(child)
 		if startErr != nil {
 			terminalGuardChild(child, startErr, "launch_failed")
 			finishGuardChildAndReport(startErr, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
@@ -133,7 +133,31 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			return
 		}
 		lifecycle := startCrashJournalPulse(guardTraceID, child.Process.Pid)
-		runErr := child.Wait()
+		wait := make(chan error, 1)
+		go func() { wait <- child.Wait() }()
+		var runErr error
+		resourceStop := make(chan struct{})
+		resourcePolicy := guardResourcePolicyFromEnv()
+		resourcePolicy.Stop = resourceStop
+		resourceEvents := startGuardChildResourceMonitor(child.Process.Pid, guardTraceID, agentName, resourcePolicy)
+		select {
+		case event := <-resourceEvents:
+			markGuardChildTerminalIntent(child, "resource_limit")
+			_ = job.Close()
+			runErr = stopGuardChild(child, wait, 0)
+			lifecycle.finish(false)
+			terminalGuardChild(child, runErr, "resource_limit")
+			if receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid); receiptErr != nil {
+				fmt.Fprintf(os.Stderr, "fak guard: child resource receipt failed: %v\n", receiptErr)
+			}
+			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
+			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted)
+			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		case runErr = <-wait:
+			close(resourceStop)
+		}
 		lifecycle.finish(runErr == nil)
 		_ = job.Close()
 		terminalGuardChild(child, runErr, "")
@@ -276,7 +300,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
-		job, err := windowgate.StartInNewJob(child)
+		job, err := windowgate.StartManagedAgentInNewJob(child)
 		if err != nil {
 			// Start/containment failing IS a launch failure: either the child never ran, or
 			// StartInNewJob reaped it because the teardown invariant could not be armed.
@@ -299,10 +323,27 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			_ = job.Close()
 			wait <- runErr
 		}()
+		resourceStop := make(chan struct{})
+		resourcePolicy := guardResourcePolicyFromEnv()
+		resourcePolicy.Stop = resourceStop
+		resourceEvents := startGuardChildResourceMonitor(child.Process.Pid, guardTraceID, agentName, resourcePolicy)
 		event := waitGuardChild(wait, restarter.events, budgetTicker.C, func(now time.Time) (bool, string) {
 			return guardTimeBudgetExhausted(serveSessions, guardTraceID, now)
-		})
+		}, resourceEvents)
+		close(resourceStop)
 		switch event.Kind {
+		case guardChildResourceLimit:
+			markGuardChildTerminalIntent(child, "resource_limit")
+			_ = job.Close()
+			_ = stopGuardChild(child, wait, 0)
+			if receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid); receiptErr != nil {
+				fmt.Fprintf(os.Stderr, "fak guard: child resource receipt failed: %v\n", receiptErr)
+			}
+			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
+			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
+			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted)
+			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
 		case guardChildCompleted:
 			runErr := event.RunErr
 			if rec, parked := guardGoalParked(); parked {
@@ -484,18 +525,25 @@ var guardChildTreeKill = procguard.KillPID
 // TREE kill of the child's PID so no descendant subtree survives the transition. Returning
 // only after <-wait guarantees the previous child is fully reaped before the caller relaunches,
 // so a budget restart is single-child (#2989).
-func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) {
+func stopGuardChild(child *exec.Cmd, wait <-chan error, grace time.Duration) error {
 	if child == nil || child.Process == nil {
-		return
+		return nil
 	}
 	_ = child.Process.Signal(os.Interrupt)
 	select {
-	case <-wait:
-		return
+	case err := <-wait:
+		return err
 	case <-time.After(grace):
-		// Tree-kill: reap the child AND its descendants, not just the immediate PID.
-		guardChildTreeKill(child.Process.Pid)
-		<-wait
+	}
+	// Tree-kill: reap the child AND its descendants, not just the immediate PID.
+	if ok, detail := guardChildTreeKill(child.Process.Pid); !ok {
+		return fmt.Errorf("tree kill pid %d failed: %s", child.Process.Pid, detail)
+	}
+	select {
+	case err := <-wait:
+		return err
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("tree kill pid %d did not join within 5s", child.Process.Pid)
 	}
 }
 

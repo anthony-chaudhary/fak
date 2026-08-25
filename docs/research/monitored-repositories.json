@@ -1,7 +1,7 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-24T19:20:00Z",
-  "methodology": "Harness-related repositories absent by exact owner/name from tracked fak docs were ranked by direct seam relevance, current development activity, adoption signal, and license clarity. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
+  "updated_at": "2026-08-25T20:40:56Z",
+  "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
       "repository": "ruvnet/ruflo",
@@ -12,7 +12,26 @@
       "last_checked": "2026-08-14",
       "checked_revision": "4dcff483482cee316f47552a961bcbaadc89f378",
       "stars_at_check": 67866,
-      "last_push_at_check": "2026-08-14T21:36:20Z"
+      "last_push_at_check": "2026-08-14T21:36:20Z",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/ruvnet-ruflo.json",
+        "indexed_revision": "4dcff483482cee316f47552a961bcbaadc89f378",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "roadmap_todos",
+          "license_provenance",
+          "completeness_critic"
+        ],
+        "subsystem_count": 18,
+        "candidate_count": 0,
+        "filed_issue_count": 0,
+        "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+      }
     },
     {
       "repository": "Untrivial-ai/agent-orchestrator",
@@ -297,6 +316,161 @@
       "stars_at_check": 2,
       "last_push_at_check": "2026-08-21T14:38:07Z",
       "study_note": "docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md"
+    },
+    {
+      "repository": "vllm-project/vllm",
+      "url": "https://github.com/vllm-project/vllm",
+      "status": "candidate",
+      "priority": 23,
+      "why": "Primary high-throughput serving reference for scheduler, prefix-cache, memory-allocation, speculative-decode, and determinism tradeoffs. Existing fak notes cite vLLM heavily, but the exact current source identity was not in the durable registry; refresh against #2236, #8395, and #8923 before filing any new performance gap.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "80771bbbddf9e5153eea3aca8055049ee5aaaed1",
+      "stars_at_check": 90021,
+      "last_push_at_check": "2026-08-25T19:35:05Z"
+    },
+    {
+      "repository": "sgl-project/sglang",
+      "url": "https://github.com/sgl-project/sglang",
+      "status": "candidate",
+      "priority": 24,
+      "why": "Primary serving reference for RadixAttention, HiCache/disaggregation, scheduler policy, and current request-state correctness. Earlier SGLang studies exist, but the live tree is moving fast; use this row for a current-source refresh instead of relying on July anchors.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "edff717ef0106b4413b371bf7a05a5193ffeee85",
+      "stars_at_check": 32437,
+      "last_push_at_check": "2026-08-25T20:42:49Z"
+    },
+    {
+      "repository": "LMCache/LMCache",
+      "url": "https://github.com/LMCache/LMCache",
+      "status": "candidate",
+      "priority": 25,
+      "why": "Fast-moving KV-cache layer with vLLM/Dynamo integration, GPU transfer registration fixes, and operational cache lifecycle seams. Previous LMCache studies should be refreshed at this exact revision before any new L3/KV offload backlog is filed.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "23cca67908e17b193eb8fab08ba1beb0115881cd",
+      "stars_at_check": 11364,
+      "last_push_at_check": "2026-08-25T18:39:04Z"
+    },
+    {
+      "repository": "NVIDIA/Model-Optimizer",
+      "url": "https://github.com/NVIDIA/Model-Optimizer",
+      "status": "candidate",
+      "priority": 26,
+      "why": "Apache-2.0 model optimization suite covering quantization, distillation, pruning, and speculative decoding export paths into TensorRT-LLM, vLLM, and peers. Candidate for Qwen3.8 quantization and borrowed-hot-path planning under #8923 without copying runtime code blindly.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "73d778422388f0e849ecb180375d34ac445711ca",
+      "stars_at_check": 3483,
+      "last_push_at_check": "2026-08-25T20:22:29Z"
+    },
+    {
+      "repository": "vllm-project/speculators",
+      "url": "https://github.com/vllm-project/speculators",
+      "status": "candidate",
+      "priority": 27,
+      "why": "Unified speculative-decoding algorithm library for vLLM, directly relevant to DFlash/DSpark/MTP candidate selection and the native Qwen3.8 speculation roadmap. No existing fak issue matched this exact source identity in the bounded dedupe scan.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "0faffeb3bd547b4451a978d7aaf26a2f01b83d62",
+      "stars_at_check": 762,
+      "last_push_at_check": "2026-08-25T20:38:13Z"
+    },
+    {
+      "repository": "NVIDIA/kvpress",
+      "url": "https://github.com/NVIDIA/kvpress",
+      "status": "candidate",
+      "priority": 28,
+      "why": "Apache-2.0 KV-cache compression library with current entropy-gated chunk compression work. Existing issue #5328 already tracks the idea-scout lead; this row pins the current source for a real study pass before deciding whether #2240-style KV quant/compression gaps need refinement.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "161705a68f64df329c88a6da5f20300a89aa7542",
+      "stars_at_check": 1191,
+      "last_push_at_check": "2026-08-18T10:31:20Z"
+    },
+    {
+      "repository": "novitalabs/pegaflow",
+      "url": "https://github.com/novitalabs/pegaflow",
+      "status": "candidate",
+      "priority": 29,
+      "why": "High-performance KV-cache storage with GPU offload, SSD caching, and cross-node sharing via RDMA for vLLM/SGLang. Candidate for cache-tier and route-by-reference comparisons, especially where FAK must distinguish native-owned KV from external-engine KV.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "d3ed31a7a4ee9bc7cdc5f112f0a1eb26efe63675",
+      "stars_at_check": 195,
+      "last_push_at_check": "2026-08-19T06:57:29Z"
+    },
+    {
+      "repository": "jundot/omlx",
+      "url": "https://github.com/jundot/omlx",
+      "status": "candidate",
+      "priority": 30,
+      "why": "Apple-Silicon inference server with continuous batching and SSD caching, relevant to FAK's Metal/Qwen3.8 resident-decode and consumer-hardware serving envelope. Dedupe against the DFlash2 oMLX fork note before filing any Mac performance gap.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "90ecf1c26dbed875e6ced82c4faa6e9250037f2d",
+      "stars_at_check": 20631,
+      "last_push_at_check": "2026-08-25T15:51:19Z"
+    },
+    {
+      "repository": "lightseekorg/tokenspeed",
+      "url": "https://github.com/lightseekorg/tokenspeed",
+      "status": "candidate",
+      "priority": 31,
+      "why": "MIT speed-of-light inference engine with fresh performance workflow work. Candidate as a sanity check for lower-bound measurement, benchmark harness shape, and no-excuses profiling before #8923 selects a borrowed hot path.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "1468fe0cbe92d389015ce73842fbaf349ce052d1",
+      "stars_at_check": 1967,
+      "last_push_at_check": "2026-08-25T20:23:02Z"
+    },
+    {
+      "repository": "Luce-Org/lucebox",
+      "url": "https://github.com/Luce-Org/lucebox",
+      "status": "candidate",
+      "priority": 32,
+      "why": "Apache-2.0 speculative inference server for consumer and heterogeneous hardware. Candidate for the product boundary around speculative serving knobs on non-datacenter devices; compare to existing DFlash/DeepSpec/mlx-dspark notes before filing.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "c994209a2c03c1bf3426924aba52b5edc05501ff",
+      "stars_at_check": 2788,
+      "last_push_at_check": "2026-08-25T16:48:25Z"
+    },
+    {
+      "repository": "apache/maka",
+      "url": "https://github.com/apache/maka",
+      "status": "candidate",
+      "priority": 33,
+      "why": "Local-first AI-agent workspace with append-only logs for model messages, tool calls, tool results, permission decisions, and termination events. Candidate for agentic performance-process work where replayable logs and durable causality reduce wasted reorientation.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "ee7da140ddf3ee522fb6eb5e0d9c215422e4e1fd",
+      "stars_at_check": 3276,
+      "last_push_at_check": "2026-08-25T20:37:24Z"
+    },
+    {
+      "repository": "superplanehq/superplane",
+      "url": "https://github.com/superplanehq/superplane",
+      "status": "candidate",
+      "priority": 34,
+      "why": "Open-source control plane for agentic engineering with current issue-intake analysis work. Candidate for queue/reconciler planning under #8873/#8909 and for reducing operator polling in performance-focused agent fleets.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "541a64b87aa534d5cbbbccb369d069e75a06bce9",
+      "stars_at_check": 5503,
+      "last_push_at_check": "2026-08-25T20:35:54Z"
+    },
+    {
+      "repository": "kubernetes-sigs/agent-sandbox",
+      "url": "https://github.com/kubernetes-sigs/agent-sandbox",
+      "status": "candidate",
+      "priority": 35,
+      "why": "Kubernetes-native isolated, stateful singleton workloads for AI agent runtimes and RL. Candidate for sandbox/runtime process isolation comparisons; dedupe against existing agent-sandbox governance and supervision issues before filing.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "3444bfb35a42e933752d3c6624a24e00a3e53d6b",
+      "stars_at_check": 3622,
+      "last_push_at_check": "2026-08-25T20:37:46Z"
+    },
+    {
+      "repository": "ARahim3/mlx-dspark",
+      "url": "https://github.com/ARahim3/mlx-dspark",
+      "status": "candidate",
+      "priority": 36,
+      "why": "Prior July study filed #4199 from mlx-dspark's yield-per-cost control discipline. The current repo has moved substantially and now advertises Qwen3.8/Apple-Silicon serving additions, so any further speculative-decoding borrow should refresh against this exact revision.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "89f4bb1629230833bb2d05653fa83052d5802b01",
+      "stars_at_check": 601,
+      "last_push_at_check": "2026-08-25T20:32:23Z",
+      "study_note": "docs/notes/study-mlx-dspark-borrow-scout-2026-07-10.md"
     }
   ]
 }

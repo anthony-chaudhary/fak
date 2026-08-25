@@ -180,6 +180,8 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **Prior art + threat model for a centrally-administered org policy plane (epic #5315)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-org-policy-plane-prior-art-2026-07-20.md) |
 | **Org-policy precedence lattice: compiled-in FROZEN floor > central > operator > agent-self (R3 / #5318)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-org-policy-precedence-2026-07-20.md) |
 | **Keeping a stable core as models × backends × features multiply** | [Combinatorial-growth epic](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/COMBINATORIAL-GROWTH-EPIC-2026-06-27.md) |
+| **Current performance borrow map for agentic and model-runtime sources** | [Research note](notes/CONCEPT-PERFORMANCE-BORROW-MAP-2026-08-25.md) |
+| **Related-system inventory contract for deep `study-repo` passes** | [Research note](notes/CONCEPT-RELATED-SYSTEM-INVENTORY-2026-08-25.md) |
 | **Constructing many on-demand "views" of the token history at marginal cost (attention/KV side-cars, re-attend tiers)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONTEXT-VIEWS-AT-MARGINAL-COST-2026-07-04.md) |
 | **The quick answers** | [FAQ](FAQ.md) |
 | **A guided first run** | [Tutorial](fak/tutorial.md) |

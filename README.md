@@ -13,6 +13,10 @@ AI agents can do more work than one fixed pile of prompts, tools, permissions, a
 settings can handle well. fak lets you run your agents with a small configuration chosen for
 this task, while one boundary manages their context, models, tools, and record of what happened.
 
+**Start here:** if you want the quickest proof, run the offline demo below; if you need
+security, inspect the default-deny policy; if you need performance, follow the witnessed
+native-model results. Claims and limitations link to the evidence behind them.
+
 <!-- native-status: 2026-08-25 -->
 ### Native-model status — 2026-08-25
 
@@ -24,6 +28,38 @@ This compact readout is designed for frequent refreshes; every row links its aut
 | **Ultracode / microagents** | A `qwen2.5:0.5b` small-model scout/writer campaign preserved the accepted output through width 8 while reading 13,126 scoped tokens vs 32,760 in the full-context counterfactual. This is a context-access result, **not Qwen3.8** and not a billed-cost claim. ([access frontier](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md)) | **ABSTAIN** on the GPT-5.6 Ultracode pair: activation and billed-token/spend accounting were not independently verified, and the observed fleet run was slower (0.47× concurrency speedup). ([paired witness](docs/_witnesses/issue-8168-ultracode-live/README.md)) |
 
 Refresh contract: update the dated marker, both rows, linked committed witnesses, and each row's explicit hold; then run `python tools/readme_freshness_audit.py --json`.
+
+<!-- project-status: 2026-08-25 -->
+### Project status — 2026-08-25
+
+For an outside reader, these labels are strict: **Shipped** means merged and checkable;
+**In flight** links to open work; **Goal** is direction, not a promise; and **Limitation**
+names what the current evidence does not support.
+
+- **Shipped:** agent queues now have a crash-safe desired-state reconciliation spine
+  ([#8875](https://github.com/anthony-chaudhary/fak/issues/8875),
+  [#8876](https://github.com/anthony-chaudhary/fak/issues/8876)); self-update now avoids
+  partial in-place binary replacement ([#8865](https://github.com/anthony-chaudhary/fak/issues/8865));
+  and installed launch paths are visible through one command-front-door matrix
+  ([#5808](https://github.com/anthony-chaudhary/fak/issues/5808)).
+- **In flight:** the queue is being extended with guarded worker launch and landing
+  ([#8889](https://github.com/anthony-chaudhary/fak/issues/8889)), status and saturation
+  metrics ([#8890](https://github.com/anthony-chaudhary/fak/issues/8890)), and operator
+  controls ([#8899](https://github.com/anthony-chaudhary/fak/issues/8899)). Native Qwen3.8
+  performance work continues in [#8923](https://github.com/anthony-chaudhary/fak/issues/8923).
+- **Goal:** make fak the simplest boundary for running long-lived agent work: configure
+  the job once, let the kernel manage context, models, tools, queues, and evidence, and
+  improve fak-native inference toward matched quality and speed. See
+  [the problems fak solves](docs/problems-we-solve.md) and
+  [the native-inference goal](docs/native-inference-goal.md).
+- **Limitation:** the queue work above is not yet the complete operator product, and the
+  native Qwen3.8 and Ultracode results remain inside the holds in the table above. For a
+  subsystem-by-subsystem account of real, simulated, and planned behavior, use
+  [STATUS.md](STATUS.md) and [the feature matrix](docs/supported/features.md).
+
+Refresh contract: reconcile shipped entries with merged commits or closed issues, confirm
+in-flight links are still open, keep goals non-promissory, state current limitations, update
+the marker, then run `python tools/readme_freshness_audit.py --json`.
 ## Run your agents
 
 Wrap the agent you already use with one command; fak forwards your existing subscription credential and applies a default-deny policy floor (no separate API key):
