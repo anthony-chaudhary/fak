@@ -263,6 +263,50 @@ func TestGuardCodexLoopGateConfigCodexOnly(t *testing.T) {
 	}
 }
 
+func TestGuardCodexLoopGateDefaultOffAndEnvironmentOptIn(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	if err := writeCodexGuardWitness(home, "loop-session"); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("default off skips transcript audit", func(t *testing.T) {
+		t.Setenv("FLEET_CODEX_LOOP_GATE", "")
+		cfg, ok := guardCodexLoopGateConfig([]string{"codex", "exec"}, dispatchCodexLoopGateDefaultThreshold(), home, 0, 20, true)
+		if !ok || cfg.Threshold != "off" {
+			t.Fatalf("default guard loop-gate config = %+v ok=%v, want off", cfg, ok)
+		}
+		var errb bytes.Buffer
+		if rc := runCodexLoopGate(&errb, cfg); rc != 0 || errb.Len() != 0 {
+			t.Fatalf("default-off guard gate rc=%d stderr=%s", rc, errb.String())
+		}
+	})
+
+	t.Run("environment opt-in retains refusal", func(t *testing.T) {
+		t.Setenv("FLEET_CODEX_LOOP_GATE", "loop")
+		cfg, ok := guardCodexLoopGateConfig([]string{"codex", "exec"}, dispatchCodexLoopGateDefaultThreshold(), home, 0, 20, true)
+		if !ok || cfg.Threshold != "loop" {
+			t.Fatalf("environment guard loop-gate config = %+v ok=%v, want loop", cfg, ok)
+		}
+		var errb bytes.Buffer
+		if rc := runCodexLoopGate(&errb, cfg); rc != 1 || !strings.Contains(errb.String(), "loop gate REFUSE fail-on=loop verdict=LOOP") {
+			t.Fatalf("environment-opted-in guard gate rc=%d stderr=%s", rc, errb.String())
+		}
+	})
+}
+
+func TestGuardCodexLoopGateHelpSaysOptInDefaultOff(t *testing.T) {
+	source, err := os.ReadFile("guard.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Codex-only opt-in launch gate", "else off", "loop|action"} {
+		if !bytes.Contains(source, []byte(want)) {
+			t.Fatalf("guard help source missing %q", want)
+		}
+	}
+}
+
 // guardCodexConfigArgs builds the ordered `-c key=value` overrides that define the `fak`
 // provider in Codex's config. The provider id is used bare in model_provider= (Codex reads
 // it as the id), while name/base_url/wire_api/env_key are TOML string literals carrying

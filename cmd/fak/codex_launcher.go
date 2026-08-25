@@ -96,7 +96,7 @@ func runCodex(stdout, stderr io.Writer, argv []string) int {
 	tokenizerPath := fs.String("tokenizer", "", "with --gguf: tokenizer override")
 	codexConfig := fs.Bool("codex-config", true, "let guard inject per-run Codex -c provider overrides (default true)")
 	codexHome := fs.String("codex-home", "", "Codex home for auth and loop-gate transcript audit (default: $CODEX_HOME or ~/.codex)")
-	loopGate := fs.String("loop-gate", "loop", "before launching, audit recent Codex sessions and refuse at threshold: loop|action|off")
+	loopGate := fs.String("loop-gate", dispatchCodexLoopGateDefaultThreshold(), "opt-in pre-launch audit of recent Codex sessions; refuse at threshold loop|action, or use off (default: $FLEET_CODEX_LOOP_GATE, else off)")
 	loopGateSinceHours := fs.Float64("loop-gate-since-hours", 24, "with --loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	loopGateLimit := fs.Int("loop-gate-limit", 20, "legacy compatibility value; the launch gate evaluates only the newest Codex session")
 	fs.Usage = func() {

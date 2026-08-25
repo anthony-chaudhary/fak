@@ -46,6 +46,65 @@ func TestDispatchTickLiveCodexAllowsGuardedSubscriptionChildFromUnguardedParent(
 	}
 }
 
+func TestDispatchTickCodexLoopGateDefaultOffSkipsAudit(t *testing.T) {
+	root, _ := dispatchCodexGateFixture(t, true)
+	t.Setenv("FLEET_CODEX_LOOP_GATE", "")
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
+
+	oldRecent := diagnoseRecentCodexLoopsForGate
+	diagnoseRecentCodexLoopsForGate = func(string, float64, int) (codexLoopRecentReport, error) {
+		t.Fatal("default-off dispatch ran the Codex transcript audit")
+		return codexLoopRecentReport{}, nil
+	}
+	t.Cleanup(func() { diagnoseRecentCodexLoopsForGate = oldRecent })
+
+	got, spawned, _ := runDispatchCodexGateTickModeArgs(t, root, true)
+	t.Cleanup(func() { releaseInProcessLaneLease(root, mapAt(got, "lease")) })
+	if !spawned || got["action"] != "spawned" || got["ok"] != true {
+		t.Fatalf("default-off Codex dispatch did not spawn: spawned=%v receipt=%#v", spawned, got)
+	}
+	if gate, evaluated := got["codex_loop_gate"]; evaluated {
+		t.Fatalf("default-off Codex dispatch emitted a loop-gate receipt: %#v", gate)
+	}
+}
+
+func TestDispatchTickCodexLoopGateEnvironmentOptInRefuses(t *testing.T) {
+	root, _ := dispatchCodexGateFixture(t, true)
+	t.Setenv("FLEET_CODEX_LOOP_GATE", "loop")
+	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
+
+	got, spawned, _ := runDispatchCodexGateTickModeArgs(t, root, true)
+	if spawned || got["action"] != "codex_loop_gate_refused" || got["verdict"] != "CODEX_LOOP_GATE_REFUSED" {
+		t.Fatalf("environment-opted-in loop gate did not refuse: spawned=%v receipt=%#v", spawned, got)
+	}
+	gate := mapAt(got, "codex_loop_gate")
+	if gate["evaluated"] != true || dispatchMapString(gate, "fail_on") != "loop" || dispatchMapString(gate, "verdict") != "LOOP" {
+		t.Fatalf("environment-opted-in gate receipt = %#v", gate)
+	}
+}
+
+func TestDispatchTickCodexLoopGateInvalidEnvironmentFailsClosed(t *testing.T) {
+	t.Setenv("FLEET_CODEX_LOOP_GATE", "urgent")
+	_, refused, err := dispatchCodexLoopGateForTick(dispatchTickOptions{Backend: "codex"}, dispatchtick.Account{Dir: t.TempDir()}, true)
+	if err == nil || refused || !strings.Contains(err.Error(), "invalid --codex-loop-gate") {
+		t.Fatalf("invalid environment threshold refused=%v err=%v, want validation error", refused, err)
+	}
+}
+
+func TestDispatchCodexLoopGateHelpSaysOptInDefaultOff(t *testing.T) {
+	for _, verb := range []string{"tick", "wave"} {
+		_, errb, code := runDispatchAt(verb, "--help")
+		if code != 2 {
+			t.Fatalf("fak dispatch %s --help exit=%d, want 2", verb, code)
+		}
+		for _, want := range []string{"opt in to a pre-spawn audit", "else off", "loop|action"} {
+			if !strings.Contains(errb, want) {
+				t.Fatalf("fak dispatch %s help missing %q:\n%s", verb, want, errb)
+			}
+		}
+	}
+}
+
 func TestDispatchTickLiveCodexStillRefusesGenuineLoopWithGuardedChild(t *testing.T) {
 	root, _ := dispatchCodexGateFixture(t, true)
 	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", healthyDispatchProvider(t)+"/v1")
@@ -248,6 +307,11 @@ func runDispatchCodexGateTick(t *testing.T, root string) (map[string]any, bool, 
 
 func runDispatchCodexGateTickMode(t *testing.T, root string, live bool) (map[string]any, bool, []string) {
 	t.Helper()
+	return runDispatchCodexGateTickModeArgs(t, root, live, "--codex-loop-gate", "loop")
+}
+
+func runDispatchCodexGateTickModeArgs(t *testing.T, root string, live bool, extraArgs ...string) (map[string]any, bool, []string) {
+	t.Helper()
 	oldBroker := launchSpawnBroker
 	oldSpawner := dispatchIssueWorkerSpawner
 	spawned := false
@@ -273,6 +337,7 @@ func runDispatchCodexGateTickMode(t *testing.T, root string, live bool) (map[str
 	})
 
 	args := []string{"tick", "--workspace", root, "--backend", "codex", "--lane", "docs", "--no-refresh", "--no-loop-ledger"}
+	args = append(args, extraArgs...)
 	if live {
 		args = append(args, "--live")
 	}

@@ -179,7 +179,7 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 	fs.Var(&issueFlags, "issue", "bind the wave to an issue number; repeatable and comma-separated (never substitutes general backlog work)")
 	settleS := fs.Float64("settle-s", 2.0, "seconds to wait after each live spawn")
 	noLedger := fs.Bool("no-loop-ledger", false, "disable loop-ledger append for spawned ticks")
-	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off")
+	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, opt in to a pre-spawn audit of recent Codex sessions and refuse at threshold loop|action, or use off (default: $FLEET_CODEX_LOOP_GATE, else off)")
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", dispatchCodexLoopGateDefaultLimitValue(), "with --codex-loop-gate, maximum newest Codex sessions to scan")
 	live := fs.Bool("live", false, "actually spawn workers")

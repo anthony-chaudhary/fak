@@ -258,6 +258,76 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	}
 }
 
+func TestRunCodexLoopGateDefaultOffSkipsAudit(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("FLEET_CODEX_LOOP_GATE", "")
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	if err := writeCodexGuardWitness(home, "loop-session"); err != nil {
+		t.Fatal(err)
+	}
+	orig := codexLaunchRun
+	spawned := false
+	codexLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+		spawned = true
+		if !strings.Contains(strings.Join(argv, " "), "--codex-loop-gate off") {
+			t.Fatalf("default-off outer launcher did not suppress the nested audit: %#v", argv)
+		}
+		return 17
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--", "exec", "do x",
+	})
+	if rc != 17 || !spawned {
+		t.Fatalf("default-off Codex launch rc=%d spawned=%v, want guarded child rc=17; stderr=%s", rc, spawned, errb.String())
+	}
+	if strings.Contains(errb.String(), "loop gate REFUSE") || strings.Contains(errb.String(), "loop gate allow") {
+		t.Fatalf("default-off Codex launch evaluated the loop gate:\n%s", errb.String())
+	}
+}
+
+func TestRunCodexLoopGateEnvironmentOptInRefusesBeforeSpawn(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("FLEET_CODEX_LOOP_GATE", "loop")
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	if err := writeCodexGuardWitness(home, "loop-session"); err != nil {
+		t.Fatal(err)
+	}
+	orig := codexLaunchRun
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
+		t.Fatal("Codex child spawned despite environment-opted-in loop gate refusal")
+		return 99
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--loop-gate-since-hours", "0",
+		"--", "exec", "do x",
+	})
+	if rc != 1 || !strings.Contains(errb.String(), "loop gate REFUSE fail-on=loop verdict=LOOP") {
+		t.Fatalf("environment-opted-in loop gate rc=%d, want witnessed refusal; stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+}
+
+func TestRunCodexLoopGateHelpSaysOptInDefaultOff(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runCodex(&out, &errb, []string{"--help"}); rc != 2 {
+		t.Fatalf("runCodex --help rc=%d, want 2", rc)
+	}
+	for _, want := range []string{"opt-in pre-launch audit", "else off", "loop|action"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("Codex help missing %q:\n%s", want, errb.String())
+		}
+	}
+}
+
 func TestRunCodexLoopGateIgnoresNewestLoopFromDifferentDirectory(t *testing.T) {
 	t.Setenv("CODEX_THREAD_ID", "")
 	home := filepath.Join(t.TempDir(), "codex-home")

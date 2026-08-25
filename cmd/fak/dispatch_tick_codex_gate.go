@@ -105,7 +105,7 @@ func dispatchCodexLoopGateForTick(opts dispatchTickOptions, account dispatchtick
 }
 
 func dispatchCodexLoopGateDefaultThreshold() string {
-	return firstString(strings.TrimSpace(os.Getenv("FLEET_CODEX_LOOP_GATE")), "loop")
+	return firstString(strings.TrimSpace(os.Getenv("FLEET_CODEX_LOOP_GATE")), "off")
 }
 
 func dispatchCodexLoopGateDefaultSinceHoursValue() float64 {
