@@ -90,6 +90,37 @@ def test_freshness_stamp_ok_when_recent() -> None:
     assert c["status"] == "OK", c
 
 
+def _native_status(date: str = "2026-06-20") -> str:
+    return f"""<!-- native-status: {date} -->
+### Native-model status
+| Lane | Result | Current hold |
+| **Qwen3.8-27B** | [native](docs/_witnesses/issue-8848-qwen38-overnight/README.md) | Below parity |
+| **Ultracode / microagents** | [small](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md) | ABSTAIN |
+Refresh contract: update evidence and rerun the audit.
+
+## Next
+"""
+
+
+def test_native_status_ok_when_fresh_sourced_and_candid() -> None:
+    c = rfa.check_native_status(_native_status(), today=TODAY, max_age_days=14)
+    assert c["status"] == "OK", c
+
+
+def test_native_status_warns_when_stale() -> None:
+    c = rfa.check_native_status(_native_status("2026-06-01"), today=TODAY,
+                                max_age_days=14)
+    assert c["status"] == "WARN"
+    assert "fresh_date" in c["items"]
+
+
+def test_native_status_warns_without_authority_or_hold() -> None:
+    text = "<!-- native-status: 2026-06-20 -->\nQwen3.8-27B Ultracode / microagents"
+    c = rfa.check_native_status(text, today=TODAY, max_age_days=14)
+    assert c["status"] == "WARN"
+    assert "qwen38_authority" in c["items"]
+    assert "honest_hold" in c["items"]
+
 def test_freshness_stamp_warn_when_absent() -> None:
     c = rfa.check_freshness_stamp("no stamp here", today=TODAY, max_age_days=14)
     assert c["status"] == "WARN", c

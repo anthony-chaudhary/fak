@@ -483,6 +483,42 @@ def check_freshness_stamp(readme: str, *, today: _dt.date,
             "detail": f"verified {age}d ago (<= {max_age_days}d window)"}
 
 
+def check_native_status(readme: str, *, today: _dt.date,
+                        max_age_days: int) -> dict[str, Any]:
+    """Keep the frequently refreshed native-model status sourced and candid."""
+    marker = re.search(r"<!--\s*native-status:\s*(\d{4}-\d{2}-\d{2})\s*-->", readme)
+    section = re.search(
+        r"<!--\s*native-status:.*?-->\s*(.*?)(?=\n##\s|\Z)", readme,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    missing: list[str] = []
+    if marker is None or section is None:
+        return {"check": "native_status", "status": "WARN",
+                "detail": "missing dated <!-- native-status: YYYY-MM-DD --> section"}
+    try:
+        stamped = _dt.date.fromisoformat(marker.group(1))
+    except ValueError:
+        return {"check": "native_status", "status": "WARN",
+                "detail": "native-status marker has an invalid date"}
+    age = (today - stamped).days
+    if age < 0 or age > max_age_days:
+        missing.append("fresh_date")
+    body = section.group(1).lower()
+    requirements = {
+        "qwen38_lane": "qwen3.8-27b" in body,
+        "ultracode_lane": "ultracode / microagents" in body,
+        "qwen38_authority": "docs/_witnesses/issue-8848-qwen38-overnight/" in body,
+        "microagent_authority": "docs/_witnesses/issue-8624-ultracode-smallmodel/" in body,
+        "honest_hold": "below parity" in body and "abstain" in body,
+        "refresh_contract": "refresh contract:" in body,
+    }
+    missing.extend(name for name, present in requirements.items() if not present)
+    status = "OK" if not missing else "WARN"
+    detail = (f"status dated {marker.group(1)} ({age}d old) with both sourced lanes and holds"
+              if not missing else "native status needs: " + ", ".join(missing))
+    return {"check": "native_status", "status": status, "detail": detail,
+            "items": missing}
+
 def check_showcase_sync(readme: str, showcase: str | None, *,
                         version: str = "",
                         dataset_versions: set[str] | None = None,
@@ -1333,6 +1369,7 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_naive_baseline(readme),
         check_headline_authority(readme, authority),
         check_freshness_stamp(readme, today=today, max_age_days=max_age_days),
+        check_native_status(readme, today=today, max_age_days=max_age_days),
         check_showcase_sync(readme, showcase, version=version,
                             dataset_versions=dataset_versions, dispatch=dispatch),
         check_jargon_density(readme, first_screen_lines=FIRST_SCREEN_LINES),

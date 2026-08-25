@@ -13,7 +13,24 @@ AI agents can do more work than one fixed pile of prompts, tools, permissions, a
 settings can handle well. fak lets you run your agents with a small configuration chosen for
 this task, while one boundary manages their context, models, tools, and record of what happened.
 
+<!-- native-status: 2026-08-25 -->
+### Native-model status — 2026-08-25
+
+This compact readout is designed for frequent refreshes; every row links its authority and says what is *not* proven.
+
+| Lane | Latest witnessed result | Current hold |
+|---|---|---|
+| **Qwen3.8-27B** | Exact BF16 target: 3/3 correct with thinking on and off; disabling thinking cut p95 time to first correct arithmetic answer from 3,378 ms to 376 ms in the frozen two-GPU envelope. The fak-native CUDA Q4_K_M path separately passed 5/5 cold exact-answer checks. ([BF16 ladder](docs/_witnesses/issue-8623-qwen38-27b/README.md) · [native campaign](docs/_witnesses/issue-8848-qwen38-overnight/README.md)) | **Below parity, not production-ready:** cached fak-native decode collapsed to 0.3 tok/s median versus 36.55 tok/s for the pinned matched-artifact llama.cpp reference; cache-identical quality was 0/5. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md)) |
+| **Ultracode / microagents** | A `qwen2.5:0.5b` small-model scout/writer campaign preserved the accepted output through width 8 while reading 13,126 scoped tokens vs 32,760 in the full-context counterfactual. This is a context-access result, **not Qwen3.8** and not a billed-cost claim. ([access frontier](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md)) | **ABSTAIN** on the GPT-5.6 Ultracode pair: activation and billed-token/spend accounting were not independently verified, and the observed fleet run was slower (0.47× concurrency speedup). ([paired witness](docs/_witnesses/issue-8168-ultracode-live/README.md)) |
+
+Refresh contract: update the dated marker, both rows, linked committed witnesses, and each row's explicit hold; then run `python tools/readme_freshness_audit.py --json`.
 ## Run your agents
+
+Wrap the agent you already use with one command; fak forwards your existing subscription credential and applies a default-deny policy floor (no separate API key):
+
+```bash
+fak guard -- codex  # -> launches Codex behind the policy floor
+```
 
 Install fak, then keep using the Codex login and models you already have:
 
@@ -82,4 +99,4 @@ scratch. Start with the [harness guide](docs/harness-init.md) when you are ready
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-08-20 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-08-25 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
