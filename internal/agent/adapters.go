@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
 // Provider names the remote transcript wire to use at the model boundary.
@@ -57,6 +59,7 @@ type adapterRequest struct {
 	// it. The normal OpenAI Responses API leaves this false; Codex's ChatGPT backend
 	// requires it when using the subscription route.
 	OmitTemperature bool
+	ServiceTier     modelroute.ServiceMode
 	// OmitMaxOutputTokens suppresses max_output_tokens for provider variants that reject
 	// it, again scoped to Codex's ChatGPT subscription backend.
 	OmitMaxOutputTokens bool
@@ -149,6 +152,7 @@ func (a openAIAdapter) Headers(apiKey string) map[string]string {
 }
 
 type openAIRequest struct {
+	ServiceTier    string               `json:"service_tier,omitempty"`
 	Model          string               `json:"model"`
 	Messages       []Message            `json:"messages"`
 	Tools          []ToolDef            `json:"tools,omitempty"`
@@ -170,8 +174,9 @@ type openAIStreamOptions struct {
 }
 
 type openAIResponse struct {
-	Model   string `json:"model"` // the model the upstream reports it served (#82 echo)
-	Choices []struct {
+	ServiceTier string `json:"service_tier,omitempty"`
+	Model       string `json:"model"` // the model the upstream reports it served (#82 echo)
+	Choices     []struct {
 		Message      Message `json:"message"`
 		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
@@ -193,6 +198,7 @@ func (a openAIAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		messages = openAIToolMessagesAsText(messages)
 	}
 	req := openAIRequest{
+		ServiceTier:    serviceTierWire(a.Provider(), r.ServiceTier),
 		Model:          r.Model,
 		Messages:       messages,
 		Tools:          openAICompatibleTools(r.Tools),
@@ -399,6 +405,7 @@ func (a openAIAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		FinishReason: finish,
 		Usage:        cr.Usage,
 		Model:        cr.Model,
+		ServiceTier:  parseServiceTier(a.Provider(), cr.ServiceTier),
 	}), nil
 }
 
@@ -498,9 +505,10 @@ type openAIResponsesTool struct {
 }
 
 type openAIResponsesResponse struct {
-	Status string `json:"status"`
-	Model  string `json:"model"` // the model the upstream reports it served (#82 echo)
-	Output []struct {
+	ServiceTier string `json:"service_tier,omitempty"`
+	Status      string `json:"status"`
+	Model       string `json:"model"` // the model the upstream reports it served (#82 echo)
+	Output      []struct {
 		ID        string `json:"id"`
 		Type      string `json:"type"`
 		Role      string `json:"role,omitempty"`
@@ -515,6 +523,7 @@ type openAIResponsesResponse struct {
 	} `json:"output"`
 	OutputText string `json:"output_text,omitempty"`
 	Usage      struct {
+		ServiceTier         string             `json:"service_tier,omitempty"`
 		InputTokens         int                `json:"input_tokens"`
 		OutputTokens        int                `json:"output_tokens"`
 		TotalTokens         int                `json:"total_tokens"`
@@ -718,6 +727,7 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		Message:      Message{Role: RoleAssistant, Content: strings.Join(content, "\n"), ToolCalls: calls},
 		FinishReason: finish,
 		Model:        rr.Model,
+		ServiceTier:  parseServiceTier(ProviderOpenAIResponses, rr.ServiceTier),
 		Usage: Usage{
 			PromptTokens:        rr.Usage.InputTokens,
 			CompletionTokens:    rr.Usage.OutputTokens,
@@ -857,6 +867,7 @@ func (a anthropicAdapter) Headers(apiKey string) map[string]string {
 }
 
 type anthropicRequest struct {
+	ServiceTier   string             `json:"service_tier,omitempty"`
 	Model         string             `json:"model"`
 	MaxTokens     int                `json:"max_tokens"`
 	Temperature   float64            `json:"temperature"`
@@ -907,10 +918,11 @@ type anthropicResponse struct {
 	} `json:"content"`
 	StopReason string `json:"stop_reason"`
 	Usage      struct {
-		InputTokens              int `json:"input_tokens"`
-		OutputTokens             int `json:"output_tokens"`
-		CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
-		CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+		ServiceTier              string `json:"service_tier,omitempty"`
+		InputTokens              int    `json:"input_tokens"`
+		OutputTokens             int    `json:"output_tokens"`
+		CacheReadInputTokens     int    `json:"cache_read_input_tokens,omitempty"`
+		CacheCreationInputTokens int    `json:"cache_creation_input_tokens,omitempty"`
 	} `json:"usage"`
 	Error *apiError `json:"error"`
 }
@@ -925,6 +937,7 @@ func (anthropicAdapter) MarshalRequest(r adapterRequest) ([]byte, error) {
 		maxTokens = 1024
 	}
 	req := anthropicRequest{
+		ServiceTier:   serviceTierWire(ProviderAnthropic, r.ServiceTier),
 		Model:         r.Model,
 		MaxTokens:     maxTokens,
 		Temperature:   r.Temperature,
@@ -1059,6 +1072,7 @@ func (anthropicAdapter) ParseResponse(raw []byte) (*Completion, error) {
 		},
 		FinishReason: finish,
 		Model:        ar.Model,
+		ServiceTier:  parseServiceTier(ProviderAnthropic, ar.Usage.ServiceTier),
 		Usage: Usage{
 			PromptTokens:             ar.Usage.InputTokens,
 			CompletionTokens:         ar.Usage.OutputTokens,
@@ -1445,4 +1459,28 @@ func jsonObjectOrRaw(raw string) any {
 
 func responseObject(content string) any {
 	return jsonObjectOrFallback(content, map[string]any{"content": content})
+}
+
+func serviceTierWire(provider Provider, mode modelroute.ServiceMode) string {
+	if mode != modelroute.ServiceModeFast {
+		return ""
+	}
+	if provider == ProviderAnthropic {
+		return "auto"
+	}
+	return "priority"
+}
+
+func parseServiceTier(provider Provider, wire string) modelroute.ServiceMode {
+	switch wire {
+	case "priority", "fast":
+		return modelroute.ServiceModeFast
+	case "auto":
+		if provider == ProviderAnthropic {
+			return modelroute.ServiceModeFast
+		}
+	case "default", "standard":
+		return modelroute.ServiceModeStandard
+	}
+	return modelroute.ServiceModeUnknown
 }

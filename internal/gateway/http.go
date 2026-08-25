@@ -18,6 +18,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
 // maxBody bounds an inbound tool-args / MCP-frame body (defense against an
@@ -1160,6 +1161,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			return data[i]["id"].(string) < data[j]["id"].(string)
 		})
 	}
+	tiers, tierRows := []string{}, []map[string]string{}
+	if contract, ok := modelroute.LookupProviderContract("openai"); ok {
+		tiers, tierRows = modelroute.SupportedServiceTierMetadata(contract)
+	}
 	codexModels := make([]map[string]any, 0, len(data))
 	for _, row := range data {
 		id := strings.TrimSpace(fmt.Sprint(row["id"]))
@@ -1198,8 +1203,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"supports_search_tool":             false,
 			"use_responses_lite":               false,
 			"priority":                         0,
-			"additional_speed_tiers":           []string{},
-			"service_tiers":                    []map[string]string{},
+			"additional_speed_tiers":           tiers,
+			"service_tiers":                    tierRows,
 			"availability_nux":                 nil,
 		})
 	}
