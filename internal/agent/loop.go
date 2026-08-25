@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/attemptbudget"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/session"
 	"github.com/anthony-chaudhary/fak/internal/sessionctl"
@@ -475,6 +476,7 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 		m.ResumedPendingTurn = resume
 	}
 
+	var repeatedFailures attemptbudget.RepeatedFailureTracker
 	for turn := 0; turn < maxTurns; turn++ {
 		var toolTerminalPayload string
 		if turn > 0 && cfg.toolTerminalWake != nil {
@@ -785,6 +787,9 @@ func runArm(ctx context.Context, task string, fak bool, maxTurns int, log *[]tra
 			}
 			if tool == toolBook && strings.Contains(content, "confirmation") && !strings.Contains(content, `"error"`) {
 				m.TaskCompleted = true // the actual goal (a real booking) succeeded
+			}
+			if recordRepeatedFailure(&repeatedFailures, tool, rawArgs, content) {
+				return m, fmt.Errorf("REPEATED_IDENTICAL_TOOL_FAILURE: tool %s failed three consecutive times", tool)
 			}
 			messages = append(messages, Message{Role: RoleTool, ToolCallID: tc.ID, Name: tool, Content: content})
 			// The result has entered the transcript: report HOW it entered (clean /

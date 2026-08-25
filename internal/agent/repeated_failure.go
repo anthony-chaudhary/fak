@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/attemptbudget"
 )
 
 // canonicalFailureKey identifies semantically identical failed tool calls. It
@@ -45,4 +48,17 @@ func canonicalArgs(rawArgs string) string {
 func joinFailureKey(tool, args, normalizedError string) string {
 	key, _ := json.Marshal([]string{tool, args, normalizedError})
 	return string(key)
+}
+
+func recordRepeatedFailure(t *attemptbudget.RepeatedFailureTracker, tool, rawArgs, content string) bool {
+	var rc ToolReceipt
+	if json.Unmarshal([]byte(content), &rc) != nil || rc.Status != ToolResultError {
+		return t.Record("", true)
+	}
+	var b bytes.Buffer
+	if json.Compact(&b, []byte(rawArgs)) == nil {
+		rawArgs = b.String()
+	}
+	key, _ := canonicalFailureKey(tool, rawArgs, content)
+	return t.Record(key, false)
 }
