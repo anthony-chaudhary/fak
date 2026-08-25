@@ -561,6 +561,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		return true
 	}
 	switch name {
+	case "agent-queue":
+		cmdAgentQueue(args)
 	case "propagation-debt-dispatch":
 		cmdPropagationDebtDispatch(args)
 	case "unwired-scorecard":

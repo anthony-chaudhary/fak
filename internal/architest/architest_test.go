@@ -2983,7 +2983,7 @@ func TestSingleEngineDriverPerID(t *testing.T) {
 
 // TestRootImportsNothingInternal gates the tier-0 root-purity invariant that the tier table
 // (line "0 root â€¦ imports nothing internal"), doc.go, GROWTH.md ("the one tree everyone
-// imports"), and PARTITION.md ("internal/abi â€¦ wave-0, human-owned, and unleasable") all
+// imports"), and docs/project/PARTITION.md ("internal/abi â€¦ wave-0, human-owned, and unleasable") all
 // assert in prose but no test enforces: internal/abi imports ZERO other internal packages.
 //
 // WHY THIS IS NOT ALREADY COVERED BY TestNoUpwardImports. The layering gate enforces the
