@@ -460,8 +460,6 @@ class PushedGateTest(unittest.TestCase):
         mod.reachable_from_origin = lambda root, sha: sha == "onmain"
         mod.closure_tip = lambda root: "tip"
         mod.effect_survives_at_tip = lambda root, sha, tip: (True, None)
-        mod.closure_tip = lambda root: "tip"
-        mod.effect_survives_at_tip = lambda root, sha, tip: (True, None)
 
     def test_unpushed_commit_is_skipped_not_closed(self) -> None:
         mod = load()
