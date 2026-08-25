@@ -2,6 +2,10 @@
 
 **Audience:** evaluators deciding which current `fak` result is applicable, what tuned alternative it was measured against, and how to inspect or reproduce its evidence.
 
+## Current Qwen3.8 completion status
+
+- [Qwen3.8 completion status](docs/benchmarks/qwen38-status.md) — accepted receipts, matched references, result classes, and remaining gaps for #8308, #8643, and #8846.
+
 ## Evaluator route: result first, method second
 
 These are **scoped results**, not a universal speedup claim. Match your workload and hardware before quoting one; use the tuned baseline as the headline comparison.
