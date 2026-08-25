@@ -110,6 +110,8 @@ func RunIndex(stdout, stderr io.Writer, argv []string) int {
 		return indexLeaf(stdout, stderr, cat, args, *asJSON, *limit)
 	case "docs", "doc":
 		return indexDocs(stdout, stderr, cat, args, *asJSON, *limit)
+	case "benchmark":
+		return indexDiscoveryBenchmark(stdout, stderr, cat, args, *asJSON)
 	case "claims", "claim":
 		return indexClaims(stdout, stderr, cat, args, *asJSON, *limit)
 	case "verbs", "verb":
@@ -160,7 +162,7 @@ func isIndexSubcommand(s string) bool {
 		"generation", "generations", "gen", "work", "views", "view", "refs", "ref",
 		"ctxplans", "ctxplan", "ctxknobs", "ctxknob", "knobs", "knob", "freshness", "fresh",
 		"execaudit", "executables", "exec", "agents", "agentsmd", "agent", "ownership",
-		"policy", "enforce", "graph":
+		"policy", "enforce", "graph", "benchmark":
 		return true
 	default:
 		return false
@@ -311,6 +313,26 @@ func indexDocs(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, a
 		func(tw *tabwriter.Writer, d devindex.Doc) {
 			fmt.Fprintf(tw, "%s\t%s\n", d.Path, d.Title)
 		})
+}
+
+func indexDiscoveryBenchmark(stdout, stderr io.Writer, cat *devindex.Catalog, args []string, asJSON bool) int {
+	if len(args) != 0 {
+		fmt.Fprintln(stderr, "fak-dev index benchmark: accepts no query")
+		return 2
+	}
+	report := cat.RunDiscoveryBenchmark(devindex.DefaultDiscoveryQuestions())
+	if asJSON {
+		return encodeJSONOrFail(stdout, stderr, report, "fak-dev index benchmark")
+	}
+	fmt.Fprintf(stdout, "discovery benchmark: %s\n", report.Summary())
+	for _, c := range report.Cases {
+		verdict := "MISS"
+		if c.Success {
+			verdict = fmt.Sprintf("HIT@%d", c.Rank)
+		}
+		fmt.Fprintf(stdout, "%s\t%s\t%s\t%s\n", verdict, c.Category, c.ID, c.Query)
+	}
+	return 0
 }
 
 // indexWork answers `fak-dev index work [<query>]` from .github/issue-views.json — the

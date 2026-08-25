@@ -356,3 +356,21 @@ func TestIndexFreshnessUndeclaredLeafParity(t *testing.T) {
 		t.Errorf("undeclared-leaf parity broken:\n devindex=%v\n hooks   =%v\n(did devindex's declared-set fall behind dos.toml's [lanes]?)", got, want)
 	}
 }
+
+func TestIndexDiscoveryBenchmarkJSON(t *testing.T) {
+	root := filepath.Clean(filepath.Join("..", ".."))
+	var stdout, stderr bytes.Buffer
+	if got := RunIndex(&stdout, &stderr, []string{"benchmark", "--json", "--root", root}); got != 0 {
+		t.Fatalf("exit=%d stderr=%s", got, stderr.String())
+	}
+	var report devindex.DiscoveryBenchmarkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Schema != devindex.DiscoveryBenchmarkSchema || report.Questions < 20 {
+		t.Fatalf("report=%+v", report)
+	}
+	if report.Coverage != "curated_docs_only" || report.Successes >= report.Questions {
+		t.Fatalf("benchmark must expose bounded coverage and current misses: %+v", report)
+	}
+}
