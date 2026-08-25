@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/laneadmit"
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/policy"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/trajectory"
 	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
 )
 
@@ -23,7 +26,21 @@ const codexOrchestrationLaunchSchema = "fak.codex_orchestration_launch.v1"
 
 const defaultUltracodeWallBudget = 30 * time.Minute
 
+const (
+	maxQwenEmptyUsageRecoveryAttempts = 1
+	orchestrationWorkloadKindEnv      = "FAK_ORCHESTRATION_WORKLOAD_KIND"
+	orchestrationTargetModelFamilyEnv = "FAK_ORCHESTRATION_TARGET_MODEL_FAMILY"
+	orchestrationUsageExpectationEnv  = "FAK_ORCHESTRATION_USAGE_EXPECTATION"
+	qwenEmptyUsageWindowEnv           = "FAK_QWEN_EMPTY_USAGE_WINDOW"
+	qwenEmptyUsageRecoveryAttemptsEnv = "FAK_QWEN_EMPTY_USAGE_RECOVERY_ATTEMPTS"
+	qwenEmptyUsageTerminalSchema      = "fak.qwen_empty_usage_terminal.v1"
+	qwenEmptyUsageTerminalReason      = "QWEN_EMPTY_USAGE"
+	qwenEmptyUsageStopChecks          = 20
+	qwenEmptyUsageStopInterval        = 100 * time.Millisecond
+)
+
 var orchestrationLaunchNow = time.Now
+var orchestrationWorkerMonitorSleep = time.Sleep
 
 func validateCodexOrchestrationArtifactHome(codexHome string) error {
 	home, err := resolvedCodexLoopHome(codexHome)
@@ -63,22 +80,55 @@ func validateCodexOrchestrationArtifactHome(codexHome string) error {
 const orchestrationChildEnv = "FAK_ORCHESTRATION_CHILD"
 
 type codexOrchestrationWorkerLaunch struct {
-	RoleID         string    `json:"role_id"`
-	OutputProfile  string    `json:"output_profile"`
-	WorkProfile    string    `json:"work_profile"`
-	PID            int       `json:"pid,omitempty"`
-	Status         string    `json:"status"`
-	LogPath        string    `json:"log_path,omitempty"`
-	Model          string    `json:"model"`
-	Mode           string    `json:"mode"`
-	Effort         string    `json:"reasoning_effort"`
-	AccessMode     string    `json:"access_mode,omitempty"`
-	ReadOnly       bool      `json:"read_only"`
-	WriteTree      string    `json:"write_tree,omitempty"`
-	PolicyPath     string    `json:"policy_path,omitempty"`
-	ReservedTokens int64     `json:"reserved_tokens,omitempty"`
-	DeadlineAt     time.Time `json:"deadline_at,omitempty"`
-	Refusal        string    `json:"refusal,omitempty"`
+	RoleID           string                               `json:"role_id"`
+	OutputProfile    string                               `json:"output_profile"`
+	WorkProfile      string                               `json:"work_profile"`
+	PID              int                                  `json:"pid,omitempty"`
+	Status           string                               `json:"status"`
+	LogPath          string                               `json:"log_path,omitempty"`
+	StartedAt        time.Time                            `json:"started_at,omitempty"`
+	Attempt          int                                  `json:"attempt"`
+	RecoveryAttempts int                                  `json:"recovery_attempts"`
+	AttemptLogs      []string                             `json:"attempt_logs,omitempty"`
+	Model            string                               `json:"model"`
+	Mode             string                               `json:"mode"`
+	Effort           string                               `json:"reasoning_effort"`
+	AccessMode       string                               `json:"access_mode,omitempty"`
+	ReadOnly         bool                                 `json:"read_only"`
+	WriteTree        string                               `json:"write_tree,omitempty"`
+	PolicyPath       string                               `json:"policy_path,omitempty"`
+	ReservedTokens   int64                                `json:"reserved_tokens,omitempty"`
+	DeadlineAt       time.Time                            `json:"deadline_at,omitempty"`
+	Refusal          string                               `json:"refusal,omitempty"`
+	Usage            *trajectory.QwenEmptyUsageAssessment `json:"empty_usage_assessment,omitempty"`
+	Terminal         *qwenEmptyUsageTerminalReceipt       `json:"terminal,omitempty"`
+}
+
+type qwenEmptyUsageGuardReceipt struct {
+	Window              string   `json:"window"`
+	MaxRecoveryAttempts int      `json:"max_recovery_attempts"`
+	ValidExclusions     []string `json:"valid_exclusions"`
+}
+
+type orchestrationWorkloadReceipt struct {
+	Kind              string `json:"kind"`
+	TargetModelFamily string `json:"target_model_family"`
+	WorkerKind        string `json:"worker_kind"`
+	UsageExpectation  string `json:"usage_expectation"`
+}
+
+type qwenEmptyUsageTerminalReceipt struct {
+	Schema              string                              `json:"schema"`
+	Reason              string                              `json:"reason"`
+	RunID               string                              `json:"run_id"`
+	RoleID              string                              `json:"role_id"`
+	WorkerModel         string                              `json:"worker_model"`
+	TargetModelFamily   string                              `json:"target_model_family"`
+	Attempts            int                                 `json:"attempts"`
+	RecoveryAttempts    int                                 `json:"recovery_attempts"`
+	MaxRecoveryAttempts int                                 `json:"max_recovery_attempts"`
+	EmittedAt           time.Time                           `json:"emitted_at"`
+	Assessment          trajectory.QwenEmptyUsageAssessment `json:"assessment"`
 }
 
 type codexOrchestrationLaunchReceipt struct {
@@ -100,6 +150,8 @@ type codexOrchestrationLaunchReceipt struct {
 	Workers           []codexOrchestrationWorkerLaunch       `json:"workers"`
 	Activations       []ultracodebench.ActivationReceipt     `json:"activations"`
 	Budget            orchestration.UltracodeEnvelopeReceipt `json:"budget"`
+	Workload          *orchestrationWorkloadReceipt          `json:"workload,omitempty"`
+	EmptyUsageGuard   *qwenEmptyUsageGuardReceipt            `json:"empty_usage_policy,omitempty"`
 }
 
 func orchestrationDegradationNames(items []orchestration.Degradation) []string {
@@ -108,6 +160,55 @@ func orchestrationDegradationNames(items []orchestration.Degradation) []string {
 		out = append(out, item.Capability+":"+item.Reason)
 	}
 	return out
+}
+
+func orchestrationWorkloadFromEnv() (*orchestrationWorkloadReceipt, error) {
+	kind := strings.ToLower(strings.TrimSpace(os.Getenv(orchestrationWorkloadKindEnv)))
+	family := strings.ToLower(strings.TrimSpace(os.Getenv(orchestrationTargetModelFamilyEnv)))
+	expectation := strings.ToLower(strings.TrimSpace(os.Getenv(orchestrationUsageExpectationEnv)))
+	if kind == "" && family == "" && expectation == "" {
+		return nil, nil
+	}
+	if kind == "" || family == "" || expectation == "" {
+		return nil, fmt.Errorf("%s, %s, and %s must be configured together", orchestrationWorkloadKindEnv, orchestrationTargetModelFamilyEnv, orchestrationUsageExpectationEnv)
+	}
+	if expectation != trajectory.QwenUsageExpectationProvider && expectation != trajectory.QwenUsageExpectationNone {
+		return nil, fmt.Errorf("%s must be %q or %q", orchestrationUsageExpectationEnv, trajectory.QwenUsageExpectationProvider, trajectory.QwenUsageExpectationNone)
+	}
+	return &orchestrationWorkloadReceipt{
+		Kind: kind, TargetModelFamily: family,
+		WorkerKind: trajectory.QwenWorkerKindExecution, UsageExpectation: expectation,
+	}, nil
+}
+
+func qwenUsageMonitoringEnabled(workload *orchestrationWorkloadReceipt) bool {
+	return workload != nil &&
+		workload.Kind == trajectory.QwenWorkloadKindModelPerformance &&
+		workload.TargetModelFamily == trajectory.QwenTargetModelFamily &&
+		workload.WorkerKind == trajectory.QwenWorkerKindExecution &&
+		workload.UsageExpectation == trajectory.QwenUsageExpectationProvider
+}
+
+func qwenEmptyUsageGuardFromEnv() (qwenEmptyUsageGuardReceipt, time.Duration, error) {
+	windowRaw := strings.TrimSpace(os.Getenv(qwenEmptyUsageWindowEnv))
+	window, err := time.ParseDuration(windowRaw)
+	if windowRaw == "" || err != nil || window <= 0 {
+		return qwenEmptyUsageGuardReceipt{}, 0, fmt.Errorf("%s must be configured as a positive duration", qwenEmptyUsageWindowEnv)
+	}
+	recoveryRaw := strings.TrimSpace(os.Getenv(qwenEmptyUsageRecoveryAttemptsEnv))
+	recoveryAttempts, err := strconv.Atoi(recoveryRaw)
+	if recoveryRaw == "" || err != nil || recoveryAttempts < 0 || recoveryAttempts > maxQwenEmptyUsageRecoveryAttempts {
+		return qwenEmptyUsageGuardReceipt{}, 0, fmt.Errorf("%s must be configured as 0 or 1", qwenEmptyUsageRecoveryAttemptsEnv)
+	}
+	return qwenEmptyUsageGuardReceipt{
+		Window:              window.String(),
+		MaxRecoveryAttempts: recoveryAttempts,
+		ValidExclusions: []string{
+			trajectory.QwenUsageReasonNotApplicable,
+			trajectory.QwenUsageReasonUsageNotExpected,
+			trajectory.QwenUsageReasonLaunchNotStarted,
+		},
+	}, window, nil
 }
 
 type orchestrationWorkerLaunchRequest struct {
@@ -126,10 +227,13 @@ type orchestrationWorkerLaunchRequest struct {
 	RunID         string
 	OutputProfile string
 	WorkProfile   string
+	Attempt       int
 	RecordStarted func(codexOrchestrationWorkerLaunch) error
 }
 
 var orchestrationWorkerLauncher = launchGuardedCodexOrchestrationWorker
+var orchestrationWorkerUsageMonitor = monitorQwenOrchestrationWorker
+var orchestrationWorkerStopper = stopQwenOrchestrationWorker
 
 func launchCodexOrchestrationWorkers(home, sessionID, requestedProfile, capabilityProfile, taskText string, resolution orchestration.Resolution, wallLimitArg ...time.Duration) (codexOrchestrationLaunchReceipt, error) {
 	return launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfile, capabilityProfile, taskText, agentDefaultOutputStyle, agentDefaultWorkProfile, "shipped-default", resolution, wallLimitArg...)
@@ -197,6 +301,26 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 	if route.ConsultOnly {
 		return receipt, fmt.Errorf("SOL_ROUTE_PRO_CONSULT_ONLY: Codex cannot transmit reasoning.mode=pro; launch a separately metered Pro consultation instead")
 	}
+	var emptyUsageWindow time.Duration
+	workload, workloadErr := orchestrationWorkloadFromEnv()
+	if workloadErr != nil {
+		receipt.Status = "declined"
+		receipt.DeclineReason = workloadErr.Error()
+		_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+		return receipt, workloadErr
+	}
+	receipt.Workload = workload
+	if qwenUsageMonitoringEnabled(workload) {
+		guardReceipt, configuredWindow, policyErr := qwenEmptyUsageGuardFromEnv()
+		if policyErr != nil {
+			receipt.Status = "declined"
+			receipt.DeclineReason = policyErr.Error()
+			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+			return receipt, policyErr
+		}
+		receipt.EmptyUsageGuard = &guardReceipt
+		emptyUsageWindow = configuredWindow
+	}
 	for _, role := range resolution.Resolved.Roles {
 		if role.ID == "lead" {
 			continue
@@ -260,39 +384,143 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 			receipt.Workers = joinCodexOrchestrationWorker(receipt.Workers, launched)
 			return launched
 		}
-		joinWorker(codexOrchestrationWorkerLaunch{
-			RoleID: role.ID, Status: "starting", LogPath: filepath.Join(runDir, role.ID+".jsonl"),
-		})
-		receipt.Status = "launching"
-		if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
-			return receipt, fmt.Errorf("persist pre-spawn child %s: %w", role.ID, err)
+		maxRecoveryAttempts := 0
+		if receipt.EmptyUsageGuard != nil {
+			maxRecoveryAttempts = receipt.EmptyUsageGuard.MaxRecoveryAttempts
 		}
-		request.RecordStarted = func(started codexOrchestrationWorkerLaunch) error {
-			if started.RoleID != "" && started.RoleID != role.ID {
-				return fmt.Errorf("started child identity %q does not match launch role %q", started.RoleID, role.ID)
+		attemptLogs := []string{}
+		for attempt := 1; attempt <= maxRecoveryAttempts+1; attempt++ {
+			request.Attempt = attempt
+			request.RemainingWall = receipt.Budget.DeadlineAt.Sub(orchestrationLaunchNow())
+			if request.RemainingWall <= 0 {
+				deadlineErr := fmt.Errorf("%s: parent wall deadline elapsed before child %q attempt %d", orchestration.UltracodeBudgetReasonWallOverrun, role.ID, attempt)
+				receipt.Status = "invalid"
+				receipt.DeclineReason = orchestration.UltracodeBudgetReasonWallOverrun
+				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+				return receipt, deadlineErr
 			}
-			if started.PID <= 0 {
-				return fmt.Errorf("started child %q has no process id", role.ID)
-			}
-			if started.Status == "" {
-				started.Status = "started"
-			}
-			joinWorker(started)
+			logPath := orchestrationWorkerLogPath(request)
+			attemptLogs = append(attemptLogs, logPath)
+			joinWorker(codexOrchestrationWorkerLaunch{
+				RoleID: role.ID, Status: "starting", LogPath: logPath,
+				Attempt: attempt, RecoveryAttempts: attempt - 1, AttemptLogs: append([]string(nil), attemptLogs...),
+			})
 			receipt.Status = "launching"
 			if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
-				return fmt.Errorf("persist started child %s: %w", role.ID, err)
+				return receipt, fmt.Errorf("persist pre-spawn child %s attempt %d: %w", role.ID, attempt, err)
 			}
-			return nil
-		}
-		launched, launchErr := orchestrationWorkerLauncher(request)
-		launched = joinWorker(launched)
-		if launchErr != nil {
-			launched.RoleID = role.ID
-			launched.Status = "failed"
+			request.RecordStarted = func(started codexOrchestrationWorkerLaunch) error {
+				if started.RoleID != "" && started.RoleID != role.ID {
+					return fmt.Errorf("started child identity %q does not match launch role %q", started.RoleID, role.ID)
+				}
+				if started.PID <= 0 {
+					return fmt.Errorf("started child %q has no process id", role.ID)
+				}
+				if started.Status == "" {
+					started.Status = "started"
+				}
+				if started.StartedAt.IsZero() {
+					started.StartedAt = orchestrationLaunchNow().UTC()
+				}
+				started.Attempt = attempt
+				started.RecoveryAttempts = attempt - 1
+				started.AttemptLogs = append([]string(nil), attemptLogs...)
+				if started.LogPath == "" {
+					started.LogPath = logPath
+				}
+				joinWorker(started)
+				receipt.Status = "launching"
+				if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
+					return fmt.Errorf("persist started child %s attempt %d: %w", role.ID, attempt, err)
+				}
+				return nil
+			}
+			attemptStartedAt := orchestrationLaunchNow().UTC()
+			launched, launchErr := orchestrationWorkerLauncher(request)
+			if launched.RoleID == "" {
+				launched.RoleID = role.ID
+			}
+			if launched.Status == "" {
+				launched.Status = "started"
+			}
+			if launched.StartedAt.IsZero() {
+				launched.StartedAt = attemptStartedAt
+			}
+			if launched.LogPath == "" {
+				launched.LogPath = logPath
+			}
+			launched.Attempt = attempt
+			launched.RecoveryAttempts = attempt - 1
+			launched.AttemptLogs = append([]string(nil), attemptLogs...)
+			launched = joinWorker(launched)
+			if launchErr != nil {
+				launched.Status = "failed"
+				joinWorker(launched)
+				receipt.Status = "partial"
+				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+				return receipt, fmt.Errorf("launch %s attempt %d: %w", role.ID, attempt, launchErr)
+			}
+			if receipt.EmptyUsageGuard == nil {
+				break
+			}
+			assessment, monitorErr := orchestrationWorkerUsageMonitor(request, launched, emptyUsageWindow, receipt.Workload)
+			launched.Usage = &assessment
+			launched = joinWorker(launched)
+			if monitorErr != nil {
+				_ = orchestrationWorkerStopper(launched.PID)
+				launched.Status = "failed"
+				joinWorker(launched)
+				receipt.Status = "partial"
+				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+				return receipt, fmt.Errorf("monitor %s attempt %d: %w", role.ID, attempt, monitorErr)
+			}
+			if assessment.State == trajectory.QwenUsageStateUnobservable {
+				_ = orchestrationWorkerStopper(launched.PID)
+				launched.Status = "failed"
+				joinWorker(launched)
+				receipt.Status = "partial"
+				receipt.DeclineReason = trajectory.QwenUsageReasonEvidenceUnobservable
+				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+				return receipt, fmt.Errorf("%s: child %q attempt %d has unreadable or malformed usage evidence", trajectory.QwenUsageReasonEvidenceUnobservable, role.ID, attempt)
+			}
+			if assessment.State != trajectory.QwenUsageStateEmpty {
+				if attempt > 1 && assessment.State == trajectory.QwenUsageStateHealthy {
+					launched.Status = "recovered"
+					joinWorker(launched)
+				}
+				break
+			}
+			if stopErr := orchestrationWorkerStopper(launched.PID); stopErr != nil {
+				launched.Status = "failed"
+				joinWorker(launched)
+				receipt.Status = "partial"
+				_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
+				return receipt, fmt.Errorf("stop empty-usage child %s attempt %d: %w", role.ID, attempt, stopErr)
+			}
+			if attempt <= maxRecoveryAttempts {
+				launched.Status = "recovering"
+				joinWorker(launched)
+				receipt.Status = "recovering"
+				if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
+					return receipt, fmt.Errorf("persist recovery child %s attempt %d: %w", role.ID, attempt, err)
+				}
+				continue
+			}
+			launched.Status = "terminal"
+			launched.Terminal = &qwenEmptyUsageTerminalReceipt{
+				Schema: qwenEmptyUsageTerminalSchema, Reason: qwenEmptyUsageTerminalReason,
+				RunID: receipt.RunID, RoleID: role.ID, WorkerModel: route.Model,
+				TargetModelFamily: receipt.Workload.TargetModelFamily,
+				Attempts:          attempt, RecoveryAttempts: attempt - 1, MaxRecoveryAttempts: maxRecoveryAttempts,
+				EmittedAt: orchestrationLaunchNow().UTC(), Assessment: assessment,
+			}
 			joinWorker(launched)
-			receipt.Status = "partial"
-			_ = persistCodexOrchestrationLaunchReceipt(home, receipt)
-			return receipt, fmt.Errorf("launch %s: %w", role.ID, launchErr)
+			receipt.Status = "terminal"
+			receipt.DeclineReason = qwenEmptyUsageTerminalReason
+			if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
+				return receipt, fmt.Errorf("persist terminal child %s: %w", role.ID, err)
+			}
+			return receipt, fmt.Errorf("%s: child %q produced no provider usage after %d attempt(s)", qwenEmptyUsageTerminalReason, role.ID, attempt)
 		}
 		if !access.Admission.ReadOnly {
 			live = append(live, laneadmit.Lease{
@@ -355,17 +583,94 @@ func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath str
 	)
 }
 
+func orchestrationWorkerLogPath(req orchestrationWorkerLaunchRequest) string {
+	name := req.Role.ID + ".jsonl"
+	if req.Attempt > 1 {
+		name = fmt.Sprintf("%s.attempt-%d.jsonl", req.Role.ID, req.Attempt)
+	}
+	return filepath.Join(req.RunDir, name)
+}
+
+func orchestrationWorkerAuditPath(req orchestrationWorkerLaunchRequest) string {
+	name := req.Role.ID + "-guard.audit.jsonl"
+	if req.Attempt > 1 {
+		name = fmt.Sprintf("%s.attempt-%d-guard.audit.jsonl", req.Role.ID, req.Attempt)
+	}
+	return filepath.Join(req.RunDir, name)
+}
+
+func monitorQwenOrchestrationWorker(req orchestrationWorkerLaunchRequest, launched codexOrchestrationWorkerLaunch, window time.Duration, workload *orchestrationWorkloadReceipt) (trajectory.QwenEmptyUsageAssessment, error) {
+	if workload == nil {
+		return trajectory.AssessQwenEmptyUsage(trajectory.QwenEmptyUsageInput{
+			WorkerModel: req.Model, LaunchStatus: launched.Status, PID: launched.PID,
+			StartedAt: launched.StartedAt, ObservedAt: orchestrationLaunchNow().UTC(),
+			Window: window, ProcessAlive: dispatchPIDAlive(launched.PID),
+		}), nil
+	}
+	effectiveWindow := window
+	if untilParentDeadline := req.DeadlineAt.Sub(launched.StartedAt); untilParentDeadline < effectiveWindow {
+		effectiveWindow = untilParentDeadline
+	}
+	if effectiveWindow <= 0 {
+		effectiveWindow = time.Nanosecond
+	}
+	for {
+		usage, err := trajectory.InspectCodexExecUsage(launched.LogPath)
+		if err != nil {
+			return trajectory.QwenEmptyUsageAssessment{}, err
+		}
+		now := orchestrationLaunchNow().UTC()
+		assessment := trajectory.AssessQwenEmptyUsage(trajectory.QwenEmptyUsageInput{
+			WorkloadKind: workload.Kind, TargetModelFamily: workload.TargetModelFamily,
+			WorkerKind: workload.WorkerKind, UsageExpectation: workload.UsageExpectation,
+			WorkerModel: req.Model, LaunchStatus: launched.Status, PID: launched.PID,
+			StartedAt: launched.StartedAt, ObservedAt: now, Window: effectiveWindow,
+			ProcessAlive: dispatchPIDAlive(launched.PID), Usage: usage,
+		})
+		if assessment.State != trajectory.QwenUsageStatePending {
+			return assessment, nil
+		}
+		wait := 250 * time.Millisecond
+		if remaining := assessment.WindowEndsAt.Sub(now); remaining < wait {
+			wait = remaining
+		}
+		if wait <= 0 {
+			continue
+		}
+		orchestrationWorkerMonitorSleep(wait)
+	}
+}
+
+func stopQwenOrchestrationWorker(pid int) error {
+	if pid <= 0 || !dispatchPIDAlive(pid) {
+		return nil
+	}
+	killed, detail := procguard.KillPID(pid)
+	if killed {
+		for i := 0; i < qwenEmptyUsageStopChecks && dispatchPIDAlive(pid); i++ {
+			orchestrationWorkerMonitorSleep(qwenEmptyUsageStopInterval)
+		}
+	}
+	if dispatchPIDAlive(pid) {
+		if strings.TrimSpace(detail) == "" {
+			detail = "process remained alive"
+		}
+		return errors.New(detail)
+	}
+	return nil
+}
+
 func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
 	fakBin, err := os.Executable()
 	if err != nil {
 		return codexOrchestrationWorkerLaunch{}, err
 	}
-	logPath := filepath.Join(req.RunDir, req.Role.ID+".jsonl")
+	logPath := orchestrationWorkerLogPath(req)
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
 		return codexOrchestrationWorkerLaunch{}, err
 	}
-	auditPath := filepath.Join(req.RunDir, req.Role.ID+"-guard.audit.jsonl")
+	auditPath := orchestrationWorkerAuditPath(req)
 	cmd := exec.Command(fakBin, orchestrationWorkerArgs(req, auditPath)...)
 	cmd.Dir = req.Root
 	cmd.Stdin = strings.NewReader(orchestrationWorkerPrompt(req))
@@ -382,7 +687,7 @@ func launchGuardedCodexOrchestrationWorker(req orchestrationWorkerLaunchRequest)
 		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, LogPath: logPath}, fmt.Errorf("worker started without process")
 	}
 	pid := cmd.Process.Pid
-	started := codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "started", LogPath: logPath}
+	started := codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: pid, Status: "started", LogPath: logPath, StartedAt: orchestrationLaunchNow().UTC(), Attempt: req.Attempt}
 	if req.RecordStarted != nil {
 		if err := req.RecordStarted(started); err != nil {
 			_ = cmd.Process.Kill()

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
 
 func TestOrchestrationStatusJoinsReceiptProcessAndTurnLog(t *testing.T) {
@@ -175,5 +177,93 @@ func TestOrchestrationStatusUsesExplicitSessionOverNewerReceipt(t *testing.T) {
 	}
 	if got.SessionID != "chosen" || got.RunID != "orch-chosen" {
 		t.Fatalf("explicit selection ignored: %+v", got)
+	}
+}
+
+func TestOrchestrationStatusProjectsTypedQwenEmptyUsageTerminal(t *testing.T) {
+	home := t.TempDir()
+	runID := "orch-qwen-terminal"
+	logRel := filepath.Join("fak-orchestration-runs", runID, "worker-1.attempt-2.jsonl")
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(home, logRel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, logRel), []byte("{\"type\":\"turn.started\"}\n{\"type\":\"turn.completed\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	assessment := trajectory.AssessQwenEmptyUsage(trajectory.QwenEmptyUsageInput{
+		WorkloadKind:      trajectory.QwenWorkloadKindModelPerformance,
+		TargetModelFamily: trajectory.QwenTargetModelFamily,
+		WorkerKind:        trajectory.QwenWorkerKindExecution,
+		UsageExpectation:  trajectory.QwenUsageExpectationProvider,
+		WorkerModel:       "gpt-5.6-sol", LaunchStatus: "started", PID: 99999999,
+		StartedAt: started, ObservedAt: started.Add(time.Minute), Window: time.Minute,
+		ProcessAlive: false,
+		Usage:        trajectory.CodexExecUsage{LogReadable: true, TurnsStarted: 1, TurnsCompleted: 1},
+	})
+	receipt := codexOrchestrationLaunchReceipt{
+		Schema: codexOrchestrationLaunchSchema, SessionID: "sess-qwen-terminal", RunID: runID,
+		LaunchedAt: started, Status: "terminal", DeclineReason: qwenEmptyUsageTerminalReason,
+		Workload: &orchestrationWorkloadReceipt{
+			Kind: trajectory.QwenWorkloadKindModelPerformance, TargetModelFamily: trajectory.QwenTargetModelFamily,
+			WorkerKind: trajectory.QwenWorkerKindExecution, UsageExpectation: trajectory.QwenUsageExpectationProvider,
+		},
+		EmptyUsagePolicy: &qwenEmptyUsagePolicyReceipt{
+			Window: "1m", MaxRecoveryAttempts: 1,
+			ValidExclusions: []string{trajectory.QwenUsageReasonNotApplicable, trajectory.QwenUsageReasonUsageNotExpected, trajectory.QwenUsageReasonLaunchNotStarted},
+		},
+		Workers: []codexOrchestrationWorkerLaunch{{
+			RoleID: "worker-1", PID: 99999999, Status: "terminal", Model: "gpt-5.6-sol",
+			LogPath: logRel, StartedAt: started, Attempt: 2, RecoveryAttempts: 1,
+			Terminal: &qwenEmptyUsageTerminalReceipt{
+				Schema: qwenEmptyUsageTerminalSchema, Reason: qwenEmptyUsageTerminalReason,
+				RunID: runID, RoleID: "worker-1", WorkerModel: "gpt-5.6-sol",
+				TargetModelFamily: trajectory.QwenTargetModelFamily,
+				Attempts:          2, RecoveryAttempts: 1, MaxRecoveryAttempts: 1,
+				EmittedAt: started.Add(time.Minute), Assessment: assessment,
+			},
+		}},
+	}
+	got := inspectOrchestrationRun(home, receipt)
+	if got.State != "attention" || got.Terminal != 1 || got.Workers[0].State != "terminal" ||
+		got.Workers[0].Terminal == nil || got.Workers[0].Terminal.Reason != qwenEmptyUsageTerminalReason {
+		t.Fatalf("status = %+v", got)
+	}
+	var out, stderr bytes.Buffer
+	if err := persistCodexOrchestrationLaunchReceipt(home, receipt); err != nil {
+		t.Fatal(err)
+	}
+	if code := runOrchestrationStatus(&out, &stderr, []string{"--home", home, "--session", receipt.SessionID}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	for _, want := range []string{"1 terminal", qwenEmptyUsageTerminalReason, trajectory.QwenUsageReasonTurnCompletedWithoutUsage} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestOrchestrationStatusExcludesExplicitQwenPreflightWorker(t *testing.T) {
+	home := t.TempDir()
+	logPath := filepath.Join(home, "preflight.jsonl")
+	if err := os.WriteFile(logPath, []byte("{\"type\":\"thread.started\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	receipt := codexOrchestrationLaunchReceipt{
+		Schema: codexOrchestrationLaunchSchema, SessionID: "sess-qwen-preflight", RunID: "orch-qwen-preflight",
+		Workload: &orchestrationWorkloadReceipt{
+			Kind: trajectory.QwenWorkloadKindModelPerformance, TargetModelFamily: trajectory.QwenTargetModelFamily,
+			WorkerKind: trajectory.QwenWorkerKindExecution, UsageExpectation: trajectory.QwenUsageExpectationNone,
+		},
+		Workers: []codexOrchestrationWorkerLaunch{{
+			RoleID: "preflight", PID: 99999999, Status: "started", Model: "gpt-5.6-sol",
+			LogPath: logPath, StartedAt: time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC), Attempt: 1,
+		}},
+	}
+	got := inspectOrchestrationRun(home, receipt)
+	if got.State != "complete" || got.Excluded != 1 || got.Exited != 0 ||
+		got.Workers[0].State != "excluded" || got.Workers[0].EmptyUsage == nil ||
+		got.Workers[0].EmptyUsage.Reason != trajectory.QwenUsageReasonUsageNotExpected {
+		t.Fatalf("status = %+v", got)
 	}
 }

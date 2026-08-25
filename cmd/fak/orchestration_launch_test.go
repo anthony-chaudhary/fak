@@ -9,8 +9,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
+	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
 
 func externalOrchestrationTestHome(t *testing.T) string {
@@ -179,4 +181,167 @@ func TestOrchestrationLaunchRefusesChildBeforeWritingReceipts(t *testing.T) {
 			t.Fatalf("%s exists after nested refusal: %v", name, err)
 		}
 	}
+}
+
+func TestOrchestrationLaunchBoundsConfiguredQwenEmptyUsage(t *testing.T) {
+	home := externalOrchestrationTestHome(t)
+	configureQwenUsageTest(t, "1")
+	oldLauncher := orchestrationWorkerLauncher
+	oldMonitor := orchestrationWorkerUsageMonitor
+	oldStopper := orchestrationWorkerStopper
+	var launches, stops int
+	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		launches++
+		return codexOrchestrationWorkerLaunch{
+			RoleID: req.Role.ID, PID: 100 + launches, Status: "started",
+			LogPath: orchestrationWorkerLogPath(req), StartedAt: time.Date(2026, 8, 25, 12, 0, launches, 0, time.UTC),
+		}, nil
+	}
+	orchestrationWorkerUsageMonitor = func(req orchestrationWorkerLaunchRequest, launched codexOrchestrationWorkerLaunch, window time.Duration, workload *orchestrationWorkloadReceipt) (trajectory.QwenEmptyUsageAssessment, error) {
+		return trajectory.AssessQwenEmptyUsage(trajectory.QwenEmptyUsageInput{
+			WorkloadKind: workload.Kind, TargetModelFamily: workload.TargetModelFamily,
+			WorkerKind: workload.WorkerKind, UsageExpectation: workload.UsageExpectation,
+			WorkerModel: req.Model, LaunchStatus: launched.Status, PID: launched.PID,
+			StartedAt: launched.StartedAt, ObservedAt: launched.StartedAt.Add(window),
+			Window: window, ProcessAlive: true,
+			Usage: trajectory.CodexExecUsage{LogReadable: true, TurnsStarted: 1},
+		}), nil
+	}
+	orchestrationWorkerStopper = func(int) error {
+		stops++
+		return nil
+	}
+	t.Cleanup(func() {
+		orchestrationWorkerLauncher = oldLauncher
+		orchestrationWorkerUsageMonitor = oldMonitor
+		orchestrationWorkerStopper = oldStopper
+	})
+
+	receipt, err := launchCodexOrchestrationWorkers(home, "session-qwen-empty", "ultracode", "native", "run the configured performance workload", qwenEmptyUsageResolution())
+	if err == nil || !strings.Contains(err.Error(), qwenEmptyUsageTerminalReason) {
+		t.Fatalf("err=%v, want %s", err, qwenEmptyUsageTerminalReason)
+	}
+	if launches != 2 || stops != 2 || receipt.Status != "terminal" || len(receipt.Workers) != 1 {
+		t.Fatalf("launches=%d stops=%d receipt=%+v", launches, stops, receipt)
+	}
+	worker := receipt.Workers[0]
+	if worker.Terminal == nil || worker.Terminal.Schema != qwenEmptyUsageTerminalSchema ||
+		worker.Terminal.Reason != qwenEmptyUsageTerminalReason || worker.Terminal.Attempts != 2 ||
+		worker.Terminal.RecoveryAttempts != 1 || worker.RecoveryAttempts != 1 ||
+		len(worker.AttemptLogs) != 2 || worker.AttemptLogs[0] == worker.AttemptLogs[1] {
+		t.Fatalf("terminal worker = %+v", worker)
+	}
+	persisted, ok := readCodexOrchestrationLaunchReceipt(home, "session-qwen-empty")
+	if !ok || persisted.Workers[0].Terminal == nil || persisted.Workers[0].Terminal.Reason != qwenEmptyUsageTerminalReason {
+		t.Fatalf("persisted=%+v ok=%v", persisted, ok)
+	}
+}
+
+func TestOrchestrationLaunchLeavesHealthyQwenUsageAlone(t *testing.T) {
+	home := externalOrchestrationTestHome(t)
+	configureQwenUsageTest(t, "1")
+	oldLauncher := orchestrationWorkerLauncher
+	oldMonitor := orchestrationWorkerUsageMonitor
+	oldStopper := orchestrationWorkerStopper
+	var launches, stops int
+	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		launches++
+		return codexOrchestrationWorkerLaunch{
+			RoleID: req.Role.ID, PID: 200, Status: "started",
+			LogPath: orchestrationWorkerLogPath(req), StartedAt: time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC),
+		}, nil
+	}
+	orchestrationWorkerUsageMonitor = func(req orchestrationWorkerLaunchRequest, launched codexOrchestrationWorkerLaunch, window time.Duration, workload *orchestrationWorkloadReceipt) (trajectory.QwenEmptyUsageAssessment, error) {
+		return trajectory.AssessQwenEmptyUsage(trajectory.QwenEmptyUsageInput{
+			WorkloadKind: workload.Kind, TargetModelFamily: workload.TargetModelFamily,
+			WorkerKind: workload.WorkerKind, UsageExpectation: workload.UsageExpectation,
+			WorkerModel: req.Model, LaunchStatus: launched.Status, PID: launched.PID,
+			StartedAt: launched.StartedAt, ObservedAt: launched.StartedAt.Add(time.Second),
+			Window: window, ProcessAlive: true,
+			Usage: trajectory.CodexExecUsage{
+				LogReadable: true, TurnsStarted: 1, TurnsCompleted: 1,
+				InputTokens: 12, OutputTokens: 3, ProviderTokens: 15, UsageCovered: true,
+			},
+		}), nil
+	}
+	orchestrationWorkerStopper = func(int) error {
+		stops++
+		return nil
+	}
+	t.Cleanup(func() {
+		orchestrationWorkerLauncher = oldLauncher
+		orchestrationWorkerUsageMonitor = oldMonitor
+		orchestrationWorkerStopper = oldStopper
+	})
+
+	receipt, err := launchCodexOrchestrationWorkers(home, "session-qwen-healthy", "ultracode", "native", "run the configured performance workload", qwenEmptyUsageResolution())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launches != 1 || stops != 0 || receipt.Status != "launched" || len(receipt.Workers) != 1 {
+		t.Fatalf("launches=%d stops=%d receipt=%+v", launches, stops, receipt)
+	}
+	worker := receipt.Workers[0]
+	if worker.Terminal != nil || worker.RecoveryAttempts != 0 || worker.Usage == nil ||
+		worker.Usage.State != trajectory.QwenUsageStateHealthy {
+		t.Fatalf("healthy worker = %+v", worker)
+	}
+}
+
+func TestOrchestrationLaunchDoesNotInferQwenFromTaskProse(t *testing.T) {
+	home := externalOrchestrationTestHome(t)
+	oldLauncher := orchestrationWorkerLauncher
+	oldMonitor := orchestrationWorkerUsageMonitor
+	orchestrationWorkerLauncher = func(req orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		return codexOrchestrationWorkerLaunch{RoleID: req.Role.ID, PID: 300, Status: "started", StartedAt: time.Now(), LogPath: orchestrationWorkerLogPath(req)}, nil
+	}
+	orchestrationWorkerUsageMonitor = func(orchestrationWorkerLaunchRequest, codexOrchestrationWorkerLaunch, time.Duration, *orchestrationWorkloadReceipt) (trajectory.QwenEmptyUsageAssessment, error) {
+		t.Fatal("task prose activated Qwen usage monitoring")
+		return trajectory.QwenEmptyUsageAssessment{}, nil
+	}
+	t.Cleanup(func() {
+		orchestrationWorkerLauncher = oldLauncher
+		orchestrationWorkerUsageMonitor = oldMonitor
+	})
+	receipt, err := launchCodexOrchestrationWorkers(home, "session-prose-only", "ultracode", "native", "Qwen Qwen Qwen", qwenEmptyUsageResolution())
+	if err != nil || receipt.EmptyUsageGuard != nil || receipt.Workload != nil {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+}
+
+func TestOrchestrationLaunchRejectsMoreThanOneQwenRecovery(t *testing.T) {
+	home := externalOrchestrationTestHome(t)
+	configureQwenUsageTest(t, "2")
+	oldLauncher := orchestrationWorkerLauncher
+	orchestrationWorkerLauncher = func(orchestrationWorkerLaunchRequest) (codexOrchestrationWorkerLaunch, error) {
+		t.Fatal("invalid recovery policy launched a worker")
+		return codexOrchestrationWorkerLaunch{}, nil
+	}
+	t.Cleanup(func() { orchestrationWorkerLauncher = oldLauncher })
+	receipt, err := launchCodexOrchestrationWorkers(home, "session-qwen-invalid-recovery", "ultracode", "native", "run configured workload", qwenEmptyUsageResolution())
+	if err == nil || !strings.Contains(err.Error(), qwenEmptyUsageRecoveryAttemptsEnv) || receipt.Status != "declined" {
+		t.Fatalf("receipt=%+v err=%v", receipt, err)
+	}
+}
+
+func configureQwenUsageTest(t *testing.T, recoveryAttempts string) {
+	t.Helper()
+	t.Setenv(orchestrationWorkloadKindEnv, trajectory.QwenWorkloadKindModelPerformance)
+	t.Setenv(orchestrationTargetModelFamilyEnv, trajectory.QwenTargetModelFamily)
+	t.Setenv(orchestrationUsageExpectationEnv, trajectory.QwenUsageExpectationProvider)
+	t.Setenv(qwenEmptyUsageWindowEnv, "1m")
+	t.Setenv(qwenEmptyUsageRecoveryAttemptsEnv, recoveryAttempts)
+}
+
+func qwenEmptyUsageResolution() orchestration.Resolution {
+	return orchestration.Resolution{Resolved: orchestration.WorkflowPlan{
+		Profile: orchestration.ProfileUltracode, TaskID: "task-qwen-empty-usage",
+		WorkClass: orchestration.WorkGrind,
+		Roles: []orchestration.Role{
+			{ID: "lead", TaskID: "task-qwen-empty-usage", Access: orchestration.ChildAccess{Mode: orchestration.ChildAccessObserve}},
+			{ID: "worker-1", TaskID: "task-qwen-empty-usage", Access: orchestration.ChildAccess{Mode: orchestration.ChildAccessObserve}},
+		},
+		Budget:   orchestration.Budget{MaxWorkers: 2, MaxTokens: 4096},
+		SOLRoute: orchestration.SOLRoute{Model: "gpt-5.6-sol", Mode: orchestration.SOLUltra, ReasoningEffort: "high"},
+	}}
 }

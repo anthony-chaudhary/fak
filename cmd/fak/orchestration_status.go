@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,11 +12,14 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/orchestration"
 	"github.com/anthony-chaudhary/fak/internal/processalive"
+	"github.com/anthony-chaudhary/fak/internal/trajectory"
 )
 
 const orchestrationStatusSchema = "fak.codex_orchestration_status.v1"
 
 const orchestrationEvidenceNotObserved = "not_observed"
+
+var orchestrationStatusNow = time.Now
 
 type orchestrationOutcomeStatus struct {
 	Verdict            string `json:"verdict"`
@@ -28,43 +30,55 @@ type orchestrationOutcomeStatus struct {
 }
 
 type orchestrationWorkerStatus struct {
-	RoleID            string    `json:"role_id"`
-	OutputProfile     string    `json:"output_profile"`
-	WorkProfile       string    `json:"work_profile"`
-	PID               int       `json:"pid,omitempty"`
-	State             string    `json:"state"`
-	ProcessAlive      bool      `json:"process_alive"`
-	LogPath           string    `json:"log_path,omitempty"`
-	LogBytes          int64     `json:"log_bytes"`
-	UpdatedAt         time.Time `json:"updated_at,omitempty"`
-	TurnsStarted      int       `json:"turns_started"`
-	TurnsDone         int       `json:"turns_completed"`
-	LastEvent         string    `json:"last_event,omitempty"`
-	InputTokens       int64     `json:"input_tokens,omitempty"`
-	CachedInputTokens int64     `json:"cached_input_tokens,omitempty"`
-	OutputTokens      int64     `json:"output_tokens,omitempty"`
-	ProviderTokens    int64     `json:"provider_tokens,omitempty"`
-	UsageCovered      bool      `json:"usage_covered"`
-	UsageAuthority    string    `json:"usage_authority"`
+	RoleID            string                               `json:"role_id"`
+	OutputProfile     string                               `json:"output_profile"`
+	WorkProfile       string                               `json:"work_profile"`
+	PID               int                                  `json:"pid,omitempty"`
+	State             string                               `json:"state"`
+	ProcessAlive      bool                                 `json:"process_alive"`
+	LogPath           string                               `json:"log_path,omitempty"`
+	Model             string                               `json:"model"`
+	StartedAt         time.Time                            `json:"started_at,omitempty"`
+	Attempt           int                                  `json:"attempt"`
+	RecoveryAttempts  int                                  `json:"recovery_attempts"`
+	LogBytes          int64                                `json:"log_bytes"`
+	LogReadable       bool                                 `json:"log_readable"`
+	LogParseErrors    int                                  `json:"log_parse_errors"`
+	UpdatedAt         time.Time                            `json:"updated_at,omitempty"`
+	TurnsStarted      int                                  `json:"turns_started"`
+	TurnsDone         int                                  `json:"turns_completed"`
+	LastEvent         string                               `json:"last_event,omitempty"`
+	InputTokens       int64                                `json:"input_tokens,omitempty"`
+	CachedInputTokens int64                                `json:"cached_input_tokens,omitempty"`
+	OutputTokens      int64                                `json:"output_tokens,omitempty"`
+	ProviderTokens    int64                                `json:"provider_tokens,omitempty"`
+	UsageCovered      bool                                 `json:"usage_covered"`
+	UsageAuthority    string                               `json:"usage_authority"`
+	EmptyUsage        *trajectory.QwenEmptyUsageAssessment `json:"empty_usage_assessment,omitempty"`
+	Terminal          *qwenEmptyUsageTerminalReceipt       `json:"terminal,omitempty"`
 }
 
 type orchestrationRunStatus struct {
-	Schema           string                      `json:"schema"`
-	SessionID        string                      `json:"session_id"`
-	RunID            string                      `json:"run_id"`
-	LaunchedAt       time.Time                   `json:"launched_at"`
-	RequestedProfile string                      `json:"requested_profile"`
-	ResolvedProfile  string                      `json:"resolved_profile"`
-	WorkClass        string                      `json:"work_class"`
-	OutputProfile    string                      `json:"output_profile"`
-	WorkProfile      string                      `json:"work_profile"`
-	ProfileSource    string                      `json:"profile_source"`
-	State            string                      `json:"state"`
-	Running          int                         `json:"running"`
-	Completed        int                         `json:"completed"`
-	Exited           int                         `json:"exited"`
-	Outcome          orchestrationOutcomeStatus  `json:"outcome"`
-	Workers          []orchestrationWorkerStatus `json:"workers"`
+	Schema           string                        `json:"schema"`
+	SessionID        string                        `json:"session_id"`
+	RunID            string                        `json:"run_id"`
+	LaunchedAt       time.Time                     `json:"launched_at"`
+	RequestedProfile string                        `json:"requested_profile"`
+	ResolvedProfile  string                        `json:"resolved_profile"`
+	WorkClass        string                        `json:"work_class"`
+	OutputProfile    string                        `json:"output_profile"`
+	WorkProfile      string                        `json:"work_profile"`
+	ProfileSource    string                        `json:"profile_source"`
+	State            string                        `json:"state"`
+	Running          int                           `json:"running"`
+	Completed        int                           `json:"completed"`
+	Exited           int                           `json:"exited"`
+	Excluded         int                           `json:"excluded"`
+	Terminal         int                           `json:"terminal"`
+	Outcome          orchestrationOutcomeStatus    `json:"outcome"`
+	Workload         *orchestrationWorkloadReceipt `json:"workload,omitempty"`
+	EmptyUsagePolicy *qwenEmptyUsagePolicyReceipt  `json:"empty_usage_policy,omitempty"`
+	Workers          []orchestrationWorkerStatus   `json:"workers"`
 }
 
 func runOrchestrationStatus(stdout, stderr io.Writer, argv []string) int {
@@ -111,11 +125,14 @@ func runOrchestrationStatus(stdout, stderr io.Writer, argv []string) int {
 	fmt.Fprintf(stdout, "Orchestration %s - %s (worker execution)\n", status.RunID, status.State)
 	fmt.Fprintf(stdout, "  Outcome %s | effects=%s | witness=%s | reconciliation=%s\n", status.Outcome.Verdict, status.Outcome.EffectReadback, status.Outcome.IndependentWitness, status.Outcome.Reconciliation)
 	fmt.Fprintf(stdout, "  %s\n", status.Outcome.Reason)
-	fmt.Fprintf(stdout, "  %d running | %d completed | %d exited | launched %s\n", status.Running, status.Completed, status.Exited, status.LaunchedAt.Local().Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(stdout, "  %d running | %d completed | %d exited | %d excluded | %d terminal | launched %s\n", status.Running, status.Completed, status.Exited, status.Excluded, status.Terminal, status.LaunchedAt.Local().Format("2006-01-02 15:04:05"))
 	for _, worker := range status.Workers {
 		activity := "no events"
 		if worker.LastEvent != "" {
 			activity = fmt.Sprintf("%s | turns %d/%d", worker.LastEvent, worker.TurnsDone, worker.TurnsStarted)
+		}
+		if worker.Terminal != nil {
+			activity = fmt.Sprintf("%s | %s", worker.Terminal.Reason, worker.Terminal.Assessment.Reason)
 		}
 		fmt.Fprintf(stdout, "  %-10s %-9s pid=%-7d %s | %s\n", worker.RoleID, worker.State, worker.PID, humanBytes(worker.LogBytes), activity)
 	}
@@ -150,15 +167,52 @@ func newestOrchestrationReceipt(home, sessionID string) (codexOrchestrationLaunc
 }
 
 func inspectOrchestrationRun(home string, receipt codexOrchestrationLaunchReceipt) orchestrationRunStatus {
-	out := orchestrationRunStatus{Schema: orchestrationStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID, LaunchedAt: receipt.LaunchedAt, RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile, WorkClass: receipt.WorkClass, OutputProfile: receipt.OutputProfile, WorkProfile: receipt.WorkProfile, ProfileSource: receipt.ProfileSource, State: "complete", Outcome: unverifiedOrchestrationOutcome(), Workers: make([]orchestrationWorkerStatus, 0, len(receipt.Workers))}
+	out := orchestrationRunStatus{Schema: orchestrationStatusSchema, SessionID: receipt.SessionID, RunID: receipt.RunID, LaunchedAt: receipt.LaunchedAt, RequestedProfile: receipt.RequestedProfile, ResolvedProfile: receipt.ResolvedProfile, WorkClass: receipt.WorkClass, OutputProfile: receipt.OutputProfile, WorkProfile: receipt.WorkProfile, ProfileSource: receipt.ProfileSource, State: "complete", Outcome: unverifiedOrchestrationOutcome(), Workload: receipt.Workload, EmptyUsagePolicy: receipt.EmptyUsagePolicy, Workers: make([]orchestrationWorkerStatus, 0, len(receipt.Workers))}
 	for _, worker := range receipt.Workers {
-		ws := orchestrationWorkerStatus{RoleID: worker.RoleID, OutputProfile: worker.OutputProfile, WorkProfile: worker.WorkProfile, PID: worker.PID, LogPath: worker.LogPath, ProcessAlive: processalive.Check(worker.PID)}
+		ws := orchestrationWorkerStatus{
+			RoleID: worker.RoleID, OutputProfile: worker.OutputProfile, WorkProfile: worker.WorkProfile,
+			PID: worker.PID, LogPath: worker.LogPath, ProcessAlive: processalive.Check(worker.PID),
+			Model: worker.Model, StartedAt: worker.StartedAt, Attempt: worker.Attempt,
+			RecoveryAttempts: worker.RecoveryAttempts, Terminal: worker.Terminal,
+		}
 		path := worker.LogPath
 		if !filepath.IsAbs(path) {
 			path = filepath.Join(home, path)
 		}
 		inspectOrchestrationLog(path, &ws)
+		if receipt.Workload != nil {
+			window := time.Duration(0)
+			if receipt.EmptyUsagePolicy != nil {
+				window, _ = time.ParseDuration(receipt.EmptyUsagePolicy.Window)
+			}
+			assessment := trajectory.AssessQwenEmptyUsage(trajectory.QwenEmptyUsageInput{
+				WorkloadKind: receipt.Workload.Kind, TargetModelFamily: receipt.Workload.TargetModelFamily,
+				WorkerKind: receipt.Workload.WorkerKind, UsageExpectation: receipt.Workload.UsageExpectation,
+				WorkerModel: worker.Model, LaunchStatus: worker.Status, PID: worker.PID,
+				StartedAt: worker.StartedAt, ObservedAt: orchestrationStatusNow().UTC(), Window: window,
+				ProcessAlive: ws.ProcessAlive,
+				Usage: trajectory.CodexExecUsage{
+					LogReadable: ws.LogReadable, ParseErrors: ws.LogParseErrors,
+					TurnsStarted: ws.TurnsStarted, TurnsCompleted: ws.TurnsDone,
+					LastEvent: ws.LastEvent, InputTokens: ws.InputTokens, CachedInputTokens: ws.CachedInputTokens,
+					OutputTokens: ws.OutputTokens, ProviderTokens: ws.ProviderTokens, UsageCovered: ws.UsageCovered,
+				},
+			})
+			ws.EmptyUsage = &assessment
+		}
 		switch {
+		case ws.Terminal != nil:
+			ws.State = "terminal"
+			out.Terminal++
+		case ws.EmptyUsage != nil && ws.EmptyUsage.State == trajectory.QwenUsageStateEmpty:
+			ws.State = "empty_usage"
+			out.Exited++
+		case ws.EmptyUsage != nil && ws.EmptyUsage.State == trajectory.QwenUsageStateUnobservable:
+			ws.State = "unobservable"
+			out.Exited++
+		case ws.EmptyUsage != nil && ws.EmptyUsage.State == trajectory.QwenUsageStateExcluded:
+			ws.State = "excluded"
+			out.Excluded++
 		case ws.TurnsStarted > 0 && ws.TurnsDone >= ws.TurnsStarted:
 			ws.State = "completed"
 			out.Completed++
@@ -173,7 +227,7 @@ func inspectOrchestrationRun(home string, receipt codexOrchestrationLaunchReceip
 	}
 	if out.Running > 0 {
 		out.State = "running"
-	} else if out.Exited > 0 {
+	} else if out.Exited > 0 || out.Terminal > 0 {
 		out.State = "attention"
 	}
 	return out
@@ -195,40 +249,23 @@ func inspectOrchestrationLog(path string, ws *orchestrationWorkerStatus) {
 		return
 	}
 	ws.LogBytes = info.Size()
+	ws.LogReadable = true
 	ws.UpdatedAt = info.ModTime().UTC()
-	f, err := os.Open(path)
+	usage, err := trajectory.InspectCodexExecUsage(path)
 	if err != nil {
 		return
 	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		var event struct {
-			Type  string `json:"type"`
-			Usage *struct {
-				InputTokens       int64 `json:"input_tokens"`
-				CachedInputTokens int64 `json:"cached_input_tokens"`
-				OutputTokens      int64 `json:"output_tokens"`
-			} `json:"usage,omitempty"`
-		}
-		if json.Unmarshal(scanner.Bytes(), &event) != nil || event.Type == "" {
-			continue
-		}
-		ws.LastEvent = event.Type
-		if event.Type == "turn.started" {
-			ws.TurnsStarted++
-		}
-		if event.Type == "turn.completed" {
-			ws.TurnsDone++
-			if event.Usage != nil && (event.Usage.InputTokens != 0 || event.Usage.CachedInputTokens != 0 || event.Usage.OutputTokens != 0) {
-				ws.InputTokens += event.Usage.InputTokens
-				ws.CachedInputTokens += event.Usage.CachedInputTokens
-				ws.OutputTokens += event.Usage.OutputTokens
-				ws.ProviderTokens += event.Usage.InputTokens + event.Usage.OutputTokens
-				ws.UsageCovered = true
-				ws.UsageAuthority = orchestration.UltracodeBudgetAuthorityProvider
-			}
-		}
+	ws.LastEvent = usage.LastEvent
+	ws.LogReadable = usage.LogReadable
+	ws.LogParseErrors = usage.ParseErrors
+	ws.TurnsStarted = usage.TurnsStarted
+	ws.TurnsDone = usage.TurnsCompleted
+	ws.InputTokens = usage.InputTokens
+	ws.CachedInputTokens = usage.CachedInputTokens
+	ws.OutputTokens = usage.OutputTokens
+	ws.ProviderTokens = usage.ProviderTokens
+	ws.UsageCovered = usage.UsageCovered
+	if usage.UsageCovered {
+		ws.UsageAuthority = orchestration.UltracodeBudgetAuthorityProvider
 	}
 }

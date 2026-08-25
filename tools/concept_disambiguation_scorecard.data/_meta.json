@@ -3232,6 +3232,21 @@
           "category": "false-positive",
           "reason": "Mechanical pairwise score aggregation helper, not a guard or gate primitive",
           "token": "aggregateV2"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct guard or gate.",
+          "token": "EmptyUsageGuard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct guard or gate.",
+          "token": "qwenEmptyUsageGuardFromEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation receipt identifier for #8699, not a distinct guard or gate.",
+          "token": "qwenEmptyUsageGuardReceipt"
         }
       ],
       "exclude": [
@@ -3267,6 +3282,7 @@
         "ConversionGate",
         "CorrectnessGate",
         "DELEGATE",
+        "EmptyUsageGuard",
         "FAK_CHILD_ATTEMPT_ID",
         "FAK_GUARD_HANDOFF_BLOCK_CEILING",
         "FAK_GUARD_OPERATOR_QUESTION_MODE",
@@ -3605,6 +3621,8 @@
         "ptrGuardInfoWorkDone",
         "publicGatewayURL",
         "quality_gate",
+        "qwenEmptyUsageGuardFromEnv",
+        "qwenEmptyUsageGuardReceipt",
         "readGuardCompactionWitnesses",
         "readguardstopsledger",
         "readguardstoptranscript",
@@ -8398,6 +8416,31 @@
           "category": "incidental",
           "reason": "Environment configuration spelling for the NATIVE_FIRST staged-diff gate, not a policy capability concept.",
           "token": "NATIVEFIRST_HOOK_MODE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct policy capability.",
+          "token": "empty_usage_policy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct policy capability.",
+          "token": "EmptyUsageGuard"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct policy capability.",
+          "token": "qwenEmptyUsageGuardFromEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct policy capability.",
+          "token": "qwenEmptyUsageGuardReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct policy capability.",
+          "token": "qwenEmptyUsagePolicyReceipt"
         }
       ],
       "exclude": [
@@ -8427,6 +8470,7 @@
         "DefaultEvidencePolicy",
         "DispositionCapability",
         "DispositionMultiCapability",
+        "EmptyUsageGuard",
         "ErrNotAdjudicated",
         "EvidenceAdjudication",
         "EvidencePolicy",
@@ -8502,6 +8546,7 @@
         "dispatchPreflightChurnState",
         "dispatchPreflightWIP",
         "dispatchWavePreflightResult",
+        "empty_usage_policy",
         "endpointAdjudicate",
         "endpointAdjudication",
         "executeLivePipeline",
@@ -8556,6 +8601,9 @@
         "postureWorkProfile",
         "postures",
         "printGuardLaunchPostures",
+        "qwenEmptyUsageGuardFromEnv",
+        "qwenEmptyUsageGuardReceipt",
+        "qwenEmptyUsagePolicyReceipt",
         "referencePolicyForCorpusCell",
         "renderLaunchPosture",
         "resolveUltracodePosture",
