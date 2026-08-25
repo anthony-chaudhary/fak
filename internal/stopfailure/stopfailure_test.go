@@ -66,9 +66,9 @@ func TestResetAndArchiveCandidates(t *testing.T) {
 	if len(reset.Updated) != 3 {
 		t.Fatalf("reset updated = %d, want 3", len(reset.Updated))
 	}
-	assertConsecutive(t, stopDir, "stale", 0)
-	assertConsecutive(t, stopDir, "claudeonly", 0)
-	assertConsecutive(t, stopDir, "progressed", 0)
+	assertMissingMarker(t, stopDir, "stale")
+	assertMissingMarker(t, stopDir, "claudeonly")
+	assertMissingMarker(t, stopDir, "progressed")
 	assertConsecutive(t, stopDir, "recent", 1)
 	assertConsecutive(t, stopDir, "markeronly", 1)
 
@@ -79,7 +79,7 @@ func TestResetAndArchiveCandidates(t *testing.T) {
 	if len(cleared.Updated) != 1 {
 		t.Fatalf("clear updated = %d, want 1", len(cleared.Updated))
 	}
-	assertConsecutive(t, stopDir, "recent", 0)
+	assertMissingMarker(t, stopDir, "recent")
 	assertConsecutive(t, stopDir, "recent2", 1)
 
 	archived, err := ArchiveMarkerOnly(opts, true)
@@ -119,6 +119,13 @@ func writeActivity(t *testing.T, dir, session string, mtime time.Time) {
 	}
 }
 
+func assertMissingMarker(t *testing.T, stopDir, session string) {
+	t.Helper()
+	_, err := os.Stat(filepath.Join(stopDir, session+".json"))
+	if !os.IsNotExist(err) {
+		t.Fatalf("%s marker still exists; err=%v", session, err)
+	}
+}
 func assertConsecutive(t *testing.T, dir, session string, want int) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(dir, session+".json"))

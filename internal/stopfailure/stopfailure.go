@@ -56,6 +56,7 @@ type Plan struct {
 	SinceHours   int                 `json:"since_hours,omitempty"`
 	Markers      int                 `json:"markers"`
 	IgnoredOld   int                 `json:"ignored_old_markers,omitempty"`
+	CleanedZero  int                 `json:"legacy_zero_markers,omitempty"`
 	Counts       map[string]int      `json:"counts"`
 	Candidates   map[string][]Marker `json:"candidates"`
 	Malformed    int                 `json:"malformed_markers,omitempty"`
@@ -126,6 +127,10 @@ func BuildPlan(opts Options) (Plan, error) {
 		}
 		if opts.SinceWindow > 0 && time.Duration(marker.AgeSeconds)*time.Second > opts.SinceWindow {
 			plan.IgnoredOld++
+			continue
+		}
+		if marker.SettlementAction == ActionZeroTotal {
+			plan.CleanedZero++
 			continue
 		}
 		plan.Markers++
@@ -356,13 +361,9 @@ func writeResetMarker(root string, marker Marker) error {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return err
 	}
-	doc["consecutive"] = 0
-	buf, err := json.Marshal(doc)
-	if err != nil {
-		return err
-	}
-	buf = append(buf, '\n')
-	return os.WriteFile(path, buf, 0o644)
+	// A healed breaker has no actionable state. Absence is the compact healthy
+	// representation; retaining one zero marker per session only creates noise.
+	return os.Remove(path)
 }
 
 func sortMarkers(rows []Marker) {
