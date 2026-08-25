@@ -21,12 +21,38 @@
 
 #import <Metal/Metal.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <unistd.h>
 
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
 extern id<MTLCommandQueue> gQueue;
+
+static _Atomic unsigned long long gQuantCommandBuffers;
+static _Atomic unsigned long long gQuantCommits;
+static _Atomic unsigned long long gQuantWaits;
+
+void mg_quant_event_command_buffer(void) {
+    atomic_fetch_add_explicit(&gQuantCommandBuffers, 1, memory_order_relaxed);
+}
+void mg_quant_event_commit(void) {
+    atomic_fetch_add_explicit(&gQuantCommits, 1, memory_order_relaxed);
+}
+void mg_quant_event_wait(void) {
+    atomic_fetch_add_explicit(&gQuantWaits, 1, memory_order_relaxed);
+}
+void mg_quant_event_snapshot(unsigned long long* command_buffers, unsigned long long* commits,
+                             unsigned long long* waits) {
+    if (command_buffers != NULL) *command_buffers = atomic_load_explicit(&gQuantCommandBuffers, memory_order_relaxed);
+    if (commits != NULL) *commits = atomic_load_explicit(&gQuantCommits, memory_order_relaxed);
+    if (waits != NULL) *waits = atomic_load_explicit(&gQuantWaits, memory_order_relaxed);
+}
+
+int mg_q8_prepare_gemv_group(const int* wids, int n, const signed char* xq, const float* xd,
+                             const int* yoff);
+int mg_q8_encode_gemv_group(void* command_buffer, const int* wids, int n, const int* yoff);
+void mg_q8_read_gemv_group(float* y, int ytot);
 
 // The MSL kernels. q4k_row_dot reconstructs one weight row's f32 values per super-block and
 // dots against the matching 256-wide activation slice — the in-kernel twin of the CPU
@@ -1018,6 +1044,7 @@ void mg_q4k_gemv(int wid, const float* x, float* y) {
         memcpy(xb.contents, x, (size_t)W.in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_quant_event_command_buffer();
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         [e setComputePipelineState:psoQ4KGemv];
         [e setBuffer:wbuf offset:0 atIndex:0];
@@ -1032,7 +1059,9 @@ void mg_q4k_gemv(int wid, const float* x, float* y) {
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
         [cb commit];
+        mg_quant_event_commit();
         [cb waitUntilCompleted];
+        mg_quant_event_wait();
 
         memcpy(y, yb.contents, (size_t)W.out * 4);
     }
@@ -1122,6 +1151,7 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
         memcpy(xb.contents, x, (size_t)in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_quant_event_command_buffer();
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         [e setComputePipelineState:psoQ4KGemv];
         [e setBuffer:xb offset:0 atIndex:1]; // shared activation for every weight in the group
@@ -1136,9 +1166,67 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
         }
         [e endEncoding];
         [cb commit];
+        mg_quant_event_commit();
         [cb waitUntilCompleted];
+        mg_quant_event_wait();
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
+    }
+}
+
+// mg_q4k_q8_gemv_group is the mixed full-attention projection spine: Q/K Q8 and V Q4_K
+// share one caller-owned command buffer. Return 0 only before a command buffer exists, 1 after a
+// completed submission, and -1 after a submitted command buffer fails.
+int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_y, const int* q4_yoff,
+                         const int* q8_wids, int nq8, const signed char* xq, const float* xd,
+                         float* q8_y, const int* q8_yoff) {
+    if (nq4 <= 0 || nq8 <= 0 || q4_wids == NULL || q8_wids == NULL ||
+        x == NULL || xq == NULL || xd == NULL || q4_y == NULL || q8_y == NULL ||
+        q4_yoff == NULL || q8_yoff == NULL) return 0;
+    for (int i = 0; i < nq4; i++) {
+        if (q4_wids[i] < 0 || q4_wids[i] >= gNQ4) return 0;
+    }
+    int in = gQ4[q4_wids[0]].in;
+    for (int i = 1; i < nq4; i++) {
+        if (gQ4[q4_wids[i]].in != in) return 0;
+    }
+    if (mg_q8_prepare_gemv_group(q8_wids, nq8, xq, xd, q8_yoff) == 0) return 0;
+    long q4total = (long)q4_yoff[nq4];
+    q4k_grow_scratch((long)in, q4total);
+    if (gQXBuf == nil || gQYBuf == nil) return 0;
+    memcpy(gQXBuf.contents, x, (size_t)in * 4);
+
+    @autoreleasepool {
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        if (cb == nil) return 0;
+        mg_quant_event_command_buffer();
+
+        id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        if (e == nil) return -1;
+        [e setComputePipelineState:psoQ4KGemv];
+        [e setBuffer:gQXBuf offset:0 atIndex:1];
+        for (int i = 0; i < nq4; i++) {
+            Q4KW W = gQ4[q4_wids[i]];
+            [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
+            [e setBuffer:gQYBuf offset:(NSUInteger)((long)q4_yoff[i] * 4) atIndex:2];
+            [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+            [e setBytes:&W.out length:sizeof(int) atIndex:4];
+            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        }
+        [e endEncoding];
+        if (mg_q8_encode_gemv_group((__bridge void*)cb, q8_wids, nq8, q8_yoff) == 0) {
+            return -1; // candidate encoding began; fail closed rather than falling back mid-batch.
+        }
+        [cb commit];
+        mg_quant_event_commit();
+        [cb waitUntilCompleted];
+        mg_quant_event_wait();
+        if (cb.status != MTLCommandBufferStatusCompleted) return -1;
+
+        memcpy(q4_y, gQYBuf.contents, (size_t)q4total * 4);
+        mg_q8_read_gemv_group(q8_y, q8_yoff[nq8]);
+        return 1;
     }
 }
 

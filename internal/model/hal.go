@@ -69,7 +69,11 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 // Close releases device-resident HAL state owned by this session. Legacy sessions have
 // no external residency, so Close is a no-op for them.
 func (s *Session) Close() {
-	if s == nil || s.Backend == nil {
+	if s == nil {
+		return
+	}
+	s.closeQwen35ProjectionBatch()
+	if s.Backend == nil {
 		return
 	}
 	if s.halClosed {

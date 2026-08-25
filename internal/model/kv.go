@@ -351,6 +351,9 @@ type Session struct {
 
 	// qwen35DecodeGraph is an opt-in per-session production-orchestrator trace.
 	qwen35DecodeGraph *qwen35DecodeGraphRecorder
+	// qwen35ProjectionBatch is nil by default. An explicitly selected Metal control/candidate
+	// installs a session-owned lifecycle here; tokenHiddenQ owns begin/finish/abort.
+	qwen35ProjectionBatch *qwen35ProjectionBatchState
 
 	// q4kExpertStats is opt-in readback for resident-Q4_K MoE decode. It records how many
 	// routed experts the Q4_K session saw, and how many actually took the Metal Q6_K-down
@@ -619,10 +622,18 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		t := s.phaseStart()
 		xp := mat.prep(xn)
 		qWidth := nH * hd
-		var q []float32
-		var gate []float32
+		var q, gate []float32
+		qName := p("self_attn.q_proj.weight")
+		kName := p("self_attn.k_proj.weight")
+		vName := p("self_attn.v_proj.weight")
+		qOut := qWidth
 		if cfg.AttnOutputGate {
-			qf := mat.mul(p("self_attn.q_proj.weight"), xp, 2*qWidth, H)
+			qOut = 2 * qWidth
+		}
+		qkv := s.qwen35MulGroup(l, mat, xp,
+			[]string{qName, kName, vName}, []int{qOut, w, w}, H)
+		qf, kk, vv := qkv[0], qkv[1], qkv[2]
+		if cfg.AttnOutputGate {
 			q = make([]float32, qWidth)
 			gate = make([]float32, qWidth)
 			for h := 0; h < nH; h++ {
@@ -630,10 +641,8 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 				copy(gate[h*hd:(h+1)*hd], qf[h*2*hd+hd:h*2*hd+2*hd])
 			}
 		} else {
-			q = mat.mul(p("self_attn.q_proj.weight"), xp, qWidth, H)
+			q = qf
 		}
-		kk := mat.mul(p("self_attn.k_proj.weight"), xp, w, H)
-		vv := mat.mul(p("self_attn.v_proj.weight"), xp, w, H)
 		s.phaseEnd("full_attn_qkv_proj", t)
 		t = s.phaseStart()
 		m.applyProjBias(l, q, kk, vv)

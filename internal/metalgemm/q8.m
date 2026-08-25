@@ -25,6 +25,9 @@
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
 extern id<MTLCommandQueue> gQueue;
+extern void mg_quant_event_command_buffer(void);
+extern void mg_quant_event_commit(void);
+extern void mg_quant_event_wait(void);
 
 static NSString *kQ8Src = @R"MSL(
 #include <metal_stdlib>
@@ -211,6 +214,54 @@ int mg_q8_upload(const signed char* codes, const float* scales, int out, int in)
     return id;
 }
 
+// Prepare and encode are split so q4k.m can own one command buffer for a mixed Q8/Q4_K group.
+// Prepare performs every fallible validation/allocation and copies the shared Q8 activation before
+// candidate work begins; encode only appends dispatches to the caller's uncommitted buffer.
+int mg_q8_prepare_gemv_group(const int* wids, int n, const signed char* xq, const float* xd,
+                             const int* yoff) {
+    if (n <= 0 || wids == NULL || xq == NULL || xd == NULL || yoff == NULL || !q8_init()) return 0;
+    if (wids[0] < 0 || wids[0] >= gNQ8) return 0;
+    Q8W W0 = gQ8[wids[0]];
+    for (int i = 1; i < n; i++) {
+        if (wids[i] < 0 || wids[i] >= gNQ8) return 0;
+        Q8W W = gQ8[wids[i]];
+        if (W.in != W0.in || W.nblk != W0.nblk) return 0;
+    }
+    q8_grow_scratch((long)W0.in, (long)W0.nblk, (long)yoff[n]);
+    if (gQ8XBuf == nil || gQ8XDBuf == nil || gQ8YBuf == nil) return 0;
+    memcpy(gQ8XBuf.contents, xq, (size_t)W0.in);
+    memcpy(gQ8XDBuf.contents, xd, (size_t)W0.nblk * 4);
+    return 1;
+}
+
+int mg_q8_encode_gemv_group(void* command_buffer, const int* wids, int n, const int* yoff) {
+    if (command_buffer == NULL || n <= 0 || wids == NULL || yoff == NULL) return 0;
+    id<MTLCommandBuffer> cmd = (__bridge id<MTLCommandBuffer>)command_buffer;
+    id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+    if (e == nil) return 0;
+    [e setComputePipelineState:psoQ8Gemv];
+    [e setBuffer:gQ8XBuf offset:0 atIndex:2];
+    [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
+    for (int i = 0; i < n; i++) {
+        Q8W W = gQ8[wids[i]];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.codes offset:0 atIndex:0];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
+        [e setBuffer:gQ8YBuf offset:(NSUInteger)((long)yoff[i] * 4) atIndex:4];
+        [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
+        [e setBytes:&W.out length:sizeof(int) atIndex:6];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+    }
+    [e endEncoding];
+    return 1;
+}
+
+void mg_q8_read_gemv_group(float* y, int ytot) {
+    if (y != NULL && ytot > 0 && gQ8YBuf != nil) {
+        memcpy(y, gQ8YBuf.contents, (size_t)ytot * 4);
+    }
+}
+
 // mg_q8_gemv computes y[out] = W[wid] · x for one Q8_0-quantized activation (xq codes [in],
 // xd block scales [nblk]). f32 result.
 void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y) {
@@ -222,6 +273,7 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y) {
         memcpy(gQ8XDBuf.contents, xd, (size_t)W.nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_quant_event_command_buffer();
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
         [e setComputePipelineState:psoQ8Gemv];
         [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
@@ -235,7 +287,9 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y) {
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
         [cmd commit];
+        mg_quant_event_commit();
         [cmd waitUntilCompleted];
+        mg_quant_event_wait();
 
         memcpy(y, gQ8YBuf.contents, (size_t)W.out * 4);
     }
@@ -256,6 +310,7 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         memcpy(gQ8XDBuf.contents, xd, (size_t)nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_quant_event_command_buffer();
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
         [e setComputePipelineState:psoQ8Gemv];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared activation for every weight in the group
@@ -272,7 +327,9 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         }
         [e endEncoding];
         [cmd commit];
+        mg_quant_event_commit();
         [cmd waitUntilCompleted];
+        mg_quant_event_wait();
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
     }
@@ -290,6 +347,7 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         memcpy(gQ8XDBuf.contents, Xd, (size_t)P * W.nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_quant_event_command_buffer();
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
         [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
@@ -314,7 +372,9 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         }
         [e endEncoding];
         [cmd commit];
+        mg_quant_event_commit();
         [cmd waitUntilCompleted];
+        mg_quant_event_wait();
 
         memcpy(Y, gQ8YBuf.contents, (size_t)P * W.out * 4);
     }
@@ -338,6 +398,7 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         const int BN = 64;  // token-tile width;            must match Q8_BN in the MSL source
         const int TG = 256; // threads per threadgroup;     must match Q8_TG in the MSL source
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_quant_event_command_buffer();
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
         [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared X panel for every weight
@@ -362,7 +423,9 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         }
         [e endEncoding];
         [cmd commit];
+        mg_quant_event_commit();
         [cmd waitUntilCompleted];
+        mg_quant_event_wait();
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
     }
