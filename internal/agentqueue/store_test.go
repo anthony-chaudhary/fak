@@ -1,11 +1,15 @@
 package agentqueue
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 func persistedFixture() Snapshot {
@@ -101,5 +105,89 @@ func TestStoreSaveDoesNotMutateCaller(t *testing.T) {
 	}
 	if strings.TrimSpace(snap.Schema) != "" {
 		t.Fatalf("Save mutated caller schema to %q", snap.Schema)
+	}
+}
+
+func TestStoreReserveConcurrentAtMaxMinusOneAcceptsExactlyOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "queue.json")
+	store := Store{Path: path}
+	snapshot := Snapshot{
+		Schema: Schema, Generation: "generation-before",
+		Pool: PoolSpec{ID: "build", Min: 0, Desired: 2, Max: 2},
+		Intents: []Intent{
+			{ID: "active", State: IntentRunning},
+			{ID: "candidate", State: IntentQueued},
+		},
+		Attempts: []Attempt{{ID: "active-1", IntentID: "active", State: AttemptRunning}},
+	}
+	if err := store.Save(snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	type result struct {
+		receipt Receipt
+		err     error
+	}
+	results := make(chan result, 2)
+	for range 2 {
+		go func() {
+			<-start
+			receipt, _, err := store.Reserve(context.Background(), "generation-before")
+			results <- result{receipt: receipt, err: err}
+		}()
+	}
+	close(start)
+
+	accepted, conflicted := 0, 0
+	for range 2 {
+		result := <-results
+		switch {
+		case result.err == nil:
+			accepted++
+			if len(result.receipt.Start) != 1 || result.receipt.Start[0].IntentID != "candidate" {
+				t.Fatalf("accepted reservation = %#v", result.receipt.Start)
+			}
+		case errors.Is(result.err, ErrGenerationConflict):
+			conflicted++
+		default:
+			t.Fatalf("Reserve error = %v", result.err)
+		}
+	}
+	if accepted != 1 || conflicted != 1 {
+		t.Fatalf("accepted=%d conflicted=%d, want 1 each", accepted, conflicted)
+	}
+	final, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(final.Attempts) != 2 || final.Attempts[1].IntentID != "candidate" || final.Attempts[1].State != AttemptReserved {
+		t.Fatalf("final attempts = %#v", final.Attempts)
+	}
+	if final.Generation == "generation-before" {
+		t.Fatal("successful reservation did not advance generation")
+	}
+}
+
+func TestStoreReserveHonorsCanceledLockWait(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "queue.json")
+	store := Store{Path: path}
+	if err := store.Save(Snapshot{Schema: Schema, Generation: "g", Pool: PoolSpec{ID: "p", Max: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := flock.TryLock(lock); err != nil {
+		t.Fatal(err)
+	}
+	defer flock.Unlock(lock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := store.Reserve(ctx, "g"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Reserve error = %v, want context.Canceled", err)
 	}
 }

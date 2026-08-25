@@ -2,18 +2,90 @@ package agentqueue
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/flock"
 )
 
 // Store persists one queue snapshot. Save acknowledges only after the new bytes
 // have been flushed and atomically installed at Path.
 type Store struct {
 	Path string
+}
+
+var ErrGenerationConflict = errors.New("agentqueue: generation conflict")
+
+// Reserve serializes the read-plan-write transition across processes. The
+// expected generation is a compare-and-swap token, so a stale reconciler cannot
+// reserve capacity from an observation another reconciler already changed.
+func (s Store) Reserve(ctx context.Context, expectedGeneration string) (Receipt, Snapshot, error) {
+	if s.Path == "" {
+		return Receipt{}, Snapshot{}, errors.New("agentqueue: snapshot path is required")
+	}
+	lock, err := os.OpenFile(s.Path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return Receipt{}, Snapshot{}, fmt.Errorf("agentqueue: open reservation lock: %w", err)
+	}
+	defer lock.Close()
+	for {
+		err = flock.TryLock(lock)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, flock.ErrLockBusy) {
+			return Receipt{}, Snapshot{}, fmt.Errorf("agentqueue: lock reservation: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return Receipt{}, Snapshot{}, fmt.Errorf("agentqueue: reserve: %w", ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	defer flock.Unlock(lock)
+
+	snapshot, err := s.Load()
+	if err != nil {
+		return Receipt{}, Snapshot{}, err
+	}
+	if snapshot.Generation != expectedGeneration {
+		return Receipt{}, snapshot, fmt.Errorf("%w: expected %q, found %q", ErrGenerationConflict, expectedGeneration, snapshot.Generation)
+	}
+	receipt, err := Reconcile(snapshot)
+	if err != nil {
+		return Receipt{}, Snapshot{}, err
+	}
+	if len(receipt.Start) == 0 {
+		return receipt, snapshot, nil
+	}
+	for _, start := range receipt.Start {
+		snapshot.Attempts = append(snapshot.Attempts, Attempt{
+			ID: start.IdempotencyKey, IntentID: start.IntentID, State: AttemptReserved,
+		})
+	}
+	snapshot.Generation = nextGeneration(snapshot.Generation, receipt.Start)
+	if err := s.Save(snapshot); err != nil {
+		return Receipt{}, Snapshot{}, err
+	}
+	return receipt, snapshot, nil
+}
+
+func nextGeneration(current string, starts []StartAction) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(current))
+	for _, start := range starts {
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(start.IdempotencyKey))
+	}
+	return "gen:" + hex.EncodeToString(h.Sum(nil)[:16])
 }
 
 func (s Store) Load() (Snapshot, error) {
