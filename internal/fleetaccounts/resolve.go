@@ -131,13 +131,8 @@ func Resolve(rows []Account, home string, req ResolveRequest, pol Policy) Resolv
 			match.ModelTier, match.ModelTier, false, "")
 	}
 
-	cls := req.TaskClass
-	strict := req.StrictTier
-	wk := strings.ToLower(strings.TrimSpace(req.WorkKind))
-	if gardeningWorkKinds[wk] || engineeringWorkKinds[wk] {
-		cls, strict = wk, false
-	}
-	route := RouteAccount(rows, req.TaskText, cls, req.AllowTierFallback, strict, req.Product, pol)
+	class, strict := dispatchTaskClass(req.TaskClass, req.WorkKind, req.StrictTier)
+	route := RouteAccount(rows, req.TaskText, class, req.AllowTierFallback, strict, req.Product, pol)
 	if !route.OK {
 		reason := route.Reason
 		if reason == "" {

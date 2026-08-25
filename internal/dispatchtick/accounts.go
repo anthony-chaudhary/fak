@@ -441,16 +441,7 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 		candidates := uniquePoolRows(availableTierCandidates(workers, tier))
 		sort.Slice(candidates, func(i, j int) bool { return accountRouteLess(candidates[i], candidates[j]) })
 		for len(lanes) < n {
-			best := -1
-			for i, row := range candidates {
-				pool := PoolKey(row)
-				if load[pool] >= AccountSessionCap(row) {
-					continue
-				}
-				if best < 0 || accountWaveSlotLess(row, candidates[best], load[pool], load[PoolKey(candidates[best])]) {
-					best = i
-				}
-			}
+			best := chooseAccountWaveRow(candidates, load)
 			if best < 0 {
 				break
 			}
@@ -460,57 +451,11 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 			slot := load[pool] + 1
 			load[pool] = slot
 			usedPools[pool] = true
-			lanes = append(lanes, AccountWaveLane{
-				OK:           true,
-				Reason:       chooseString(tier == target, "wave lane (target tier)", "wave lane (fallback tier)"),
-				Account:      row.Account,
-				Tag:          row.Tag,
-				Product:      row.Product,
-				ConfigDir:    row.Dir,
-				Model:        row.Model,
-				ModelTier:    row.ModelTier,
-				SelectedTier: row.ModelTier,
-				TargetTier:   target,
-				FallbackUsed: tier != target,
-				LoginStatus:  row.LoginStatus,
-				CanServe:     row.CanServe,
-				Pool:         pool,
-				SessionSlot:  slot,
-				SessionCap:   capacity,
-			})
+			lanes = append(lanes, accountWaveLane(row, target, tier, pool, slot, capacity))
 		}
 	}
-	granted := len(lanes)
-	shortfall := n - granted
-	if shortfall < 0 {
-		shortfall = 0
-	}
-	waveID := strings.TrimSpace(in.WaveID)
-	if waveID == "" {
-		pools := make([]string, 0, len(lanes))
-		for _, lane := range lanes {
-			pools = append(pools, lane.Pool)
-		}
-		waveID = waveIDForPools(pools)
-	}
-	for i := range lanes {
-		lanes[i].Rank = i
-		lanes[i].WaveID = waveID
-		lanes[i].Size = granted
-	}
-	reason := ""
-	switch {
-	case granted == 0:
-		reason = fmt.Sprintf("no available account for a wave (target tier %d", target)
-		if product != "" {
-			reason += fmt.Sprintf(", product %s", product)
-		}
-		reason += ")"
-	case shortfall > 0:
-		reason = fmt.Sprintf("granted %d of %d session slot(s) across %d distinct pool(s); %d short (roster has no more available session slots at the requested tiers)", granted, n, len(usedPools), shortfall)
-	default:
-		reason = fmt.Sprintf("granted %d session slot(s) across %d distinct pool(s)", granted, len(usedPools))
-	}
+	granted, shortfall, waveID := finalizeAccountWave(lanes, n, in.WaveID)
+	reason := accountWaveReason(granted, n, len(usedPools), shortfall, target, product)
 	return AccountWaveResult{
 		OK:                    granted > 0,
 		Requested:             n,
@@ -524,6 +469,89 @@ func AllocateWave(in AccountWaveInput) AccountWaveResult {
 		Lanes:                 lanes,
 		BlockedTargetAccounts: publicBlockedAccounts(workers, target),
 	}
+}
+
+// accountWaveReason summarizes the same allocation counts carried in the result.
+func accountWaveReason(granted, requested, distinctCount, shortfall, target int, product string) string {
+	reason := ""
+	switch {
+	case granted == 0:
+		reason = fmt.Sprintf("no available account for a wave (target tier %d", target)
+		if product != "" {
+			reason += fmt.Sprintf(", product %s", product)
+		}
+		reason += ")"
+	case shortfall > 0:
+		reason = fmt.Sprintf("granted %d of %d session slot(s) across %d distinct pool(s); %d short (roster has no more available session slots at the requested tiers)", granted, requested, distinctCount, shortfall)
+	default:
+		reason = fmt.Sprintf("granted %d session slot(s) across %d distinct pool(s)", granted, distinctCount)
+	}
+	return reason
+}
+
+// chooseAccountWaveRow returns the least-loaded routable candidate with free
+// session capacity. Keeping the admission and tie-break together prevents callers
+// from ranking a full pool ahead of one that can actually accept the next lane.
+func chooseAccountWaveRow(candidates []AccountRow, load map[string]int) int {
+	best := -1
+	for i, row := range candidates {
+		pool := PoolKey(row)
+		if load[pool] >= AccountSessionCap(row) {
+			continue
+		}
+		if best < 0 || accountWaveSlotLess(row, candidates[best], load[pool], load[PoolKey(candidates[best])]) {
+			best = i
+		}
+	}
+	return best
+}
+
+// accountWaveLane projects one selected account slot onto the public lane shape.
+// Selection mutates pool load; this helper only records the resulting decision.
+func accountWaveLane(row AccountRow, target, tier int, pool string, slot, capacity int) AccountWaveLane {
+	return AccountWaveLane{
+		OK:           true,
+		Reason:       chooseString(tier == target, "wave lane (target tier)", "wave lane (fallback tier)"),
+		Account:      row.Account,
+		Tag:          row.Tag,
+		Product:      row.Product,
+		ConfigDir:    row.Dir,
+		Model:        row.Model,
+		ModelTier:    row.ModelTier,
+		SelectedTier: row.ModelTier,
+		TargetTier:   target,
+		FallbackUsed: tier != target,
+		LoginStatus:  row.LoginStatus,
+		CanServe:     row.CanServe,
+		Pool:         pool,
+		SessionSlot:  slot,
+		SessionCap:   capacity,
+	}
+}
+
+// finalizeAccountWave stamps identity and stable lane metadata after allocation.
+// It returns the derived counts so the result and its explanatory reason share one
+// definition of granted versus shortfall.
+func finalizeAccountWave(lanes []AccountWaveLane, requested int, explicitWaveID string) (granted, shortfall int, waveID string) {
+	granted = len(lanes)
+	shortfall = requested - granted
+	if shortfall < 0 {
+		shortfall = 0
+	}
+	waveID = strings.TrimSpace(explicitWaveID)
+	if waveID == "" {
+		pools := make([]string, 0, len(lanes))
+		for _, lane := range lanes {
+			pools = append(pools, lane.Pool)
+		}
+		waveID = waveIDForPools(pools)
+	}
+	for i := range lanes {
+		lanes[i].Rank = i
+		lanes[i].WaveID = waveID
+		lanes[i].Size = granted
+	}
+	return granted, shortfall, waveID
 }
 
 func BuildSeatPool(rows []AccountRow, leases []SeatLease, product string) SeatPoolResult {
@@ -718,24 +746,7 @@ func availableTierCandidates(workers []AccountRow, tier int) []AccountRow {
 }
 
 func uniquePoolRows(rows []AccountRow) []AccountRow {
-	byPool := map[string]AccountRow{}
-	order := []string{}
-	for _, row := range rows {
-		pool := PoolKey(row)
-		if _, ok := byPool[pool]; !ok {
-			order = append(order, pool)
-			byPool[pool] = row
-			continue
-		}
-		if accountPoolRowLess(row, byPool[pool]) {
-			byPool[pool] = row
-		}
-	}
-	out := make([]AccountRow, 0, len(order))
-	for _, pool := range order {
-		out = append(out, byPool[pool])
-	}
-	return out
+	return stablePreferredByKey(rows, PoolKey, accountPoolRowLess)
 }
 
 func accountPoolRowLess(a, b AccountRow) bool {

@@ -103,6 +103,36 @@ func in(s string, opts ...string) bool {
 	return false
 }
 
+// dispatchTaskClass applies the work-kind override shared by one-account and wave
+// resolution before either delegates to the canonical task classifier.
+func dispatchTaskClass(taskClass, workKind string, strictTier bool) (string, bool) {
+	wk := strings.ToLower(strings.TrimSpace(workKind))
+	if gardeningWorkKinds[wk] || engineeringWorkKinds[wk] {
+		taskClass, strictTier = wk, false
+	}
+	return taskClass, strictTier
+}
+
+// routingTierOrder returns the shared target/fallback ladder and whether policy or the
+// caller enabled hard-tier fallback. Apex remains explicit-only because no non-apex
+// ladder can contain TierApex.
+func routingTierOrder(target int, strictTier, allowTierFallback bool, pol Policy) ([]int, bool) {
+	fallbackPolicy := strings.ToLower(pol.Routing.HardTier1Fallback)
+	effectiveAllow := allowTierFallback || in(fallbackPolicy, "allow", "fallback", "tier2", "t2")
+	tiers := []int{target}
+	switch {
+	case target == TierApex:
+		if !strictTier {
+			tiers = append(tiers, TierFrontier)
+		}
+	case target == TierLight && !strictTier:
+		tiers = append(tiers, TierFrontier)
+	case effectiveAllow:
+		tiers = append(tiers, TierLight)
+	}
+	return tiers, effectiveAllow
+}
+
 func routeRank(r Account) (int, int, int, float64, string, string) {
 	return -derefInt(r.RouteWeight),
 		derefInt(r.LiveSessions),
@@ -228,25 +258,10 @@ func RouteAccount(rows []Account, taskText, taskClass string, allowTierFallback,
 			BlockedTargetAccounts: []BlockedAccount{}}
 	}
 	target := task.TargetTier
-	fallbackPolicy := strings.ToLower(pol.Routing.HardTier1Fallback)
-	effectiveAllow := allowTierFallback || in(fallbackPolicy, "allow", "fallback", "tier2", "t2")
 	// The fallback ladder. Crucially, no non-apex target ever lists tier 0, so a tier-0
 	// (Fable 5) account is unreachable except when apex was explicitly targeted — the
 	// account-side half of the apex restriction (see apextier.go).
-	tierOrder := []int{target}
-	switch {
-	case target == TierApex:
-		// Apex is scarce and explicit-only: never escalate INTO it, and when no apex
-		// account is offered, degrade DOWN to the frontier tier — never sideways or up
-		// — unless the caller pinned the exact tier.
-		if !strictTier {
-			tierOrder = append(tierOrder, TierFrontier)
-		}
-	case target == TierLight && !strictTier:
-		tierOrder = append(tierOrder, TierFrontier)
-	case effectiveAllow:
-		tierOrder = append(tierOrder, TierLight)
-	}
+	tierOrder, effectiveAllow := routingTierOrder(target, strictTier, allowTierFallback, pol)
 
 	atCap := 0
 	for _, tier := range tierOrder {

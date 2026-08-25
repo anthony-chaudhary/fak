@@ -487,13 +487,30 @@ func isSensitiveKey(s string) bool {
 }
 
 func uniqueStrings(values ...string) []string {
-	seen := map[string]bool{}
-	out := []string{}
+	return stablePreferredByKey(values, func(value string) string { return value }, nil)
+}
+
+// stablePreferredByKey collapses duplicate keys without disturbing their first-seen
+// order. When prefer is set, a later value may replace the representative in place;
+// the key never moves, so routing output remains deterministic across replacements.
+func stablePreferredByKey[T any](values []T, key func(T) string, prefer func(T, T) bool) []T {
+	byKey := make(map[string]T, len(values))
+	order := make([]string, 0, len(values))
 	for _, value := range values {
-		if !seen[value] {
-			seen[value] = true
-			out = append(out, value)
+		k := key(value)
+		current, exists := byKey[k]
+		if !exists {
+			order = append(order, k)
+			byKey[k] = value
+			continue
 		}
+		if prefer != nil && prefer(value, current) {
+			byKey[k] = value
+		}
+	}
+	out := make([]T, 0, len(order))
+	for _, k := range order {
+		out = append(out, byKey[k])
 	}
 	return out
 }

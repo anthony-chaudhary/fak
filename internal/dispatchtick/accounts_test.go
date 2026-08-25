@@ -291,6 +291,22 @@ func TestAllocateWaveCollapsesDuplicatePools(t *testing.T) {
 	}
 }
 
+func TestUniquePoolRowsPreservesFirstPoolOrderWhenRepresentativeImproves(t *testing.T) {
+	rows := []AccountRow{
+		{Account: ".claude-a-blocked", Tag: "a-blocked", Product: "claude", AccountUUID: "pool-a", Available: false, ModelTier: 1},
+		{Account: ".claude-b", Tag: "b", Product: "claude", AccountUUID: "pool-b", Available: true, ModelTier: 1},
+		{Account: ".claude-a-ready", Tag: "a-ready", Product: "claude", AccountUUID: "pool-a", Available: true, ModelTier: 1},
+	}
+
+	got := uniquePoolRows(rows)
+	if len(got) != 2 {
+		t.Fatalf("unique pool rows = %+v, want two pools", got)
+	}
+	if got[0].Tag != "a-ready" || got[1].Tag != "b" {
+		t.Fatalf("unique pool row order = [%s %s], want improved pool-a representative before pool-b", got[0].Tag, got[1].Tag)
+	}
+}
+
 func TestAllocateWaveGardeningFallsBackUpAndProductFilters(t *testing.T) {
 	got := AllocateWave(AccountWaveInput{Rows: accountRowsFixture(), Count: 2, Product: "claude", WorkKind: "gardening"})
 	if !got.OK || got.Granted != 2 || got.Lanes[0].SelectedTier != 1 || !got.Lanes[0].FallbackUsed {

@@ -480,13 +480,7 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		if kind == "" {
 			kind = "auth"
 		}
-		reason := freshProbeBlock.Reason
-		if reason == "" {
-			reason = freshProbeBlock.Last
-		}
-		if reason == "" {
-			reason = "blocked"
-		}
+		reason := probeBlockReason(freshProbeBlock.Reason, freshProbeBlock.Last)
 		st.Available, st.Blocked = false, true
 		st.BlockKind, st.hasBlockKind = kind, true
 		st.BlockReason = reason
@@ -548,10 +542,7 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 			if kind == "" {
 				kind = "auth"
 			}
-			reason := led.BlockReason
-			if reason == "" {
-				reason = "blocked"
-			}
+			reason := probeBlockReason(led.BlockReason)
 			st.Available, st.Blocked = false, true
 			st.BlockKind, st.hasBlockKind = kind, true
 			st.BlockReason = reason
@@ -610,6 +601,17 @@ func computeRuntimeStatus(account, dir string, reg Registry) RuntimeStatus {
 		seatUnmeasured = seatProbeUnmeasured(account, now)
 	}
 	return markUnknownHealth(st, consultLedger, seatUnmeasured)
+}
+
+// probeBlockReason preserves the first recorder-provided reason and supplies the
+// stable fallback used by both synthetic-session and ledger probe verdicts.
+func probeBlockReason(reasons ...string) string {
+	for _, reason := range reasons {
+		if reason != "" {
+			return reason
+		}
+	}
+	return "blocked"
 }
 
 func registryEmpty(reg Registry) bool {

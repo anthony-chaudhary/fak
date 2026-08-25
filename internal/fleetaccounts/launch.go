@@ -65,9 +65,7 @@ func DecideLaunch(req LaunchRequest) LaunchDecision {
 	switch d.Product {
 	case "claude":
 		d.Argv = []string{"claude", "-p", req.Prompt}
-		if model != "" {
-			d.Argv = append(d.Argv, "--model", model)
-		}
+		d.Argv = appendModelArgument(d.Argv, "--model", model)
 		speed := strings.ToLower(strings.TrimSpace(req.Speed))
 		if speed == "" || speed == "auto" {
 			speed = "fast"
@@ -94,16 +92,12 @@ func DecideLaunch(req LaunchRequest) LaunchDecision {
 			"--dangerously-bypass-hook-trust",
 			"--json",
 		}
-		if model != "" {
-			d.Argv = append(d.Argv, "--model", model)
-		}
+		d.Argv = appendModelArgument(d.Argv, "--model", model)
 		d.Argv = append(d.Argv, req.Prompt)
 		d.Env = map[string]string{"CODEX_HOME": a.ConfigDir}
 	case "opencode":
 		d.Argv = []string{"opencode", "run"}
-		if model != "" {
-			d.Argv = append(d.Argv, "-m", model)
-		}
+		d.Argv = appendModelArgument(d.Argv, "-m", model)
 		d.Argv = append(d.Argv, req.Prompt)
 		d.Env = map[string]string{"XDG_CONFIG_HOME": opencodeConfigHome(a.ConfigDir)}
 	default:
@@ -112,6 +106,13 @@ func DecideLaunch(req LaunchRequest) LaunchDecision {
 	}
 	d.OK = true
 	return d
+}
+
+func appendModelArgument(argv []string, flag, model string) []string {
+	if model == "" {
+		return argv
+	}
+	return append(argv, flag, model)
 }
 
 func endpointClass(a Resolved) string {

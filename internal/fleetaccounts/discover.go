@@ -596,6 +596,16 @@ func apiKeySeatReason(env string) string {
 	return "real offered API-key account (credential from $" + env + ")"
 }
 
+// registryAccountName resolves the account basename carried by a registry home. A
+// configured directory is authoritative; name remains the fallback for dir-less seats.
+func registryAccountName(h configaccounts.Home) string {
+	account := strings.TrimSpace(h.Name)
+	if strings.TrimSpace(h.Dir) != "" {
+		account = filepath.Base(h.Dir)
+	}
+	return account
+}
+
 // apiKeySeatRow builds the roster row for one ACTIVE api-key registry seat. It is the
 // registry-driven twin of classifyRow: the same intrinsic and policy gates decide whether the
 // seat is offered, and an offered seat gets the same worker profile stamp — but its readiness
@@ -603,10 +613,7 @@ func apiKeySeatReason(env string) string {
 // config dir, which a dir-less api-key seat does not have. The row names the env VAR only; the
 // key itself is never read here, let alone reported.
 func apiKeySeatRow(h configaccounts.Home, pol Policy) Account {
-	account := strings.TrimSpace(h.Name)
-	if strings.TrimSpace(h.Dir) != "" {
-		account = filepath.Base(h.Dir)
-	}
+	account := registryAccountName(h)
 	tag := AccountTag(account)
 	base := Account{
 		Dir:             h.Dir,
@@ -673,10 +680,7 @@ func registrySeatRow(h configaccounts.Home, pol Policy) Account {
 		return row
 	}
 
-	account := strings.TrimSpace(h.Name)
-	if strings.TrimSpace(h.Dir) != "" {
-		account = filepath.Base(h.Dir)
-	}
+	account := registryAccountName(h)
 	tag := AccountTag(account)
 	base := Account{
 		Dir: h.Dir, Product: "claude", Account: account, Tag: tag, Notes: pol.Notes[tag],

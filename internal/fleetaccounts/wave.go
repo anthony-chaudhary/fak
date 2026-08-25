@@ -60,33 +60,17 @@ func AllocateWave(rows []Account, req WaveRequest, pol Policy) WaveResult {
 	if n < 0 {
 		n = 0
 	}
-	cls, strict := req.TaskClass, req.StrictTier
-	wk := strings.ToLower(strings.TrimSpace(req.WorkKind))
-	if gardeningWorkKinds[wk] || engineeringWorkKinds[wk] {
-		cls, strict = wk, false
-	}
-	task := ClassifyTask(req.TaskText, cls, pol)
+	class, strict := dispatchTaskClass(req.TaskClass, req.WorkKind, req.StrictTier)
+	task := ClassifyTask(req.TaskText, class, pol)
 	target := task.TargetTier
 
 	wantedProduct := strings.ToLower(strings.TrimSpace(req.Product))
 	workers, available := routableAndAvailable(rows, wantedProduct)
 
-	fallbackPolicy := strings.ToLower(pol.Routing.HardTier1Fallback)
-	effectiveAllow := req.AllowTierFallback || in(fallbackPolicy, "allow", "fallback", "tier2", "t2")
 	// The same fallback ladder as RouteAccount: no non-apex target lists tier 0, so an
 	// apex (Fable 5) seat is never swept into a hard/light wave. An explicit apex target
 	// degrades DOWN to frontier (never sideways to light) when no apex seat is offered.
-	tierOrder := []int{target}
-	switch {
-	case target == TierApex:
-		if !strict {
-			tierOrder = append(tierOrder, TierFrontier)
-		}
-	case target == TierLight && !strict:
-		tierOrder = append(tierOrder, TierFrontier)
-	case effectiveAllow:
-		tierOrder = append(tierOrder, TierLight)
-	}
+	tierOrder, _ := routingTierOrder(target, strict, req.AllowTierFallback, pol)
 
 	var lanes []WaveLane
 	usedPools := map[string]bool{}
