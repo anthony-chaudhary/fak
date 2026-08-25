@@ -33,6 +33,14 @@ jobs:
       - name: build fakmetal
         run: go build -tags fakmetal ./internal/metalgemm/ ./internal/model/
 
+      # Issue #8844 device witness: execute tiny fak-native Q4_K and Q8 calls and require
+      # scoped commit/wait/readback lifecycle events from the Objective-C bridge.
+      - name: witness - scoped Q4_K and Q8 lifecycle
+        run: |
+          uname -s
+          uname -m
+          system_profiler SPHardwareDataType SPDisplaysDataType 2>/dev/null | grep -iE 'Model Name|Model Identifier|Chip|Metal|Chipset|Vendor' | head -30 || true
+          go test -tags fakmetal ./internal/metalgemm/ -run '^TestExecutionObservationCapturesQuantizedMetalLifecycle$' -count=1 -v
       # Correctness gate: the batched fused MLP equals n single fused MLPs (offset binding).
       - name: parity - batched fused MLP == single
         run: go test -tags fakmetal ./internal/model/ -run 'TestMetalFusedMLPQ6DownBatchMatchesSingle|TestMetalFusedMLPQ6DownMatchesCPU' -count=1 -v
