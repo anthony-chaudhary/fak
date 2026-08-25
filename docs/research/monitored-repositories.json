@@ -53,7 +53,26 @@
       "last_checked": "2026-08-14",
       "checked_revision": "a6c360047186cc5b8afe3a74012a12bfc94ae7c7",
       "stars_at_check": 10553,
-      "last_push_at_check": "2026-08-14T22:56:23Z"
+      "last_push_at_check": "2026-08-14T22:56:23Z",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/langchain-ai-open-swe.json",
+        "indexed_revision": "a6c360047186cc5b8afe3a74012a12bfc94ae7c7",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "roadmap_todos",
+          "license_provenance",
+          "completeness_critic"
+        ],
+        "subsystem_count": 12,
+        "candidate_count": 0,
+        "filed_issue_count": 0,
+        "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git, ui/src/features/agents/terminal/ghostty/vendor; classes checked absent in local tree: roadmap_todos; still requires non-tree study artifacts: open_closed_issues_prs_discussions, fak_selfquery_witness, candidate_matrix, issue_tracking"
+      }
     },
     {
       "repository": "EveryInc/compound-engineering-plugin",

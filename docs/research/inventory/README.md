@@ -6,7 +6,10 @@ Each map is an inventory denominator for a deep `study-repo` pass. It records th
 
 Registry rows must add `source_evidence` for any source class the map marks `partial` or `external_required`. Bare `source_classes` names are only acceptable when backed by a map status of `covered` or `checked_absent`.
 
-Current map:
+Current maps:
+
+- [`langchain-ai-open-swe.json`](langchain-ai-open-swe.json) — machine map for `langchain-ai/open-swe` at `a6c360047186cc5b8afe3a74012a12bfc94ae7c7`.
+- [`langchain-ai-open-swe.md`](langchain-ai-open-swe.md) — human rendering of the same scan.
 
 - [`ruvnet-ruflo.json`](ruvnet-ruflo.json) — machine map for `ruvnet/ruflo` at `4dcff483482cee316f47552a961bcbaadc89f378`.
 - [`ruvnet-ruflo.md`](ruvnet-ruflo.md) — human rendering of the same scan.
