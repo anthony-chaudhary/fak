@@ -61,17 +61,7 @@ func q6kReduceRowScalar(row []byte, nblk int, qx []int8, IS, SS []int32) {
 					g := base + scOff + is + p*2
 					var iAcc, sAcc int32
 					for l := lo; l < lo+16; l++ {
-						var q6 int32
-						switch p {
-						case 0:
-							q6 = int32((ql[qlOff+l+0] & 0x0f) | (((qh[qhOff+l] >> 0) & 3) << 4))
-						case 1:
-							q6 = int32((ql[qlOff+l+32] & 0x0f) | (((qh[qhOff+l] >> 2) & 3) << 4))
-						case 2:
-							q6 = int32((ql[qlOff+l+0] >> 4) | (((qh[qhOff+l] >> 4) & 3) << 4))
-						default:
-							q6 = int32((ql[qlOff+l+32] >> 4) | (((qh[qhOff+l] >> 6) & 3) << 4))
-						}
+						q6 := q6kCode(ql, qh, qlOff, qhOff, l, p)
 						xv := int32(qx[xBase+n+l+p*32])
 						iAcc += q6 * xv
 						sAcc += xv
@@ -85,6 +75,17 @@ func q6kReduceRowScalar(row []byte, nblk int, qx []int8, IS, SS []int32) {
 			scOff += 8
 		}
 	}
+}
+
+func q6kCode(ql, qh []byte, qlOff, qhOff, lane, part int) int32 {
+	shift := uint(part * 2)
+	qLow := ql[qlOff+lane+(part&1)*32]
+	if part >= 2 {
+		qLow >>= 4
+	} else {
+		qLow &= 0x0f
+	}
+	return int32(qLow | (((qh[qhOff+lane] >> shift) & 3) << 4))
 }
 
 // q6kCombineRow folds the int32 (I_g, S_g) reductions to the float dot: per group, d*sc_g applies

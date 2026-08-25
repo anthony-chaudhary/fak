@@ -198,6 +198,10 @@ type snapshotEncoder struct {
 }
 
 func (e *snapshotEncoder) u64(v uint64) {
+	e.write(v)
+}
+
+func (e *snapshotEncoder) write(v any) {
 	if e.err != nil {
 		return
 	}
@@ -205,10 +209,7 @@ func (e *snapshotEncoder) u64(v uint64) {
 }
 
 func (e *snapshotEncoder) u32(v uint32) {
-	if e.err != nil {
-		return
-	}
-	e.err = binary.Write(&e.Buffer, binary.BigEndian, v)
+	e.write(v)
 }
 
 func (e *snapshotEncoder) integer(v int) { e.u64(uint64(int64(v))) }

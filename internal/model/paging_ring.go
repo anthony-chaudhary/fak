@@ -265,9 +265,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 	if wt, ok := r.resident[id]; ok {
 		r.pool.Touch(id)
 		r.hit++
-		if r.shared != nil && !r.prefetching {
-			r.shared.noteServe(id)
-		}
+		r.noteDemandServe(id)
 		// A HIT on a weight the prefetch staged is where overlap is actually observed: the transfer
 		// was issued a GEMM or more ago, and either landed underneath that work or did not. Skip the
 		// fence while prefetching — re-hinting an in-flight weight must not block the hint path.
@@ -325,9 +323,7 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 		}
 	}
 	r.resident[id] = wt
-	if r.shared != nil && !r.prefetching {
-		r.shared.noteServe(id)
-	}
+	r.noteDemandServe(id)
 	// A DEMAND miss must hand back a settled handle: every caller of stage() goes straight on to
 	// read or multiply it. Only the prefetch path may return with the transfer still in flight,
 	// which is the whole point of the extension — issue now, pay later or not at all.
@@ -338,6 +334,12 @@ func (r *pagedRing) stage(name string, mk func() compute.Tensor, dtype compute.D
 		r.peak = used
 	}
 	return wt, true
+}
+
+func (r *pagedRing) noteDemandServe(id polymodel.ModelID) {
+	if r.shared != nil && !r.prefetching {
+		r.shared.noteServe(id)
+	}
 }
 
 // awaitStaged makes a staged weight visible to subsequent ops and books the overlap (#5627).

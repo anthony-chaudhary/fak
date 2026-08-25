@@ -81,8 +81,10 @@ func detectDotProd() bool {
 }
 
 func linuxHasASIMDDP() bool {
-	const atHWCAP = 16
-	const hwcapASIMDDP = 1 << 20
+	return linuxAuxvHas(16, 1<<20)
+}
+
+func linuxAuxvHas(entry, mask uint64) bool {
 	b, err := os.ReadFile("/proc/self/auxv")
 	if err != nil {
 		return false
@@ -91,8 +93,8 @@ func linuxHasASIMDDP() bool {
 	for i := 0; i+16 <= len(b); i += 16 {
 		typ := binary.LittleEndian.Uint64(b[i:])
 		val := binary.LittleEndian.Uint64(b[i+8:])
-		if typ == atHWCAP {
-			return val&hwcapASIMDDP != 0
+		if typ == entry {
+			return val&mask != 0
 		}
 		if typ == 0 {
 			break
@@ -126,24 +128,7 @@ func detectI8MM() bool {
 }
 
 func linuxHasI8MM() bool {
-	const atHWCAP2 = 26
-	const hwcap2I8MM = 1 << 13
-	b, err := os.ReadFile("/proc/self/auxv")
-	if err != nil {
-		return false
-	}
-	// auxv is a flat array of (uint64 type, uint64 value) pairs, terminated by type 0.
-	for i := 0; i+16 <= len(b); i += 16 {
-		typ := binary.LittleEndian.Uint64(b[i:])
-		val := binary.LittleEndian.Uint64(b[i+8:])
-		if typ == atHWCAP2 {
-			return val&hwcap2I8MM != 0
-		}
-		if typ == 0 {
-			break
-		}
-	}
-	return false
+	return linuxAuxvHas(26, 1<<13)
 }
 
 // qdot8 dispatches the Q8_0 GEMV inner product to the NEON kernel when available, else the

@@ -549,11 +549,7 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
-		for _, name := range []string{
-			lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"),
-			lp("self_attn.v_proj.weight"), lp("self_attn.o_proj.weight"),
-			lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight"), lp("mlp.down_proj.weight"),
-		} {
+		for _, name := range denseProjectionNames(lp) {
 			qt := m.q4kw[name]
 			if qt == nil {
 				continue // Q8 minority — not a q4_k-resident projection
@@ -598,11 +594,7 @@ func (m *Model) metalQ8Weights() map[string]bool {
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {
 		lp := func(str string) string { return layerName(l, str) }
-		for _, name := range []string{
-			lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"),
-			lp("self_attn.v_proj.weight"), lp("self_attn.o_proj.weight"),
-			lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight"), lp("mlp.down_proj.weight"),
-		} {
+		for _, name := range denseProjectionNames(lp) {
 			add(name)
 		}
 		if cfg.isLinearAttnLayer(l) {
@@ -616,6 +608,14 @@ func (m *Model) metalQ8Weights() map[string]bool {
 		}
 	}
 	return uploaded
+}
+
+func denseProjectionNames(lp func(string) string) []string {
+	return []string{
+		lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"),
+		lp("self_attn.v_proj.weight"), lp("self_attn.o_proj.weight"),
+		lp("mlp.gate_proj.weight"), lp("mlp.up_proj.weight"), lp("mlp.down_proj.weight"),
+	}
 }
 
 func (m *Model) withMetalQ4K(name string, qt *q4kTensor, use func(*metalgemm.Q4KWeight)) bool {
