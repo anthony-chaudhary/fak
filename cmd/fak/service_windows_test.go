@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
 	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 func TestWindowsServiceHandlerReportsRunningAndStops(t *testing.T) {
@@ -61,5 +63,19 @@ func TestWindowsControlCrashTickUsesMachineInteractiveRegistry(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(registry, hostresurrect.CohortFileName)); err != nil {
 		t.Fatalf("cohort not written to interactive registry: %v", err)
+	}
+}
+
+func TestWindowsStagedServiceExecutableUsesProgramData(t *testing.T) {
+	old := windowsServiceProgramData
+	windowsServiceProgramData = func() string { return `C:\ProgramData` }
+	t.Cleanup(func() { windowsServiceProgramData = old })
+	want := filepath.Join(`C:\ProgramData`, "fak", "bin", "fak.exe")
+	if got := windowsStagedServiceExecutable(); got != want {
+		t.Fatalf("path=%q want=%q", got, want)
+	}
+	cfg := windowsServiceConfig(want)
+	if cfg.StartType != mgr.StartAutomatic || cfg.ServiceStartName != `NT AUTHORITY\LocalService` || !strings.Contains(cfg.BinaryPathName, want) {
+		t.Fatalf("config=%+v", cfg)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -17,6 +18,13 @@ import (
 )
 
 const windowsGuardServiceName = "FakGuardControl"
+
+var windowsServiceProgramData = func() string { return os.Getenv("ProgramData") }
+var windowsServiceExecutable = os.Executable
+
+func windowsStagedServiceExecutable() string {
+	return filepath.Join(windowsServiceProgramData(), "fak", "bin", "fak.exe")
+}
 
 type fakWindowsService struct{ stdout, stderr io.Writer }
 
@@ -45,7 +53,7 @@ func (h fakWindowsService) Execute(_ []string, changes <-chan svc.ChangeRequest,
 }
 
 func windowsServiceStateDir() string {
-	return filepath.Join(os.Getenv("ProgramData"), "fak", "guard-control")
+	return filepath.Join(windowsServiceProgramData(), "fak", "guard-control")
 }
 
 var windowsControlCrashTick = func(stdout, stderr io.Writer, state string) int {
@@ -102,6 +110,52 @@ func applyWindowsSDDL(path, sddl string) error {
 	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
 }
 
+func secureWindowsServiceBinary(path string) error {
+	return applyWindowsSDDL(path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;LS)")
+}
+func stageWindowsServiceExecutable(source, target string) error {
+	if source == target {
+		return fmt.Errorf("refusing to stage service executable onto itself: %s", target)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return err
+	}
+	if err := applyWindowsSDDL(filepath.Dir(target), "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;LS)"); err != nil {
+		return err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".fak-service-*.exe")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err = io.Copy(tmp, in); err == nil {
+		err = tmp.Sync()
+	}
+	if e := tmp.Close(); err == nil {
+		err = e
+	}
+	if err != nil {
+		return err
+	}
+	if err = secureWindowsServiceBinary(name); err != nil {
+		return err
+	}
+	_ = os.Remove(target)
+	if err = os.Rename(name, target); err != nil {
+		return err
+	}
+	return secureWindowsServiceBinary(target)
+}
+func windowsServiceConfig(binary string) mgr.Config {
+	return mgr.Config{StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, BinaryPathName: fmt.Sprintf("%s service windows-run", strconv.Quote(binary)), DisplayName: "fak Guard control plane", Description: "Session-0 Guard sensor, policy, durable state, and recovery control plane", ServiceStartName: "NT AUTHORITY\\LocalService", SidType: windows.SERVICE_SID_TYPE_RESTRICTED}
+}
+
 func secureWindowsServiceState(path string) error {
 	// SYSTEM + Builtin Administrators + LocalService full control, protected from
 	// permissive parent inheritance. CI/interactive users do not own this state.
@@ -112,12 +166,13 @@ func secureWindowsSharedDir(path string) error {
 }
 
 func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (serviceResult, int) {
-	exe, err := os.Executable()
+	sourceExe, err := windowsServiceExecutable()
 	if err != nil {
 		return serviceResult{}, 1
 	}
 	state := windowsServiceStateDir()
-	result := serviceResult{Manager: "windows-scm", Unit: windowsGuardServiceName, Path: exe}
+	stagedExe := windowsStagedServiceExecutable()
+	result := serviceResult{Manager: "windows-scm", Unit: windowsGuardServiceName, Path: stagedExe}
 	if dry {
 		if action == "witness" {
 			result.StateKept = true
@@ -148,17 +203,24 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 				return result, 1
 			}
 		}
-		s, err := m.OpenService(windowsGuardServiceName)
-		if err == nil {
-			_ = s.Close()
-			fmt.Fprintln(stderr, "service already exists")
+		if err := stageWindowsServiceExecutable(sourceExe, stagedExe); err != nil {
+			fmt.Fprintln(stderr, "stage service executable:", err)
 			return result, 1
 		}
-		cfg := mgr.Config{StartType: mgr.StartAutomatic, ErrorControl: mgr.ErrorNormal, DisplayName: "fak Guard control plane", Description: "Session-0 Guard sensor, policy, durable state, and recovery control plane", ServiceStartName: "NT AUTHORITY\\LocalService", SidType: windows.SERVICE_SID_TYPE_RESTRICTED}
-		s, err = m.CreateService(windowsGuardServiceName, exe, cfg, "service", "windows-run")
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return result, 1
+		cfg := windowsServiceConfig(stagedExe)
+		s, err := m.OpenService(windowsGuardServiceName)
+		if err == nil {
+			if err = s.UpdateConfig(cfg); err != nil {
+				_ = s.Close()
+				fmt.Fprintln(stderr, "update service:", err)
+				return result, 1
+			}
+		} else {
+			s, err = m.CreateService(windowsGuardServiceName, stagedExe, cfg, "service", "windows-run")
+			if err != nil {
+				fmt.Fprintln(stderr, "create service:", err)
+				return result, 1
+			}
 		}
 		defer s.Close()
 		if err = s.SetRecoveryActions([]mgr.RecoveryAction{{Type: mgr.ServiceRestart, Delay: 3 * time.Second}, {Type: mgr.ServiceRestart, Delay: 10 * time.Second}, {Type: mgr.ServiceRestart, Delay: 30 * time.Second}}, 86400); err != nil {
@@ -167,8 +229,12 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 		if err = s.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
 			return result, 1
 		}
-		if err = s.Start(); err != nil {
-			return result, 1
+		st, queryErr := s.Query()
+		if queryErr != nil || st.State == svc.Stopped {
+			if err = s.Start(); err != nil && !strings.Contains(strings.ToLower(err.Error()), "already running") {
+				fmt.Fprintln(stderr, "start service:", err)
+				return result, 1
+			}
 		}
 	case "status":
 		s, err := m.OpenService(windowsGuardServiceName)
