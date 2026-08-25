@@ -27,6 +27,23 @@ It never renames or overwrites the provider binary. `fak launch status` shows
 the exact recorded paths. `fak launch uninstall --provider all` removes the shims
 and configuration bindings.
 
+## Which Codex command?
+
+These entry points are intentionally different; they are not aliases:
+
+| Command | Role | Pipeline | Use it when |
+|---|---|---|---|
+| `codex` | **Canonical** zero-adoption front door | managed shim -> `fak launch codex` -> `fak guard` -> recorded provider | Normal interactive Codex use after `fak launch install`. |
+| `fak m codex` | Noncanonical general manage surface | `fak manage` -> `fak guard` -> `codex` from `PATH` | Explicit guard/manage experimentation. On Windows, managed-wrapper resolution remains tracked by #8866. |
+| `fak codex` | Specialized Codex loop surface | freshness admission -> loop gate -> `fak guard` -> `codex` from `PATH` | You specifically need checkout freshness, loop-gate, split-pane, or resume translation behavior. |
+
+Run `fak launch doctor` before changing launch wiring. Its versioned `--json` output
+includes an `entry_points` matrix with each command's role, pipeline, readiness, reason,
+and recovery action. Tests keep this matrix unique and deterministic; readiness and
+operator scorecards can consume it instead of inferring parity from similar command names.
+A provider-level `READY` result proves the managed bare command, not that every wrapper
+which resolves the provider again through `PATH` is safe.
+
 Bypass is deliberately available at three scopes:
 
 ```sh

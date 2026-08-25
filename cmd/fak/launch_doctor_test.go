@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,5 +145,64 @@ func TestLaunchDoctorNamesExistingUnmanagedPathWinner(t *testing.T) {
 	}
 	if report.Binary.AppVersion == "" || report.Binary.Go == "" {
 		t.Fatalf("binary provenance missing: %+v", report.Binary)
+	}
+}
+
+func TestBuildLaunchDoctorEntryPointsClassifiesCodexSurfaces(t *testing.T) {
+	entries := buildLaunchDoctorEntryPoints([]launchDoctorRow{{Provider: "codex", Reason: "READY", InterceptReady: true}})
+	if len(entries) != 3 {
+		t.Fatalf("entry points=%d want 3: %+v", len(entries), entries)
+	}
+	want := []struct {
+		command, role, reason string
+		ready                 bool
+	}{
+		{"codex", "canonical", "READY", true},
+		{"fak m codex", "noncanonical", "PATH_RESOLUTION_AMBIGUOUS", false},
+		{"fak codex", "specialized", "PATH_RESOLUTION_AMBIGUOUS", false},
+	}
+	seen := map[string]bool{}
+	for i, entry := range entries {
+		if seen[entry.Command] {
+			t.Fatalf("duplicate command %q", entry.Command)
+		}
+		seen[entry.Command] = true
+		if entry.Command != want[i].command || entry.Role != want[i].role || entry.Reason != want[i].reason || entry.Ready != want[i].ready {
+			t.Errorf("entry[%d]=%+v want command=%q role=%q reason=%q ready=%t", i, entry, want[i].command, want[i].role, want[i].reason, want[i].ready)
+		}
+		if len(entry.Pipeline) < 3 {
+			t.Errorf("entry[%d] pipeline too weak: %+v", i, entry.Pipeline)
+		}
+	}
+	if got := strings.Join(entries[0].Pipeline, " -> "); !strings.Contains(got, "recorded-provider") {
+		t.Fatalf("canonical pipeline=%q", got)
+	}
+	if got := strings.Join(entries[2].Pipeline, " -> "); !strings.Contains(got, "freshness-admission") || !strings.Contains(got, "loop-gate") {
+		t.Fatalf("specialized pipeline=%q", got)
+	}
+}
+
+func TestBuildLaunchDoctorEntryPointsPropagatesProviderFailure(t *testing.T) {
+	entries := buildLaunchDoctorEntryPoints([]launchDoctorRow{{Provider: "codex", Reason: "SHADOWED", Action: "prepend bin to PATH"}})
+	for _, entry := range entries {
+		if entry.Ready || entry.Reason != "SHADOWED" || entry.Action != "prepend bin to PATH" {
+			t.Fatalf("entry=%+v", entry)
+		}
+	}
+}
+
+func TestLaunchDoctorHumanOutputNamesEntryPointRoles(t *testing.T) {
+	oldConfig, oldBin := os.Getenv("FAK_LAUNCH_CONFIG"), os.Getenv("FAK_LAUNCH_BIN")
+	t.Cleanup(func() { _ = os.Setenv("FAK_LAUNCH_CONFIG", oldConfig); _ = os.Setenv("FAK_LAUNCH_BIN", oldBin) })
+	root := t.TempDir()
+	_ = os.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(root, "missing.json"))
+	_ = os.Setenv("FAK_LAUNCH_BIN", filepath.Join(root, "bin"))
+	var out, errOut bytes.Buffer
+	_ = runLaunchDoctor(&out, &errOut, nil)
+	text := out.String()
+	for _, want := range []string{"ENTRY POINTS", "codex        role=canonical", "fak m codex  role=noncanonical", "fak codex    role=specialized"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("human output missing %q:\n%s", want, text)
+		}
 	}
 }

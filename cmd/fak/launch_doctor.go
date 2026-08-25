@@ -38,13 +38,24 @@ type launchDoctorRow struct {
 	InterceptReady bool   `json:"intercept_ready"`
 }
 
+type launchDoctorEntryPoint struct {
+	Command  string   `json:"command"`
+	Provider string   `json:"provider"`
+	Role     string   `json:"role"`
+	Pipeline []string `json:"pipeline"`
+	Ready    bool     `json:"ready"`
+	Reason   string   `json:"reason"`
+	Action   string   `json:"action,omitempty"`
+}
+
 type launchDoctorReport struct {
-	Schema     string            `json:"schema"`
-	ConfigPath string            `json:"config_path"`
-	ShimDir    string            `json:"shim_dir"`
-	Default    string            `json:"default_provider,omitempty"`
-	Binary     binaryIdentity    `json:"binary"`
-	Rows       []launchDoctorRow `json:"providers"`
+	Schema      string                   `json:"schema"`
+	ConfigPath  string                   `json:"config_path"`
+	ShimDir     string                   `json:"shim_dir"`
+	Default     string                   `json:"default_provider,omitempty"`
+	Binary      binaryIdentity           `json:"binary"`
+	Rows        []launchDoctorRow        `json:"providers"`
+	EntryPoints []launchDoctorEntryPoint `json:"entry_points"`
 }
 
 func runLaunchDoctor(stdout, stderr io.Writer, argv []string) int {
@@ -77,6 +88,10 @@ func runLaunchDoctor(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stdout, "LAUNCH DOCTOR config=%s shims=%s default=%s\n", report.ConfigPath, report.ShimDir, valueOr(report.Default, "none"))
 		for _, row := range report.Rows {
 			fmt.Fprintf(stdout, "  %-6s %-18s winner=%-12s underlying=%-12s action=%s\n", row.Provider, row.Reason, valueOr(row.PathWinner, "none"), valueOr(row.Underlying, "none"), valueOr(row.Action, "none"))
+		}
+		fmt.Fprintln(stdout, "ENTRY POINTS")
+		for _, entry := range report.EntryPoints {
+			fmt.Fprintf(stdout, "  %-12s role=%-12s ready=%-5t reason=%s\n", entry.Command, entry.Role, entry.Ready, entry.Reason)
 		}
 	}
 	if loadErr != nil {
@@ -172,7 +187,30 @@ func buildLaunchDoctor(c launchshim.Config, loadErr error, configPath, shimDir s
 		}
 		report.Rows = append(report.Rows, row)
 	}
+	sort.Slice(report.Rows, func(i, j int) bool { return report.Rows[i].Provider < report.Rows[j].Provider })
+	report.EntryPoints = buildLaunchDoctorEntryPoints(report.Rows)
 	return report
+}
+
+func buildLaunchDoctorEntryPoints(rows []launchDoctorRow) []launchDoctorEntryPoint {
+	var codex launchDoctorRow
+	for _, row := range rows {
+		if row.Provider == "codex" {
+			codex = row
+			break
+		}
+	}
+	bare := launchDoctorEntryPoint{Command: "codex", Provider: "codex", Role: "canonical", Pipeline: []string{"managed-shim", "fak launch codex", "fak guard", "recorded-provider"}, Ready: codex.InterceptReady, Reason: codex.Reason, Action: codex.Action}
+	pathReason, pathAction := codex.Reason, codex.Action
+	if codex.InterceptReady {
+		pathReason = "PATH_RESOLUTION_AMBIGUOUS"
+		pathAction = "use codex; use fak launch --direct codex for recovery; track fak m codex under #8866"
+	}
+	return []launchDoctorEntryPoint{
+		bare,
+		{Command: "fak m codex", Provider: "codex", Role: "noncanonical", Pipeline: []string{"fak manage", "fak guard", "PATH codex"}, Reason: pathReason, Action: pathAction},
+		{Command: "fak codex", Provider: "codex", Role: "specialized", Pipeline: []string{"freshness-admission", "loop-gate", "fak guard", "PATH codex"}, Reason: pathReason, Action: pathAction},
+	}
 }
 
 func statMissing(stat launchStat, path string) bool { _, err := stat(path); return err != nil }
