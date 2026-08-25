@@ -20,7 +20,11 @@ import (
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
-const windowsGuardServiceName = "FakGuardControl"
+const (
+	windowsGuardServiceName     = "FakGuardControl"
+	windowsServiceBinarySDDL    = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;LS)"
+	windowsServiceBinaryDirSDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;LS)"
+)
 
 var windowsServiceProgramData = func() string { return os.Getenv("ProgramData") }
 var windowsServiceExecutable = os.Executable
@@ -78,7 +82,7 @@ var (
 	windowsRenameServiceExecutable       = renameWindowsServiceExecutableNoReplace
 	windowsApplyServiceBinarySecurity    = secureWindowsServiceBinary
 	windowsApplyServiceBinaryDirSecurity = secureWindowsServiceBinaryDir
-	windowsSelectStagedServiceExecutable = selectWindowsServiceExecutable
+	windowsPlanStagedServiceExecutable   = planWindowsServiceExecutable
 	windowsStageServiceExecutable        = stageWindowsServiceExecutable
 	windowsPrepareServiceState           = prepareWindowsServiceState
 	windowsServiceStopTimeout            = 30 * time.Second
@@ -87,6 +91,21 @@ var (
 
 func windowsServiceBinaryDir() string {
 	return filepath.Join(windowsServiceProgramData(), "fak", "bin")
+}
+
+func prepareWindowsServiceBinaryTree(binaryDir string) error {
+	if err := windowsMakeDirAll(binaryDir, 0o755); err != nil {
+		return fmt.Errorf("create service binary directory: %w", err)
+	}
+	// Harden the machine-owned directories from root to leaf before publishing a
+	// binary. LocalService receives read/execute (directory traversal) only;
+	// SYSTEM and Administrators retain the only write-capable grants.
+	for _, dir := range []string{filepath.Dir(binaryDir), binaryDir} {
+		if err := windowsApplyServiceBinaryDirSecurity(dir); err != nil {
+			return fmt.Errorf("secure service binary directory %s: %w", dir, err)
+		}
+	}
+	return nil
 }
 
 func renameWindowsServiceExecutableNoReplace(source, target string) error {
@@ -188,11 +207,11 @@ func applyWindowsSDDL(path, sddl string) error {
 }
 
 func secureWindowsServiceBinary(path string) error {
-	return applyWindowsSDDL(path, "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;GRGX;;;LS)")
+	return applyWindowsSDDL(path, windowsServiceBinarySDDL)
 }
 
 func secureWindowsServiceBinaryDir(path string) error {
-	return applyWindowsSDDL(path, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;GRGX;;;LS)")
+	return applyWindowsSDDL(path, windowsServiceBinaryDirSDDL)
 }
 
 func windowsExecutableSHA256(path string) ([sha256.Size]byte, error) {
@@ -210,7 +229,7 @@ func windowsExecutableSHA256(path string) ([sha256.Size]byte, error) {
 	return digest, nil
 }
 
-func selectWindowsServiceExecutable(source string) (string, error) {
+func planWindowsServiceExecutable(source string) (string, error) {
 	digest, err := windowsExecutableSHA256(source)
 	if err != nil {
 		return "", err
@@ -222,10 +241,7 @@ func stageWindowsServiceExecutable(source, target string) error {
 	if source == target {
 		return fmt.Errorf("refusing to stage service executable onto itself: %s", target)
 	}
-	if err := windowsMakeDirAll(filepath.Dir(target), 0o755); err != nil {
-		return err
-	}
-	if err := windowsApplyServiceBinaryDirSecurity(filepath.Dir(target)); err != nil {
+	if err := prepareWindowsServiceBinaryTree(filepath.Dir(target)); err != nil {
 		return err
 	}
 	if targetDigest, err := windowsExecutableSHA256(target); err == nil {
@@ -471,7 +487,7 @@ func installWindowsService(m windowsSCMManager, sourceExe, state string) (string
 	if err := windowsPrepareServiceState(state); err != nil {
 		return failExisting("prepare service state", err, false)
 	}
-	target, err = windowsSelectStagedServiceExecutable(sourceExe)
+	target, err = windowsPlanStagedServiceExecutable(sourceExe)
 	if err != nil {
 		return failExisting("plan service executable", err, false)
 	}
@@ -520,7 +536,7 @@ func windowsServiceAction(action string, stdout, stderr io.Writer, dry bool) (se
 	state := windowsServiceStateDir()
 	result := serviceResult{Manager: "windows-scm", Unit: windowsGuardServiceName}
 	if action == "install" {
-		if selectedPath, planErr := windowsSelectStagedServiceExecutable(sourceExe); planErr == nil {
+		if selectedPath, planErr := windowsPlanStagedServiceExecutable(sourceExe); planErr == nil {
 			result.Path = selectedPath
 		}
 	}

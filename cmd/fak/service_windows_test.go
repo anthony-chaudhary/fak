@@ -548,3 +548,97 @@ func TestInstallWindowsServiceFreshStartFailureRemovesIncompleteService(t *testi
 		t.Fatalf("err=%v deletes=%d", err, created.deleteCalls)
 	}
 }
+
+func TestStageWindowsServiceExecutableCapturedACLPlanIsOrderedAndIdempotent(t *testing.T) {
+	oldMakeDir := windowsMakeDirAll
+	oldDirSecurity := windowsApplyServiceBinaryDirSecurity
+	oldBinarySecurity := windowsApplyServiceBinarySecurity
+	oldRename := windowsRenameServiceExecutable
+	t.Cleanup(func() {
+		windowsMakeDirAll = oldMakeDir
+		windowsApplyServiceBinaryDirSecurity = oldDirSecurity
+		windowsApplyServiceBinarySecurity = oldBinarySecurity
+		windowsRenameServiceExecutable = oldRename
+	})
+
+	dir := t.TempDir()
+	profile := filepath.Join(dir, "Users", "operator")
+	programData := filepath.Join(dir, "ProgramData")
+	oldProgramData := windowsServiceProgramData
+	windowsServiceProgramData = func() string { return programData }
+	t.Cleanup(func() { windowsServiceProgramData = oldProgramData })
+	source := filepath.Join(profile, "bin", "fak.exe")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("stable service image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target, err := planWindowsServiceExecutable(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryDir := windowsServiceBinaryDir()
+	machineDir := filepath.Dir(binaryDir)
+	if filepath.Dir(target) != binaryDir || strings.HasPrefix(strings.ToLower(target), strings.ToLower(profile)+string(filepath.Separator)) {
+		t.Fatalf("SCM target=%q must be staged under machine binary dir=%q, not invoking profile=%q", target, binaryDir, profile)
+	}
+
+	var events []string
+	windowsMakeDirAll = func(path string, mode os.FileMode) error {
+		events = append(events, "mkdir:"+path)
+		return os.MkdirAll(path, mode)
+	}
+	windowsApplyServiceBinaryDirSecurity = func(path string) error {
+		events = append(events, "acl-dir:"+path)
+		return nil
+	}
+	windowsApplyServiceBinarySecurity = func(path string) error {
+		events = append(events, "acl-binary:"+path)
+		return nil
+	}
+	windowsRenameServiceExecutable = func(from, to string) error {
+		events = append(events, "publish:"+to)
+		return os.Rename(from, to)
+	}
+
+	if err := stageWindowsServiceExecutable(source, target); err != nil {
+		t.Fatal(err)
+	}
+	wantFirst := []string{
+		"mkdir:" + binaryDir,
+		"acl-dir:" + machineDir,
+		"acl-dir:" + binaryDir,
+	}
+	if len(events) != 5 || !reflect.DeepEqual(events[:3], wantFirst) || !strings.HasPrefix(events[3], "acl-binary:") || events[4] != "publish:"+target {
+		t.Fatalf("captured first-install plan=%v", events)
+	}
+
+	events = nil
+	if err := stageWindowsServiceExecutable(source, target); err != nil {
+		t.Fatal(err)
+	}
+	wantReinstall := append(append([]string{}, wantFirst...), "acl-binary:"+target)
+	if !reflect.DeepEqual(events, wantReinstall) {
+		t.Fatalf("captured idempotent reinstall plan=%v want=%v", events, wantReinstall)
+	}
+}
+
+func TestWindowsServiceBinaryACLIsLeastPrivilege(t *testing.T) {
+	for name, sddl := range map[string]string{
+		"binary":    windowsServiceBinarySDDL,
+		"directory": windowsServiceBinaryDirSDDL,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(sddl, ";GRGX;;;LS)") {
+				t.Fatalf("LocalService lacks read/execute/traverse grant: %s", sddl)
+			}
+			if strings.Contains(sddl, ";FA;;;LS)") || strings.Contains(sddl, ";GW;;;LS)") || strings.Contains(sddl, ";GRGW;;;LS)") {
+				t.Fatalf("LocalService unexpectedly has a write-capable grant: %s", sddl)
+			}
+			if !strings.HasPrefix(sddl, "D:P") {
+				t.Fatalf("ACL inherits broad parent grants: %s", sddl)
+			}
+		})
+	}
+}
