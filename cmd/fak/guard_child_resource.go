@@ -90,16 +90,24 @@ func guardResourcePolicyFromEnv() guardResourcePolicy {
 	if override == "" {
 		override = strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_COMMIT_MB"))
 	}
-	if n, err := strconv.ParseUint(override, 10, 64); err == nil && n > 0 {
-		p.MaxTreeBytes = n << 20
+	if n, ok := parseGuardResourceMegabytes(override); ok {
+		p.MaxTreeBytes = n
 	}
-	if n, err := strconv.ParseUint(strings.TrimSpace(os.Getenv("FAK_SYSTEM_COMMIT_HEADROOM_MB")), 10, 64); err == nil && n > 0 {
-		p.MinSystemHeadroom = n << 20
+	if n, ok := parseGuardResourceMegabytes(strings.TrimSpace(os.Getenv("FAK_SYSTEM_COMMIT_HEADROOM_MB"))); ok {
+		p.MinSystemHeadroom = n
 	}
 	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv("FAK_CHILD_RESOURCE_POLL"))); err == nil && d >= 100*time.Millisecond {
 		p.PollInterval = d
 	}
 	return p
+}
+
+func parseGuardResourceMegabytes(raw string) (uint64, bool) {
+	n, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || n == 0 || n > ^uint64(0)>>20 {
+		return 0, false
+	}
+	return n << 20, true
 }
 
 func guardTreeRSSDefault(hostPhysicalBytes uint64) uint64 {
