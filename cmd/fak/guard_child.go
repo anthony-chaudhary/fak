@@ -804,20 +804,29 @@ func resolveWindowsBatchCommand(command []string) []string {
 	default:
 		return command
 	}
-	resolved, err := exec.LookPath(command[0] + ".cmd")
-	if err != nil {
+	// CreateProcess cannot execute a batch file directly. npm's shim sits beside
+	// the package entrypoint. Search every PATH directory rather than trusting the
+	// first shim: fak's managed launcher may intentionally precede npm's directory
+	// and does not own the package entrypoint itself.
+	node, nodeErr := exec.LookPath("node.exe")
+	if nodeErr != nil {
 		return command
 	}
-	if absolute, err := filepath.Abs(resolved); err == nil {
-		resolved = absolute
-	}
-	// CreateProcess cannot execute a batch file directly. npm's shim sits beside
-	// the package entrypoint, so invoke that JavaScript file with node instead of
-	// relying on cmd.exe quoting rules for the generated agent argv.
-	entrypoint := filepath.Join(filepath.Dir(resolved), entrypointRel)
-	node, nodeErr := exec.LookPath("node.exe")
-	if nodeErr == nil {
-		if _, statErr := os.Stat(entrypoint); statErr == nil {
+	return resolveNodeBatchCommandFromPath(command, entrypointRel, node, os.Getenv("PATH"))
+}
+
+func resolveNodeBatchCommandFromPath(command []string, entrypointRel, node, pathEnv string) []string {
+	for _, dir := range filepath.SplitList(pathEnv) {
+		dir = strings.TrimSpace(strings.Trim(dir, `"`))
+		if dir == "" {
+			continue
+		}
+		shim := filepath.Join(dir, command[0]+".cmd")
+		if info, statErr := os.Stat(shim); statErr != nil || info.IsDir() {
+			continue
+		}
+		entrypoint := filepath.Join(dir, entrypointRel)
+		if info, statErr := os.Stat(entrypoint); statErr == nil && !info.IsDir() {
 			out := []string{node, entrypoint}
 			return append(out, command[1:]...)
 		}

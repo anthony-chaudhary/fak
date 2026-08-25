@@ -529,6 +529,36 @@ func TestPrintGuardCodexNote(t *testing.T) {
 	}
 }
 
+func TestResolveNodeBatchCommandFromPathSkipsManagedCodexWrapper(t *testing.T) {
+	managed := t.TempDir()
+	npm := t.TempDir()
+	if err := os.WriteFile(filepath.Join(managed, "codex.cmd"), []byte("@fak-launch launch codex -- %*\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entrypoint := filepath.Join(npm, "node_modules", "@openai", "codex", "bin", "codex.js")
+	if err := os.MkdirAll(filepath.Dir(entrypoint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(npm, "codex.cmd"), []byte("@node codex.js %*\r\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entrypoint, []byte("// fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pathEnv := managed + string(os.PathListSeparator) + npm
+
+	got := resolveNodeBatchCommandFromPath([]string{"codex", "--version"}, filepath.Join("node_modules", "@openai", "codex", "bin", "codex.js"), "node-fixture", pathEnv)
+	if len(got) != 3 {
+		t.Fatalf("resolved argv = %#v, want node + npm entrypoint + args", got)
+	}
+	if got[1] != entrypoint {
+		t.Fatalf("entrypoint = %q, want npm entrypoint %q (managed wrapper must be skipped)", got[1], entrypoint)
+	}
+	if got[2] != "--version" {
+		t.Fatalf("forwarded arg = %q, want --version", got[2])
+	}
+}
+
 // --- small slice helpers (local to keep the assertions readable) ---
 
 func containsArg(args []string, want string) bool { return indexOf(args, want) >= 0 }
