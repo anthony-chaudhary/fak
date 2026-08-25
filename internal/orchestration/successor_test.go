@@ -141,6 +141,7 @@ func validEffectSuccessorProposal() EffectSuccessorProposal {
 		panic(err)
 	}
 	return EffectSuccessorProposal{
+		RunID: "run-8843",
 		Observer: ObserverNode{
 			ID: "observer-scout",
 			Access: NodeAccess{

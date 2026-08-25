@@ -91,6 +91,7 @@ type LeaseVerdict struct {
 }
 
 type EffectSuccessorProposal struct {
+	RunID              string                    `json:"run_id"`
 	Observer           ObserverNode              `json:"observer"`
 	Observation        ObservationArtifact       `json:"observation"`
 	Effect             EffectEnvelope            `json:"effect"`
@@ -113,15 +114,18 @@ type EffectSuccessorNode struct {
 }
 
 type EffectSuccessorReceipt struct {
-	Schema         string `json:"schema"`
-	ID             string `json:"id"`
-	NodeID         string `json:"node_id"`
-	ObserverID     string `json:"observer_id"`
-	ObservationID  string `json:"observation_id"`
-	SnapshotEpoch  string `json:"snapshot_epoch"`
-	EnvelopeDigest string `json:"envelope_digest"`
-	LeaseID        string `json:"lease_id"`
-	Budget         Budget `json:"budget"`
+	Schema         string         `json:"schema"`
+	AdmittedAt     string         `json:"admitted_at"`
+	ID             string         `json:"id"`
+	RunID          string         `json:"run_id"`
+	NodeID         string         `json:"node_id"`
+	ObserverID     string         `json:"observer_id"`
+	ObservationID  string         `json:"observation_id"`
+	SnapshotEpoch  string         `json:"snapshot_epoch"`
+	EnvelopeDigest string         `json:"envelope_digest"`
+	Envelope       EffectEnvelope `json:"envelope"`
+	LeaseID        string         `json:"lease_id"`
+	Budget         Budget         `json:"budget"`
 }
 
 type EffectSuccessorAdmission struct {
@@ -135,6 +139,10 @@ type EffectSuccessorAdmission struct {
 // current observer artifact. All inputs are values or pure gate verdicts, so a
 // refusal cannot widen or otherwise mutate the running observer.
 func ProposeEffectSuccessor(proposal EffectSuccessorProposal) (EffectSuccessorAdmission, error) {
+	runID := strings.TrimSpace(proposal.RunID)
+	if runID == "" || runID != proposal.RunID {
+		return EffectSuccessorAdmission{}, &EffectSuccessorRefusal{Reason: EffectSuccessorInvalid, Detail: "run identity is required"}
+	}
 	observer := normalizeObserver(proposal.Observer)
 	observation := normalizeObservation(proposal.Observation)
 	effect := normalizeEffectEnvelope(proposal.Effect)
@@ -225,11 +233,13 @@ func ProposeEffectSuccessor(proposal EffectSuccessorProposal) (EffectSuccessorAd
 	receipt := EffectSuccessorReceipt{
 		Schema:         EffectSuccessorReceiptSchema,
 		ID:             receiptID,
+		RunID:          runID,
 		NodeID:         nodeID,
 		ObserverID:     observer.ID,
 		ObservationID:  observation.ID,
 		SnapshotEpoch:  observation.StateEpoch,
 		EnvelopeDigest: envelopeDigest,
+		Envelope:       effect,
 		LeaseID:        identity.LeaseID,
 		Budget:         proposal.Reservation,
 	}
