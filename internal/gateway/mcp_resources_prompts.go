@@ -49,13 +49,12 @@ type mcpResource struct {
 // revisions it speaks, and the full tool catalog in one fetch.
 func (s *Server) resources() []mcpResource {
 	return []mcpResource{
-		{
-			uri:  "fak://server/capabilities",
-			name: "fak gateway capabilities",
-			desc: "machine-readable self-description: server name/version, the MCP protocol revisions this server speaks, and the full tool catalog with descriptions",
-			mime: "application/json",
-			build: func(s *Server) string {
-				doc := map[string]any{
+		jsonMCPResource(
+			"fak://server/capabilities",
+			"fak gateway capabilities",
+			"machine-readable self-description: server name/version, the MCP protocol revisions this server speaks, and the full tool catalog with descriptions",
+			func(s *Server) any {
+				return map[string]any{
 					"name":             "fak-gateway",
 					"version":          s.version,
 					"protocolVersions": mcpProtocolVersions,
@@ -66,20 +65,14 @@ func (s *Server) resources() []mcpResource {
 						"schema":   mcpCacheSemanticsSchema,
 					},
 				}
-				b, _ := json.Marshal(doc)
-				return string(b)
 			},
-		},
-		{
-			uri:  mcpCacheSemanticsURI,
-			name: "fak MCP cache semantics",
-			desc: "machine-readable cache contract for MCP clients: descriptor/resource reuse, tool-result hits, provider-prefix constraints, and invalidation verbs",
-			mime: "application/json",
-			build: func(s *Server) string {
-				b, _ := json.Marshal(mcpCacheSemanticsDoc(s.version))
-				return string(b)
-			},
-		},
+		),
+		jsonMCPResource(
+			mcpCacheSemanticsURI,
+			"fak MCP cache semantics",
+			"machine-readable cache contract for MCP clients: descriptor/resource reuse, tool-result hits, provider-prefix constraints, and invalidation verbs",
+			func(s *Server) any { return mcpCacheSemanticsDoc(s.version) },
+		),
 		{
 			uri:  contextq.MCPMissingContextURIPrefix + "{key}",
 			name: "missing context demand-page template",
@@ -97,6 +90,16 @@ func (s *Server) resources() []mcpResource {
 				b, _ := json.Marshal(doc)
 				return string(b)
 			},
+		},
+	}
+}
+
+func jsonMCPResource(uri, name, desc string, document func(*Server) any) mcpResource {
+	return mcpResource{
+		uri: uri, name: name, desc: desc, mime: "application/json",
+		build: func(s *Server) string {
+			b, _ := json.Marshal(document(s))
+			return string(b)
 		},
 	}
 }

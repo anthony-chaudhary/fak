@@ -414,7 +414,7 @@ func (s *Server) handleTeleportVerb(w http.ResponseWriter, r *http.Request, trac
 		}
 		b, err := ExportTeleport(l, traceID, req)
 		if err != nil {
-			writeErrCode(w, http.StatusNotFound, "teleport_not_exportable", "TELEPORT_NOT_EXPORTABLE: "+err.Error())
+			writeTeleportNotFound(w, "exportable", err)
 			return true
 		}
 		s.logf("gateway: session %s export -> head %s (%d entries)", traceID, b.Head, len(b.Entries))
@@ -452,11 +452,16 @@ func (s *Server) handleTeleportVerb(w http.ResponseWriter, r *http.Request, trac
 		}
 		f, err := ForkTeleport(l, traceID, req.ForkTraceID)
 		if err != nil {
-			writeErrCode(w, http.StatusNotFound, "teleport_not_forkable", "TELEPORT_NOT_FORKABLE: "+err.Error())
+			writeTeleportNotFound(w, "forkable", err)
 			return true
 		}
 		s.logf("gateway: session %s fork -> %s at shared prefix %s", traceID, f.ForkTraceID, f.SharedPrefix)
 		writeJSON(w, http.StatusOK, f)
 	}
 	return true
+}
+
+func writeTeleportNotFound(w http.ResponseWriter, operation string, err error) {
+	code := "teleport_not_" + operation
+	writeErrCode(w, http.StatusNotFound, code, strings.ToUpper(code)+": "+err.Error())
 }

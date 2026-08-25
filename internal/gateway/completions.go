@@ -151,21 +151,7 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if finish == "" {
 		finish = "stop"
 	}
-	respModel := comp.Model
-	if respModel == "" {
-		respModel = reqModel
-	}
-	if stream != nil && respModel != stream.model {
-		// The streamed wire announced `model` in the preamble, before the upstream could
-		// report what it served, and OpenAI keeps that field CONSTANT for the life of a
-		// stream — so the #82 served-model echo cannot ride this path without the chunks
-		// contradicting each other mid-stream. Keep the announced (request) model and make
-		// the divergence operator-visible instead of silently flipping the field. The
-		// non-streaming JSON response still echoes the served model truthfully. Same rule,
-		// same reason, as the chat wire (#5399).
-		s.logf("gateway: streamed turn announced model %q in its preamble; upstream served %q (constant-model SSE, #5514)", stream.model, respModel)
-		respModel = stream.model
-	}
+	respModel := s.responseModel(comp.Model, reqModel, completionStreamModel(stream), "#5514")
 	s.logInferenceTurn(reqTrace, "openai_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
 
 	resp := CompletionResponse{
@@ -181,6 +167,13 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func completionStreamModel(stream *completionStreamWriter) string {
+	if stream == nil {
+		return ""
+	}
+	return stream.model
 }
 
 // validateCompletionSampling enforces the same sampling-param floor the chat route

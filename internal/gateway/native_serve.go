@@ -273,11 +273,9 @@ func (s *Server) serveNativeMessagesStream(w http.ResponseWriter, r *http.Reques
 // The HTTP handlers convert once themselves so they can render that refusal as a typed
 // 400, and call runNativeArmSeed below with the seed they already hold.
 func (s *Server) runNativeArm(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string) (agent.ArmMetrics, error) {
-	seed, wireErr := newNativeWireSeed(req)
-	if wireErr != nil {
-		return agent.ArmMetrics{}, wireErr
-	}
-	return s.runNativeArmSeed(ctx, seed, reqTrace)
+	return withNativeWireSeed(req, func(seed nativeWireSeed) (agent.ArmMetrics, error) {
+		return s.runNativeArmSeed(ctx, seed, reqTrace)
+	})
 }
 
 // runNativeArmSeed drives the owned loop for one ALREADY-CONVERTED request. Splitting the
@@ -299,11 +297,17 @@ func (s *Server) runNativeArmSeed(ctx context.Context, seed nativeWireSeed, reqT
 // for the same reason runNativeArm does; the SSE handler converts up front instead so its
 // refusal is a 400 rather than an error frame, and calls runNativeArmStreamSeed.
 func (s *Server) runNativeArmStream(ctx context.Context, req *agent.AnthropicMessagesRequest, reqTrace string, sink agent.StreamSink, onProgress agent.ProgressObserver) (agent.ArmMetrics, error) {
+	return withNativeWireSeed(req, func(seed nativeWireSeed) (agent.ArmMetrics, error) {
+		return s.runNativeArmStreamSeed(ctx, seed, reqTrace, sink, onProgress)
+	})
+}
+
+func withNativeWireSeed(req *agent.AnthropicMessagesRequest, run func(nativeWireSeed) (agent.ArmMetrics, error)) (agent.ArmMetrics, error) {
 	seed, wireErr := newNativeWireSeed(req)
 	if wireErr != nil {
 		return agent.ArmMetrics{}, wireErr
 	}
-	return s.runNativeArmStreamSeed(ctx, seed, reqTrace, sink, onProgress)
+	return run(seed)
 }
 
 // runNativeArmStreamSeed is the streamed twin of runNativeArmSeed: one already-converted

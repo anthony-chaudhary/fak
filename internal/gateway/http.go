@@ -712,20 +712,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// requested model (or, if it omitted one, the configured model) when the upstream
 	// did not name a served model. Never just s.model — that is the silent-substitution
 	// this fix removes.
-	respModel := comp.Model
-	if respModel == "" {
-		respModel = reqModel
-	}
-	if stream != nil && respModel != stream.model {
-		// The streamed wire announced `model` in the preamble, before the upstream could
-		// report what it served, and OpenAI keeps that field CONSTANT for the life of a
-		// stream — so the #82 served-model echo cannot ride this path without the chunks
-		// contradicting each other mid-stream. Keep the announced (request) model and make
-		// the divergence operator-visible instead of silently flipping the field. The
-		// non-streaming JSON response still echoes the served model truthfully.
-		s.logf("gateway: streamed turn announced model %q in its preamble; upstream served %q (constant-model SSE, #5399)", stream.model, respModel)
-		respModel = stream.model
-	}
+	respModel := s.responseModel(comp.Model, reqModel, chatStreamModel(stream), "#5399")
 	s.logInferenceTurn(reqTrace, "openai_chat_completions", req.Stream, comp.Usage, finish, time.Since(began), false)
 	resp := ChatResponse{
 		ID:      "chatcmpl-fak-" + itoa(uint64(time.Now().UnixNano())),
@@ -744,6 +731,24 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) responseModel(served, requested, streamModel, issue string) string {
+	if served == "" {
+		served = requested
+	}
+	if streamModel != "" && served != streamModel {
+		s.logf("gateway: streamed turn announced model %q in its preamble; upstream served %q (constant-model SSE, %s)", streamModel, served, issue)
+		return streamModel
+	}
+	return served
+}
+
+func chatStreamModel(stream *chatStreamWriter) string {
+	if stream == nil {
+		return ""
+	}
+	return stream.model
 }
 
 // applyAdjudicatedTurn folds one adjudicated proposal set into the assistant

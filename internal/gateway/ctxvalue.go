@@ -490,27 +490,23 @@ func (s *Server) noteCtxValueTTL1hScope(trace string, messagePrefix bool) {
 // default. A trace with no recorded session (never upgraded, or an empty trace
 // from a non-session caller) reads false — never true on a guess.
 func (s *Server) ttl1hActiveFor(trace string) bool {
-	if s == nil || strings.TrimSpace(trace) == "" {
-		return false
-	}
-	s.ctxValueMu.Lock()
-	defer s.ctxValueMu.Unlock()
-	if v, ok := s.ctxValue[trace]; ok {
-		return v.ttl1hActive
-	}
-	return false
+	return s.ttl1hStateFor(trace, func(v *sessionCtxValue) bool { return v.ttl1hActive })
 }
 
 // ttl1hMessagePrefixFor reports whether the admitted 1h layout for trace includes
 // a message-prefix breakpoint. False is the head-only control arm.
 func (s *Server) ttl1hMessagePrefixFor(trace string) bool {
+	return s.ttl1hStateFor(trace, func(v *sessionCtxValue) bool { return v.ttl1hMessagePrefix })
+}
+
+func (s *Server) ttl1hStateFor(trace string, selectState func(*sessionCtxValue) bool) bool {
 	if s == nil || strings.TrimSpace(trace) == "" {
 		return false
 	}
 	s.ctxValueMu.Lock()
 	defer s.ctxValueMu.Unlock()
 	if v, ok := s.ctxValue[trace]; ok {
-		return v.ttl1hMessagePrefix
+		return selectState(v)
 	}
 	return false
 }
