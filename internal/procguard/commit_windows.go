@@ -61,6 +61,9 @@ func collectCommitSnapshot(rootPID int) (CommitSnapshot, bool, string) {
 	for pid := range owned {
 		h, openErr := syscall.OpenProcess(processQueryLimitedInformation|processVMRead, false, uint32(pid))
 		if openErr != nil {
+			if processExitedDuringSnapshot(openErr) {
+				continue
+			}
 			return s, true, fmt.Sprintf("OpenProcess pid %d: %v", pid, openErr)
 		}
 		var counters processMemoryCountersCommit
@@ -88,4 +91,11 @@ func collectCommitSnapshot(rootPID int) (CommitSnapshot, bool, string) {
 	s.SystemCommitBytes = uint64(perf.CommitTotal) * uint64(perf.PageSize)
 	s.SystemCommitLimit = uint64(perf.CommitLimit) * uint64(perf.PageSize)
 	return s, true, ""
+}
+
+// processExitedDuringSnapshot recognizes the Windows result for a PID that vanished
+// after enumeration. Other errors remain fatal so the resource guard never mistakes
+// denied or broken telemetry for a safe process tree.
+func processExitedDuringSnapshot(err error) bool {
+	return err == syscall.Errno(87)
 }
