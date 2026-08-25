@@ -1,0 +1,7 @@
+BACKEND_FORWARD_PREFLIGHT_OK backend=cuda forward=qwen35-gdn path=cuda/qwen35-gdn-ssm-decode-v1
+2026/08/25 16:23:54 inkernel_chat model=qwen38:27b backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/12w prompt=14tok cacheable=0tok reused=0tok prefill=14tok/13.71s/1.0tok/s decode=1tok/0.00s/3134.6tok/s
+2026/08/25 16:24:06 inkernel_chat model=qwen38:27b backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/12w prompt=22tok cacheable=0tok reused=0tok prefill=22tok/11.83s/1.9tok/s decode=3tok/0.25s/12.1tok/s
+2026/08/25 16:24:16 inkernel_chat model=qwen38:27b backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/12w prompt=22tok cacheable=22tok reused=22tok prefill=0tok/0.00s/0.0tok/s decode=3tok/9.59s/0.3tok/s
+2026/08/25 16:24:27 inkernel_chat model=qwen38:27b backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/12w prompt=22tok cacheable=22tok reused=22tok prefill=0tok/0.00s/0.0tok/s decode=3tok/10.50s/0.3tok/s
+2026/08/25 16:24:38 inkernel_chat model=qwen38:27b backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/12w prompt=22tok cacheable=22tok reused=22tok prefill=0tok/0.00s/0.0tok/s decode=3tok/11.32s/0.3tok/s
+2026/08/25 16:24:48 inkernel_chat model=qwen38:27b backend=cuda forward_path=cuda/qwen35-gdn-ssm-decode-v1 q4k=true q8dec=avx512+fused/12w prompt=22tok cacheable=22tok reused=22tok prefill=0tok/0.00s/0.0tok/s decode=3tok/9.55s/0.3tok/s

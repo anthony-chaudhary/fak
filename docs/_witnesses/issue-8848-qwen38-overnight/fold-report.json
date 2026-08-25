@@ -1,0 +1,106 @@
+{
+  "schema": "fak.qwen38.overnight-fold/1",
+  "issue": 8848,
+  "generated_at": "2026-08-25T16:28:24.317283+00:00",
+  "experiment_rows": 120,
+  "unique_experiment_ids": 120,
+  "all_quality_pass": true,
+  "source_sha256": {
+    "issue8848-bf16.jsonl": "15c4d8e678510b36e5d3377a92ba17e495658a58f037d224891bfa0f1c5a71b8",
+    "issue8848-fp8.jsonl": "fcb4a4bbc37549443fe9d548f5d1b6eda4effd0fe1f7e57608e794f1602c6328"
+  },
+  "arms": [
+    {
+      "model": "qwen38-bf16",
+      "engine": "vllm-reference",
+      "enable_thinking": true,
+      "experiments": 30,
+      "quality_passes": 30,
+      "errors": 0,
+      "median_latency_ms": 3855.989,
+      "p95_latency_ms": 5664.459
+    },
+    {
+      "model": "qwen38-bf16",
+      "engine": "vllm-reference",
+      "enable_thinking": false,
+      "experiments": 30,
+      "quality_passes": 30,
+      "errors": 0,
+      "median_latency_ms": 484.57,
+      "p95_latency_ms": 490.181
+    },
+    {
+      "model": "qwen38-fp8",
+      "engine": "vllm-reference",
+      "enable_thinking": true,
+      "experiments": 30,
+      "quality_passes": 30,
+      "errors": 0,
+      "median_latency_ms": 3876.0299999999997,
+      "p95_latency_ms": 4781.302
+    },
+    {
+      "model": "qwen38-fp8",
+      "engine": "vllm-reference",
+      "enable_thinking": false,
+      "experiments": 30,
+      "quality_passes": 30,
+      "errors": 0,
+      "median_latency_ms": 502.3925,
+      "p95_latency_ms": 510.093
+    }
+  ],
+  "hill_climb": [
+    {
+      "envelope": "qwen38-bf16/vllm-reference/arithmetic-only",
+      "baseline": "enable_thinking=true",
+      "candidate": "enable_thinking=false",
+      "quality_equal": true,
+      "median_latency_gain": 0.8743331477346019,
+      "verdict": "KEEP"
+    },
+    {
+      "envelope": "qwen38-fp8/vllm-reference/arithmetic-only",
+      "baseline": "enable_thinking=true",
+      "candidate": "enable_thinking=false",
+      "quality_equal": true,
+      "median_latency_gain": 0.8703847751436392,
+      "verdict": "KEEP"
+    }
+  ],
+  "native_fak_current": {
+    "engine": "fak-native",
+    "backend": "cuda",
+    "forward_path": "cuda/qwen35-gdn-ssm-decode-v1",
+    "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "quality_passes": "5/5 exact Q38",
+    "decode_3tok_samples_tps": [
+      12.1,
+      0.3,
+      0.3,
+      0.3,
+      0.3
+    ],
+    "median_decode_tps": 0.3
+  },
+  "llamacpp_reference": {
+    "commit": "171974745",
+    "artifact": "same Q4_K_M",
+    "decode_3tok_samples_tps": [
+      30.4091,
+      36.2434,
+      36.8949,
+      36.7359,
+      36.5491
+    ],
+    "median_decode_tps": 36.5491
+  },
+  "parity": {
+    "verdict": "HOLD_BELOW_PARITY",
+    "matched_decode_ratio": 0.008208136452060378,
+    "threshold": 1.0,
+    "reason": "Exact artifact, A100 class, and three-token decode are matched, but request/template overhead and quality execution differ; the result is sufficient to reject parity, not to claim a precise end-to-end gap."
+  },
+  "next_experiment": "Fix cached fak-native CUDA decode collapse first: identical cached repeats fell from 12.1 tok/s to 0.3 tok/s while pinned llama.cpp median was 36.55 tok/s. Profile session-state/cache restore around the Qwen GDN recurrent state before another kernel rewrite."
+}
