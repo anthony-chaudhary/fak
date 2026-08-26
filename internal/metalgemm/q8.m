@@ -452,6 +452,28 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         }
 }
 
+// mg_issue8833_q8_encode_gemv encodes the existing Q8 GEMV shader into a caller-owned command
+// buffer and caller-owned shared buffers. It does not commit, wait, or read back. Keeping this
+// helper in this translation unit is intentional: the weight table and pipeline are private here.
+int mg_issue8833_q8_encode_gemv(void* command, int wid, void* xq, void* xd, void* y) {
+    if (!q8_valid(wid) || command == NULL || xq == NULL || xd == NULL || y == NULL) return 0;
+    id<MTLCommandBuffer> cmd = (__bridge id<MTLCommandBuffer>)command;
+    Q8W W = gQ8[wid];
+    id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+    if (e == nil) return 0;
+    [e setComputePipelineState:psoQ8Gemv];
+    [e setBuffer:(__bridge id<MTLBuffer>)W.codes offset:0 atIndex:0];
+    [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
+    [e setBuffer:(__bridge id<MTLBuffer>)xq offset:0 atIndex:2];
+    [e setBuffer:(__bridge id<MTLBuffer>)xd offset:0 atIndex:3];
+    [e setBuffer:(__bridge id<MTLBuffer>)y offset:0 atIndex:4];
+    [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
+    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+    [e endEncoding];
+    return 1;
+}
+
 // mg_q8_gemm computes Y[P,out] = X[P,in] * W[wid]^T for a Q8_0 activation panel in one command
 // buffer. This is the Metal prefill primitive for Q8-minority projections in the resident-Q4_K
 // lane (#1087): full-attn q/k and Qwen3.6 linear_attn.* no longer have to fall back to CPU qGemm8.

@@ -412,6 +412,9 @@ type Session struct {
 	// participate because retained no-copy Metal weights borrow model-owned backing.
 	closeOnce        sync.Once
 	modelWeightsHeld bool
+	// mixedQKV is session-owned experimental dispatch state. It is initialized from the
+	// explicit selector once per session and zeroed by Close; no mutable package-global owner exists.
+	mixedQKV mixedQKVSession
 }
 
 // NewSession starts a fresh generation session.
@@ -419,7 +422,9 @@ func (m *Model) NewSession() *Session {
 	if !m.holdModelWeights() {
 		panic("model: weights are closing or closed")
 	}
-	return &Session{M: m, Cache: NewKVCache(m.Cfg), modelWeightsHeld: true}
+	s := &Session{M: m, Cache: NewKVCache(m.Cfg), modelWeightsHeld: true}
+	s.initMixedQKV()
+	return s
 }
 
 // token runs one position through all layers and projects to logits. It is
@@ -649,16 +654,26 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 		t := s.phaseStart()
 		xp := mat.prep(xn)
 		qWidth := nH * hd
-		var q []float32
-		var gate []float32
-		if cfg.AttnOutputGate {
-			qf := mat.mul(p("self_attn.q_proj.weight"), xp, 2*qWidth, H)
-			q, gate = splitPackedQueryGate(qf, nH, hd)
+		qn, kn, vn := p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight"), p("self_attn.v_proj.weight")
+		var q, gate, kk, vv []float32
+		if mixed, handled, err := s.tryMixedQKV(mat, qn, kn, vn, xp, xn, 2*qWidth, w, w); handled {
+			if err != nil {
+				// Submission transfers ownership to the mixed-QKV call. Retrying the established
+				// path here would encode the same projections twice and violate command ownership.
+				panic(err)
+			}
+			q, gate = splitPackedQueryGate(mixed[0], nH, hd)
+			kk, vv = mixed[1], mixed[2]
 		} else {
-			q = mat.mul(p("self_attn.q_proj.weight"), xp, qWidth, H)
+			if cfg.AttnOutputGate {
+				qf := mat.mul(qn, xp, 2*qWidth, H)
+				q, gate = splitPackedQueryGate(qf, nH, hd)
+			} else {
+				q = mat.mul(qn, xp, qWidth, H)
+			}
+			kk = mat.mul(kn, xp, w, H)
+			vv = mat.mul(vn, xp, w, H)
 		}
-		kk := mat.mul(p("self_attn.k_proj.weight"), xp, w, H)
-		vv := mat.mul(p("self_attn.v_proj.weight"), xp, w, H)
 		s.phaseEnd("full_attn_qkv_proj", t)
 		t = s.phaseStart()
 		m.applyProjBias(l, q, kk, vv)
