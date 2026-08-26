@@ -38,6 +38,10 @@ comparison. A current performance or efficiency claim still needs a scoped row i
 named. When the evidence says fak-native is behind, say so and keep the gap as native product
 work.
 
+New native-performance work prefers Qwen3.8.
+Qwen3.6 is allowed only when the task states an explicit task-specific exception, such as regression, compatibility, historical comparison, or a hardware/artifact constraint.
+Preserve historical Qwen3.6 artifacts; do not rename or rewrite them as Qwen3.8 evidence.
+
 ## What fak-native means
 
 The model executes **inside the fak-owned inference path**:
