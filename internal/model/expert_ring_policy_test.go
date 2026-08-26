@@ -301,3 +301,84 @@ func TestExpertRingValueAwareLeavesRefusalUntouched(t *testing.T) {
 		t.Fatalf("a refused stage evicted %d weights", after.Evictions-before.Evictions)
 	}
 }
+
+func TestExpertRingPolicySwapPreservesResidencyAndStartsTraceEpoch(t *testing.T) {
+	const H, E = 256, 8
+	m := expertRingTestModel(t, H, E)
+	perWeight := expertRingWeightBytes(t, m)
+	s := expertPolicySession(m, perWeight*6, ExpertRingEvictLRU)
+	defer s.Close()
+	driveExpertWindow(s, m, []int{0, 1, 0})
+
+	before := s.ExpertRing()
+	beforeTrace := s.ExpertRingTrace()
+	if before.Policy != ExpertRingEvictLRU || before.PolicyGeneration != 1 || len(beforeTrace.Events) == 0 {
+		t.Fatalf("initial epoch stats=%+v trace=%+v, want LRU generation 1 with evidence", before, beforeTrace)
+	}
+	resident := make(map[string]any, len(s.expertRing.resident))
+	for id, tensor := range s.expertRing.resident {
+		resident[string(id)] = tensor.Buf()
+	}
+	pins, budget := s.expertRing.pins, s.expertRing.budget()
+
+	receipt, err := s.SwapExpertRingEvictPolicy(ExpertRingEvictValueAware)
+	if err != nil {
+		t.Fatalf("SwapExpertRingEvictPolicy: %v", err)
+	}
+	if !receipt.Changed || receipt.PreviousPolicy != ExpertRingEvictLRU || receipt.Policy != ExpertRingEvictValueAware ||
+		receipt.PreviousGeneration != 1 || receipt.PolicyGeneration != 2 {
+		t.Fatalf("receipt=%+v, want LRU/1 -> value-aware/2", receipt)
+	}
+	if receipt.PriorStats != before || len(receipt.PriorTrace.Events) != len(beforeTrace.Events) {
+		t.Fatalf("receipt did not seal prior epoch: stats=%+v trace=%+v", receipt.PriorStats, receipt.PriorTrace)
+	}
+	after := s.ExpertRing()
+	afterTrace := s.ExpertRingTrace()
+	if after.Policy != ExpertRingEvictValueAware || after.PolicyGeneration != 2 || len(afterTrace.Events) != 0 ||
+		afterTrace.Policy != ExpertRingEvictValueAware || afterTrace.PolicyGeneration != 2 {
+		t.Fatalf("new epoch stats=%+v trace=%+v", after, afterTrace)
+	}
+	if after.ResidentCount != before.ResidentCount || after.ResidentBytes != before.ResidentBytes ||
+		after.PageIns != before.PageIns || after.Hits != before.Hits || after.Evictions != before.Evictions ||
+		s.expertRing.pins != pins || s.expertRing.budget() != budget {
+		t.Fatalf("swap changed durable/cumulative ring state: before=%+v after=%+v", before, after)
+	}
+	for id, tensor := range s.expertRing.resident {
+		if resident[string(id)] != tensor.Buf() {
+			t.Fatalf("resident %s handle changed across swap", id)
+		}
+	}
+	if s.expertRing.heat != nil || s.expertRing.lastUse != nil || s.expertRing.clock != 0 || s.expertRing.accesses != 0 {
+		t.Fatalf("policy-local state survived swap: heat=%v lastUse=%v clock=%d accesses=%d",
+			s.expertRing.heat, s.expertRing.lastUse, s.expertRing.clock, s.expertRing.accesses)
+	}
+
+	driveExpertWindow(s, m, []int{0})
+	if got := s.ExpertRingTrace(); got.Policy != ExpertRingEvictValueAware || got.PolicyGeneration != 2 || len(got.Events) == 0 {
+		t.Fatalf("post-swap access was not recorded in new epoch: %+v", got)
+	}
+}
+
+func TestExpertRingPolicySwapRejectsInvalidAndNoopsSamePolicy(t *testing.T) {
+	m := expertRingTestModel(t, 256, 4)
+	s := expertPolicySession(m, expertRingWeightBytes(t, m)*3, ExpertRingEvictLRU)
+	defer s.Close()
+	driveExpertWindow(s, m, []int{0, 0})
+
+	beforeStats, beforeTrace := s.ExpertRing(), s.ExpertRingTrace()
+	heatLen, lastUseLen, clock, accesses := len(s.expertRing.heat), len(s.expertRing.lastUse), s.expertRing.clock, s.expertRing.accesses
+	if _, err := s.SwapExpertRingEvictPolicy(ExpertRingEvictPolicy(99)); err == nil {
+		t.Fatal("invalid policy was accepted")
+	}
+	if got := s.ExpertRing(); got != beforeStats {
+		t.Fatalf("invalid policy changed stats: before=%+v after=%+v", beforeStats, got)
+	}
+	receipt, err := s.SwapExpertRingEvictPolicy(ExpertRingEvictLRU)
+	if err != nil || receipt.Changed {
+		t.Fatalf("same-policy swap receipt=%+v err=%v", receipt, err)
+	}
+	if got := s.ExpertRing(); got != beforeStats || len(s.ExpertRingTrace().Events) != len(beforeTrace.Events) ||
+		len(s.expertRing.heat) != heatLen || len(s.expertRing.lastUse) != lastUseLen || s.expertRing.clock != clock || s.expertRing.accesses != accesses {
+		t.Fatalf("same-policy request changed epoch or policy-local state")
+	}
+}

@@ -77,6 +77,67 @@ func (p ExpertRingEvictPolicy) String() string {
 	}
 }
 
+func (p ExpertRingEvictPolicy) valid() bool {
+	return p == ExpertRingEvictLRU || p == ExpertRingEvictValueAware
+}
+
+// ExpertRingPolicySwapReceipt seals the policy epoch that ended at a quiescent swap boundary.
+// PriorStats and PriorTrace are immutable value snapshots. Changed is false for a same-policy
+// request, in which case no generation or policy-local state changed.
+type ExpertRingPolicySwapReceipt struct {
+	Changed            bool                  `json:"changed"`
+	PreviousPolicy     ExpertRingEvictPolicy `json:"previous_policy"`
+	Policy             ExpertRingEvictPolicy `json:"policy"`
+	PreviousGeneration uint64                `json:"previous_generation"`
+	PolicyGeneration   uint64                `json:"policy_generation"`
+	PriorStats         ExpertRingStats       `json:"prior_stats"`
+	PriorTrace         ExpertAccessTrace     `json:"prior_trace"`
+}
+
+func (r *pagedRing) swapPolicy(policy ExpertRingEvictPolicy) (ExpertRingPolicySwapReceipt, error) {
+	if !policy.valid() {
+		return ExpertRingPolicySwapReceipt{}, fmt.Errorf("expert ring: unknown eviction policy %d", policy)
+	}
+	receipt := ExpertRingPolicySwapReceipt{
+		PreviousPolicy:     r.policy,
+		Policy:             r.policy,
+		PreviousGeneration: r.policyGeneration,
+		PolicyGeneration:   r.policyGeneration,
+		PriorStats:         r.stats(),
+		PriorTrace:         r.traceSnapshot(),
+	}
+	if policy == r.policy {
+		return receipt, nil
+	}
+	r.policy = policy
+	r.policyGeneration++
+	// These fields describe only the victim policy's evidence window. Residency, handles, pins,
+	// budget, and cumulative traffic counters deliberately survive the transition.
+	r.heat = nil
+	r.lastUse = nil
+	r.clock = 0
+	r.accesses = 0
+	r.trace = nil
+	r.traceDropped = 0
+	receipt.Changed = true
+	receipt.Policy = policy
+	receipt.PolicyGeneration = r.policyGeneration
+	return receipt, nil
+}
+
+// SwapExpertRingEvictPolicy changes a private ring at the same no-forward-in-flight boundary as
+// ExpertRingEndTurn. A session attached to a shared ring is serialized by that ring's existing
+// mutex, but callers needing whole-turn attribution must first barrier every attached session.
+// No synchronization is added to the expert-access path.
+func (s *Session) SwapExpertRingEvictPolicy(policy ExpertRingEvictPolicy) (ExpertRingPolicySwapReceipt, error) {
+	if s == nil || s.expertRing == nil {
+		return ExpertRingPolicySwapReceipt{}, fmt.Errorf("expert ring: not enabled")
+	}
+	done := s.ringEnter(s.expertRing)
+	defer done()
+	return s.expertRing.swapPolicy(policy)
+}
+
 // expertRingDecayEveryAccesses is how many ring stagings pass between heat right-shifts, matching
 // defaultDecayEveryAccesses so the live ring and the offline simulation age heat identically.
 const expertRingDecayEveryAccesses = defaultDecayEveryAccesses
@@ -230,7 +291,7 @@ func (r *pagedRing) observeTrace(layer, expert int, weightBytes int64) {
 // The zero trace (no ring, or nothing staged) is returned as-is; the replay entry points reject it
 // with a clear error rather than scoring an empty window.
 func (s *Session) ExpertRingTrace() ExpertAccessTrace {
-	if s == nil || s.expertRing == nil || len(s.expertRing.trace) == 0 {
+	if s == nil || s.expertRing == nil {
 		return ExpertAccessTrace{}
 	}
 	r := s.expertRing
@@ -238,6 +299,11 @@ func (s *Session) ExpertRingTrace() ExpertAccessTrace {
 	// is taken inside a ring span. Inert under the per-session default.
 	done := s.ringEnter(r)
 	defer done()
+	return r.traceSnapshot()
+}
+
+// traceSnapshot copies a policy epoch. The caller holds the shared-ring mutex when applicable.
+func (r *pagedRing) traceSnapshot() ExpertAccessTrace {
 	type key struct{ layer, expert int }
 	size := map[key]int64{}
 	for _, e := range r.trace {
@@ -250,11 +316,13 @@ func (s *Session) ExpertRingTrace() ExpertAccessTrace {
 		events[i] = ExpertAccessTraceEvent{Layer: e.Layer, Expert: e.Expert, WeightBytes: size[key{e.Layer, e.Expert}]}
 	}
 	return ExpertAccessTrace{
-		Schema:      ExpertReplayTraceSchema,
-		Name:        "observed-expert-ring",
-		Source:      fmt.Sprintf("paged-ring policy=%s budget_bytes=%d", r.policy, r.budget()),
-		BudgetBytes: r.budget(),
-		Events:      events,
+		Schema:           ExpertReplayTraceSchema,
+		Name:             "observed-expert-ring",
+		Source:           fmt.Sprintf("paged-ring policy=%s budget_bytes=%d", r.policy, r.budget()),
+		Policy:           r.policy,
+		PolicyGeneration: r.policyGeneration,
+		BudgetBytes:      r.budget(),
+		Events:           events,
 		// A dropped access is an access the window did not see, not one that did not happen —
 		// surfacing it keeps a truncated trace from reading as a complete one.
 		UnsizedTouches: r.traceDropped,
