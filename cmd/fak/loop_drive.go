@@ -160,29 +160,13 @@ func runLoopDrive(stdout, stderr io.Writer, argv []string) int {
 }
 
 func driveGoalSpec(stdout, stderr io.Writer, opt loopDriveOptions) int {
-	clock := opt.Clock
-	if clock == nil {
-		clock = time.Now
-	}
-	sleep := opt.Sleep
-	if sleep == nil {
-		sleep = time.Sleep
-	}
-	floor := opt.MinIterationFloor
-	if floor <= 0 {
-		floor = time.Second
-	}
-	goalPath := strings.TrimSpace(opt.GoalPath)
-	if goalPath == "" {
-		goalPath = "GOAL.md"
-	}
-	handoffFile, handoffCleanup, err := loopDriveHandoffFile(opt.HandoffFile)
+	runtime, err := prepareLoopDriveRuntime(&opt)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak loop drive: %v\n", err)
 		return 1
 	}
-	defer handoffCleanup()
-	opt.HandoffFile = handoffFile
+	defer runtime.cleanup()
+	clock, sleep, floor, goalPath := runtime.clock, runtime.sleep, runtime.floor, runtime.goalPath
 	iterations := 0
 	var tokensUsed int64
 	var regionHold *loopDriveRegionHold
