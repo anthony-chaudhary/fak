@@ -85,7 +85,7 @@ func EvaluateComplexityCampaign(c ComplexityCampaign) (ComplexityReport, error) 
 	if c.PromotionEvidence == "" || c.DemotionEvidence == "" || c.InvalidatingAssumption == "" {
 		return ComplexityReport{}, errors.New("generation evidence and invalidating assumption are required")
 	}
-	r := ComplexityReport{Schema: c.Schema, CampaignVersion: c.CampaignVersion, Model: c.Model, Runtime: c.Runtime, Tokenizer: c.Tokenizer, CachePosture: c.CachePosture, ReplayCommand: "go test ./internal/ultracodebench -run TestIssue8674ArtifactReplay -count=1", PromotionEvidence: c.PromotionEvidence, DemotionEvidence: c.DemotionEvidence, InvalidatingAssumption: c.InvalidatingAssumption}
+	r := ComplexityReport{Schema: c.Schema, CampaignVersion: c.CampaignVersion, Model: c.Model, Runtime: c.Runtime, Tokenizer: c.Tokenizer, CachePosture: c.CachePosture, ReplayCommand: "go test ./internal/ultracodecrossover -run TestIssue8674ArtifactReplay -count=1", PromotionEvidence: c.PromotionEvidence, DemotionEvidence: c.DemotionEvidence, InvalidatingAssumption: c.InvalidatingAssumption}
 	failures := 0
 	for i, rung := range c.Rungs {
 		if rung.Number != i+1 || rung.Name == "" || rung.Task == "" || rung.FrozenCheck == "" {

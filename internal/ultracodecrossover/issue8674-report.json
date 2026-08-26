@@ -45,7 +45,7 @@
   "first_failure_rung": 3,
   "stopped_after_rung": 4,
   "failure_mode": "scoped outcome failed frozen check or diverged from full context (missing-context failure)",
-  "replay_command": "go test ./internal/ultracodebench -run TestIssue8674ArtifactReplay -count=1",
+  "replay_command": "go test ./internal/ultracodecrossover -run TestIssue8674ArtifactReplay -count=1",
   "promotion_evidence": "repeat on a second model/runtime and observe the crossover within one rung before promotion to gen/now",
   "demotion_evidence": "retire this campaign if replay changes any frozen full-context outcome or authoritative telemetry becomes unavailable",
   "invalidating_assumption": "the synthetic dependency ladder predicts crossover behavior for repository tasks"
