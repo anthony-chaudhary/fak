@@ -1,0 +1,29 @@
+2026-08-26T14:52:02Z gpu_lease acquired=true
+2026-08-26T14:52:02Z baseline_service stop=launchd signal=TERM
+2026-08-26T14:52:02Z candidate_launch count=1 engine=inkernel model=qwen38:27b native=true
+2026-08-26T14:52:02Z watcher_exit before_first_sample=true reason=bsd_awk_third_argument_match_unsupported
+2026-08-26T14:52:21Z candidate_listener observed=true port=8090
+2026-08-26T14:52:21Z trace=gw-1 method=GET path=/health status=404
+2026-08-26T14:52:21Z trace=gw-2 method=GET path=/v1/models status=200
+2026-08-26T14:52:23Z trace=gw-3 method=GET path=/health status=404
+2026-08-26T14:52:23Z trace=gw-4 method=GET path=/v1/models status=200
+2026-08-26T14:52:25Z trace=gw-5 method=GET path=/health status=404
+2026-08-26T14:52:25Z trace=gw-6 method=GET path=/v1/models status=200
+2026-08-26T14:52:27Z trace=gw-7 method=GET path=/health status=404
+2026-08-26T14:52:27Z trace=gw-8 method=GET path=/v1/models status=200
+2026-08-26T14:52:29Z trace=gw-9 method=GET path=/health status=404
+2026-08-26T14:52:29Z trace=gw-10 method=GET path=/v1/models status=200
+2026-08-26T14:52:31Z trace=gw-11 method=GET path=/health status=404
+2026-08-26T14:52:31Z trace=gw-12 method=GET path=/v1/models status=200
+2026-08-26T14:52:33Z trace=gw-13 method=GET path=/health status=404
+2026-08-26T14:52:33Z trace=gw-14 method=GET path=/v1/models status=200
+2026-08-26T14:52:35Z trace=gw-15 method=GET path=/health status=404
+2026-08-26T14:52:35Z trace=gw-16 method=GET path=/v1/models status=200
+2026-08-26T14:52:37Z trace=gw-17 method=GET path=/health status=404
+2026-08-26T14:52:37Z trace=gw-18 method=GET path=/v1/models status=200
+2026-08-26T14:52:38Z candidate_teardown signal=TERM
+2026-08-26T14:52:38Z request_sent count=0 body_bytes=0 response_headers=0 response_bytes=0
+2026-08-26T14:52:38Z time_l maximum_rss_bytes=19267272704 peak_footprint_bytes=35065373872
+2026-08-26T14:52:38Z gpu_lease released=true signal=TERM
+2026-08-26T14:53:20Z restore_ready owner_command_sha256=a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d health=200 models=200
+2026-08-26T14:54:51Z restore_complete stable_seconds=91 health=200 models=200

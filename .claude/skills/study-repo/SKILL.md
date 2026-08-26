@@ -128,6 +128,21 @@ fak study-monitor --due-days 14
 - If it has no row, add it as `candidate` with the discovery check's date, pinned revision, push timestamp, adoption signal, and plain-language relevance.
 - At the end of a completed pass, update `last_checked`, `checked_revision`, `stars_at_check`, and `last_push_at_check`; set `status` to `studied` and `study_note` to the durable note path when a note ships, or `watch` when no candidate survives.
 - Land the registry update with the study note. A prose-only “we looked at it” is not durable registration.
+
+## Durable study receipt — bounded query before acquisition, immutable receipt after decision
+
+The prose registry is orientation, not durable decision memory. Before cloning or acquiring a source, run a bounded query using its URL, name, or capability axis:
+
+```powershell
+fak study search "<source-or-capability>" --limit 20
+```
+
+Treat a match as an explicit **extend**, **recheck**, or **supersede** decision; never silently repeat it. If the store is missing or unavailable, state `durable study memory unavailable: <error>` in the report and continue with transcript-local evidence. Do not claim that a query or write persisted.
+
+After candidate dispositions are witnessed, write a `fak-study/1` JSON record and run `fak study add --file <record.json>`. The record must pin every source revision; carry PRESENT/PARTIAL/ABSENT, disposition, evidence paths, and any superseded record ID; and put its returned `study_...` ID in every downstream GitHub issue body. A later verified implementation outcome is a new receipt that sets the candidate outcome and supersedes the earlier ID, never an edit that promotes model output to truth.
+
+Promotion evidence: a fresh invocation finds the source-to-candidate decision by its returned ID or bounded lexical search. Demote or retire this integration if receipts do not reduce duplicate acquisition or if unavailable storage is reported as durable. Invalidating assumption: compact lexical queries are sufficient to rediscover the relevant prior decision without autonomous crawling.
+
 ## The pass
 
 ### 1 — Acquire into scratch, and PIN the source (never the tree)

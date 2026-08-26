@@ -171,6 +171,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, args))
 	case "watchdog-audit-run":
 		os.Exit(runWatchdogAuditRunner(os.Stdout, os.Stderr, args))
+	case "watchdog-audit-health":
+		os.Exit(runWatchdogAuditHealth(os.Stdout, os.Stderr, args, time.Now))
 	case "schedscan":
 		cmdSchedScan(args)
 	case "growthgate":
@@ -670,6 +672,9 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdHorizonRecovery(args)
 	case "dogfood-issues":
 		cmdDogfoodIssues(args)
+	case "study":
+		// Local content-addressed source-to-decision receipts.
+		os.Exit(runStudy(os.Stdout, os.Stderr, args))
 	case "study-monitor":
 		// Durable source registry for recurring study/scout passes.
 		os.Exit(runStudyMonitor(os.Stdout, os.Stderr, args))

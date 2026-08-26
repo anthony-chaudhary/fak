@@ -2379,3 +2379,10 @@ The campaign evidence field naming the runtime that actually executed model math
 The closed qwen38 campaign values selecting either fak-native model math for promotion eligibility or the pinned llama.cpp comparison-only runtime.
 
 **Distinct from:** These are the values carried by ExecutionEngine, not the ExecutionEngine evidence field itself, the generic engine dispatch interface, a backend/device choice, or permission to fall back between runtimes.
+
+
+### full_context_tokens
+
+Token count in the unscoped full-context counterfactual used as the conservation baseline.
+
+**Distinct from:** A baseline count for one evaluator receipt, not a managed runtime context, context span ledger, or context-window limit.

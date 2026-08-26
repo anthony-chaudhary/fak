@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/disambiguation"
@@ -594,14 +595,15 @@ type disambiguationDocsFile struct {
 type disambiguationDocsReport struct {
 	Schema string                   `json:"schema"`
 	Check  bool                     `json:"check"`
+	Stale  []string                 `json:"stale,omitempty"`
 	Files  []disambiguationDocsFile `json:"files"`
 }
 
 func runDisambiguationDocs(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("disambiguation docs", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	outputDir := fs.String("output-dir", defaultDisambiguationDocsDir, "generated documentation directory")
-	check := fs.Bool("check", false, "fail when a tracked page differs")
+	outputDir := fs.String("output-dir", filepath.Join("docs", "generated", "disambiguation"), "generated documentation directory")
+	check := fs.Bool("check", false, "fail when the generated tree differs")
 	jsonOutput := fs.Bool("json", false, "emit JSON report")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -615,45 +617,90 @@ func runDisambiguationDocs(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "fak disambiguation docs: %v\n", err)
 		return 1
 	}
-	report := disambiguationDocsReport{Schema: disambiguation.GeneratedDocsSchemaVersion, Check: *check, Files: make([]disambiguationDocsFile, 0, len(pages))}
-	stale := false
+	report := disambiguationDocsReport{Schema: "fak.disambiguation_docs.v1", Check: *check}
+	expected := make(map[string]disambiguation.DocPage, len(pages))
 	for _, page := range pages {
-		path := filepath.Join(*outputDir, filepath.FromSlash(page.Path))
-		existing, readErr := os.ReadFile(path)
-		changed := readErr != nil || !bytes.Equal(existing, page.Content)
-		if changed && !*check {
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				fmt.Fprintf(stderr, "fak disambiguation docs: create output directory: %v\n", err)
+		expected[filepath.Clean(filepath.FromSlash(page.Path))] = page
+	}
+	actual, err := disambiguationDocFiles(*outputDir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak disambiguation docs: inspect output: %v\n", err)
+		return 1
+	}
+	for rel, page := range expected {
+		target := filepath.Join(*outputDir, rel)
+		current, readErr := os.ReadFile(target)
+		changed := readErr != nil || !bytes.Equal(current, page.Content)
+		report.Files = append(report.Files, disambiguationDocsFile{Path: filepath.ToSlash(target), Changed: changed})
+		if *check && changed {
+			report.Stale = append(report.Stale, filepath.ToSlash(target))
+		}
+	}
+	for rel := range actual {
+		if _, ok := expected[rel]; !ok {
+			report.Stale = append(report.Stale, filepath.ToSlash(filepath.Join(*outputDir, rel)))
+		}
+	}
+	if !*check {
+		if err := os.RemoveAll(*outputDir); err != nil {
+			fmt.Fprintf(stderr, "fak disambiguation docs: reset output: %v\n", err)
+			return 1
+		}
+		for _, page := range pages {
+			target := filepath.Join(*outputDir, filepath.FromSlash(page.Path))
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 				return 1
 			}
-			if err := os.WriteFile(path, page.Content, 0o644); err != nil {
-				fmt.Fprintf(stderr, "fak disambiguation docs: write %s: %v\n", path, err)
+			if err := os.WriteFile(target, page.Content, 0o644); err != nil {
 				return 1
 			}
 		}
-		digest := sha256.Sum256(page.Content)
-		report.Files = append(report.Files, disambiguationDocsFile{Path: filepath.ToSlash(path), SHA256: hex.EncodeToString(digest[:]), Bytes: len(page.Content), Changed: changed})
-		stale = stale || changed
 	}
-	if *check && stale {
-		fmt.Fprintf(stderr, "fak disambiguation docs: stale pages in %s; rerun without --check\n", *outputDir)
-		return 1
-	}
+	sort.Slice(report.Files, func(i, j int) bool { return report.Files[i].Path < report.Files[j].Path })
+	sort.Strings(report.Stale)
 	if *jsonOutput {
 		if err := json.NewEncoder(stdout).Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak disambiguation docs: encode report: %v\n", err)
 			return 1
 		}
 	} else {
 		for _, file := range report.Files {
-			verb := "unchanged"
-			if file.Changed && !*check {
-				verb = "wrote"
+			status := "unchanged"
+			if file.Changed {
+				status = "changed"
 			}
-			fmt.Fprintf(stdout, "%s %s sha256:%s\n", verb, file.Path, file.SHA256)
+			fmt.Fprintf(stdout, "%s %s\n", status, file.Path)
+		}
+		for _, extra := range report.Stale {
+			fmt.Fprintf(stdout, "stale %s\n", extra)
 		}
 	}
+	if *check && len(report.Stale) > 0 {
+		fmt.Fprintf(stderr, "fak disambiguation docs: %d stale, missing, or extra file(s)\n", len(report.Stale))
+		return 1
+	}
 	return 0
+}
+
+func disambiguationDocFiles(root string) (map[string]struct{}, error) {
+	files := map[string]struct{}{}
+	err := filepath.WalkDir(root, func(name string, entry os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && name == root {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, name)
+		if err != nil {
+			return err
+		}
+		files[filepath.Clean(rel)] = struct{}{}
+		return nil
+	})
+	return files, err
 }
 
 var committedDisambiguationProbe = probeCommittedDisambiguation

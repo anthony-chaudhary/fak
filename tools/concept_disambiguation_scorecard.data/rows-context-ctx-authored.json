@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "fullcontexttokens",
+      "canonical": "full_context_tokens",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "Token count in the unscoped full-context counterfactual used as the conservation baseline.",
+      "distinction": "A baseline count for one evaluator receipt, not a managed runtime context, context span ledger, or context-window limit.",
+      "distinct_from": [
+        "contextspanledger",
+        "micro-context"
+      ],
+      "aliases": [],
+      "grounding": "full_context_tokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

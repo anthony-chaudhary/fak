@@ -24,7 +24,7 @@ func TestJournalAuditAdvancedForClaudeAndCodex(t *testing.T) {
 	writeJournalAuditFixture(t, codexPath, strings.Join([]string{
 		`{"timestamp":"2026-08-25T09:00:00Z","type":"session_meta","payload":{"id":"` + codexID + `"}}`,
 		`{"timestamp":"2026-08-25T09:55:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-before"}}`,
-		`{"timestamp":"2026-08-25T10:02:00Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-after"}}`,
+		`{"timestamp":"2026-08-25T10:02:00Z","type":"response_item","payload":{"type":"function_call","name":"exec_command"}}`,
 	}, "\n")+"\n")
 
 	report := AuditRecentLaunches(JournalAuditOptions{
@@ -47,7 +47,7 @@ func TestJournalAuditAdvancedForClaudeAndCodex(t *testing.T) {
 	if got := byProvider["claude"]; got.Status != JournalStatusAdvanced || got.TranscriptPath != claudePath || got.BaselineCursor == nil || got.BaselineCursor.ID != "assistant-before" || got.PostLaunchCursor == nil || got.PostLaunchCursor.ID != "assistant-after" {
 		t.Fatalf("Claude row=%+v", got)
 	}
-	if got := byProvider["codex"]; got.Status != JournalStatusAdvanced || got.TranscriptPath != codexPath || got.BaselineCursor == nil || got.BaselineCursor.ID != "turn-before" || got.PostLaunchCursor == nil || got.PostLaunchCursor.ID != "turn-after" {
+	if got := byProvider["codex"]; got.Status != JournalStatusAdvanced || got.TranscriptPath != codexPath || got.BaselineCursor != nil || got.PostLaunchCursor == nil || got.PostLaunchCursor.ID != "turn-before" || got.PostLaunchCursor.Kind != "function_call" {
 		t.Fatalf("Codex row=%+v", got)
 	}
 }
@@ -87,6 +87,57 @@ func TestJournalAuditDistinguishesMissingAndPresentWithoutProgress(t *testing.T)
 	}
 	if status[missingID] != JournalStatusMissingTranscript || status[claudeID] != JournalStatusPresentNoPostLaunchProgress || status[codexID] != JournalStatusPresentNoPostLaunchProgress {
 		t.Fatalf("statuses=%v", status)
+	}
+}
+
+func TestJournalAuditCountsInFlightCodexActivityAfterLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		row  string
+		kind string
+	}{
+		{name: "function call", row: `{"timestamp":"2026-08-25T10:00:01Z","type":"response_item","payload":{"type":"function_call","name":"exec_command"}}`, kind: "function_call"},
+		{name: "function call output", row: `{"timestamp":"2026-08-25T10:00:01Z","type":"response_item","payload":{"type":"function_call_output","output":"ok"}}`, kind: "function_call_output"},
+		{name: "assistant output", row: `{"timestamp":"2026-08-25T10:00:01Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Working"}]}}`, kind: "assistant"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			userRoot := t.TempDir()
+			const identity = "c1000010-0000-4000-8000-000000000010"
+			writeJournalAuditFixture(t, filepath.Join(userRoot, ".codex", "sessions", "2026", "08", "25", "rollout-"+identity+".jsonl"), strings.Join([]string{
+				`{"timestamp":"2026-08-25T09:59:00Z","type":"session_meta","payload":{"id":"` + identity + `"}}`,
+				`{"timestamp":"2026-08-25T09:59:30Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-live"}}`,
+				tc.row,
+			}, "\n")+"\n")
+
+			report := AuditRecentLaunches(JournalAuditOptions{
+				Now: time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC), Window: 24 * time.Hour,
+				UserHome: userRoot, CodexHome: filepath.Join(userRoot, ".codex"), IdentityPath: filepath.Join(userRoot, "resume_identity.jsonl"),
+				Identities: []JournalLaunchIdentity{{Identity: identity, LaunchAt: time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC), Provider: "codex"}},
+			})
+			if len(report.Rows) != 1 || report.Rows[0].Status != JournalStatusAdvanced || report.Rows[0].PostLaunchCursor == nil || report.Rows[0].PostLaunchCursor.Kind != tc.kind {
+				t.Fatalf("report=%+v", report)
+			}
+		})
+	}
+}
+
+func TestJournalAuditRejectsCodexSetupOnlyAfterLaunch(t *testing.T) {
+	userRoot := t.TempDir()
+	const identity = "c1000011-0000-4000-8000-000000000011"
+	writeJournalAuditFixture(t, filepath.Join(userRoot, ".codex", "sessions", "2026", "08", "25", "rollout-"+identity+".jsonl"), strings.Join([]string{
+		`{"timestamp":"2026-08-25T09:59:00Z","type":"session_meta","payload":{"id":"` + identity + `"}}`,
+		`{"timestamp":"2026-08-25T10:00:01Z","type":"turn_context","payload":{"type":"metadata"}}`,
+		`{"timestamp":"2026-08-25T10:00:02Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-idle"}}`,
+		`{"timestamp":"2026-08-25T10:00:03Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"instructions"}]}}`,
+	}, "\n")+"\n")
+
+	report := AuditRecentLaunches(JournalAuditOptions{
+		Now: time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC), Window: 24 * time.Hour,
+		UserHome: userRoot, CodexHome: filepath.Join(userRoot, ".codex"), IdentityPath: filepath.Join(userRoot, "resume_identity.jsonl"),
+		Identities: []JournalLaunchIdentity{{Identity: identity, LaunchAt: time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC), Provider: "codex"}},
+	})
+	if len(report.Rows) != 1 || report.Rows[0].Status != JournalStatusPresentNoPostLaunchProgress || report.Rows[0].PostLaunchCursor != nil {
+		t.Fatalf("report=%+v", report)
 	}
 }
 

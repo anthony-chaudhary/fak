@@ -2,9 +2,9 @@
 
 **Audience:** evaluators deciding which current `fak` result is applicable, what tuned alternative it was measured against, and how to inspect or reproduce its evidence.
 
-## Current Qwen3.8 completion status
+## Current Qwen performance
 
-- [Qwen3.8 completion status](docs/benchmarks/qwen38-status.md) — accepted receipts, matched references, result classes, and remaining gaps for #8308, #8643, and #8846.
+- [Qwen performance index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) — the canonical cross-hardware route for accepted highlights, receipts, result classes, and remaining gaps.
 
 ## Evaluator route: result first, method second
 

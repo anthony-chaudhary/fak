@@ -65,6 +65,16 @@ type responsesTool struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	raw         json.RawMessage
+}
+
+func (t *responsesTool) UnmarshalJSON(data []byte) error {
+	type wireTool responsesTool
+	if err := json.Unmarshal(data, (*wireTool)(t)); err != nil {
+		return err
+	}
+	t.raw = append(t.raw[:0], data...)
+	return nil
 }
 
 // responsesInputItem is one element of an `input` array. The Responses wire is a
@@ -589,7 +599,11 @@ func responsesToolsToToolDefs(tools []responsesTool) []agent.ToolDef {
 	}
 	out := make([]agent.ToolDef, 0, len(tools))
 	for _, t := range tools {
-		if t.Type != "function" || t.Name == "" {
+		if t.Type != "function" {
+			out = append(out, agent.ToolDef{Type: t.Type, ResponsesWire: append(json.RawMessage(nil), t.raw...)})
+			continue
+		}
+		if t.Name == "" {
 			continue
 		}
 		out = append(out, agent.ToolDef{

@@ -1,0 +1,8 @@
+source=run-20260826T145606Z scrubbed=true
+arm_directories=01-control-rep1
+control_arm_directories=1
+candidate_arm_directories=0
+campaign_json=absent
+control_arm_json=absent
+terminal_state=control_response_completed_after_three_sample_swap_gate_crossing
+candidate_executed=false

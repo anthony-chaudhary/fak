@@ -53,6 +53,7 @@ type GatePolicy struct {
 	QualityHigherIsBetter      bool    `json:"quality_higher_is_better"`
 	RequiredEngine             string  `json:"required_engine"`
 	RequiredForwardPath        string  `json:"required_forward_path"`
+	RequireAmbientEvidence     bool    `json:"require_ambient_evidence,omitempty"`
 	RequireSystemBaseline      bool    `json:"require_system_baseline,omitempty"`
 	AllowSampledSystemBaseline bool    `json:"allow_sampled_system_baseline,omitempty"`
 }
@@ -152,6 +153,24 @@ func Gate(r GateRequest) (GateVerdict, error) {
 	if len(a.Repetitions) < p.MinimumRepetitions || len(c.Repetitions) < p.MinimumRepetitions {
 		return GateVerdict{}, fmt.Errorf("policy requires at least %d repetitions", p.MinimumRepetitions)
 	}
+	if p.RequireAmbientEvidence {
+		for _, pair := range []struct {
+			name    string
+			receipt ExperimentReceipt
+		}{{"last accepted", a}, {"candidate", c}} {
+			if len(pair.receipt.AmbientEvidence) != len(pair.receipt.Repetitions) {
+				return GateVerdict{}, fmt.Errorf("%s ambient evidence must align 1:1 with repetitions", pair.name)
+			}
+			for i, evidence := range pair.receipt.AmbientEvidence {
+				if err := ValidateAmbientEvidence(evidence); err != nil {
+					return GateVerdict{}, fmt.Errorf("%s ambient evidence %d: %w", pair.name, i, err)
+				}
+				if evidence.Verdict != AmbientClean {
+					return GateVerdict{Schema: GateVerdictSchema, Classification: GateInvestigate, EnvelopeID: c.EnvelopeID, AcceptedRevision: a.Revision, CandidateRevision: c.Revision, Checks: []GateCheck{{Name: "ambient_evidence", Status: "fail", Detail: fmt.Sprintf("%s repetition %d verdict=%s", pair.name, i, evidence.Verdict)}}}, nil
+				}
+			}
+		}
+	}
 	am, cm := meanTPS(a.Repetitions), meanTPS(c.Repetitions)
 	an, cn := noisePercent(a.Repetitions), noisePercent(c.Repetitions)
 	drop := (am - cm) / am * 100
@@ -207,6 +226,9 @@ func systemBaselineGateState(a, c ExperimentReceipt, required, allowSampled bool
 		name    string
 		receipt ExperimentReceipt
 	}{{"last_accepted", a}, {"candidate", c}} {
+		if len(side.receipt.AmbientEvidence) > 0 {
+			return "investigate", fmt.Sprintf("%s mixes legacy ambient evidence with system baseline attestations", side.name)
+		}
 		if side.receipt.Schema != ReceiptSchemaV2 {
 			return "investigate", fmt.Sprintf("%s uses legacy receipt schema without ambient evidence contract", side.name)
 		}
@@ -250,6 +272,9 @@ func validateGatePolicy(p GatePolicy) error {
 	}
 	if p.Schema == GatePolicySchemaV1 && (p.RequireSystemBaseline || p.AllowSampledSystemBaseline) {
 		return fmt.Errorf("v1 gate policy cannot require system baseline evidence")
+	}
+	if p.RequireAmbientEvidence && p.RequireSystemBaseline {
+		return fmt.Errorf("gate policy cannot require both legacy ambient evidence and system baseline evidence")
 	}
 	if p.AllowSampledSystemBaseline && !p.RequireSystemBaseline {
 		return fmt.Errorf("sampled system baseline opt-in requires system baseline evidence")

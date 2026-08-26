@@ -1112,6 +1112,11 @@
           "category": "incidental",
           "reason": "External normalized JSON provenance field; it reports authoritative runtime telemetry and does not name a fak cache concept.",
           "token": "runtime_cache_tokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture field naming the observed provider-cache evidence arm; it is not a new cache mechanism or reusable product concept.",
+          "token": "provider_cache_evidence"
         }
       ],
       "id": "cache",
@@ -1350,6 +1355,7 @@
         "prefixcachequeries",
         "promptcachehittokens",
         "promptcachemisstokens",
+        "provider_cache_evidence",
         "provider_cache_read_boundary",
         "provider_cache_usage_not_reported",
         "pycache",
@@ -3278,6 +3284,11 @@
           "category": "incidental",
           "reason": "Implementation receipt identifier for #8699, not a distinct guard or gate.",
           "token": "qwenEmptyUsageGuardReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed ambient-baseline verdict used by the native performance gate; it applies the existing investigate outcome rather than introducing a new guard or gate concept.",
+          "token": "AmbientInvestigate"
         }
       ],
       "exclude": [
@@ -3292,7 +3303,8 @@
         "mitigat",
         "navigat",
         "negat",
-        "propagat"
+        "propagat",
+        "AmbientInvestigate"
       ],
       "id": "guard-gate",
       "ignore": [
@@ -5604,6 +5616,36 @@
           "category": "incidental",
           "reason": "human-output renderer implementation symbol, not a session-runtime concept",
           "token": "renderSessionJournalAudit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Versioned JSON schema constant local to the issue 8678 experiment evaluator.",
+          "token": "LifecycleSessionSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 8678 experiment ledger decode type, not a new runtime session concept.",
+          "token": "LifecycleSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "One row in the issue 8678 experiment ledger.",
+          "token": "LifecycleCell"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 8678 evaluator output type, not runtime lifecycle state.",
+          "token": "LifecycleReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "One evaluated issue 8678 lifecycle boundary row.",
+          "token": "LifecycleReportCell"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local evaluator function for one lifecycle witness; it is not a distinct session runtime concept.",
+          "token": "EvaluateLifecycleSession"
         }
       ],
       "id": "session-runtime",
@@ -5621,6 +5663,7 @@
         "CoveredSessions",
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
+        "EvaluateLifecycleSession",
         "FAK_SESSION_CLIENT_TOKEN",
         "FAK_SESSION_STATE",
         "FinalizeSessionMoveCheckpoint",
@@ -5633,6 +5676,11 @@
         "ITERM_SESSION_ID",
         "IndexHealth",
         "InspectIndexHealth",
+        "LifecycleCell",
+        "LifecycleReport",
+        "LifecycleReportCell",
+        "LifecycleSession",
+        "LifecycleSessionSchema",
         "LogicalSessionID",
         "MalformedSessionRef",
         "ModelSlotsDuringToolWait",
@@ -7532,6 +7580,31 @@
           "category": "incidental",
           "reason": "Field name for an opaque revision compatibility value, not the gateway or engine concept.",
           "token": "KernelRevision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal constant bounding one coordinator cohort; not a separate gateway or engine concept.",
+          "token": "inKernelDecodeCohortMax"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal result carrier for one coordinator call; not a separate gateway or engine concept.",
+          "token": "inKernelCoalesceResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private context key type used by the coordinator; not a separate gateway or engine concept.",
+          "token": "inKernelCoalesceContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal request carrier for one coordinator call; not a separate gateway or engine concept.",
+          "token": "inKernelCoalesceRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Legacy environment selector removed while rebasing the coordinator onto current native GDN execution; not a gateway or engine concept.",
+          "token": "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE"
         }
       ],
       "id": "gateway-engine",
@@ -7548,6 +7621,7 @@
         "EngineRead",
         "EngineReductionPct",
         "EngineWrite",
+        "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE",
         "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
         "GatewaySeat",
         "InKernelKVPrefixPressureSource",
@@ -7598,6 +7672,10 @@
         "gateways",
         "globEngine",
         "grepEngine",
+        "inKernelCoalesceContextKey",
+        "inKernelCoalesceRequest",
+        "inKernelCoalesceResult",
+        "inKernelDecodeCohortMax",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
         "inkernelforcedtoolinstruction",
@@ -9253,6 +9331,26 @@
           "category": "incidental",
           "reason": "Access-frontier metric field, not a new context mechanism",
           "token": "ScopedContextInputTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "A fixture-local measurement label for the repository-side context arm, not a new context mechanism or product concept.",
+          "token": "repository_context"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture outcome flag for whether context survived compaction; it is not a new context mechanism.",
+          "token": "compaction_recovered"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Go context key type used to transport one coordinator; not a reusable context mechanism.",
+          "token": "inKernelCoalesceContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local context selected for one decode lane; not a reusable context mechanism.",
+          "token": "laneCtx"
         }
       ],
       "id": "context-ctx",
@@ -9300,6 +9398,7 @@
         "compactionThrashStreak",
         "compactionWitness",
         "compaction_checkpoint_conflation_rejected",
+        "compaction_recovered",
         "compactions",
         "context",
         "contextBucket",
@@ -9331,7 +9430,9 @@
         "guardReadPath",
         "guardSourceReadRecovery",
         "guardSourceReadRecoverySchema",
+        "inKernelCoalesceContextKey",
         "inspectCodexHookProfileContext",
+        "laneCtx",
         "latestGuardCompactionWitness",
         "newGuardCompactionWitness",
         "newTraceContext",
@@ -9350,6 +9451,7 @@
         "recalls",
         "recordCompactionThrash",
         "recordGuardCompactionWitness",
+        "repository_context",
         "requestContext",
         "sessionClientDescriptorForContext",
         "session_compaction_thrash",
@@ -12684,6 +12786,31 @@
           "category": "incidental",
           "reason": "Local per-candidate measurement record, not a plan result concept.",
           "token": "CandidateResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local adapter type for a measured MatMul implementation, not a planning candidate concept.",
+          "token": "MatMulCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum label for deterministic study-import ledger disposition; it is not a planning concept.",
+          "token": "ImportCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Promotion ladder receipt field naming an immutable environment digest; not a new planning concept.",
+          "token": "CandidateEnvironmentSHA"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON spelling of the immutable promotion-ladder environment digest; not a new planning concept.",
+          "token": "candidate_environment_sha256"
+        },
+        {
+          "category": "incidental",
+          "reason": "Promotion-ladder evidence sample collection field; not a new planning concept.",
+          "token": "CandidateSamples"
         }
       ],
       "exclude": [
@@ -12701,12 +12828,14 @@
         "BuildSweepPlan",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
+        "CandidateEnvironmentSHA",
         "CandidateMeanTokensPerS",
         "CandidateOutputNMSE",
         "CandidatePassed",
         "CandidateResult",
         "CandidateRevision",
         "CandidateRuntimeSHA",
+        "CandidateSamples",
         "CandidateTaskAccuracy",
         "Candidates",
         "DecodeInterleavePlan",
@@ -12723,11 +12852,13 @@
         "GroupLaneStatePlan",
         "GroupedPlan",
         "HeldCandidates",
+        "ImportCandidate",
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",
         "ListPlanSchema",
         "MaintenanceSeconds",
+        "MatMulCandidate",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
         "NativeDecodeTracePlanner",
@@ -12800,6 +12931,7 @@
         "candidatePaths",
         "candidateRate",
         "candidateReport",
+        "candidate_environment_sha256",
         "candidate_evaluations",
         "candidate_mean_tokens_per_second",
         "candidate_requires_auth_relevance",

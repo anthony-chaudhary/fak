@@ -215,8 +215,11 @@ func contentPartText(raw json.RawMessage) (string, error) {
 
 // ToolDef is an OpenAI function/tool declaration advertised to the model.
 type ToolDef struct {
-	Type     string          `json:"type"` // always "function"
+	Type     string          `json:"type"` // normally "function"
 	Function ToolDefFunction `json:"function"`
+	// ResponsesWire preserves non-function Responses tools (for example custom/freeform
+	// tools) across the gateway model hop without interpreting or authorizing them.
+	ResponsesWire json.RawMessage `json:"-"`
 }
 
 // ToolDefFunction is the function half of a ToolDef: the tool name, its description,

@@ -129,6 +129,27 @@ func TestAttachSystemBaselineUpgradesAndPreservesRepetitionOrder(t *testing.T) {
 	}
 }
 
+func TestLegacyAmbientEvidenceAndSystemBaselinesAreMutuallyExclusive(t *testing.T) {
+	legacy := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	legacy.Schema = ReceiptSchemaV1
+	addAmbient(t, &legacy, AmbientClean)
+	if err := ValidateReceipt(ActiveGraph(), legacy); err != nil {
+		t.Fatalf("published v1 ambient evidence: %v", err)
+	}
+	attestation := baselineAttestation(systembaseline.VerdictClean, true)
+	if _, err := AttachSystemBaseline(ActiveGraph(), legacy, attestation); err == nil || !strings.Contains(err.Error(), "legacy ambient evidence") {
+		t.Fatalf("attach over legacy evidence err=%v", err)
+	}
+
+	mixed := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	addAmbient(t, &mixed, AmbientClean)
+	mixed.SystemBaselines = []systembaseline.Report{attestation}
+	mixed.Repetitions[0].SystemBaselineDigest = attestation.Digest
+	if err := ValidateReceipt(ActiveGraph(), mixed); err == nil || !strings.Contains(err.Error(), "cannot carry both") {
+		t.Fatalf("mixed authority err=%v", err)
+	}
+}
+
 func TestValidateReceiptRejectsBindingHolesMismatchAndReuse(t *testing.T) {
 	base := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
 	attestation := baselineAttestation(systembaseline.VerdictClean, true)

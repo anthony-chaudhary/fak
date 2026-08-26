@@ -1,0 +1,128 @@
+{
+  "schema": "fak-ultracode-lifecycle-session/1",
+  "issue": 8678,
+  "captured_at": "2026-08-26T13:18:25Z",
+  "model": "qwen2.5:0.5b",
+  "model_digest": "a8b0c51577010a279d933d14c2a8ab4b268079d44c5c8830c0a93900f1827c67",
+  "runtime": "Ollama 0.30.10 / llama.cpp on sanctioned fak-realmodel node",
+  "tokenizer": "runtime-owned qwen2 tokenizer; prompt_eval_count authoritative",
+  "task_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+  "full_context_input_tokens": 2256,
+  "cells": [
+    {
+      "boundary": "cold",
+      "boundary_evidence": {
+        "kind": "runtime_ps_absent",
+        "receipt": "runtime /api/ps returned no loaded model before replay"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_evidence": "runtime /api/ps returned no loaded model before replay",
+      "started_ns": 1787750325644013214,
+      "prompt_eval_duration_ns": 2851370000
+    },
+    {
+      "boundary": "warm_reuse",
+      "boundary_evidence": {
+        "kind": "same_session_immediate_replay",
+        "receipt": "llama-server log: cached n_tokens > 0 for immediate replay"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 600,
+      "provider_cache_evidence": "llama-server log: cached n_tokens > 0 for immediate replay",
+      "started_ns": 1787750331991632950,
+      "prompt_eval_duration_ns": 2839228000
+    },
+    {
+      "boundary": "ttl_expiry",
+      "boundary_evidence": {
+        "kind": "runtime_ps_absent_after_declared_ttl",
+        "receipt": "declared keep_alive=2s; waited 5s; runtime /api/ps returned no loaded model"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_evidence": "declared keep_alive=2s; waited 5s; runtime /api/ps returned no loaded model",
+      "started_ns": 1787750341918854753,
+      "prompt_eval_duration_ns": 2859510000
+    },
+    {
+      "boundary": "ttl_recovered",
+      "boundary_evidence": {
+        "kind": "same_session_immediate_replay",
+        "receipt": "llama-server log: cached n_tokens > 0 after TTL replay rewarmed prefix"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 600,
+      "provider_cache_evidence": "llama-server log: cached n_tokens > 0 after TTL replay rewarmed prefix",
+      "started_ns": 1787750348288116353,
+      "prompt_eval_duration_ns": 2848936000
+    },
+    {
+      "boundary": "explicit_clear",
+      "boundary_evidence": {
+        "kind": "ollama_keep_alive_zero",
+        "receipt": "Ollama unload receipt done_reason=unload and /api/ps models=[]"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 0,
+      "provider_cache_evidence": "Ollama unload receipt done_reason=unload and /api/ps models=[]",
+      "started_ns": 1787750354689862732,
+      "prompt_eval_duration_ns": 2890932000
+    },
+    {
+      "boundary": "clear_recovered",
+      "boundary_evidence": {
+        "kind": "same_session_immediate_replay",
+        "receipt": "llama-server log: cached n_tokens > 0 after explicit-clear replay rewarmed prefix"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 600,
+      "provider_cache_evidence": "llama-server log: cached n_tokens > 0 after explicit-clear replay rewarmed prefix",
+      "started_ns": 1787750361063755569,
+      "prompt_eval_duration_ns": 2852909000
+    },
+    {
+      "boundary": "compaction",
+      "boundary_evidence": {
+        "kind": "harness_context_compaction",
+        "receipt": "harness receipt records before/after SHA-256 and 8801 dropped UTF-8 bytes"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 600,
+      "provider_cache_evidence": "harness receipt records before/after SHA-256 and 8801 dropped UTF-8 bytes",
+      "started_ns": 1787750367424018944,
+      "prompt_eval_duration_ns": 2853517000
+    },
+    {
+      "boundary": "compaction_recovered",
+      "boundary_evidence": {
+        "kind": "same_session_immediate_replay",
+        "receipt": "llama-server log: cached n_tokens > 0 after compacted replay"
+      },
+      "accepted_outcome": true,
+      "outcome_digest": "766a84068bf5a85e452ef70ade7b906d956c2130f6df651f4d5bac1e435df889",
+      "scoped_context_input_tokens": 635,
+      "provider_cache_read_tokens": 600,
+      "provider_cache_evidence": "llama-server log: cached n_tokens > 0 after compacted replay",
+      "started_ns": 1787750373787879797,
+      "prompt_eval_duration_ns": 2837021000
+    }
+  ],
+  "promotion_evidence": "Promote toward gen/now after a second bounded campaign reproduces reset/recovery with exact per-request cache-token logs.",
+  "demotion_evidence": "Demote or retire if provider cache telemetry cannot be authoritatively joined to each replay or equal accepted outcomes stop holding.",
+  "invalidating_assumption": "The runtime log cache-token counts are attributable to this isolated bounded campaign rather than concurrent requests."
+}

@@ -104,6 +104,12 @@ type InKernelPlanner struct {
 	// follow-up (internal/model/batch.go), not a correctness fix.
 	devMu sync.Mutex
 
+	coalesceMu        sync.Mutex
+	coalesceReady     []*inKernelCoalesceRequest
+	coalesceRunning   bool
+	coalesceReadyHook func()
+	coalesceBatchHook func(int)
+
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
 
@@ -879,9 +885,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// forwards at once without the concurrent op-streams corrupting shared device buffers
 	// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
 	// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
-	if p.requiresDeviceSerialization() {
+	if p.requiresDeviceSerialization() && !p.coalescesQwenDecode() {
 		p.devMu.Lock()
 		defer p.devMu.Unlock()
+		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+			return nil, err
+		}
+	}
+	if p.coalescesQwenDecode() {
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
 			return nil, err
 		}
@@ -899,10 +910,18 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			}
 		}
 	}
-	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
-		sb.Reset()
-		measurement.reset()
-	}, measurement)
+	generate := func(runCtx context.Context) (inKernelGenerateResult, error) {
+		return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
+			sb.Reset()
+			measurement.reset()
+		}, measurement)
+	}
+	var genRes inKernelGenerateResult
+	if p.coalescesQwenDecode() {
+		genRes, err = p.runCoalescedGenerate(ctx, generate)
+	} else {
+		genRes, err = generate(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}

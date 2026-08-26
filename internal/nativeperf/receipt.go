@@ -37,6 +37,7 @@ type ExperimentReceipt struct {
 	UnchangedControls []string                `json:"unchanged_controls"`
 	ChangedAxes       []string                `json:"changed_axes"`
 	Repetitions       []Repetition            `json:"repetitions"`
+	AmbientEvidence   []AmbientEvidence       `json:"ambient_evidence,omitempty"`
 	Memory            MemoryMetrics           `json:"memory"`
 	Execution         ExecutionIdentity       `json:"execution"`
 	Quality           QualityMetric           `json:"quality"`
@@ -144,6 +145,9 @@ func DecodeReceipt(data []byte) (ExperimentReceipt, error) {
 // AttachSystemBaseline appends the next aggregate attestation without allowing
 // callers to skip or overfill the receipt's one-per-repetition sequence.
 func AttachSystemBaseline(graph Graph, receipt ExperimentReceipt, attestation systembaseline.Report) (ExperimentReceipt, error) {
+	if len(receipt.AmbientEvidence) > 0 {
+		return ExperimentReceipt{}, errors.New("receipt already carries legacy ambient evidence")
+	}
 	if receipt.Schema == ReceiptSchemaV1 {
 		receipt.Schema = ReceiptSchemaV2
 	}
@@ -233,6 +237,20 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	for i, rep := range r.Repetitions {
 		if !positive(rep.EndToEndMilliseconds) || !positive(rep.TokensPerSecond) {
 			f = append(f, fmt.Sprintf("repetition %d lacks positive end-to-end latency/tok/s", i))
+		}
+	}
+	if len(r.AmbientEvidence) > 0 && len(r.SystemBaselines) > 0 {
+		f = append(f, "receipt cannot carry both legacy ambient evidence and system baseline attestations")
+	}
+	if len(r.AmbientEvidence) > 0 {
+		if len(r.AmbientEvidence) != len(r.Repetitions) {
+			f = append(f, fmt.Sprintf("ambient evidence count %d must align 1:1 with %d repetitions", len(r.AmbientEvidence), len(r.Repetitions)))
+		} else {
+			for i, evidence := range r.AmbientEvidence {
+				if err := ValidateAmbientEvidence(evidence); err != nil {
+					f = append(f, fmt.Sprintf("ambient evidence %d: %v", i, err))
+				}
+			}
 		}
 	}
 	seenBaselineDigests := map[string]bool{}

@@ -25,3 +25,24 @@ request kinds, timeout, disconnect, and stale or duplicate responses all decline
 Receipts name the Codex sandbox/approval policy separately from fak's additional
 capability floor; journals contain scrubbed summaries and identities, never raw
 command output, environment values, or credentials.
+
+## Experimental protocol compatibility gate
+
+Before `Run` starts the Codex app-server, callers that opt into the experimental
+adapter provide a `CompatibilityEnvelope` and the `CompatibilityReceipt` loaded
+from a tested fixture. The gate binds binary version, negotiated protocol, and
+the fixture's SHA-256 digest, then compares the authority-bearing method set.
+Unknown observation events remain an adapter/rendering concern; unknown or
+renamed approval methods fail closed before process or tool execution.
+
+Refresh a tested version by capturing a scrubbed generated schema in
+`testdata/conformance`, running the package conformance tests, and shipping the
+new fixture with its receipt binding. Roll back by restoring the previously
+tested Codex binary/protocol pair; diagnostics report all three binding values.
+
+Promotion evidence from `gen/next` is a release gate running these fixtures
+against the installed Codex minimum and current versions. Demote or retire the
+adapter if those receipts cannot be reproduced or authority drift repeatedly
+requires bypasses. This gate assumes the local generated schema completely
+names every authority-bearing request; an out-of-band authority channel
+invalidates that assumption and must keep the adapter experimental.

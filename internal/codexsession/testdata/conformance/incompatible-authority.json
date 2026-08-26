@@ -1,0 +1,7 @@
+{
+  "fixture": "incompatible-authority",
+  "binaryVersion": "codex-cli 0.46.0-experimental",
+  "protocolVersion": "app-server/experimental-v2",
+  "events": ["thread/started", "item/started", "item/completed", "turn/completed"],
+  "authorityMethods": ["item/commandExecution/requestAuthorization"]
+}

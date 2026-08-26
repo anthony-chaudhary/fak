@@ -153,6 +153,15 @@ func (p *PrefixSnapshot) Close() {
 	p.Cache = nil
 }
 
+const q4kMLPOutputSlabReceiptSchema = "fak-q4k-gateup-slab/v1"
+
+type q4kMLPOutputSlabStats struct {
+	Calls          uint64
+	Allocations    uint64
+	Reuses         uint64
+	HighWaterBytes uint64
+}
+
 type Session struct {
 	qwen35GDNSequenceMu sync.Mutex
 	qwen35GDNSequence   *qwen35GDNSequenceOwner
@@ -368,6 +377,12 @@ type Session struct {
 	// correct token-loop fallback without adding an operator-facing control.
 	q4kHybridPrefillChunks   int
 	q4kHybridPrefillLastBase int
+	// q4kMLPOutputSlab is the optional, session-local host readback backing for one grouped Q4_K
+	// gate/up prefill result. Generation owns a Session serially, and each layer consumes gate/up
+	// before the next layer overwrites it. It is retained only inside the P<=512, 68 MiB envelope
+	// and released by Close; nil preserves the allocating path.
+	q4kMLPOutputSlab      []float32
+	q4kMLPOutputSlabStats q4kMLPOutputSlabStats
 
 	// tap is an opt-in diagnostic dump hook for a single decode position. Nil on all
 	// normal sessions; tests and FAK_HIDDEN_TAP use it to capture hidden-state probes.

@@ -301,10 +301,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	measurement.startDecodeTrace()
 	td := time.Now()
-	if p.batchDecode {
+	if coordinated, coordinateErr := coalescedDecode(ctx, ln); coordinated {
+		err = coordinateErr
+	} else if p.batchDecode {
 		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
-		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged; this is
-		// the wiring a cross-request coalescer builds on (aggregate throughput is box-gated).
+		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged.
 		inKernelDecodeLanesBatched(ctx, []*decodeLane{ln}, p.m, p.quant)
 	} else {
 		inKernelDecodeSerial(ctx, ln)
@@ -368,6 +369,7 @@ func (p *InKernelPlanner) nativeInferencePrefillChunkTokens() int {
 // opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
 // the property that makes the two paths bit-for-bit equivalent.
 type decodeLane struct {
+	ctx    context.Context
 	s      *model.Session
 	logits []float32
 	counts []int32
@@ -530,7 +532,11 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 // no-token contract). It is the path an unset FAK_INKERNEL_BATCH takes.
 func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 	for ln.gen < ln.maxNew {
-		next, advance := ln.decodeOne(ctx)
+		laneCtx := ctx
+		if ln.ctx != nil {
+			laneCtx = ln.ctx
+		}
+		next, advance := ln.decodeOne(laneCtx)
 		if !advance {
 			return
 		}
@@ -565,7 +571,11 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 			if ln.done || ln.gen >= ln.maxNew {
 				continue // finished lane: dropped from the active set, never re-stepped.
 			}
-			next, advance := ln.decodeOne(ctx)
+			laneCtx := ctx
+			if ln.ctx != nil {
+				laneCtx = ln.ctx
+			}
+			next, advance := ln.decodeOne(laneCtx)
 			if !advance {
 				continue
 			}

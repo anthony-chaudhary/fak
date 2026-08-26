@@ -76,7 +76,7 @@ concurrent = [
   "cachemeta", "ociartifact", "portabilityswitch",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
-  "provenance", "recall", "registrations", "shipgate", "steward", "studydrift", "studymonitor", "turnbench",
+  "provenance", "recall", "registrations", "shipgate", "steward", "studydrift", "studymonitor", "studyreceipt", "turnbench",
   "vdso", "witness",
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
@@ -605,6 +605,7 @@ shipgate = ["internal/shipgate/**"]
 steward = ["internal/steward/**"]
 studydrift = ["internal/studydrift/**"]
 studymonitor = ["internal/studymonitor/**"]
+studyreceipt = ["internal/study/**", "cmd/fak/study.go", "cmd/fak/study_test.go", "cmd/fak/main.go", ".claude/skills/study-repo/SKILL.md", ".claude/skills/field-borrow/SKILL.md"]
 turnbench = ["internal/turnbench/**"]
 vdso = ["internal/vdso/**"]
 witness = ["internal/witness/**"]

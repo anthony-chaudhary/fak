@@ -23,19 +23,22 @@ import (
 const Engine = "codex"
 
 type Config struct {
-	Command         string
-	Args            []string
-	Workspace       string
-	Version         string
-	RunID           string
-	Sink            func(harnesskit.Envelope) error
-	ApprovalPolicy  ApprovalPolicy
-	ApprovalJournal func(ApprovalJournalEntry)
-	ApprovalTimeout time.Duration
-	Now             func() time.Time
-	Session         *sessionctl.CodexSession
-	StartMode       sessionctl.CodexStartMode
-	InputLease      string
+	Command          string
+	Args             []string
+	Workspace        string
+	Version          string
+	RunID            string
+	Sink             func(harnesskit.Envelope) error
+	ApprovalPolicy   ApprovalPolicy
+	ApprovalJournal  func(ApprovalJournalEntry)
+	ApprovalTimeout  time.Duration
+	Now              func() time.Time
+	Session          *sessionctl.CodexSession
+	StartMode        sessionctl.CodexStartMode
+	InputLease       string
+	Compatibility    *CompatibilityEnvelope
+	TestedReceipt    *CompatibilityReceipt
+	AuthorityMethods []string
 }
 
 type Adapter struct {
@@ -92,6 +95,14 @@ func New(cfg Config) (*Adapter, error) {
 }
 
 func (a *Adapter) Run(ctx context.Context, text string) error {
+	if a.cfg.Compatibility != nil || a.cfg.TestedReceipt != nil {
+		if a.cfg.Compatibility == nil || a.cfg.TestedReceipt == nil {
+			return errors.New("codexsession: compatibility envelope and tested receipt must be configured together")
+		}
+		if err := CheckCompatibility(*a.cfg.Compatibility, *a.cfg.TestedReceipt, a.cfg.AuthorityMethods); err != nil {
+			return err
+		}
+	}
 	var execution sessionctl.CodexExecution
 	if a.cfg.Session != nil {
 		mode := a.cfg.StartMode

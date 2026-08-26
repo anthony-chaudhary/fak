@@ -208,3 +208,52 @@ func TestGateSuspectRangeIsSortedAndBounded(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 }
+
+func TestGateAmbientEvidencePolicy(t *testing.T) {
+	clean := gateRequest(t)
+	clean.Policy.RequireAmbientEvidence = true
+	addAmbient(t, &clean.LastAccepted, AmbientClean)
+	addAmbient(t, &clean.Candidate, AmbientClean)
+	verdict, err := Gate(clean)
+	if err != nil || verdict.Classification != GatePass {
+		t.Fatalf("clean: %+v %v", verdict, err)
+	}
+
+	contaminated := clean
+	addAmbient(t, &contaminated.Candidate, AmbientInvestigate)
+	verdict, err = Gate(contaminated)
+	if err != nil || verdict.Classification != GateInvestigate {
+		t.Fatalf("contaminated: %+v %v", verdict, err)
+	}
+
+	unmeasured := clean
+	unmeasured.Candidate.AmbientEvidence = nil
+	if _, err = Gate(unmeasured); err == nil || !strings.Contains(err.Error(), "align 1:1") {
+		t.Fatalf("unmeasured err=%v", err)
+	}
+
+	legacy := gateRequest(t)
+	if verdict, err = Gate(legacy); err != nil || verdict.Classification != GatePass {
+		t.Fatalf("legacy v1 compatibility: %+v %v", verdict, err)
+	}
+}
+
+func TestGateRejectsCompetingAmbientAuthorities(t *testing.T) {
+	r := gateRequest(t)
+	r.Policy.RequireAmbientEvidence = true
+	r.Policy.RequireSystemBaseline = true
+	if _, err := Gate(r); err == nil || !strings.Contains(err.Error(), "cannot require both") {
+		t.Fatalf("policy err=%v", err)
+	}
+
+	r = gateRequest(t)
+	r.Policy.RequireSystemBaseline = true
+	r.Policy.AllowSampledSystemBaseline = true
+	attachSystemBaselines(&r.LastAccepted, systembaseline.VerdictClean, true)
+	attachSystemBaselines(&r.Candidate, systembaseline.VerdictClean, true)
+	addAmbient(t, &r.Candidate, AmbientClean)
+	verdict, err := Gate(r)
+	if err != nil || verdict.Classification != GateInvestigate || verdict.Bisect != nil {
+		t.Fatalf("mixed receipt: %+v %v", verdict, err)
+	}
+}

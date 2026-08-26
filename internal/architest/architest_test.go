@@ -403,6 +403,8 @@ var tier = map[string]int{
 	"claimcheck":          1, // pure net-true-value claim grader; stdlib-only, off the hot path.
 	"ideascout":           2, // inbound arXiv/GitHub idea scout and issue planner; stdlib-only shell/network I/O off the hot path.
 	"studymonitor":        2, // stdlib-only external source registry validator and report renderer; off the runtime hot path.
+	"study":               1, // stdlib-only immutable source-to-decision receipt store; off the runtime hot path.
+	"edgequal":            1, // stdlib-only offline evidence contract validator; off the runtime hot path.
 	"customizationindex":  2, // stdlib-only agent customization registry validator and freshness reporter; off the runtime hot path.
 	"loopindex":           1, // pure S0 agentic-loop scorecard: folds orient->plan->act->verify->ship->learn probes into loop-index + loopindex_debt; stdlib-only, off the hot path.
 	"loopmap":             2, // queryable loop-stage -> tool map over loopindex(1); off the hot path.
@@ -709,6 +711,7 @@ var tier = map[string]int{
 	"computetune":                1, // stdlib-only offline tuning decision primitive over replayable compute traces (#8608).
 	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
 	"systembaseline":             1,
+	"ultracodedogfood":           1, // stdlib-only deterministic lifecycle-boundary witness evaluator (#8678).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
