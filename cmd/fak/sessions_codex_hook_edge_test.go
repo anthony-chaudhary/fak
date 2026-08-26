@@ -9,8 +9,9 @@ import (
 	"testing"
 )
 
-// This file is the adversarial / edge-case sweep for the Codex direct-continuation
-// hook (#3903, follow-on to #3023). The hook is deliberately FAIL-OPEN: any input it
+// This file is the adversarial / edge-case sweep for the hardened Codex
+// direct-continuation hook (#3903, follow-on to #3023). Hardened mode is deliberately
+// FAIL-OPEN: any input it
 // cannot turn into a resolvable direct-provider session allows the turn (exit 0, no
 // block), and only an active session whose model_provider is non-empty and not "fak"
 // is blocked with a JSON {"decision":"block"} on stdout. Every case below captures
@@ -63,7 +64,7 @@ func writeCodexHookSessionFromLines(t *testing.T, lines []string) (home, session
 func runCodexLoopHookForTest(t *testing.T, home, payload string) (code int, stdout, stderr string) {
 	t.Helper()
 	var outBuf, errBuf bytes.Buffer
-	argv := []string{"codex-loop-hook"}
+	argv := []string{"codex-loop-hook", "--hardened"}
 	if home != "" {
 		argv = append(argv, "--codex-home", home)
 	}
@@ -190,7 +191,7 @@ func TestCodexLoopHookOversizedPayload(t *testing.T) {
 
 // TestCodexLoopHookPartialFinalLine: a truncated or garbage trailing JSONL record in
 // the transcript is skipped by the diagnoser, so it never masks the provider recorded
-// in an earlier session_meta. The direct-provider block must survive a partial tail.
+// in an earlier session_meta. The hardened direct-provider block must survive a partial tail.
 func TestCodexLoopHookPartialFinalLine(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
 	t.Setenv(guardActiveEnv, "") // ambient `fak guard` would allow-silently; see above

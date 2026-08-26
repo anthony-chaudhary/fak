@@ -131,7 +131,42 @@ The dry-run should print a command shaped like:
 fak manage --split off ... -- codex --dangerously-bypass-approvals-and-sandbox exec --json ...
 ```
 
-### Live continuation-hook contract witness
+### UserPromptSubmit modes
+
+The checked-in `.codex/hooks.json` and the default installer are permissive. Codex still
+evaluates the manifest's tiny shell selector, but an ordinary direct prompt starts no
+`fak` process, inspects no session transcript, emits no context, and returns no block
+envelope. The selector invokes `fak` only for a child marked `FAK_GUARD_ACTIVE=1` or an
+explicit hardened environment; that scoped child receives the one-shot
+guarded-workflow context used by fak orchestration.
+
+Install or refresh that default declaration with:
+
+```bash
+fak sessions codex-hook-install
+```
+
+Operators who intentionally want cross-instance submit enforcement can choose hardened
+mode in either of two reversible ways:
+
+```bash
+# Persist hardened behavior in $CODEX_HOME/hooks.json.
+fak sessions codex-hook-install --hardened
+
+# Harden only Codex processes launched from this shell.
+FAK_CODEX_SUBMIT_HARDENED=1 codex
+```
+
+The direct runtime surface is `fak sessions codex-loop-hook --hardened`. In hardened
+mode, an unguarded direct provider is diagnosed and blocked before the next model turn;
+if that bounded diagnosis times out, the hook returns a typed hardened-timeout block
+instead of allowing a turn that a later audit row could misrepresent.
+`--allow-direct` or `FAK_ALLOW_DIRECT_CODEX_CONTINUE=1` remains the intentional override.
+Running `fak sessions codex-hook-install` again removes installer-baked hardening and
+restores the permissive default. Unsetting `FAK_CODEX_SUBMIT_HARDENED` rolls back the
+shell-scoped form.
+
+### Live hardened-hook contract witness
 
 Codex CLI 0.144.1 was exercised end to end with the reviewed repo-level
 `.codex/hooks.json`. The CLI discovered the manifest, invoked `UserPromptSubmit` with
@@ -139,20 +174,22 @@ Codex CLI 0.144.1 was exercised end to end with the reviewed repo-level
 model execution (zero input/output tokens). The privacy-preserving captured payload and
 normalized event evidence are committed at
 [`experiments/agent-live/codex-continuation-hook-live-witness-2026-07-11.json`](../../experiments/agent-live/codex-continuation-hook-live-witness-2026-07-11.json).
+That artifact witnesses the block-envelope contract now selected by hardened mode; it
+is not the shipped default posture.
 
-### Continuation guard and intentional direct sessions
+### Hardened recovery and intentional direct sessions
 
-The reviewed Codex `UserPromptSubmit` continuation hook runs `fak sessions
-codex-loop-hook` before a continued turn. If the session is using a direct model
-provider, the hook blocks the turn because fak cannot enforce the guard on that model
-call; relaunch with `fak codex` (preferred) or `fak manage -- codex`.
+When hardened mode blocks a direct session because fak cannot enforce its next model
+call, relaunch with `fak codex` (preferred) or `fak manage -- codex`.
 
-For a deliberately direct-provider continuation, pass `--allow-direct` when invoking
-the hook, or set `FAK_ALLOW_DIRECT_CODEX_CONTINUE=1` in the hook environment. In
-PowerShell use `$env:FAK_ALLOW_DIRECT_CODEX_CONTINUE=1`; on POSIX shells prefix the
-Codex command with `FAK_ALLOW_DIRECT_CODEX_CONTINUE=1`. The hook intentionally fails
-open on unreadable/missing session evidence or other internal diagnostic errors, and
-writes a diagnostic to stderr rather than blocking unrelated Codex work.
+For a deliberately direct-provider continuation while hardened mode remains selected,
+pass `--allow-direct` when invoking the hook, or set
+`FAK_ALLOW_DIRECT_CODEX_CONTINUE=1` in the hook environment. In PowerShell use
+`$env:FAK_ALLOW_DIRECT_CODEX_CONTINUE=1`; on POSIX shells prefix the Codex command with
+`FAK_ALLOW_DIRECT_CODEX_CONTINUE=1`. The hardened hook intentionally fails open on
+unreadable/missing session evidence or other internal diagnostic errors. For repair
+when `fak` itself is missing or broken, the exact break-glass value remains
+`FAK_CODEX_RAW_RECOVERY=break-glass`; it bypasses the hook and prints a warning.
 
 After the child exits, `fak codex` also tries to find the newest Codex session JSONL
 touched during the run and writes privacy-preserving vCache artifacts: sanitized token

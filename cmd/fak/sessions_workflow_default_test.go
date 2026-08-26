@@ -17,7 +17,7 @@ func TestSessionsCodexLoopHookInjectsWorkflowDefaultOnceForGuardedSession(t *tes
 	input := `{"hook_event_name":"UserPromptSubmit","session_id":"` + sessionID + `","prompt":"implement the multi-step feature and verify it"}`
 
 	var stdout, stderr bytes.Buffer
-	if code := sessionsCodexLoopHook(&stdout, &stderr, strings.NewReader(input), []string{"--codex-home", home}); code != 0 {
+	if code := sessionsCodexLoopHook(&stdout, &stderr, strings.NewReader(input), []string{"--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("hook code=%d stderr=%q", code, stderr.String())
 	}
 	var output codexLoopHookOutput
@@ -45,7 +45,7 @@ func TestSessionsCodexLoopHookInjectsWorkflowDefaultOnceForGuardedSession(t *tes
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := sessionsCodexLoopHook(&stdout, &stderr, strings.NewReader(input), []string{"--codex-home", home}); code != 0 {
+	if code := sessionsCodexLoopHook(&stdout, &stderr, strings.NewReader(input), []string{"--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("second hook code=%d stderr=%q", code, stderr.String())
 	}
 	if stdout.Len() != 0 {
@@ -94,12 +94,12 @@ func TestCodexWorkflowDefaultClassifiesShortPromptAsLikelyDirect(t *testing.T) {
 	}
 }
 
-func TestSessionsCodexLoopHookKeepsWorkflowDefaultOffDirectSession(t *testing.T) {
+func TestSessionsCodexLoopHookKeepsWorkflowDefaultOffHardenedDirectSession(t *testing.T) {
 	home, sessionID := writeCodexHookSession(t, "openai")
 	input := `{"hook_event_name":"UserPromptSubmit","session_id":"` + sessionID + `","prompt":"implement the multi-step feature"}`
 
 	var stdout, stderr bytes.Buffer
-	if code := sessionsCodexLoopHook(&stdout, &stderr, strings.NewReader(input), []string{"--codex-home", home}); code != 0 {
+	if code := sessionsCodexLoopHook(&stdout, &stderr, strings.NewReader(input), []string{"--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("hook code=%d stderr=%q", code, stderr.String())
 	}
 	var output codexLoopHookOutput

@@ -13,9 +13,11 @@ package main
 //	fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
 //	fak sessions codex-loop archive --path FILE [--codex-home DIR] [--dry-run] [--json]
 //	                                                                          diagnose Codex JSONL for repeated tool loops
-//	fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
+//	fak sessions codex-loop-hook [--codex-home DIR] [--hardened] [--allow-direct]
 //	fak sessions workflow-default-report [--codex-home DIR] [--json]
 //	                                                                          internal Codex UserPromptSubmit continuation gate
+//	fak sessions codex-hook-install [--codex-home DIR] [--dry-run] [--hardened]
+//	                                                                          install its scoped hook declaration
 //
 // It reads transcripts and shells `git` (read-only) off any hot path; it writes
 // nothing unless --corpus is given (a scrubbed JSONL corpus, only structured signal,
@@ -64,6 +66,8 @@ func runSessionsWithStdin(stdout, stderr io.Writer, stdin io.Reader, argv []stri
 		return sessionsCodexLoop(stdout, stderr, rest)
 	case "codex-loop-hook":
 		return sessionsCodexLoopHook(stdout, stderr, stdin, rest)
+	case "codex-hook-install":
+		return sessionsCodexHookInstall(stdout, stderr, rest)
 	case "workflow-default-report":
 		return runSessionsWorkflowDefaultReport(stdout, stderr, rest)
 	case "workflow-outcome-study":
@@ -87,10 +91,10 @@ usage:
   fak sessions learn    [--corpus IN] [--project SUB] [--root DIR ...] [--max N] [--json]
   fak sessions codex-loop [--session ID | --path FILE | --recent] [--codex-home DIR] [--json] [--fail-on none|loop|action|unguarded]
 //	fak sessions codex-loop archive --path FILE [--codex-home DIR] [--dry-run] [--json]
-  fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct]
+  fak sessions codex-loop-hook [--codex-home DIR] [--hardened] [--allow-direct]
   fak sessions workflow-default-report [--codex-home DIR] [--json]
   fak sessions workflow-outcome-study --input STUDY.json [--json]
-  fak sessions codex-hook-install [--codex-home DIR] [--dry-run]
+  fak sessions codex-hook-install [--codex-home DIR] [--dry-run] [--hardened]
 
 Start here:
   fak sessions score        fold THIS host's fak sessions, witness their commits, and
@@ -106,9 +110,11 @@ Start here:
                             --session nor --path, it audits $CODEX_THREAD_ID when set.
   fak sessions codex-loop-hook
   fak sessions workflow-default-report --json
-                            internal UserPromptSubmit hook: block the next prompt when the
-                            active Codex session bypasses fak guard. Set
-                            FAK_ALLOW_DIRECT_CODEX_CONTINUE=1 for an intentional override.
+                            internal UserPromptSubmit hook: inject scoped context for a
+                            FAK_GUARD_ACTIVE child. Direct prompts are byte-silent by
+                            default; --hardened (or FAK_CODEX_SUBMIT_HARDENED=1) opts into
+                            blocking unguarded peers. FAK_ALLOW_DIRECT_CODEX_CONTINUE=1
+                            remains an override within hardened mode.
 `)
 }
 

@@ -37,6 +37,7 @@ func TestCodexProjectHookRequiresExactBreakGlassValue(t *testing.T) {
 	cmd := codexProjectHookCommand(t, h)
 	cmd.Env = append(os.Environ(),
 		codexRawRecoveryEnv+"=1",
+		codexLoopHookHardenedEnv+"=1",
 		"PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"),
 	)
 	cmd.Stdin = strings.NewReader("{\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"ordinary raw turn\"}\n")
