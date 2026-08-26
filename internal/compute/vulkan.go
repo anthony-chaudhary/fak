@@ -1324,15 +1324,9 @@ func (k *vulkanKV) Clone() KVStore {
 func (k *vulkanKV) Free() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
-	free := func(d *vslice) {
+	releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *vslice) {
 		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fvk_free(pointer) })
-	}
-	for l := range k.K {
-		free(&k.K[l])
-		free(&k.Kraw[l])
-		free(&k.V[l])
-	}
-	k.pos = nil
+	})
 }
 
 func (k *vulkanKV) readVS(d *vslice) []float32 {

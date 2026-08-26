@@ -44,3 +44,12 @@ func releaseDeviceSlice(pointer *unsafe.Pointer, length, capacity *int, release 
 	}
 	clearDeviceSliceMetadata(length, capacity)
 }
+
+func releaseKVDeviceSlices[D any](keys, rawKeys, values []D, positions *[]int, release func(*D)) {
+	for layer := range keys {
+		release(&keys[layer])
+		release(&rawKeys[layer])
+		release(&values[layer])
+	}
+	*positions = nil
+}
