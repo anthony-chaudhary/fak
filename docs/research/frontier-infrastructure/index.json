@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T18:39:00-07:00",
-  "issue": 9317,
+  "updated_at": "2026-08-26T18:56:00-07:00",
+  "issue": 9318,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 146,
+    "entry_count": 151,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -97,6 +97,7 @@
       "Anthropic / Mistral / Microsoft",
       "Anthropic / Nscale",
       "Apple",
+      "Applied Digital",
       "Baidu",
       "BurstGPT v1.1",
       "ByteDance Seed",
@@ -111,6 +112,7 @@
       "European Commission / EuroHPC",
       "European Union / AI Office",
       "FineServe",
+      "Fireworks AI",
       "GE Vernova / Crusoe",
       "GitHub Copilot coding agent",
       "Google",
@@ -126,9 +128,12 @@
       "IndiaAI Mission",
       "International Energy Agency",
       "LG AI Research",
+      "Lambda",
       "Large-scale training reliability study",
       "Leyline",
+      "Lightmatter",
       "MBZUAI / G42 Institute of Foundation Models",
+      "Marvell / Celestial AI",
       "Meta",
       "Microsoft",
       "Microsoft Research Mnemosyne",
@@ -5484,6 +5489,205 @@
       "fak_implications": [
         "Treat hardware generation, network topology, and phase pool balance as autoscaler state.",
         "Label this as reported production measurement and require matched local reproduction before claiming analogous gains."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "lambda-microsoft-gpu-contract-2025",
+      "category": "ai_cloud",
+      "entity": "Lambda",
+      "topic": [
+        "neocloud",
+        "customer_contract",
+        "gpu_deployment",
+        "customer_concentration",
+        "funding"
+      ],
+      "published_at": "2025-11-03",
+      "event_at": "2025-11-03",
+      "source_title": "Lambda Announces Multibillion-Dollar Agreement With Microsoft to Deploy AI Infrastructure Powered by Tens of Thousands of NVIDIA GPUs",
+      "source_url": "https://lambda.ai/blog/lambda-announces-multibillion-dollar-agreement-with-microsoft-to-deploy-ai-infrastructure-powered-by-tens-of-thousands-of-nvidia-gpus",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Lambda announced a multi-year, multibillion-dollar Microsoft agreement to deploy tens of thousands of NVIDIA GPUs including GB300 NVL72 systems; later financing was positioned to expand its AI-factory footprint.",
+      "quantified": {
+        "physical_nvidia_gpus": "tens_of_thousands"
+      },
+      "assumptions": [
+        "Neocloud capacity can be financed against concentrated multi-year hyperscaler demand and deployed in named accelerator systems."
+      ],
+      "contradictions_or_limits": [
+        "The announcement does not disclose exact contract value, GPU count, site, power, delivery schedule, acceptance, utilization, or revenue recognition.",
+        "A contract and financing plan are not installed healthy capacity."
+      ],
+      "fak_implications": [
+        "Track customer concentration, financed assets, physical delivery, acceptance, and useful goodput separately.",
+        "Retain accelerator SKU and system boundary rather than converting to generic GPU equivalents."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "applied-digital-polaris-live-2026",
+      "category": "datacenter_physical",
+      "entity": "Applied Digital",
+      "topic": [
+        "site_lifecycle",
+        "critical_it_load",
+        "ready_for_service",
+        "contracted_capacity",
+        "construction"
+      ],
+      "published_at": "2026-07-01",
+      "event_at": "2026-07-01",
+      "source_title": "Applied Digital Delivers Second Building at Polaris Forge 1",
+      "source_url": "https://ir.applieddigital.com/_assets/_7657ad86a3899c3d591ec79f9937f175/appliedblockchaininc/news/2026-07-01_Applied_Digital_Delivers_Second_Building_at_157.pdf",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Applied Digital said Building 2 Phase 1 at Polaris Forge 1 reached Ready for Service with 75 MW, bringing campus live capacity to 175 MW; full-build contracted critical IT load is 400 MW.",
+      "quantified": {
+        "new_ready_for_service_mw": 75,
+        "campus_live_capacity_mw": 175,
+        "full_build_contracted_critical_it_mw": 400
+      },
+      "assumptions": [
+        "Ready-for-service and live critical IT load are stronger lifecycle evidence than lease, campus, or utility-power totals."
+      ],
+      "contradictions_or_limits": [
+        "Company-reported Ready for Service does not disclose customer accelerator installation, utilization, PUE, uptime, or useful AI goodput.",
+        "The remaining 225 MW of contracted full-build load is not yet live in this source."
+      ],
+      "fak_implications": [
+        "Track site phase, live critical IT MW, contracted future MW, and customer compute acceptance separately.",
+        "Do not treat total campus design or lease capacity as current service capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "lightmatter-m1000-photonic-platform-2025",
+      "category": "supply_chain",
+      "entity": "Lightmatter",
+      "topic": [
+        "photonic_interconnect",
+        "scale_up",
+        "bandwidth",
+        "validation",
+        "production_readiness"
+      ],
+      "published_at": "2025-09-05",
+      "event_at": "2025-09-05",
+      "source_title": "Seeing is Believing: A Technical Deep Dive into Lightmatter’s Hardware",
+      "source_url": "https://lightmatter.co/blog/seeing-is-believing-a-technical-deep-dive-into-lightmatters-hardware/",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Lightmatter described Passage M1000 as a production-ready 3D photonic interposer/server platform with a 4,000 mm² die complex, 34 chiplets, 1,024 SerDes lanes, 256 optical fibers, and up to 114 Tbps total bandwidth.",
+      "quantified": {
+        "silicon_die_complex_mm2": 4000,
+        "integrated_chiplets": 34,
+        "serdes_lanes": 1024,
+        "optical_fibers": 256,
+        "total_bandwidth_tbps_up_to": 114
+      },
+      "assumptions": [
+        "Scale-up interconnect density and energy can gate package and rack scaling independently of compute silicon."
+      ],
+      "contradictions_or_limits": [
+        "Production-ready and bandwidth figures are vendor claims; shipments, yield, customer qualification, system availability, power, error rates, and application goodput are not disclosed.",
+        "Component bandwidth is not cluster goodput."
+      ],
+      "fak_implications": [
+        "Track sample, validation, qualification, shipment, integration, and production states for photonic interconnect.",
+        "Count protocol, topology, error, power, packaging, and application overhead before using peak bandwidth."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "marvell-celestial-ai-acquisition-2026",
+      "category": "market_signal",
+      "entity": "Marvell / Celestial AI",
+      "topic": [
+        "acquisition",
+        "photonic_fabric",
+        "interconnect",
+        "revenue_milestones",
+        "startup_lifecycle"
+      ],
+      "published_at": "2026-02-02",
+      "event_at": "2026-02-02",
+      "source_title": "Marvell Completes Acquisition of Celestial AI",
+      "source_url": "https://investor.marvell.com/news-events/press-releases/detail/1005/marvell-completes-acquisition-of-celestial-ai",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Marvell completed its Celestial AI acquisition on February 2, 2026, integrating the team and photonic-fabric technology into its Data Center Group and projecting initial revenue contribution in the second half of fiscal 2028.",
+      "quantified": {
+        "cash_balance_reduction_usd": 1000000000,
+        "new_diluted_shares_approx": 27000000,
+        "annual_non_gaap_opex_increase_usd_approx": 50000000,
+        "target_annualized_revenue_fy2028_q4_usd": 500000000,
+        "target_annualized_revenue_fy2029_q4_usd": 1000000000
+      },
+      "assumptions": [
+        "Optical-fabric startups may consolidate into incumbent semiconductor portfolios before high-volume deployment."
+      ],
+      "contradictions_or_limits": [
+        "Completion and projected revenue milestones do not establish product shipments, qualification, interoperability, or deployed goodput.",
+        "Integration success, roadmap continuity, and revenue projections require later evidence."
+      ],
+      "fak_implications": [
+        "Track acquisition close, product integration, customer qualification, revenue milestones, and roadmap continuity separately.",
+        "Do not interpret purchase price as deployed capacity or technical validation."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "fireworks-series-d-tokens-2026",
+      "category": "ai_cloud",
+      "entity": "Fireworks AI",
+      "topic": [
+        "inference_platform",
+        "funding",
+        "revenue_run_rate",
+        "token_volume",
+        "customer_specialization"
+      ],
+      "published_at": "2026-07-15",
+      "event_at": "2026-07-15",
+      "source_title": "Announcing our Series D and $1B ARR",
+      "source_url": "https://fireworks.ai/blog/series-d-announcement",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Fireworks announced a $1.505B Series D at a $17.5B valuation, more than $1B annualized revenue run rate, and more than 40T tokens served daily, with over 95% from customer-specialized models.",
+      "quantified": {
+        "series_d_usd": 1505000000,
+        "valuation_usd": 17500000000,
+        "annualized_revenue_run_rate_usd_gt": 1000000000,
+        "tokens_per_day_gt": 40000000000000,
+        "customer_specialized_token_share_pct_gt": 95
+      },
+      "assumptions": [
+        "Inference-platform traffic may be dominated by customer-specialized models rather than one public model popularity distribution."
+      ],
+      "contradictions_or_limits": [
+        "All business and token-volume figures are company-reported; token counting, cache effects, model mix, customer concentration, quality, and profitability are undisclosed.",
+        "Funding, valuation, ARR, and token volume are different evidence classes and do not prove margin or physical capacity."
+      ],
+      "fak_implications": [
+        "Separate public-model, fine-tuned, and customer-specialized traffic in workload generation.",
+        "Require token accounting, cache, model, hardware, and revenue definitions before comparing inference platforms."
       ],
       "rumor": {
         "is_rumor": false
