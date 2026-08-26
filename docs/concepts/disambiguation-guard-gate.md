@@ -75,3 +75,157 @@ This map positions the current `guard-gate` coverage backlog. Each entry names t
 - **`guardactiveenv`** — the exact guard-gate symbol, not the broader family label.
 - **`guardcodexoauthplaceholderapikey`** — the exact guard-gate symbol, not the broader family label.
 - **`guardalloweffectivereadlayers`** — the exact guard-gate symbol, not the broader family label.
+
+
+### checkAndEmitReportGate (checked-report emitter)
+
+checkAndEmitReportGate evaluates a typed report with its leaf-specific check function, attaches the resulting exit code and message through WithGate, then emits the same gated report as JSON or human text.
+
+**Distinct from:** It is a generic report-output adapter used by milestone, program, and operator checks. It is not the runtime gate decision point that admits a tool call, and it does not decide a report policy itself.
+
+
+### dispatchWavePrelaunchGate (audited wave admission)
+
+prelaunchGate is the dispatchWavePrelaunchGate derived from the audited execution plan; it records LAUNCH or HOLD, target counts, ready/refused/error counts, and the refusal set used to admit or reprice a worker wave.
+
+**Distinct from:** It is the audited admission result for a dispatch wave. It is not checkAndEmitReportGate, which attaches and renders a leaf check result without deciding whether workers launch.
+
+
+### guardLaunchPlan (semantic/executable launch identity)
+
+guardLaunchPlan carries the semantic agent arguments used for receipts and policy identity separately from the executable arguments passed to the child, together with the resolved harness profile and provider.
+
+**Distinct from:** It is the immutable identity of one resolved guard launch. It is not newGuardLaunchPlan, which constructs that identity, and it is not the upstream-posture resolver that selects routing and credentials.
+
+
+### newGuardLaunchPlan (launch identity constructor)
+
+newGuardLaunchPlan clones the semantic argument vector, initializes the executable vector, and records the normalized harness profile and provider used to construct a guardLaunchPlan.
+
+**Distinct from:** It constructs the launch identity before execution. It is not the guardLaunchPlan value it returns, nor the brokered process-launch path that later consumes that value.
+
+
+### launchGuardChildWithBroker (brokered guard child launch)
+
+launchGuardChildWithBroker validates the resolved launch plan through the tool-process gate, records the broker spawn attempt, and starts the guard child with the approved executable arguments.
+
+**Distinct from:** It is the process-boundary operation that consumes an already resolved guardLaunchPlan. It does not construct semantic launch identity and it is not the later resource-limit wait event.
+
+
+### guardChildResourceLimit (child wait event)
+
+guardChildResourceLimit is the guardChildWaitKind emitted when the child resource watcher detects a configured limit breach, causing the supervisor to stop the child and record that outcome in its receipt.
+
+**Distinct from:** It is an observed post-launch termination event. It is not the broker admission that authorizes the process to start, and it is not the resource-limit configuration itself.
+
+
+### resolveGuardUpstreamPosture (guard route and trust resolver)
+
+resolveGuardUpstreamPosture resolves local-only versus proxy execution, upstream wire and provider, base URL and credentials, enterprise trust or cloud waiver, account refresh/failover, and request headers before the guard child is spawned.
+
+**Distinct from:** It selects the upstream route and its trust posture. It is not the generic tool-call gate, and it does not itself launch the child process.
+
+
+### FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM (cloud-route waiver)
+
+FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM is the explicit waiver key that permits a guard launch through an unsupported cloud upstream while retaining the local hook floor, tool broker, transcript, and sandbox controls.
+
+**Distinct from:** It waives model-traffic adjudication for a route; it does not make that route adjudicated. It is an input consumed by resolveGuardUpstreamPosture, not the resolver or an automatic fallback.
+
+
+### guardCodexSubscriptionHeaders (Codex account request headers)
+
+guardCodexSubscriptionHeaders converts a resolved Codex ChatGPT subscription credential into the Authorization, originator, and account-routing headers required by the upstream request.
+
+**Distinct from:** It assembles one provider-specific header set after credential resolution. It does not choose the upstream posture, refresh the account, or authorize a tool call.
+
+
+### guardAllowOverlayVersion (allow overlay schema version)
+
+guardAllowOverlayVersion identifies the persisted schema understood by the guard allow-overlay loader and writer, so allow decisions are decoded against an explicit compatibility boundary.
+
+**Distinct from:** It versions the allow-overlay representation only. It is not a runtime allow decision, and it is independent of the deny-overlay schema version.
+
+
+### guardDenyOverlayVersion (deny overlay schema version)
+
+guardDenyOverlayVersion identifies the persisted schema understood by the guard deny-overlay loader and writer, so deny decisions are decoded against an explicit compatibility boundary.
+
+**Distinct from:** It versions the deny-overlay representation only. It neither performs a runtime denial nor versions the separate allow overlay.
+
+
+### guardInfoCacheSourceObserved (cache-observation predicate)
+
+guardInfoCacheSourceObserved reports whether a guard observation contains enough cache-source evidence to describe provider, managed, or local cache posture in guard info output.
+
+**Distinct from:** It is a presence predicate over observation data. It does not choose a cache source, render the source label, or admit a request.
+
+
+### guardInfoCacheSourceWord (cache-source label renderer)
+
+guardInfoCacheSourceWord converts an observed guard cache-source state into the concise semantic label used in guard info text.
+
+**Distinct from:** It renders the source label after observation has been established. It is not guardInfoCacheSourceObserved, which decides whether source evidence is present, and it does not render full observation rows.
+
+
+### guardInfoObservationRows (guard observation row builder)
+
+guardInfoObservationRows builds the typed guard-info observation rows, including compatibility handling for legacy observations, before the human or JSON report is emitted.
+
+**Distinct from:** It materializes structured observation rows. It is not the single cache-source word renderer and it does not summarize managed-cache posture into prose.
+
+
+### guardInfoManagedCacheText (managed-cache posture clause)
+
+guardInfoManagedCacheText renders the managed-cache posture clause in guard info from the resolved observation and cache evidence.
+
+**Distinct from:** It produces one human-readable managed-cache clause. It is not the typed observation-row builder, and it does not render live adjudication deny or repair details.
+
+
+### guardInfoAdjudicationDetail (live adjudication detail clause)
+
+guardInfoAdjudicationDetail renders the live adjudication detail for guard info, including the observed deny or repair outcome and its forensic context.
+
+**Distinct from:** It explains an adjudication outcome. It is not managed-cache posture text and it does not decide or execute the adjudication being described.
+
+
+### guardInfoSession (live guard session projection)
+
+guardInfoSession returns the live guardvars.SessionVars projection used to populate the session portion of guard info output.
+
+**Distinct from:** It reads and projects the current session state for inspection. It does not reconstruct observation history and it does not build the hook arguments used to start a session.
+
+
+### guardSessionStartArgs (guard hook start arguments)
+
+guardSessionStartArgs builds the argument vector for the guard session-start hook, including managed-mode, trace, and provider context required by that hook invocation.
+
+**Distinct from:** It serializes startup context for a hook process. It is not guardInfoSession, which projects an already live session for inspection, and it does not launch the guarded model child.
+
+
+### GateCheck (dispatch backpressure input)
+
+internal/dispatchtick.GateCheck is the measured hook-health input to dispatch backpressure: hook identity, budget, observed overhead breach, and the minimum worker count the policy may retain.
+
+**Distinct from:** It is typed operational evidence used to scale a dispatch wave. Unlike CheckGate it does not return a report exit code, and unlike nativeperf.GateCheck it does not record a single benchmark predicate.
+
+
+### GateCheck (native-performance predicate result)
+
+internal/nativeperf.GateCheck is one named Status and Detail result inside a native-performance GateVerdict, preserving the evidence for an individual quality, engine, or performance predicate.
+
+**Distinct from:** It is a single benchmark-verdict row. It is not dispatchtick.GateCheck, which carries hook overhead and worker-floor inputs for dispatch backpressure, or CheckGate, which returns a report-level exit code.
+
+
+### splitPackedQueryGate (attention query/output-gate splitter)
+
+splitPackedQueryGate separates each packed query projection head into its query vector and output-gate vector so the attention result can be modulated by the per-head gate.
+
+**Distinct from:** It splits one fused attention projection. It is not the attention output gate application itself, and it is unrelated to the feed-forward shared-expert gate.
+
+
+### shared_expert_gate (Qwen3.5 shared-expert scalar gate)
+
+shared_expert_gate is the hidden-to-one sigmoid projection that scales Qwen3.5 shared_expert output before that always-on feed-forward contribution is added to routed expert output.
+
+**Distinct from:** It gates the singular Qwen3.5 shared expert in the MoE feed-forward path. It is not splitPackedQueryGate or the per-head attention output gate, and it is not the plural ungated shared_experts layout used by GLM.

@@ -27,10 +27,11 @@
       "family": "witness-proof",
       "kind": "symbol",
       "definition": "dispatchtick.ClaimWitnessed is the CLAIM_WITNESSED verdict a finished dispatch worker's slot grades into when `dos commit-audit` confirms its resolving commit cleared the diff-witnessed keep-bit - the positive branch of the .witness sidecar claim vocabulary (ClaimWitnessed / ClaimUnwitnessed / ClaimNoCommit).",
-      "distinction": "It records that a worker's commit WAS independently corroborated by the closure audit, NOT the abi require-witness REQUEST for proof (VerdictRequireWitness) nor the kernel's terminal DENY label for missing proof (ReasonUnwitnessed).",
+      "distinction": "It records that a dispatch worker's COMMIT was independently corroborated by the closure audit. It is not ClassWitnessed, which classifies native-performance throughput evidence, the abi require-witness request for proof (VerdictRequireWitness), or the kernel's terminal deny label for missing proof (ReasonUnwitnessed).",
       "distinct_from": [
         "VerdictRequireWitness (abi verdict)",
-        "ReasonUnwitnessed (deny reason)"
+        "ReasonUnwitnessed (deny reason)",
+        "nativeperf-class-witnessed"
       ],
       "aliases": [],
       "grounding": "claimwitnessed",

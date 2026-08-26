@@ -398,16 +398,16 @@
     },
     {
       "id": "cov-debt-tail-guard-gate-breathgate",
-      "canonical": "guard-gate implementation surface for breathgate",
+      "canonical": "runBreath (documentation-breath ratchet gate)",
       "family": "guard-gate",
       "kind": "symbol",
-      "definition": "`breathgate` is the exact repository symbol or term named `breathgate` in the guard-gate concept family; its owning implementation determines the concrete operation.",
-      "distinction": "This row positions the exact `breathgate` spelling rather than the broader `guard-gate` domain or a sibling symbol.",
+      "definition": "cmd/fak.runBreath audits documentation vocabulary and, when `--gate` is armed, exits 1 only for findings above the counted baseline; its default census is advisory and an input failure exits 2.",
+      "distinction": "This is a repository-documentation growth ratchet. It is not the runtime `gate` decision point that admits or refuses a tool call, and it does not enforce existing below-baseline findings.",
       "distinct_from": [
-        "insufficientaggregatehbm"
+        "gate"
       ],
       "aliases": [],
-      "grounding": "breathgate",
+      "grounding": "runBreath",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
       "parent": "",

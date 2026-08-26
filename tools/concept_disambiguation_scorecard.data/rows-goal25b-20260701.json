@@ -56,25 +56,6 @@
       "gaps": []
     },
     {
-      "id": "x-goal25b-plan-cmdplanaudit",
-      "canonical": "cmdPlanAudit",
-      "family": "plan",
-      "kind": "symbol",
-      "definition": "cmdPlanAudit (cmd/fak/plan_audit.go) is the `fak plan-audit` CLI entry, exiting with runPlanAudit's status over the plan corpus.",
-      "distinction": "The plan-AUDIT command, not a plan document or planner.",
-      "distinct_from": [
-        "x-goal25b-plan-totalplans",
-        "plan-planner"
-      ],
-      "aliases": [],
-      "grounding": "cmdPlanAudit",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "",
-      "parent": "",
-      "verdict": "defined",
-      "gaps": []
-    },
-    {
       "id": "x-goal25b-plan-totalplans",
       "canonical": "total_plans",
       "family": "plan",
@@ -82,7 +63,7 @@
       "definition": "total_plans (internal/planaudit) is the plan-audit counter of how many plan documents the audit walked.",
       "distinction": "An audit COUNT over plan documents, not a plan itself.",
       "distinct_from": [
-        "x-goal25b-plan-cmdplanaudit"
+        "plan-planner"
       ],
       "aliases": [],
       "grounding": "total_plans",
@@ -1344,8 +1325,7 @@
       "definition": "origin_witness (internal/taskmgr, /fak/tasks filter) is the evidence axis naming WHICH witness vouched for a task's origin claim.",
       "distinction": "Names the vouching witness on a task record; PathWitness/ShapeWitness are witness kinds it may name.",
       "distinct_from": [
-        "x-goal25-witness-proof-pathwitness",
-        "x1348-witness-proof-fakwitnessargkey"
+        "x-goal25-witness-proof-pathwitness"
       ],
       "aliases": [],
       "grounding": "origin_witness",

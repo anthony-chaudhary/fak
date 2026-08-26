@@ -1,0 +1,440 @@
+{
+  "rows": [
+    {
+      "id": "issue9181-guard-gate-check-and-emit-report",
+      "canonical": "checkAndEmitReportGate (checked-report emitter)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "checkAndEmitReportGate evaluates a typed report with its leaf-specific check function, attaches the resulting exit code and message through WithGate, then emits the same gated report as JSON or human text.",
+      "distinction": "It is a generic report-output adapter used by milestone, program, and operator checks. It is not the runtime gate decision point that admits a tool call, and it does not decide a report policy itself.",
+      "distinct_from": [
+        "gate",
+        "issue9181-guard-gate-wave-prelaunch"
+      ],
+      "aliases": [],
+      "grounding": "checkAndEmitReportGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-wave-prelaunch",
+      "canonical": "dispatchWavePrelaunchGate (audited wave admission)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "prelaunchGate is the dispatchWavePrelaunchGate derived from the audited execution plan; it records LAUNCH or HOLD, target counts, ready/refused/error counts, and the refusal set used to admit or reprice a worker wave.",
+      "distinction": "It is the audited admission result for a dispatch wave. It is not checkAndEmitReportGate, which attaches and renders a leaf check result without deciding whether workers launch.",
+      "distinct_from": [
+        "issue9181-guard-gate-check-and-emit-report"
+      ],
+      "aliases": [
+        "dispatchWavePrelaunchGate"
+      ],
+      "grounding": "prelaunchGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-launch-plan",
+      "canonical": "guardLaunchPlan (semantic/executable launch identity)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardLaunchPlan carries the semantic agent arguments used for receipts and policy identity separately from the executable arguments passed to the child, together with the resolved harness profile and provider.",
+      "distinction": "It is the immutable identity of one resolved guard launch. It is not newGuardLaunchPlan, which constructs that identity, and it is not the upstream-posture resolver that selects routing and credentials.",
+      "distinct_from": [
+        "gate",
+        "issue9181-guard-gate-new-launch-plan",
+        "issue9181-guard-gate-launch-with-broker"
+      ],
+      "aliases": [],
+      "grounding": "guardLaunchPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-new-launch-plan",
+      "canonical": "newGuardLaunchPlan (launch identity constructor)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "newGuardLaunchPlan clones the semantic argument vector, initializes the executable vector, and records the normalized harness profile and provider used to construct a guardLaunchPlan.",
+      "distinction": "It constructs the launch identity before execution. It is not the guardLaunchPlan value it returns, nor the brokered process-launch path that later consumes that value.",
+      "distinct_from": [
+        "issue9181-guard-gate-launch-plan"
+      ],
+      "aliases": [],
+      "grounding": "newGuardLaunchPlan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-launch-with-broker",
+      "canonical": "launchGuardChildWithBroker (brokered guard child launch)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "launchGuardChildWithBroker validates the resolved launch plan through the tool-process gate, records the broker spawn attempt, and starts the guard child with the approved executable arguments.",
+      "distinction": "It is the process-boundary operation that consumes an already resolved guardLaunchPlan. It does not construct semantic launch identity and it is not the later resource-limit wait event.",
+      "distinct_from": [
+        "issue9181-guard-gate-launch-plan",
+        "issue9181-guard-gate-child-resource-limit"
+      ],
+      "aliases": [],
+      "grounding": "launchGuardChildWithBroker",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-child-resource-limit",
+      "canonical": "guardChildResourceLimit (child wait event)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardChildResourceLimit is the guardChildWaitKind emitted when the child resource watcher detects a configured limit breach, causing the supervisor to stop the child and record that outcome in its receipt.",
+      "distinction": "It is an observed post-launch termination event. It is not the broker admission that authorizes the process to start, and it is not the resource-limit configuration itself.",
+      "distinct_from": [
+        "issue9181-guard-gate-launch-with-broker"
+      ],
+      "aliases": [],
+      "grounding": "guardChildResourceLimit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-upstream-posture",
+      "canonical": "resolveGuardUpstreamPosture (guard route and trust resolver)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "resolveGuardUpstreamPosture resolves local-only versus proxy execution, upstream wire and provider, base URL and credentials, enterprise trust or cloud waiver, account refresh/failover, and request headers before the guard child is spawned.",
+      "distinction": "It selects the upstream route and its trust posture. It is not the generic tool-call gate, and it does not itself launch the child process.",
+      "distinct_from": [
+        "gate",
+        "issue9181-guard-gate-unsupported-upstream-waiver",
+        "issue9181-guard-gate-codex-subscription-headers"
+      ],
+      "aliases": [],
+      "grounding": "resolveGuardUpstreamPosture",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-unsupported-upstream-waiver",
+      "canonical": "FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM (cloud-route waiver)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM is the explicit waiver key that permits a guard launch through an unsupported cloud upstream while retaining the local hook floor, tool broker, transcript, and sandbox controls.",
+      "distinction": "It waives model-traffic adjudication for a route; it does not make that route adjudicated. It is an input consumed by resolveGuardUpstreamPosture, not the resolver or an automatic fallback.",
+      "distinct_from": [
+        "issue9181-guard-gate-upstream-posture"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-codex-subscription-headers",
+      "canonical": "guardCodexSubscriptionHeaders (Codex account request headers)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardCodexSubscriptionHeaders converts a resolved Codex ChatGPT subscription credential into the Authorization, originator, and account-routing headers required by the upstream request.",
+      "distinction": "It assembles one provider-specific header set after credential resolution. It does not choose the upstream posture, refresh the account, or authorize a tool call.",
+      "distinct_from": [
+        "issue9181-guard-gate-upstream-posture"
+      ],
+      "aliases": [],
+      "grounding": "guardCodexSubscriptionHeaders",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-allow-overlay-version",
+      "canonical": "guardAllowOverlayVersion (allow overlay schema version)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "guardAllowOverlayVersion identifies the persisted schema understood by the guard allow-overlay loader and writer, so allow decisions are decoded against an explicit compatibility boundary.",
+      "distinction": "It versions the allow-overlay representation only. It is not a runtime allow decision, and it is independent of the deny-overlay schema version.",
+      "distinct_from": [
+        "gate",
+        "issue9181-guard-gate-deny-overlay-version"
+      ],
+      "aliases": [],
+      "grounding": "guardAllowOverlayVersion",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-deny-overlay-version",
+      "canonical": "guardDenyOverlayVersion (deny overlay schema version)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "guardDenyOverlayVersion identifies the persisted schema understood by the guard deny-overlay loader and writer, so deny decisions are decoded against an explicit compatibility boundary.",
+      "distinction": "It versions the deny-overlay representation only. It neither performs a runtime denial nor versions the separate allow overlay.",
+      "distinct_from": [
+        "issue9181-guard-gate-allow-overlay-version"
+      ],
+      "aliases": [],
+      "grounding": "guardDenyOverlayVersion",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-info-cache-observed",
+      "canonical": "guardInfoCacheSourceObserved (cache-observation predicate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardInfoCacheSourceObserved reports whether a guard observation contains enough cache-source evidence to describe provider, managed, or local cache posture in guard info output.",
+      "distinction": "It is a presence predicate over observation data. It does not choose a cache source, render the source label, or admit a request.",
+      "distinct_from": [
+        "gate",
+        "issue9181-guard-gate-info-cache-source-word"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoCacheSourceObserved",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-info-cache-source-word",
+      "canonical": "guardInfoCacheSourceWord (cache-source label renderer)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardInfoCacheSourceWord converts an observed guard cache-source state into the concise semantic label used in guard info text.",
+      "distinction": "It renders the source label after observation has been established. It is not guardInfoCacheSourceObserved, which decides whether source evidence is present, and it does not render full observation rows.",
+      "distinct_from": [
+        "issue9181-guard-gate-info-cache-observed",
+        "issue9181-guard-gate-info-observation-rows"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoCacheSourceWord",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-info-observation-rows",
+      "canonical": "guardInfoObservationRows (guard observation row builder)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardInfoObservationRows builds the typed guard-info observation rows, including compatibility handling for legacy observations, before the human or JSON report is emitted.",
+      "distinction": "It materializes structured observation rows. It is not the single cache-source word renderer and it does not summarize managed-cache posture into prose.",
+      "distinct_from": [
+        "issue9181-guard-gate-info-cache-source-word",
+        "issue9181-guard-gate-info-managed-cache",
+        "issue9181-guard-gate-info-session"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoObservationRows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-info-managed-cache",
+      "canonical": "guardInfoManagedCacheText (managed-cache posture clause)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardInfoManagedCacheText renders the managed-cache posture clause in guard info from the resolved observation and cache evidence.",
+      "distinction": "It produces one human-readable managed-cache clause. It is not the typed observation-row builder, and it does not render live adjudication deny or repair details.",
+      "distinct_from": [
+        "issue9181-guard-gate-info-observation-rows",
+        "issue9181-guard-gate-info-adjudication"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoManagedCacheText",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-info-adjudication",
+      "canonical": "guardInfoAdjudicationDetail (live adjudication detail clause)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardInfoAdjudicationDetail renders the live adjudication detail for guard info, including the observed deny or repair outcome and its forensic context.",
+      "distinction": "It explains an adjudication outcome. It is not managed-cache posture text and it does not decide or execute the adjudication being described.",
+      "distinct_from": [
+        "issue9181-guard-gate-info-managed-cache"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoAdjudicationDetail",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-info-session",
+      "canonical": "guardInfoSession (live guard session projection)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardInfoSession returns the live guardvars.SessionVars projection used to populate the session portion of guard info output.",
+      "distinction": "It reads and projects the current session state for inspection. It does not reconstruct observation history and it does not build the hook arguments used to start a session.",
+      "distinct_from": [
+        "issue9181-guard-gate-info-observation-rows",
+        "issue9181-guard-gate-session-start-args"
+      ],
+      "aliases": [],
+      "grounding": "guardInfoSession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-session-start-args",
+      "canonical": "guardSessionStartArgs (guard hook start arguments)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "guardSessionStartArgs builds the argument vector for the guard session-start hook, including managed-mode, trace, and provider context required by that hook invocation.",
+      "distinction": "It serializes startup context for a hook process. It is not guardInfoSession, which projects an already live session for inspection, and it does not launch the guarded model child.",
+      "distinct_from": [
+        "issue9181-guard-gate-info-session"
+      ],
+      "aliases": [],
+      "grounding": "guardSessionStartArgs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-dispatch-gate-check",
+      "canonical": "GateCheck (dispatch backpressure input)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/dispatchtick.GateCheck is the measured hook-health input to dispatch backpressure: hook identity, budget, observed overhead breach, and the minimum worker count the policy may retain.",
+      "distinction": "It is typed operational evidence used to scale a dispatch wave. Unlike CheckGate it does not return a report exit code, and unlike nativeperf.GateCheck it does not record a single benchmark predicate.",
+      "distinct_from": [
+        "gate",
+        "x2-guard-gate-checkgate",
+        "issue9181-guard-gate-nativeperf-gate-check"
+      ],
+      "aliases": [],
+      "grounding": "GateCheck",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-nativeperf-gate-check",
+      "canonical": "GateCheck (native-performance predicate result)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "internal/nativeperf.GateCheck is one named Status and Detail result inside a native-performance GateVerdict, preserving the evidence for an individual quality, engine, or performance predicate.",
+      "distinction": "It is a single benchmark-verdict row. It is not dispatchtick.GateCheck, which carries hook overhead and worker-floor inputs for dispatch backpressure, or CheckGate, which returns a report-level exit code.",
+      "distinct_from": [
+        "issue9181-guard-gate-dispatch-gate-check",
+        "x2-guard-gate-checkgate"
+      ],
+      "aliases": [],
+      "grounding": "GateCheck",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-split-packed-query",
+      "canonical": "splitPackedQueryGate (attention query/output-gate splitter)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "splitPackedQueryGate separates each packed query projection head into its query vector and output-gate vector so the attention result can be modulated by the per-head gate.",
+      "distinction": "It splits one fused attention projection. It is not the attention output gate application itself, and it is unrelated to the feed-forward shared-expert gate.",
+      "distinct_from": [
+        "attn-output-gate",
+        "issue9181-guard-gate-shared-expert"
+      ],
+      "aliases": [],
+      "grounding": "splitPackedQueryGate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9181-guard-gate-shared-expert",
+      "canonical": "shared_expert_gate (Qwen3.5 shared-expert scalar gate)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "shared_expert_gate is the hidden-to-one sigmoid projection that scales Qwen3.5 shared_expert output before that always-on feed-forward contribution is added to routed expert output.",
+      "distinction": "It gates the singular Qwen3.5 shared expert in the MoE feed-forward path. It is not splitPackedQueryGate or the per-head attention output gate, and it is not the plural ungated shared_experts layout used by GLM.",
+      "distinct_from": [
+        "issue9181-guard-gate-split-packed-query"
+      ],
+      "aliases": [],
+      "grounding": "shared_expert_gate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

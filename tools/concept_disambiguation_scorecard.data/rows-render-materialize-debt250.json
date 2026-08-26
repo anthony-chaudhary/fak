@@ -79,8 +79,8 @@
       "canonical": "render-materialize implementation surface for rendertui",
       "family": "render-materialize",
       "kind": "symbol",
-      "definition": "`RenderTUI` is the render-materialize symbol declared or used at `cmd/fak/harness_preview.go:62` as `fmt.Fprint(stdout, harnesspreview.RenderTUI(preview))`. This row positions that concrete implementation surface, not merely the family label.",
-      "distinction": "Use `RenderTUI` for the operation evidenced at `cmd/fak/harness_preview.go:62`. Unlike `x2-render-materialize-renderer`, it names this exact implementation surface; unlike `render-materialize`, it is not the umbrella domain.",
+      "definition": "harnesspreview.RenderTUI renders one typed harness launch-change Preview as the compact TUI pane printed by `fak harness preview`; it is quiet for an unchanged launch and includes the decision-required change report otherwise.",
+      "distinction": "It renders a single harness-preview decision pane. It is not the cmd/fak renderTUI* console-dashboard family, which renders live loops, sessions, guard, garden, issues, agent, config, and overview reports.",
       "distinct_from": [
         "x2-render-materialize-renderer",
         "cov-debt250-render-materialize-rendercli",

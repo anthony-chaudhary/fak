@@ -78,21 +78,19 @@
   },
   {
    "id": "policy-capability-ci-preflight",
-   "canonical": "ci-preflight (cmd)",
+   "canonical": "fak-dev ci-preflight (RunCIPreflight)",
    "family": "policy-capability",
    "kind": "symbol",
-   "definition": "`fak ci-preflight` (cmd/fak ci_preflight.go, cmdCIPreflight/runCIPreflight) archives the COMMITTED trunk tip to a throwaway checkout and answers whether it is gofmt-clean and build-green, immune to the peer-dirty shared working tree.",
+   "definition": "devcmd.RunCIPreflight is the `fak-dev ci-preflight` entrypoint that archives a requested committed ref into an isolated temporary checkout and reports whether that tip is gofmt-clean and build-green, without reading peer-dirty working-tree files.",
    "distinction": "It checks the git TIP's build health, not whether a dispatch worker may spawn or one tool call is admitted - unlike DispatchPreflight (dispatch admission) and the preflight ladder (per-call schema checks).",
    "distinct_from": [
     "DispatchPreflight (dispatch admission)",
     "preflight-ladder"
    ],
    "aliases": [
-    "cmdCIPreflight",
-    "runCIPreflight",
     "ci-preflight"
    ],
-   "grounding": "cmdCIPreflight",
+   "grounding": "RunCIPreflight",
    "grounding_kind": "symbol",
    "glossary_anchor": "",
    "parent": "",

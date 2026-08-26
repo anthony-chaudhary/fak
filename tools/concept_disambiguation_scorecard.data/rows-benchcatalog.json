@@ -25,7 +25,7 @@
       "id": "benchcatalog-capability-missing",
       "canonical": "benchmark capability missing",
       "family": "policy-capability",
-      "kind": "reason-code",
+      "kind": "symbol",
       "definition": "The stable benchmark preflight refusal emitted when a required environment capability is absent or incompatible with the task contract.",
       "distinction": "Absence or identity mismatch, not a present resource below its minimum and not a capability that the contract expressly forbids.",
       "distinct_from": [
@@ -47,7 +47,7 @@
       "id": "benchcatalog-capability-insufficient",
       "canonical": "benchmark capability insufficient",
       "family": "policy-capability",
-      "kind": "reason-code",
+      "kind": "symbol",
       "definition": "The stable benchmark preflight refusal emitted when a compute resource is present but its observed quantity is below the task minimum.",
       "distinction": "A numeric shortfall in an observed resource, not a wholly absent or incompatible capability and not an expressly forbidden capability.",
       "distinct_from": [
@@ -68,7 +68,7 @@
       "id": "benchcatalog-capability-forbidden",
       "canonical": "benchmark capability forbidden",
       "family": "policy-capability",
-      "kind": "reason-code",
+      "kind": "symbol",
       "definition": "The stable benchmark preflight refusal emitted when the provider environment exposes a capability the task contract requires to be absent.",
       "distinction": "A prohibited observed capability, not a missing requirement and not a present resource below its minimum.",
       "distinct_from": [

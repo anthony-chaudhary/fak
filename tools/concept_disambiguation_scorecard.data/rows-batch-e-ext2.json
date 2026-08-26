@@ -409,7 +409,6 @@
         "RenderTrace (agent)",
         "Rendered",
         "x-ci-coverage-render-materialize-renderbest",
-        "rendergitspawnreport",
         "x2-render-materialize-gitdailyrenderhealth"
       ],
       "aliases": [],
@@ -447,9 +446,7 @@
       "definition": "sessionobs.RenderContrast writes the value-vs-waste session-observation contrast report to a writer (value/waste counts, separability, and per-feature discriminators ranked worst-first).",
       "distinction": "Not the bench RenderMarkdown reports; RenderContrast emits the session-obs learn contrast view, not a benchmark comparison.",
       "distinct_from": [
-        "RenderMarkdown (bench report)",
-        "rendergitspawnreport",
-        "rendergitspawndelta"
+        "RenderMarkdown (bench report)"
       ],
       "aliases": [],
       "grounding": "rendercontrast",
@@ -641,8 +638,7 @@
       "definition": "cachevaluereport.RenderTwoTrack renders the cache-value profit-and-loss two-track report side by side (the WITNESSED reuse track and its OBSERVED-dollar projection) with the verdict.",
       "distinction": "Not the bench RenderMarkdown reports; RenderTwoTrack renders the cache-value P&L two-track view, not a benchmark comparison.",
       "distinct_from": [
-        "RenderMarkdown (bench report)",
-        "rendercachevalueregress"
+        "RenderMarkdown (bench report)"
       ],
       "aliases": [],
       "grounding": "rendertwotrack",
