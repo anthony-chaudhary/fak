@@ -93,22 +93,57 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintf(stderr, "fak ultracode bench: %v\n", err)
 			return 2
 		}
-		frontier := ultracodebench.AccessFrontierFixture()
-		if scenarioInput != "" {
+		var report any
+		if scenarioInput == "" {
+			frontier := ultracodebench.AccessModeFrontierFixture()
+			evaluated, err := ultracodebench.EvaluateAccessModeFrontier(frontier, widths)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
+				return 1
+			}
+			report = evaluated
+		} else {
 			b, err := os.ReadFile(scenarioInput)
 			if err != nil {
 				fmt.Fprintf(stderr, "fak ultracode bench: read scenario input: %v\n", err)
 				return 1
 			}
-			if err := json.Unmarshal(b, &frontier); err != nil {
+			var header struct {
+				Schema string `json:"schema"`
+			}
+			if err := json.Unmarshal(b, &header); err != nil {
 				fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
 				return 1
 			}
-		}
-		report, err := ultracodebench.EvaluateAccessFrontier(frontier, widths)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
-			return 1
+			switch header.Schema {
+			case ultracodebench.AccessModeFrontierSchema:
+				var frontier ultracodebench.AccessModeFrontier
+				if err := json.Unmarshal(b, &frontier); err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
+					return 1
+				}
+				evaluated, err := ultracodebench.EvaluateAccessModeFrontier(frontier, widths)
+				if err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
+					return 1
+				}
+				report = evaluated
+			case ultracodebench.AccessFrontierSchema:
+				var frontier ultracodebench.AccessFrontier
+				if err := json.Unmarshal(b, &frontier); err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
+					return 1
+				}
+				evaluated, err := ultracodebench.EvaluateAccessFrontier(frontier, widths)
+				if err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
+					return 1
+				}
+				report = evaluated
+			default:
+				fmt.Fprintf(stderr, "fak ultracode bench: unsupported access-frontier schema %q\n", header.Schema)
+				return 1
+			}
 		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
