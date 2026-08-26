@@ -451,12 +451,73 @@
       "status": "studied",
       "priority": 18,
       "why": "Experimental Codex open-turn continuation analogue: one typed wait_for_user_input rendezvous keeps repeated operator messages inside one provider turn. The narrow candidate is a capability-gated, policy-preserving matched experiment; the Bun TUI, Codex-specific host, parallel worker stack, and approval shortcuts are excluded.",
-      "last_checked": "2026-08-24",
+      "last_checked": "2026-08-25",
       "checked_revision": "bbf449ca624aca90d8cda0bc21100f2a73a56bf4",
       "stars_at_check": 2,
       "last_push_at_check": "2026-08-21T14:38:07Z",
       "study_note": "docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md",
-      "refresh_issue": "#9004"
+      "refresh_issue": "#9004",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/mchicao-endless.json",
+        "indexed_revision": "bbf449ca624aca90d8cda0bc21100f2a73a56bf4",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 7,
+        "candidate_count": 3,
+        "filed_issue_count": 0,
+        "completeness_critic": "exhaustive pinned tree map plus complete GitHub issue, pull-request, discussion, release, tag, branch, and history read-back; fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped control directory: .git",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate --slurp repos/Mchicao/endless/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo Mchicao/endless --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:Mchicao,name:endless) discussions(first:100)",
+              "gh api repos/Mchicao/endless/releases?per_page=100",
+              "gh api repos/Mchicao/endless/tags?per_page=100"
+            ],
+            "note": "Exhaustive GitHub read-back returned zero issues, pull requests, discussions, releases, and tags."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"open provider turn wait for user input rendezvous session continuation policy capability\"",
+              "fak capabilities \"operator input during one model turn pause resume control live session\"",
+              "fak capabilities \"parallel worker terminal tui codex host approval bypass\""
+            ],
+            "note": "Queries found native capability-floor, turn-tax, live-control, context-reuse, carry-forward, and fleet-monitoring surfaces; no equivalent typed in-provider-turn user rendezvous."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/mchicao-endless.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9004"
+            ],
+            "note": "All candidates were rejected or already owned; no borrow issue survived."
+          }
+        ],
+        "issue_refs": [
+          "#9004"
+        ]
+      }
     },
     {
       "repository": "vllm-project/vllm",
