@@ -149,13 +149,17 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	name := strings.ToUpper(strings.TrimSpace(event.Name))
 	isLowVirtualMemory := name == "LOW_VIRTUAL_MEMORY" && event.EventID == 2004
 	isShellCrash := name == "POWERSHELL_PROCESS_CRASH" && event.EventID == 1000
+	isWindowsShellCrash := name == "WINDOWS_SHELL_PROCESS_CRASH" && event.EventID == 1000
 	isRadar := name == "RADAR_PRE_LEAK_64" && event.EventID == 1001
 	isResolver := strings.HasPrefix(name, "RESOURCE_EXHAUSTION_") && (event.EventID == 1014 || event.EventID == 1015)
-	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isRadar && !isResolver) {
+	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isRadar && !isResolver) {
 		return Correlation{}, false
 	}
 	app := strings.TrimSpace(event.App)
 	if isShellCrash && !strings.EqualFold(app, "pwsh.exe") && !strings.EqualFold(app, "powershell.exe") {
+		return Correlation{}, false
+	}
+	if isWindowsShellCrash && !strings.EqualFold(app, "explorer.exe") {
 		return Correlation{}, false
 	}
 	if isRadar && !strings.EqualFold(app, "fak.exe") {
@@ -172,7 +176,7 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		if isLowVirtualMemory && !eventNamesFakPID(event.Culprits, sample.PID) {
 			continue
 		}
-		if isShellCrash || isResolver {
+		if isShellCrash || isWindowsShellCrash || isResolver {
 			continue
 		}
 		candidates = append(candidates, sample)
@@ -194,6 +198,9 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		}
 	}
 	status, reason := "historical_unresolved", "no durable fak process census spans the event time"
+	if isWindowsShellCrash {
+		reason = "Windows shell crash is retained as observational host evidence and is not attributed to fak"
+	}
 	if isShellCrash {
 		if owned != nil {
 			status, reason = "identified", "PowerShell crash PID and process creation time exactly match a fak-owned launch receipt"

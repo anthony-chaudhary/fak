@@ -115,6 +115,33 @@ func TestClassifyCommandDoesNotRetainArguments(t *testing.T) {
 	}
 }
 
+func TestWindowsShellCrashRemainsUnattributed(t *testing.T) {
+	event := ResourceEvent{
+		TimeMS: 2000, Source: "Application Error", EventID: 1000, RecordID: "111218",
+		Name: "WINDOWS_SHELL_PROCESS_CRASH", ReportID: "aca4a57c", App: "Explorer.EXE",
+		ProcessID: 11060, ProcessStartMS: 1000,
+		Fault: &ApplicationFault{AppVersion: "10.0.26100.8875", Module: "SystemTray.dll", ModuleVersion: "2605.22002.100.0", ExceptionCode: "c0000409", FaultOffset: "000000000018253f"},
+	}
+	sample := ProcessSample{Schema: CensusSchema, PID: 7, ProcessStartMS: 500, SampledAtMS: 3000, Executable: `C:\bin\fak.exe`}
+	launch := OwnedShellLaunch{TimestampUTCMS: 1900, ParentPID: 7, ChildPID: 11060, ChildCreatedUTCMS: 1000, Outcome: "failed"}
+	got, ok := CorrelateWithOwnedLaunches(event, []ProcessSample{sample}, []OwnedShellLaunch{launch})
+	if !ok || got.Status != "historical_unresolved" || got.OwnedLaunch != nil || len(got.Candidates) != 0 {
+		t.Fatalf("correlation = %+v, ok=%v", got, ok)
+	}
+	if got.EventName != "WINDOWS_SHELL_PROCESS_CRASH" || got.Fault == nil || got.Fault.Module != "SystemTray.dll" {
+		t.Fatalf("typed shell fault not retained: %+v", got)
+	}
+	if !strings.Contains(got.Reason, "not attributed to fak") {
+		t.Fatalf("reason = %q", got.Reason)
+	}
+}
+
+func TestWindowsShellCrashRejectsOtherApplications(t *testing.T) {
+	_, ok := Correlate(ResourceEvent{TimeMS: 1, EventID: 1000, Name: "WINDOWS_SHELL_PROCESS_CRASH", App: "other.exe"}, nil)
+	if ok {
+		t.Fatal("accepted non-Explorer Windows shell crash")
+	}
+}
 func TestPowerShellCrashIdentifiesExactOwnedLaunch(t *testing.T) {
 	event := ResourceEvent{TimeMS: 2000, Source: "Application Error", EventID: 1000, Name: "POWERSHELL_PROCESS_CRASH", App: "powershell.exe", ProcessID: 42, ProcessStartMS: 1000}
 	launch := OwnedShellLaunch{ParentPID: 7, ChildPID: 42, ChildCreatedUTCMS: 1000, LaunchID: "sha256:test", LaunchClass: "probe", ShellImage: "powershell", ShellEdition: "desktop", ShellVersion: "5.1", Outcome: "failed", ErrorClass: "console_fault"}
