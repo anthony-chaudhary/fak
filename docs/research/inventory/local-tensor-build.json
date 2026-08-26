@@ -786,7 +786,7 @@
     "forge_surface": {
       "status": "unavailable",
       "evidence": [
-        "docs/research/tensor-build-local-study-2026-08-15.md#exhaustive-inventory-refresh-2026-08-25"
+        "docs/notes/tensor-build-local-study-2026-08-15.md#exhaustive-inventory-refresh-2026-08-25"
       ],
       "note": "No trustworthy source repository identity or credentials were recoverable, so open/closed issues, pull requests, discussions, and releases cannot be enumerated. The absence is explicit rather than inferred from templates."
     },

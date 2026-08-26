@@ -156,12 +156,20 @@ These sources shape graph structure rather than supply fak measurements:
 
 ## Baseline/candidate experiment receipts
 
-Use the versioned `fak-native-performance-receipt/v1` contract before changing a lever:
+Use the current `fak-native-performance-receipt/v2` contract before changing a lever:
 
 ```bash
 fak native-performance --baseline metal.command-buffer-amortization > baseline.json
 # Fill capture-only placeholders while running the pinned fak-native envelope.
 fak native-performance --compare baseline.json --candidate candidate.json
+```
+
+Capture ambient load around each repetition separately:
+
+```bash
+fak bench system-baseline --baseline-duration 2s --interval 250ms --max-sampler-duty-percent 10 --out baseline-system-rep-1.json -- <one benchmark repetition>
+fak bench system-baseline --verify baseline-system-rep-1.json
+fak native-performance --attach-receipt RECEIPT --system-baseline ATTESTATION --out NEXT
 ```
 
 The same schema serves Metal and CUDA while envelope IDs keep their results separate. Each
@@ -171,6 +179,29 @@ peak/resident memory, commands, profiler artifact digests, execution identity, a
 count. The candidate must declare exactly one `lever:<id>` changed axis; both arms carry the
 complete unchanged-control list. Comparison fails closed on control drift, missing repetitions,
 private path/host syntax, any fallback, or execution identity other than `fak-native`.
+
+Run the attachment command once per repetition, using each `NEXT` output as the following
+call's `RECEIPT`; it appends attestations in repetition order. The first attachment upgrades
+a legacy v1 receipt to v2, and the command refuses to overfill the strict 1:1
+`system_baselines`/`repetitions` sequence. Each repetition binds the exact attestation
+digest; mismatch or reuse is rejected.
+
+Under `fak-native-performance-gate-policy/v2`, strict qualification sets both
+`require_system_baseline: true` and `allow_sampled_system_baseline: true`: the second flag is
+the explicit opt-in required to accept the v1 sampler's `sampled_pid_ppid_tree` coverage.
+Without it, even valid `clean` sampled evidence makes the gate `investigate`. Both baseline
+and candidate still need exactly one valid, `clean` attestation per repetition with baseline
+host CPU and command-window host/SUT/non-SUT CPU available. Missing, extra, `investigate`,
+`invalid`, or required-unknown evidence also investigates. Ambient measurements qualify
+evidence only: do not subtract them from throughput or silently drop repetitions.
+
+The attestation reports sampler wall duty for both baseline and command windows. Duty above
+`--max-sampler-duty-percent` investigates without correcting the reported CPU values.
+
+Top-consumer records are opt-in because even scrubbed executable images and PIDs are local,
+high-cardinality evidence. V1 samples host totals and PID/PPID-tree CPU and RSS on Linux and
+Windows; it does not yet capture PSI, cgroup or Job Object accounting, GPU activity, or
+complete short-lived-descendant attribution.
 
 The baseline command emits a deliberately incomplete template: `FILL_*` values and zero metrics
 cannot validate. This shifts the evidence contract before the edit without pretending a template

@@ -1420,7 +1420,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
 
     The packet fixtures below are verbatim excerpts of the real committed files."""
 
-    # verbatim line 3 of docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md,
+    # verbatim line 3 of docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md,
     # added by 8595070f42 -- the commit that closed #6205.
     PACKET_6205 = (
         "# Go call-graph alternatives — 2026-08-10\n\n"
@@ -1428,7 +1428,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
         "[#6205](https://github.com/anthony-chaudhary/fak/issues/6205) tracks real "
         "type-aware and code-intelligence tool runs with independent resource and "
         "cost witnesses.\n")
-    # verbatim line 5 of docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md
+    # verbatim line 5 of docs/notes/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md
     # (#6165): the SAME status, written in the other packet dialect this corpus uses.
     PACKET_6165 = (
         "# Bounded cache-snapshot alternatives — 2026-08-10\n\n## Verdict\n\n"
@@ -1438,7 +1438,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
         "measurements until their real stores execute the common retention workload; "
         "[#6165](https://github.com/anthony-chaudhary/fak/issues/6165) tracks those "
         "witnesses.\n")
-    # verbatim tail of docs/benchmarks/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md
+    # verbatim tail of docs/notes/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md
     # (#6122): a third dialect that never uppercases the token and states the hold as
     # an author disclaimer instead.
     PACKET_6122 = (
@@ -1467,7 +1467,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
     def test_status_marker_on_the_issues_own_line_holds(self) -> None:
         mod = load()
         binds, reason = mod.evidence_declares_incomplete(
-            6205, "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
+            6205, "docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
             self.PACKET_6205)
         self.assertFalse(binds)
         self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
@@ -1477,7 +1477,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
     def test_verdict_dialect_holds_too(self) -> None:
         mod = load()
         binds, reason = mod.evidence_declares_incomplete(
-            6165, "docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
+            6165, "docs/notes/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
             self.PACKET_6165)
         self.assertFalse(binds)
         self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
@@ -1485,7 +1485,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
     def test_stays_open_disclaimer_dialect_holds(self) -> None:
         mod = load()
         binds, reason = mod.evidence_declares_incomplete(
-            6122, "docs/benchmarks/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md",
+            6122, "docs/notes/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md",
             self.PACKET_6122)
         self.assertFalse(binds)
         self.assertIn(mod.EVIDENCE_INCOMPLETE_HOLD, reason)
@@ -1511,7 +1511,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
         mod = load()
         self.assertEqual(
             mod.evidence_declares_incomplete(
-                6205, "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
+                6205, "docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
                 self.PACKET_6205.replace("**INCOMPLETE**", "**COMPLETE**")),
             (True, None))
 
@@ -1536,7 +1536,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
 
     def test_reads_the_witness_shas_touched_packets_and_holds(self) -> None:
         mod = load()
-        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        packet = "docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
         run, seen = self._packet_reader(
             [packet, "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md",
              "internal/codegraph/compare.go"],
@@ -1588,7 +1588,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
     def test_unreadable_packet_does_not_mask_a_readable_incomplete_one(self) -> None:
         mod = load()
         gone = "docs/benchmarks/DELETED.md"
-        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        packet = "docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
         run, _ = self._packet_reader([gone, packet], {packet: self.PACKET_6205})
         mod.run_capture = run
         binds, reason = mod.evidence_binds_closure(
@@ -1620,7 +1620,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
         self._patch_through_to_evidence(
             mod, 6205, "8595070f42",
             "feat(codegraph): add call graph alternatives comparison #6205")
-        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        packet = "docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
         run, seen = self._packet_reader([packet], {packet: self.PACKET_6205})
 
         def guarded(cmd, cwd, timeout):
@@ -1645,7 +1645,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
         self._patch_through_to_evidence(
             mod, 6205, "8595070f42",
             "feat(codegraph): add call graph alternatives comparison #6205")
-        packet = "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
+        packet = "docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md"
         complete = self.PACKET_6205.replace("**INCOMPLETE**", "**COMPLETE**")
         run, _ = self._packet_reader([packet], {packet: complete})
         base = gh_close_then_state()  # readback confirms CLOSED
@@ -1664,7 +1664,7 @@ class IncompleteEvidenceGateTest(unittest.TestCase):
         self._patch_through_to_evidence(
             mod, 6122, "1ba26ad4f7",
             "feat(cacheobs): add telemetry alternatives comparison #6122")
-        packet = "docs/benchmarks/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md"
+        packet = "docs/notes/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md"
         run, _ = self._packet_reader([packet], {packet: self.PACKET_6122})
         mod.run_capture = run
         p = mod.evaluate(ROOT, limit=10, live=False, audit_json=None, max_commits=600)

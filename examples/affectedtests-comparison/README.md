@@ -24,7 +24,7 @@ in about 1 second with an installed `fak` binary.
 The selected package list is deterministic for this pinned fixture and `run.ps1`
 is safe to re-run; machine load may change elapsed time. See
 [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md) for a captured successful run and the
-[full alternatives benchmark](../../docs/benchmarks/AFFECTED-TEST-SELECTION-ALTERNATIVES-2026-08-10.md)
+[full alternatives benchmark](../../docs/notes/AFFECTED-TEST-SELECTION-ALTERNATIVES-2026-08-10.md)
 for the tool versions and measurements.
 
 ## What this demonstrates

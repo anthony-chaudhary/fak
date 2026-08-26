@@ -142,7 +142,7 @@ input back. Presence is ephemeral; history and pending interactions are durable.
 
 A first-party client must render every advertised action or visibly mark it unavailable with a
 reason and a handoff URI/command. It may not silently hide controls to simplify its product. New
-kernel controls appear through capability discovery rather than bespoke frontend releases wherever
+kernel controls appear through capability discovery rather than custom frontend releases wherever
 possible. A conformance fixture compares terminal and UI clients against the same descriptor and
 action corpus.
 
@@ -247,7 +247,7 @@ unit tests:
   the Fleet renderer.
 - [`gateway-port-ui-plan.md`](gateway-port-ui-plan.md) remains useful for a same-machine console
   spine. Its per-agent URL is a discovery bootstrap for the current execution epoch, not durable
-  identity, and its page must grow by consuming this contract rather than bespoke routes.
+  identity, and its page must grow by consuming this contract rather than custom routes.
 - [`notes/PORTABLE-SESSION-IMAGE-AND-SNAPSHOT-2026-06-24.md`](notes/PORTABLE-SESSION-IMAGE-AND-SNAPSHOT-2026-06-24.md)
   supplies checkpoint/image groundwork. A portable image is an input to `Move`, not itself the
   user-visible session.
