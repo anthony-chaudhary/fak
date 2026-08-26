@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-25T21:18:01Z",
+  "updated_at": "2026-08-25T19:30:00-07:00",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -386,12 +386,74 @@
       "status": "studied",
       "priority": 20,
       "why": "Gemini CLI provider-clear behavior was studied at its typed lifecycle seam: clear, with new as an alias, ends the old session, mints a session id, and emits SessionStart(Clear). The provider session-reset guide records the integration consequence and exact upstream evidence.",
-      "last_checked": "2026-08-22",
-      "checked_revision": "e90c63fa158b8facd1872d32b34b07e516308f2b",
-      "stars_at_check": 106610,
-      "last_push_at_check": "2026-08-22T01:10:05Z",
+      "last_checked": "2026-08-25",
+      "checked_revision": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+      "stars_at_check": 106686,
+      "last_push_at_check": "2026-08-26T01:07:54Z",
       "study_note": "docs/integrations/provider-session-reset.md",
-      "refresh_issue": "#8999"
+      "refresh_issue": "#8999",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/google-gemini-gemini-cli.json",
+        "indexed_revision": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 18,
+        "candidate_count": 3,
+        "filed_issue_count": 0,
+        "completeness_critic": "exhaustive local tree map plus pinned GitHub history/release/issue/PR/discussion metadata, roadmap and license audit, FAK self-query, candidate adjudication, and issue tracking; skipped dependency/cache/control directories: .git, packages/core/vendor",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api graphql -f query=<repository issue/pullRequest/discussion/release aggregate query>",
+              "gh api repos/google-gemini/gemini-cli/commits/64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+              "gh api repos/google-gemini/gemini-cli/license",
+              "gh api repos/google-gemini/gemini-cli/releases?per_page=5"
+            ],
+            "note": "14,309 issues, 12,659 pull requests, 662 discussions, and 601 releases at the observation cutoff; detailed state counts and method are in the map."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"provider session reset clear new session lifecycle event\"",
+              "fak capabilities \"session checkpoint resume conversation persistence trace continuity\"",
+              "fak capabilities \"MCP OAuth trust policy extensions hooks lifecycle security\""
+            ],
+            "note": "Queries found FAK-owned portable-session, context-reuse, live-control, and capability-floor seams; no distinct unowned Gemini mechanism survived."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/google-gemini-gemini-cli.json#candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8999",
+              "https://github.com/anthony-chaudhary/fak/issues/8220"
+            ],
+            "note": "Provider adaptation is already owned; remaining live dogfood is already tracked, so no new borrow issue was filed."
+          }
+        ],
+        "issue_refs": [
+          "#8999",
+          "#8220"
+        ]
+      }
     },
     {
       "repository": "sgl-project/mini-sglang",

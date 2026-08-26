@@ -134,3 +134,37 @@ studied harnesses already provide.
 No upstream code was copied. The recurring source-registry update remains tracked
 in [#8221](https://github.com/anthony-chaudhary/fak/issues/8221) because that registry
 was under a peer-owned edit during this pass.
+
+## Exhaustive Gemini CLI inventory refresh (2026-08-25)
+
+Issue [#8999](https://github.com/anthony-chaudhary/fak/issues/8999) refreshes the
+Gemini evidence against verified commit
+[`64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4`](https://github.com/google-gemini/gemini-cli/commit/64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4)
+(commit time `2026-08-25T18:52:30Z`, tree
+`95e04bcee2859ff1c997f3fc333609045011197b`). The generated exhaustive map is
+[`docs/research/inventory/google-gemini-gemini-cli.json`](../research/inventory/google-gemini-gemini-cli.json):
+2,971 files and 294 directories were walked, including README/docs,
+architecture, runtime, 1,110 test/fixture files, history/changelogs/releases,
+`ROADMAP.md`, and Apache-2.0 provenance. Only `.git` and the vendored
+`packages/core/vendor` dependency tree were skipped.
+
+Non-tree read-back used GitHub GraphQL aggregate counts and REST metadata at the
+same observation cutoff: 14,309 issues (599 open, 13,710 closed), 12,659 pull
+requests (264 open, 5,727 closed-unmerged, 6,668 merged), 662 discussions, and
+601 releases. The inventory records the exact methods, counts, FAK self-queries,
+and candidate dispositions rather than treating a local tree walk as the whole
+denominator.
+
+The refreshed source still fires `SessionEnd(Clear)`, mints a new UUID, resets
+chat state, and fires `SessionStart(Clear)`; `new` remains an alias. FAK's
+provider-boundary adaptation is therefore retained as **already owned**, with no
+source copied. Gemini checkpoint/session management is rejected as a separate
+borrow because FAK already owns portable session images, recall, context reuse,
+and live-session control. Gemini's hook/extension/MCP stack is also rejected as
+a direct port because it duplicates FAK's guarded adapters, gateway, and
+capability floor without a matched performance or correctness gain.
+
+No new follow-on survived this audit. First-class Gemini guard integration
+shipped under [#8219](https://github.com/anthony-chaudhary/fak/issues/8219), and
+the remaining live cross-provider dogfood witness is already tracked by
+[#8220](https://github.com/anthony-chaudhary/fak/issues/8220).
