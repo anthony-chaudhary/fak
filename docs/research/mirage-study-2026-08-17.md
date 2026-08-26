@@ -1,11 +1,20 @@
-# Mirage deep study — 2026-08-17
+# Mirage deep study — refreshed 2026-08-25
 
 **Source:** [`strukto-ai/mirage`](https://github.com/strukto-ai/mirage)  
-**Pinned revision:** [`e0a4f51109cbe6b8a239700d8348f0cbebd70b26`](https://github.com/strukto-ai/mirage/commit/e0a4f51109cbe6b8a239700d8348f0cbebd70b26) (checked 2026-08-17)  
+**Pinned revision:** [`2ed4257af98fc1a206a5444057d1290892190e69`](https://github.com/strukto-ai/mirage/commit/2ed4257af98fc1a206a5444057d1290892190e69) (checked 2026-08-25)
 **Release checked:** `v0.0.5` at `d4f2ff5de2ec8e6eeb3b283f794d7b85bae53835` (published 2026-08-15)  
 **License:** Apache-2.0 (`LICENSE` at the pinned revision)  
 **Acquisition:** full git clone in allocated scratch; 8,406 tracked files and 1,564 commits at the pin. GitHub issues, pull requests, discussions, releases, and repository metadata were also queried on 2026-08-17.
 
+## Exhaustive inventory refresh — 2026-08-25
+
+The committed [`fak-study-inventory-map/1`](inventory/strukto-ai-mirage.json) indexes all **8,921 tracked files**, **1,556 directories**, and **1,116,124 text lines** at the pinned revision across 17 top-level subsystems. The largest denominators are `python/` (3,461 files), `typescript/` (3,083), `integ/` (1,324), `examples/` (364), `docs/` (327), and `spec/` (285); the map also records the remaining 11 roots and representative paths. The local walk covers README/docs, architecture/design, runtime, tests/fixtures, history-bearing files, roadmap tokens, and license/provenance.
+
+Non-tree evidence is complete at the pinned commit timestamp: **206 issues** (99 open, 107 closed at read-back), **706 pull requests** (13 open, 24 closed, 669 merged), **zero discussions**, five releases/tags, and all 1,798 commits. GitHub issue/PR lists were paged beyond their complete denominators, GraphQL returned `totalCount: 0` for discussions, and REST returned all five releases. No dedicated `ROADMAP` or `CHANGELOG` file exists; explicit roadmap issues [#721](https://github.com/strukto-ai/mirage/issues/721) and [#705](https://github.com/strukto-ai/mirage/issues/705), proposal [#861](https://github.com/strukto-ai/mirage/issues/861), the full issue/PR ledger, release records, Git history, and the TODO/FIXME scan supply those classes without presenting proposals as shipped behavior.
+
+Provenance remains suitable for clean-room adaptation: the root and Python licenses are Apache-2.0, package manifests declare Apache-2.0, and `licenses/` retains bundled MIT and BSD-3-Clause notices. A direct code port still requires file-level provenance review.
+
+The candidate matrix was re-run against current fak. Three `fak capabilities` queries covered external-input drift, backend/workspace capabilities, and VFS/tool semantics. The original six dispositions still hold: [#7256](https://github.com/anthony-chaudhary/fak/issues/7256) remains the one distinct borrow; typed backend support maps to [#5310](https://github.com/anthony-chaudhary/fak/issues/5310); staged workspaces and observer continuity map to [#4234](https://github.com/anthony-chaudhary/fak/issues/4234); policy placement is shipped; and a universal VFS remains a rejected default. No additional dispatchable borrow survived, so no new issue was filed.
 ## Verdict
 
 Mirage is not a replacement for fak's model/tool-call kernel. It is a complementary **resource substrate**: one POSIX-like namespace over local files, object stores, SaaS APIs, databases, and agent memory, with caching, policy, observation, snapshots, and a shell. Its strongest transferable idea is not “add a VFS.” It is: **when a run depends on mutable external resources, capture what the agent actually saw, pin or fingerprint it, and refuse silent replay drift before the next effect.**
@@ -97,4 +106,3 @@ This should adapt the behavior, not port Mirage code. fak is Go and its resource
 No Mirage source bytes were copied into fak. All implementation references above are observations at the pinned revision; candidate implementation is adaptation/inspiration. GitHub metadata is time-sensitive and was observed on 2026-08-17: 3,499 stars, 259 forks, 96 issues total, 8 pull requests total, and latest release `v0.0.5`. The repository was created 2026-05-06, so its breadth is notable but its long-term compatibility and operational stability are not yet established.
 
 The guarded parallel study used fak orchestration run `orch-37f308f70b0c4e604789ed82` with a three-role ultracode DAG, required leases, independent witnesses, and effect readback. Final claims here were independently re-read from the pinned clone and current fak tree rather than accepted from worker logs.
-

@@ -217,12 +217,72 @@
       "status": "studied",
       "priority": 7,
       "why": "Unified agent resource substrate deeply studied for snapshot drift gates, typed per-operation backend capabilities, transactional workspace branches, policy placement, and observer fidelity. The surviving fak gap is a strict pre-effect external-input drift contract; stronger or already-planned fak work covers the other candidates.",
-      "last_checked": "2026-08-17",
-      "checked_revision": "e0a4f51109cbe6b8a239700d8348f0cbebd70b26",
-      "stars_at_check": 3499,
-      "last_push_at_check": "2026-08-17T23:41:51Z",
+      "last_checked": "2026-08-25",
+      "checked_revision": "2ed4257af98fc1a206a5444057d1290892190e69",
+      "stars_at_check": 3567,
+      "last_push_at_check": "2026-08-25T22:18:51Z",
       "study_note": "docs/research/mirage-study-2026-08-17.md",
-      "refresh_issue": "#8986"
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/strukto-ai-mirage.json",
+        "indexed_revision": "2ed4257af98fc1a206a5444057d1290892190e69",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 17,
+        "candidate_count": 6,
+        "filed_issue_count": 1,
+        "completeness_critic": "Exhaustive 8,921-file local tree map plus full pinned history, tags, releases, issue, pull-request, and discussion read-back; roadmap/TODO, license provenance, fak self-query, candidate adjudication, and issue tracking are explicit under non_tree_study; only .git internals are skipped and represented by history commands.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh issue list --repo strukto-ai/mirage --state all --limit 1000 --json number,title,state,createdAt,closedAt,labels,url",
+              "gh pr list --repo strukto-ai/mirage --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:strukto-ai,name:mirage) discussions(first:100)"
+            ],
+            "note": "Complete read-back at the pinned cutoff: 206 issues, 706 pull requests, zero discussions, and five releases."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"resume replay mutable external input drift pre-effect validation\" --json",
+              "fak capabilities \"typed backend capability negotiation transactional workspace filesystem\" --json",
+              "fak capabilities \"virtual filesystem sandbox remote execution file tool\" --json"
+            ],
+            "note": "Candidate-specific queries confirmed one open reliability gap and stronger existing/default seams for the remaining candidates."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/strukto-ai-mirage.json#candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8986",
+              "https://github.com/anthony-chaudhary/fak/issues/7256"
+            ],
+            "note": "The refresh tracker and sole surviving borrow were read back; no new issue survived adjudication."
+          }
+        ],
+        "issue_refs": [
+          "#8986",
+          "#7256"
+        ]
+      }
     },
     {
       "repository": "agent0ai/agent-zero",
