@@ -1,0 +1,26 @@
+{
+  "rows": [
+    {
+      "id": "gateway-engine-execution-engine-values",
+      "canonical": "ExecutionEngine values (fak-native / llama.cpp)",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The closed qwen38 campaign values selecting either fak-native model math for promotion eligibility or the pinned llama.cpp comparison-only runtime.",
+      "distinction": "These are the values carried by ExecutionEngine, not the ExecutionEngine evidence field itself, the generic engine dispatch interface, a backend/device choice, or permission to fall back between runtimes.",
+      "distinct_from": [
+        "gateway-engine-execution-engine",
+        "engine"
+      ],
+      "aliases": [
+        "EngineFakNative",
+        "EngineLlamaCpp"
+      ],
+      "grounding": "EngineFakNative",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

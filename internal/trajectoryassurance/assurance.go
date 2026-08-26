@@ -169,7 +169,9 @@ func assessFloor(checks []DeterministicCheck) Layer {
 	sort.Slice(checks, func(i, j int) bool { return checks[i].Name < checks[j].Name })
 	for _, check := range checks {
 		if check.Passed == nil {
-			layer.State = Unknown
+			if layer.State != Fail {
+				layer.State = Unknown
+			}
 			layer.Reason = "one or more deterministic results are missing"
 		} else if !*check.Passed {
 			layer.State = Fail
@@ -189,11 +191,11 @@ func assessObservation(name string, observation Observation) Layer {
 	if reason == "" {
 		reason = "required evidence is missing"
 	}
-	return Layer{Name: name, State: state, Source: observation.Evidence.Source, Provenance: observation.Evidence.Provenance, Authority: observation.Evidence.Authority, Freshness: observation.Evidence.Freshness, Reason: reason}
+	return Layer{Name: name, State: state, Source: observation.Evidence.Source, Provenance: observation.Evidence.Provenance, Authority: observation.Evidence.Authority, Freshness: observation.Evidence.Freshness, Reason: reason, ReasonToken: observation.Evidence.ReasonToken}
 }
 
 func assessEfficiency(in EfficiencyInput) Layer {
-	layer := Layer{Name: "efficiency_with_quality", Source: in.Evidence.Source, Provenance: in.Evidence.Provenance, Authority: in.Evidence.Authority, Freshness: in.Evidence.Freshness, Reason: in.Evidence.Reason}
+	layer := Layer{Name: "efficiency_with_quality", Source: in.Evidence.Source, Provenance: in.Evidence.Provenance, Authority: in.Evidence.Authority, Freshness: in.Evidence.Freshness, Reason: in.Evidence.Reason, ReasonToken: in.Evidence.ReasonToken}
 	if in.Outcome == nil || in.ConstraintsSatisfied == nil || in.ParentUnits == nil || !in.AccountingComplete || missingMetadata(in.Evidence) {
 		layer.State = Unknown
 		layer.Reason = "outcome, constraints, and complete parent+child accounting are required"
@@ -233,6 +235,9 @@ func mergeEvidence(layer Layer, evidence Evidence) Layer {
 	}
 	if layer.Freshness == "" {
 		layer.Freshness = evidence.Freshness
+	}
+	if layer.ReasonToken == "" {
+		layer.ReasonToken = evidence.ReasonToken
 	}
 	if missingMetadata(evidence) && layer.State != Fail {
 		layer.State = Unknown

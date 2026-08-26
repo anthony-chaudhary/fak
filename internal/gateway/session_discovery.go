@@ -145,6 +145,11 @@ func (s *Server) handleFakSessionDiscovery(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+func writeSessionDiscoveryJSON(w http.ResponseWriter, status int, value any) bool {
+	writeJSON(w, status, value)
+	return true
+}
+
 func (s *Server) handleSessionDiscovery(w http.ResponseWriter, r *http.Request, path string) bool {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -152,50 +157,61 @@ func (s *Server) handleSessionDiscovery(w http.ResponseWriter, r *http.Request, 
 	}
 	sessionID := parts[0]
 	if len(parts) == 1 && r.Method == http.MethodGet {
-		record, code := s.sessionDiscoveryRecord(sessionID, sessionBearer(r))
-		if code != "" {
-			status := http.StatusUnauthorized
-			if code == "DISCOVERY_NOT_FOUND" {
-				status = http.StatusNotFound
-			}
-			if code == "STALE_EPOCH" {
-				status = http.StatusConflict
-			}
-			writeErrCode(w, status, code, "session discovery refused")
-			return true
-		}
-		writeJSON(w, http.StatusOK, record)
-		return true
+		return s.readSessionDiscovery(w, r, sessionID)
 	}
 	if len(parts) == 2 && parts[1] == "publish" && r.Method == http.MethodPost {
-		if !s.authorizeSessionClient(w, r) {
-			return true
-		}
-		var req struct {
-			RelayURL   string `json:"relay_url"`
-			TTLSeconds int64  `json:"ttl_seconds"`
-		}
-		if !decodeSessionClientJSON(w, r, &req) {
-			return true
-		}
-		publication, err := s.PublishSessionDiscovery(sessionID, req.RelayURL, time.Duration(req.TTLSeconds)*time.Second)
-		if err != nil {
-			writeErrCode(w, http.StatusBadRequest, "DISCOVERY_PUBLISH_REFUSED", err.Error())
-			return true
-		}
-		writeJSON(w, http.StatusCreated, publication)
-		return true
+		return s.publishSessionDiscovery(w, r, sessionID)
 	}
 	if len(parts) == 2 && parts[1] == "revoke" && r.Method == http.MethodPost {
-		if !s.authorizeSessionClient(w, r) {
-			return true
-		}
-		if !s.RevokeSessionDiscovery(sessionID) {
-			writeErrCode(w, http.StatusNotFound, "DISCOVERY_NOT_FOUND", "session discovery not found")
-			return true
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"schema": sessionDiscoverySchema, "session_id": sessionID, "revoked": true})
-		return true
+		return s.revokeSessionDiscovery(w, r, sessionID)
 	}
 	return false
+}
+
+func (s *Server) readSessionDiscovery(w http.ResponseWriter, r *http.Request, sessionID string) bool {
+	record, code := s.sessionDiscoveryRecord(sessionID, sessionBearer(r))
+	if code == "" {
+		return writeSessionDiscoveryJSON(w, http.StatusOK, record)
+	}
+	status := http.StatusUnauthorized
+	if code == "DISCOVERY_NOT_FOUND" {
+		status = http.StatusNotFound
+	}
+	if code == "STALE_EPOCH" {
+		status = http.StatusConflict
+	}
+	writeErrCode(w, status, code, "session discovery refused")
+	return true
+}
+
+func (s *Server) publishSessionDiscovery(w http.ResponseWriter, r *http.Request, sessionID string) bool {
+	if !s.authorizeSessionClient(w, r) {
+		return true
+	}
+	var req struct {
+		RelayURL   string `json:"relay_url"`
+		TTLSeconds int64  `json:"ttl_seconds"`
+	}
+	if !decodeSessionClientJSON(w, r, &req) {
+		return true
+	}
+	publication, err := s.PublishSessionDiscovery(sessionID, req.RelayURL, time.Duration(req.TTLSeconds)*time.Second)
+	if err != nil {
+		writeErrCode(w, http.StatusBadRequest, "DISCOVERY_PUBLISH_REFUSED", err.Error())
+		return true
+	}
+	return writeSessionDiscoveryJSON(w, http.StatusCreated, publication)
+}
+
+func (s *Server) revokeSessionDiscovery(w http.ResponseWriter, r *http.Request, sessionID string) bool {
+	if !s.authorizeSessionClient(w, r) {
+		return true
+	}
+	if !s.RevokeSessionDiscovery(sessionID) {
+		writeErrCode(w, http.StatusNotFound, "DISCOVERY_NOT_FOUND", "session discovery not found")
+		return true
+	}
+	return writeSessionDiscoveryJSON(w, http.StatusOK, map[string]any{
+		"schema": sessionDiscoverySchema, "session_id": sessionID, "revoked": true,
+	})
 }

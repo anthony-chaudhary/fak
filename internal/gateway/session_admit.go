@@ -49,6 +49,48 @@ type servedSessionTurn struct {
 	minGapMs  int
 }
 
+// beginServedRequest establishes the request context and trace before admitting
+// one served turn. Every model-facing HTTP wire crosses this same boundary.
+func (s *Server) beginServedRequest(w http.ResponseWriter, r *http.Request) (context.Context, string, servedSessionTurn, bool, bool) {
+	ctx := r.Context()
+	trace := s.useHTTPTrace(w, r, "")
+	turn, ok, canceled := s.beginServedSessionTurn(ctx, trace)
+	return ctx, trace, turn, ok, canceled
+}
+
+// admitServedRequest applies the reset-capable admission path shared by the
+// OpenAI and Anthropic request wires. It owns refusal rendering so each wire
+// cannot drift in cancellation, budget-reset, or coherence-reset behavior.
+func (s *Server) admitServedRequest(w http.ResponseWriter, r *http.Request, messages []agent.Message) (context.Context, string, []agent.Message, servedSessionTurn, bool) {
+	ctx, trace, turn, ok, canceled := s.beginServedRequest(w, r)
+	if canceled {
+		return ctx, trace, messages, turn, false
+	}
+	if !ok {
+		newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, turn.state, messages)
+		if !reset {
+			writeSessionRefusal(w, turn.state)
+			return ctx, trace, messages, turn, false
+		}
+		trace, messages, turn, ok, canceled = newTrace, resetMessages, resetTurn, resetOK, resetCanceled
+		if canceled || !ok {
+			if !canceled {
+				writeSessionRefusal(w, turn.state)
+			}
+			return ctx, trace, messages, turn, false
+		}
+	}
+
+	trace, messages, turn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, trace, messages, turn)
+	if canceled || !ok {
+		if !canceled {
+			writeSessionRefusal(w, turn.state)
+		}
+		return ctx, trace, messages, turn, false
+	}
+	return ctx, trace, messages, turn, true
+}
+
 // beginServedSessionTurn applies the live session gate to one proxied model request.
 // When DecideSession is wired, this is the mutating boundary: session.Table.Decide
 // debits TurnsLeft, resolves pause/drain/stop/budget exhaustion, and returns the pace
