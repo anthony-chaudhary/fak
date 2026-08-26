@@ -32,8 +32,7 @@
       "distinction": "Each is a single concrete enum VALUE on its subsystem's stance type, NOT the general tool-admission posture concept that selects fail-closed vs admit-and-log behavior.",
       "distinct_from": [
         "posture (tool admission)",
-        "ResetPolicy (gateway)",
-        "orgpostureinert"
+        "ResetPolicy (gateway)"
       ],
       "aliases": [
         "posturewarm",

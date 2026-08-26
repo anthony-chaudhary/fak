@@ -47,20 +47,20 @@
     },
     {
       "id": "dev-tier-fak-dev-namespace",
-      "canonical": "fak dev (namespace)",
+      "canonical": "fak-dev command surface",
       "family": "dev-tier",
       "kind": "concept",
-      "definition": "The CLI namespace that dispatches the dev-tier verbs (resolveDevVerb, cmd/fak/dev.go) and behind which the bare dev spellings are gated - a COMMAND surface that reads devindex to decide what is dev-tier.",
-      "distinction": "A command namespace - NOT dev-ex (a GitHub developer-experience routing LABEL an issue carries, not a command), NOT devindex (the catalog package it reads to decide tiers), and NOT a dev verb (a single entry, vs the namespace that groups them).",
+      "definition": "The separately buildable `cmd/fak-dev` maintainer CLI that dispatches repository-development commands such as ci-preflight, buildcheck, plan-audit, orient, and issue tooling through internal/devcmd.",
+      "distinction": "It is a separate executable for repository-maintenance operations. It is not dev-ex, an issue-routing label; devindex, the catalog behind command discovery; or a single dev verb within the command surface.",
       "distinct_from": [
         "dev-tier-devindex",
         "dev-tier-dev-verb"
       ],
       "aliases": [
-        "fak dev namespace",
-        "dev namespace"
+        "fak dev tooling",
+        "developer command surface"
       ],
-      "grounding": "resolveDevVerb",
+      "grounding": "fak-dev",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

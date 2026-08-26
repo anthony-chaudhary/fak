@@ -247,7 +247,7 @@
       "kind": "symbol",
       "definition": "The report-level CI gate on cadencereport/dojo/gardenbundle reports: CheckGate(report) returns an exit code plus message, and WithGate folds that gate result (gateExit / gateMessage) back into the emitted report.",
       "distinction": "It is a REPORT-SUMMARY CI-pass/fail gate over an already-computed report, NOT a kernel adjudication gate on a tool call and NOT a result admitter.",
-      "distinct_from": ["gate", "result-admitter"],
+      "distinct_from": ["gate", "result-admitter", "issue9181-guard-gate-dispatch-gate-check", "issue9181-guard-gate-nativeperf-gate-check"],
       "aliases": ["withgate", "newwithgate", "gateexit", "gatemessage"],
       "grounding": "checkgate",
       "grounding_kind": "symbol",

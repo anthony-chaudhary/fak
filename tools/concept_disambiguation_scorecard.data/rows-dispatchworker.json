@@ -42,17 +42,19 @@
   ,
     {
       "id": "opencodeguardconfigcontent",
-      "canonical": "opencodeGuardConfigContent",
+      "canonical": "deepMergeConfig (dispatchworker guard config merge)",
       "family": "guard-gate",
       "kind": "symbol",
-      "definition": "The cmd/dispatchworker/guard.go merge that folds the opencode compaction overlay into an existing OPENCODE_CONFIG_CONTENT document while preserving operator-supplied keys, returning the existing document unchanged when there is no overlay to apply.",
-      "distinction": "A MERGE over an operator-supplied env document - NOT the overlay it merges (opencodeCompactionOverlay) and NOT the guard policy or its floor. The Go launcher points opencode at guard via --base-url, so unlike the python half this does not also rewrite the provider baseURL.",
+      "definition": "cmd/dispatchworker.deepMergeConfig recursively overlays nested map values onto a base configuration map, preserving unrelated operator keys while replacing scalar or type-conflicting values.",
+      "distinction": "It is the pure recursive merge primitive, not opencodeCompactionOverlay, which constructs one provider-specific overlay, and not guardWrap, which assembles the guarded worker command line.",
       "distinct_from": [
         "opencodecompactionoverlay",
         "claudeguardturnsperepoch"
       ],
-      "aliases": [],
-      "grounding": "opencodeGuardConfigContent",
+      "aliases": [
+        "opencodeGuardConfigContent"
+      ],
+      "grounding": "deepMergeConfig",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
