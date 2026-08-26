@@ -25,7 +25,8 @@ const (
 	OracleMeasurementSchema = "fak.qwen38-llamacpp-measurement/1"
 	OracleReportSchema      = "fak.qwen38-llamacpp-oracle/1"
 	OracleArchiveSchema     = "fak.qwen38-llamacpp-oracle-raw/1"
-	PinnedLlamaCPPRevision  = "17197474510622a3b4ea7d0909d70b606f542b96"
+	PinnedLlamaCPPBuild     = "9828"
+	PinnedLlamaCPPRevision  = "ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0"
 	PinnedLlamaCPPLicense   = "MIT"
 )
 
@@ -175,8 +176,8 @@ func RunOracle(ctx context.Context, configPath, corpusPath, reportPath, archiveP
 	if err != nil {
 		return OracleReport{}, fmt.Errorf("llama.cpp revision: %w", err)
 	}
-	if strings.TrimSpace(string(revision)) != PinnedLlamaCPPRevision {
-		return OracleReport{}, fmt.Errorf("llama.cpp revision drift: got %q want %q", strings.TrimSpace(string(revision)), PinnedLlamaCPPRevision)
+	if !matchesPinnedLlamaCPPRevision(revision) {
+		return OracleReport{}, fmt.Errorf("llama.cpp revision drift: got %q want build %s at %s", strings.TrimSpace(string(revision)), PinnedLlamaCPPBuild, PinnedLlamaCPPRevision)
 	}
 	reference, err := loadOracleRuntime(ctx, cfg.Reference, corpus)
 	if err != nil {
@@ -221,6 +222,19 @@ func RunOracle(ctx context.Context, configPath, corpusPath, reportPath, archiveP
 		return OracleReport{}, fmt.Errorf("report: %w", err)
 	}
 	return report, nil
+}
+
+// matchesPinnedLlamaCPPRevision binds llama-server's build-number/short-SHA
+// identity to the immutable full revision stored in every oracle artifact. The
+// alternate full-SHA form supports revision commands such as git rev-parse HEAD.
+func matchesPinnedLlamaCPPRevision(raw []byte) bool {
+	output := strings.TrimSpace(strings.ReplaceAll(string(raw), "\r\n", "\n"))
+	if output == PinnedLlamaCPPRevision {
+		return true
+	}
+	lines := strings.Split(output, "\n")
+	versionLine := fmt.Sprintf("version: %s (%s)", PinnedLlamaCPPBuild, PinnedLlamaCPPRevision[:9])
+	return len(lines) == 2 && lines[0] == versionLine && strings.HasPrefix(lines[1], "built with ") && len(strings.TrimSpace(strings.TrimPrefix(lines[1], "built with "))) > 0
 }
 
 func validateOracleConfig(cfg OracleConfig) error {

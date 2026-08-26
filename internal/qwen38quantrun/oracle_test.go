@@ -93,10 +93,62 @@ func TestRunOracleRefusesMissingHardwareEvidence(t *testing.T) {
 }
 
 func TestRunOracleRefusesRevisionDrift(t *testing.T) {
-	cfg := validOracleConfig(oracleFixturePaths{}, oracleFixturePaths{})
+	dir := t.TempDir()
+	corpus := qwen38quant.DefaultCorpus()
+	corpusPath := filepath.Join(dir, "corpus.json")
+	writeJSONTest(t, corpusPath, corpus)
+	ref := writeOracleRuntimeFixture(t, dir, "llama.cpp", corpus, 0)
+	candidate := writeOracleRuntimeFixture(t, dir, "fak", corpus, 0)
+	cfg := validOracleConfig(ref, candidate)
 	cfg.RevisionCommand = oracleHelperCommand("revision-drift", "")
-	if err := validateOracleConfig(cfg); err == nil {
-		t.Fatal("fixture should still satisfy static config validation")
+	configPath := filepath.Join(dir, "oracle.json")
+	writeJSONTest(t, configPath, cfg)
+	reportPath, archivePath := filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json")
+
+	_, err := RunOracle(context.Background(), configPath, corpusPath, reportPath, archivePath)
+	if err == nil || !strings.Contains(err.Error(), "revision drift") {
+		t.Fatalf("err=%v", err)
+	}
+	for _, path := range []string{reportPath, archivePath} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("%s exists after revision refusal", path)
+		}
+	}
+}
+
+func TestValidateOracleConfigRefusesPinnedRevisionDrift(t *testing.T) {
+	paths := oracleFixturePaths{
+		adapterPath: "adapter.json", reportPath: "report.json", archivePath: "archive.json", measurementPath: "measurement.json",
+	}
+	cfg := validOracleConfig(paths, paths)
+	cfg.LlamaCPPRevision = strings.Repeat("b", 40)
+	if err := validateOracleConfig(cfg); err == nil || !strings.Contains(err.Error(), "pinned oracle") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestMatchesPinnedLlamaCPPRevision(t *testing.T) {
+	const buildLine = "built with AppleClang 21.0.0.21000101 for Darwin arm64\n"
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{name: "immutable full revision", output: PinnedLlamaCPPRevision + "\n", want: true},
+		{name: "installed b9828 identity", output: "version: 9828 (ebd048fc5)\n" + buildLine, want: true},
+		{name: "wrong build", output: "version: 9827 (ebd048fc5)\n" + buildLine},
+		{name: "wrong revision", output: "version: 9828 (deadbeef0)\n" + buildLine},
+		{name: "dirty revision suffix", output: "version: 9828 (ebd048fc5-dirty)\n" + buildLine},
+		{name: "missing build metadata", output: "version: 9828 (ebd048fc5)\n"},
+		{name: "identity not first", output: "warning\nversion: 9828 (ebd048fc5)\n" + buildLine},
+		{name: "drifted full revision", output: strings.Repeat("b", 40) + "\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesPinnedLlamaCPPRevision([]byte(tt.output)); got != tt.want {
+				t.Fatalf("matchesPinnedLlamaCPPRevision(%q)=%v want %v", tt.output, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -107,7 +159,8 @@ func TestOracleHelperProcess(t *testing.T) {
 	mode, path := os.Args[len(os.Args)-2], os.Args[len(os.Args)-1]
 	switch mode {
 	case "revision":
-		os.Stdout.WriteString(PinnedLlamaCPPRevision + "\n")
+		os.Stdout.WriteString("version: " + PinnedLlamaCPPBuild + " (" + PinnedLlamaCPPRevision[:9] + ")\n")
+		os.Stdout.WriteString("built with AppleClang 21.0.0.21000101 for Darwin arm64\n")
 	case "revision-drift":
 		os.Stdout.WriteString(strings.Repeat("b", 40) + "\n")
 	case "measurement":
