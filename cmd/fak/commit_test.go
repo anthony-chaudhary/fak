@@ -337,6 +337,48 @@ func TestRunCommitLaneClearStillBuildChecksAndCommits(t *testing.T) {
 	}
 }
 
+func TestRunCommitProspectiveValidationRefusalNeverCallsCommit(t *testing.T) {
+	oldWait, oldBuild, oldCommit := commitLaneWaitFn, commitBuildCheckGate, commitFn
+	t.Cleanup(func() {
+		commitLaneWaitFn, commitBuildCheckGate, commitFn = oldWait, oldBuild, oldCommit
+	})
+	commitLaneWaitFn = func(string, time.Duration) (bool, safecommit.LockWaitReceipt) {
+		return true, safecommit.LockWaitReceipt{}
+	}
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckFailed, "prospective validation failed\n  test: deliberate failure\nnext: fak validate --ref HEAD --mine p/p_test.go"
+	}
+	commitCalled := false
+	commitFn = func(context.Context, safecommit.Options) (safecommit.Result, error) {
+		commitCalled = true
+		return safecommit.Result{}, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runCommit(&stdout, &stderr, []string{
+		"--json", "--dir", t.TempDir(), "--path", "p/p_test.go",
+		"-m", "test(cmd): prove prospective validation refusal (fak cmd)",
+	})
+	if code != safecommit.ExitRefused {
+		t.Fatalf("code=%d, want %d; stdout=%s stderr=%s", code, safecommit.ExitRefused, stdout.String(), stderr.String())
+	}
+	if commitCalled {
+		t.Fatal("validation refusal called safecommit.Commit")
+	}
+	var res safecommit.Result
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		t.Fatalf("decode typed refusal: %v\n%s", err, stdout.String())
+	}
+	if res.Reason != safecommit.ReasonCommittedRed || res.BuildCheck == nil || res.BuildCheck.Outcome != safecommit.BuildCheckFailed {
+		t.Fatalf("typed refusal=%+v", res)
+	}
+	for _, want := range []string{"COMMITTED_RED", "deliberate failure", "fak validate --ref HEAD --mine p/p_test.go"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr=%q; want %q", stderr.String(), want)
+		}
+	}
+}
+
 func TestRunCommit_noPathsIsUsageError(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := runCommit(&out, &errb, []string{"-m", "msg"})

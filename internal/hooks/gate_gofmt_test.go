@@ -94,3 +94,19 @@ func TestGateGofmt_EmptyStagedSetClean(t *testing.T) {
 		t.Fatalf("an empty staged set fires nothing; got findings=%+v err=%v", findings, err)
 	}
 }
+
+func TestGateGofmt_DefaultModeBlocks(t *testing.T) {
+	for _, gate := range PreCommitGates() {
+		if gate.Name != "GOFMT" {
+			continue
+		}
+		if gate.DefaultMode != "" {
+			t.Fatalf("GOFMT DefaultMode=%q, want empty (block)", gate.DefaultMode)
+		}
+		if gate.ModeEnv != "FLEET_GOFMT_GUARD" || gate.EscapeEnv != "ALLOW_GOFMT_DRIFT" {
+			t.Fatalf("GOFMT gate modes changed unexpectedly: %+v", gate)
+		}
+		return
+	}
+	t.Fatal("GOFMT gate not registered")
+}

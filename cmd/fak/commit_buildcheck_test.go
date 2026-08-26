@@ -28,6 +28,9 @@ func TestCommitBuildCheckPackages(t *testing.T) {
 		{"cmd/fak path dedups against the always-included target", []string{"cmd/fak/commit.go"}, []string{"./cmd/fak"}},
 		{"dedup and sort across dirs", []string{"internal/zoo/a.go", "internal/aaa/b.go", "internal/zoo/c.go"}, []string{"./cmd/fak", "./internal/aaa", "./internal/zoo"}},
 		{"root-level go file maps to dot", []string{"main.go"}, []string{".", "./cmd/fak"}},
+		{"objective-c-only file triggers its package", []string{"internal/native/bridge.m"}, []string{"./cmd/fak", "./internal/native"}},
+		{"header-only file triggers its package", []string{"internal/native/bridge.h"}, []string{"./cmd/fak", "./internal/native"}},
+		{"assembly-only file triggers its package", []string{"internal/native/bridge.s"}, []string{"./cmd/fak", "./internal/native"}},
 		{"non-go commit returns nil", []string{"README.md", "docs/a.txt"}, nil},
 		{"mixed commit keeps only go dirs", []string{"README.md", "internal/x/y.go"}, []string{"./cmd/fak", "./internal/x"}},
 		{"empty returns nil", nil, nil},
@@ -177,6 +180,112 @@ func TestCommitBuildCheckGate_introducedRedRefused(t *testing.T) {
 	outcome, detail = commitBuildCheckGate(&stderr, repo, []string{"p/p.go"})
 	if outcome != safecommit.BuildCheckNotApplicable {
 		t.Fatalf("no-effective-change commit: expected a not-applicable gate; got outcome=%q detail=%q stderr=%s", outcome, detail, stderr.String())
+	}
+}
+
+func buildCheckGitState(t *testing.T, git func(args ...string) string) (head, index string) {
+	t.Helper()
+	return git("rev-parse", "HEAD"), git("write-tree")
+}
+
+func requireBuildCheckGitState(t *testing.T, git func(args ...string) string, head, index string) {
+	t.Helper()
+	if gotHead, gotIndex := buildCheckGitState(t, git); gotHead != head || gotIndex != index {
+		t.Fatalf("prospective refusal mutated git state: HEAD %s -> %s, index %s -> %s", head, gotHead, index, gotIndex)
+	}
+}
+
+func requireProspectiveRefusal(t *testing.T, outcome safecommit.BuildCheckOutcome, detail string, wants ...string) {
+	t.Helper()
+	if _, admit, reason := safecommit.DecideBuildCheck(outcome, detail, false); admit || reason != safecommit.ReasonCommittedRed {
+		t.Fatalf("outcome=%q admit=%v reason=%q detail=%q; want typed COMMITTED_RED refusal", outcome, admit, reason, detail)
+	}
+	for _, want := range append(wants, "next: fak validate --ref HEAD") {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("detail=%q; want actionable evidence %q", detail, want)
+		}
+	}
+}
+
+func TestCommitBuildCheckGateNativeOnlyMissingSymbolRefusesBeforeGitMutation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	if out, err := exec.Command("go", "env", "CGO_ENABLED").Output(); err != nil || strings.TrimSpace(string(out)) != "1" {
+		t.Skip("native-only link witness requires cgo")
+	}
+	repo, git := seedBuildCheckRepo(t)
+	writeBuildCheckFile(t, repo, "go.mod", buildCheckGoMod)
+	writeBuildCheckFile(t, repo, "p/p.go", `package p
+
+/*
+int native_value(void);
+*/
+import "C"
+
+func Value() int { return int(C.native_value()) }
+`)
+	writeBuildCheckFile(t, repo, "p/native.c", "int native_value(void) { return 1; }\n")
+	commitBuildCheckPlumbing(t, repo, git, "seed green native package", "go.mod", "p/p.go", "p/native.c")
+	t.Setenv("GOCACHE", t.TempDir())
+	head, index := buildCheckGitState(t, git)
+
+	writeBuildCheckFile(t, repo, "p/native.c", "extern int missing_native(void);\nint native_value(void) { return missing_native(); }\n")
+	var stderr bytes.Buffer
+	outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/native.c"})
+	requireProspectiveRefusal(t, outcome, detail, "missing_native")
+	requireBuildCheckGitState(t, git, head, index)
+
+	writeBuildCheckFile(t, repo, "p/native.c", "int native_value(void) { return 2; }\n")
+	if outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/native.c"}); outcome != safecommit.BuildCheckPassed {
+		t.Fatalf("restored native fixture outcome=%q detail=%q stderr=%s", outcome, detail, stderr.String())
+	}
+}
+
+func TestCommitBuildCheckGateFailingChangedPackageTestRefusesBeforeGitMutation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	repo, git := seedBuildCheckRepo(t)
+	writeBuildCheckFile(t, repo, "go.mod", buildCheckGoMod)
+	writeBuildCheckFile(t, repo, "p/p.go", "package p\n\nfunc Value() int { return 1 }\n")
+	writeBuildCheckFile(t, repo, "p/p_test.go", "package p\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) {\n\tif Value() != 1 { t.Fatal(\"bad\") }\n}\n")
+	commitBuildCheckPlumbing(t, repo, git, "seed passing test", "go.mod", "p/p.go", "p/p_test.go")
+	t.Setenv("GOCACHE", t.TempDir())
+	head, index := buildCheckGitState(t, git)
+
+	writeBuildCheckFile(t, repo, "p/p_test.go", "package p\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) {\n\tt.Fatal(\"deliberate prospective failure\")\n}\n")
+	var stderr bytes.Buffer
+	outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/p_test.go"})
+	requireProspectiveRefusal(t, outcome, detail, "test", "deliberate prospective failure")
+	requireBuildCheckGitState(t, git, head, index)
+
+	writeBuildCheckFile(t, repo, "p/p_test.go", "package p\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) {\n\tif Value() != 1 { t.Fatal(\"bad\") }\n}\n")
+	if outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/p_test.go"}); outcome != safecommit.BuildCheckNotApplicable {
+		t.Fatalf("restored identical fixture outcome=%q detail=%q", outcome, detail)
+	}
+}
+
+func TestCommitBuildCheckGateUnformattedOwnedPathRefusesBeforeGitMutation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	repo, git := seedBuildCheckRepo(t)
+	writeBuildCheckFile(t, repo, "go.mod", buildCheckGoMod)
+	writeBuildCheckFile(t, repo, "p/p.go", "package p\n\nfunc Value() int { return 1 }\n")
+	commitBuildCheckPlumbing(t, repo, git, "seed formatted package", "go.mod", "p/p.go")
+	t.Setenv("GOCACHE", t.TempDir())
+	head, index := buildCheckGitState(t, git)
+
+	writeBuildCheckFile(t, repo, "p/p.go", "package p\n\nfunc Value( ) int { return 2 }\n")
+	var stderr bytes.Buffer
+	outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/p.go"})
+	requireProspectiveRefusal(t, outcome, detail, "gofmt", "p/p.go")
+	requireBuildCheckGitState(t, git, head, index)
+
+	writeBuildCheckFile(t, repo, "p/p.go", "package p\n\nfunc Value() int { return 2 }\n")
+	if outcome, detail := commitBuildCheckGate(&stderr, repo, []string{"p/p.go"}); outcome != safecommit.BuildCheckPassed {
+		t.Fatalf("formatted fixture outcome=%q detail=%q stderr=%s", outcome, detail, stderr.String())
 	}
 }
 
