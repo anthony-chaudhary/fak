@@ -466,7 +466,9 @@ func (k sessionQ4KKernel) mul(name string, x any, out, in int) []float32 {
 		// activation once and is byte-identical to the f32 dequant-then-dot (kQuantMatRows;
 		// TestKQuantMatRowsMatchesF32). Without this the weight would miss q4kw and fall to the
 		// Q8 dequant-and-requantize path below, the slowest available route for these experts.
-		return kQuantMatRows(qt, xf)
+		y := make([]float32, qt.out)
+		k.s.kQuantMatRowsIntoDispatch(name, qt, xf, y)
+		return y
 	}
 	// Quant matmul weights with no resident Q4_K or k-quant copy (qwen3.5 attn_qkv → split
 	// q/k/v) fall back to the proven Q8_0 GEMV. The f32 activation is quantized on demand for

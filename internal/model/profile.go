@@ -20,8 +20,13 @@ package model
 // artifact — the kernel inspecting its own attention-state operations.
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
 // Op-class labels (stable keys for the JSON the cmd emits).
@@ -109,13 +114,213 @@ type PhaseProfile struct {
 // PhaseProfiler records coarse phase timings when attached to Session.PhaseProfiler.
 // It is not goroutine-safe; model sessions are already single-owner during generation.
 type PhaseProfiler struct {
-	stat  map[string]*PhaseStat
-	order []string
+	stat           map[string]*PhaseStat
+	order          []string
+	metal          *metalgemm.ExecutionSession
+	metalFallbacks []MetalFallbackEvent
+}
+
+// MetalFallbackRoute identifies a stable native-dispatch escape seam.
+type MetalFallbackRoute string
+
+const (
+	MetalFallbackQ4KGEMMCPU             MetalFallbackRoute = "q4k-gemm-cpu"
+	MetalFallbackQ4KGEMVPanelCPU        MetalFallbackRoute = "q4k-gemv-panel-cpu"
+	MetalFallbackQ4KGEMMGroupDispatch   MetalFallbackRoute = "q4k-gemm-group-caller-dispatch"
+	MetalFallbackQ4KGEMVGroupDispatch   MetalFallbackRoute = "q4k-gemv-group-caller-dispatch"
+	MetalFallbackQ8GEMMCPU              MetalFallbackRoute = "q8-gemm-cpu"
+	MetalFallbackQ8GEMMGroupDispatch    MetalFallbackRoute = "q8-gemm-group-caller-dispatch"
+	MetalFallbackQ8GEMVGroupDispatch    MetalFallbackRoute = "q8-gemv-group-caller-dispatch"
+	MetalFallbackQ6KGEMMCPU             MetalFallbackRoute = "q6k-gemm-cpu"
+	MetalFallbackQ6KGEMVCPU             MetalFallbackRoute = "q6k-gemv-cpu"
+	MetalFallbackQ4KGEMVCPU             MetalFallbackRoute = "q4k-gemv-cpu"
+	MetalFallbackQ8GEMVCPU              MetalFallbackRoute = "q8-gemv-cpu"
+	MetalFallbackQ4KGroupQ8CPU          MetalFallbackRoute = "q4k-group-q8-cpu"
+	MetalFallbackFusedMLPDispatch       MetalFallbackRoute = "fused-mlp-caller-dispatch"
+	MetalFallbackFusedMLPQ6DownDispatch MetalFallbackRoute = "fused-mlp-q6down-caller-dispatch"
+	MetalFallbackFusedMLPBatchDispatch  MetalFallbackRoute = "fused-mlp-q6down-batch-caller-dispatch"
+)
+
+const (
+	metalFallbackBackendCPU         = "cpu"
+	metalFallbackBackendNotExecuted = "not-executed"
+	metalFallbackDispositionCPU     = "cpu-executed"
+	metalFallbackDispositionCaller  = "returned-to-caller-dispatch"
+	metalFallbackReceiptSchema      = "fak-metal-fallback-receipt/v1"
+)
+
+// MetalFallbackEvent records whether a declined candidate actually executed CPU work or merely
+// returned control to the caller's ordinary native dispatcher. Sequence is session-local.
+type MetalFallbackEvent struct {
+	Sequence        int                          `json:"sequence"`
+	Route           MetalFallbackRoute           `json:"route"`
+	Operation       metalgemm.ExecutionOperation `json:"operation"`
+	PromisedBackend string                       `json:"promised_backend"`
+	ActualBackend   string                       `json:"actual_backend"`
+	Disposition     string                       `json:"disposition"`
+	Promised        bool                         `json:"promised"`
+	CPUWorkExecuted bool                         `json:"cpu_work_executed"`
+}
+
+// MetalFallbackReceipt preserves the ordered fallback stream and independently recomputed count.
+type MetalFallbackReceipt struct {
+	Schema               string               `json:"schema"`
+	Events               []MetalFallbackEvent `json:"events"`
+	EventsSHA256         string               `json:"events_sha256"`
+	PromisedCPUFallbacks int                  `json:"promised_cpu_fallbacks"`
 }
 
 // NewPhaseProfiler creates an empty opt-in phase profiler.
 func NewPhaseProfiler() *PhaseProfiler {
-	return &PhaseProfiler{stat: map[string]*PhaseStat{}}
+	return &PhaseProfiler{stat: map[string]*PhaseStat{}, metal: metalgemm.NewExecutionSession()}
+}
+
+func (p *PhaseProfiler) recordMetal(snapshot metalgemm.ExecutionSnapshot, err error) {
+	if p == nil {
+		return
+	}
+	if p.metal == nil {
+		p.metal = metalgemm.NewExecutionSession()
+	}
+	p.metal.Record(snapshot, err)
+}
+
+func (p *PhaseProfiler) recordMetalFallback(route MetalFallbackRoute) {
+	if p == nil {
+		return
+	}
+	event, ok := metalFallbackTemplate(route)
+	if !ok {
+		panic("model: unknown Metal fallback route " + string(route))
+	}
+	event.Sequence = len(p.metalFallbacks) + 1
+	p.metalFallbacks = append(p.metalFallbacks, event)
+}
+
+// MetalFallbackCount returns only promised Metal routes that actually executed CPU work.
+func (p *PhaseProfiler) MetalFallbackCount() int {
+	if p == nil {
+		return 0
+	}
+	return promisedCPUFallbacks(p.metalFallbacks)
+}
+
+// MetalFallbackReceipt returns the ordered typed stream owned by this profiler's Session.
+func (p *PhaseProfiler) MetalFallbackReceipt() (MetalFallbackReceipt, error) {
+	if p == nil {
+		return MetalFallbackReceipt{}, fmt.Errorf("phase profiler is nil")
+	}
+	events := append([]MetalFallbackEvent(nil), p.metalFallbacks...)
+	raw, err := json.Marshal(events)
+	if err != nil {
+		return MetalFallbackReceipt{}, err
+	}
+	digest := sha256.Sum256(raw)
+	receipt := MetalFallbackReceipt{Schema: metalFallbackReceiptSchema, Events: events, EventsSHA256: fmt.Sprintf("%x", digest), PromisedCPUFallbacks: promisedCPUFallbacks(events)}
+	if err := ValidateMetalFallbackReceipt(receipt); err != nil {
+		return MetalFallbackReceipt{}, err
+	}
+	return receipt, nil
+}
+
+// ValidateMetalFallbackReceipt recomputes ordering, route semantics, digest, and scalar total.
+func ValidateMetalFallbackReceipt(receipt MetalFallbackReceipt) error {
+	if receipt.Schema != metalFallbackReceiptSchema {
+		return fmt.Errorf("unexpected Metal fallback receipt schema %q", receipt.Schema)
+	}
+	for i, event := range receipt.Events {
+		if event.Sequence != i+1 {
+			return fmt.Errorf("Metal fallback sequence %d = %d, want %d", i, event.Sequence, i+1)
+		}
+		want, ok := metalFallbackTemplate(event.Route)
+		if !ok || event.Operation != want.Operation || event.PromisedBackend != want.PromisedBackend || event.ActualBackend != want.ActualBackend || event.Disposition != want.Disposition || event.Promised != want.Promised || event.CPUWorkExecuted != want.CPUWorkExecuted {
+			return fmt.Errorf("Metal fallback event %d has invalid route semantics", i+1)
+		}
+	}
+	raw, err := json.Marshal(receipt.Events)
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(raw)
+	if receipt.EventsSHA256 != fmt.Sprintf("%x", digest) {
+		return fmt.Errorf("Metal fallback event digest mismatch")
+	}
+	if got := promisedCPUFallbacks(receipt.Events); receipt.PromisedCPUFallbacks != got {
+		return fmt.Errorf("Metal fallback aggregate = %d, want %d", receipt.PromisedCPUFallbacks, got)
+	}
+	return nil
+}
+
+func promisedCPUFallbacks(events []MetalFallbackEvent) int {
+	count := 0
+	for _, event := range events {
+		if event.Promised && event.CPUWorkExecuted && event.ActualBackend == metalFallbackBackendCPU {
+			count++
+		}
+	}
+	return count
+}
+
+func metalFallbackTemplate(route MetalFallbackRoute) (MetalFallbackEvent, bool) {
+	cpu := func(operation metalgemm.ExecutionOperation) MetalFallbackEvent {
+		return MetalFallbackEvent{Route: route, Operation: operation, PromisedBackend: "metal", ActualBackend: metalFallbackBackendCPU, Disposition: metalFallbackDispositionCPU, Promised: true, CPUWorkExecuted: true}
+	}
+	dispatch := func(operation metalgemm.ExecutionOperation) MetalFallbackEvent {
+		return MetalFallbackEvent{Route: route, Operation: operation, PromisedBackend: "metal", ActualBackend: metalFallbackBackendNotExecuted, Disposition: metalFallbackDispositionCaller, Promised: false, CPUWorkExecuted: false}
+	}
+	switch route {
+	case MetalFallbackQ4KGEMMCPU:
+		return cpu(metalgemm.ExecutionQ4KGEMM), true
+	case MetalFallbackQ4KGEMVPanelCPU:
+		return cpu(metalgemm.ExecutionQ4KGEMV), true
+	case MetalFallbackQ4KGEMMGroupDispatch:
+		return dispatch(metalgemm.ExecutionQ4KGEMMGroup), true
+	case MetalFallbackQ4KGEMVGroupDispatch:
+		return dispatch(metalgemm.ExecutionQ4KGEMVGroup), true
+	case MetalFallbackQ8GEMMCPU:
+		return cpu(metalgemm.ExecutionQ8GEMM), true
+	case MetalFallbackQ8GEMMGroupDispatch:
+		return dispatch(metalgemm.ExecutionQ8GEMMGroup), true
+	case MetalFallbackQ8GEMVGroupDispatch:
+		return dispatch(metalgemm.ExecutionQ8GEMVGroup), true
+	case MetalFallbackQ6KGEMMCPU:
+		return cpu(metalgemm.ExecutionQ6KGEMM), true
+	case MetalFallbackQ6KGEMVCPU:
+		return cpu(metalgemm.ExecutionQ6KGEMV), true
+	case MetalFallbackQ4KGEMVCPU:
+		return cpu(metalgemm.ExecutionQ4KGEMV), true
+	case MetalFallbackQ8GEMVCPU:
+		return cpu(metalgemm.ExecutionQ8GEMV), true
+	case MetalFallbackQ4KGroupQ8CPU:
+		return cpu(metalgemm.ExecutionQ8GEMV), true
+	case MetalFallbackFusedMLPDispatch:
+		return dispatch(metalgemm.ExecutionQ4KFusedMLP), true
+	case MetalFallbackFusedMLPQ6DownDispatch:
+		return dispatch(metalgemm.ExecutionQ4KFusedMLPQ6Down), true
+	case MetalFallbackFusedMLPBatchDispatch:
+		return dispatch(metalgemm.ExecutionQ4KFusedMLPQ6DownBatch), true
+	default:
+		return MetalFallbackEvent{}, false
+	}
+}
+
+// MetalExecutionCounters returns the validated aggregate owned by this profiler's Session.
+func (p *PhaseProfiler) MetalExecutionCounters() (metalgemm.ExecutionCounters, error) {
+	if p == nil {
+		return metalgemm.ExecutionCounters{}, metalgemm.ExecutionCountersIncompleteError{Detail: "phase profiler is nil"}
+	}
+	if p.metal == nil {
+		return metalgemm.ExecutionCounters{}, metalgemm.ExecutionCountersIncompleteError{Detail: "session capture was not initialized"}
+	}
+	return p.metal.Counters()
+}
+
+// MetalExecutionReceipt returns the raw event stream owned by this profiler's Session.
+func (p *PhaseProfiler) MetalExecutionReceipt() (metalgemm.ExecutionReceipt, error) {
+	if p == nil || p.metal == nil {
+		return metalgemm.ExecutionReceipt{}, metalgemm.ExecutionCountersIncompleteError{Detail: "session capture was not initialized"}
+	}
+	return p.metal.Receipt()
 }
 
 func (p *PhaseProfiler) record(phase string, nanos int64) {
@@ -142,6 +347,8 @@ func (p *PhaseProfiler) Reset() {
 		delete(p.stat, k)
 	}
 	p.order = p.order[:0]
+	p.metal = metalgemm.NewExecutionSession()
+	p.metalFallbacks = nil
 }
 
 // Snapshot returns a sorted copy of the current timings. totalNanos should be the

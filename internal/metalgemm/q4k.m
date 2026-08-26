@@ -21,12 +21,20 @@
 
 #import <Metal/Metal.h>
 #include "q8_bridge.h"
+#include <CoreFoundation/CoreFoundation.h>
+#include <math.h>
+#include <string.h>
+#include <unistd.h>
 
 typedef struct {
     uintptr_t command_buffer;
     int committed;
     int completed_wait;
     int host_readback;
+    int encoders;
+    double gpu_milliseconds;
+    double wait_milliseconds;
+    int timing_available;
 } mg_execution_event;
 
 static inline void mg_execution_event_reset(mg_execution_event* event) {
@@ -35,19 +43,42 @@ static inline void mg_execution_event_reset(mg_execution_event* event) {
     event->committed = 0;
     event->completed_wait = 0;
     event->host_readback = 0;
+    event->encoders = 0;
+    event->gpu_milliseconds = 0;
+    event->wait_milliseconds = 0;
+    event->timing_available = 0;
 }
 
-static inline void mg_execution_event_finish(mg_execution_event* event, id<MTLCommandBuffer> cb) {
+static inline void mg_execution_event_command_buffer(mg_execution_event* event, id<MTLCommandBuffer> cb) {
     if (event == NULL) return;
     event->command_buffer = (uintptr_t)(__bridge void*)cb;
+}
+
+static inline void mg_execution_event_encoder(mg_execution_event* event, id<MTLComputeCommandEncoder> encoder) {
+    if (event != NULL && encoder != nil) event->encoders++;
+}
+
+static inline void mg_execution_event_committed(mg_execution_event* event) {
+    if (event == NULL) return;
     event->committed = 1;
-    event->completed_wait = 1;
+}
+
+static inline void mg_execution_event_waited(mg_execution_event* event, id<MTLCommandBuffer> cb, CFAbsoluteTime wait_started) {
+    if (event == NULL) return;
+    event->completed_wait = cb.status == MTLCommandBufferStatusCompleted;
+    event->wait_milliseconds = (CFAbsoluteTimeGetCurrent() - wait_started) * 1000.0;
+    double gpu_start = cb.GPUStartTime;
+    double gpu_end = cb.GPUEndTime;
+    if (isfinite(gpu_start) && isfinite(gpu_end) && gpu_end > gpu_start) {
+        event->gpu_milliseconds = (gpu_end - gpu_start) * 1000.0;
+        event->timing_available = 1;
+    }
+}
+
+static inline void mg_execution_event_readback(mg_execution_event* event) {
+    if (event == NULL) return;
     event->host_readback = 1;
 }
-#include <CoreFoundation/CoreFoundation.h>
-#include <string.h>
-#include <unistd.h>
-
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
 extern id<MTLCommandQueue> gQueue;
@@ -694,7 +725,8 @@ static void q4k_grow_mlp(long iElems) {
 // elementwise, (3) the down GEMV. This collapses the MLP — ~54% of q4_k_m decode — from three
 // per-matmul command buffers (each round-tripping the I-wide gate/up out + the intermediate back
 // in) to one. Caller guarantees gate.out==up.out==down.in (=I) and gate.in==up.in==down.out (=H).
-void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y) {
+void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (gate_wid < 0 || up_wid < 0 || down_wid < 0 ||
         gate_wid >= gNQ4 || up_wid >= gNQ4 || down_wid >= gNQ4) return;
     @autoreleasepool {
@@ -707,9 +739,11 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
         memcpy(xb.contents, x, (size_t)H * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
 
         // (1) gate = G·x and up = U·x (independent), one encoder
         id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e1);
         [e1 setComputePipelineState:psoQ4KGemv];
         [e1 setBuffer:xb offset:0 atIndex:1];
         [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
@@ -726,6 +760,7 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
 
         // (2) inter = silu(gate) * up
         id<MTLComputeCommandEncoder> e2 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e2);
         [e2 setComputePipelineState:psoQ4KSwiGLU];
         [e2 setBuffer:gMlpGate offset:0 atIndex:0];
         [e2 setBuffer:gMlpUp offset:0 atIndex:1];
@@ -736,6 +771,7 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
 
         // (3) y = D·inter
         id<MTLComputeCommandEncoder> e3 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e3);
         [e3 setComputePipelineState:psoQ4KGemv];
         [e3 setBuffer:gMlpInter offset:0 atIndex:1];
         [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
@@ -746,8 +782,12 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
         [e3 endEncoding];
 
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
         memcpy(y, yb.contents, (size_t)D.out * 4);
+        mg_execution_event_readback(event);
     }
 }
 
@@ -798,7 +838,8 @@ int mg_q6k_upload(const unsigned char* raw, int out, int in) {
 // mg_q6k_gemv computes y[out] = W[wid] · x for a resident Q6_K weight in one command buffer.
 // The fused MLP already uses q6k_gemv as stage 3; this standalone wrapper lets k-quant decode
 // sites such as the Qwen3.6 Q6_K LM head stay on Metal instead of escaping to the CPU.
-void mg_q6k_gemv(int wid, const float* x, float* y) {
+void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < MG_Q6_BASE || (wid - MG_Q6_BASE) >= gNQ6) return;
     @autoreleasepool {
         Q6KW W = gQ6[wid - MG_Q6_BASE];
@@ -807,7 +848,9 @@ void mg_q6k_gemv(int wid, const float* x, float* y) {
         memcpy(xb.contents, x, (size_t)W.in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ6KGemv];
         [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
         [e setBuffer:xb offset:0 atIndex:1];
@@ -818,16 +861,21 @@ void mg_q6k_gemv(int wid, const float* x, float* y) {
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
 
         memcpy(y, yb.contents, (size_t)W.out * 4);
+        mg_execution_event_readback(event);
     }
 }
 
 // mg_q6k_gemm computes Y[P,out] = X[P,in] * W[wid]^T for a resident Q6_K weight in one command
 // buffer. This is the prefill counterpart to q6k_gemv / mg_q4k_mlp_q6down's stage 3: dense
 // q4_k_m down_proj can stay on Metal instead of using the host kQuantMatRowsIntoBatch loop.
-void mg_q6k_gemm(int wid, const float* X, int P, float* Y) {
+void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (wid < MG_Q6_BASE || (wid - MG_Q6_BASE) >= gNQ6 || P <= 0) return;
     @autoreleasepool {
         Q6KW W = gQ6[wid - MG_Q6_BASE];
@@ -836,7 +884,9 @@ void mg_q6k_gemm(int wid, const float* X, int P, float* Y) {
         memcpy(xb.contents, X, (size_t)P * W.in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ6KGemm];
         [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
         [e setBuffer:xb offset:0 atIndex:1];
@@ -848,9 +898,13 @@ void mg_q6k_gemm(int wid, const float* X, int P, float* Y) {
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
 
         memcpy(Y, yb.contents, (size_t)P * W.out * 4);
+        mg_execution_event_readback(event);
     }
 }
 
@@ -886,7 +940,8 @@ static void q4k_grow_y_k(long totalElems) {
 }
 
 int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids,
-                            int n, const float* x, float* Ycat) {
+                            int n, const float* x, float* Ycat, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (n <= 0 || gate_wids == NULL || up_wids == NULL || down_wids == NULL) return -1;
     // Validate every expert up front and confirm a uniform (H, I, Dout) across the batch (all
     // routed experts of a layer share the FFN geometry). A mismatch declines the whole batch.
@@ -909,11 +964,13 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
         memcpy(xb.contents, x, (size_t)H * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
 
         // Stage 1: for every expert, gate = G_e*x and up = U_e*x into its own I-wide slice
         // (offset e*I). One encoder holds all 2n GEMV dispatches; distinct output slices avoid a
         // false write-after-write hazard across experts.
         id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e1);
         [e1 setComputePipelineState:psoQ4KGemv];
         [e1 setBuffer:xb offset:0 atIndex:1];
         for (int e = 0; e < n; e++) {
@@ -934,6 +991,7 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
 
         // Stage 2: inter_e = silu(gate_e) * up_e over each expert's I-wide slice.
         id<MTLComputeCommandEncoder> e2 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e2);
         [e2 setComputePipelineState:psoQ4KSwiGLU];
         for (int e = 0; e < n; e++) {
             NSUInteger off = (NSUInteger)((long)e * I * 4);
@@ -947,6 +1005,7 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
 
         // Stage 3: y_e = D_e * inter_e (Q6_K GEMV) into Ycat row e (offset e*Dout).
         id<MTLComputeCommandEncoder> e3 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e3);
         [e3 setComputePipelineState:psoQ6KGemv];
         for (int e = 0; e < n; e++) {
             Q6KW D = gQ6[down_wids[e] - MG_Q6_BASE];
@@ -962,8 +1021,12 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
         [e3 endEncoding];
 
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
         memcpy(Ycat, gQYBufK.contents, (size_t)n * Dout * 4);
+        mg_execution_event_readback(event);
     }
     return 0;
 }
@@ -972,7 +1035,8 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
 // IDENTICAL — they run over the resident gMlpGate/gMlpUp/gMlpInter scratch — only stage 3 binds the
 // Q6_K down weight (gQ6[down_wid-MG_Q6_BASE]) and the Q6_K GEMV pipeline. The whole MLP still runs in
 // ONE command buffer. gate_wid/up_wid are Q4_K wids; down_wid is a Q6_K wid (>= MG_Q6_BASE).
-void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y) {
+void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event) {
+    mg_execution_event_reset(event);
     if (gate_wid < 0 || up_wid < 0 || gate_wid >= gNQ4 || up_wid >= gNQ4) return;
     if (down_wid < MG_Q6_BASE || (down_wid - MG_Q6_BASE) >= gNQ6) return;
     @autoreleasepool {
@@ -986,9 +1050,11 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
         memcpy(xb.contents, x, (size_t)H * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
 
         // (1) gate = G·x and up = U·x (independent), one encoder — IDENTICAL to mg_q4k_mlp.
         id<MTLComputeCommandEncoder> e1 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e1);
         [e1 setComputePipelineState:psoQ4KGemv];
         [e1 setBuffer:xb offset:0 atIndex:1];
         [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
@@ -1005,6 +1071,7 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
 
         // (2) inter = silu(gate) * up — IDENTICAL to mg_q4k_mlp.
         id<MTLComputeCommandEncoder> e2 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e2);
         [e2 setComputePipelineState:psoQ4KSwiGLU];
         [e2 setBuffer:gMlpGate offset:0 atIndex:0];
         [e2 setBuffer:gMlpUp offset:0 atIndex:1];
@@ -1015,6 +1082,7 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
 
         // (3) y = D·inter with the Q6_K GEMV pipeline (the only line that differs from mg_q4k_mlp).
         id<MTLComputeCommandEncoder> e3 = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e3);
         [e3 setComputePipelineState:psoQ6KGemv];
         [e3 setBuffer:gMlpInter offset:0 atIndex:1];
         [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
@@ -1025,8 +1093,12 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
         [e3 endEncoding];
 
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
         memcpy(y, yb.contents, (size_t)D.out * 4);
+        mg_execution_event_readback(event);
     }
 }
 
@@ -1109,7 +1181,9 @@ int mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execu
         memcpy(xb.contents, x, (size_t)W.in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:pso];
         [e setBuffer:wbuf offset:0 atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
@@ -1123,10 +1197,13 @@ int mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execu
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
 
         memcpy(y, yb.contents, (size_t)W.out * 4);
-    mg_execution_event_finish(event, cb);
+        mg_execution_event_readback(event);
     return executed;
     }
 }
@@ -1150,7 +1227,9 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execut
         memcpy(xb.contents, Xcat, (size_t)n * W.in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ4KGemv];
         [e setBuffer:wbuf offset:0 atIndex:0];
         [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
@@ -1163,10 +1242,13 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execut
         }
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
 
         memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
-    mg_execution_event_finish(event, cb);
+        mg_execution_event_readback(event);
     }
 }
 
@@ -1184,7 +1266,9 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_
         memcpy(xb.contents, Xcat, (size_t)n * W.in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ4KGemvMulti[n - 4]];
         [e setBuffer:wbuf offset:0 atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
@@ -1195,10 +1279,13 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_
             threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
 
         memcpy(Ycat, yb.contents, (size_t)n * W.out * 4);
-    mg_execution_event_finish(event, cb);
+        mg_execution_event_readback(event);
     }
 }
 
@@ -1220,7 +1307,9 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
         memcpy(xb.contents, x, (size_t)in * 4);
 
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ4KGemv];
         [e setBuffer:xb offset:0 atIndex:1]; // shared activation for every weight in the group
         for (int i = 0; i < n; i++) {
@@ -1234,10 +1323,13 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
         }
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
-    mg_execution_event_finish(event, cb);
+        mg_execution_event_readback(event);
     }
 }
 
@@ -1267,10 +1359,11 @@ int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_
     @autoreleasepool {
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         if (cb == nil) return 0;
-        if (event != NULL) event->command_buffer = (uintptr_t)(__bridge void*)cb;
+        mg_execution_event_command_buffer(event, cb);
 
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         if (e == nil) return -1;
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ4KGemv];
         [e setBuffer:gQXBuf offset:0 atIndex:1];
         for (int i = 0; i < nq4; i++) {
@@ -1283,18 +1376,21 @@ int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_
                 threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         }
         [e endEncoding];
-        if (mg_q8_encode_gemv_group((__bridge void*)cb, q8_wids, nq8, q8_yoff) == 0) {
+        int q8_encoders = mg_q8_encode_gemv_group((__bridge void*)cb, q8_wids, nq8, q8_yoff);
+        if (q8_encoders <= 0) {
             return -1; // candidate encoding began; fail closed rather than falling back mid-batch.
         }
+		if (event != NULL) event->encoders += q8_encoders;
         [cb commit];
-        if (event != NULL) event->committed = 1;
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
-        if (event != NULL) event->completed_wait = 1;
+        mg_execution_event_waited(event, cb, wait_started);
         if (cb.status != MTLCommandBufferStatusCompleted) return -1;
 
         memcpy(q4_y, gQYBuf.contents, (size_t)q4total * 4);
         mg_q8_read_gemv_group(q8_y, q8_yoff[nq8]);
-        if (event != NULL) event->host_readback = 1;
+        mg_execution_event_readback(event);
         return 1;
     }
 }
@@ -1324,7 +1420,9 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, m
         const int TG = 256; // threads per threadgroup (TGX*TGY); must match Q4K_TG in the MSL source
         int rowBlocks = (W.out + BM - 1) / BM;
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:q4k_gemm_pso()];
         [e setBuffer:wbuf offset:0 atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
@@ -1342,14 +1440,17 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, m
         }
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
         // GPUStartTime/GPUEndTime are valid only after waitUntilCompleted returns (already-completed
         // cb; reading them is cheap). This is the on-GPU execution window, excluding the CPU-side
         // encode/commit/sync/H2D that dominates the q4k_metal prefill wall we are trying to split.
         if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
 
         memcpy(Y, yb.contents, (size_t)P * W.out * 4);
-    mg_execution_event_finish(event, cb);
+        mg_execution_event_readback(event);
     }
 }
 
@@ -1381,7 +1482,9 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
         const int BN = 64;  // must match Q4K_BN in the MSL source
         const int TG = 256; // must match Q4K_TG (TGX*TGY) in the MSL source
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:q4k_gemm_pso()];
         [e setBuffer:xb offset:0 atIndex:1]; // shared X for the whole group
         [e setBytes:&P length:sizeof(int) atIndex:5];
@@ -1403,13 +1506,16 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
         }
         [e endEncoding];
         [cb commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cb waitUntilCompleted];
+        mg_execution_event_waited(event, cb, wait_started);
         // On-GPU execution window for the whole group (valid post-wait; excludes CPU encode/commit/
         // sync/H2D). Lets the model side split its wall-timed q4kTime into gpu_compute vs roundtrip.
         if (out_gpu_ms) *out_gpu_ms = (cb.GPUEndTime - cb.GPUStartTime) * 1000.0;
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
-    mg_execution_event_finish(event, cb);
+        mg_execution_event_readback(event);
     }
 }
 

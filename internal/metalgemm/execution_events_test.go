@@ -1,15 +1,16 @@
 package metalgemm
 
 import (
+	"strings"
 	"sync"
 	"testing"
 )
 
 func TestExecutionObservationUsesLocalOpaqueIDsAndClonesSnapshots(t *testing.T) {
 	observation := newExecutionObservation(ExecutionQ4KGEMV, true)
-	observation.record(0xdeadbeef, true, true, true)
-	observation.record(0xcafebabe, true, false, false)
-	observation.record(0xdeadbeef, true, true, true)
+	observation.record(0xdeadbeef, true, true, true, 1, 0.2, 0.3, true)
+	observation.record(0xcafebabe, true, false, false, 1, 0.2, 0.3, true)
+	observation.record(0xdeadbeef, true, true, true, 1, 0.2, 0.3, true)
 
 	first, err := observation.Snapshot()
 	if err != nil {
@@ -45,7 +46,7 @@ func TestExecutionObservationsAreConcurrentAndIsolated(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			observations[i].record(uintptr(0x1000+i), true, true, true)
+			observations[i].record(uintptr(0x1000+i), true, true, true, 1, 0.2, 0.3, true)
 		}(i)
 	}
 	wg.Wait()
@@ -58,5 +59,63 @@ func TestExecutionObservationsAreConcurrentAndIsolated(t *testing.T) {
 		if len(snapshot.Events) != 1 || snapshot.Events[0].CommandBufferID != 1 {
 			t.Fatalf("observation[%d] = %+v, want one local ID 1", i, snapshot.Events)
 		}
+	}
+}
+
+func TestExecutionSessionAggregatesAndFailsClosed(t *testing.T) {
+	session := NewExecutionSession()
+	session.Record(ExecutionSnapshot{Events: []ExecutionEvent{{
+		Operation: ExecutionQ4KGEMM, CommandBufferID: 1, Committed: true,
+		CompletedWait: true, HostReadback: true, Encoders: 2,
+		GPUMilliseconds: 1.25, WaitMilliseconds: 1.5, TimingAvailable: true,
+	}}}, nil)
+	counters, err := session.Counters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counters.CommandBuffers != 1 || counters.Encoders != 2 || counters.DispatchMilliseconds != 1.25 || counters.WaitMilliseconds != 1.5 {
+		t.Fatalf("counters = %+v", counters)
+	}
+
+	incomplete := NewExecutionSession()
+	incomplete.Record(ExecutionSnapshot{Events: []ExecutionEvent{{Operation: ExecutionQ8GEMV, Committed: true}}}, nil)
+	if _, err := incomplete.Counters(); !IsExecutionCountersIncomplete(err) {
+		t.Fatalf("err = %v, want typed incomplete capture", err)
+	}
+	empty := NewExecutionSession()
+	empty.Record(ExecutionSnapshot{}, nil)
+	if _, err := empty.Counters(); !IsExecutionCountersIncomplete(err) {
+		t.Fatalf("empty err = %v, want typed incomplete capture", err)
+	}
+}
+
+func TestExecutionReceiptRecomputesDigestAndCounters(t *testing.T) {
+	session := NewExecutionSession()
+	session.Record(ExecutionSnapshot{Events: []ExecutionEvent{
+		{Operation: ExecutionQ4KGEMM, CommandBufferID: 1, Committed: true, CompletedWait: true, HostReadback: true, Encoders: 2, GPUMilliseconds: 1.25, WaitMilliseconds: 1.5, TimingAvailable: true},
+		{Operation: ExecutionQ8GEMV, CommandBufferID: 1, Committed: true, CompletedWait: true, HostReadback: true, Encoders: 1, GPUMilliseconds: 0.5, WaitMilliseconds: 0.75, TimingAvailable: true},
+	}}, nil)
+	receipt, err := session.Receipt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateExecutionReceipt(receipt); err != nil {
+		t.Fatalf("receipt did not read back: %v", err)
+	}
+	if receipt.Counters.CommandBuffers != 2 || receipt.Counters.Encoders != 3 || receipt.Counters.DispatchMilliseconds != 1.75 || receipt.Counters.WaitMilliseconds != 2.25 {
+		t.Fatalf("receipt counters = %+v", receipt.Counters)
+	}
+
+	tamperedEvent := receipt
+	tamperedEvent.Events = append([]ExecutionEvent(nil), receipt.Events...)
+	tamperedEvent.Events[0].Encoders++
+	if err := ValidateExecutionReceipt(tamperedEvent); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("tampered event err = %v, want digest mismatch", err)
+	}
+
+	tamperedCounters := receipt
+	tamperedCounters.Counters.CommandBuffers++
+	if err := ValidateExecutionReceipt(tamperedCounters); err == nil || !strings.Contains(err.Error(), "aggregate mismatch") {
+		t.Fatalf("tampered counters err = %v, want aggregate mismatch", err)
 	}
 }

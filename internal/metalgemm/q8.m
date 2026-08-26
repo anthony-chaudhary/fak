@@ -20,12 +20,19 @@
 
 #import <Metal/Metal.h>
 #include "q8_bridge.h"
+#include <CoreFoundation/CoreFoundation.h>
+#include <math.h>
+#include <string.h>
 
 typedef struct {
     uintptr_t command_buffer;
     int committed;
     int completed_wait;
     int host_readback;
+    int encoders;
+    double gpu_milliseconds;
+    double wait_milliseconds;
+    int timing_available;
 } mg_execution_event;
 
 static inline void mg_execution_event_reset(mg_execution_event* event) {
@@ -34,13 +41,36 @@ static inline void mg_execution_event_reset(mg_execution_event* event) {
     event->committed = 0;
     event->completed_wait = 0;
     event->host_readback = 0;
+    event->encoders = 0;
+    event->gpu_milliseconds = 0;
+    event->wait_milliseconds = 0;
+    event->timing_available = 0;
 }
 
-static inline void mg_execution_event_finish(mg_execution_event* event, id<MTLCommandBuffer> cmd) {
+static inline void mg_execution_event_command_buffer(mg_execution_event* event, id<MTLCommandBuffer> cmd) {
     if (event == NULL) return;
     event->command_buffer = (uintptr_t)(__bridge void*)cmd;
+}
+static inline void mg_execution_event_encoder(mg_execution_event* event, id<MTLComputeCommandEncoder> encoder) {
+    if (event != NULL && encoder != nil) event->encoders++;
+}
+static inline void mg_execution_event_committed(mg_execution_event* event) {
+    if (event == NULL) return;
     event->committed = 1;
-    event->completed_wait = 1;
+}
+static inline void mg_execution_event_waited(mg_execution_event* event, id<MTLCommandBuffer> cmd, CFAbsoluteTime wait_started) {
+    if (event == NULL) return;
+    event->completed_wait = cmd.status == MTLCommandBufferStatusCompleted;
+    event->wait_milliseconds = (CFAbsoluteTimeGetCurrent() - wait_started) * 1000.0;
+    double gpu_start = cmd.GPUStartTime;
+    double gpu_end = cmd.GPUEndTime;
+    if (isfinite(gpu_start) && isfinite(gpu_end) && gpu_end > gpu_start) {
+        event->gpu_milliseconds = (gpu_end - gpu_start) * 1000.0;
+        event->timing_available = 1;
+    }
+}
+static inline void mg_execution_event_readback(mg_execution_event* event) {
+    if (event == NULL) return;
     event->host_readback = 1;
 }
 #include <CoreFoundation/CoreFoundation.h>
@@ -352,7 +382,9 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
         memcpy(gQ8XDBuf.contents, xd, (size_t)W.nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemv];
         [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
         [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
@@ -365,10 +397,13 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(y, gQ8YBuf.contents, (size_t)W.out * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 
@@ -389,7 +424,9 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         memcpy(gQ8XDBuf.contents, xd, (size_t)nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemv];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared activation for every weight in the group
         [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
@@ -405,10 +442,13 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         }
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 
@@ -425,7 +465,9 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         memcpy(gQ8XDBuf.contents, Xd, (size_t)P * W.nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
         [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
@@ -449,10 +491,13 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         }
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(Y, gQ8YBuf.contents, (size_t)P * W.out * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 
@@ -476,7 +521,9 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         const int BN = 64;  // token-tile width;            must match Q8_BN in the MSL source
         const int TG = 256; // threads per threadgroup;     must match Q8_TG in the MSL source
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared X panel for every weight
         [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
@@ -500,10 +547,13 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         }
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 

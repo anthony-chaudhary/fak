@@ -18,6 +18,10 @@ typedef struct {
     int committed;
     int completed_wait;
     int host_readback;
+    int encoders;
+    double gpu_milliseconds;
+    double wait_milliseconds;
+    int timing_available;
 } mg_execution_event;
 int  mg_q8_upload(const signed char* codes, const float* scales, int out, int in);
 int  mg_q8_alias(const signed char* codes, const float* scales, int out, int in);
@@ -36,6 +40,15 @@ import (
 	"sync"
 	"unsafe"
 )
+
+func recordQ8Event(observation *ExecutionObservation, event *C.mg_execution_event) {
+	if event == nil {
+		return
+	}
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0,
+		event.host_readback != 0, int(event.encoders), float64(event.gpu_milliseconds),
+		float64(event.wait_milliseconds), event.timing_available != 0)
+}
 
 // Q8Weight is a handle to a Q8_0 weight matrix [Out, In] resident on the GPU (int8 codes + per-32
 // f32 block scales). In must be a multiple of 32 (the Q8_0 block size); Nblk = In/32.
@@ -135,7 +148,7 @@ func (w *Q8Weight) GEMVWithEvents(xq []int8, xd []float32, y []float32, observat
 	var event C.mg_execution_event
 	C.mg_q8_gemv(w.id, (*C.schar)(unsafe.Pointer(&xq[0])), (*C.float)(unsafe.Pointer(&xd[0])),
 		(*C.float)(unsafe.Pointer(&y[0])), &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ8Event(observation, &event)
 }
 
 // GEMVGroupQ8 runs one decode GEMV per weight in ws — all reading the SAME Q8_0 activation (xq
@@ -172,7 +185,7 @@ func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation 
 	var event C.mg_execution_event
 	C.mg_q8_gemv_group(&wids[0], C.int(n), (*C.schar)(unsafe.Pointer(&xq[0])), (*C.float)(unsafe.Pointer(&xd[0])),
 		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ8Event(observation, &event)
 	out := make([][]float32, n)
 	o := 0
 	for i, w := range ws {
@@ -197,7 +210,7 @@ func (w *Q8Weight) GEMMWithEvents(Xq []int8, Xd []float32, P int, Y []float32, o
 	var event C.mg_execution_event
 	C.mg_q8_gemm(w.id, (*C.schar)(unsafe.Pointer(&Xq[0])), (*C.float)(unsafe.Pointer(&Xd[0])),
 		C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ8Event(observation, &event)
 }
 
 // GEMMGroupQ8 runs one batched prefill GEMM per weight in ws, all reading the SAME Q8_0 activation
@@ -233,7 +246,7 @@ func GEMMGroupQ8WithEvents(ws []*Q8Weight, Xq []int8, Xd []float32, P int, obser
 	var event C.mg_execution_event
 	C.mg_q8_gemm_group(&wids[0], C.int(n), (*C.schar)(unsafe.Pointer(&Xq[0])), (*C.float)(unsafe.Pointer(&Xd[0])),
 		C.int(P), (*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ8Event(observation, &event)
 	out := make([][]float32, n)
 	o := 0
 	for i, w := range ws {

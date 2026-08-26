@@ -70,6 +70,10 @@ func TestMixedQ4KQ8Observation(t *testing.T) {
 	if candidateSnapshot.Events[0].Operation != ExecutionMixedQ4KQ8QKV {
 		t.Fatalf("candidate operation=%q", candidateSnapshot.Events[0].Operation)
 	}
+	requireCompletedExecution(t, candidateObservation, ExecutionMixedQ4KQ8QKV)
+	if got := candidateSnapshot.Events[0].Encoders; got != 2 {
+		t.Fatalf("candidate encoders=%d, want one Q4_K plus one Q8 encoder", got)
+	}
 	t.Logf("captured lifecycle: control_events=2 candidate_events=%d candidate=%+v", len(candidateSnapshot.Events), candidateSnapshot.Events[0])
 	cosine, maxRel := q4kTestCosineMaxRel(q4Control, q4Candidate[0])
 	if cosine < 0.9999 || maxRel > 0.02 {
