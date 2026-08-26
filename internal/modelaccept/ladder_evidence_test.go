@@ -70,18 +70,132 @@ func TestBuildInventoryWithLadderEvidenceAdmission(t *testing.T) {
 	})
 }
 
-func TestCommittedLadderChecksumMismatchFailsClosed(t *testing.T) {
+func TestCommittedLadderEvidencePassesAndTamperFailsClosed(t *testing.T) {
 	dir := filepath.Join("..", "..", "docs", "_witnesses", "issue-8623-qwen38-27b")
-	inventory, admission := BuildInventoryWithLadderEvidence(inventoryFixture(), inventoryOptions(), LadderEvidenceOptions{
+	admission := VerifyLadderEvidence(LadderEvidenceOptions{
 		Directory: dir,
 		Manifest:  filepath.Join(dir, "checksums.json"),
 	})
-	assertLadderEvidenceHold(t, inventory, admission, LadderEvidenceChecksumMismatch, "environment.json")
-	if admission.Reason.ExpectedSHA256 != "daff998a66ab76358b02f19f8dc59b39e484232920b8a833b531e06c2462eda5" {
-		t.Fatalf("committed expected SHA-256 changed: %+v", admission.Reason)
+	if admission.Verdict != Pass || admission.Reason.Code != "" {
+		t.Fatalf("committed evidence admission = %+v", admission)
 	}
-	if admission.Reason.ActualSHA256 != "10b860cc29e30ebe4edd2062b2ef1a8a7c6a59d11523d9ea64bc19dbad0dfe17" {
-		t.Fatalf("committed actual SHA-256 changed: %+v", admission.Reason)
+	assertCommittedLadderSemantics(t, dir)
+
+	tampered := cloneLadderEvidenceFixture(t, dir)
+	rawPath := filepath.Join(tampered, "raw-run.json")
+	raw, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[0] ^= 1
+	if err := os.WriteFile(rawPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refused := VerifyLadderEvidence(LadderEvidenceOptions{
+		Directory: tampered,
+		Manifest:  filepath.Join(tampered, "checksums.json"),
+	})
+	if refused.Verdict != Hold || refused.Reason.Code != LadderEvidenceChecksumMismatch || refused.Reason.Path != "raw-run.json" {
+		t.Fatalf("one-byte tamper admission = %+v", refused)
+	}
+	if refused.Reason.ExpectedSHA256 == "" || refused.Reason.ActualSHA256 == "" || refused.Reason.ExpectedSHA256 == refused.Reason.ActualSHA256 {
+		t.Fatalf("tamper did not carry distinct expected/actual SHA-256: %+v", refused.Reason)
+	}
+}
+
+func assertCommittedLadderSemantics(t *testing.T, dir string) {
+	t.Helper()
+	type result struct {
+		StageID         string  `json:"stage_id"`
+		Model           string  `json:"model"`
+		Revision        string  `json:"revision"`
+		CorpusSHA       string  `json:"corpus_sha256"`
+		EnvironmentSHA  string  `json:"environment_sha256"`
+		Trials          int     `json:"trials"`
+		BaselinePassed  int     `json:"baseline_passed"`
+		CandidatePassed int     `json:"candidate_passed"`
+		BaselineMetric  float64 `json:"baseline_metric"`
+		CandidateMetric float64 `json:"candidate_metric"`
+	}
+	var evidence struct {
+		Schema              string   `json:"schema"`
+		BaselineRuntimeSHA  string   `json:"baseline_runtime_sha"`
+		CandidateRuntimeSHA string   `json:"candidate_runtime_sha"`
+		Results             []result `json:"results"`
+	}
+	decodeJSONFile(t, filepath.Join(dir, "evidence-complete.json"), &evidence)
+	if evidence.Schema != "fak.qwen38-ladder-evidence/1" || len(evidence.Results) != 6 {
+		t.Fatalf("evidence identity = schema %q, results %d", evidence.Schema, len(evidence.Results))
+	}
+	target := evidence.Results[len(evidence.Results)-1]
+	if target.StageID != "target" || target.Model != "Qwen/Qwen3.8-27B" || target.Revision != "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0" || target.Trials != 3 || target.BaselinePassed != 3 || target.CandidatePassed != 3 || target.BaselineMetric != 3378.019733 || target.CandidateMetric != 376.181809 {
+		t.Fatalf("target evidence = %+v", target)
+	}
+
+	var environment struct {
+		Model              string `json:"model"`
+		Revision           string `json:"revision"`
+		DType              string `json:"dtype"`
+		TensorParallelSize int    `json:"tensor_parallel_size"`
+		EnvironmentSHA     string `json:"environment_sha256"`
+		Arms               struct {
+			Baseline struct {
+				RuntimeSHA string `json:"runtime_sha"`
+			} `json:"baseline"`
+			Candidate struct {
+				RuntimeSHA string `json:"runtime_sha"`
+			} `json:"candidate"`
+		} `json:"arms"`
+	}
+	decodeJSONFile(t, filepath.Join(dir, "environment.json"), &environment)
+	if environment.Model != target.Model || environment.Revision != target.Revision || environment.DType != "bfloat16" || environment.TensorParallelSize != 2 || environment.EnvironmentSHA != target.EnvironmentSHA || environment.Arms.Baseline.RuntimeSHA != evidence.BaselineRuntimeSHA || environment.Arms.Candidate.RuntimeSHA != evidence.CandidateRuntimeSHA {
+		t.Fatalf("environment does not bind target evidence: %+v", environment)
+	}
+
+	var raw struct {
+		EnvironmentSHA string `json:"environment_sha256"`
+		CorpusSHA      string `json:"corpus_sha256"`
+		Summary        struct {
+			Baseline struct {
+				Passed, Trials int
+				P95MS          float64 `json:"p95_ms"`
+			} `json:"baseline"`
+			Candidate struct {
+				Passed, Trials int
+				P95MS          float64 `json:"p95_ms"`
+			} `json:"candidate"`
+		} `json:"summary"`
+	}
+	decodeJSONFile(t, filepath.Join(dir, "raw-run.json"), &raw)
+	corpus, err := os.ReadFile(filepath.Join(dir, "corpus.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpusDigest := sha256.Sum256(corpus)
+	corpusSHA := hex.EncodeToString(corpusDigest[:])
+	if raw.EnvironmentSHA != target.EnvironmentSHA || raw.CorpusSHA != target.CorpusSHA || corpusSHA != target.CorpusSHA || raw.Summary.Baseline.Passed != target.BaselinePassed || raw.Summary.Baseline.Trials != target.Trials || raw.Summary.Baseline.P95MS != target.BaselineMetric || raw.Summary.Candidate.Passed != target.CandidatePassed || raw.Summary.Candidate.Trials != target.Trials || raw.Summary.Candidate.P95MS != target.CandidateMetric {
+		t.Fatalf("raw run does not bind target evidence: raw=%+v corpus_sha256=%s", raw, corpusSHA)
+	}
+
+	var evaluator struct {
+		Verdict        string  `json:"verdict"`
+		ImprovementPct float64 `json:"improvement_pct"`
+	}
+	decodeJSONFile(t, filepath.Join(dir, "evaluator-output.json"), &evaluator)
+	improvement := (target.BaselineMetric - target.CandidateMetric) / target.BaselineMetric * 100
+	if evaluator.Verdict != "PASS" || evaluator.ImprovementPct != improvement {
+		t.Fatalf("evaluator output = %+v, computed improvement = %.17g", evaluator, improvement)
+	}
+}
+
+func decodeJSONFile(t *testing.T, name string, dst any) {
+	t.Helper()
+	data, err := os.ReadFile(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, dst); err != nil {
+		t.Fatal(err)
 	}
 }
 

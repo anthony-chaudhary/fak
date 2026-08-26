@@ -275,6 +275,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [QWEN38-FLASH-NEXT execution index](docs/notes/QWEN38-FLASH-NEXT-EPIC-INDEX-2026-08-26.md) -- auto-indexed dated note.
 - [Qwen3.8-Flash-Next source-pinned study](docs/notes/CONCEPT-STUDY-QWEN38-FLASH-NEXT-2026-08-26.md) -- architecture, runtime contract, fak-native seam map, durable receipt, and filed implementation packets.
 - [Qwen tool-error family re-audit (#8700)](docs/notes/ISSUE-8700-QWEN-TOOL-ERROR-FAMILIES-2026-08-26.md) -- auto-indexed dated note.
 - [Mac guard dogfood readout — 2026-08-25](docs/notes/MAC-GUARD-DOGFOOD-2026-08-25.md) — installed-trunk Codex shell witness for Darwin session journaling, child-tree monitoring, gateway compatibility, and the filed residual defect ledger.
