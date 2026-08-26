@@ -1,6 +1,6 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T23:59:00-07:00",
+  "updated_at": "2026-08-26T15:48:44-07:00",
   "issue": 9269,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
@@ -152,7 +152,7 @@
       "Full startup census across inference engines, neoclouds, model routers, KV-cache systems, power, cooling, networking, and modular datacenters, including failures and acquisitions.",
       "China and export-control coverage, sovereign AI programs, standards, regulatory changes, and regional supply chains.",
       "A systematic rumor chronology with original source, independent corroboration graph, later confirmation/refutation, and expiry.",
-      "Automated link checking, schema validation as a committed Go leaf, contradiction clustering, and scheduled refresh."
+      "Automated link checking, schema validation as a committed Go leaf, and scheduled refresh; the manual contradiction matrix exists but project-level reconciliation remains incomplete."
     ]
   },
   "entries": [

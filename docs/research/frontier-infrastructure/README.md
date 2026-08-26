@@ -9,16 +9,19 @@ stop fak from optimizing against an invented cluster, a stationary synthetic wor
 or an unlabeled market rumor.
 
 The machine-readable source of truth is [`index.json`](index.json). The derived
-[`workload-assumptions.md`](workload-assumptions.md) registry converts the ledger into
-benchmark assumptions and explicitly bounds Zipfian, batching, cluster, and userbase
-claims. [`workload-parameters.md`](workload-parameters.md) records measured populations,
-parameters, and exact limits for replay and generation. [`startups-landscape.md`](startups-landscape.md) is the adjacent-provider taxonomy
-and watchlist. [`filings-ledger.md`](filings-ledger.md) normalizes hyperscaler capex,
-leases, asset mix, backlog, and accounting boundaries. [`supply-chain-ledger.md`](supply-chain-ledger.md) tracks the
-power-to-goodput delivery pipeline and contradiction evidence. [`market-chronology.md`](market-chronology.md) preserves
-releases, partnerships, funding, failures, and rumor outcomes by date. [`refresh-protocol.md`](refresh-protocol.md) defines the online-search,
-contradiction, and rumor lifecycle. The `slices/` directory is reserved for independently
-researched coverage ledgers.
+views are:
+
+- [`coverage-audit.md`](coverage-audit.md) — requirement-by-requirement completeness audit, exact corpus counts, and proof still needed;
+- [`contradiction-matrix.md`](contradiction-matrix.md) — denominator, lifecycle, accounting, distribution, and rumor conflicts normalized before comparison;
+- [`slices/frontier-lab-census.md`](slices/frontier-lab-census.md) — compact lab-by-lab census of the current source set;
+- [`workload-assumptions.md`](workload-assumptions.md) — architecture and benchmark priors;
+- [`workload-parameters.md`](workload-parameters.md) — exact production-trace distributions and benchmark synthesis;
+- [`filings-ledger.md`](filings-ledger.md) — normalized hyperscaler capex and accounting-boundary evidence;
+- [`supply-chain-ledger.md`](supply-chain-ledger.md) — power, grid, cooling, water, construction, HBM, packaging, optics, networking, and electrical bottlenecks;
+- [`market-chronology.md`](market-chronology.md) — completed events, future announcements, partnerships, funding, and rumors;
+- [`startups-landscape.md`](startups-landscape.md) — startup and alternative-infrastructure map;
+- [`refresh-protocol.md`](refresh-protocol.md) — how to extend the ledger without laundering claims.
+
 Empty or missing slices are coverage debt, not evidence that a category has no activity.
 
 ## Result first
@@ -126,11 +129,12 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **96 dated entries** across frontier labs, hyperscalers,
-AI clouds, accelerators, serving systems, measured workload traces, workload models,
-physical capacity, supply chains, standards, market signals, and three explicitly labeled
-rumors. It is **not exhaustive yet**. The authoritative missing-work list is
-`coverage.explicit_gaps` in `index.json`.
+The current spine contains **96 dated entries**, **91 unique source URLs**, and
+**73 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
+datacenter supply, accelerators, serving systems, workload traces, market signals,
+and **3 explicit rumors**. It is broad, but it is not entity-complete. The
+requirement-level verdict is in [`coverage-audit.md`](coverage-audit.md); the detailed
+missing slices remain machine-readable under `coverage.explicit_gaps` in `index.json`.
 
 Immediate next slices:
 
@@ -139,7 +143,7 @@ Immediate next slices:
 3. extend the [`filings-ledger.md`](filings-ledger.md) beyond the four largest U.S. hyperscalers;
 4. extend the [`supply-chain-ledger.md`](supply-chain-ledger.md) into a named site/vendor delivery census;
 5. expand the [`market-chronology.md`](market-chronology.md) with startup failures, cancellations, and resolved rumors;
-6. contradiction matrix and recurring validator.
+6. add committed schema/link validation and scheduled refresh after the ledger schema stabilizes.
 
 The clearest workload-distribution evidence so far is not a universal Zipf law. It is a
 set of **heavy-tailed, category-dependent, nonstationary** behaviors: model popularity
