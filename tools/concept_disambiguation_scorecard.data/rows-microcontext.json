@@ -9,7 +9,8 @@
       "distinction": "A logical scheduling and isolation unit over one shared base; not a full harness process, not a provider context-window limit, and not context-MMU result-byte admission.",
       "distinct_from": [
         "context-mmu",
-        "compaction"
+        "compaction",
+        "fullcontexttokens"
       ],
       "aliases": [
         "microcontextdemo"

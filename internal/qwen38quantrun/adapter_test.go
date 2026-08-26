@@ -34,7 +34,7 @@ func TestCommandProbeRejectsUnknownObservationFields(t *testing.T) {
 func TestRunAdapterWritesNothingWhenProbeFails(t *testing.T) {
 	dir := t.TempDir()
 	cfg := AdapterConfig{
-		Endpoint: EndpointConfig{Endpoint: "http://invalid", Model: "exact"}, Arm: "q4_k_m",
+		Endpoint: EndpointConfig{Endpoint: "http://invalid", Model: "exact"}, ExecutionEngine: qwen38quant.EngineFakNative, Arm: "q4_k_m",
 		ObservationCommand: helperCommand("probe-fail"), RestartCommand: helperCommand("ok"),
 		ReadyCommand: helperCommand("ok"), CleanupCommand: helperCommand("ok"),
 	}

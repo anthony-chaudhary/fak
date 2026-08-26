@@ -1,0 +1,53 @@
+{
+  "schema": "fak-native-performance-profile/v1",
+  "envelope_id": "qwen38-27b-q4km-m3pro-p32-t64",
+  "execution": {
+    "engine": "fak-native",
+    "forward_path": "metal/qwen35-hybrid-session-v1",
+    "fallback_count": 0
+  },
+  "phases": [
+    {
+      "name": "load-setup",
+      "start_milliseconds": 0,
+      "duration_milliseconds": 30058.88675
+    },
+    {
+      "name": "prefill",
+      "start_milliseconds": 30058.88675,
+      "duration_milliseconds": 33208.000334
+    },
+    {
+      "name": "first-token",
+      "start_milliseconds": 63266.887084,
+      "duration_milliseconds": 4840.541375
+    },
+    {
+      "name": "steady-decode",
+      "start_milliseconds": 68107.428459,
+      "duration_milliseconds": 21914.40525
+    },
+    {
+      "name": "verification",
+      "start_milliseconds": 90021.833709,
+      "duration_milliseconds": 12.42275
+    },
+    {
+      "name": "teardown",
+      "start_milliseconds": 90034.256459,
+      "duration_milliseconds": 0.203375
+    }
+  ],
+  "metal": {
+    "command_buffers": 14833,
+    "encoders": 23025,
+    "dispatch_milliseconds": 15383.214458172006,
+    "wait_milliseconds": 42001.76811218262,
+    "resident_bytes": 24595492864,
+    "working_set_bytes": 18132647936
+  },
+  "attribution_unavailable": {
+    "reason": "capture-tool-does-not-export-dispatch-attribution",
+    "detail": "fak-native session lifecycle capture does not export per-lever dispatch attribution"
+  }
+}

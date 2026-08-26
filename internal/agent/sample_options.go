@@ -135,6 +135,34 @@ func WithPresencePenalty(p *float64) SampleOpt {
 	}
 }
 
+// WithNativeInferenceReceipt asks the in-kernel planner to capture a guarded
+// per-token native execution receipt. Planners which do not own the model logits
+// leave the request unsupported; callers must not reconstruct this evidence from
+// response text or gateway wall time.
+func WithNativeInferenceReceipt(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.NativeInferenceReceipt = enabled
+	}
+}
+
+// WithDecodeTrace asks a capable in-kernel planner to timestamp each committed
+// generated token. Unsupported planners must be rejected by the caller before
+// inference; they must not synthesize this evidence from response fragments.
+func WithDecodeTrace(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.DecodeTrace = enabled
+	}
+}
+
+// WithNativeDecodeTokenIDs asks native decode to retain the already-selected
+// token ID at the same commit seam as DecodeTrace. It performs no logits scan
+// and is valid only alongside WithDecodeTrace(true).
+func WithNativeDecodeTokenIDs(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.NativeDecodeTokenIDs = enabled
+	}
+}
+
 // WithGuidedDecode sets the per-request provider-native guided-decode carriers.
 // It is intentionally narrower than RawRequestBody/ExtraBody: callers pass only the
 // allowlisted structured-output fields parsed from the client request, and the

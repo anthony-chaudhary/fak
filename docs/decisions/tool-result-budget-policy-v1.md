@@ -1,3 +1,7 @@
+---
+title: "Tool result-budget policy v1"
+description: "Status: proposed spine specification (2026-08-18)"
+---
 # Tool result-budget policy v1
 
 Status: proposed spine specification (2026-08-18)

@@ -2,6 +2,10 @@
 
 **Audience:** evaluators deciding which current `fak` result is applicable, what tuned alternative it was measured against, and how to inspect or reproduce its evidence.
 
+## Current Qwen performance
+
+- [Qwen performance index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) — the canonical cross-hardware route for accepted highlights, receipts, result classes, and remaining gaps.
+
 ## Evaluator route: result first, method second
 
 These are **scoped results**, not a universal speedup claim. Match your workload and hardware before quoting one; use the tuned baseline as the headline comparison.

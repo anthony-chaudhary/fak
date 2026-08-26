@@ -1,0 +1,7 @@
+2026-08-26T13:49:11Z candidate_start commit=87b92938232ccf24d290d4c2ef08e16cf55cc0d3 tree=60a6c1f5f3de7687fc39d95093451dcb1b54ce83 binary_sha256=81749488237578d87e60bce82d6967e37f5200eb07eb256f64bcba3ad8355340
+2026-08-26T13:49:29Z ready status=200 engine=inkernel model=qwen38:27b
+2026-08-26T13:49:47Z identity engine=inkernel backend=metal forward_path=metal/qwen35-gdn-preprojected-sequence-v1 q4k=true fallback=false llama_cpp=false
+2026-08-26T13:51:23Z safety_trip kind=swap-growth consecutive=3 limit_bytes=12884901888 observed_bytes=14780664381
+2026-08-26T13:51:29Z candidate_exit signal=TERM response_headers=false remote_error=connection-closed-after-controlled-stop time_l_maximum_rss_bytes=19071762432 time_l_peak_footprint_bytes=47053850128
+2026-08-26T13:51:46Z restore_stable_start owner_command_sha256=a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d health=200 models=200
+2026-08-26T13:53:20Z restore_stable_complete seconds=90 owner_command_sha256=a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d health=200 models=200

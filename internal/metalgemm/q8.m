@@ -19,12 +19,20 @@
 // teardown via mg_q8_reset.
 
 #import <Metal/Metal.h>
+#include "q8_bridge.h"
+#include <CoreFoundation/CoreFoundation.h>
+#include <math.h>
+#include <string.h>
 
 typedef struct {
     uintptr_t command_buffer;
     int committed;
     int completed_wait;
     int host_readback;
+    int encoders;
+    double gpu_milliseconds;
+    double wait_milliseconds;
+    int timing_available;
 } mg_execution_event;
 
 static inline void mg_execution_event_reset(mg_execution_event* event) {
@@ -33,17 +41,41 @@ static inline void mg_execution_event_reset(mg_execution_event* event) {
     event->committed = 0;
     event->completed_wait = 0;
     event->host_readback = 0;
+    event->encoders = 0;
+    event->gpu_milliseconds = 0;
+    event->wait_milliseconds = 0;
+    event->timing_available = 0;
 }
 
-static inline void mg_execution_event_finish(mg_execution_event* event, id<MTLCommandBuffer> cmd) {
+static inline void mg_execution_event_command_buffer(mg_execution_event* event, id<MTLCommandBuffer> cmd) {
     if (event == NULL) return;
     event->command_buffer = (uintptr_t)(__bridge void*)cmd;
+}
+static inline void mg_execution_event_encoder(mg_execution_event* event, id<MTLComputeCommandEncoder> encoder) {
+    if (event != NULL && encoder != nil) event->encoders++;
+}
+static inline void mg_execution_event_committed(mg_execution_event* event) {
+    if (event == NULL) return;
     event->committed = 1;
-    event->completed_wait = 1;
+}
+static inline void mg_execution_event_waited(mg_execution_event* event, id<MTLCommandBuffer> cmd, CFAbsoluteTime wait_started) {
+    if (event == NULL) return;
+    event->completed_wait = cmd.status == MTLCommandBufferStatusCompleted;
+    event->wait_milliseconds = (CFAbsoluteTimeGetCurrent() - wait_started) * 1000.0;
+    double gpu_start = cmd.GPUStartTime;
+    double gpu_end = cmd.GPUEndTime;
+    if (isfinite(gpu_start) && isfinite(gpu_end) && gpu_end > gpu_start) {
+        event->gpu_milliseconds = (gpu_end - gpu_start) * 1000.0;
+        event->timing_available = 1;
+    }
+}
+static inline void mg_execution_event_readback(mg_execution_event* event) {
+    if (event == NULL) return;
     event->host_readback = 1;
 }
 #include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
+#include <unistd.h>
 
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
@@ -176,11 +208,22 @@ typedef struct {
     CFTypeRef codes;  // retained id<MTLBuffer>, int8 [out*in]
     CFTypeRef scales; // retained id<MTLBuffer>, f32  [out*nblk]
     int out, in, nblk;
+	int nocopy;
 } Q8W;
 
 #define MG_MAX_Q8 8192
 static Q8W gQ8[MG_MAX_Q8];
 static int gNQ8 = 0;
+
+static int q8_valid(int wid) {
+	return wid >= 0 && wid < gNQ8 && gQ8[wid].codes != NULL && gQ8[wid].scales != NULL;
+}
+
+static int q8_slot(void) {
+	for (int i = 0; i < gNQ8; i++) if (!q8_valid(i)) return i;
+	if (gNQ8 >= MG_MAX_Q8) return -1;
+	return gNQ8++;
+}
 
 // Reused per-call scratch: the activation codes/scales and the result. Weights are persistent;
 // only the per-call X/Y move (same discipline as q4k.m's gQXBuf/gQYBuf).
@@ -209,7 +252,8 @@ int mg_q8_upload(const signed char* codes, const float* scales, int out, int in)
     if (gDev == nil) return -1;
     if (!q8_init()) return -1;
     if (in % 32 != 0 || out <= 0) return -1;
-    if (gNQ8 >= MG_MAX_Q8) {
+	int slot = q8_slot();
+	if (slot < 0) {
         static int capWarned = 0;
         if (!capWarned) { capWarned = 1; NSLog(@"mg_q8_upload: q8 weight table full (%d)", MG_MAX_Q8); }
         return -1;
@@ -225,20 +269,112 @@ int mg_q8_upload(const signed char* codes, const float* scales, int out, int in)
     }
     memcpy(cb.contents, codes,  (size_t)codeBytes);
     memcpy(sb.contents, scales, (size_t)scaleBytes);
-    int id = gNQ8++;
-    gQ8[id].codes  = CFBridgingRetain(cb);
-    gQ8[id].scales = CFBridgingRetain(sb);
-    gQ8[id].out  = out;
-    gQ8[id].in   = in;
-    gQ8[id].nblk = nblk;
-    return id;
+	gQ8[slot].codes  = CFBridgingRetain(cb);
+	gQ8[slot].scales = CFBridgingRetain(sb);
+	gQ8[slot].out  = out;
+	gQ8[slot].in   = in;
+	gQ8[slot].nblk = nblk;
+	gQ8[slot].nocopy = 0;
+	return slot;
+}
+
+static long q8_page_round(long n) {
+	long page = (long)getpagesize();
+	if (page <= 1) return n;
+	return ((n + page - 1) / page) * page;
+}
+
+// mg_q8_alias creates shared Metal views over caller-owned, page-aligned storage. It never falls
+// back to a copy; the Go owner pins the regions until mg_q8_release has dropped both views.
+int mg_q8_alias(const signed char* codes, const float* scales, int out, int in) {
+	if (gDev == nil || !q8_init() || codes == NULL || scales == NULL || in <= 0 || in % 32 != 0 || out <= 0) return -1;
+	long page = (long)getpagesize();
+	if (page > 1 && (((uintptr_t)codes % (uintptr_t)page) != 0 || ((uintptr_t)scales % (uintptr_t)page) != 0)) return -1;
+	int nblk = in / 32;
+	long codeBytes = (long)out * in;
+	long scaleBytes = (long)out * nblk * 4;
+	id<MTLBuffer> cb = [gDev newBufferWithBytesNoCopy:(void*)codes length:(NSUInteger)q8_page_round(codeBytes)
+		options:MTLResourceStorageModeShared deallocator:nil];
+	id<MTLBuffer> sb = [gDev newBufferWithBytesNoCopy:(void*)scales length:(NSUInteger)q8_page_round(scaleBytes)
+		options:MTLResourceStorageModeShared deallocator:nil];
+	if (cb == nil || sb == nil) return -1;
+	int id = q8_slot();
+	if (id < 0) return -1;
+	gQ8[id].codes = CFBridgingRetain(cb);
+	gQ8[id].scales = CFBridgingRetain(sb);
+	gQ8[id].out = out;
+	gQ8[id].in = in;
+	gQ8[id].nblk = nblk;
+	gQ8[id].nocopy = 1;
+	return id;
+}
+
+void mg_q8_release(int wid) {
+	if (!q8_valid(wid)) return;
+	CFBridgingRelease(gQ8[wid].codes);
+	CFBridgingRelease(gQ8[wid].scales);
+	memset(&gQ8[wid], 0, sizeof(Q8W));
+}
+
+int mg_q8_live_count(void) {
+	int n = 0;
+	for (int i = 0; i < gNQ8; i++) if (q8_valid(i)) n++;
+	return n;
+}
+
+// Prepare and encode are split so q4k.m can own one command buffer for a mixed Q8/Q4_K group.
+// Prepare performs every fallible validation/allocation and copies the shared Q8 activation before
+// candidate work begins; encode only appends dispatches to the caller's uncommitted buffer.
+int mg_q8_prepare_gemv_group(const int* wids, int n, const signed char* xq, const float* xd,
+                             const int* yoff) {
+    if (n <= 0 || wids == NULL || xq == NULL || xd == NULL || yoff == NULL || !q8_init()) return 0;
+    if (!q8_valid(wids[0])) return 0;
+    Q8W W0 = gQ8[wids[0]];
+    for (int i = 1; i < n; i++) {
+        if (!q8_valid(wids[i])) return 0;
+        Q8W W = gQ8[wids[i]];
+        if (W.in != W0.in || W.nblk != W0.nblk) return 0;
+    }
+    q8_grow_scratch((long)W0.in, (long)W0.nblk, (long)yoff[n]);
+    if (gQ8XBuf == nil || gQ8XDBuf == nil || gQ8YBuf == nil) return 0;
+    memcpy(gQ8XBuf.contents, xq, (size_t)W0.in);
+    memcpy(gQ8XDBuf.contents, xd, (size_t)W0.nblk * 4);
+    return 1;
+}
+
+int mg_q8_encode_gemv_group(void* command_buffer, const int* wids, int n, const int* yoff) {
+    if (command_buffer == NULL || n <= 0 || wids == NULL || yoff == NULL) return 0;
+    id<MTLCommandBuffer> cmd = (__bridge id<MTLCommandBuffer>)command_buffer;
+    id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+    if (e == nil) return 0;
+    [e setComputePipelineState:psoQ8Gemv];
+    [e setBuffer:gQ8XBuf offset:0 atIndex:2];
+    [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
+    for (int i = 0; i < n; i++) {
+        Q8W W = gQ8[wids[i]];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.codes offset:0 atIndex:0];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
+        [e setBuffer:gQ8YBuf offset:(NSUInteger)((long)yoff[i] * 4) atIndex:4];
+        [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
+        [e setBytes:&W.out length:sizeof(int) atIndex:6];
+        [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+            threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+    }
+    [e endEncoding];
+    return 1;
+}
+
+void mg_q8_read_gemv_group(float* y, int ytot) {
+    if (y != NULL && ytot > 0 && gQ8YBuf != nil) {
+        memcpy(y, gQ8YBuf.contents, (size_t)ytot * 4);
+    }
 }
 
 // mg_q8_gemv computes y[out] = W[wid] · x for one Q8_0-quantized activation (xq codes [in],
 // xd block scales [nblk]). f32 result.
 void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < 0 || wid >= gNQ8) return;
+    if (!q8_valid(wid)) return;
     @autoreleasepool {
         Q8W W = gQ8[wid];
         q8_grow_scratch((long)W.in, (long)W.nblk, (long)W.out);
@@ -246,7 +382,9 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
         memcpy(gQ8XDBuf.contents, xd, (size_t)W.nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemv];
         [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
         [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
@@ -259,10 +397,13 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
             threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(y, gQ8YBuf.contents, (size_t)W.out * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 
@@ -273,6 +414,7 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
 void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event) {
     mg_execution_event_reset(event);
     if (n <= 0) return;
+	for (int i = 0; i < n; i++) if (!q8_valid(wids[i])) return;
     @autoreleasepool {
         int in   = gQ8[wids[0]].in;
         int nblk = gQ8[wids[0]].nblk;
@@ -282,7 +424,9 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         memcpy(gQ8XDBuf.contents, xd, (size_t)nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemv];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared activation for every weight in the group
         [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
@@ -298,10 +442,13 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
         }
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 
@@ -310,7 +457,7 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
 // lane (#1087): full-attn q/k and Qwen3.6 linear_attn.* no longer have to fall back to CPU qGemm8.
 void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < 0 || wid >= gNQ8 || P <= 0) return;
+    if (!q8_valid(wid) || P <= 0) return;
     @autoreleasepool {
         Q8W W = gQ8[wid];
         q8_grow_scratch((long)P * W.in, (long)P * W.nblk, (long)P * W.out);
@@ -318,7 +465,9 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         memcpy(gQ8XDBuf.contents, Xd, (size_t)P * W.nblk * 4);
 
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:(__bridge id<MTLBuffer>)W.codes  offset:0 atIndex:0];
         [e setBuffer:(__bridge id<MTLBuffer>)W.scales offset:0 atIndex:1];
@@ -342,10 +491,13 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
         }
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(Y, gQ8YBuf.contents, (size_t)P * W.out * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 
@@ -357,6 +509,7 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
 void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event) {
     mg_execution_event_reset(event);
     if (n <= 0 || P <= 0) return;
+	for (int i = 0; i < n; i++) if (!q8_valid(wids[i])) return;
     @autoreleasepool {
         Q8W W0 = gQ8[wids[0]];
         long ytot = (long)yoff[n];
@@ -368,7 +521,9 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         const int BN = 64;  // token-tile width;            must match Q8_BN in the MSL source
         const int TG = 256; // threads per threadgroup;     must match Q8_TG in the MSL source
         id<MTLCommandBuffer> cmd = [gQueue commandBuffer];
+        mg_execution_event_command_buffer(event, cmd);
         id<MTLComputeCommandEncoder> e = [cmd computeCommandEncoder];
+        mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ8Gemm];
         [e setBuffer:gQ8XBuf  offset:0 atIndex:2]; // shared X panel for every weight
         [e setBuffer:gQ8XDBuf offset:0 atIndex:3];
@@ -392,10 +547,13 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
         }
         [e endEncoding];
         [cmd commit];
+        mg_execution_event_committed(event);
+        CFAbsoluteTime wait_started = CFAbsoluteTimeGetCurrent();
         [cmd waitUntilCompleted];
+        mg_execution_event_waited(event, cmd, wait_started);
 
         memcpy(Ycat, gQ8YBuf.contents, (size_t)ytot * 4);
-    mg_execution_event_finish(event, cmd);
+        mg_execution_event_readback(event);
         }
 }
 
@@ -405,20 +563,17 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
 // own encoder rather than go through mg_q8_gemv's standalone commit. These expose the persistent
 // device buffers + dims for a wid without copying. id<MTLBuffer> crosses the .m boundary fine
 // (same ObjC compile unit set, one binary). nil/zero for an out-of-range wid.
-id<MTLBuffer> mg_q8_codes_buf(int wid)  { return (wid >= 0 && wid < gNQ8) ? (__bridge id<MTLBuffer>)gQ8[wid].codes  : nil; }
-id<MTLBuffer> mg_q8_scales_buf(int wid) { return (wid >= 0 && wid < gNQ8) ? (__bridge id<MTLBuffer>)gQ8[wid].scales : nil; }
+id<MTLBuffer> mg_q8_codes_buf(int wid)  { return q8_valid(wid) ? (__bridge id<MTLBuffer>)gQ8[wid].codes  : nil; }
+id<MTLBuffer> mg_q8_scales_buf(int wid) { return q8_valid(wid) ? (__bridge id<MTLBuffer>)gQ8[wid].scales : nil; }
 void mg_q8_dims(int wid, int* out, int* in, int* nblk) {
-    if (wid < 0 || wid >= gNQ8) { *out = *in = *nblk = 0; return; }
+    if (!q8_valid(wid)) { *out = *in = *nblk = 0; return; }
     *out = gQ8[wid].out; *in = gQ8[wid].in; *nblk = gQ8[wid].nblk;
 }
 
 // mg_q8_reset releases every resident Q8 weight buffer and the reused scratch, returning the Q8
 // table to empty. Mirrors mg_q4k_reset. Call only when no Q8Weight handle is still in use.
 void mg_q8_reset(void) {
-    for (int i = 0; i < gNQ8; i++) {
-        if (gQ8[i].codes  != NULL) { CFBridgingRelease(gQ8[i].codes);  gQ8[i].codes  = NULL; }
-        if (gQ8[i].scales != NULL) { CFBridgingRelease(gQ8[i].scales); gQ8[i].scales = NULL; }
-    }
+	for (int i = 0; i < gNQ8; i++) mg_q8_release(i);
     gNQ8 = 0;
     gQ8XBuf  = nil; gQ8XCap  = 0;
     gQ8XDBuf = nil; gQ8XDCap = 0;

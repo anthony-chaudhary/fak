@@ -31,7 +31,10 @@ func (c EndpointConfig) runnerConfig() Config {
 // ObservationCommand must emit one Observation JSON object on stdout; lifecycle
 // commands are argv arrays and are never interpreted by a shell.
 type AdapterConfig struct {
-	Endpoint           EndpointConfig       `json:"endpoint"`
+	Endpoint EndpointConfig `json:"endpoint"`
+	// ExecutionEngine carries the model-math runtime identity used for evidence
+	// promotion, distinct from endpoint, planner, transport, and hardware backend identity.
+	ExecutionEngine    string               `json:"execution_engine"`
 	Arm                string               `json:"arm"`
 	Expected           qwen38quant.Identity `json:"expected"`
 	Command            []string             `json:"command"`
@@ -66,7 +69,7 @@ func RunAdapter(ctx context.Context, configPath, corpusPath, reportPath, archive
 		return errors.New("restart_command, ready_command, and cleanup_command are required")
 	}
 	campaign, err := (Runner{}).RunCampaign(ctx, CampaignConfig{
-		Endpoint: cfg.Endpoint.runnerConfig(), Arm: cfg.Arm, Expected: cfg.Expected, Command: cfg.Command,
+		Endpoint: cfg.Endpoint.runnerConfig(), ExecutionEngine: cfg.ExecutionEngine, Arm: cfg.Arm, Expected: cfg.Expected, Command: cfg.Command,
 		RequireDevice: cfg.RequireDevice, StaleAfter: cfg.StaleAfter,
 		RollbackThreshold: cfg.RollbackThreshold,
 		Probe:             commandProbe{argv: cfg.ObservationCommand},

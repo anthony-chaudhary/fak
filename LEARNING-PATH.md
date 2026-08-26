@@ -1860,6 +1860,7 @@ go test -run 'Verdict|Adjud|HTTPSyscall|DefaultDeny|DenyIsValue|FailsClosed' ./i
 | **FAK 615** — Extending fak: The Three-Gate Leaf Pattern | **FAK 209**, **FAK 210**, **FAK 614** |
 | **FAK 616** — The Witness-Gated Issue-Dispatch Loop | **FAK 614**, **FAK 307** |
 | **FAK 617** — Loops All the Way Down: The Durable Verified Loop, Loop Health, and Session Net-True | **FAK 614**, **FAK 616** |
+| **FAK 618** — Navigating the Shipped Surface: Verb, Command, or Internal Leaf? | **FAK 209**, **FAK 617** |
 
 ### FAK 601 — The Claims Ledger: SHIPPED/SIMULATED/STUB and the 0/29-Novel Posture
 
@@ -2174,11 +2175,42 @@ go test ./internal/loopmgr/ ./internal/rsiloop/ ./internal/sessionobs/ -count=1 
 
 **Checkpoint:** Draw the five-ring ladder and name the witness primitive each ring carries (the adjudicator's provable refusal, ctxmmu's Clear+rescreen, recall's sealed page, the fleet's per-SHA `dos commit-audit`, the RSI keep-bit). Then explain why a `fak loop drive` turn that the model calls "done" still re-arms unless a dos witness agrees, and why a session that burned 200 turns and hit a STOP must grade HURT, not WASH, even though both spent tokens.
 
+### FAK 618 — Navigating the Shipped Surface: Verb, Command, or Internal Leaf?
+
+**Prerequisites:** **FAK 209**, **FAK 617**
+
+**You'll be able to:**
+- Start with a supported `fak <verb>` when operating the product, use a standalone
+  `cmd/<name>` only for a bounded fixture, publisher, or compatibility lab, and open an
+  `internal/<leaf>` when changing the pure contract behind either entry point
+- Follow a request from the appendix's user-facing verb to its implementation leaf, then
+  identify the witness surface that prevents the command's output from becoming a claim
+- Distinguish read-only reports and dry-run plans from commands that launch, enroll,
+  publish, reap, or otherwise mutate state before choosing a first probe
+
+**Lab:**
+```bash
+go run ./cmd/fak help architecture
+go run ./cmd/fak index query "architecture report" --json
+go test ./internal/archreport -count=1
+```
+
+**Expected result:** Help supplies the operator contract, the index locates the owning
+surface, and the package test exercises the contract without making an external change.
+Use the three maps in the appendix to repeat that trace for an operations, model, or
+curriculum task.
+
+**Checkpoint:** For a new model-performance observation, explain why `fak model-observe`
+is the normal operator door, `cmd/modelperfobs` is the bounded capture/report utility,
+and `internal/modelperfobs` is the reusable measurement contract. Then name which layer
+you would test after changing only the observation fold, and which command is safe to run
+first when an entry offers both a report and a mutating action.
+
 ---
 
 ## You've finished the path
 
-If you can pass the checkpoints through **FAK 617**, you can: stand up and harden the
+If you can pass the checkpoints through **FAK 618**, you can: stand up and harden the
 gateway in front of any OpenAI- or Anthropic-compatible model; author and review a
 capability floor; explain the write-time quarantine and the IFC taint lattice; read the
 in-kernel model's forward pass and its oracle-parity ledger; tell an honest benchmark
@@ -2203,7 +2235,7 @@ please [open an issue](https://github.com/anthony-chaudhary/fak/issues).
 ## Appendix — the full shipped surface (operator, contributor, and package map)
 
 **Who this is for.** The courses above teach the load-bearing ideas end to end, but the
-binary ships far more than 99 courses can each drill into: a fleet-operations toolbox, a
+binary ships far more than 100 courses can each drill into: a fleet-operations toolbox, a
 set of self-measuring scorecards, model/hardware benchmarks, and a stack of internal
 leaves you will meet the moment you open the tree. This appendix is the orientation index
 for that surface — one honest line per verb, standalone binary, and internal package,
@@ -2562,6 +2594,167 @@ package name. One honest line each.
 | `internal/toolshape` | Fingerprints the SHAPE of one tool call's input and output — the redaction-safe structural record the analytics chain consumes, where the trajectory turn itself carries only opaque content digests. |
 | `internal/tooltrend` | Folds a sequence of per-session tool-call buckets into a tool-mix and output-shape TREND: which tools and which response shapes are rising or falling across N sessions. |
 | `internal/trajctlhook` | The impure call-site assembly that binds the pure trajectory-control turn-boundary fold to a running session's host evidence — whether a claimed commit SHA still resolves, the analyzed audit rows, the wall-clock stamp. |
+
+### H. FAK 618 field map — choosing the right shipped entry point
+
+These are the surfaces added after the last learning snapshot. Read each table as a route,
+not a vocabulary list: begin with the operator question, use the public verb when one
+exists, drop to a standalone command for its bounded artifact workflow, and edit the
+internal leaf only when the reusable contract itself must change.
+
+#### H.1 — Agent, fleet, evidence, and model verbs
+
+| Verb | Use it when you need to… |
+| --- | --- |
+| `fak agent-queue` | Reconcile an agent-pool snapshot into explicit start or hold actions. |
+| `fak agents` | Query live and historical sessions with constrained SQL, grouping, counts, or JSON. |
+| `fak architecture` | Inspect dependency tiers, violations, fan-out, depth, and blast radius before changing a leaf. |
+| `fak armbench` | Run provenance-locked paired benchmark arms from one immutable manifest. |
+| `fak borrow-provenance` | Pin an external source and later verify its bytes against the recorded digest. |
+| `fak breath` | Check the counted, mechanically enforceable half of the one-breath documentation contract. |
+| `fak capabilities` | Find token, turn, cache, routing, session-control, and supporting-floor outcomes by intent. |
+| `fak codex-resume` | Resume Codex sessions under bounded deadlines and report their rollout outcomes. |
+| `fak component` | Check component contracts and workload coverage from a declared root. |
+| `fak compute-trace` | Turn compute events into a bounded trace for placement and performance diagnosis. |
+| `fak config` | Locate configuration guidance and audit a deployed posture against it. |
+| `fak disambiguation` | Query, audit, or regenerate the canonical concept-separation index. |
+| `fak dormancy` | Classify dormant loop work from the loop ledger instead of guessing from age alone. |
+| `fak enroll` | Pin, inspect, or revoke a host's opt-in organization trust anchor. |
+| `fak fanout` | Fold nightrun fan-out reuse receipts into a trend report. |
+| `fak gitd` | Serve provenance-bearing, content-addressed git reads through the resident repo broker. |
+| `fak goal` | Manage canonical goal state, bindings, evidence, lifecycle transitions, and execution topology. |
+| `fak guard-goal-question` | Enforce the active-goal boundary before a guarded agent asks an operator question. |
+| `fak harness` | Compose, inspect, resolve, and verify reusable agent-harness stacks. |
+| `fak hostdiag` | Correlate privacy-safe host resource symptoms with fak work before prescribing recovery. |
+| `fak launch` | Reversibly install, enable, inspect, or remove provider routing through fak. |
+| `fak learning-observation` | Trace an observation through candidate, witness, and verdict rather than calling it learned early. |
+| `fak lifecycle` | Inspect or control phase-aware capability lifecycle state. |
+| `fak m` | Use the short alias for `fak manage` when wrapping a harness interactively. |
+| `fak manage` | Put a harness behind the managed-agent door so tool calls can be denied, repaired, or quarantined. |
+| `fak model-default` | Read the default model identity together with its dated evidence fold. |
+| `fak model-observe` | Proxy, summarize, or verify model-performance and cache-transition observations. |
+| `fak native-benchmarks` | List required fak-native witnesses and fail when an obligation is still missing. |
+| `fak native-first-lint` | Catch prose that treats missing local hardware as a terminal native-inference blocker. |
+| `fak native-performance` | Query, compare, or choose the next profile in the committed native optimization graph. |
+| `fak org` | See organization-policy posture and which control channel owns each capability. |
+| `fak progress` | Detect fleet stalls by comparing a recent window with its declared baseline. |
+| `fak provider-cost` | Import, report, and reconcile provider-cost ledgers against registered sessions. |
+| `fak quantbench` | Run the quantization benchmark contract or emit its self-test matrix. |
+| `fak quantwatch` | Collect bounded arXiv and GitHub quantization updates, offline or live. |
+| `fak schedule-held` | Evaluate held hardware-job schedules and measure admission-policy overhead. |
+| `fak scratch-janitor` | Preview or remove abandoned session scratch while respecting age and resume guards. |
+| `fak search` | Search the tracked repository corpus with bounded results and machine-readable output. |
+| `fak shellprov` | Capture shell-command provenance so later evidence names what actually ran. |
+| `fak speed-ab` | Replay a captured speed A/B manifest and emit its benchmark witness. |
+| `fak stale-work` | Discover and rank stale repository work against open issues within a bounded scan. |
+| `fak temp-artifacts` | Preview or quarantine aged temporary artifacts, then recheck before permanent reap. |
+| `fak terminal-relief` | Measure terminal-host pressure and relaunch only restorable dashboards when armed. |
+| `fak test-quality` | Score defects in test source against a shrinks-only baseline and emit repair candidates. |
+| `fak token-profile` | Price forecast or observed token classes into dollars and scheduler-weight units. |
+| `fak tool-width` | Fold tool-width observations and ratchet the rate of batched turns. |
+| `fak trajectory` | Audit Claude or Codex logs into scrubbed JSONL and Markdown summaries. |
+| `fak turnavoid` | Replay whole-model-turn avoidance traces with strict input and net-true attribution. |
+| `fak turntax` | Measure the extra recovery turns a baseline loop fires against fak's one-shot path. |
+| `fak value-chain` | Hold a value-chain manifest against observed artifacts and their evidence. |
+| `fak watchdog-audit-run` | Run the watchdog's own liveness/productivity audit rather than trusting scheduled-task status. |
+| `fak work-delivery` | Track, transition, and diagnose a work unit across declared delivery stages. |
+| `fak workpattern` | Mine recurring work shapes from source or recorded trajectories. |
+| `fak worktype` | Attribute session token spend and witnessed outcomes to classified work types. |
+
+Start read-only: `fak architecture`, `fak agents`, `fak capabilities`, and the report
+subcommands expose state; `fak enroll`, `fak launch`, and reap modes cross a mutation
+boundary and should follow their preview/status path first.
+
+#### H.2 — Bounded standalone commands
+
+| Command | Artifact or boundary it owns |
+| --- | --- |
+| `cmd/amoprofpub` | Converts an AMOProf directory or archive into Confluence storage XHTML plus an attachment manifest. |
+| `cmd/caveman-pairwise-judge` | Judges paired caveman benchmark outputs against an immutable source manifest and versioned receipt protocol. |
+| `cmd/fak-dev` | Hosts contributor-only, shared-trunk-safe diagnostics and project-maintenance helpers outside the product CLI. |
+| `cmd/fak-dos` | Applies journaled DOS decision changes through the writable host adapter; inspect/list before add or remove. |
+| `cmd/fak-project-assets` | Syncs generated project assets and checks parity with their canonical sources. |
+| `cmd/framevisibility` | Probes whether harness frames remain observable across the adapter boundary. |
+| `cmd/kvdepth` | Measures reusable prefix depth per observation instead of collapsing reuse into one hit-rate scalar. |
+| `cmd/managedinventory` | Generates or checks the managed-agent portability inventory without reading live credentials. |
+| `cmd/modelperfobs` | Captures OpenAI-compatible timings, renders reports, and verifies cache-state benchmark receipts. |
+| `cmd/nvidia-nemo-api-demo-audit` | Audits the NVIDIA NeMo API demo inputs and outputs into a reproducible, scrubbed receipt. |
+| `cmd/pagescheck` | Checks documentation source, freshness, discoverability, and built publication artifacts. |
+| `cmd/portability-adapter-selfcheck` | Exercises adapter registration or prints a skeleton without launching a real workload. |
+| `cmd/portability-lab` | Runs the clean-room portability acceptance lab and writes its authoritative JSON report. |
+| `cmd/portabilitycontract` | Explains, identities, or validates a packaged portability contract and its round trip. |
+| `cmd/qwen38campaign` | Runs the frozen Qwen3.8 soak or oracle evidence campaign from declared config and corpus. |
+| `cmd/streamcapture` | Records a real provider stream, scrubs it, and verifies the fixture before hermetic replay. |
+| `cmd/supportwitness` | Applies a support witness to a capability graph and writes the promoted graph separately. |
+| `cmd/testenv` | Runs a test command after removing credential-shaped environment variables. |
+| `cmd/uxjourneyproxy` | Scores a deterministic user-journey corpus for proxy-path cognitive load. |
+| `cmd/verbsdoc` | Renders the source-derived verb and refusal reference so documentation follows the registry. |
+
+These binaries are narrow by design. If the same job has a `fak` verb, teach and automate
+the verb; invoke `go run ./cmd/<name>` when reproducing the specific artifact workflow.
+
+#### H.3 — Internal leaves behind the new surface
+
+| Package | Contract to understand before editing it |
+| --- | --- |
+| `internal/archreport` | Derives a queryable architecture report from the tier/source registry. |
+| `internal/cloudroute` | Detects request-signed cloud model routes without confusing provider routing with model identity. |
+| `internal/codexresume` | Drives bounded Codex headless resumes to rollout-witnessed terminal outcomes. |
+| `internal/corelockgate` | Owns the hard-self core-lock question so one boundary decides whether it may be opened. |
+| `internal/customizationindex` | Indexes supported customization seams so operators can discover the owning guide and contract. |
+| `internal/depthadmit` | Folds witnessed plan depth and admits continuation only while declared closure can still be reached. |
+| `internal/dispatchdoa` | Detects workers that died before completing useful dispatch work. |
+| `internal/docrender` | Renders repository Markdown into print-ready HTML and related publication artifacts. |
+| `internal/fleetbus` | Carries typed fleet-control messages rather than treating terminal text as a control protocol. |
+| `internal/fp4runtime` | Negotiates versioned FP4 and microscaling artifacts at the runtime boundary. |
+| `internal/generationctl` | Coordinates live generation epochs, steering directives, and their acknowledgements. |
+| `internal/gitbroker` | Centralizes guarded git execution and the resident content-addressed read broker. |
+| `internal/gitdaily` | Runs the deduped daily lock-reap and safe object-database consolidation fold. |
+| `internal/harnessmodelset` | Declares strict, role-indexed model requirements for a harness. |
+| `internal/harnessmodelsetconformance` | Captures the end-to-end witness that a resolved role/model set actually conforms. |
+| `internal/harnessserver` | Binds a harness to an externally owned, already-ready inference server. |
+| `internal/hostdiag` | Correlates Windows resource warnings with privacy-safe fak workload facts. |
+| `internal/httptrust` | Resolves one declared corporate CA bundle source for outbound HTTP clients. |
+| `internal/humanctl` | Indexes operator-requested outcomes and the control surfaces that can satisfy them. |
+| `internal/kvquantmeta` | Defines provider-neutral KV-cache quantization descriptors and compatibility rules. |
+| `internal/leasequeue` | Queues region-admission waiters with explicit ownership instead of busy retry. |
+| `internal/lightgapport` | Audits claimed portability swap points against committed CI witnesses. |
+| `internal/managedocs` | Ratchets the canonical managed-agent documentation against its shipped surfaces. |
+| `internal/mixedprecision` | Defines deterministic layerwise mixed-precision policy and accounting contracts. |
+| `internal/modelinventory` | Normalizes model artifacts and runtime observations into one inventory. |
+| `internal/modelperfobs` | Measures OpenAI-compatible requests and folds cache-state observations into reports. |
+| `internal/modelsetlock` | Persists canonical model-set selections with stable identity and locking. |
+| `internal/modelsetreceipt` | Independently attests what harness model set was resolved and launched. |
+| `internal/modelsetresolve` | Deterministically binds harness roles to compatible model candidates. |
+| `internal/ociartifact` | Implements the activation-neutral OCI 1.1 collection profile. |
+| `internal/portabilityswitch` | Coordinates context changes with lifecycle state during a portability switch. |
+| `internal/projectassets` | Resolves canonical project assets and proves generated copies remain in parity. |
+| `internal/quantdetect` | Performs bounded, weight-free detection of quantization formats. |
+| `internal/quantpolicy` | Evaluates explicit constraints over a proposed quantization choice. |
+| `internal/quantprov` | Carries neutral provenance for quantized artifacts and their transformations. |
+| `internal/scratchmark` | Detects source files whose leading contract marks them as disposable scratch. |
+| `internal/serveradapter` | Renders configuration for supported external inference servers and probes readiness. |
+| `internal/serverlifecycle` | Owns one local server instance from configuration through readiness and teardown. |
+| `internal/serverproduct` | Defines the secret-free boundary between a server product description and its adapter. |
+| `internal/sessionintent` | Represents provider-neutral session-level operator intent. |
+| `internal/skilleffectiveness` | Measures whether loading a skill improved witnessed outcomes for matched work. |
+| `internal/skillfootprint` | Prices the resident skill-description context floor. |
+| `internal/streamrules` | Matches incremental provider output against regex rules without waiting for stream completion. |
+| `internal/studydrift` | Detects when a pinned external study no longer matches the source revision it analyzed. |
+| `internal/studymonitor` | Folds study provenance and drift checks into an operator-readable monitoring verdict. |
+| `internal/taskvc` | Binds enabled fleet Scheduled Tasks to versioned installers or scrubbed captures. |
+| `internal/tempartifact` | Inventories and conservatively reaps direct fak temporary artifacts. |
+| `internal/tokenprofile` | Classifies forecast and observed tokens by economic and scheduling duty. |
+| `internal/toolcallcontrol` | Applies deterministic pre-execution checks to proposed tool calls. |
+| `internal/toolcatalog` | Separates executable tool registration from the catalog metadata agents discover. |
+| `internal/ultracodebench` | Evaluates paired single-agent and fleet coding runs with accepted-effect accounting. |
+| `internal/ultracodenegcontrol` | Evaluates predeclared negative controls so fleet gains cannot be self-attributed. |
+| `internal/valuechain` | Verifies that promised value-chain stages resolve to observed, evidence-bearing artifacts. |
+
+The recurring pattern is shell → pure fold → witness: for example,
+`fak model-observe` or `cmd/modelperfobs` gathers facts, `internal/modelperfobs` folds
+them, and the receipt makes the result replayable. Keep those responsibilities separate
+when adding a new surface.
 
 **Checkpoint:** Name the verb you would reach for to (a) prove the committed trunk builds
 without trusting your working tree, (b) see which ready issues are starving, and (c) get

@@ -1,3 +1,8 @@
+---
+title: "Issue #8360 — Qwen3.8-27B Q4_K_M MacBook Metal campaign"
+description: "Reference documentation for Issue #8360 — Qwen3.8-27B Q4_K_M MacBook Metal campaign, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8360 — Qwen3.8-27B Q4_K_M MacBook Metal campaign
 
 `summary.json` is the compact readout. `campaign-report.json` and `archive.json` are the

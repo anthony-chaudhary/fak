@@ -18,7 +18,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/branchrole"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
-	"github.com/anthony-chaudhary/fak/internal/windowgate"
 	"github.com/anthony-chaudhary/fak/internal/workerworktree"
 )
 
@@ -320,25 +319,18 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	cmd.Stderr = fh
 	configureDispatchSpawn(cmd)
 	configureDispatchWorkerConsole(cmd, backend)
-	var job *windowgate.JobObject
-	if runtime.GOOS == "windows" {
-		job, err = windowgate.StartManagedAgentInNewJob(cmd)
-	} else {
-		err = cmd.Start()
-	}
+	// A dispatch tick is only the launcher; the guarded worker must outlive it. A
+	// Windows Job Object with KILL_ON_JOB_CLOSE makes the short-lived tick the
+	// owner of the whole agent tree, so exiting the tick closes the last job handle
+	// and kills a healthy Codex worker before its first provider turn (#9064). The
+	// guard process already owns and monitors its wrapped agent tree, including the
+	// resource ceiling. Launch the guard as an ordinary hidden-background process
+	// here, matching the Unix detached lifetime instead of nesting it under the
+	// launcher's kill-on-close job.
+	err = cmd.Start()
 	if err != nil {
 		_ = fh.Close()
 		return dispatchSpawnResult{}, err
-	}
-	var jobDone <-chan error
-	if job != nil {
-		done := make(chan error, 1)
-		go func() {
-			err := cmd.Wait()
-			_ = job.Close()
-			done <- err
-		}()
-		jobDone = done
 	}
 	_ = fh.Close()
 
@@ -376,11 +368,7 @@ func spawnDispatchIssueWorker(command []string, env map[string]string, cwd, runs
 	}
 	res := dispatchSpawnResult{PID: cmd.Process.Pid, Log: outLog, Issue: issue, Lane: lane, Backend: backend, LeaseID: leaseID, Tree: tree, Account: acct, Membership: mem}
 	if probeS > 0 {
-		if jobDone != nil {
-			res.EarlyExit = probeDispatchWait(jobDone, outLog, probeS)
-		} else {
-			res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
-		}
+		res.EarlyExit = probeDispatchSpawn(cmd, outLog, probeS)
 	}
 	return res, nil
 }

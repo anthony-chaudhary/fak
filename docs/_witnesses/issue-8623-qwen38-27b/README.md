@@ -1,3 +1,7 @@
+---
+title: "Issue #8623 — exact Qwen3.8-27B paired confirmation"
+description: "Verdict: PASS on the declared exact-target envelope."
+---
 # Issue #8623 — exact Qwen3.8-27B paired confirmation
 
 **Verdict: PASS on the declared exact-target envelope.**

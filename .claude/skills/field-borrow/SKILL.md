@@ -160,6 +160,15 @@ field-borrow composes with all three: it can be the human-in-the-loop pass over 
 `idea-scout` hit, it feeds witnessed coverage rows to `industry-score`, and once a spine
 ships it hands off to `spine-fanout`.
 
+
+## Durable study receipt — query first, record the disposition last
+
+Before acquiring the external source, run `fak study search "<source-or-capability>" --limit 20`. Use a hit to choose and report **extend**, **recheck**, or **supersede** rather than duplicating the study. Missing or unavailable storage degrades explicitly: report `durable study memory unavailable: <error>`, continue with bounded local evidence, and never call that evidence persisted.
+
+After the PRESENT/PARTIAL/ABSENT witness and disposition exist, write a pinned `fak-study/1` record with `fak study add --file <record.json>`. Put the returned `study_...` ID in every downstream GitHub issue body. Verified implementation outcomes append through a new receipt with an outcome and `supersedes` link; they do not rewrite or model-promote the original decision.
+
+Promotion evidence: a fresh invocation discovers the candidate through bounded search and returns the same record ID. Demote or retire this seam if it does not prevent duplicate study or if storage failures can masquerade as persistence. Invalidating assumption: source names and capability terms provide enough lexical signal for bounded rediscovery.
+
 ## The pass
 
 ### 1 — Name the source and the capability axis (dated)

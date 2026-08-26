@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestKVCapacityRepositoryDogfoodReadout(t *testing.T) {
@@ -27,7 +28,10 @@ func TestKVCapacityRepositoryDogfoodReadout(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			snapshot := NormalizeKVCapacity(sample, nil)
+			snapshot, err := NormalizeKVCapacity(filepath.Join(t.TempDir(), "usage.jsonl"), time.Now(), sample, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			var rendered bytes.Buffer
 			if err := WriteKVCapacityMarkdown(&rendered, snapshot); err != nil {
 				t.Fatal(err)

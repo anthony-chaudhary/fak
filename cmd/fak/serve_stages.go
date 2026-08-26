@@ -74,6 +74,34 @@ func newServeStartupMessage(source, kind, level, text string) gateway.StartupMes
 	return gateway.StartupMessage{Source: source, Kind: kind, Level: level, Text: text}
 }
 
+// serveNativeAdmissionPolicy changes only the token axis of the gateway's
+// shipping policy. Keeping the other axes derived from DefaultAdmissionPolicy
+// prevents this operator declaration from drifting scheduler semantics.
+func serveNativeAdmissionPolicy(sf *serveFlags) (gateway.AdmissionPolicy, error) {
+	policy := gateway.DefaultAdmissionPolicy()
+	if sf == nil || sf.nativeAdmissionTokenBudget == nil {
+		return policy, errors.New("--native-admission-token-budget is unavailable")
+	}
+	if *sf.nativeAdmissionTokenBudget <= 0 {
+		return policy, fmt.Errorf("--native-admission-token-budget must be positive (got %d)", *sf.nativeAdmissionTokenBudget)
+	}
+	policy.TokenBudget = *sf.nativeAdmissionTokenBudget
+	return policy, nil
+}
+
+// newServeNativeAdmissionController is the production construction seam shared
+// by buildGateway and the admission witness. The startup note is durable readback
+// of the exact bound installed on this boot, not an inferred model/context limit.
+func newServeNativeAdmissionController(sf *serveFlags) (*gateway.AdmissionController, gateway.StartupMessage, error) {
+	policy, err := serveNativeAdmissionPolicy(sf)
+	if err != nil {
+		return nil, gateway.StartupMessage{}, err
+	}
+	message := newServeStartupMessage("serve", "native-admission-token-budget", "info",
+		fmt.Sprintf("native scheduler admission token budget=%d", policy.TokenBudget))
+	return gateway.NewAdmissionController(policy), message, nil
+}
+
 func (rt *serveRuntime) addStartupMessage(message gateway.StartupMessage) {
 	if strings.TrimSpace(message.Text) == "" {
 		return

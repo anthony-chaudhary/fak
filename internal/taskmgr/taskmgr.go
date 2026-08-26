@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/witnessprocess"
 )
 
 const SchemaSnapshot = "fak.task-manager-snapshot.v1"
@@ -75,13 +77,14 @@ func WithOriginWitness(w Witness) Option {
 }
 
 type TaskSpec struct {
-	TaskID       string            `json:"task_id"`
-	Title        string            `json:"title,omitempty"`
-	Total        float64           `json:"total,omitempty"`
-	Unit         string            `json:"unit,omitempty"`
-	Labels       map[string]string `json:"labels,omitempty"`
-	EvidenceRefs []EvidenceRef     `json:"evidence_refs,omitempty"`
-	QualitySLO   *QualitySLO       `json:"quality_slo,omitempty"`
+	TaskID       string                `json:"task_id"`
+	Title        string                `json:"title,omitempty"`
+	Total        float64               `json:"total,omitempty"`
+	Unit         string                `json:"unit,omitempty"`
+	Labels       map[string]string     `json:"labels,omitempty"`
+	EvidenceRefs []EvidenceRef         `json:"evidence_refs,omitempty"`
+	QualitySLO   *QualitySLO           `json:"quality_slo,omitempty"`
+	WitnessFirst *witnessprocess.Block `json:"witness_first,omitempty"`
 }
 
 type StepSpec struct {
@@ -693,6 +696,11 @@ func (m *Manager) sampleAt(now time.Time) ResourceSample {
 }
 
 func validateTaskSpec(spec TaskSpec) error {
+	if spec.WitnessFirst != nil {
+		if _, err := spec.WitnessFirst.Validate(); err != nil {
+			return err
+		}
+	}
 	if spec.TaskID == "" {
 		return errors.New("taskmgr: task id is required")
 	}
@@ -840,6 +848,11 @@ func unixNanoOrZero(t time.Time) int64 {
 }
 
 func cloneTaskSpec(spec TaskSpec) TaskSpec {
+	if spec.WitnessFirst != nil {
+		clone := *spec.WitnessFirst
+		clone.NegativeResults = append([]witnessprocess.NegativeResult(nil), spec.WitnessFirst.NegativeResults...)
+		spec.WitnessFirst = &clone
+	}
 	spec.Labels = cloneLabels(spec.Labels)
 	spec.EvidenceRefs = cloneEvidenceRefs(spec.EvidenceRefs)
 	spec.QualitySLO = cloneQualitySLO(spec.QualitySLO)

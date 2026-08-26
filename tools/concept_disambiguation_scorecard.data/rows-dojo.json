@@ -122,7 +122,8 @@
       "definition": "The reduced three-field view (dropped spans, restored spans, restore-recorded honesty bit) of fak's durable context-span drop/restore ledger that the restore-recall fold consumes.",
       "distinction": "A reduced COUNT view for scoring - NOT the gateway-usage ledger itself (the on-disk source) and NOT context-MMU; its honesty bit separates a genuine zero-restored from restores-not-recorded.",
       "distinct_from": [
-        "context-mmu"
+        "context-mmu",
+        "fullcontexttokens"
       ],
       "aliases": [],
       "grounding": "ContextSpanLedger",

@@ -1,0 +1,27 @@
+{
+  "schema":"fak-native-performance-receipt/v1",
+  "role":"baseline",
+  "envelope_id":"qwen38-27b-q4k-a100-p1-decode",
+  "changed_lever_id":"cuda.q8_1-activation-quant",
+  "revision":"0bdb66d1fd9a2f06684e3ba314d0c51802ab5c18+profile",
+  "artifact_sha256":"7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+  "machine":{"scrubbed_id":"gcp-a100-40gb","platform":"linux/amd64","backend":"cuda"},
+  "controls":{"prompt_tokens":22,"decode_tokens":6,"batch":1,"context_tokens":22,"temperature":0,"sampling":"greedy","cache_state":"four confirmed device-prefix hits; quality HOLD","warmups":1,"repetitions":5},
+  "unchanged_controls":["Qwen3.8-27B","Q4_K_M","fak-native","cuda/qwen35-gdn-ssm-decode-v1","A100-SXM4-40GB"],
+  "changed_axes":["none-baseline"],
+  "repetitions":[
+    {"end_to_end_milliseconds":6636.26,"tokens_per_second":0.9,"prefill_milliseconds":6190,"decode_milliseconds":270},
+    {"end_to_end_milliseconds":4898.85,"tokens_per_second":1.3,"decode_milliseconds":4710},
+    {"end_to_end_milliseconds":4913.07,"tokens_per_second":1.3,"decode_milliseconds":4730},
+    {"end_to_end_milliseconds":4917.14,"tokens_per_second":1.3,"decode_milliseconds":4730},
+    {"end_to_end_milliseconds":4913.98,"tokens_per_second":1.3,"decode_milliseconds":4730}
+  ],
+  "memory":{"peak_bytes":26791116800,"resident_bytes":26791116800},
+  "execution":{"engine":"fak-native","forward_path":"cuda/q4k-p1-decode","fallback_count":0},
+  "commands":["fak serve --gguf <exact-artifact> --backend cuda --engine inkernel","5 cold unique + 5 identical exact-output requests"],
+  "profiler_artifacts":[
+    {"path":"profile.json","sha256":"pending-in-commit-witness"},
+    {"path":"prefix-profile.jsonl","sha256":"4f185e3784c28f2c67e361822a7029b5259155d92cc0b0df6333c9a1205dec42"},
+    {"path":"rows.json","sha256":"660b08fef9f32b4bf4a95d1cdc6cb91b7efa045a1dbb244723dfde036fe47435"}
+  ]
+}

@@ -1,6 +1,9 @@
 package model
 
-import "sync"
+import (
+	"sync"
+	"unsafe"
+)
 
 // quant.go — the Q8_0 quantized inference lane: close the raw-throughput gap to
 // llama.cpp on its OWN terms (same quantization format), in pure Go, without spending
@@ -109,7 +112,16 @@ func q8round(x float32) int8 {
 // producer passes in/qBlk. Codes start at zero, which is what a d==0 block encodes, so a
 // producer may skip writing zero blocks entirely.
 func newQ8Tensor(out, in, nblk int) *q8Tensor {
-	return &q8Tensor{out: out, in: in, nblk: nblk, q: make([]int8, out*in), d: make([]float32, out*nblk)}
+	if out <= 0 || in <= 0 || nblk <= 0 {
+		return &q8Tensor{out: out, in: in, nblk: nblk}
+	}
+	codeBytes := makePageAlignedResidentBytes(out * in)
+	scaleBytes := makePageAlignedResidentBytes(out * nblk * 4)
+	q := unsafe.Slice((*int8)(unsafe.Pointer(&codeBytes[0])), out*in)
+	d := unsafe.Slice((*float32)(unsafe.Pointer(&scaleBytes[0])), out*nblk)
+	// q and d retain their page-rounded backing allocations. Metal aliases and pins these exact
+	// owners; there is no second payload whose bytes could be mistaken for residency.
+	return &q8Tensor{out: out, in: in, nblk: nblk, q: q, d: d}
 }
 
 // quantizeQ8 converts a row-major f32 weight matrix [out,in] to Q8_0. Each 32-wide block

@@ -1,3 +1,7 @@
+---
+title: "Harness pack gallery"
+description: "fak harness gallery helps you choose a harness shape before choosing adapters or editing runtime code."
+---
 # Harness pack gallery
 
 `fak harness gallery` helps you choose a harness shape **before** choosing adapters or editing runtime code. Each pack translates a recognizable job into the person and problem it serves, the result that should improve, the public extension seam, capability boundaries, a small first build, and its proof.

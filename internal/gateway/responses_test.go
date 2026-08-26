@@ -600,3 +600,22 @@ func TestResponsesInputStringForm(t *testing.T) {
 		t.Errorf("fak extension present on a no-tool turn: %+v", resp.Fak)
 	}
 }
+
+func TestResponsesToolsPreserveFunctionAndCustomWire(t *testing.T) {
+	const custom = `{"type":"custom","name":"apply_patch","description":"Apply a patch","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}}`
+	var inbound []responsesTool
+	if err := json.Unmarshal([]byte(`[{"type":"function","name":"mcp__custom__fak_tools_search","description":"Search","parameters":{"type":"object"}},`+custom+`]`), &inbound); err != nil {
+		t.Fatal(err)
+	}
+
+	defs := responsesToolsToToolDefs(inbound)
+	if len(defs) != 2 {
+		t.Fatalf("tool catalog length = %d, want 2", len(defs))
+	}
+	if defs[0].Type != "function" || defs[0].Function.Name != "mcp__custom__fak_tools_search" {
+		t.Fatalf("function tool changed: %+v", defs[0])
+	}
+	if defs[1].Type != "custom" || string(defs[1].ResponsesWire) != custom {
+		t.Fatalf("custom tool wire changed: type=%q wire=%s", defs[1].Type, defs[1].ResponsesWire)
+	}
+}

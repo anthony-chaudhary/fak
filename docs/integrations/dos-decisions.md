@@ -1,3 +1,7 @@
+---
+title: "fak-DOS writable decisions adapter"
+description: "DOS 0.29.0's native dos decisions --all --json surface is read-only. The public fak-dos adapter adds the missing host-write boundary without modifying the..."
+---
 # fak-DOS writable decisions adapter
 
 DOS 0.29.0's native `dos decisions --all --json` surface is read-only. The public

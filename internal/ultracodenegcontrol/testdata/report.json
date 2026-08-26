@@ -1,0 +1,13 @@
+{
+  "schema": "fak-ultracode-negative-control-report/1",
+  "campaign": "internal/ultracodenegcontrol/testdata/campaign.json",
+  "results": [
+    {"name":"duplicated-context","expected_verdict":"NO_GAIN","verdict":"NO_GAIN","credited_savings":0,"reason":"placebo produced no token reduction under an equal accepted outcome","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/duplicated-context.json"],"publish_contradiction":false},
+    {"name":"omitted-required-context","expected_verdict":"ABSTAIN","verdict":"ABSTAIN","credited_savings":0,"reason":"accepted outcomes diverged; harmful omission is not savings","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/omitted-required-context.json"],"publish_contradiction":false},
+    {"name":"random-truncation","expected_verdict":"ABSTAIN","verdict":"ABSTAIN","credited_savings":0,"reason":"accepted outcomes diverged; harmful omission is not savings","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/random-truncation.json"],"publish_contradiction":false},
+    {"name":"shuffled-role","expected_verdict":"NO_GAIN","verdict":"NO_GAIN","credited_savings":0,"reason":"placebo produced no token reduction under an equal accepted outcome","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/shuffled-role.json"],"publish_contradiction":false}
+  ],
+  "promotion_evidence": "All four predeclared controls replay to their expected NO_GAIN or ABSTAIN verdict with zero credited savings.",
+  "demotion_or_retirement_evidence": "Any contradictory result is published with publish_contradiction=true and retires the causal interpretation until explained.",
+  "invalidating_assumption": "The frozen control observations are fixtures, not fresh provider runs; a changed model, runtime, tokenizer, task, cache posture, campaign version, accepted outcome, or authoritative usage receipt invalidates this report."
+}

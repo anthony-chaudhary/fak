@@ -1,3 +1,7 @@
+---
+title: "Ponytail Promptfoo pinned comparator reproduction (#6686)"
+description: "This packet reproduces the benchmark definitions at DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3 with Promptfoo 0.122.0."
+---
 # Ponytail Promptfoo pinned comparator reproduction (#6686)
 
 This packet reproduces the benchmark definitions at `DietrichGebert/ponytail@2ed6c52c9d7e5e56942508591085fd45dea277d3` with Promptfoo `0.122.0`. It is a comparator reproduction, not a fak value claim.

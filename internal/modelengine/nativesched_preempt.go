@@ -323,13 +323,23 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 		ln.logits = copyF32(sess.Prefill(history))
 		ln.sess = sess
 	case NativePreemptSwap:
-		pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
-		seq, err := pool.RestoreFromHost(ln.hostKV)
-		if err != nil {
-			return err
+		var cache *model.KVCache
+		if s.m.Cfg.IsQwen35Hybrid() {
+			var err error
+			cache, err = model.QwenHybridKVCacheFromHost(s.m.Cfg, ln.hostKV)
+			if err != nil {
+				return err
+			}
+		} else {
+			pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
+			seq, err := pool.RestoreFromHost(ln.hostKV)
+			if err != nil {
+				return err
+			}
+			cache = seq.ToKVCache(s.m.Cfg)
+			seq.Free()
 		}
-		ln.sess = s.sessionFromCache(seq.ToKVCache(s.m.Cfg), ln.q4k)
-		seq.Free()
+		ln.sess = s.sessionFromCache(cache, ln.q4k)
 		ln.logits = copyF32(ln.savedLogits)
 		s.preemptStats.SwapRestoredBytes += int64(len(ln.hostKV))
 	default:
@@ -480,13 +490,19 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 		if ln.sess == nil || ln.sess.Cache == nil {
 			return fmt.Errorf("modelengine: cannot swap preempt lane without resident KV")
 		}
-		pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
-		seq, err := model.KVCacheToPaged(pool, ln.sess.Cache)
-		if err != nil {
-			return err
+		var blob []byte
+		var err error
+		if s.m.Cfg.IsQwen35Hybrid() {
+			blob, err = model.QwenHybridKVCacheToHost(ln.sess.Cache, s.blockTokensLocked())
+		} else {
+			pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
+			seq, pageErr := model.KVCacheToPaged(pool, ln.sess.Cache)
+			if pageErr != nil {
+				return pageErr
+			}
+			blob, err = seq.SwapToHost()
+			seq.Free()
 		}
-		blob, err := seq.SwapToHost()
-		seq.Free()
 		if err != nil {
 			return err
 		}

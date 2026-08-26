@@ -1,3 +1,7 @@
+---
+title: "Qwen3.8-27B fak-native cache attribution — issue #8819"
+description: "Verdict: HOLDCACHERESTOREREGRESSION; parity remains HOLDBELOWPARITY. A live fak-native CUDA run on the exact Qwen3.8-27B Q4KM artifact produced 5/5 exact..."
+---
 # Qwen3.8-27B fak-native cache attribution — issue #8819
 
 **Verdict: `HOLD_CACHE_RESTORE_REGRESSION`; parity remains `HOLD_BELOW_PARITY`.** A live fak-native CUDA run on the exact Qwen3.8-27B Q4_K_M artifact produced 5/5 exact cold outputs at 11.8–12.1 decode tok/s. The identical-prompt arm produced 0/5 exact outputs; its four confirmed 24-token cache hits decoded at about 0.2 tok/s.

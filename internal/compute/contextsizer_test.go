@@ -111,6 +111,33 @@ func TestAutoSizeContextPlanDerivesLargestFittingContext(t *testing.T) {
 	}
 }
 
+func TestAutoSizeContextPlanChargesFixedSessionState(t *testing.T) {
+	cfg := tinyContextSizeConfig()
+	const fixedBytes = int64(4096)
+	cfg.SessionState = MemoryPlan{{
+		Class: MemoryKVCache, Bytes: fixedBytes, Detail: "test-recurrent-state", DType: F32.String(),
+	}}
+	const wantTokens = 1024
+	perToken := EstimateKVStoreBytes(cfg.KV, 1)
+	scratch := EstimateHALTransientMemoryPlan(cfg.Scratch).Total()
+	weights := MemoryPlan{{Class: MemoryWeights, Bytes: 1 << 20}}
+	avail := weights.DeviceTotal() + fixedBytes + scratch + int64(wantTokens)*perToken
+
+	gotTokens, plan := AutoSizeContextPlan(cfg, weights, avail, -1)
+	if gotTokens != wantTokens {
+		t.Fatalf("derived tokens = %d, want %d after subtracting fixed session state", gotTokens, wantTokens)
+	}
+	var fixedSeen int64
+	for _, d := range plan {
+		if d.Detail == "test-recurrent-state" {
+			fixedSeen += d.Bytes
+		}
+	}
+	if fixedSeen != fixedBytes {
+		t.Fatalf("fixed session demand = %d, want %d in per-context plan: %#v", fixedSeen, fixedBytes, plan)
+	}
+}
+
 // #1046: a cpu-offload serve pins its routed experts in HOST RAM, so they must NOT be charged
 // against the DEVICE budget the KV cache competes for. The derivation subtracts only the
 // device-scoped weights — host-scoped offload bytes (even when far larger than the device) leave

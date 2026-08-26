@@ -1,0 +1,75 @@
+{
+  "schema": "fak-codex-orchestration-hook-trust-witness/1",
+  "captured_at": "2026-08-25T19:03:30-07:00",
+  "github_issue": 9008,
+  "status": "passed",
+  "environment": {
+    "codex_cli_version": "0.149.1",
+    "host": "windows/amd64",
+    "cwd": "<trusted-repo-root>",
+    "hook_source": "<trusted-repo-root>/.codex/hooks.json",
+    "trust_source": "persisted hooks.state entry in <codex-home>/config.toml"
+  },
+  "method": {
+    "hook_instrument": "A PATH-prepended fak.cmd shim intercepted the vetted project UserPromptSubmit command, logged each invocation, emitted a blocking decision with reason 'fak 9008 witness sentinel', and exited 0. The project hook source and persisted trust entry were not modified.",
+    "traffic_discriminator": "Both arms selected the deliberately invalid model slug definitely-invalid-model-9008. Reaching provider validation would emit an invalid-model provider error; a pre-provider hook block instead completes with zero usage and no model or tool event.",
+    "command_shape": "codex exec [--dangerously-bypass-hook-trust] -m definitely-invalid-model-9008 --json <same-fixed-synthetic-prompt>",
+    "privacy": "Absolute paths are normalized and thread identifiers are omitted."
+  },
+  "arms": [
+    {
+      "arm": "persisted_exact_trust",
+      "bypass_flag": false,
+      "exit_code": 0,
+      "hook_dispatch_count": 1,
+      "hook_decision": "block",
+      "provider_traffic_count": 0,
+      "model_output_count": 0,
+      "tool_call_count": 0,
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0
+      },
+      "events": [
+        "thread.started",
+        "local-model-metadata-fallback",
+        "turn.started",
+        "turn.completed"
+      ]
+    },
+    {
+      "arm": "broad_hook_trust_bypass",
+      "bypass_flag": true,
+      "exit_code": 0,
+      "hook_dispatch_count": 1,
+      "hook_decision": "block",
+      "provider_traffic_count": 0,
+      "model_output_count": 0,
+      "tool_call_count": 0,
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0
+      },
+      "events": [
+        "thread.started",
+        "hook-trust-bypass-warning",
+        "local-model-metadata-fallback",
+        "turn.started",
+        "turn.completed"
+      ]
+    }
+  ],
+  "matched_outcome": {
+    "hook_dispatch": true,
+    "blocking_decision": true,
+    "exit_status": true,
+    "provider_model_tool_traffic": true
+  },
+  "verdict": "On Codex CLI 0.149.1, persisted exact trust and broad hook-trust bypass both dispatched the same vetted blocking UserPromptSubmit hook once and stopped before provider, model, or tool traffic. The broad bypass is redundant for orchestration and can be removed; it does not bypass a blocking hook decision."
+}

@@ -43,7 +43,7 @@ import (
 //	fak cachevalue status --vcache-context-witness-report context-witness.json
 //	fak cachevalue status --ablation-report ablate.json --headroom-bench-report headroom.json
 //	fak cachevalue review --since 2026-06-22 --json      # inspect cache-frontier review row
-//	fak cachevalue review --date 2026-06-29 --append-ledger docs/cache-frontier/review-ledger.jsonl --markdown-out docs/cache-frontier/reviews/2026-06-29.md
+//	fak cachevalue review --date 2026-06-29 --append-ledger docs/cache-frontier/review-ledger.jsonl --markdown-out docs/notes/2026-06-29.md
 //
 // It targets the FAK_CACHEVALUE_* surface (a public channel in the scoreboard Slack
 // workspace, separate from the lab/DGX control bridge); the token falls back to the

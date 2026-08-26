@@ -1,3 +1,7 @@
+---
+title: "Attention-preserving KV vector quantization evaluation"
+description: "Contract: fak.kvvectoreval/v1 Status: research interoperability contract; no kernel integration"
+---
 # Attention-preserving KV vector quantization evaluation
 
 Issue: [#6259](https://github.com/anthony-chaudhary/fak/issues/6259)  

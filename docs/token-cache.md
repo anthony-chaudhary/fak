@@ -1,3 +1,7 @@
+---
+title: "Shared token-cache retention"
+description: "The duplication scanner persists content-addressed token windows at /fak/token-cache."
+---
 # Shared token-cache retention
 
 The duplication scanner persists content-addressed token windows at

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -146,15 +147,51 @@ func TestInstallManagedNativeHooksUsesSupportedSeams(t *testing.T) {
 	}
 }
 
-func TestManageNativeHookFailsClosedOnMalformedInput(t *testing.T) {
+func TestManageNativeHookCodexSuccessJSON(t *testing.T) {
+	for _, event := range []string{"Stop", "PreCompact", "PreToolUse", "PostToolUse"} {
+		t.Run(event, func(t *testing.T) {
+			var out bytes.Buffer
+			input := fmt.Sprintf(`{"hook_event_name":%q}`, event)
+			cmdManageNativeHook([]string{"--harness", "codex", "--event", event}, strings.NewReader(input), &out)
+			if got, want := out.String(), "{}\n"; got != want {
+				t.Fatalf("Codex %s success JSON = %q, want %q", event, got, want)
+			}
+		})
+	}
+}
+
+func TestManageNativeHookCodexMalformedInputJSON(t *testing.T) {
+	tests := []struct {
+		event string
+		want  string
+	}{
+		{"Stop", `{"decision":"block","reason":"fak rejected malformed native hook input"}` + "\n"},
+		{"PreToolUse", `{"decision":"block","reason":"fak rejected malformed native hook input"}` + "\n"},
+		{"PostToolUse", `{"decision":"block","reason":"fak rejected malformed native hook input"}` + "\n"},
+		{"PreCompact", `{"continue":false,"stopReason":"fak rejected malformed native hook input"}` + "\n"},
+	}
+	for _, test := range tests {
+		t.Run(test.event, func(t *testing.T) {
+			var out bytes.Buffer
+			cmdManageNativeHook([]string{"--harness", "codex", "--event", test.event}, strings.NewReader(`{"hook_event_name":"wrong"}`), &out)
+			if got := out.String(); got != test.want {
+				t.Fatalf("Codex %s malformed-input JSON = %q, want %q", test.event, got, test.want)
+			}
+		})
+	}
+}
+
+func TestManageNativeHookPreservesGeminiResponses(t *testing.T) {
 	var out bytes.Buffer
 	cmdManageNativeHook([]string{"--harness", "gemini", "--event", "BeforeTool"}, strings.NewReader(`{"hook_event_name":"wrong"}`), &out)
-	if !strings.Contains(out.String(), `"decision":"deny"`) {
-		t.Fatalf("malformed input did not deny: %s", out.String())
+	want := `{"decision":"deny","reason":"fak rejected malformed native hook input"}` + "\n"
+	if got := out.String(); got != want {
+		t.Fatalf("Gemini malformed-input JSON = %q, want %q", got, want)
 	}
 	out.Reset()
 	cmdManageNativeHook([]string{"--harness", "gemini", "--event", "BeforeTool"}, strings.NewReader(`{"hook_event_name":"BeforeTool"}`), &out)
-	if !strings.Contains(out.String(), `"decision":"allow"`) {
-		t.Fatalf("valid input did not allow: %s", out.String())
+	want = `{"decision":"allow"}` + "\n"
+	if got := out.String(); got != want {
+		t.Fatalf("Gemini valid-input JSON = %q, want %q", got, want)
 	}
 }

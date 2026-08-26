@@ -1,0 +1,735 @@
+{
+  "schema": "fak-repo-hygiene-relocation/1",
+  "issue": 9118,
+  "parent": 9113,
+  "baseline_hygiene_debt": 232,
+  "baseline_placement_debt": 145,
+  "moved_count": 116,
+  "placement_moves": 115,
+  "root_hygiene_moves": 1,
+  "moves": [
+    {
+      "from": "PLAN-QWEN-LAPTOP-TOP10.md",
+      "to": "docs/notes/PLAN-QWEN-LAPTOP-TOP10.md",
+      "title": "Plan: #9050 — top ten fak-native Qwen laptop improvements"
+    },
+    {
+      "from": "docs/archive/README-2026-06-25-before-fresh-start.md",
+      "to": "docs/notes/README-2026-06-25-before-fresh-start.md",
+      "title": "fak — the **F**used **A**gent **K**ernel"
+    },
+    {
+      "from": "docs/benchmarks/AFFECTED-TEST-SELECTION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/AFFECTED-TEST-SELECTION-ALTERNATIVES-2026-08-10.md",
+      "title": "Affected-test selection alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/ANSWER-DEGENERATION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/ANSWER-DEGENERATION-ALTERNATIVES-2026-08-10.md",
+      "title": "Answer-degeneration detection alternatives â€” 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/BAZEL-TEST-ROUTE-CONSTRAINTS-2026-08-10.md",
+      "to": "docs/notes/BAZEL-TEST-ROUTE-CONSTRAINTS-2026-08-10.md",
+      "title": "Bazel platform-constraint test-route witness (#6401)"
+    },
+    {
+      "from": "docs/benchmarks/BLAST-RADIUS-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/BLAST-RADIUS-ALTERNATIVES-2026-08-10.md",
+      "title": "Dependency blast-radius alternatives â€” 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
+      "title": "Bounded cache-snapshot alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CACHE-BUDGET-CONCENTRATION-ALLOCATION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/CACHE-BUDGET-CONCENTRATION-ALLOCATION-ALTERNATIVES-2026-08-10.md",
+      "title": "Cache-budget concentration allocation alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CACHE-COST-ACCOUNTING-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/CACHE-COST-ACCOUNTING-ALTERNATIVES-2026-08-09.md",
+      "title": "Cache-cost accounting alternatives — 2026-08-09"
+    },
+    {
+      "from": "docs/benchmarks/CACHE-HONESTY-LINT-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/CACHE-HONESTY-LINT-ALTERNATIVES-2026-08-10.md",
+      "title": "Cache-honesty AST lint alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/CACHE-OBSERVABILITY-ALTERNATIVES-2026-08-10.md",
+      "title": "Cache-observability alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CACHE-REUSE-DIVERGENCE-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/CACHE-REUSE-DIVERGENCE-ALTERNATIVES-2026-08-10.md",
+      "title": "Cache reuse-divergence detection alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CACHE-REUSE-TREND-GATE-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/CACHE-REUSE-TREND-GATE-ALTERNATIVES-2026-08-10.md",
+      "title": "Cache reuse trend-gate alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CACHE-TELEMETRY-RECONCILIATION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/CACHE-TELEMETRY-RECONCILIATION-ALTERNATIVES-2026-08-10.md",
+      "title": "Provider-cache telemetry reconciliation alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CODEX-TOKEN-SANITIZATION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/CODEX-TOKEN-SANITIZATION-ALTERNATIVES-2026-08-10.md",
+      "title": "Codex token-sanitization alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/COMPILED-CONFORMANCE-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/COMPILED-CONFORMANCE-ALTERNATIVES-2026-08-10.md",
+      "title": "Compiled ABI and adjudication conformance alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "title": "Compute-region admission alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/CONTEXT-COMPRESSION-LIVE-2026-08-09.md",
+      "to": "docs/notes/CONTEXT-COMPRESSION-LIVE-2026-08-09.md",
+      "title": "Context compression: live native vs LLMLingua-2 witness"
+    },
+    {
+      "from": "docs/benchmarks/CONTEXT-MEMORY-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/CONTEXT-MEMORY-ALTERNATIVES-2026-08-09.md",
+      "title": "Context-memory native-vs-alternative comparison witness"
+    },
+    {
+      "from": "docs/benchmarks/DEADLINE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/DEADLINE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "title": "Deadline-aware admission alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/DEDICATED-CACHE-WARMING-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/DEDICATED-CACHE-WARMING-ALTERNATIVES-2026-08-10.md",
+      "title": "Dedicated cache-warming alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/DEFAULT-CACHE-READINESS-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/DEFAULT-CACHE-READINESS-ALTERNATIVES-2026-08-10.md",
+      "title": "Default-cache readiness alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/DISAMBIGUATION-SCALE-2026-08-17.md",
+      "to": "docs/notes/DISAMBIGUATION-SCALE-2026-08-17.md",
+      "title": "Disambiguation projected-scale witness — 2026-08-17"
+    },
+    {
+      "from": "docs/benchmarks/ENGINE-CACHE-INVALIDATION-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/ENGINE-CACHE-INVALIDATION-ALTERNATIVES-2026-08-09.md",
+      "title": "Engine-cache invalidation alternatives — 2026-08-09"
+    },
+    {
+      "from": "docs/benchmarks/GO-AST-QUERY-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/GO-AST-QUERY-ALTERNATIVES-2026-08-10.md",
+      "title": "Go AST query alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
+      "title": "Go call-graph alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/GO-SYNTAX-VALIDATION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/GO-SYNTAX-VALIDATION-ALTERNATIVES-2026-08-10.md",
+      "title": "Go syntax-validation alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/GUARD-JOURNAL-ROUTING-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/GUARD-JOURNAL-ROUTING-ALTERNATIVES-2026-08-10.md",
+      "title": "Guard-journal action-routing alternatives â€” 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md",
+      "title": "Indexed literal code-search alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/ISSUE-CLOSE-BATCH-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/ISSUE-CLOSE-BATCH-ALTERNATIVES-2026-08-10.md",
+      "title": "Budgeted issue-close batching alternatives â€” 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/ISSUE-DEDUP-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/ISSUE-DEDUP-ALTERNATIVES-2026-08-10.md",
+      "title": "Issue near-duplicate detection alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/KV-MEMORY-BUDGET-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/KV-MEMORY-BUDGET-ALTERNATIVES-2026-08-10.md",
+      "title": "KV-memory budget-model alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "title": "Lane/tree collision admission alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/LANE-TREE-ADMISSION-SCALING-2026-08-21.md",
+      "to": "docs/notes/LANE-TREE-ADMISSION-SCALING-2026-08-21.md",
+      "title": "Lane/tree admission scaling — 2026-08-21"
+    },
+    {
+      "from": "docs/benchmarks/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md",
+      "title": "Worker launch-latency alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/LEASEREF-BURST-SCALING-2026-08-21.md",
+      "to": "docs/notes/LEASEREF-BURST-SCALING-2026-08-21.md",
+      "title": "Lease-ref lifecycle burst scaling — 2026-08-21"
+    },
+    {
+      "from": "docs/benchmarks/MODEL-BACKEND-PRECISION-COVERAGE-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/MODEL-BACKEND-PRECISION-COVERAGE-ALTERNATIVES-2026-08-10.md",
+      "title": "Model/backend/precision coverage alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/MODEL-ROUTING-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/MODEL-ROUTING-ALTERNATIVES-2026-08-09.md",
+      "title": "Model routing native-vs-alternative comparison witness"
+    },
+    {
+      "from": "docs/benchmarks/MUTATION-BUDGET-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/MUTATION-BUDGET-ALTERNATIVES-2026-08-10.md",
+      "title": "GitHub mutation-budget alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/NATIVE-MCP-FILTER-LIVE-PROOF-2026-08-10.md",
+      "to": "docs/notes/NATIVE-MCP-FILTER-LIVE-PROOF-2026-08-10.md",
+      "title": "Native MCP tool-filter live model A/B — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/NATIVE-MCP-FILTER-PROOF-2026-08-10.md",
+      "to": "docs/notes/NATIVE-MCP-FILTER-PROOF-2026-08-10.md",
+      "title": "Native MCP tool-filter A/B proof — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/NET-TRUE-CLAIM-GRADING-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/NET-TRUE-CLAIM-GRADING-ALTERNATIVES-2026-08-10.md",
+      "title": "Net-true claim grading alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/POLICY-ADJUDICATION-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/POLICY-ADJUDICATION-ALTERNATIVES-2026-08-09.md",
+      "title": "Policy adjudication native-vs-alternative comparison witness"
+    },
+    {
+      "from": "docs/benchmarks/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
+      "title": "Prefix-cache budget sweep alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/PROVIDER-CACHE-ECONOMICS-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/PROVIDER-CACHE-ECONOMICS-ALTERNATIVES-2026-08-10.md",
+      "title": "Provider-cache economics alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/RATE-LIMITING-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/RATE-LIMITING-ALTERNATIVES-2026-08-09.md",
+      "title": "Tool-call rate-limiting alternatives — 2026-08-09"
+    },
+    {
+      "from": "docs/benchmarks/RESUME-BACKOFF-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/RESUME-BACKOFF-ALTERNATIVES-2026-08-10.md",
+      "title": "Failure-signature resume-backoff alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/RETRY-ATTEMPT-BUDGET-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/RETRY-ATTEMPT-BUDGET-ALTERNATIVES-2026-08-10.md",
+      "title": "Retry-attempt budgeting alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/SHARED-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/SHARED-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+      "title": "Shared region admission alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/TEST-EXECUTION-ROUTING-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/TEST-EXECUTION-ROUTING-ALTERNATIVES-2026-08-10.md",
+      "title": "Test-execution routing alternatives â€” 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/TIMEOUT-PHASE-ATTRIBUTION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/TIMEOUT-PHASE-ATTRIBUTION-ALTERNATIVES-2026-08-10.md",
+      "title": "Timeout-phase attribution alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/TOKEN-USAGE-NORMALIZATION-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/TOKEN-USAGE-NORMALIZATION-ALTERNATIVES-2026-08-10.md",
+      "title": "Multi-provider token-usage normalization alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/TOKENIZER-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/TOKENIZER-ALTERNATIVES-2026-08-09.md",
+      "title": "Tokenizer native-vs-alternative comparison witness"
+    },
+    {
+      "from": "docs/benchmarks/TOOL-FILTERING-ALTERNATIVES-MICRO-2026-08-09.md",
+      "to": "docs/notes/TOOL-FILTERING-ALTERNATIVES-MICRO-2026-08-09.md",
+      "title": "Tool-filtering native-vs-alternative microbenchmark witness"
+    },
+    {
+      "from": "docs/benchmarks/TOOL-RESULT-CACHE-ALTERNATIVES-2026-08-09.md",
+      "to": "docs/notes/TOOL-RESULT-CACHE-ALTERNATIVES-2026-08-09.md",
+      "title": "Tool-result cache native-vs-alternative comparison witness"
+    },
+    {
+      "from": "docs/benchmarks/WARM-CACHE-BUDGET-SCHEDULING-ALTERNATIVES-2026-08-10.md",
+      "to": "docs/notes/WARM-CACHE-BUDGET-SCHEDULING-ALTERNATIVES-2026-08-10.md",
+      "title": "Warm-cache budget scheduling alternatives — 2026-08-10"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-cross-model-scaffold-extension.md",
+      "to": "docs/notes/2026-08-15-cross-model-scaffold-extension.md",
+      "title": "Cross-model prompt-contract extension — 14B completed, 27B fault isolated — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-15b-prompt-robustness.md",
+      "to": "docs/notes/2026-08-15-qwen25-15b-prompt-robustness.md",
+      "title": "Qwen2.5-1.5B prompt-paraphrase robustness — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-3b-scaffold-crossover.md",
+      "to": "docs/notes/2026-08-15-qwen25-3b-scaffold-crossover.md",
+      "title": "Qwen2.5 prompt-order crossover at 3B — pure-fak CPU Q8 — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-option-order-robustness.md",
+      "to": "docs/notes/2026-08-15-qwen25-option-order-robustness.md",
+      "title": "Qwen2.5 option-order robustness — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-prompt-paraphrase-robustness.md",
+      "to": "docs/notes/2026-08-15-qwen25-prompt-paraphrase-robustness.md",
+      "title": "Qwen2.5-3B prompt-paraphrase robustness — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-small-backend-sensitivity.md",
+      "to": "docs/notes/2026-08-15-qwen25-small-backend-sensitivity.md",
+      "title": "Qwen2.5 small-model backend sensitivity — pure-fak Q8 — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-small-size-ladder.md",
+      "to": "docs/notes/2026-08-15-qwen25-small-size-ladder.md",
+      "title": "Qwen2.5 small-model size ladder — pure-fak CPU Q8 — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-small-model-scaffold-l4.md",
+      "to": "docs/notes/2026-08-15-small-model-scaffold-l4.md",
+      "title": "Small-model prompt-scaffold ablation — NVIDIA L4 — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-smollm-size-token-ablation.md",
+      "to": "docs/notes/2026-08-15-smollm-size-token-ablation.md",
+      "title": "SmolLM prompt-scaffold size and token-budget ablation — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-smollm3-option-order-robustness.md",
+      "to": "docs/notes/2026-08-15-smollm3-option-order-robustness.md",
+      "title": "SmolLM3 option-order robustness — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-15-smollm3-prompt-paraphrase-robustness.md",
+      "to": "docs/notes/2026-08-15-smollm3-prompt-paraphrase-robustness.md",
+      "title": "SmolLM3 prompt-paraphrase robustness — 2026-08-15"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-3b-canonical-binding-transfer.md",
+      "to": "docs/notes/2026-08-16-3b-canonical-binding-transfer.md",
+      "title": "Local 3B canonical bound-routing transfer — 2026-08-16"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-canonical-named-catalog-ablation.md",
+      "to": "docs/notes/2026-08-16-canonical-named-catalog-ablation.md",
+      "title": "Canonical named-tool catalog ablation"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-confusable-tool-catalog-ablation.md",
+      "to": "docs/notes/2026-08-16-confusable-tool-catalog-ablation.md",
+      "title": "Confusable tool-catalog scale ablation (2026-08-16)"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-constrained-routing-ablation.md",
+      "to": "docs/notes/2026-08-16-constrained-routing-ablation.md",
+      "title": "Grammar-constrained decoding for sub-2B tool routing"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-deterministic-argument-binding-ablation.md",
+      "to": "docs/notes/2026-08-16-deterministic-argument-binding-ablation.md",
+      "title": "Deterministic argument-binding ablation"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-heldout-selective-adjudication.md",
+      "to": "docs/notes/2026-08-16-heldout-selective-adjudication.md",
+      "title": "Held-out selective adjudication under catalog perturbation"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-model-fallback-ablation.md",
+      "to": "docs/notes/2026-08-16-model-fallback-ablation.md",
+      "title": "Validator retry versus cross-model fallback on a confusable tool catalog"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-open-ended-scaffold-ablation.md",
+      "to": "docs/notes/2026-08-16-open-ended-scaffold-ablation.md",
+      "title": "Cross-family open-ended scaffold and token-cap study (2026-08-16)"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-phi35-canonical-binding-transfer.md",
+      "to": "docs/notes/2026-08-16-phi35-canonical-binding-transfer.md",
+      "title": "Phi-3.5-mini canonical bound-routing transfer — 2026-08-16"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-phi35-exhaustive-option-permutations.md",
+      "to": "docs/notes/2026-08-16-phi35-exhaustive-option-permutations.md",
+      "title": "Phi-3.5 exhaustive option-permutation scaffold study (2026-08-16)"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-qwen25-exhaustive-option-permutations.md",
+      "to": "docs/notes/2026-08-16-qwen25-exhaustive-option-permutations.md",
+      "title": "Qwen2.5 exhaustive option-permutation robustness — 2026-08-16"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-selective-adjudication-confidence.md",
+      "to": "docs/notes/2026-08-16-selective-adjudication-confidence.md",
+      "title": "Token confidence for selective small-model adjudication"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-small-model-adjudicator-cascade.md",
+      "to": "docs/notes/2026-08-16-small-model-adjudicator-cascade.md",
+      "title": "A 0.5B draft with a 1.5B semantic adjudicator"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-small-model-routing-ablation.md",
+      "to": "docs/notes/2026-08-16-small-model-routing-ablation.md",
+      "title": "Sub-2B tool routing on a confusable catalog"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-smollm17-heldout-order-robustness.md",
+      "to": "docs/notes/2026-08-16-smollm17-heldout-order-robustness.md",
+      "title": "SmolLM2-1.7B held-out catalog-order robustness"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-smollm3-exhaustive-option-permutations.md",
+      "to": "docs/notes/2026-08-16-smollm3-exhaustive-option-permutations.md",
+      "title": "SmolLM3 exhaustive option-permutation robustness — 2026-08-16"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-stable-id-catalog-ablation.md",
+      "to": "docs/notes/2026-08-16-stable-id-catalog-ablation.md",
+      "title": "Stable-ID canonical catalog ablation"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-sub500m-canonical-binding-transfer.md",
+      "to": "docs/notes/2026-08-16-sub500m-canonical-binding-transfer.md",
+      "title": "Sub-500M canonical-routing transfer"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-sub500m-nonoracle-shortlist.md",
+      "to": "docs/notes/2026-08-16-sub500m-nonoracle-shortlist.md",
+      "title": "Qwen2.5-0.5B non-oracle shortlist routing — 2026-08-16"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-sub500m-oracle-candidate-size.md",
+      "to": "docs/notes/2026-08-16-sub500m-oracle-candidate-size.md",
+      "title": "Sub-500M oracle candidate-size sensitivity"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-tool-routing-ablation.md",
+      "to": "docs/notes/2026-08-16-tool-routing-ablation.md",
+      "title": "Cross-family structured tool-routing ablation (2026-08-16)"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-tool-schema-remediation.md",
+      "to": "docs/notes/2026-08-16-tool-schema-remediation.md",
+      "title": "Cross-family tool-schema remediation study (2026-08-16)"
+    },
+    {
+      "from": "docs/benchmarks/model-sensitivity/2026-08-16-validator-retry-ablation.md",
+      "to": "docs/notes/2026-08-16-validator-retry-ablation.md",
+      "title": "Validator-driven tool-call retry study (2026-08-16)"
+    },
+    {
+      "from": "docs/benchmarks/workflow-outcome-study/RESULT-2026-08-17.md",
+      "to": "docs/notes/RESULT-2026-08-17.md",
+      "title": "Guarded workflow outcome study — 2026-08-17"
+    },
+    {
+      "from": "docs/blast-radius-containment/epic-2712.md",
+      "to": "docs/notes/epic-2712.md",
+      "title": "Epic — #2712"
+    },
+    {
+      "from": "docs/blast-radius-containment/w1-spine-2713.md",
+      "to": "docs/notes/w1-spine-2713.md",
+      "title": "W1 — spine — #2713"
+    },
+    {
+      "from": "docs/blast-radius-containment/w2-recognize-2714.md",
+      "to": "docs/notes/w2-recognize-2714.md",
+      "title": "W2 — recognize — #2714"
+    },
+    {
+      "from": "docs/blast-radius-containment/w3-estimate-2715.md",
+      "to": "docs/notes/w3-estimate-2715.md",
+      "title": "W3 — estimate — #2715"
+    },
+    {
+      "from": "docs/blast-radius-containment/w4-scope-hold-2716.md",
+      "to": "docs/notes/w4-scope-hold-2716.md",
+      "title": "W4 — scope-hold — #2716"
+    },
+    {
+      "from": "docs/blast-radius-containment/w5-elect-fixer-2717.md",
+      "to": "docs/notes/w5-elect-fixer-2717.md",
+      "title": "W5 — elect fixer — #2717"
+    },
+    {
+      "from": "docs/blast-radius-containment/w6-auto-release-2718.md",
+      "to": "docs/notes/w6-auto-release-2718.md",
+      "title": "W6 — auto-release — #2718"
+    },
+    {
+      "from": "docs/blast-radius-containment/w7-surface-2719.md",
+      "to": "docs/notes/w7-surface-2719.md",
+      "title": "W7 — surface — #2719"
+    },
+    {
+      "from": "docs/blast-radius-containment/w8-bound-2720.md",
+      "to": "docs/notes/w8-bound-2720.md",
+      "title": "W8 — bound — #2720"
+    },
+    {
+      "from": "docs/cache-frontier/reviews/2026-06-29.md",
+      "to": "docs/notes/2026-06-29.md",
+      "title": "Cache frontier weekly review - 2026-06-29"
+    },
+    {
+      "from": "docs/cache-frontier/reviews/2026-07-04.md",
+      "to": "docs/notes/2026-07-04.md",
+      "title": "Cache frontier weekly review - 2026-07-04"
+    },
+    {
+      "from": "docs/research/agent-skill-portability-2026-08-14.md",
+      "to": "docs/notes/agent-skill-portability-2026-08-14.md",
+      "title": "Agent skill portability research — 2026-08-14"
+    },
+    {
+      "from": "docs/research/agent-zero-study-2026-08-18.md",
+      "to": "docs/notes/agent-zero-study-2026-08-18.md",
+      "title": "Agent Zero study: a transparent computer agent versus a governed agent kernel"
+    },
+    {
+      "from": "docs/research/flashinfer-study-2026-08-22.md",
+      "to": "docs/notes/flashinfer-study-2026-08-22.md",
+      "title": "FlashInfer study — reusable execution plans, workload tuning, and traceable kernels"
+    },
+    {
+      "from": "docs/research/graft-study-2026-08-18.md",
+      "to": "docs/notes/graft-study-2026-08-18.md",
+      "title": "Graft study — local structural context as an agent-kernel input"
+    },
+    {
+      "from": "docs/research/llm-d-study-2026-08-18.md",
+      "to": "docs/notes/llm-d-study-2026-08-18.md",
+      "title": "llm-d repository study"
+    },
+    {
+      "from": "docs/research/managed-context-cognitive-load-baseline-2026-08-13.md",
+      "to": "docs/notes/managed-context-cognitive-load-baseline-2026-08-13.md",
+      "title": "Managed-context journey cognitive-load baseline"
+    },
+    {
+      "from": "docs/research/microcontext-natural-traffic-2026-08-16.md",
+      "to": "docs/notes/microcontext-natural-traffic-2026-08-16.md",
+      "title": "Natural-traffic tool-admission calibration — 2026-08-16"
+    },
+    {
+      "from": "docs/research/mirage-study-2026-08-17.md",
+      "to": "docs/notes/mirage-study-2026-08-17.md",
+      "title": "Mirage deep study — refreshed 2026-08-25"
+    },
+    {
+      "from": "docs/research/native-harness-dependency-management-2026-08-15.md",
+      "to": "docs/notes/native-harness-dependency-management-2026-08-15.md",
+      "title": "Native harness dependency management: research frame"
+    },
+    {
+      "from": "docs/research/openrouter-study-2026-08-18.md",
+      "to": "docs/notes/openrouter-study-2026-08-18.md",
+      "title": "OpenRouter study: transferable routing contracts and the gaps fak should close"
+    },
+    {
+      "from": "docs/research/structured-session-intent-2026-08-18.md",
+      "to": "docs/notes/structured-session-intent-2026-08-18.md",
+      "title": "Structured session intent — inventory, field study, and spine"
+    },
+    {
+      "from": "docs/research/tensor-build-local-study-2026-08-15.md",
+      "to": "docs/notes/tensor-build-local-study-2026-08-15.md",
+      "title": "TensorBuild deep study: evidence identity, artifact liveness, and outcome economics"
+    },
+    {
+      "from": "docs/research/ttl-upgrade-refusal-corpus-2026-08-09.md",
+      "to": "docs/notes/ttl-upgrade-refusal-corpus-2026-08-09.md",
+      "title": "TTL-upgrade refusal corpus study (2026-08-09)"
+    },
+    {
+      "from": "tools/self_improve.runs/FIRST-CYCLE-2026-06-26.md",
+      "to": "docs/notes/FIRST-CYCLE-2026-06-26.md",
+      "title": "dos-self-improve — first end-to-end cycle on fak (#388)"
+    }
+  ],
+  "retained_contractual_witness_markdown": [
+    "docs/_witnesses/agent-default-code-tools-non-fak-2026-08-19.md",
+    "docs/_witnesses/defaults-selfcheck-non-fak-2026-08-19.md",
+    "docs/_witnesses/dispatch-thread-pressure-2026-08-14.md",
+    "docs/_witnesses/end-to-end-value-chain-selfcheck-2026-08-13.md",
+    "docs/_witnesses/fleet-res-rollup-2026-08-13.md",
+    "docs/_witnesses/guard-codex-default-profiles-non-fak-2026-08-18.md",
+    "docs/_witnesses/harness-web-demo/DOGFOOD-LIVE-WORK-2026-08-22.md",
+    "docs/_witnesses/harness-web-demo/EDGE-ADVERSARIAL-2026-08-20.md",
+    "docs/_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md",
+    "docs/_witnesses/harness-web-demo/LIVE-FAK-L4-2026-08-15.md",
+    "docs/_witnesses/harness-web-demo/LIVE-NATIVE-PROBE-2026-08-15.md",
+    "docs/_witnesses/harness-web-demo/OPERATOR-HOME-2026-08-20.md",
+    "docs/_witnesses/harness-web-demo/SHIPPED-FAK-LAUNCH-2026-08-15.md",
+    "docs/_witnesses/issue-8494/trajectory-audit-2026-08-21.md",
+    "docs/_witnesses/launch-posture-cross-wire-non-fak-2026-08-19.md",
+    "docs/_witnesses/launch-posture-missing-vcache-calibration-2026-08-18.md",
+    "docs/_witnesses/manage-parity-2026-08-13.md",
+    "docs/_witnesses/manage-parity-hooks-2026-08-14.md",
+    "docs/_witnesses/managed-tool-search-compat-2026-08-13.md",
+    "docs/_witnesses/micro-paired-value-2026-08-13.md",
+    "docs/_witnesses/microagent-real-kernel-2026-08-12.md",
+    "docs/_witnesses/openai-decoded-context-view-default-non-fak-2026-08-18.md",
+    "docs/_witnesses/openai-stale-read-elision-non-fak-2026-08-18.md",
+    "docs/_witnesses/vcache-calibrated-steering-non-fak-2026-08-18.md",
+    "docs/_witnesses/vcache-calibrated-ttl-tier-non-fak-2026-08-18.md",
+    "docs/_witnesses/vcache-calibrated-write-pricing-2026-08-19.md",
+    "docs/_witnesses/vcache-forced-mismatch-demotion-2026-08-19.md",
+    "docs/_witnesses/vcache-provider-calibration-live-2026-08-18.md",
+    "docs/_witnesses/wip-ownership-seam-2026-08-13.md"
+  ],
+  "retained_due_cross_lane_contract": [
+    "docs/research/microagents-to-harnesses-2026-08-18.md"
+  ],
+  "reference_files_rewritten": [
+    "INDEX.md",
+    "cmd/fak/cachevalue.go",
+    "docs/CACHE-FRONTIER-OPERATING-PLAN.md",
+    "docs/CAPABILITIES.md",
+    "docs/README-legacy.md",
+    "docs/REPO-HYGIENE-SCORECARD.md",
+    "docs/archive/README.md",
+    "docs/benchmarks/AFFECTED-TEST-SELECTION-ALTERNATIVES-2026-08-10.md",
+    "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-cross-model-scaffold-extension.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-15b-prompt-robustness.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-3b-scaffold-crossover.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-option-order-robustness.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-prompt-paraphrase-robustness.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-small-backend-sensitivity.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-qwen25-small-size-ladder.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-small-model-scaffold-l4.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-smollm-size-token-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-smollm3-option-order-robustness.md",
+    "docs/benchmarks/model-sensitivity/2026-08-15-smollm3-prompt-paraphrase-robustness.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-3b-canonical-binding-transfer.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-canonical-named-catalog-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-confusable-tool-catalog-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-constrained-routing-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-deterministic-argument-binding-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-heldout-selective-adjudication.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-model-fallback-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-open-ended-scaffold-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-phi35-canonical-binding-transfer.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-phi35-exhaustive-option-permutations.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-qwen25-exhaustive-option-permutations.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-selective-adjudication-confidence.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-small-model-adjudicator-cascade.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-small-model-routing-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-smollm17-heldout-order-robustness.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-smollm3-exhaustive-option-permutations.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-stable-id-catalog-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-sub500m-canonical-binding-transfer.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-sub500m-nonoracle-shortlist.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-sub500m-oracle-candidate-size.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-tool-routing-ablation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-tool-schema-remediation.md",
+    "docs/benchmarks/model-sensitivity/2026-08-16-validator-retry-ablation.md",
+    "docs/benchmarks/workflow-outcome-study/RESULT-2026-08-17.md",
+    "docs/blast-radius-containment-cohort.md",
+    "docs/cache-frontier/README.md",
+    "docs/cache-frontier/reviews/2026-06-29.md",
+    "docs/cache-frontier/reviews/2026-07-04.md",
+    "docs/cache-value-rollup.md",
+    "docs/harness-init.md",
+    "docs/integrations/llm-d.md",
+    "docs/notes/TOP-NEXT-GITHUB-WORK-2026-08-18.md",
+    "docs/research/README.md",
+    "docs/research/agent-zero-study-2026-08-18.md",
+    "docs/research/flashinfer-study-2026-08-22.md",
+    "docs/research/graft-study-2026-08-18.md",
+    "docs/research/inventory/local-tensor-build.json",
+    "docs/research/llm-d-study-2026-08-18.md",
+    "docs/research/managed-context-cognitive-load-baseline-2026-08-13.md",
+    "docs/research/mirage-study-2026-08-17.md",
+    "docs/research/monitored-repositories.json",
+    "docs/research/monitored-repositories.md",
+    "docs/research/tensor-build-local-study-2026-08-15.md",
+    "examples/affectedtests-comparison/README.md",
+    "internal/capindex/product.go",
+    "internal/disambiguation/README.md",
+    "internal/managedocs/managedocs.go",
+    "internal/managedocs/managedocs_test.go",
+    "internal/nativebench/nativebench.go",
+    "llms-full.txt",
+    "tools/issue_resolve_witnessed_test.py",
+    "tools/self_improve.runs/FIRST-CYCLE-2026-06-26.md"
+  ],
+  "historical_machine_corpora_preserved": [
+    "docs/_witnesses/**",
+    "experiments/**"
+  ],
+  "additional_hygiene_repairs": [
+    {
+      "path": "docs/gateway-port-ui-plan.md",
+      "repair": "replace one AI-tell phrase with plain language"
+    },
+    {
+      "path": "docs/industry-scorecard/operability.md",
+      "repair": "replace one AI-tell phrase with precise scheduling language"
+    },
+    {
+      "path": "docs/session-client-contract.md",
+      "repair": "replace two AI-tell phrases with plain language"
+    }
+  ],
+  "measured_after": {
+    "hygiene_debt": 111,
+    "placement_debt": 30,
+    "root_hygiene_debt": 0,
+    "ai_tells_debt": 1,
+    "bloat_debt": 9,
+    "score": 67.4,
+    "grade": "D"
+  },
+  "measured_delta": {
+    "hygiene_debt": 121,
+    "placement_debt": 115,
+    "root_hygiene_debt": 1,
+    "ai_tells_debt": 5,
+    "bloat_debt": 0,
+    "score_points": 2.0
+  }
+}

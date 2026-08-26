@@ -1,3 +1,7 @@
+---
+title: "Portability acceptance lab (#6606)"
+description: "go run ./cmd/portability-lab is the independent, credential-free release gate for epic 6589. It calls the shipped internal/portability APIs directly;"
+---
 # Portability acceptance lab (#6606)
 
 `go run ./cmd/portability-lab` is the independent, credential-free release gate for epic #6589.

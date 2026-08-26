@@ -386,7 +386,7 @@ func cloneRawMetrics(in map[string]json.RawMessage) map[string]json.RawMessage {
 // NormalizeKVCapacity derives comparable units only from explicit native
 // metrics and geometry. Previous may be nil; when present it enables temporal
 // identity and monotonic-counter validation.
-func NormalizeKVCapacity(current KVMetricSample, previous *KVMetricSample) KVCapacitySnapshot {
+func normalizeKVCapacity(current KVMetricSample, previous *KVMetricSample) KVCapacitySnapshot {
 	snapshot := KVCapacitySnapshot{
 		Schema:      KVCapacitySchema,
 		Dialect:     current.Dialect,

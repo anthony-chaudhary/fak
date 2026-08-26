@@ -24,11 +24,11 @@ const QwenMutationObserveReproFirst QwenMutationIntervention = "observe-only: re
 
 // QwenMutationChurn summarizes a maximal run of repeated unwitnessed writes.
 type QwenMutationChurn struct {
-	TranscriptID    string
-	Target          string
-	Count           int
-	AccountedTokens uint64
-	Intervention    QwenMutationIntervention
+	TranscriptID    string                   `json:"transcript_id"`
+	Target          string                   `json:"target"`
+	Count           int                      `json:"count"`
+	AccountedTokens uint64                   `json:"accounted_tokens"`
+	Intervention    QwenMutationIntervention `json:"intervention"`
 }
 
 // DetectQwenMutationChurn finds consecutive writes by one transcript to one target

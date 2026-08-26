@@ -1,3 +1,7 @@
+---
+title: "Agent customization field index"
+description: "Machine source: agent-customization-index.json Scope: customization of the agent being authored, its runtime authority, interpretation of its trajectory,"
+---
 # Agent customization field index
 
 **Machine source:** [`agent-customization-index.json`](agent-customization-index.json)  

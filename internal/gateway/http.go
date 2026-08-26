@@ -539,7 +539,25 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateSampling(req)) {
 		return
 	}
-	ctx := r.Context()
+	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
+	decodeTraceRequested := req.FakDecodeTrace
+	decodeTokenIDsRequested := req.Fak != nil && req.Fak.NativeDecodeTokenIDs
+	if decodeTokenIDsRequested && !decodeTraceRequested {
+		writeErr(w, http.StatusBadRequest, "native decode token IDs require fak_decode_trace")
+		return
+	}
+	if decodeTraceRequested && req.Stream {
+		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a buffered fak-native request")
+		return
+	}
+	if receiptRequested && req.Stream {
+		writeErr(w, http.StatusBadRequest, "native inference receipts require a buffered request")
+		return
+	}
+	if receiptRequested && ((req.Temperature != nil && *req.Temperature != 0) || (req.TopP != nil && *req.TopP != 0) || len(req.LogitBias) > 0 || (req.FrequencyPenalty != nil && *req.FrequencyPenalty != 0) || (req.PresencePenalty != nil && *req.PresencePenalty != 0)) {
+		writeErr(w, http.StatusBadRequest, "native inference receipts require greedy sampling over unmodified logits")
+		return
+	}
 	// Request-model pass-through (#82): forward the client's requested model to the
 	// upstream verbatim, falling back to the gateway's configured model only when the
 	// client omitted one. This stops the gateway silently serving a DIFFERENT model
@@ -551,48 +569,19 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if reqModel == "" {
 		reqModel = s.model
 	}
+	if decodeTraceRequested && !s.chatDecodeTraceSupported(req.Model) {
+		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a fak-native model route")
+		return
+	}
 
 	// Thread one request TraceID across every proposed call in this chat so the IFC
 	// ledger, plan-CFI, response header, and access log all correlate. The
 	// middleware honors a client-supplied X-Trace-Id or mints one.
-	reqTrace := s.useHTTPTrace(w, r, "")
-	// Operator control / budget / pace at the served request boundary. With
-	// DecideSession wired this mutates the live session table (TurnsLeft debit,
-	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
-	// still refuses paused/draining/stopped sessions.
-	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
-	if canceled {
+	ctx, reqTrace, messages, sessionTurn, admitted := s.admitServedRequest(w, r, req.Messages)
+	if !admitted {
 		return
 	}
-	if !ok {
-		// Budget drained: opt-in human-like reset (distill seed, re-arm, continue on
-		// the fresh trace) when wired; else the historical 409 directive. Mirrors the
-		// Anthropic wire in messages.go.
-		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, req.Messages); reset {
-			req.Messages = resetMessages
-			reqTrace = newTrace
-			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
-			if canceled {
-				return
-			}
-			if !ok {
-				writeSessionRefusal(w, sessionTurn.state)
-				return
-			}
-		} else {
-			writeSessionRefusal(w, sessionTurn.state)
-			return
-		}
-	}
-	// Coherence thrash (#3159): actuate an armed hard reset on this ADMITTED turn (mirrors the
-	// budget-reset block above; a no-op when nothing is armed or no resetter is wired).
-	if reqTrace, req.Messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, req.Messages, sessionTurn); canceled {
-		return
-	}
-	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
-		writeSessionRefusal(w, sessionTurn.state)
-		return
-	}
+	req.Messages = messages
 	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
@@ -663,6 +652,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// could. No-op when the client omitted them (nil pointer).
 		agent.WithFrequencyPenalty(req.FrequencyPenalty),
 		agent.WithPresencePenalty(req.PresencePenalty),
+		agent.WithNativeInferenceReceipt(receiptRequested),
+		agent.WithDecodeTrace(decodeTraceRequested),
+		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator
@@ -705,6 +697,18 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, conformanceMsg)
 		return
 	}
+	if receiptRequested && comp.NativeInference == nil {
+		writeErr(w, http.StatusBadGateway, "configured planner cannot produce a native inference receipt")
+		return
+	}
+	if decodeTraceRequested && comp.DecodeTrace == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
+		return
+	}
+	if decodeTokenIDsRequested && comp.NativeDecodeTokenIDs == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
+		return
+	}
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	finish := s.applyAdjudicatedTurn(&asst, adjs, kept, dropped, servedHits, servedText, bodyRefused, comp.FinishReason)
@@ -727,11 +731,41 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 {
 		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, Redactions: redactions}
 	}
+	if comp.NativeInference != nil {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.NativeInferenceReceipt = comp.NativeInference
+	}
+	if decodeTraceRequested {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.DecodeTrace = comp.DecodeTrace
+	}
+	if decodeTokenIDsRequested {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.NativeDecodeTokenIDs = comp.NativeDecodeTokenIDs
+	}
 	if stream != nil {
 		writeChatCompletionStream(stream, resp)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) chatDecodeTraceSupported(reqModel string) bool {
+	p := s.planner
+	if dual, ok := p.(*DualPlanner); ok {
+		if !dual.RoutesLocal(reqModel) {
+			return false
+		}
+		p = dual.Local()
+	}
+	capable, ok := p.(agent.NativeDecodeTracePlanner)
+	return ok && capable.NativeDecodeTraceSupported()
 }
 
 func (s *Server) responseModel(served, requested, streamModel, issue string) string {
@@ -1126,6 +1160,39 @@ func writeSSEData(w http.ResponseWriter, v any) error {
 	return nil
 }
 
+type codexServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// codexServiceTierCatalog translates provider routing metadata at the public
+// gateway seam. Codex selects a tier by its provider wire value, while the
+// portable mode remains advertised separately through additional_speed_tiers.
+func codexServiceTierCatalog(rows []map[string]string) []codexServiceTier {
+	catalog := make([]codexServiceTier, 0, len(rows))
+	for _, row := range rows {
+		mode := strings.TrimSpace(row["mode"])
+		id := strings.TrimSpace(row["wire_value"])
+		if id == "" {
+			id = mode
+		}
+		name := strings.ReplaceAll(mode, "_", " ")
+		if name == "" {
+			name = id
+		}
+		if name != "" {
+			name = strings.ToUpper(name[:1]) + name[1:]
+		}
+		catalog = append(catalog, codexServiceTier{
+			ID:          id,
+			Name:        name,
+			Description: name + " service tier",
+		})
+	}
+	return catalog
+}
+
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	data := []map[string]any{{"id": s.model, "object": "model", "owned_by": "fak"}}
 	// Dual mode (local model alongside the API upstream): advertise the in-kernel
@@ -1165,6 +1232,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if contract, ok := modelroute.LookupProviderContract("openai"); ok {
 		tiers, tierRows = modelroute.SupportedServiceTierMetadata(contract)
 	}
+	tierCatalog := codexServiceTierCatalog(tierRows)
 	codexModels := make([]map[string]any, 0, len(data))
 	for _, row := range data {
 		id := strings.TrimSpace(fmt.Sprint(row["id"]))
@@ -1204,7 +1272,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"use_responses_lite":               false,
 			"priority":                         0,
 			"additional_speed_tiers":           tiers,
-			"service_tiers":                    tierRows,
+			"service_tiers":                    tierCatalog,
 			"availability_nux":                 nil,
 		})
 	}

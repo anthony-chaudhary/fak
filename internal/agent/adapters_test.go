@@ -2117,3 +2117,24 @@ func TestForceAnthropicStreaming(t *testing.T) {
 		}
 	})
 }
+
+func TestOpenAIResponsesToolsPreserveCustomWire(t *testing.T) {
+	const custom = `{"type":"custom","name":"apply_patch","description":"Apply a patch","format":{"type":"grammar","syntax":"lark","definition":"start: /.+/"}}`
+	tools := openAIResponsesTools([]ToolDef{
+		{Type: "function", Function: ToolDefFunction{Name: "mcp__custom__fak_tools_search", Description: "Search", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		{Type: "custom", ResponsesWire: json.RawMessage(custom)},
+	})
+	if len(tools) != 2 {
+		t.Fatalf("tool catalog length = %d, want 2", len(tools))
+	}
+	var fn map[string]any
+	if err := json.Unmarshal(tools[0], &fn); err != nil {
+		t.Fatal(err)
+	}
+	if fn["type"] != "function" || fn["name"] != "mcp__custom__fak_tools_search" {
+		t.Fatalf("function tool changed: %s", tools[0])
+	}
+	if string(tools[1]) != custom {
+		t.Fatalf("custom tool wire changed: %s", tools[1])
+	}
+}

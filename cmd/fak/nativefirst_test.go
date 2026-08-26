@@ -26,6 +26,25 @@ func TestNativeFirstCanonicalCrossIndex(t *testing.T) {
 		t.Fatal("canonical native inference doctrine is incomplete")
 	}
 }
+
+func TestQwen38PerformancePreferenceProjected(t *testing.T) {
+	root := repoRoot()
+	required := []string{
+		"New native-performance work prefers Qwen3.8.",
+		"Qwen3.6 is allowed only when the task states an explicit task-specific exception, such as regression, compatibility, historical comparison, or a hardware/artifact constraint.",
+		"Preserve historical Qwen3.6 artifacts; do not rename or rewrite them as Qwen3.8 evidence.",
+	}
+	for _, rel := range []string{"AGENTS.md", "docs/native-inference-goal.md"} {
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !containsAll(string(b), required...) {
+			t.Fatalf("%s does not project the exact Qwen3.8 performance preference and Qwen3.6 exception rule", rel)
+		}
+	}
+}
+
 func containsAll(s string, wants ...string) bool {
 	for _, want := range wants {
 		if !strings.Contains(s, want) {

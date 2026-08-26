@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -52,12 +53,18 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 	if kv == nil {
 		panic("model: compute backend " + be.Name() + " does not provide KVStore")
 	}
+	if !m.holdModelWeights() {
+		if free, ok := kv.(interface{ Free() }); ok {
+			free.Free()
+		}
+		panic("model: weights are closing or closed")
+	}
 	// A reusable captured graph is bound to one session's buffer addresses; reset it so
 	// this session captures fresh (no-op on cpu-ref / when graphs are off).
 	if gr, ok := be.(interface{ GraphReset() }); ok {
 		gr.GraphReset()
 	}
-	s := &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor)}
+	s := &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor), modelWeightsHeld: true}
 	if m.Cfg.IsQwen35Hybrid() {
 		// ValidateBackendForwardPath already proved this exact structural capability and
 		// path identity before KV or weight allocation.
@@ -66,53 +73,66 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 	return s, nil
 }
 
-// Close releases device-resident HAL state owned by this session. Legacy sessions have
-// no external residency, so Close is a no-op for them.
+// Close releases session-owned device state and its model-weight lifetime reference.
 func (s *Session) Close() {
-	if s == nil || s.Backend == nil {
+	if s == nil {
 		return
 	}
-	if s.halClosed {
-		return
-	}
-	s.halClosed = true
-	if b, ok := s.Backend.(batchBackend); ok {
-		b.FlushBatch()
-	}
-	s.closeQwen35HALState()
-	if s.halW != nil {
-		for name, t := range s.halW {
-			s.Backend.Free(t)
-			delete(s.halW, name)
+	s.closeOnce.Do(func() {
+		if stats := s.q4kMLPOutputSlabStats; stats.Calls != 0 {
+			fmt.Fprintf(os.Stderr, "{\"schema\":%q,\"engine\":\"fak-native\",\"backend\":\"metal\",\"quant\":\"q4_k\",\"calls\":%d,\"allocations\":%d,\"reuses\":%d,\"high_water_bytes\":%d}\n",
+				q4kMLPOutputSlabReceiptSchema, stats.Calls, stats.Allocations, stats.Reuses, stats.HighWaterBytes)
 		}
-	}
-	// Routed-expert weights served by the bounded ring are NOT in halW (that is the point), so they
-	// need their own teardown or their device handles would outlive the session. A SHARED ring
-	// (R7/#5618) is the exception and the reason the branch exists: its residency belongs to the
-	// (model, device) pair, so this conversation ending must DETACH and leave every byte in place for
-	// the agents still using it. Freeing here would page out a peer's working set — and Free a handle
-	// it is about to multiply against.
-	if s.sharedRing != nil {
-		s.sharedRing.Detach(s)
-	} else if s.expertRing != nil {
-		s.expertRing.freeAll()
-		s.expertRing = nil
-	}
-	if kv, ok := s.halKV.(interface{ Free() }); ok {
-		kv.Free()
-	}
-	if s.v4Expert != nil {
-		_ = s.v4Expert.Close()
-		s.v4Expert = nil
-	}
-	if r, ok := s.Backend.(interface{ Recycle() }); ok {
-		r.Recycle()
-	}
-	if t, ok := s.Backend.(interface{ Trim() }); ok {
-		t.Trim()
-	}
-	s.halKV = nil
-	s.halW = nil
+		// The grouped-Q4_K readback slab is session-owned even on the legacy (Backend=nil) path.
+		s.q4kMLPOutputSlab = nil
+		s.closeQwen35GDNSequence()
+		// Sequence auxiliary state can be owned by a native capability even when
+		// Backend is nil, so its teardown is outside the compute-HAL branch.
+		s.closeQwen35HALState()
+		if s.Backend != nil {
+			s.halClosed = true
+			if b, ok := s.Backend.(batchBackend); ok {
+				b.FlushBatch()
+			}
+			if s.halW != nil {
+				for name, t := range s.halW {
+					s.Backend.Free(t)
+					delete(s.halW, name)
+				}
+			}
+			// Routed-expert weights served by the bounded ring are NOT in halW (that is the point), so they
+			// need their own teardown or their device handles would outlive the session. A SHARED ring
+			// (R7/#5618) is the exception and the reason the branch exists: its residency belongs to the
+			// (model, device) pair, so this conversation ending must DETACH and leave every byte in place for
+			// the agents still using it. Freeing here would page out a peer's working set — and Free a handle
+			// it is about to multiply against.
+			if s.sharedRing != nil {
+				s.sharedRing.Detach(s)
+			} else if s.expertRing != nil {
+				s.expertRing.freeAll()
+				s.expertRing = nil
+			}
+			if kv, ok := s.halKV.(interface{ Free() }); ok {
+				kv.Free()
+			}
+			if s.v4Expert != nil {
+				_ = s.v4Expert.Close()
+				s.v4Expert = nil
+			}
+			if r, ok := s.Backend.(interface{ Recycle() }); ok {
+				r.Recycle()
+			}
+			if t, ok := s.Backend.(interface{ Trim() }); ok {
+				t.Trim()
+			}
+			s.halKV = nil
+			s.halW = nil
+		}
+		if s.modelWeightsHeld {
+			s.modelWeightsHeld = false
+			s.M.releaseWeightSession()
+		}
+	})
 }
 
 type classedUploadBackend interface {

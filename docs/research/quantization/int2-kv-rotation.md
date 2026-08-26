@@ -1,3 +1,7 @@
+---
+title: "Output-aware INT2 KV-cache rotation evaluation"
+description: "This leaf pins and adjudicates one bounded, observed evaluation of the output-aware rotation idea in OptR, arXiv:2608.02691v2."
+---
 # Output-aware INT2 KV-cache rotation evaluation
 
 This leaf pins and adjudicates one **bounded, observed** evaluation of the output-aware

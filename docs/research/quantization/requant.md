@@ -1,3 +1,7 @@
+---
+title: "ReQuant fixed-grid refinement evaluation"
+description: "Status: modeled contract witness, not an observed model- or hardware-performance result."
+---
 # ReQuant fixed-grid refinement evaluation
 
 Status: **modeled contract witness**, not an observed model- or hardware-performance result.  

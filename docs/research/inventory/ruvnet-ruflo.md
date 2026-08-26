@@ -1,3 +1,7 @@
+---
+title: "Study inventory: ruvnet/ruflo"
+description: "- Schema: fak-study-inventory-map/1 - Indexed revision: 4dcff483482cee316f47552a961bcbaadc89f378 - Source: https://github.com/ruvnet/ruflo - Observed at:"
+---
 # Study inventory: ruvnet/ruflo
 
 - **Schema:** `fak-study-inventory-map/1`

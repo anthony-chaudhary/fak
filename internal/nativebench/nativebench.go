@@ -353,7 +353,7 @@ var leafClassifications = []LeafClassification{{Leaf: "internal/blastradius", Di
 	},
 }
 
-var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_intersection", NativePath: "internal/blastradius/blastradius.go", Workload: "same broken package, reverse dependency graph, lease trees, queued issue paths, and exact affected/excluded oracle", Metrics: []string{"radius_precision", "radius_recall", "lease_hold_precision", "lease_hold_recall", "issue_hold_precision", "issue_hold_recall", "latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "broken-tree intersection only", Class: TunedBaseline, Source: "internal/blastradius/compare.go"}, {Name: "DOS leases", Class: FirstClassIntegration, Integration: "dos", Source: "internal/blastradius/compare.go"}, {Name: "Bazel query reverse dependencies", Class: NextBest, Source: "https://bazel.build/query/guide"}, {Name: "Pants dependents", Class: NextBest, Source: "https://www.pantsbuild.org"}, {Name: "Nx affected graph", Class: NextBest, Source: "https://nx.dev"}, {Name: "Kubernetes Lease impact labels", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"}}, Witness: "../../docs/benchmarks/BLAST-RADIUS-ALTERNATIVES-2026-08-10.md", Integrations: []string{"dos"}},
+var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_intersection", NativePath: "internal/blastradius/blastradius.go", Workload: "same broken package, reverse dependency graph, lease trees, queued issue paths, and exact affected/excluded oracle", Metrics: []string{"radius_precision", "radius_recall", "lease_hold_precision", "lease_hold_recall", "issue_hold_precision", "issue_hold_recall", "latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "broken-tree intersection only", Class: TunedBaseline, Source: "internal/blastradius/compare.go"}, {Name: "DOS leases", Class: FirstClassIntegration, Integration: "dos", Source: "internal/blastradius/compare.go"}, {Name: "Bazel query reverse dependencies", Class: NextBest, Source: "https://bazel.build/query/guide"}, {Name: "Pants dependents", Class: NextBest, Source: "https://www.pantsbuild.org"}, {Name: "Nx affected graph", Class: NextBest, Source: "https://nx.dev"}, {Name: "Kubernetes Lease impact labels", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"}}, Witness: "../../docs/notes/BLAST-RADIUS-ALTERNATIVES-2026-08-10.md", Integrations: []string{"dos"}},
 	{
 		Capability: "prefix_cache_budget_sweep",
 		NativePath: "internal/cachesweep/cachesweep.go",
@@ -366,19 +366,19 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Caffeine simulator", Class: NextBest, Source: "https://github.com/ben-manes/caffeine/wiki/Simulator"},
 			{Name: "Redis or Valkey maxmemory policies", Class: NextBest, Source: "https://redis.io/docs/latest/develop/reference/eviction/"},
 		},
-		Witness: "../../docs/benchmarks/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/PREFIX-CACHE-SWEEP-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "guard_journal_action_routing", NativePath: "internal/guardroute/guardroute.go", Workload: "same empty, structural-anomaly, below-threshold reason, and at-threshold reason journal folds with exact no-op, finding, or issue action oracle",
 		Metrics:      []string{"action_accuracy", "false_routes", "missed_routes", "severity_accuracy", "latency_ms", "throughput_folds_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"},
-		Alternatives: []Alternative{{Name: "count-threshold-only routing", Class: TunedBaseline, Source: "internal/guardroute/compare.go"}, {Name: "DOS decisions", Class: FirstClassIntegration, Integration: "dos", Source: "dos decisions"}, {Name: "OPA decision policy", Class: NextBest, Source: "https://www.openpolicyagent.org"}, {Name: "Cedar policy evaluator", Class: NextBest, Source: "https://www.cedarpolicy.com"}, {Name: "Drools rule engine", Class: NextBest, Source: "https://www.drools.org"}, {Name: "Prometheus Alertmanager routing", Class: NextBest, Source: "https://prometheus.io/docs/alerting/latest/alertmanager/"}}, Witness: "../../docs/benchmarks/GUARD-JOURNAL-ROUTING-ALTERNATIVES-2026-08-10.md", Integrations: []string{"dos"},
+		Alternatives: []Alternative{{Name: "count-threshold-only routing", Class: TunedBaseline, Source: "internal/guardroute/compare.go"}, {Name: "DOS decisions", Class: FirstClassIntegration, Integration: "dos", Source: "dos decisions"}, {Name: "OPA decision policy", Class: NextBest, Source: "https://www.openpolicyagent.org"}, {Name: "Cedar policy evaluator", Class: NextBest, Source: "https://www.cedarpolicy.com"}, {Name: "Drools rule engine", Class: NextBest, Source: "https://www.drools.org"}, {Name: "Prometheus Alertmanager routing", Class: NextBest, Source: "https://prometheus.io/docs/alerting/latest/alertmanager/"}}, Witness: "../../docs/notes/GUARD-JOURNAL-ROUTING-ALTERNATIVES-2026-08-10.md", Integrations: []string{"dos"},
 	},
 	{
 		Capability: "issue_near_duplicate_detection", NativePath: "internal/issuededup/issuededup.go",
 		Workload:     "same three-issue backlog, two paraphrased duplicates, one unrelated candidate, and exact existing-issue oracle across every arm",
 		Metrics:      []string{"precision", "recall", "false_positives", "false_negatives", "pointer_accuracy", "latency_ms", "throughput_candidates_per_second", "cpu_seconds", "peak_rss_bytes", "input_bytes", "network_bytes", "operator_seconds", "total_cost"},
 		Alternatives: []Alternative{{Name: "normalized exact-title equality", Class: TunedBaseline, Source: "internal/issuededup/compare.go"}, {Name: "GitHub issue search", Class: FirstClassIntegration, Integration: "github", Source: "internal/issuededup/compare.go"}, {Name: "GitHub duplicate issue detection", Class: NextBest, Source: "https://docs.github.com/issues"}, {Name: "Linear duplicate detection", Class: NextBest, Source: "https://linear.app"}, {Name: "Jira similar requests", Class: NextBest, Source: "https://www.atlassian.com/software/jira"}, {Name: "sentence-transformer cosine retrieval", Class: NextBest, Source: "https://www.sbert.net"}},
-		Witness:      "../../docs/benchmarks/ISSUE-DEDUP-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"},
+		Witness:      "../../docs/notes/ISSUE-DEDUP-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"},
 	},
 	{
 		Capability: "lane_tree_collision_admission",
@@ -392,7 +392,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Kubernetes Lease coordination", Class: NextBest, Source: "https://kubernetes.io/docs/concepts/architecture/leases/"},
 			{Name: "etcd concurrency mutex", Class: NextBest, Source: "https://pkg.go.dev/go.etcd.io/etcd/client/v3/concurrency"},
 		},
-		Witness:      "../../docs/benchmarks/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/LANE-TREE-ADMISSION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"dos"},
 	},
 	{
@@ -408,7 +408,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "etcd concurrency mutex", Class: NextBest, Source: "https://pkg.go.dev/go.etcd.io/etcd/client/v3/concurrency"},
 			{Name: "GitHub Actions concurrency groups", Class: NextBest, Source: "https://docs.github.com/actions/using-jobs/using-concurrency"},
 		},
-		Witness:      "../../docs/benchmarks/SHARED-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/SHARED-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"dos", "leaseref"},
 	},
 	{
@@ -423,7 +423,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Ray scheduler", Class: NextBest, Source: "https://docs.ray.io/en/latest/ray-core/scheduling/"},
 			{Name: "AWS Batch", Class: NextBest, Source: "https://docs.aws.amazon.com/batch/"},
 		},
-		Witness: "../../docs/benchmarks/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/COMPUTE-REGION-ADMISSION-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "warm_cache_budget_scheduling",
@@ -438,7 +438,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "vLLM automatic prefix caching", Class: NextBest, Source: "https://docs.vllm.ai/en/latest/design/prefix_caching/"},
 			{Name: "SGLang HiCache and cache-aware scheduling", Class: NextBest, Source: "https://docs.sglang.ai/advanced_features/hicache.html"},
 		},
-		Witness:      "../../docs/benchmarks/WARM-CACHE-BUDGET-SCHEDULING-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/WARM-CACHE-BUDGET-SCHEDULING-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"lmcache", "mooncake", "nixl"},
 	},
 	{
@@ -453,7 +453,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Prometheus recording and alerting rules", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/configuration/alerting_rules/"},
 			{Name: "Datadog anomaly monitor", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/types/anomaly/"},
 		},
-		Witness:      "../../docs/benchmarks/CACHE-REUSE-DIVERGENCE-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/CACHE-REUSE-DIVERGENCE-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
@@ -468,7 +468,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Prometheus recording and alerting rules", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/configuration/recording_rules/"},
 			{Name: "Datadog change and anomaly monitor", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/types/change-alert/"},
 		},
-		Witness:      "../../docs/benchmarks/CACHE-REUSE-TREND-GATE-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/CACHE-REUSE-TREND-GATE-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
@@ -484,7 +484,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "vLLM cache-aware routing", Class: NextBest, Source: "https://docs.vllm.ai/en/latest/serving/parallelism_scaling/"},
 			{Name: "SGLang HiCache and cache-aware scheduling", Class: NextBest, Source: "https://docs.sglang.ai/advanced_features/hicache.html"},
 		},
-		Witness:      "../../docs/benchmarks/CACHE-BUDGET-CONCENTRATION-ALLOCATION-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/CACHE-BUDGET-CONCENTRATION-ALLOCATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"lmcache", "mooncake"},
 	},
 	{
@@ -502,7 +502,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "vLLM automatic prefix caching", Class: NextBest, Source: "https://docs.vllm.ai/en/latest/design/prefix_caching/"},
 			{Name: "SGLang HiCache", Class: NextBest, Source: "https://docs.sglang.ai/advanced_features/hicache.html"},
 		},
-		Witness:      "../../docs/benchmarks/DEDICATED-CACHE-WARMING-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/DEDICATED-CACHE-WARMING-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"anthropic", "gemini", "openai", "lmcache", "mooncake"},
 	},
 	{
@@ -519,7 +519,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Datadog LLM Observability", Class: NextBest, Source: "https://docs.datadoghq.com/llm_observability/"},
 			{Name: "LangSmith", Class: NextBest, Source: "https://docs.smith.langchain.com/observability/how_to_guides/monitor_costs"},
 		},
-		Witness:      "../../docs/benchmarks/PROVIDER-CACHE-ECONOMICS-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/PROVIDER-CACHE-ECONOMICS-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
@@ -535,7 +535,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Prometheus TSDB", Class: NextBest, Source: "https://prometheus.io/docs/prometheus/latest/storage/"},
 			{Name: "ClickHouse", Class: NextBest, Source: "https://clickhouse.com/docs/engines/table-engines/mergetree-family/mergetree"},
 		},
-		Witness:      "../../docs/benchmarks/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/BOUNDED-CACHE-SNAPSHOT-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
@@ -551,7 +551,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Vector VRL remap", Class: NextBest, Source: "https://vector.dev/docs/reference/vrl/"},
 			{Name: "Fluent Bit filter pipeline", Class: NextBest, Source: "https://docs.fluentbit.io/manual/pipeline/filters"},
 		},
-		Witness:      "../../docs/benchmarks/CODEX-TOKEN-SANITIZATION-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/CODEX-TOKEN-SANITIZATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"opentelemetry", "prometheus"},
 	},
 	{
@@ -566,7 +566,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "CodeQL", Class: NextBest, Source: "https://codeql.github.com/docs/"},
 			{Name: "golangci-lint custom analyzer", Class: NextBest, Source: "https://golangci-lint.run/docs/plugins/go-plugins/"},
 		},
-		Witness: "../../docs/benchmarks/CACHE-HONESTY-LINT-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/CACHE-HONESTY-LINT-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "provider_cache_telemetry_reconciliation",
@@ -584,7 +584,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Datadog monitors", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/"},
 			{Name: "LangSmith traces", Class: NextBest, Source: "https://docs.smith.langchain.com/observability"},
 		},
-		Witness:      "../../docs/benchmarks/CACHE-TELEMETRY-RECONCILIATION-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/CACHE-TELEMETRY-RECONCILIATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"anthropic", "openai", "gemini", "prometheus", "opentelemetry"},
 	},
 	{
@@ -601,7 +601,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Datadog monitors", Class: NextBest, Source: "https://docs.datadoghq.com/monitors/"},
 			{Name: "LangSmith evaluations", Class: NextBest, Source: "https://docs.smith.langchain.com/evaluation"},
 		},
-		Witness:      "../../docs/benchmarks/DEFAULT-CACHE-READINESS-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/DEFAULT-CACHE-READINESS-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
@@ -619,7 +619,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Braintrust scorers", Class: NextBest, Source: "https://www.braintrust.dev/docs/guides/scores"},
 			{Name: "DeepEval metrics", Class: NextBest, Source: "https://deepeval.com/docs/metrics-introduction"},
 		},
-		Witness:      "../../docs/benchmarks/NET-TRUE-CLAIM-GRADING-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/NET-TRUE-CLAIM-GRADING-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"prometheus", "opentelemetry"},
 	},
 	{
@@ -634,7 +634,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Comby", Class: NextBest, Source: "https://comby.dev/docs/"},
 			{Name: "gogrep", Class: NextBest, Source: "https://github.com/mvdan/gogrep"},
 		},
-		Witness: "../../docs/benchmarks/GO-AST-QUERY-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/GO-AST-QUERY-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "indexed_literal_code_search",
@@ -649,7 +649,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "livegrep", Class: NextBest, Source: "https://github.com/livegrep/livegrep"},
 			{Name: "Sourcegraph Search", Class: NextBest, Source: "https://sourcegraph.com/docs/code-search"},
 		},
-		Witness: "../../docs/benchmarks/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/INDEXED-CODE-SEARCH-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "syntactic_go_call_graph_traversal",
@@ -664,9 +664,9 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "CodeQL Go call graph", Class: NextBest, Source: "https://codeql.github.com/codeql-standard-libraries/go/semmle/go/CallGraph.qll/module.CallGraph.html"},
 			{Name: "SCIP Go code intelligence graph", Class: NextBest, Source: "https://github.com/sourcegraph/scip-go"},
 		},
-		Witness: "../../docs/benchmarks/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/GO-CALL-GRAPH-ALTERNATIVES-2026-08-10.md",
 	},
-	{Capability: "budgeted_issue_close_batch_planning", NativePath: "internal/closebatch/closebatch.go", Workload: "same seven issues, batch size three, five-call mutation budget, one-call reserve, exact allowed/held batches, costs, and rollback commands", Metrics: []string{"plan_accuracy", "false_plans", "allowed_batches", "held_batches", "request_cost_accuracy", "latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "fixed-size chunking only", Class: TunedBaseline, Source: "internal/closebatch/compare.go"}, {Name: "GitHub Issues", Class: FirstClassIntegration, Integration: "github", Source: "internal/closebatch/compare.go"}, {Name: "GitHub CLI issue close loop", Class: NextBest, Source: "https://cli.github.com/manual/gh_issue_close"}, {Name: "GitHub GraphQL mutation batching", Class: NextBest, Source: "https://docs.github.com/graphql"}, {Name: "Jira bulk transition", Class: NextBest, Source: "https://www.atlassian.com/software/jira"}, {Name: "Linear bulk issue update", Class: NextBest, Source: "https://linear.app"}}, Witness: "../../docs/benchmarks/ISSUE-CLOSE-BATCH-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"}},
+	{Capability: "budgeted_issue_close_batch_planning", NativePath: "internal/closebatch/closebatch.go", Workload: "same seven issues, batch size three, five-call mutation budget, one-call reserve, exact allowed/held batches, costs, and rollback commands", Metrics: []string{"plan_accuracy", "false_plans", "allowed_batches", "held_batches", "request_cost_accuracy", "latency_ms", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "fixed-size chunking only", Class: TunedBaseline, Source: "internal/closebatch/compare.go"}, {Name: "GitHub Issues", Class: FirstClassIntegration, Integration: "github", Source: "internal/closebatch/compare.go"}, {Name: "GitHub CLI issue close loop", Class: NextBest, Source: "https://cli.github.com/manual/gh_issue_close"}, {Name: "GitHub GraphQL mutation batching", Class: NextBest, Source: "https://docs.github.com/graphql"}, {Name: "Jira bulk transition", Class: NextBest, Source: "https://www.atlassian.com/software/jira"}, {Name: "Linear bulk issue update", Class: NextBest, Source: "https://linear.app"}}, Witness: "../../docs/notes/ISSUE-CLOSE-BATCH-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"}},
 	{
 		Capability: "go_syntax_validation",
 		NativePath: "internal/codelint/packs.go",
@@ -681,7 +681,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "golangci-lint", Class: NextBest, Source: "https://golangci-lint.run/"},
 			{Name: "gopls diagnostics", Class: NextBest, Source: "https://go.dev/gopls/"},
 		},
-		Witness: "../../docs/benchmarks/GO-SYNTAX-VALIDATION-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/GO-SYNTAX-VALIDATION-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "multi_provider_token_usage_normalization",
@@ -700,7 +700,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "OpenTelemetry GenAI semantic conventions", Class: NextBest, Source: "https://opentelemetry.io/docs/specs/semconv/gen-ai/"},
 			{Name: "LangSmith token and cost tracking", Class: NextBest, Source: "https://docs.smith.langchain.com/observability/how_to_guides/log_llm_trace"},
 		},
-		Witness:      "../../docs/benchmarks/TOKEN-USAGE-NORMALIZATION-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/TOKEN-USAGE-NORMALIZATION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"openai", "anthropic", "local", "opentelemetry"},
 	},
 	{
@@ -716,7 +716,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "Pact", Class: NextBest, Source: "https://docs.pact.io/"},
 			{Name: "Cedar policy validator and tests", Class: NextBest, Source: "https://docs.cedarpolicy.com/"},
 		},
-		Witness: "../../docs/benchmarks/COMPILED-CONFORMANCE-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/COMPILED-CONFORMANCE-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "model_backend_precision_coverage_matrix",
@@ -734,7 +734,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "ONNX Runtime execution-provider matrix", Class: NextBest, Source: "https://onnxruntime.ai/docs/execution-providers/"},
 			{Name: "TensorRT-LLM support matrix", Class: NextBest, Source: "https://github.com/NVIDIA/TensorRT-LLM"},
 		},
-		Witness:      "../../docs/benchmarks/MODEL-BACKEND-PRECISION-COVERAGE-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/MODEL-BACKEND-PRECISION-COVERAGE-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"cuda", "metal", "vulkan"},
 	},
 	{
@@ -748,7 +748,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "OpenTelemetry metrics", Class: NextBest, Source: "https://opentelemetry.io/docs/concepts/signals/metrics/"},
 			{Name: "Datadog distribution metric", Class: NextBest, Source: "https://docs.datadoghq.com/metrics/distributions/"},
 		},
-		Witness: "../../docs/benchmarks/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/LAUNCH-LATENCY-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "github_mutation_budgeting",
@@ -761,7 +761,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "gh api rate-limit handling", Class: NextBest, Source: "https://cli.github.com/manual/gh_api"},
 			{Name: "Envoy global rate limit", Class: NextBest, Source: "https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_filters/rate_limit_filter"},
 		},
-		Witness: "../../docs/benchmarks/MUTATION-BUDGET-ALTERNATIVES-2026-08-10.md",
+		Witness: "../../docs/notes/MUTATION-BUDGET-ALTERNATIVES-2026-08-10.md",
 	},
 	{
 		Capability: "deadline_aware_admission",
@@ -776,7 +776,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "fak + vLLM priority scheduling", Class: FirstClassIntegration, Integration: "vllm", Source: "internal/engine/vllm.go"},
 			{Name: "fak + SGLang priority scheduling", Class: FirstClassIntegration, Integration: "sglang", Source: "internal/engine/sglang.go"},
 		},
-		Witness:      "../../docs/benchmarks/DEADLINE-ADMISSION-ALTERNATIVES-2026-08-10.md",
+		Witness:      "../../docs/notes/DEADLINE-ADMISSION-ALTERNATIVES-2026-08-10.md",
 		Integrations: []string{"vllm", "sglang"},
 	},
 	{
@@ -815,8 +815,8 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 			{Name: "AWS Step Functions retry", Class: NextBest, Source: "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html"},
 		},
 	},
-	{Capability: "reverse_dependency_affected_test_selection", NativePath: "internal/affectedtests/affectedtests.go", Workload: "same diamond Go import graph, one changed leaf, exact transitive importer closure, and isolated-package exclusion", Metrics: []string{"selection_precision", "selection_recall", "missed_packages", "extra_packages", "latency_ms", "tests_executed", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "changed-package tests only", Class: TunedBaseline, Source: "internal/affectedtests/compare.go"}, {Name: "Go test", Class: FirstClassIntegration, Integration: "go", Source: "internal/affectedtests/compare.go"}, {Name: "Bazel test selection", Class: NextBest, Source: "https://bazel.build"}, {Name: "Pants changed-since test selection", Class: NextBest, Source: "https://www.pantsbuild.org"}, {Name: "Nx affected", Class: NextBest, Source: "https://nx.dev/ci/features/affected"}, {Name: "Gradle test impact analysis", Class: NextBest, Source: "https://gradle.com"}}, Witness: "../../docs/benchmarks/AFFECTED-TEST-SELECTION-ALTERNATIVES-2026-08-10.md", Integrations: []string{"go"}},
-	{Capability: "answer_degeneration_detection", NativePath: "internal/answershape/answershape.go", Workload: "same coherent response, phrase loop, short-period byte loop, and repeated-line loop with independent degeneration labels", Metrics: []string{"precision", "recall", "false_positives", "false_negatives", "reason_accuracy", "latency_ms", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "exact repeated-line ratio", Class: TunedBaseline, Source: "internal/answershape/compare.go"}, {Name: "OpenAI response guard", Class: FirstClassIntegration, Integration: "openai", Source: "internal/answershape/compare.go"}, {Name: "Anthropic response guard", Class: FirstClassIntegration, Integration: "anthropic", Source: "internal/answershape/compare.go"}, {Name: "llama.cpp repetition controls", Class: NextBest, Source: "https://github.com/ggml-org/llama.cpp"}, {Name: "vLLM repetition penalties", Class: NextBest, Source: "https://docs.vllm.ai"}, {Name: "Hugging Face transformers repetition penalty", Class: NextBest, Source: "https://huggingface.co/docs/transformers"}, {Name: "NeMo Guardrails output rail", Class: NextBest, Source: "https://github.com/NVIDIA/NeMo-Guardrails"}}, Witness: "../../docs/benchmarks/ANSWER-DEGENERATION-ALTERNATIVES-2026-08-10.md", Integrations: []string{"openai", "anthropic"}},
+	{Capability: "reverse_dependency_affected_test_selection", NativePath: "internal/affectedtests/affectedtests.go", Workload: "same diamond Go import graph, one changed leaf, exact transitive importer closure, and isolated-package exclusion", Metrics: []string{"selection_precision", "selection_recall", "missed_packages", "extra_packages", "latency_ms", "tests_executed", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "changed-package tests only", Class: TunedBaseline, Source: "internal/affectedtests/compare.go"}, {Name: "Go test", Class: FirstClassIntegration, Integration: "go", Source: "internal/affectedtests/compare.go"}, {Name: "Bazel test selection", Class: NextBest, Source: "https://bazel.build"}, {Name: "Pants changed-since test selection", Class: NextBest, Source: "https://www.pantsbuild.org"}, {Name: "Nx affected", Class: NextBest, Source: "https://nx.dev/ci/features/affected"}, {Name: "Gradle test impact analysis", Class: NextBest, Source: "https://gradle.com"}}, Witness: "../../docs/notes/AFFECTED-TEST-SELECTION-ALTERNATIVES-2026-08-10.md", Integrations: []string{"go"}},
+	{Capability: "answer_degeneration_detection", NativePath: "internal/answershape/answershape.go", Workload: "same coherent response, phrase loop, short-period byte loop, and repeated-line loop with independent degeneration labels", Metrics: []string{"precision", "recall", "false_positives", "false_negatives", "reason_accuracy", "latency_ms", "throughput_bytes_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "exact repeated-line ratio", Class: TunedBaseline, Source: "internal/answershape/compare.go"}, {Name: "OpenAI response guard", Class: FirstClassIntegration, Integration: "openai", Source: "internal/answershape/compare.go"}, {Name: "Anthropic response guard", Class: FirstClassIntegration, Integration: "anthropic", Source: "internal/answershape/compare.go"}, {Name: "llama.cpp repetition controls", Class: NextBest, Source: "https://github.com/ggml-org/llama.cpp"}, {Name: "vLLM repetition penalties", Class: NextBest, Source: "https://docs.vllm.ai"}, {Name: "Hugging Face transformers repetition penalty", Class: NextBest, Source: "https://huggingface.co/docs/transformers"}, {Name: "NeMo Guardrails output rail", Class: NextBest, Source: "https://github.com/NVIDIA/NeMo-Guardrails"}}, Witness: "../../docs/notes/ANSWER-DEGENERATION-ALTERNATIVES-2026-08-10.md", Integrations: []string{"openai", "anthropic"}},
 	{
 		Capability: "retry_attempt_budgeting",
 		NativePath: "internal/attemptbudget/attemptbudget.go",
@@ -931,7 +931,7 @@ var contracts = []Contract{{Capability: "dependency_blast_radius_lease_issue_int
 		},
 		Integrations: []string{"litellm", "openrouter", "portkey"},
 	},
-	{Capability: "host_test_execution_routing", NativePath: "internal/testroute/testroute.go", Workload: "same native-allowed, Windows-with-WSL, CI-only, and unavailable probes with exact executable route oracle", Metrics: []string{"route_accuracy", "false_routes", "latency_ms", "throughput_probes_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "GOOS-only native-or-CI rule", Class: TunedBaseline, Source: "internal/testroute/compare.go"}, {Name: "GitHub Actions", Class: FirstClassIntegration, Integration: "github", Source: "internal/testroute/compare.go"}, {Name: "Go toolchain native execution", Class: NextBest, Source: "https://go.dev/cmd/go/"}, {Name: "WSL test wrapper", Class: NextBest, Source: "https://learn.microsoft.com/windows/wsl/"}, {Name: "GitHub Actions workflow routing", Class: NextBest, Source: "https://docs.github.com/actions"}, {Name: "Bazel platform constraints", Class: NextBest, Source: "https://bazel.build/extending/platforms"}}, Witness: "../../docs/benchmarks/TEST-EXECUTION-ROUTING-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"}},
+	{Capability: "host_test_execution_routing", NativePath: "internal/testroute/testroute.go", Workload: "same native-allowed, Windows-with-WSL, CI-only, and unavailable probes with exact executable route oracle", Metrics: []string{"route_accuracy", "false_routes", "latency_ms", "throughput_probes_per_second", "cpu_seconds", "peak_rss_bytes", "network_bytes", "operator_seconds", "total_cost"}, Alternatives: []Alternative{{Name: "GOOS-only native-or-CI rule", Class: TunedBaseline, Source: "internal/testroute/compare.go"}, {Name: "GitHub Actions", Class: FirstClassIntegration, Integration: "github", Source: "internal/testroute/compare.go"}, {Name: "Go toolchain native execution", Class: NextBest, Source: "https://go.dev/cmd/go/"}, {Name: "WSL test wrapper", Class: NextBest, Source: "https://learn.microsoft.com/windows/wsl/"}, {Name: "GitHub Actions workflow routing", Class: NextBest, Source: "https://docs.github.com/actions"}, {Name: "Bazel platform constraints", Class: NextBest, Source: "https://bazel.build/extending/platforms"}}, Witness: "../../docs/notes/TEST-EXECUTION-ROUTING-ALTERNATIVES-2026-08-10.md", Integrations: []string{"github"}},
 	{
 		Capability: "tokenization",
 		NativePath: "internal/tokenizer/tokenizer.go",

@@ -1,0 +1,64 @@
+{
+  "schema": "fak-ultracode-tool-result-shape-report/1",
+  "source_artifact": "internal/ultracodebench/testdata/issue8677-tool-result-shape-campaign.json",
+  "verdict": "GAIN",
+  "cells": [
+    {
+      "size": "small",
+      "relevance": "irrelevant",
+      "verdict": "GAIN",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 18,
+        "history": 0
+      },
+      "net_tokens": 6
+    },
+    {
+      "size": "large",
+      "relevance": "irrelevant",
+      "verdict": "GAIN",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 180,
+        "history": 0
+      },
+      "net_tokens": 168
+    },
+    {
+      "size": "small",
+      "relevance": "relevant",
+      "verdict": "NO_GAIN",
+      "reason": "scoping overhead is not repaid",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 6,
+        "history": 0
+      },
+      "net_tokens": -6
+    },
+    {
+      "size": "large",
+      "relevance": "relevant",
+      "verdict": "GAIN",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 48,
+        "history": 0
+      },
+      "net_tokens": 36
+    }
+  ],
+  "first_net_positive_size_by_relevance": {
+    "irrelevant": "small",
+    "relevant": "large"
+  },
+  "replay_command": "go test ./internal/ultracodebench -run TestIssue8677ToolResultShapeArtifact -count=1",
+  "promotion_evidence": "promote toward gen/now after a second runtime reproduces both relevance crossovers with equal accepted effects and exact required-fact retention",
+  "demotion_evidence": "demote or retire if authoritative token telemetry, equal accepted effects, or required-fact retention fails in any cell",
+  "invalidating_assumption": "whitespace-v1 token counts approximate the named model tokenizer closely enough to locate the crossover"
+}

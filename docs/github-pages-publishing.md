@@ -1,3 +1,7 @@
+---
+title: "GitHub Pages publishing"
+description: "fak publishes reader-facing material from the tracked docs/ source tree at . The publishing contract is intentionally source-driven: edit or delete source,"
+---
 # GitHub Pages publishing
 
 fak publishes reader-facing material from the tracked `docs/` source tree at

@@ -1,0 +1,13 @@
+{
+  "schema": "fak.ultracode.conservation-receipt.v1",
+  "envelope": {"Model":"qwen2.5:0.5b","Runtime":"ollama-0.11.4/llama.cpp-b6356","Tokenizer":"qwen2-q4_0","Task":"issue-8624-frozen-agentic-task","WarmthCondition":"warm-prefix-factorial","CampaignVersion":"issue-8624-v1"},
+  "accepted_outcome_equal": true,
+  "baseline_tokens": 1000,
+  "raw_provider": {"prompt_eval_count":373,"source":"ollama response"},
+  "raw_runtime": {"full_context_tokens":1000,"scoped_prompt_tokens":373,"source":"issue-8624 receipt"},
+  "spans": [
+    {"start":0,"end":627,"class":"scoped_away","provenance":"fak:scope receipt"},
+    {"start":627,"end":1000,"class":"prefix_read","provenance":"runtime:prompt_eval_count"}
+  ]
+}
+

@@ -1,0 +1,3 @@
+{"type":"attachment","attachment":{"type":"hook_codex","durationMs":"slow","hook":"pretool","sessionId":"session-1"}}
+{"type":"attachment","attachment":{"type":"hook_codex","durationMs":-1,"hook":"posttool","sessionId":"session-1"}}
+not-json

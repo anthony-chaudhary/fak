@@ -1,3 +1,7 @@
+---
+title: "Durable process-forest identity"
+description: "Schema fak-process-forest/1 makes logical ownership independent of observed PID ancestry. A forest has a stable forestid and root authority;"
+---
 # Durable process-forest identity
 
 Schema `fak-process-forest/1` makes logical ownership independent of observed PID ancestry. A forest has a stable `forest_id` and root authority; every member has a stable `member_id`, optional logical parent, adapter kind, monotonic generation, state, and optional host/PID/process-start observation.

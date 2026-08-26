@@ -3,11 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/stallscan"
 )
 
@@ -128,11 +131,71 @@ func TestSortProcIOByOps(t *testing.T) {
 	}
 }
 
+func TestStallWatchRecordAuditsContinuityAndHealth(t *testing.T) {
+	started := time.Unix(100, 0).UTC()
+	sampled := time.Unix(160, 0).UTC()
+	rec := stallWatchRecord(map[string]any{"schema": "fak.stallscan.v1"}, "watch-1", 7, started, sampled, 20*time.Second)
+	b, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Schema string `json:"schema"`
+		Watch  struct {
+			ID         string    `json:"id"`
+			Sequence   uint64    `json:"sequence"`
+			StartedAt  time.Time `json:"started_at"`
+			SampledAt  time.Time `json:"sampled_at"`
+			IntervalMS int64     `json:"interval_ms"`
+			Healthy    bool      `json:"healthy"`
+		} `json:"watch"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != "fak.stallscan.v1" || got.Watch.ID != "watch-1" || got.Watch.Sequence != 7 || !got.Watch.StartedAt.Equal(started) || !got.Watch.SampledAt.Equal(sampled) || got.Watch.IntervalMS != 20000 || !got.Watch.Healthy {
+		t.Fatalf("incomplete watch audit record: %+v", got)
+	}
+}
+
+func TestStallWatchLockRejectsDuplicateWriter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stallscan.jsonl")
+	first, err := acquireStallWatchLock(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = flock.Unlock(first)
+		_ = first.Close()
+	}()
+	if second, err := acquireStallWatchLock(path); err == nil {
+		_ = flock.Unlock(second)
+		_ = second.Close()
+		t.Fatal("duplicate writer acquired the same JSONL lock")
+	}
+}
+
+func TestAppendStallJSONLSurfacesFailures(t *testing.T) {
+	dir := t.TempDir()
+	if err := appendStallJSONL(dir, map[string]any{"schema": "fak.stallscan.v1"}, 0); err == nil {
+		t.Fatal("append to directory succeeded")
+	}
+
+	old := boundStallLogForWatch
+	boundStallLogForWatch = func(string, int64) error { return errors.New("rotation broke") }
+	t.Cleanup(func() { boundStallLogForWatch = old })
+	if err := appendStallJSONL(filepath.Join(dir, "stallscan.jsonl"), map[string]any{"schema": "fak.stallscan.v1"}, 1); err == nil || !strings.Contains(err.Error(), "rotate log") {
+		t.Fatalf("rotation error = %v", err)
+	}
+}
+
 func TestBoundStallLogRetainsCompleteNewestRecords(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "stallscan.jsonl")
 	for i := 0; i < 20; i++ {
-		appendStallJSONL(path, map[string]any{"seq": i, "payload": strings.Repeat("x", 40)}, 400)
+		if err := appendStallJSONL(path, map[string]any{"seq": i, "payload": strings.Repeat("x", 40)}, 400); err != nil {
+			t.Fatal(err)
+		}
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {

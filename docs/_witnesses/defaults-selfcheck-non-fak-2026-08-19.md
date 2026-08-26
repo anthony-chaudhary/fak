@@ -1,3 +1,7 @@
+---
+title: "Integrated defaults selfcheck in a non-FAK repository — 2026-08-19"
+description: "Verdict: fak doctor defaults-selfcheck creates a disposable non-FAK repository and passes one deterministic behavioral packet over the default repository..."
+---
 # Integrated defaults selfcheck in a non-FAK repository — 2026-08-19
 
 **Verdict:** `fak doctor defaults-selfcheck` creates a disposable non-FAK repository and passes one deterministic behavioral packet over the default repository tools, harness profiles, context transforms, and calibrated virtual-cache decisions without a provider key.

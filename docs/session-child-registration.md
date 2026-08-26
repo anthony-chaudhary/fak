@@ -1,3 +1,7 @@
+---
+title: "Child-agent registration and lineage"
+description: "Every executable child agent launched by dispatchworker or fak manage is registered durably before its process starts. Registration failure is fail-closed:"
+---
 # Child-agent registration and lineage
 
 Every executable child agent launched by `dispatchworker` or `fak manage` is registered durably **before** its process starts. Registration failure is fail-closed: no child work runs without an inspectable row.

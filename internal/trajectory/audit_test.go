@@ -31,7 +31,7 @@ func TestAuditIntegratesToolErrorFamilies(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []QwenToolErrorFamily{
-		{Family: "permission", Count: 2, FirstIndex: 2, LastIndex: 6},
+		{Family: "permission", Count: 2, FirstIndex: 2, LastIndex: 6, RepeatedFailures: 1},
 		{Family: "timeout", Count: 1, FirstIndex: 4, LastIndex: 4},
 	}
 	if !reflect.DeepEqual(result.ToolErrorFamilies, want) {
@@ -51,7 +51,7 @@ func TestAuditIntegratesToolErrorFamilies(t *testing.T) {
 	if err := WriteAuditMarkdown(&markdown, result); err != nil {
 		t.Fatal(err)
 	}
-	wantTable := "| Family | Count | First event | Last event | Tokens |\n|---|---:|---:|---:|---:|\n| permission | 2 | 2 | 6 | 0 |\n| timeout | 1 | 4 | 4 | 0 |"
+	wantTable := "| Family | Calls | Accounted tokens | Repeated failures | Mutation churn | First event | Last event |\n|---|---:|---:|---:|---:|---:|---:|\n| permission | 2 | 0 | 1 | 0 | 2 | 6 |\n| timeout | 1 | 0 | 0 | 0 | 4 | 4 |"
 	if !strings.Contains(markdown.String(), wantTable) {
 		t.Fatalf("Markdown missing ranked tool-error table:\n%s", markdown.String())
 	}
@@ -74,6 +74,25 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	}
 	if result.Summary.RepeatedFailures != 1 || result.Summary.MutationChurn != 2 {
 		t.Fatalf("behavior = repeats:%d churn:%d, want 1/2", result.Summary.RepeatedFailures, result.Summary.MutationChurn)
+	}
+	claudeChurn := auditSession(t, result, AuditSourceClaude).MutationChurnEvents
+	if len(claudeChurn) != 1 || claudeChurn[0].Target != "fixture.go" || claudeChurn[0].Count != 2 || claudeChurn[0].Intervention != QwenMutationObserveReproFirst {
+		t.Fatalf("Claude churn events = %+v, want one attributed observe-only fixture.go run", claudeChurn)
+	}
+	var jsonl bytes.Buffer
+	if err := WriteAuditJSONL(&jsonl, result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jsonl.String(), "\"kind\":\"mutation_churn\"") || !strings.Contains(jsonl.String(), "\"target\":\"fixture.go\"") {
+		t.Fatalf("audit JSONL missing queryable attributed churn row: %s", jsonl.String())
+	}
+	var rendered bytes.Buffer
+	if err := WriteAuditMarkdown(&rendered, result); err != nil {
+		t.Fatal(err)
+	}
+	wantChurnRow := "| claude-session | fixture.go | 2 | "
+	if !strings.Contains(rendered.String(), wantChurnRow) {
+		t.Fatalf("audit markdown missing captured churn intervention row %q", wantChurnRow)
 	}
 	if result.Summary.HookP95MS == nil || *result.Summary.HookP95MS != 120 {
 		t.Fatalf("hook p95 = %v, want 120", result.Summary.HookP95MS)

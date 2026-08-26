@@ -1,3 +1,7 @@
+---
+title: "Ponytail non-token gates (#6687)"
+description: "NOT-YET. The gate runner and reproducible evidence are present, but the 2026-08-14 provider run found real category failures."
+---
 # Ponytail non-token gates (#6687)
 
 ## Verdict

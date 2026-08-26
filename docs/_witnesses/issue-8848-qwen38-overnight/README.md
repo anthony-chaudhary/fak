@@ -1,3 +1,7 @@
+---
+title: "Issue #8848 — Qwen3.8-27B overnight hill climb"
+description: "Verdict: HOLDBELOWPARITY. The campaign retains 120 unique, quality-passing GCP A100 reference-runtime experiments and two quality-constrained KEEP decisions,"
+---
 # Issue #8848 — Qwen3.8-27B overnight hill climb
 
 **Verdict: `HOLD_BELOW_PARITY`.** The campaign retains 120 unique, quality-passing GCP A100 reference-runtime experiments and two quality-constrained `KEEP` decisions, but the matched-enough native check disproves current fak-native parity. The next experiment is to profile and fix cached Qwen GDN session-state restore before rewriting another kernel.

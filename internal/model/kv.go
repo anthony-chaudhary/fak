@@ -84,6 +84,8 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 
 // Clone makes a second independent owner for lookup; the cache retains the original.
 func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
+	started := prefixProfileStart()
+	defer func() { emitPrefixProfile(started, "device_clone", "complete", p, nil) }()
 	if p == nil || p.Cache == nil {
 		return nil, nil
 	}
@@ -151,7 +153,18 @@ func (p *PrefixSnapshot) Close() {
 	p.Cache = nil
 }
 
+const q4kMLPOutputSlabReceiptSchema = "fak-q4k-gateup-slab/v1"
+
+type q4kMLPOutputSlabStats struct {
+	Calls          uint64
+	Allocations    uint64
+	Reuses         uint64
+	HighWaterBytes uint64
+}
+
 type Session struct {
+	qwen35GDNSequenceMu sync.Mutex
+	qwen35GDNSequence   *qwen35GDNSequenceOwner
 	cacheGeometryMu     sync.RWMutex
 	cacheGeometryFailed bool
 	cacheGeometryEpoch  uint64
@@ -357,6 +370,20 @@ type Session struct {
 	// fused path. The counters are session-local; generation already owns a Session serially.
 	q4kExpertStats Q4KExpertStats
 
+	// q4kHybridPrefillChunks is an internal execution marker for the resident Qwen
+	// hybrid panel path. It advances only after a whole chunk has appended successfully;
+	// the paired base records the position that chunk actually started at. Keeping this
+	// separate from Cache.Len lets tests distinguish resident append from a numerically
+	// correct token-loop fallback without adding an operator-facing control.
+	q4kHybridPrefillChunks   int
+	q4kHybridPrefillLastBase int
+	// q4kMLPOutputSlab is the optional, session-local host readback backing for one grouped Q4_K
+	// gate/up prefill result. Generation owns a Session serially, and each layer consumes gate/up
+	// before the next layer overwrites it. It is retained only inside the P<=512, 68 MiB envelope
+	// and released by Close; nil preserves the allocating path.
+	q4kMLPOutputSlab      []float32
+	q4kMLPOutputSlabStats q4kMLPOutputSlabStats
+
 	// tap is an opt-in diagnostic dump hook for a single decode position. Nil on all
 	// normal sessions; tests and FAK_HIDDEN_TAP use it to capture hidden-state probes.
 	tap       *hiddenTap
@@ -381,11 +408,18 @@ type Session struct {
 	// arithmetic change (TestDecodeStepAllocationStaysBounded guards the bound).
 	decodeScores []float32
 	v4Expert     v4LiveExpertRuntime
+	// closeOnce covers backend resources and the model-weight reference. Legacy sessions also
+	// participate because retained no-copy Metal weights borrow model-owned backing.
+	closeOnce        sync.Once
+	modelWeightsHeld bool
 }
 
 // NewSession starts a fresh generation session.
 func (m *Model) NewSession() *Session {
-	return &Session{M: m, Cache: NewKVCache(m.Cfg)}
+	if !m.holdModelWeights() {
+		panic("model: weights are closing or closed")
+	}
+	return &Session{M: m, Cache: NewKVCache(m.Cfg), modelWeightsHeld: true}
 }
 
 // token runs one position through all layers and projects to logits. It is
@@ -791,8 +825,8 @@ func (s *Session) Prefill(ids []int) []float32 {
 		// refuses): batch each layer's projection/MLP GEMMs over the prompt panel while keeping
 		// the GDN recurrence, the resident-Q4K twin of the q8Qwen35HybridPrefillOK gate. Closes
 		// QWEN36-NATIVE-PERF-PLAN P3's per-token-fallback prefill wall.
-		if q4kQwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
-			return s.prefillQwen35HybridQ4K(ids)
+		if logits, used := s.tryPrefillQwen35HybridQ4K(ids, true); used {
+			return logits
 		}
 		return s.headResident(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 	}
@@ -890,8 +924,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 			s.prefillBatchedQ4K(ids)
 			return
 		}
-		if q4kQwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
-			s.prefillQwen35HybridQ4KNoLogits(ids)
+		if _, used := s.tryPrefillQwen35HybridQ4K(ids, false); used {
 			return
 		}
 		for _, id := range ids {

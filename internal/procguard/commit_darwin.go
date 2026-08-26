@@ -4,29 +4,66 @@ package procguard
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"syscall"
 )
 
+const darwinMemorySnapshotAttempts = 2
+
 func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
-	census, censusErr := CollectProcesses()
-	relations, relationErr := CollectRelations()
-	snapshot, joinErr := joinDarwinMemorySnapshot(rootPID, census, relations)
+	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(rootPID, CollectProcesses, CollectRelations, darwinProcessAlive)
 	physical, physicalErr := hostPhysicalMemoryBytes()
 	snapshot.HostPhysicalBytes = physical
-	detail := joinDetails(censusErr, relationErr, joinErr, physicalErr)
+	detail = joinDetails(detail, physicalErr)
 	return snapshot, true, detail
+}
+
+// collectDarwinMemorySnapshotWithCollectors bounds reconciliation of the two
+// independent ps snapshots. A child can start after the RSS census and appear
+// in the following relation census; one fresh pair closes that race. Collector
+// failures are not retried, and a second incomplete join remains fail-closed.
+func collectDarwinMemorySnapshotWithCollectors(rootPID int, collectCensus, collectRelations func() ([]Proc, string), processAlive func(int) (bool, error)) (MemorySnapshot, string) {
+	var snapshot MemorySnapshot
+	for attempt := 0; attempt < darwinMemorySnapshotAttempts; attempt++ {
+		census, censusErr := collectCensus()
+		relations, relationErr := collectRelations()
+		var joinErr string
+		var recollect bool
+		snapshot, joinErr, recollect = joinDarwinMemorySnapshotForCollection(rootPID, census, relations, processAlive)
+		detail := joinDetails(censusErr, relationErr, joinErr)
+		if detail == "" || censusErr != "" || relationErr != "" || !recollect || attempt+1 == darwinMemorySnapshotAttempts {
+			return snapshot, detail
+		}
+	}
+	return snapshot, "Darwin memory snapshot attempts exhausted"
 }
 
 // joinDarwinMemorySnapshot joins the separate BSD ps resource and relation
 // tables by PID. The relation table defines ownership; every owned PID must have
 // an RSS row or the sample is typed as incomplete instead of looking healthy.
 func joinDarwinMemorySnapshot(rootPID int, census, relations []Proc) (MemorySnapshot, string) {
+	return joinDarwinMemorySnapshotWithProbe(rootPID, census, relations, darwinProcessAlive)
+}
+
+// joinDarwinMemorySnapshotWithProbe keeps liveness reconciliation injectable so
+// the two-snapshot exit race has a deterministic regression witness. The RSS and
+// relation tables are collected by separate ps processes; a descendant may exit
+// after appearing in one table and before the join examines it.
+func joinDarwinMemorySnapshotWithProbe(rootPID int, census, relations []Proc, processAlive func(int) (bool, error)) (MemorySnapshot, string) {
+	snapshot, detail, _ := joinDarwinMemorySnapshotForCollection(rootPID, census, relations, processAlive)
+	return snapshot, detail
+}
+
+// joinDarwinMemorySnapshotForCollection identifies the one incomplete shape
+// that a fresh census can reconcile: owned PIDs with no RSS row. All other join
+// failures are final for the current poll.
+func joinDarwinMemorySnapshotForCollection(rootPID int, census, relations []Proc, processAlive func(int) (bool, error)) (MemorySnapshot, string, bool) {
 	s := MemorySnapshot{Metric: MemoryMetricRSS, RootPID: rootPID}
 	if rootPID <= 0 {
-		return s, "invalid root pid"
+		return s, "invalid root pid", false
 	}
 	byRSS := make(map[int]Proc, len(census))
 	for _, row := range census {
@@ -44,7 +81,7 @@ func joinDarwinMemorySnapshot(rootPID int, census, relations []Proc) (MemorySnap
 		children[*row.PPID] = append(children[*row.PPID], row.PID)
 	}
 	if _, ok := byRelation[rootPID]; !ok {
-		return s, fmt.Sprintf("root pid %d missing from relation census", rootPID)
+		return s, fmt.Sprintf("root pid %d missing from relation census", rootPID), false
 	}
 	for ppid := range children {
 		sort.Ints(children[ppid])
@@ -75,14 +112,41 @@ func joinDarwinMemorySnapshot(rootPID int, census, relations []Proc) (MemorySnap
 				process.Name = rss.Name
 			}
 		} else {
+			// The root is the fail-closed anchor for the entire ownership walk. A
+			// missing root RSS row is never omitted as exit churn; only already-exited
+			// descendants are harmless churn.
+			if pid != rootPID {
+				alive, err := processAlive(pid)
+				if err != nil {
+					return s, fmt.Sprintf("probe missing rss pid %d: %v", pid, err), false
+				}
+				if !alive {
+					continue
+				}
+			}
 			missing = append(missing, pid)
 		}
 		s.Processes = append(s.Processes, process)
 	}
 	if len(missing) > 0 {
-		return s, fmt.Sprintf("owned pids missing from rss census: %v", missing)
+		return s, fmt.Sprintf("owned pids missing from rss census: %v", missing), true
 	}
-	return s, ""
+	return s, "", false
+}
+
+// darwinProcessAlive distinguishes normal exit churn from telemetry failures.
+// EPERM proves the PID still exists and therefore keeps a missing RSS row fatal;
+// ESRCH is the only result that permits skipping a descendant.
+func darwinProcessAlive(pid int) (bool, error) {
+	err := syscall.Kill(pid, 0)
+	switch {
+	case err == nil, errors.Is(err, syscall.EPERM):
+		return true, nil
+	case errors.Is(err, syscall.ESRCH):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 func joinDetails(details ...string) string {

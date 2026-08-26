@@ -1,3 +1,7 @@
+---
+title: "WIP inventory"
+description: "fak wip inventory is the read-only census for a peer-dirty checkout. It keeps source work separate from ignored/generated files,"
+---
 # WIP inventory
 
 `fak wip inventory` is the read-only census for a peer-dirty checkout. It keeps source work separate from ignored/generated files, registered detached worker worktrees, stale worker residue, and `refs/fak/wip/*` checkpoints.

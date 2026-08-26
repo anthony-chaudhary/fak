@@ -1,0 +1,138 @@
+{
+  "schema": "fak.qwen38-load-worker-ablation-witness/1",
+  "issue": 9059,
+  "run_id": "run-20260826T1201Z",
+  "captured_utc": "2026-08-26T12:01:04Z/2026-08-26T12:05:58Z",
+  "scope": "fak-native streamed dense Q4_K load-only pressure ablation",
+  "host": {
+    "os": "darwin",
+    "arch": "arm64",
+    "machine": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "unified_memory_bytes": 38654705664
+  },
+  "frozen_identity": {
+    "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+    "model_bytes": 17106775008,
+    "model_source_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "binary_sha256": "e6021596691ea9e9dc3c767deb7b7b0703e59cd8620d7f924939a3e7db84bb35",
+    "base_revision": "83ee601a42554f98cf6e7f3d1cb0b4d9b5c540ec",
+    "source_diff_sha256": "dd5ff3c094ce9e38788748ebeb625a49a3b935d7dfc452ec0d99a5aaf5f02910",
+    "go_version": "go1.26.6",
+    "app_version": "0.45.0"
+  },
+  "isolation": {
+    "gpu_lease": {
+      "persistent_helper": true,
+      "held_across_both_arms": true,
+      "helper_binary_sha256": "611c3439921c4f38c44d7d308583ca0f949f30db4a565a5b080e89bd3144d2a2"
+    },
+    "port_8090": {
+      "exact_owner_command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+      "watcher_script_sha256": "7c52b59f0dee026e189cad5e5480e53325e29c3b03bc1e7dc11fb349e938d1ff",
+      "quiesced_before_arms": true,
+      "watcher_active_across_arms": true,
+      "listener_overlap_observed": false
+    },
+    "cleanup_restoration": {
+      "watcher": {
+        "stopped": true,
+        "matched_terms": 168,
+        "unmatched_signals": 0,
+        "reused_pid_signals": 0
+      },
+      "original_llama_owner": {
+        "restored": true,
+        "pid": 62326,
+        "command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+        "model_identity": "qwen3.6-27b",
+        "stable_seconds": 90
+      },
+      "stale_gpu_lease_helper": {
+        "verified_absent": true,
+        "consecutive_lock_samples": 30
+      }
+    },
+    "arms_serialized": true,
+    "cache_displacement_bytes_per_arm": 48368448672,
+    "cache_displacement_exceeds_unified_memory": true
+  },
+  "arms": [
+    {
+      "name": "control-workers12",
+      "identity_ref": "frozen_identity",
+      "load_workers_literal": "12",
+      "load_workers_effective": 12,
+      "gomaxprocs": 12,
+      "load_ms": 16685.636875,
+      "peak_rss_bytes": 16621256704,
+      "peak_footprint_bytes": 28454507112,
+      "swap_before_mib": 2569.25,
+      "swap_peak_mib": 2569.25,
+      "swap_after_mib": 2569.25,
+      "positive_swap_growth_mib": 0,
+      "exit_status": 0,
+      "checkpoint_owner_closed": true,
+      "displacement": [
+        {
+          "name": "cache-displacement-a",
+          "bytes": 29811762848,
+          "sha256": "33c45709dc2638426f1b86abc71a4dc4ecf6aae94fea583308b38459d99fee71"
+        },
+        {
+          "name": "cache-displacement-b",
+          "bytes": 18556685824,
+          "sha256": "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5"
+        }
+      ]
+    },
+    {
+      "name": "candidate-workers1",
+      "identity_ref": "frozen_identity",
+      "load_workers_literal": "1",
+      "load_workers_effective": 1,
+      "gomaxprocs": 12,
+      "load_ms": 18465.682875,
+      "peak_rss_bytes": 17109860352,
+      "peak_footprint_bytes": 30846490920,
+      "swap_before_mib": 2513.25,
+      "swap_peak_mib": 2513.25,
+      "swap_after_mib": 2473.25,
+      "positive_swap_growth_mib": 0,
+      "exit_status": 0,
+      "checkpoint_owner_closed": true,
+      "displacement": [
+        {
+          "name": "cache-displacement-a",
+          "bytes": 29811762848,
+          "sha256": "33c45709dc2638426f1b86abc71a4dc4ecf6aae94fea583308b38459d99fee71"
+        },
+        {
+          "name": "cache-displacement-b",
+          "bytes": 18556685824,
+          "sha256": "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5"
+        }
+      ]
+    }
+  ],
+  "exact_deltas_candidate_minus_control": {
+    "load_ms": 1780.046,
+    "load_percent": 10.668133397216,
+    "peak_rss_bytes": 488603648,
+    "peak_rss_percent": 2.939631200584,
+    "peak_footprint_bytes": 2391983808,
+    "peak_footprint_percent": 8.406344199128,
+    "swap_after_minus_before_mib": -40
+  },
+  "decision": {
+    "verdict": "REJECT",
+    "keep_requires_lower_peak_pressure": true,
+    "candidate_lower_peak_rss": false,
+    "candidate_lower_peak_footprint": false,
+    "candidate_zero_positive_swap_growth": true,
+    "both_clean_teardown": true,
+    "native_profile_run": false,
+    "native_profile_skip_reason": "The one-worker arm failed the load-only pressure gate: it was slower and increased both peak RSS and peak footprint.",
+    "claim": "Reducing streamed Q4_K load concurrency from 12 workers to 1 is rejected for this exact M3 Pro envelope; it did not lower measured startup pressure."
+  }
+}

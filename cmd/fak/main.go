@@ -163,8 +163,16 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdLearningObservation(args)
 	case "host-crash":
 		cmdHostCrash(args)
+	case "hostdiag":
+		cmdHostdiag(args)
+	case "shellprov":
+		cmdShellprov(args)
 	case "host-relaunch-broker":
 		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, args))
+	case "watchdog-audit-run":
+		os.Exit(runWatchdogAuditRunner(os.Stdout, os.Stderr, args))
+	case "watchdog-audit-health":
+		os.Exit(runWatchdogAuditHealth(os.Stdout, os.Stderr, args, time.Now))
 	case "schedscan":
 		cmdSchedScan(args)
 	case "growthgate":
@@ -215,6 +223,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 
 func dispatchCoreVerbB(name string, args []string) bool {
 	switch name {
+	case "compute-trace":
+		os.Exit(runComputeTrace(os.Stdout, os.Stderr, args))
 	case "loop-score":
 		cmdLoopScore(args)
 	case "waiting":
@@ -662,6 +672,9 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdHorizonRecovery(args)
 	case "dogfood-issues":
 		cmdDogfoodIssues(args)
+	case "study":
+		// Local content-addressed source-to-decision receipts.
+		os.Exit(runStudy(os.Stdout, os.Stderr, args))
 	case "study-monitor":
 		// Durable source registry for recurring study/scout passes.
 		os.Exit(runStudyMonitor(os.Stdout, os.Stderr, args))
@@ -999,6 +1012,8 @@ func cmdBench(argv []string) {
 		case "gitspawn":
 			// #5620: git process spawns per unit of work on the three hot paths.
 			os.Exit(runGitSpawnBench(os.Stdout, os.Stderr, argv[1:]))
+		case "system-baseline":
+			os.Exit(runBenchSystemBaseline(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)

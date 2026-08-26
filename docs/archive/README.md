@@ -19,7 +19,7 @@ Archived files preserve prior designs, retired instructions, and snapshots that 
 | A rejected or retired proposal | The option and its evidence were considered, then removed from active guidance. | Follow its decision record or current architecture route for the selected path. |
 | No replacement link | The file is still historical evidence, not current instruction. | Start from the [documentation index](../index.md) or report the missing replacement through [CONTRIBUTING.md](../../CONTRIBUTING.md#reporting-issues). |
 
-The current file in this directory, [`README-2026-06-25-before-fresh-start.md`](README-2026-06-25-before-fresh-start.md), is a snapshot of the repository front door before its 2026-06-25 refresh. Its maintained replacement is the root [`README.md`](../../README.md).
+The current file in this directory, [`README-2026-06-25-before-fresh-start.md`](../notes/README-2026-06-25-before-fresh-start.md), is a snapshot of the repository front door before its 2026-06-25 refresh. Its maintained replacement is the root [`README.md`](../../README.md).
 
 ## Lifecycle and replacement contract
 

@@ -221,7 +221,9 @@ read-back establish the exact axis split:
   engine. A DFlash2 recipe is configuration/documentation after a stable upstream
   release, not a new FAK runtime architecture.
 
-## Candidate-by-candidate disposition
+## Candidate matrix refresh
+
+### Candidate-by-candidate disposition
 
 | Technique | Exact axis | FAK status | Portfolio route | Disposition |
 |---|---|---|---|---|
@@ -320,3 +322,56 @@ versioned ride recipes, not silently deferred native implementations.
 - [llama.cpp study](CONCEPT-STUDY-LLAMACPP-2026-07-18.md)
 - [#8258: per-position speculative acceptance profile](https://github.com/anthony-chaudhary/fak/issues/8258)
 - [#4202: stochastic lossless acceptance](https://github.com/anthony-chaudhary/fak/issues/4202)
+
+## Exhaustive inventory refresh (issue #8994, 2026-08-25)
+
+The denominator is now explicit in
+[`docs/research/inventory/z-lab-dflash.json`](../research/inventory/z-lab-dflash.json).
+It was generated with `fak study-inventory` from a detached checkout of
+`07ebd93db9f472af339b644bb70221ad8428328a`: **11 regular files** across **14 tree entries**, **3 immediate
+subsystems**, and only `.git` skipped. The pinned tree is small enough that every
+file was read or classified, not sampled.
+
+### Complete source-class read-back
+
+| Source class | Pinned or dated evidence | Result |
+|---|---|---|
+| README/docs | `README.md` at `07ebd93` | Product claim, architecture figure, install/use, model matrix, benchmark table, backend links, and citations are all in one README; there is no docs tree. |
+| Architecture/design | `README.md`, `dflash/model.py`, `dflash/model_mlx.py` at `07ebd93` | Design is embedded in the figure and paired Torch/MLX implementations; no separate design document exists. |
+| Runtime source | all five `dflash/*.py` files, `pyproject.toml`, and both workflows at `07ebd93` | Reference package contains Torch and MLX model paths, CLI, benchmark harness, package metadata, and publishing automation. |
+| Tests/fixtures | exhaustive 11-file/14-entry map at `07ebd93` | Confirmed absent: no tests, fixtures, test workflow, or declared test runner. This limits the reference package's regression value. |
+| History/changelog/releases | complete pinned git log; GitHub tag/release API on 2026-08-25 | One release and tag, `v0.1.0`, both at `07ebd93`; no changelog. The 24-commit history was read, including the DFlash 2, MLX, and serving-link additions. |
+| Open/closed issues, PRs, discussions | GitHub GraphQL and complete `gh ... --limit 200` state reads on 2026-08-25 | 85 open + 48 closed issues; 11 open + 8 closed + 3 merged PRs; 7 discussions. Threads cover correctness/load failures, backend integrations, training requests, smaller models, and non-CUDA support. These are dated mutable forge facts, not revision-pinned tree facts. |
+| Roadmap/TODOs | all source plus issues, PRs, discussions, and milestones | No canonical roadmap, milestones, or source TODOs. Requests are distributed across forge threads and must not be presented as maintainer commitments. |
+| License/provenance | `LICENSE`, `pyproject.toml`, README paper/model links at `07ebd93` | MIT covers the repository code; model checkpoints and papers remain separately linked upstream artifacts whose terms must be checked independently. |
+| FAK self-query | `fak capabilities` plus `fak-dev index docs/leaves` queries recorded in the registry row | FAK already has the study and shipped per-position acceptance telemetry (#8258); stochastic lossless sampling remains open (#4202). No fak-native DFlash architecture implementation surfaced. |
+| Candidate matrix | [candidate dispositions](#candidate-by-candidate-disposition) | Eight candidates retain explicit adopt/adapt/reject/defer decisions; this refresh changes evidence completeness, not those technical decisions. |
+| Completeness critic | inventory map plus this table | Every required class is backed by a pinned path, a dated forge query, or an explicit checked-absent result. |
+| Issue tracking | FAK #8258, #4202, parent #8936, child #8994 | No new implementation issue is justified by an inventory-only refresh; existing shipped/open owners remain the correct follow-ons. |
+
+### FAK decisions after denominator refresh
+
+- **Keep / shipped:** per-position acceptance telemetry remains the transferable
+  runtime primitive; #8258 is closed and independently visible in FAK's index.
+- **Keep / open:** #4202 remains the exact correctness owner before any sampled
+  DFlash-like path can claim losslessness at `T > 0`.
+- **Do not import:** the tiny reference package has no tests and is not a
+  production serving backend. FAK should not vendor it or silently route native
+  inference through linked vLLM/SGLang integrations.
+- **Defer:** trained DFlash layers, checkpoints, and training recipes remain
+  architecture/model work, not an inference-only kernel patch. Revisit only with
+  a fak-native model path, quality gate, and matched end-to-end witness.
+- **Borrow when owned:** retain path coherence, dynamic local mixing, exact target
+  verification, and per-position telemetry as design constraints for any future
+  native implementation.
+
+### Follow-ons and completeness critic
+
+No new follow-on was filed: the only actionable FAK gaps found by the exhaustive
+pass are already owned by shipped #8258 and open #4202. Upstream's issue volume,
+backend requests, and absent tests are useful risk evidence, but do not establish
+new FAK scope. The principal residual uncertainty is external to this inventory:
+model/checkpoint licensing and performance/quality must be re-verified whenever a
+specific artifact and runtime envelope are selected. The registry's row-specific
+`fak study-monitor --inventory-check --json` result is the readiness witness for
+this refresh.

@@ -1,6 +1,12 @@
+---
+title: "session-runtime names"
+description: "This map positions the current session-runtime coverage backlog. Each entry names the exact repository symbol;"
+---
 # session-runtime names
 
 This map positions the current `session-runtime` coverage backlog. Each entry names the exact repository symbol; the family label remains the broader domain and is not a substitute for the symbol.
+
+## Symbol map
 
 - **`sessiondiag`** — the exact `session-runtime` symbol `sessiondiag`; use this spelling for that operation rather than the undifferentiated family name.
 - **`validsession`** — the exact `session-runtime` symbol `validsession`; use this spelling for that operation rather than the undifferentiated family name.

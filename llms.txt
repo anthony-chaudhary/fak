@@ -46,6 +46,7 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - External system architecture, interfaces, and trust boundaries: [`docs/architecture.md`](docs/architecture.md)
 - Detailed integration architecture and extension seams: [`docs/fak/agent-integration-architecture.md`](docs/fak/agent-integration-architecture.md)
 - Managed agent runtime ownership, interfaces, flow, and offline proof: [`docs/explainers/agent-runtime.md`](docs/explainers/agent-runtime.md)
+- Canonical identity and nearest-contrast lookup for overloaded terms: [`docs/generated/disambiguation/INDEX.md`](docs/generated/disambiguation/INDEX.md)
 - TensorRT-LLM vs SGLang and how fak fronts fleet or local inference: [`docs/explainers/tensorrt-llm-vs-sglang-and-fak.md`](docs/explainers/tensorrt-llm-vs-sglang-and-fak.md)
 - One-minute offline proof: [`docs/repro-packet.md`](docs/repro-packet.md)
 - One-agent management with `fak guard`: [`README.md#manage-one-local-agent-fak-guard`](README.md#manage-one-local-agent-fak-guard)
@@ -59,7 +60,8 @@ connects new work to operator value. Do not turn this direction into a shipped c
 - Deployment: [`docs/fak/deployment-guide.md`](docs/fak/deployment-guide.md)
 - Deploying the gateway on a **rented GPU box** (CoreWeave, Lambda, RunPod, Crusoe, Vast.ai, Nebius) — in-kernel on the GPU, or proxy in front of a co-located vLLM/SGLang; every provider row is `not yet` end-to-end witnessed: [`docs/fak/neo-cloud-deploy.md`](docs/fak/neo-cloud-deploy.md). Distinct from **fronting a hosted model API** ([`docs/supported/clouds.md`](docs/supported/clouds.md)) and from the neo-cloud **backend binding layer** ([`docs/vendor/neo-cloud-reference-architecture.md`](docs/vendor/neo-cloud-reference-architecture.md)).
 - Adding a new model to the in-kernel engine — the one question that splits a one-line arch alias plus a recognition test from a `fak new-model` scaffold plus a forward pass and an oracle: [`docs/new-model-playbook.md`](docs/new-model-playbook.md)
-- Latest Qwen3.8-27B performance, evidence status, and the Qwen3.6/llama.cpp delta: [`docs/benchmarks/QWEN38-27B-LATEST.md`](docs/benchmarks/QWEN38-27B-LATEST.md)
+- Canonical cross-hardware Qwen performance highlights and worker publishing route: [`docs/benchmarks/QWEN-PERFORMANCE-INDEX.md`](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md)
+- Detailed Qwen3.8-27B Metal result and the Qwen3.6/llama.cpp delta: [`docs/benchmarks/QWEN38-27B-LATEST.md`](docs/benchmarks/QWEN38-27B-LATEST.md)
 - Routing a run difference to loader, quant, or forward when model id, quant mode, and tokens/sec all match — the model-load provenance artifact and its algebra (schema `fak-model-load-provenance/1`): [`docs/model-load-provenance-troubleshooting.md`](docs/model-load-provenance-troubleshooting.md)
 - Release readiness, guarded cut/publish, verification, and rollback: [`fak release`](cmd/fak/release.go) and [`.claude/skills/release/SKILL.md`](.claude/skills/release/SKILL.md)
 - Daily lock-aware shared-checkout Git hygiene, canonical verb, and proof floor: [`fak git-daily`](docs/releases/issue-5592-daily-lock-aware-git-hygiene-2026-08-08.md)

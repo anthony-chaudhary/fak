@@ -1,3 +1,7 @@
+---
+title: "Deterministic harness product resolution"
+description: "fak harness resolve closes the pre-launch chain:"
+---
 # Deterministic harness product resolution
 
 `fak harness resolve` closes the pre-launch chain:

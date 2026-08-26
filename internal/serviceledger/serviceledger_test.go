@@ -199,3 +199,65 @@ func TestOpenRefusesMalformedLedgerLine(t *testing.T) {
 		t.Fatal("malformed ledger line was silently accepted")
 	}
 }
+
+func TestOpenRepairsOnlyTruncatedFinalRecord(t *testing.T) {
+	dir := t.TempDir()
+	led, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := led.Append(readyEvent(1000, "u1")); err != nil || !ok {
+		t.Fatalf("append: ok=%v err=%v", ok, err)
+	}
+	path := filepath.Join(dir, "events.jsonl")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	torn := []byte(`{"version":1,"event":`)
+	if err := os.WriteFile(path, append(before, torn...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.Events(); len(got) != 1 || got[0].Seq != 1 {
+		t.Fatalf("recovery changed acknowledged events: %+v", got)
+	}
+	receipt := reopened.Recovery()
+	if receipt.CorruptionClass != "truncated_tail" || receipt.DiscardedTailBytes != int64(len(torn)) || receipt.RecoveredSequence != 1 {
+		t.Fatalf("recovery receipt = %+v", receipt)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("repair did not truncate exactly the torn tail: got %d bytes want %d", len(after), len(before))
+	}
+}
+
+func TestOpenRefusesChecksumCorruption(t *testing.T) {
+	dir := t.TempDir()
+	led, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := led.Append(readyEvent(1000, "u1")); err != nil || !ok {
+		t.Fatalf("append: ok=%v err=%v", ok, err)
+	}
+	path := filepath.Join(dir, "events.jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[strings.Index(string(data), "u1")] = 'x'
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(dir); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("checksum corruption was not refused: %v", err)
+	}
+}

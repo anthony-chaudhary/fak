@@ -1,3 +1,7 @@
+---
+title: "Study inventory: vllm-project/speculators"
+description: "- Schema: fak-study-inventory-map/1 - Indexed revision: 0faffeb3bd547b4451a978d7aaf26a2f01b83d62 - Source:"
+---
 # Study inventory: vllm-project/speculators
 
 - **Schema:** `fak-study-inventory-map/1`

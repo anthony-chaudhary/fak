@@ -440,7 +440,7 @@ func formIDs(body string) []string {
 
 func TestHumanIssueTemplatesPromptForCanonicalProblemFrame(t *testing.T) {
 	root := filepath.Dir(internalDir(t))
-	workerReadyIDs := []string{"parent-context", "generation", "problem_frame", "current-state", "why-next", "working-spine", "priority-context", "work-unit", "expected-steps", "assumptions", "confusion-risks", "coordination-notes", "trigger", "batch-policy", "in-scope", "out-of-scope", "done-condition", "witness", "acceptance-gate", "lane", "path-hints", "hot-tree-owning-lanes", "hot-tree-contention-check", "hot-tree-partition", "hot-tree-commit-recipe", "boundary-notes", "closure-binding", "final-checks"}
+	workerReadyIDs := []string{"parent-context", "generation", "problem_frame", "current-state", "why-next", "working-spine", "priority-context", "work-unit", "expected-steps", "assumptions", "confusion-risks", "coordination-notes", "trigger", "batch-policy", "in-scope", "out-of-scope", "done-condition", "witness-context", "witness-envelope", "baseline-artifact", "declared-lever", "candidate-artifact", "promotion-gate", "durable-witness", "rejected-levers", "witness-exception", "witness", "acceptance-gate", "lane", "path-hints", "hot-tree-owning-lanes", "hot-tree-contention-check", "hot-tree-partition", "hot-tree-commit-recipe", "boundary-notes", "closure-binding", "final-checks"}
 	for _, name := range []string{"feature-request.yml", "bug-report.yml", "worker-ready-issue.yml"} {
 		data, err := os.ReadFile(filepath.Join(root, ".github", "ISSUE_TEMPLATE", name))
 		if err != nil {

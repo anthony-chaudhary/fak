@@ -1,3 +1,7 @@
+---
+title: "Native-performance profile v1 witness status"
+description: "This directory records the acceptance boundary for issue 8760. The committed JSON under internal/nativeperf/testdata/native-performance-profile/ is synthetic..."
+---
 # Native-performance profile v1 witness status
 
 This directory records the acceptance boundary for issue #8760. The committed

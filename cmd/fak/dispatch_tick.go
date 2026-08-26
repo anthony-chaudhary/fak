@@ -195,6 +195,15 @@ func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
 		return 1
 	}
+	// The dispatch tick is the single automatic value-chain adoption seam. Record
+	// every completed decision without requiring an operator or worker prompt to
+	// remember the economics verb.
+	if receipt, err := recordDispatchValueChainUsage(opts.Workspace, payload, time.Now().UTC()); err != nil {
+		fmt.Fprintf(stderr, "fak dispatch tick: record value-chain usage: %v\n", err)
+		return 1
+	} else {
+		payload["value_chain_usage"] = receipt
+	}
 	if code := emitJSONOrRender(stdout, stderr, "fak dispatch tick", asJSON, payload, func(w io.Writer) {
 		fmt.Fprint(w, renderDispatchTick(payload))
 	}); code != 0 {
@@ -735,6 +744,8 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	}
 	launchPreview, guardedPreview = guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
 	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
+	// command is prepared before admission completes; execution is proven only after the spawner returns a child.
+	payload["command_executed"] = false
 	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchPreview, root, account)
 	payload["guarded"] = guardedPreview
 	return launch, launchPreview, guardedPreview, nil
@@ -865,6 +876,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		return finish(payload), nil
 	}
 	payload["command"] = dispatchtick.LaunchCommandShape(command, root, account)
+	payload["command_executed"] = true
 	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchCommand, root, account)
 	payload["guarded"] = guarded
 	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {

@@ -1,3 +1,8 @@
+---
+title: "Qwen3.8-27B exact FP8 TP2 witness"
+description: "Reference documentation for Qwen3.8-27B exact FP8 TP2 witness, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Qwen3.8-27B exact FP8 TP2 witness
 
 This directory freezes the 2026-08-19 exact-checkpoint acceptance for

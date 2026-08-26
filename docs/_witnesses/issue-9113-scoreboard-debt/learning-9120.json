@@ -1,0 +1,41 @@
+{
+  "schema": "fak-learning-debt-witness/1",
+  "issue": 9120,
+  "parent_issue": 9113,
+  "measured_on": "2026-08-26",
+  "command": "python tools/learning_scorecard.py --json",
+  "before": {
+    "learning_debt": 133,
+    "learning_debt_in_docs": 5,
+    "learning_debt_in_coverage": 127,
+    "learning_debt_in_stamp": 1,
+    "missing_shipped_surfaces": 127,
+    "mean_score": 96.8,
+    "coverage_pct": 84.5
+  },
+  "after": {
+    "learning_debt": 6,
+    "learning_debt_in_docs": 5,
+    "learning_debt_in_coverage": 0,
+    "learning_debt_in_stamp": 1,
+    "missing_shipped_surfaces": 0,
+    "mean_score": 96.8,
+    "coverage_pct": 100.0
+  },
+  "delta": {
+    "learning_debt": -127,
+    "learning_debt_in_coverage": -127,
+    "missing_shipped_surfaces": -127,
+    "coverage_pct": 15.5
+  },
+  "cohort": {
+    "fak_verbs": 54,
+    "internal_packages": 53,
+    "standalone_commands": 20
+  },
+  "validation": {
+    "command": "python tools/learning_scorecard_test.py",
+    "result": "48/48 passed"
+  },
+  "note": "The live parent baseline had already moved from 134 debt / 128 shipped-surface gaps to 133 / 127 before this worker edited the curriculum; this receipt uses the same-worktree authoritative before and after reads. The five unrelated in-doc defects and one stale generated snapshot remain unchanged."
+}

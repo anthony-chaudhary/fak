@@ -1,3 +1,7 @@
+---
+title: "Forced vCache mismatch demotion — 2026-08-19"
+description: "Verdict: a live provider-cache false-warm result now produces a hash-chained demotion record that identifies the first turn where observed provider reuse..."
+---
 # Forced vCache mismatch demotion — 2026-08-19
 
 **Verdict:** a live provider-cache false-warm result now produces a hash-chained demotion record that identifies the first turn where observed provider reuse diverged from the warm belief.

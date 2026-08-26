@@ -67,3 +67,29 @@ Observed through the Hugging Face model API and each checkpoint's `config.json` 
 - Exact target config: <https://huggingface.co/Qwen/Qwen3.8-27B/raw/1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0/config.json>
 
 All model revisions are pinned in `internal/qwen38ladder`. Re-query upstream before deliberately updating a stage; do not silently float revisions.
+
+## Evidence modes and promotion policy
+
+`fak.qwen38-ladder-evidence/1` remains backward compatible. An artifact with the
+original top-level `corpus_sha256`, aggregate trial counts, and metrics is the
+**concept-proof mode** used by the three-trial arithmetic spine. It can prove the
+ladder mechanism and authorize only the next experiment; it is not default or
+release evidence.
+
+A repeated default/release decision uses the strengthened mode: declare a fixed
+`corpora` manifest (name, task family, immutable SHA, and correctness floor), a
+`confidence` rule with `method: "paired-win-rate"`, minimum paired samples, and
+minimum win rate, then provide one ordered result for every corpus at every rung.
+Each result binds both arms to corpus, runtime, model revision, and environment
+identities and carries raw paired measurements. The evaluator fails closed with
+typed reason codes for missing arms, identity drift, too few pairs, an invalid
+baseline, quality regression, confidence failure, or a proxy-only default/release
+claim. Only complete multi-corpus evidence at `Qwen/Qwen3.8-27B` returns `PASS`.
+
+Promotion evidence is every declared family clearing its correctness floor,
+minimum sample count, metric threshold, and paired-win-rate threshold. Demotion or
+retirement evidence is any typed `HOLD`; stop before the next expensive rung and
+repair or retire the candidate. The policy is invalidated if paired observations
+are not comparable independent trials (for example, correlated warm-cache repeats)
+or if the fixed corpus manifest no longer represents the intended workload; in
+that case revise and re-hash the manifest before making another promotion claim.

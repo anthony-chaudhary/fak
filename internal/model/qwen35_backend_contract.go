@@ -6,6 +6,101 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/compute"
 )
 
+// Qwen35GDNPreprojectedSequencePath is the backend-neutral capability identity
+// for one complete, preprojected GDN sequence. It deliberately does not name a
+// device: Metal and other native runtimes can implement the same ownership and
+// no-fallback contract without becoming a compute.Backend.
+const Qwen35GDNPreprojectedSequencePath = "qwen35/gdn-preprojected-sequence-v1"
+
+// Qwen35GDNAuxHandle is an opaque backend-owned auxiliary-state identity. Zero
+// is never live; the model compares non-zero values only to enforce stable,
+// session-local ownership.
+type Qwen35GDNAuxHandle uint64
+
+// Qwen35GDNAuxState identifies the convolution window and recurrent matrix for
+// one session/layer pair.
+type Qwen35GDNAuxState struct {
+	Convolution Qwen35GDNAuxHandle
+	Recurrent   Qwen35GDNAuxHandle
+}
+
+func (s Qwen35GDNAuxState) valid() bool {
+	return s.Convolution != 0 && s.Recurrent != 0 && s.Convolution != s.Recurrent
+}
+
+func (s Qwen35GDNAuxState) present() bool {
+	return s.Convolution != 0 || s.Recurrent != 0
+}
+
+// Qwen35GDNSequenceGeometry is the fixed per-layer shape used both to allocate
+// auxiliary state and to validate a sequence operation.
+type Qwen35GDNSequenceGeometry struct {
+	NumKeyHeads, NumValueHeads int
+	KeyHeadDim, ValueHeadDim   int
+	ConvKernel                 int
+}
+
+// Qwen35GDNPreprojectedSequenceRequest contains the projections consumed by the
+// GDN convolution/recurrent scan. State and Geometry are filled by Session at
+// dispatch; callers supply the preprojected panels and scalar parameters.
+type Qwen35GDNPreprojectedSequenceRequest struct {
+	Layer, Tokens              int
+	Mixed, Z, B, A             []float32
+	Conv1D, ALog, DTBias, Norm []float32
+	RMSNormEpsilon             float32
+	State                      Qwen35GDNAuxState
+	Geometry                   Qwen35GDNSequenceGeometry
+}
+
+// Qwen35GDNPreprojectedSequenceResult returns the pre-out-projection core and
+// the same in-place state identities supplied in the request.
+type Qwen35GDNPreprojectedSequenceResult struct {
+	Core  []float32
+	State Qwen35GDNAuxState
+}
+
+// Qwen35GDNPreprojectedSequenceBackend is an optional native whole-operation
+// capability. New/Free own auxiliary state; Sequence must mutate that state in
+// place and must not return replacement handles.
+type Qwen35GDNPreprojectedSequenceBackend interface {
+	Qwen35GDNPreprojectedSequencePath() string
+	NewQwen35GDNAuxState(layer int, geometry Qwen35GDNSequenceGeometry) (Qwen35GDNAuxState, error)
+	Qwen35GDNPreprojectedSequence(Qwen35GDNPreprojectedSequenceRequest) (Qwen35GDNPreprojectedSequenceResult, error)
+	FreeQwen35GDNAuxState(Qwen35GDNAuxState) error
+}
+
+type qwen35GDNPreprojectedSequencePathMarker interface {
+	Qwen35GDNPreprojectedSequencePath() string
+}
+
+// UnsupportedGDNPreprojectedSequenceError is a pre-allocation refusal. An
+// advertised-but-incomplete or wrong-path capability never mutates session or
+// backend state.
+type UnsupportedGDNPreprojectedSequenceError struct {
+	Path   string
+	Reason string
+}
+
+func (e *UnsupportedGDNPreprojectedSequenceError) Error() string {
+	return fmt.Sprintf("model: cannot admit Qwen GDN preprojected sequence via %q: %s; refusing host recurrence fallback", e.Path, e.Reason)
+}
+
+func qwen35GDNPreprojectedSequenceBackend(candidate any) (Qwen35GDNPreprojectedSequenceBackend, bool, error) {
+	marker, advertised := candidate.(qwen35GDNPreprojectedSequencePathMarker)
+	if !advertised {
+		return nil, false, nil
+	}
+	path := marker.Qwen35GDNPreprojectedSequencePath()
+	backend, ok := candidate.(Qwen35GDNPreprojectedSequenceBackend)
+	if !ok {
+		return nil, true, &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "path marker has no lifecycle/operation implementation"}
+	}
+	if path != Qwen35GDNPreprojectedSequencePath {
+		return nil, true, &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "wrong capability identity"}
+	}
+	return backend, true, nil
+}
+
 // Qwen35GDNCUDAPath is the production path identity reserved for a Qwen3.5/3.6
 // Gated-DeltaNet/SSM token mixer implemented by the CUDA compute backend.
 const Qwen35GDNCUDAPath = "cuda/qwen35-gdn-ssm-decode-v1"

@@ -1,3 +1,7 @@
+---
+title: "Explainable continuity"
+description: "fak profile continuity is one task-oriented front door over the shipped portability foundations. It does not replace the Object contract, package format,"
+---
 # Explainable continuity
 
 `fak profile continuity` is one task-oriented front door over the shipped portability foundations. It does not replace the Object contract, package format, reconciliation, egress, organization, registry, or adapter seams.

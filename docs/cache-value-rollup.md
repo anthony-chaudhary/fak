@@ -31,7 +31,7 @@ it, and what must not be inferred from it.
 | Track | What it answers | Evidence | Current status |
 |---|---|---|---|
 | Track 1: WITNESSED kernel value | Did fak's own kernel reuse KV-prefix work on multi-turn sessions? | `cachevalueledger.Row` fields: `prompt_tokens`, `reused_tokens`, turn regimes, and weekly buckets from `internal/cachevaluereport`. | Shipped for realized reuse trend. |
-| Track 2: OBSERVED net-dollar savings | Did the deployed gateway reduce provider spend after its own costs and provider-cache behavior? | `cachevaluereport.SavingsRow` fields: provider/mechanism, cache read/write tokens, compaction shed tokens, rebate/write/spend/net dollars, and weekly buckets. | Shipped 2026-07-02 as a sibling ledger + two-track fold (`docs/nightrun/cache-savings.jsonl`); live rows accrue as sessions append savings evidence. Provenance caveat (as of 2026-07-04): the read/write token counts are OBSERVED, but the dollar columns are computed at DEFAULT list prices (`pricing_source=default:…`) — a list-price equivalent, not a metered provider invoice — and non-Anthropic (codex/openai) rows stay `dollar_blind`. The net-OBSERVED-economics target is still open (#1544; the #2179 1h-write pricing-tier fix has landed). See the [2026-07-04 review](cache-frontier/reviews/2026-07-04.md). |
+| Track 2: OBSERVED net-dollar savings | Did the deployed gateway reduce provider spend after its own costs and provider-cache behavior? | `cachevaluereport.SavingsRow` fields: provider/mechanism, cache read/write tokens, compaction shed tokens, rebate/write/spend/net dollars, and weekly buckets. | Shipped 2026-07-02 as a sibling ledger + two-track fold (`docs/nightrun/cache-savings.jsonl`); live rows accrue as sessions append savings evidence. Provenance caveat (as of 2026-07-04): the read/write token counts are OBSERVED, but the dollar columns are computed at DEFAULT list prices (`pricing_source=default:…`) — a list-price equivalent, not a metered provider invoice — and non-Anthropic (codex/openai) rows stay `dollar_blind`. The net-OBSERVED-economics target is still open (#1544; the #2179 1h-write pricing-tier fix has landed). See the [2026-07-04 review](notes/2026-07-04.md). |
 
 The tracks stay unblended because they answer different questions. Track 1 is a mechanism
 proof: fak authored reuse inside the kernel and can witness the token counters. Track 2 is
@@ -329,7 +329,7 @@ fak cachevalue review \
   --date 2026-06-29 \
   --source-markdown reviews/2026-06-29.md \
   --append-ledger docs/cache-frontier/review-ledger.jsonl \
-  --markdown-out docs/cache-frontier/reviews/2026-06-29.md
+  --markdown-out docs/notes/2026-06-29.md
 ```
 
 Use `--json` without `--append-ledger` to inspect the row first. The review artifact is

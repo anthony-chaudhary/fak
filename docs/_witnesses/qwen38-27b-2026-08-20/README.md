@@ -1,3 +1,7 @@
+---
+title: "Qwen3.8-27B native Metal witness"
+description: "This directory freezes the 2026-08-20 native-fak acceptance of the exact unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe Q4KM checkpoint on..."
+---
 # Qwen3.8-27B native Metal witness
 
 This directory freezes the 2026-08-20 native-fak acceptance of the exact

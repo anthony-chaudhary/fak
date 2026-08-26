@@ -18,7 +18,7 @@ plane. fak's support is deliberately a ride-mode integration:
 
 ## Supported contract: llm-d v0.9+
 
-This integration targets llm-d v0.9 and later compatible v0.x releases. Compatibility means the documented OpenAI transport shape, not proof of every scheduler or cluster. Refresh this contract when Endpoint Picker, queueing, P/D, or KV-event APIs change. Live-cluster proof is tracked in [#8017](https://github.com/anthony-chaudhary/fak/issues/8017); see the [pinned study](../research/llm-d-study-2026-08-18.md).
+This integration targets llm-d v0.9 and later compatible v0.x releases. Compatibility means the documented OpenAI transport shape, not proof of every scheduler or cluster. Refresh this contract when Endpoint Picker, queueing, P/D, or KV-event APIs change. Live-cluster proof is tracked in [#8017](https://github.com/anthony-chaudhary/fak/issues/8017); see the [pinned study](../notes/llm-d-study-2026-08-18.md).
 
 | Decision | Authoritative owner |
 |---|---|

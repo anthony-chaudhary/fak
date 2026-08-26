@@ -8,13 +8,15 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/harnessartifact"
 	"github.com/anthony-chaudhary/fak/internal/harnessserver"
 	"github.com/anthony-chaudhary/fak/internal/harnessverify"
 )
 
 type harnessVerifyRunCLIResult struct {
-	Harness harnessverify.Report   `json:"harness"`
-	Server  harnessserver.Verified `json:"server"`
+	Harness   harnessverify.Report                   `json:"harness"`
+	Server    harnessserver.Verified                 `json:"server"`
+	Lifecycle *harnessartifact.ModelLifecycleReceipt `json:"lifecycle,omitempty"`
 }
 
 func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
@@ -24,6 +26,8 @@ func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 	observationPath := fs.String("observation", "", "runtime capability and decision observation JSON")
 	serverBindingPath := fs.String("server-binding", "", "immutable harness server binding created by harness init")
 	jsonView := fs.Bool("json", false, "emit machine-readable verification JSON")
+	lifecyclePath := fs.String("lifecycle-receipt", "", "model lifecycle receipt to verify")
+	expectedDeclaration := fs.String("expected-declaration", "", "expected lifecycle declaration identity")
 	observationTemplate := fs.Bool("print-observation-template", false, "print a runtime observation bound to --lock")
 	if err := fs.Parse(argv); err != nil {
 		return 2
@@ -38,6 +42,18 @@ func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 	if *lockPath == "" || *observationPath == "" {
 		fmt.Fprintln(stderr, "fak harness verify-run: --lock and --observation are required")
 		return 2
+	}
+	var lifecycle *harnessartifact.ModelLifecycleReceipt
+	if *lifecyclePath != "" {
+		receipt, lifecycleErr := harnessartifact.ReadModelLifecycleReceipt(*lifecyclePath)
+		if lifecycleErr == nil {
+			lifecycleErr = harnessartifact.CheckLifecycleDeclaration(receipt, *expectedDeclaration)
+		}
+		if lifecycleErr != nil {
+			fmt.Fprintf(stderr, "fak harness verify-run: lifecycle: %s: %s\n", harnessartifact.LifecycleDiagnosticCode(lifecycleErr), harnessartifact.RedactLifecycleText(lifecycleErr.Error()))
+			return 4
+		}
+		lifecycle = &receipt
 	}
 	server, err := verifyHarnessServerBinding(*serverBindingPath)
 	if err != nil {
@@ -70,14 +86,21 @@ func runHarnessVerifyRun(stdout, stderr io.Writer, argv []string) int {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		var output any = report
-		if server != nil {
-			output = harnessVerifyRunCLIResult{Harness: report, Server: *server}
+		if server != nil || lifecycle != nil {
+			combined := harnessVerifyRunCLIResult{Harness: report, Lifecycle: lifecycle}
+			if server != nil {
+				combined.Server = *server
+			}
+			output = combined
 		}
 		if err := enc.Encode(output); err != nil {
 			fmt.Fprintf(stderr, "fak harness verify-run: %v\n", err)
 			return 1
 		}
 	} else {
+		if lifecycle != nil {
+			fmt.Fprintf(stdout, "MODEL LIFECYCLE | VERIFIED | state=%s declaration=%s readiness=%s stop=%s\n", lifecycle.State, lifecycle.Declaration.ID, lifecycle.Readiness.ID, lifecycle.Stop.ID)
+		}
 		if server != nil {
 			fmt.Fprintf(stdout, "SERVER RECEIPT | VERIFIED | model=%s generation=%d protocol=%s/%s\n", server.ModelAlias, server.Generation, server.ProtocolFamily, server.ProtocolRevision)
 		}

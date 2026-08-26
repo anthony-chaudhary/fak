@@ -1,3 +1,8 @@
+---
+title: "Qwen3.8 native-Metal startup predicate audit"
+description: "Reference documentation for Qwen3.8 native-Metal startup predicate audit, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Qwen3.8 native-Metal startup predicate audit
 
 Issue [#8964](https://github.com/anthony-chaudhary/fak/issues/8964) asked for a

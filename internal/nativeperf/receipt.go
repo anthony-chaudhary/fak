@@ -2,13 +2,21 @@ package nativeperf
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/systembaseline"
 )
 
-const ReceiptSchema = "fak-native-performance-receipt/v1"
+const (
+	ReceiptSchemaV1 = "fak-native-performance-receipt/v1"
+	ReceiptSchemaV2 = "fak-native-performance-receipt/v2"
+	ReceiptSchema   = ReceiptSchemaV2
+)
 
 const (
 	RoleBaseline  = "baseline"
@@ -18,21 +26,25 @@ const (
 // ExperimentReceipt is the portable, scrubbed A/B evidence contract shared by
 // Metal and CUDA native-performance experiments.
 type ExperimentReceipt struct {
-	Schema            string             `json:"schema"`
-	Role              string             `json:"role"`
-	EnvelopeID        string             `json:"envelope_id"`
-	ChangedLeverID    string             `json:"changed_lever_id"`
-	Revision          string             `json:"revision"`
-	ArtifactSHA256    string             `json:"artifact_sha256"`
-	Machine           MachineIdentity    `json:"machine"`
-	Controls          ExperimentControls `json:"controls"`
-	UnchangedControls []string           `json:"unchanged_controls"`
-	ChangedAxes       []string           `json:"changed_axes"`
-	Repetitions       []Repetition       `json:"repetitions"`
-	Memory            MemoryMetrics      `json:"memory"`
-	Execution         ExecutionIdentity  `json:"execution"`
-	Commands          []string           `json:"commands"`
-	ProfilerArtifacts []ArtifactRef      `json:"profiler_artifacts"`
+	Schema            string                  `json:"schema"`
+	Role              string                  `json:"role"`
+	EnvelopeID        string                  `json:"envelope_id"`
+	ChangedLeverID    string                  `json:"changed_lever_id"`
+	Revision          string                  `json:"revision"`
+	ArtifactSHA256    string                  `json:"artifact_sha256"`
+	Machine           MachineIdentity         `json:"machine"`
+	Controls          ExperimentControls      `json:"controls"`
+	UnchangedControls []string                `json:"unchanged_controls"`
+	ChangedAxes       []string                `json:"changed_axes"`
+	Repetitions       []Repetition            `json:"repetitions"`
+	AmbientEvidence   []AmbientEvidence       `json:"ambient_evidence,omitempty"`
+	Memory            MemoryMetrics           `json:"memory"`
+	Execution         ExecutionIdentity       `json:"execution"`
+	Quality           QualityMetric           `json:"quality"`
+	ModuleVersions    []ModuleRevision        `json:"module_versions"`
+	Commands          []string                `json:"commands"`
+	ProfilerArtifacts []ArtifactRef           `json:"profiler_artifacts"`
+	SystemBaselines   []systembaseline.Report `json:"system_baselines,omitempty"`
 }
 
 type MachineIdentity struct {
@@ -59,6 +71,7 @@ type Repetition struct {
 	TTFTMilliseconds     float64 `json:"ttft_milliseconds,omitempty"`
 	PrefillMilliseconds  float64 `json:"prefill_milliseconds,omitempty"`
 	DecodeMilliseconds   float64 `json:"decode_milliseconds,omitempty"`
+	SystemBaselineDigest string  `json:"system_baseline_digest,omitempty"`
 }
 
 type MemoryMetrics struct {
@@ -105,8 +118,10 @@ func BaselineTemplate(graph Graph, leverID string) (ExperimentReceipt, error) {
 		Machine:           MachineIdentity{ScrubbedID: "FILL_SCRUBBED_MACHINE_ID", Platform: lever.Applicability.Platform, Backend: envelope.Backend},
 		Controls:          ExperimentControls{PromptTokens: envelope.PromptTokens, DecodeTokens: envelope.DecodeTokens, Batch: 1, ContextTokens: envelope.PromptTokens + envelope.DecodeTokens, Temperature: float64(envelope.Temperature), Sampling: "greedy", CacheState: "cold", Warmups: 1, Repetitions: envelope.Repetitions},
 		UnchangedControls: append([]string(nil), requiredControlNames...), ChangedAxes: []string{}, Repetitions: reps,
-		Execution: ExecutionIdentity{Engine: "fak-native", ForwardPath: envelope.ForwardPath},
-		Commands:  []string{"FILL_SCRUBBED_CAPTURE_COMMAND"}, ProfilerArtifacts: []ArtifactRef{{Path: "FILL_RELATIVE_PROFILE_PATH", SHA256: strings.Repeat("0", 64)}},
+		Execution:      ExecutionIdentity{Engine: "fak-native", ForwardPath: envelope.ForwardPath},
+		Quality:        QualityMetric{Name: "FILL_QUALITY_METRIC", Score: 0, HigherIsBetter: true},
+		ModuleVersions: []ModuleRevision{{Module: "FILL_MODULE", Revision: "FILL_MODULE_REVISION"}},
+		Commands:       []string{"FILL_SCRUBBED_CAPTURE_COMMAND"}, ProfilerArtifacts: []ArtifactRef{{Path: "FILL_RELATIVE_PROFILE_PATH", SHA256: strings.Repeat("0", 64)}},
 	}, nil
 }
 
@@ -117,13 +132,59 @@ func DecodeReceipt(data []byte) (ExperimentReceipt, error) {
 	if err := dec.Decode(&r); err != nil {
 		return r, fmt.Errorf("decode receipt: %w", err)
 	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return r, errors.New("decode receipt: multiple JSON values")
+		}
+		return r, fmt.Errorf("decode receipt trailing data: %w", err)
+	}
 	return r, nil
+}
+
+// AttachSystemBaseline appends the next aggregate attestation without allowing
+// callers to skip or overfill the receipt's one-per-repetition sequence.
+func AttachSystemBaseline(graph Graph, receipt ExperimentReceipt, attestation systembaseline.Report) (ExperimentReceipt, error) {
+	if len(receipt.AmbientEvidence) > 0 {
+		return ExperimentReceipt{}, errors.New("receipt already carries legacy ambient evidence")
+	}
+	if receipt.Schema == ReceiptSchemaV1 {
+		receipt.Schema = ReceiptSchemaV2
+	}
+	if err := ValidateReceipt(graph, receipt); err != nil {
+		return ExperimentReceipt{}, err
+	}
+	if err := attestation.Validate(); err != nil {
+		return ExperimentReceipt{}, fmt.Errorf("system baseline: %w", err)
+	}
+	if len(attestation.TopNonSUT) > 0 {
+		return ExperimentReceipt{}, errors.New("system baseline contains high-cardinality process identities")
+	}
+	if len(receipt.SystemBaselines) >= len(receipt.Repetitions) {
+		return ExperimentReceipt{}, errors.New("system baselines already cover every repetition")
+	}
+	receipt.SystemBaselines = append(receipt.SystemBaselines, attestation)
+	receipt.Repetitions[len(receipt.SystemBaselines)-1].SystemBaselineDigest = attestation.Digest
+	if err := ValidateReceipt(graph, receipt); err != nil {
+		return ExperimentReceipt{}, err
+	}
+	return receipt, nil
 }
 
 func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	var f []string
-	if r.Schema != ReceiptSchema {
-		f = append(f, fmt.Sprintf("schema must be %q", ReceiptSchema))
+	if r.Schema != ReceiptSchemaV1 && r.Schema != ReceiptSchemaV2 {
+		f = append(f, fmt.Sprintf("schema must be %q or %q", ReceiptSchemaV1, ReceiptSchemaV2))
+	}
+	if r.Schema == ReceiptSchemaV1 && len(r.SystemBaselines) > 0 {
+		f = append(f, "v1 receipts cannot carry system baseline attestations")
+	}
+	if r.Schema == ReceiptSchemaV1 {
+		for i, repetition := range r.Repetitions {
+			if repetition.SystemBaselineDigest != "" {
+				f = append(f, fmt.Sprintf("v1 repetition %d cannot bind system baseline evidence", i))
+			}
+		}
 	}
 	if r.Role != RoleBaseline && r.Role != RoleCandidate {
 		f = append(f, "role must be baseline or candidate")
@@ -148,11 +209,24 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	if !scrubbed(r.Machine.ScrubbedID) {
 		f = append(f, "machine identity is empty or contains private path/host syntax")
 	}
-	if r.Execution.Engine != "fak-native" || strings.TrimSpace(r.Execution.ForwardPath) == "" {
-		f = append(f, "execution identity must name fak-native and a forward path")
+	if strings.TrimSpace(r.Execution.Engine) == "" || strings.TrimSpace(r.Execution.ForwardPath) == "" {
+		f = append(f, "execution identity must name an engine and a forward path")
 	}
-	if r.Execution.FallbackCount != 0 {
-		f = append(f, "fallback count must be zero")
+	if r.Execution.FallbackCount < 0 {
+		f = append(f, "fallback count must be non-negative")
+	}
+	if strings.TrimSpace(r.Quality.Name) == "" || strings.HasPrefix(r.Quality.Name, "FILL_") || math.IsNaN(r.Quality.Score) || math.IsInf(r.Quality.Score, 0) {
+		f = append(f, "quality metric must be captured and finite")
+	}
+	if len(r.ModuleVersions) == 0 {
+		f = append(f, "at least one module revision is required")
+	}
+	seenModules := map[string]bool{}
+	for _, m := range r.ModuleVersions {
+		if strings.TrimSpace(m.Module) == "" || strings.HasPrefix(m.Module, "FILL_") || strings.TrimSpace(m.Revision) == "" || strings.HasPrefix(m.Revision, "FILL_") || seenModules[m.Module] {
+			f = append(f, "module revisions must be unique captured module@rev identities")
+		}
+		seenModules[m.Module] = true
 	}
 	if r.Controls.PromptTokens <= 0 || r.Controls.DecodeTokens <= 0 || r.Controls.Batch <= 0 || r.Controls.ContextTokens <= 0 || r.Controls.Warmups < 0 || r.Controls.Repetitions <= 0 {
 		f = append(f, "controls contain invalid dimensions")
@@ -163,6 +237,45 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	for i, rep := range r.Repetitions {
 		if !positive(rep.EndToEndMilliseconds) || !positive(rep.TokensPerSecond) {
 			f = append(f, fmt.Sprintf("repetition %d lacks positive end-to-end latency/tok/s", i))
+		}
+	}
+	if len(r.AmbientEvidence) > 0 && len(r.SystemBaselines) > 0 {
+		f = append(f, "receipt cannot carry both legacy ambient evidence and system baseline attestations")
+	}
+	if len(r.AmbientEvidence) > 0 {
+		if len(r.AmbientEvidence) != len(r.Repetitions) {
+			f = append(f, fmt.Sprintf("ambient evidence count %d must align 1:1 with %d repetitions", len(r.AmbientEvidence), len(r.Repetitions)))
+		} else {
+			for i, evidence := range r.AmbientEvidence {
+				if err := ValidateAmbientEvidence(evidence); err != nil {
+					f = append(f, fmt.Sprintf("ambient evidence %d: %v", i, err))
+				}
+			}
+		}
+	}
+	seenBaselineDigests := map[string]bool{}
+	for i := range r.SystemBaselines {
+		if err := r.SystemBaselines[i].Validate(); err != nil {
+			f = append(f, fmt.Sprintf("system baseline %d is invalid: %v", i, err))
+		}
+		if len(r.SystemBaselines[i].TopNonSUT) > 0 {
+			f = append(f, fmt.Sprintf("system baseline %d contains high-cardinality process identities", i))
+		}
+		if seenBaselineDigests[r.SystemBaselines[i].Digest] {
+			f = append(f, fmt.Sprintf("system baseline %d reuses an attestation digest", i))
+		}
+		seenBaselineDigests[r.SystemBaselines[i].Digest] = true
+	}
+	if len(r.SystemBaselines) > len(r.Repetitions) {
+		f = append(f, "system baselines exceed repetition count")
+	}
+	for i, repetition := range r.Repetitions {
+		if i < len(r.SystemBaselines) {
+			if repetition.SystemBaselineDigest != r.SystemBaselines[i].Digest {
+				f = append(f, fmt.Sprintf("repetition %d system baseline binding does not match embedded attestation", i))
+			}
+		} else if repetition.SystemBaselineDigest != "" {
+			f = append(f, fmt.Sprintf("repetition %d has a system baseline binding hole", i))
 		}
 	}
 	if r.Memory.PeakBytes == 0 || r.Memory.ResidentBytes == 0 {
@@ -214,7 +327,7 @@ func CompareReceipts(graph Graph, baseline, candidate ExperimentReceipt) (Compar
 	if baseline.EnvelopeID != candidate.EnvelopeID || baseline.ChangedLeverID != candidate.ChangedLeverID {
 		return Comparison{}, fmt.Errorf("receipts target different envelope or lever")
 	}
-	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution != candidate.Execution || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
+	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution.Engine != candidate.Execution.Engine || baseline.Execution.ForwardPath != candidate.Execution.ForwardPath || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
 		return Comparison{}, fmt.Errorf("receipts are incomparable: an undeclared control axis drifted")
 	}
 	b, c := meanTPS(baseline.Repetitions), meanTPS(candidate.Repetitions)

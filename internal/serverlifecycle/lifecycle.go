@@ -167,7 +167,9 @@ func (e *RefusalError) Error() string { return e.Reason + ": " + e.Detail }
 
 // Init writes a validated spec and runtime configuration without resolving the
 // artifact, inspecting the executable, or launching a process.
-func Init(_ context.Context, opts InitOptions) (Result, error) {
+func Init(_ context.Context, opts InitOptions) (result Result, retErr error) {
+	dir := strings.TrimSpace(opts.InstanceDirectory)
+	defer func() { retErr = errors.Join(retErr, recordInvocation(dir, "init", result, retErr)) }()
 	dir, err := cleanAbsolute(opts.InstanceDirectory)
 	if err != nil {
 		return resultFor("init", opts.InstanceDirectory), err
@@ -251,7 +253,7 @@ func Init(_ context.Context, opts InitOptions) (Result, error) {
 	if err := atomicWrite(specPath, specJSON); err != nil {
 		return resultFor("init", dir), err
 	}
-	result := resultFor("init", dir)
+	result = resultFor("init", dir)
 	result.State = StateConfigured
 	result.Evidence.SpecValid = true
 	return result, nil
@@ -260,6 +262,7 @@ func Init(_ context.Context, opts InitOptions) (Result, error) {
 // Up starts the configured adapter and publishes a receipt only after the full
 // protocol readiness probe succeeds.
 func Up(ctx context.Context, dir string, opts Options) (result Result, retErr error) {
+	defer func() { retErr = errors.Join(retErr, recordInvocation(dir, "up", result, retErr)) }()
 	inst, err := loadInstance(dir)
 	if err != nil {
 		return resultFor("up", dir), err
@@ -395,12 +398,13 @@ func Up(ctx context.Context, dir string, opts Options) (result Result, retErr er
 
 // Status derives lifecycle state from the persisted record plus fresh process,
 // receipt, and protocol observations.
-func Status(ctx context.Context, dir string, opts Options) (Result, error) {
+func Status(ctx context.Context, dir string, opts Options) (result Result, retErr error) {
+	defer func() { retErr = errors.Join(retErr, recordInvocation(dir, "status", result, retErr)) }()
 	inst, err := loadInstance(dir)
 	if err != nil {
 		return resultFor("status", dir), err
 	}
-	result := resultFor("status", inst.dir)
+	result = resultFor("status", inst.dir)
 	result.Evidence.SpecValid = true
 	lockHeld, _, err := recoverLifecycleLock(filepath.Join(inst.dir, LockFilename))
 	if err != nil {
@@ -468,6 +472,7 @@ func Status(ctx context.Context, dir string, opts Options) (Result, error) {
 // Down stops only the process whose instance, generation, PID, and OS start
 // identity agree across state, receipt, and current observation.
 func Down(_ context.Context, dir string, opts Options) (result Result, retErr error) {
+	defer func() { retErr = errors.Join(retErr, recordInvocation(dir, "down", result, retErr)) }()
 	inst, err := loadInstance(dir)
 	if err != nil {
 		return resultFor("down", dir), err

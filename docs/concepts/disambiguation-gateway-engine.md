@@ -1,3 +1,7 @@
+---
+title: "gateway-engine names"
+description: "This map positions the current gateway-engine coverage backlog. Each entry names the exact repository symbol;"
+---
 # gateway-engine names
 
 This map positions the current `gateway-engine` coverage backlog. Each entry names the exact repository symbol; the family label remains the broader domain and is not a substitute for the symbol.

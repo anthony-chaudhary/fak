@@ -1,3 +1,8 @@
+---
+title: "Issue #8311 — Q5_K_M platform qualification attempt"
+description: "Reference documentation for Issue #8311 — Q5_K_M platform qualification attempt, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8311 — Q5_K_M platform qualification attempt
 
 **Status: INVALID — serving API contract failed before campaign qualification.**

@@ -1,3 +1,8 @@
+---
+title: "Issue #8629 — valid paired Qwen proxy climb"
+description: "Reference documentation for Issue #8629 — valid paired Qwen proxy climb, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8629 — valid paired Qwen proxy climb
 
 **Verdict: PROMOTE through Qwen3.5-4B; next stage is pinned Qwen3.5-9B.**

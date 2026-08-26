@@ -1,3 +1,8 @@
+---
+title: "Issue #8621 — Qwen3.5-0.8B paired smoke result"
+description: "Reference documentation for Issue #8621 — Qwen3.5-0.8B paired smoke result, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8621 — Qwen3.5-0.8B paired smoke result
 
 **Verdict: HOLD.** The candidate passed 3/3 and reduced p95 generation wall time from 2509.8482 ms to 613.7351 ms, but the baseline passed 0/3. The ladder now rejects that invalid attribution because both arms must meet the stage's absolute correctness floor before performance can promote.

@@ -1,3 +1,7 @@
+---
+title: "Headless run protocol v1"
+description: "pkg/harnesskit exposes fak.harness.run/v1, a product-neutral event and input contract. Provider request, response, SDK,"
+---
 # Headless run protocol v1
 
 `pkg/harnesskit` exposes `fak.harness.run/v1`, a product-neutral event and input contract. Provider request, response, SDK, and transport objects stop at the adapter boundary; public envelopes contain only semantic payloads declared in `protocol.go`.

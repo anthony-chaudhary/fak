@@ -1,3 +1,7 @@
+---
+title: "Work-accounting coverage"
+description: "fak info --work-coverage reports the authoritative registry of shipped mechanisms whose effect must appear in WORK DONE, be explicitly non-additive,"
+---
 # Work-accounting coverage
 
 `fak info --work-coverage` reports the authoritative registry of shipped mechanisms whose effect must appear in WORK DONE, be explicitly non-additive, be intentionally excluded, or remain honestly unavailable. Use `--json` for `fak.info.work-accounting-coverage/1`.

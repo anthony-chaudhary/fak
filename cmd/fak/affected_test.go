@@ -22,6 +22,16 @@ type goListObj struct {
 	Dir          string
 	Module       *struct{ Path, Dir string }
 	GoFiles      []string `json:",omitempty"`
+	CgoFiles     []string `json:",omitempty"`
+	CFiles       []string `json:",omitempty"`
+	CXXFiles     []string `json:",omitempty"`
+	MFiles       []string `json:",omitempty"`
+	HFiles       []string `json:",omitempty"`
+	FFiles       []string `json:",omitempty"`
+	SFiles       []string `json:",omitempty"`
+	SwigFiles    []string `json:",omitempty"`
+	SwigCXXFiles []string `json:",omitempty"`
+	SysoFiles    []string `json:",omitempty"`
 	TestGoFiles  []string `json:",omitempty"`
 	EmbedFiles   []string `json:",omitempty"`
 	Imports      []string `json:",omitempty"`
@@ -37,8 +47,18 @@ func TestParseGoListAndSelectEndToEnd(t *testing.T) {
 			GoFiles: []string{"main.go"},
 			Imports: []string{"example.com/m/internal/foo"}},
 		{ImportPath: "example.com/m/internal/foo", Dir: filepath.Join(modDir, "internal", "foo"), Module: mod,
-			GoFiles: []string{"foo.go"},
-			Imports: []string{"fmt"}}, // stdlib import must be filtered out of edges
+			GoFiles:      []string{"foo.go"},
+			CgoFiles:     []string{"cgo.go"},
+			CFiles:       []string{"bridge.c"},
+			CXXFiles:     []string{"bridge.cc"},
+			MFiles:       []string{"bridge.m"},
+			HFiles:       []string{"bridge.h"},
+			FFiles:       []string{"bridge.f"},
+			SFiles:       []string{"bridge.s"},
+			SwigFiles:    []string{"bridge.swig"},
+			SwigCXXFiles: []string{"bridge.swigcxx"},
+			SysoFiles:    []string{"bridge.syso"},
+			Imports:      []string{"fmt"}}, // stdlib import must be filtered out of edges
 		{ImportPath: "example.com/m/internal/bar", Dir: filepath.Join(modDir, "internal", "bar"), Module: mod,
 			GoFiles:     []string{"bar.go"},
 			TestGoFiles: []string{"bar_test.go"},
@@ -60,10 +80,20 @@ func TestParseGoListAndSelectEndToEnd(t *testing.T) {
 		t.Fatalf("total = %d, want 3", total)
 	}
 	wantFiles := map[string]string{
-		"main.go":                  "example.com/m",
-		"internal/foo/foo.go":      "example.com/m/internal/foo",
-		"internal/bar/bar.go":      "example.com/m/internal/bar",
-		"internal/bar/bar_test.go": "example.com/m/internal/bar",
+		"main.go":                     "example.com/m",
+		"internal/foo/foo.go":         "example.com/m/internal/foo",
+		"internal/foo/cgo.go":         "example.com/m/internal/foo",
+		"internal/foo/bridge.c":       "example.com/m/internal/foo",
+		"internal/foo/bridge.cc":      "example.com/m/internal/foo",
+		"internal/foo/bridge.m":       "example.com/m/internal/foo",
+		"internal/foo/bridge.h":       "example.com/m/internal/foo",
+		"internal/foo/bridge.f":       "example.com/m/internal/foo",
+		"internal/foo/bridge.s":       "example.com/m/internal/foo",
+		"internal/foo/bridge.swig":    "example.com/m/internal/foo",
+		"internal/foo/bridge.swigcxx": "example.com/m/internal/foo",
+		"internal/foo/bridge.syso":    "example.com/m/internal/foo",
+		"internal/bar/bar.go":         "example.com/m/internal/bar",
+		"internal/bar/bar_test.go":    "example.com/m/internal/bar",
 	}
 	if !reflect.DeepEqual(fileToPkg, wantFiles) {
 		t.Fatalf("fileToPkg = %v, want %v", fileToPkg, wantFiles)

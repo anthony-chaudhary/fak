@@ -37,6 +37,35 @@ func (c Config) ContextSizeConfig() compute.ContextSizeConfig {
 		HeadDim:    c.HeadDim,
 		RopeTheta:  c.RopeTheta,
 	}
+	var sessionState compute.MemoryPlan
+	if c.IsQwen35Hybrid() {
+		// The live Qwen35 paths never append token-indexed K/Kraw/V for a
+		// linear_attention layer. The direct path returns through linearAttnStep
+		// before the cache append; the HAL path remaps each full-attention layer
+		// onto a compact KV index. Charge exactly those compact layers plus the
+		// fixed recurrent matrix and short-convolution window.
+		//
+		// If fixed-state arithmetic cannot be proved, retain the uniform layer
+		// count. A malformed/overflowing config must stay conservatively
+		// over-reserved instead of receiving an unbacked hybrid discount.
+		if recurrentBytes, ok := recurrentGeometryBytes(c); ok {
+			fullLayers := 0
+			for l := 0; l < c.NumLayers; l++ {
+				if !c.isLinearAttnLayer(l) {
+					fullLayers++
+				}
+			}
+			kv.NumLayers = fullLayers
+			if recurrentBytes > 0 {
+				sessionState = compute.MemoryPlan{{
+					Class:  compute.MemoryKVCache,
+					Bytes:  recurrentBytes,
+					Detail: "qwen35-gdn-recurrent-conv-state",
+					DType:  compute.F32.String(),
+				}}
+			}
+		}
+	}
 	if HybridKVGroupsEnabled() {
 		// KVCacheShape already normalizes the loader's -1 full-attention sentinel to
 		// kvbudget's non-positive "no window" spelling, which is the spelling
@@ -48,7 +77,8 @@ func (c Config) ContextSizeConfig() compute.ContextSizeConfig {
 		}
 	}
 	return compute.ContextSizeConfig{
-		KV: kv,
+		KV:           kv,
+		SessionState: sessionState,
 		Scratch: compute.TransformerScratchConfig{
 			HiddenSize:       c.HiddenSize,
 			IntermediateSize: c.IntermediateSize,

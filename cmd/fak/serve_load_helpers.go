@@ -325,6 +325,29 @@ func resetOnBudgetHook(enabled bool, freshContextTokens int) gateway.ResetOnBudg
 // Qwen3.8-27B Q4_K_M campaign on an M3 Pro, not a GGUF steady-state estimate.
 const metalGGUFObservedPeakMultiplier = 3.5
 
+const (
+	streamedQ4KModeRetainedCPU = "retained-cpu-backing"
+	streamedQ4KModeFreeCPU     = "free-cpu-after-upload"
+
+	// streamedQ4KMeasuredPeakBytes is the /usr/bin/time maximum resident set from
+	// the canonical no-FAK_Q4K_FREE_CPU receipt. The 36 GiB control reached
+	// readiness but grew swap by 7,681,930,691 bytes, so it is a refusal witness,
+	// not an admission receipt.
+	streamedQ4KMeasuredPeakBytes int64 = 22754885632
+
+	// The receipt derives the fail-closed bound by adding the observed peak swap
+	// delta to the 36 GiB host and rounding up to the next whole GiB. See
+	// docs/_witnesses/issue-8971-streamed-q4k-capacity/canonical-no-free-cpu.json.
+	streamedQ4KMetalCapacityBytes int64 = 44 << 30
+
+	// streamedQ4KFreeCPUMetalCapacityBytes is the host size of the immutable #8964
+	// FAK_Q4K_FREE_CPU=1 control, not its old 18 GiB maximum-RSS sample. The exact
+	// 36 GiB M3 Pro reached native Metal readiness after 64,915,847,712 bytes of
+	// cache displacement and reduced swap in both recorded runs. This bound applies
+	// only when the operator explicitly declares release-after-upload mode.
+	streamedQ4KFreeCPUMetalCapacityBytes int64 = 36 << 30
+)
+
 func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak int64, refuse bool) {
 	if !metal || steady <= 0 || total <= 0 || !known {
 		return 0, false
@@ -337,11 +360,31 @@ func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak in
 	return peak, peak > total
 }
 
-func refuseOversubscribedMetalGGUF(path string) error {
-	// The streamed dense-Q4_K experiment replaces the all-resident startup shape this
-	// observed multiplier guards. Its acceptance run measures the new bound directly.
-	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+func streamedQ4KMetalCapacity(total int64, known, freeCPU bool) (required int64, refuse bool, mode string) {
+	mode = streamedQ4KModeRetainedCPU
+	required = streamedQ4KMetalCapacityBytes
+	if freeCPU {
+		mode = streamedQ4KModeFreeCPU
+		required = streamedQ4KFreeCPUMetalCapacityBytes
+	}
+	if total <= 0 || !known {
+		return 0, false, mode
+	}
+	return required, required > total, mode
+}
+
+func refuseStreamedQ4KMetalCapacity(total int64, known, freeCPU bool) error {
+	required, refuse, mode := streamedQ4KMetalCapacity(total, known, freeCPU)
+	if !refuse {
 		return nil
+	}
+	return fmt.Errorf("fak serve: METAL_STREAM_Q4K_PEAK_TOO_BIG: mode=%s native streamed Q4_K startup requires %d bytes (%.2f GiB), host has %d bytes (%.2f GiB); use a larger-memory Mac", mode, required, float64(required)/(1<<30), total, float64(total)/(1<<30))
+}
+
+func refuseOversubscribedMetalGGUF(path string) error {
+	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+		total, _, known := compute.HostSystemMemoryInfo()
+		return refuseStreamedQ4KMetalCapacity(total, known, os.Getenv("FAK_Q4K_FREE_CPU") == "1")
 	}
 	ws, err := ggufload.OpenWeights(path)
 	if err != nil {

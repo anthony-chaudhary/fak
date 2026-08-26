@@ -44,6 +44,8 @@ type Session struct {
 	GuardReceipt       *GuardReceipt `json:"guard_launch_receipt,omitempty"`
 	ProcessTrees       []ProcessTree `json:"process_trees,omitempty"`
 	Provider           string        `json:"provider,omitempty"`
+	Harness            string        `json:"harness,omitempty"`
+	HarnessSource      string        `json:"harness_source,omitempty"`
 	Category           string        `json:"category,omitempty"`
 	Action             string        `json:"action,omitempty"`
 	Reason             string        `json:"reason,omitempty"`
@@ -81,6 +83,8 @@ type Request struct {
 	CWD                string   `json:"cwd,omitempty"`
 	Source             string   `json:"source,omitempty"`
 	Provider           string   `json:"provider,omitempty"`
+	Harness            string   `json:"harness,omitempty"`
+	HarnessSource      string   `json:"harness_source,omitempty"`
 	Category           string   `json:"category,omitempty"`
 	Action             string   `json:"action,omitempty"`
 	Argv               []string `json:"argv"`
@@ -96,6 +100,8 @@ type Receipt struct {
 	Schema             string   `json:"schema"`
 	ThreadID           string   `json:"thread_id"`
 	Provider           string   `json:"provider,omitempty"`
+	Harness            string   `json:"harness,omitempty"`
+	HarnessSource      string   `json:"harness_source,omitempty"`
 	Category           string   `json:"category,omitempty"`
 	CWD                string   `json:"cwd"`
 	Argv               []string `json:"argv"`
@@ -160,12 +166,12 @@ func Select(report InventoryReport, opts Options) []Request {
 		if opts.CWDOverride != "" {
 			cwd = opts.CWDOverride
 		}
-		provider := normalizeProvider(row.Provider, row.Thread.Source)
+		provider, harnessSource := selectedHarness(row)
 		category := row.Category
 		if category == "" {
 			category = CategorySubstantive
 		}
-		req := Request{ThreadID: id, CWD: cwd, Source: row.Thread.Source, Provider: provider, Category: category, Action: row.Action, Status: status, Reason: reason, HostHandles: append([]string(nil), row.HostHandles...), IdentityProvenance: row.IdentityProvenance}
+		req := Request{ThreadID: id, CWD: cwd, Source: row.Thread.Source, Provider: provider, Harness: provider, HarnessSource: harnessSource, Category: category, Action: row.Action, Status: status, Reason: reason, HostHandles: append([]string(nil), row.HostHandles...), IdentityProvenance: row.IdentityProvenance}
 		if status != "candidate" {
 			// Unified cohort rows remain in the witness even when they are probes,
 			// live, waiting for a reset, or identity-blocked. Legacy Codex inventory
@@ -189,10 +195,18 @@ func Select(report InventoryReport, opts Options) []Request {
 			out = append(out, req)
 			continue
 		}
-		if provider == ProviderClaude {
+		switch provider {
+		case ProviderClaude:
 			req.Argv = claudeResumeArgv(opts.ManagerBin, id)
-		} else {
+		case ProviderCodex:
 			req.Argv = codexResumeArgv(opts.ManagerBin, opts.CodexBin, id, cwd)
+		default:
+			req.Status = "identity_blocked"
+			req.Category = CategoryIdentityBlocked
+			req.Action = ActionResolveIdentity
+			req.Reason = "harness_identity_unavailable"
+			out = append(out, req)
+			continue
 		}
 		if opts.Prompt != "" {
 			req.Argv = append(req.Argv, opts.Prompt)
@@ -278,6 +292,19 @@ func recoveryEligibility(row Session, explicit bool) (string, string) {
 	}
 }
 
+func selectedHarness(row Session) (string, string) {
+	if harness := providerName(row.Harness); harness != "" {
+		return harness, firstNonBlank(row.HarnessSource, "inventory.harness")
+	}
+	if provider := providerName(row.Provider); provider != "" {
+		return provider, "inventory.provider"
+	}
+	if inferred := normalizeProvider("", row.Thread.Source); inferred != "" {
+		return inferred, "legacy_source"
+	}
+	return "", ""
+}
+
 func normalizeProvider(provider, source string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider != "" {
@@ -286,6 +313,13 @@ func normalizeProvider(provider, source string) string {
 	if strings.Contains(strings.ToLower(source), "claude") {
 		return ProviderClaude
 	}
+	if strings.Contains(strings.ToLower(source), "codex") {
+		return ProviderCodex
+	}
+	if strings.EqualFold(strings.TrimSpace(source), "session_registration") {
+		return ""
+	}
+	// Legacy inventory rows predate explicit harness identity and are Codex-only.
 	return ProviderCodex
 }
 
@@ -327,6 +361,10 @@ func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classif
 		req.CWD = cwd
 		req.Source = "session_journal"
 		req.Provider = journalProvider(row.Session, existing)
+		req.Harness = req.Provider
+		if req.HarnessSource == "" {
+			req.HarnessSource = journalHarnessSource(row.Session, existing)
+		}
 		prepareJournalRequest(&req, hasExisting, opts)
 		merged = append(merged, req)
 		seen[row.Session.ID] = true
@@ -360,7 +398,10 @@ func MergeJournalCrashes(requests []Request, classified []sessionjournal.Classif
 }
 
 func journalProvider(row sessionjournal.Session, existing Request) string {
-	if provider := strings.ToLower(strings.TrimSpace(existing.Provider)); provider != "" {
+	if provider := providerName(existing.Harness); provider != "" {
+		return provider
+	}
+	if provider := providerName(existing.Provider); provider != "" {
 		return provider
 	}
 	if provider := providerName(row.Agent); provider != "" {
@@ -371,10 +412,22 @@ func journalProvider(row sessionjournal.Session, existing Request) string {
 			return provider
 		}
 	}
-	// guard_sessionstart historically omitted Agent while recording Claude's
-	// session UUID. Defaulting that producer to Claude is safer than translating
-	// its ID into an unrelated Codex namespace.
-	return ProviderClaude
+	return ""
+}
+
+func journalHarnessSource(row sessionjournal.Session, existing Request) string {
+	if strings.TrimSpace(existing.HarnessSource) != "" {
+		return existing.HarnessSource
+	}
+	if providerName(row.Agent) != "" {
+		return "session_journal.agent"
+	}
+	for _, arg := range row.Argv {
+		if providerName(arg) != "" {
+			return "session_journal.argv"
+		}
+	}
+	return ""
 }
 
 func providerName(value string) string {
@@ -449,7 +502,7 @@ func WriteReceipt(req Request, now time.Time) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	encErr := json.NewEncoder(f).Encode(Receipt{Schema: ReceiptSchema, ThreadID: req.ThreadID, Provider: req.Provider, Category: req.Category, HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance, CWD: req.CWD, Argv: req.Argv, RecordedAt: now.UTC().Format(time.RFC3339Nano), State: "launch_intent"})
+	encErr := json.NewEncoder(f).Encode(Receipt{Schema: ReceiptSchema, ThreadID: req.ThreadID, Provider: req.Provider, Harness: req.Harness, HarnessSource: req.HarnessSource, Category: req.Category, HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance, CWD: req.CWD, Argv: req.Argv, RecordedAt: now.UTC().Format(time.RFC3339Nano), State: "launch_intent"})
 	closeErr := f.Close()
 	if encErr != nil {
 		return false, encErr

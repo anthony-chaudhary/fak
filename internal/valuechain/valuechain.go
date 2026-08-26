@@ -36,17 +36,18 @@ type Outcome struct {
 }
 
 type Observation struct {
-	ID         string             `json:"id"`
-	TraceID    string             `json:"trace_id"`
-	SessionID  string             `json:"session_id,omitempty"`
-	PairID     string             `json:"pair_id,omitempty"`
-	StageID    string             `json:"stage_id"`
-	Arm        string             `json:"arm"`
-	Turns      int64              `json:"turns,omitempty"`
-	CostUSD    *float64           `json:"cost_usd,omitempty"`
-	CostKey    string             `json:"cost_key,omitempty"`
-	Outcomes   map[string]float64 `json:"outcomes,omitempty"`
-	Provenance string             `json:"provenance"`
+	ID                string             `json:"id"`
+	TraceID           string             `json:"trace_id"`
+	SessionID         string             `json:"session_id,omitempty"`
+	PairID            string             `json:"pair_id,omitempty"`
+	StageID           string             `json:"stage_id"`
+	Arm               string             `json:"arm"`
+	Turns             int64              `json:"turns,omitempty"`
+	CostUSD           *float64           `json:"cost_usd,omitempty"`
+	CostKey           string             `json:"cost_key,omitempty"`
+	Outcomes          map[string]float64 `json:"outcomes,omitempty"`
+	Provenance        string             `json:"provenance"`
+	InvocationOutcome string             `json:"invocation_outcome,omitempty"`
 }
 
 type Input struct {
@@ -84,13 +85,20 @@ type Comparison struct {
 	PairedTraces        int      `json:"paired_traces"`
 	CostPerTurnDeltaPct *float64 `json:"cost_per_turn_delta_pct,omitempty"`
 }
+type OutcomeCounts struct {
+	Success int `json:"success"`
+	Refusal int `json:"refusal"`
+	Error   int `json:"error"`
+}
+
 type Report struct {
-	Schema     string       `json:"schema"`
-	Name       string       `json:"name"`
-	Arms       []ArmReport  `json:"arms"`
-	Inventory  []LinkStatus `json:"inventory"`
-	Comparison *Comparison  `json:"comparison,omitempty"`
-	Warnings   []string     `json:"warnings,omitempty"`
+	Schema             string        `json:"schema"`
+	Name               string        `json:"name"`
+	Arms               []ArmReport   `json:"arms"`
+	Inventory          []LinkStatus  `json:"inventory"`
+	Comparison         *Comparison   `json:"comparison,omitempty"`
+	Warnings           []string      `json:"warnings,omitempty"`
+	InvocationOutcomes OutcomeCounts `json:"invocation_outcomes"`
 }
 
 func Read(manifestPath, observationsPath string) (Manifest, Input, error) {
@@ -168,6 +176,7 @@ func Audit(m Manifest, in Input) (Report, error) {
 	costOwners := map[string]string{}
 	paired := map[string]map[string]bool{}
 	stageCount := map[string]int{}
+	invocationOutcomes := OutcomeCounts{}
 	for _, o := range in.Observations {
 		if o.ID == "" || seenObs[o.ID] {
 			return Report{}, fmt.Errorf("duplicate or empty observation id %q", o.ID)
@@ -181,6 +190,16 @@ func Audit(m Manifest, in Input) (Report, error) {
 		}
 		if o.TraceID == "" || o.Provenance == "" {
 			return Report{}, fmt.Errorf("observation %q requires trace_id and provenance", o.ID)
+		}
+		switch o.InvocationOutcome {
+		case "", "success":
+			invocationOutcomes.Success++
+		case "refusal":
+			invocationOutcomes.Refusal++
+		case "error":
+			invocationOutcomes.Error++
+		default:
+			return Report{}, fmt.Errorf("observation %q has invalid invocation_outcome %q", o.ID, o.InvocationOutcome)
 		}
 		if o.Turns < 0 {
 			return Report{}, fmt.Errorf("observation %q has negative turns", o.ID)
@@ -241,7 +260,7 @@ func Audit(m Manifest, in Input) (Report, error) {
 			paired[o.PairID][o.Arm] = true
 		}
 	}
-	rep := Report{Schema: Schema, Name: m.Name}
+	rep := Report{Schema: Schema, Name: m.Name, InvocationOutcomes: invocationOutcomes}
 	for _, s := range m.Stages {
 		status := "ABSENT"
 		if stageCount[s.ID] > 0 {

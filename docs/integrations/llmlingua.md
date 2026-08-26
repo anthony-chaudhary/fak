@@ -1,3 +1,7 @@
+---
+title: "LLMLingua-2 compressor adapter"
+description: "The lingua Compressor is a first-class, off-by-default adapter selected with --via lingua or FAKCOMPRESSOR=lingua. Configure its model service with:"
+---
 # LLMLingua-2 compressor adapter
 
 The `lingua` Compressor is a first-class, off-by-default adapter selected with `--via lingua` or `FAK_COMPRESSOR=lingua`. Configure its model service with:

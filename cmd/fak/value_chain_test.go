@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestValueChainSupportSpine(t *testing.T) {
@@ -46,6 +48,36 @@ func TestValueChainAgenticPacketAdapter(t *testing.T) {
 	}
 }
 
+func TestValueChainUsageLedgerAndWeeklyFold(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "usage.jsonl")
+	root := repoRoot()
+	args := []string{"audit", "--manifest", filepath.Join(root, "examples", "value-chain", "support-manifest.json"), "--observations", filepath.Join(root, "examples", "value-chain", "support-observations.json"), "--ledger", ledger}
+	for range 2 {
+		var out, errOut bytes.Buffer
+		if code := runValueChain(&out, &errOut, args); code != 0 {
+			t.Fatalf("audit code=%d stderr=%s", code, errOut.String())
+		}
+	}
+	rows, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(rows, []byte("\n")); got != 2 {
+		t.Fatalf("ledger rows=%d, want 2; ledger=%s", got, rows)
+	}
+	if bytes.Contains(rows, []byte(root)) {
+		t.Fatalf("ledger leaks repository path: %s", rows)
+	}
+	var out, errOut bytes.Buffer
+	if code := runValueChain(&out, &errOut, []string{"usage", "--ledger", ledger}); code != 0 {
+		t.Fatalf("usage code=%d stderr=%s", code, errOut.String())
+	}
+	if got := out.String(); !regexp.MustCompile(`^week=\d{4}-W\d{2} invocations=2\n$`).MatchString(got) {
+		t.Fatalf("usage fold=%q", got)
+	}
+}
+
 func TestValueChainSelfcheckMatchesCapturedWitness(t *testing.T) {
 	root := repoRoot()
 	var out, errOut bytes.Buffer
@@ -79,5 +111,25 @@ func TestValueChainSelfcheckRejectsStaleWitness(t *testing.T) {
 	})
 	if code != 1 || !strings.Contains(errOut.String(), "selfcheck mismatch") {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+}
+
+func TestDispatchTickAutomaticallyRecordsValueChainUsage(t *testing.T) {
+	root := t.TempDir()
+	payload := map[string]any{"action": "would_spawn"}
+	receipt, err := recordDispatchValueChainUsage(root, payload, time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt["automatic"] != true || receipt["outcome"] != "would_spawn" {
+		t.Fatalf("receipt = %#v", receipt)
+	}
+	ledger, _ := receipt["ledger"].(string)
+	data, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"outcome":"would_spawn"`) {
+		t.Fatalf("ledger = %s", data)
 	}
 }

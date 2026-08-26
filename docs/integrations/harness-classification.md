@@ -1,3 +1,7 @@
+---
+title: "Contextual harness domain classification"
+description: "fak harness classify chooses among the initial closed domains legal, coding, and integrated without a model call or a recurring profile picker."
+---
 # Contextual harness domain classification
 
 `fak harness classify` chooses among the initial closed domains `legal`, `coding`, and `integrated` without a model call or a recurring profile picker.

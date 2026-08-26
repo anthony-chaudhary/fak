@@ -1,3 +1,7 @@
+---
+title: "Shift-left WIP control at the shared-tree ownership seam"
+description: "Date: 2026-08-13. Repo: C:\\work\\fak, branch main. Shipped: internal/wiplease (pure projection leaf + behavior tests)."
+---
 # Shift-left WIP control at the shared-tree ownership seam
 
 Date: 2026-08-13. Repo: `C:\work\fak`, branch `main`.

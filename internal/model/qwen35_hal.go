@@ -28,8 +28,12 @@ func (e *BackendForwardOperationError) Error() string {
 func (e *BackendForwardOperationError) Unwrap() error { return e.Cause }
 
 type qwen35HALState struct {
-	backend Qwen35GDNBackend
-	layers  []qwen35HALLayerState
+	backend          Qwen35GDNBackend
+	layers           []qwen35HALLayerState
+	sequenceBackend  Qwen35GDNPreprojectedSequenceBackend
+	sequenceLayers   []Qwen35GDNAuxState
+	sequenceAccepted bool
+	sequenceFailure  error
 }
 
 type qwen35HALLayerState struct {
@@ -114,26 +118,183 @@ func cloneQwen35HALState(src *qwen35HALState, backend compute.Backend) (*qwen35H
 }
 
 func (q *qwen35HALState) free(backend compute.Backend) {
-	if q == nil || backend == nil {
+	if q == nil {
 		return
 	}
-	for i := range q.layers {
-		if q.layers[i].conv.Buf() != nil {
-			backend.Free(q.layers[i].conv)
+	if backend != nil {
+		for i := range q.layers {
+			if q.layers[i].conv.Buf() != nil {
+				backend.Free(q.layers[i].conv)
+			}
+			if q.layers[i].recurrent.Buf() != nil {
+				backend.Free(q.layers[i].recurrent)
+			}
+			q.layers[i] = qwen35HALLayerState{}
 		}
-		if q.layers[i].recurrent.Buf() != nil {
-			backend.Free(q.layers[i].recurrent)
+	}
+	q.freeSequence()
+}
+
+func (q *qwen35HALState) freeSequence() {
+	if q == nil || q.sequenceBackend == nil {
+		return
+	}
+	backend := q.sequenceBackend
+	states := q.sequenceLayers
+	// Clear ownership before invoking backend cleanup so Close remains exact-once
+	// even when a backend reports a teardown error or re-enters a failure path.
+	q.sequenceBackend = nil
+	q.sequenceLayers = nil
+	for _, state := range states {
+		if state.valid() {
+			_ = backend.FreeQwen35GDNAuxState(state)
 		}
-		q.layers[i] = qwen35HALLayerState{}
 	}
 }
 
 func (s *Session) closeQwen35HALState() {
-	if s == nil || s.qwen35HAL == nil || s.Backend == nil {
+	if s == nil || s.qwen35HAL == nil {
 		return
 	}
 	s.qwen35HAL.free(s.Backend)
 	s.qwen35HAL = nil
+}
+
+// Qwen35GDNSequenceOperationError marks an admitted capability failure. Used is
+// returned true by tryQwen35GDNPreprojectedSequence even on this error, binding
+// callers to fail closed rather than replaying the sequence on the host.
+type Qwen35GDNSequenceOperationError struct {
+	Layer int
+	Stage string
+	Cause error
+}
+
+func (e *Qwen35GDNSequenceOperationError) Error() string {
+	return fmt.Sprintf("model: admitted Qwen GDN sequence failed closed at layer %d (%s): %v; auxiliary state released, no host retry", e.Layer, e.Stage, e.Cause)
+}
+
+func (e *Qwen35GDNSequenceOperationError) Unwrap() error { return e.Cause }
+
+func (s *Session) qwen35GDNSequenceGeometry() Qwen35GDNSequenceGeometry {
+	nK, nV, kHd, vHd, _, _, _ := s.M.Cfg.linearAttnDims()
+	return Qwen35GDNSequenceGeometry{
+		NumKeyHeads: nK, NumValueHeads: nV,
+		KeyHeadDim: kHd, ValueHeadDim: vHd,
+		ConvKernel: s.M.Cfg.LinearConvKernelDim,
+	}
+}
+
+// initQwen35GDNPreprojectedSequence admits and transactionally allocates one
+// distinct state pair for every linear-attention layer. It is intentionally
+// independent of Session.Backend so a fak-native Metal owner can attach to the
+// resident-Q4_K session without pretending to be a compute.Backend.
+func (s *Session) initQwen35GDNPreprojectedSequence(candidate any) (bool, error) {
+	backend, advertised, err := qwen35GDNPreprojectedSequenceBackend(candidate)
+	if err != nil || !advertised {
+		return advertised, err
+	}
+	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
+		return true, &UnsupportedGDNPreprojectedSequenceError{Path: Qwen35GDNPreprojectedSequencePath, Reason: "session is not a Qwen hybrid"}
+	}
+	if s.qwen35HAL != nil && s.qwen35HAL.sequenceBackend != nil {
+		return true, &UnsupportedGDNPreprojectedSequenceError{Path: Qwen35GDNPreprojectedSequencePath, Reason: "session already owns sequence auxiliary state"}
+	}
+	state := &qwen35HALState{sequenceBackend: backend, sequenceLayers: make([]Qwen35GDNAuxState, s.M.Cfg.NumLayers), sequenceAccepted: true}
+	seen := make(map[Qwen35GDNAuxHandle]struct{})
+	geometry := s.qwen35GDNSequenceGeometry()
+	for layer := 0; layer < s.M.Cfg.NumLayers; layer++ {
+		if !s.M.Cfg.isLinearAttnLayer(layer) {
+			continue
+		}
+		aux, allocErr := backend.NewQwen35GDNAuxState(layer, geometry)
+		if allocErr != nil || !aux.valid() {
+			if aux.present() {
+				_ = backend.FreeQwen35GDNAuxState(aux)
+			}
+			state.freeSequence()
+			if allocErr == nil {
+				allocErr = fmt.Errorf("backend returned absent or aliased auxiliary handles")
+			}
+			return true, &Qwen35GDNSequenceOperationError{Layer: layer, Stage: "allocate auxiliary state", Cause: allocErr}
+		}
+		if _, duplicate := seen[aux.Convolution]; duplicate {
+			_ = backend.FreeQwen35GDNAuxState(aux)
+			state.freeSequence()
+			return true, &Qwen35GDNSequenceOperationError{Layer: layer, Stage: "allocate auxiliary state", Cause: fmt.Errorf("backend reused convolution handle %d", aux.Convolution)}
+		}
+		if _, duplicate := seen[aux.Recurrent]; duplicate {
+			_ = backend.FreeQwen35GDNAuxState(aux)
+			state.freeSequence()
+			return true, &Qwen35GDNSequenceOperationError{Layer: layer, Stage: "allocate auxiliary state", Cause: fmt.Errorf("backend reused recurrent handle %d", aux.Recurrent)}
+		}
+		seen[aux.Convolution] = struct{}{}
+		seen[aux.Recurrent] = struct{}{}
+		state.sequenceLayers[layer] = aux
+	}
+	if s.qwen35HAL == nil {
+		s.qwen35HAL = state
+	} else {
+		s.qwen35HAL.sequenceBackend = state.sequenceBackend
+		s.qwen35HAL.sequenceLayers = state.sequenceLayers
+		s.qwen35HAL.sequenceAccepted = true
+		s.qwen35HAL.sequenceFailure = nil
+	}
+	return true, nil
+}
+
+func (s *Session) failQwen35GDNSequence(layer int, stage string, cause error) error {
+	if cause == nil {
+		cause = fmt.Errorf("unknown sequence operation failure")
+	}
+	err := &Qwen35GDNSequenceOperationError{Layer: layer, Stage: stage, Cause: cause}
+	if s != nil && s.qwen35HAL != nil {
+		s.qwen35HAL.freeSequence()
+		s.qwen35HAL.sequenceAccepted = true
+		s.qwen35HAL.sequenceFailure = err
+	}
+	return err
+}
+
+// tryQwen35GDNPreprojectedSequence invokes the admitted whole-operation seam.
+// Once state exists, accepted is always true, including validation, submit, and
+// result failures; this is the no-post-submit-fallback bit callers must honor.
+func (s *Session) tryQwen35GDNPreprojectedSequence(req Qwen35GDNPreprojectedSequenceRequest) (Qwen35GDNPreprojectedSequenceResult, bool, error) {
+	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted {
+		return Qwen35GDNPreprojectedSequenceResult{}, false, nil
+	}
+	if s.qwen35HAL.sequenceFailure != nil {
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.qwen35HAL.sequenceFailure
+	}
+	if s.qwen35HAL.sequenceBackend == nil {
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.failQwen35GDNSequence(req.Layer, "validate state", fmt.Errorf("admitted backend is missing"))
+	}
+	if req.Layer < 0 || req.Layer >= len(s.qwen35HAL.sequenceLayers) || !s.M.Cfg.isLinearAttnLayer(req.Layer) {
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.failQwen35GDNSequence(req.Layer, "validate request", fmt.Errorf("unsupported linear-attention layer"))
+	}
+	if req.Tokens < 1 {
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.failQwen35GDNSequence(req.Layer, "validate request", fmt.Errorf("token count must be positive"))
+	}
+	state := s.qwen35HAL.sequenceLayers[req.Layer]
+	if !state.valid() {
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.failQwen35GDNSequence(req.Layer, "validate state", fmt.Errorf("missing auxiliary state"))
+	}
+	req.State = state
+	req.Geometry = s.qwen35GDNSequenceGeometry()
+	result, err := s.qwen35HAL.sequenceBackend.Qwen35GDNPreprojectedSequence(req)
+	if err != nil {
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.failQwen35GDNSequence(req.Layer, "Qwen35GDNPreprojectedSequence", err)
+	}
+	if result.State != state {
+		if result.State.present() {
+			_ = s.qwen35HAL.sequenceBackend.FreeQwen35GDNAuxState(result.State)
+		}
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.failQwen35GDNSequence(req.Layer, "state identity", fmt.Errorf("backend replaced persistent in-place state"))
+	}
+	wantCore := req.Tokens * req.Geometry.NumValueHeads * req.Geometry.ValueHeadDim
+	if req.Geometry.NumValueHeads <= 0 || req.Geometry.ValueHeadDim <= 0 || wantCore/req.Tokens/req.Geometry.NumValueHeads != req.Geometry.ValueHeadDim || len(result.Core) != wantCore {
+		return Qwen35GDNPreprojectedSequenceResult{}, true, s.failQwen35GDNSequence(req.Layer, "result shape", fmt.Errorf("core elements=%d, want %d", len(result.Core), wantCore))
+	}
+	return result, true, nil
 }
 
 func (s *Session) failBackendForward(layer int, stage string, cause error) {

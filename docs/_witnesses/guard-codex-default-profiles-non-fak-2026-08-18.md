@@ -1,3 +1,7 @@
+---
+title: "Guarded Codex default profiles in a non-FAK repository — 2026-08-18"
+description: "Verdict: guarded Codex now receives Caveman medium and Ponytail medium by default through Codex's -c developerinstructions=... configuration seam."
+---
 # Guarded Codex default profiles in a non-FAK repository — 2026-08-18
 
 **Verdict:** guarded Codex now receives Caveman medium and Ponytail medium by default through Codex's -c developer_instructions=... configuration seam.

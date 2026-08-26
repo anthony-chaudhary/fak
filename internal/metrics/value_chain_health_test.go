@@ -22,6 +22,7 @@ func TestValueChainHealthCapturedRealData(t *testing.T) {
 
 	got := RenderValueChainHealth(ScoreValueChainHealth(report))
 	const want = "Vertical value-chain health: A\n" +
+		"- invocation_outcomes: success=4 refusal=0 error=0\n" +
 		"- adoption: candidate=shared sessions=2 turns=10\n" +
 		"- failure_rate: uncovered_candidate_turns=0.00%\n" +
 		"- drift: paired_cost_per_turn_delta=-40.00%\n"

@@ -163,6 +163,73 @@ func TestPrefillQwen35HybridQ4KNoLogitsMatchesState(t *testing.T) {
 	assertLinearAttnCacheQuantClose(t, "hybrid q4k no-logits prefill", want.Cache.linear, got.Cache.linear)
 }
 
+// TestPrefillQwen35HybridQ4KAppendMatchesMonolithic is the append witness for
+// bounded Qwen prefill. The second and third chunks start at nonzero positions;
+// both are shorter than the fresh-panel threshold, so their execution markers
+// prove they did not silently fall through to the token-at-a-time path.
+func TestPrefillQwen35HybridQ4KAppendMatchesMonolithic(t *testing.T) {
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+	cfg := qwen35HybridQ4KTestCfg()
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajority(t, m, cfg)
+	prompt := []int{
+		3, 7, 11, 5, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61,
+		67, 71, 73, 79, 83, 89, 97,
+		101, 103, 107, 109, 113, 127, 131, 137, 139,
+	}
+
+	monolithic := m.NewSession()
+	monolithic.Q4K = true
+	wantLogits := monolithic.Prefill(prompt)
+	assertQ4KHybridPrefillMarker(t, monolithic, 1, 0)
+
+	chunked := m.NewSession()
+	chunked.Q4K = true
+	chunked.PrefillNoLogits(prompt[:16])
+	assertQ4KHybridPrefillMarker(t, chunked, 1, 0)
+	chunked.PrefillNoLogits(prompt[16:23])
+	assertQ4KHybridPrefillMarker(t, chunked, 2, 16)
+	gotLogits := chunked.Prefill(prompt[23:])
+	assertQ4KHybridPrefillMarker(t, chunked, 3, 23)
+
+	assertQuantLogitsClose(t, "hybrid q4k append logits", wantLogits, gotLogits)
+	if got, want := argmax(gotLogits), argmax(wantLogits); got != want {
+		t.Fatalf("hybrid q4k append greedy token = %d, want %d", got, want)
+	}
+	assertKVCacheQuantCloseTol(t, "hybrid q4k append", monolithic.Cache, chunked.Cache, prefillQ4KKTol(), prefillQ4KVTol())
+	assertLinearAttnCacheQuantClose(t, "hybrid q4k append", monolithic.Cache.linear, chunked.Cache.linear)
+	if got, want := chunked.Cache.Len(), len(prompt); got != want {
+		t.Fatalf("chunked cache len = %d, want %d", got, want)
+	}
+	for pos, got := range chunked.Cache.pos {
+		if got != pos {
+			t.Fatalf("chunked cache position[%d] = %d, want %d", pos, got, pos)
+		}
+	}
+
+	unsupportedCfg := cfg
+	unsupportedCfg.AttnOutputGate = false
+	unsupported := NewSynthetic(unsupportedCfg).NewSession()
+	unsupported.Q4K = true
+	before := unsupported.Cache.Clone()
+	if logits, used := unsupported.tryPrefillQwen35HybridQ4K(prompt[:16], true); used || logits != nil {
+		t.Fatalf("unsupported resident geometry = (used=%v, logits=%d), want fail-closed decline", used, len(logits))
+	}
+	assertQ4KHybridPrefillMarker(t, unsupported, 0, 0)
+	assertKVCacheQuantClose(t, "unsupported geometry decline", before, unsupported.Cache)
+	assertLinearAttnCacheQuantClose(t, "unsupported geometry decline", before.linear, unsupported.Cache.linear)
+}
+
+func assertQ4KHybridPrefillMarker(t *testing.T, s *Session, chunks, base int) {
+	t.Helper()
+	if s.q4kHybridPrefillChunks != chunks || s.q4kHybridPrefillLastBase != base {
+		t.Fatalf("resident q4k hybrid marker = (chunks=%d, base=%d), want (%d, %d)",
+			s.q4kHybridPrefillChunks, s.q4kHybridPrefillLastBase, chunks, base)
+	}
+}
+
 // TestPrefillQwen35HybridQ4KDeterministic confirms the batched Q4_K hybrid prefill is
 // reproducible: identical prompt → bit-identical logits + recurrent state across runs. This
 // catches a non-deterministic parallel-reduction bug (e.g. a per-worker accumulator escaping

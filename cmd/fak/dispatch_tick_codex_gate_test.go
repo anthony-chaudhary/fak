@@ -14,7 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
 )
 
-func TestDispatchTickLiveCodexAllowsGuardedSubscriptionChildFromUnguardedParent(t *testing.T) {
+func TestDispatchCommandExecutedLiveCodexAllowsGuardedSubscriptionChildFromUnguardedParent(t *testing.T) {
 	root, threadID := dispatchCodexGateFixture(t, false)
 	t.Setenv("FLEET_DOGFOOD_GUARD_BASEURL", "")
 
@@ -32,6 +32,9 @@ func TestDispatchTickLiveCodexAllowsGuardedSubscriptionChildFromUnguardedParent(
 
 	if got["action"] != "spawned" || got["verdict"] != "SPAWNED" || got["ok"] != true {
 		t.Fatalf("dispatch result = action %v verdict %v ok %v, want spawned/SPAWNED/true", got["action"], got["verdict"], got["ok"])
+	}
+	if got["command_executed"] != true {
+		t.Fatalf("spawned dispatch command_executed = %#v, want true", got["command_executed"])
 	}
 	gate := mapAt(got, "codex_loop_gate")
 	parent := mapAt(gate, "parent")
@@ -76,6 +79,9 @@ func TestDispatchTickCodexLoopGateEnvironmentOptInRefuses(t *testing.T) {
 	got, spawned, _ := runDispatchCodexGateTickModeArgs(t, root, true)
 	if spawned || got["action"] != "codex_loop_gate_refused" || got["verdict"] != "CODEX_LOOP_GATE_REFUSED" {
 		t.Fatalf("environment-opted-in loop gate did not refuse: spawned=%v receipt=%#v", spawned, got)
+	}
+	if got["command_executed"] != false {
+		t.Fatalf("refused dispatch command_executed = %#v, want false", got["command_executed"])
 	}
 	gate := mapAt(got, "codex_loop_gate")
 	if gate["evaluated"] != true || dispatchMapString(gate, "fail_on") != "loop" || dispatchMapString(gate, "verdict") != "LOOP" {

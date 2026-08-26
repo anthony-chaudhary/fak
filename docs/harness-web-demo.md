@@ -1,3 +1,7 @@
+---
+title: "Local native harness web UI"
+description: "harnesswebdemo is the local operator home over fak's public pkg/harnesskit contract. Its first screen shows current agent/session totals, recent runs,"
+---
 # Local native harness web UI
 
 `harnesswebdemo` is the local operator home over fak's public `pkg/harnesskit` contract. Its first screen shows current agent/session totals, recent runs, the canonical goal registry, and direct links to the Web gateway, health, sessions, loops, fleet, tasks, metrics, and diagnostics. The run composer follows that operational overview instead of replacing it.

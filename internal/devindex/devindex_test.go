@@ -3,6 +3,7 @@ package devindex
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -527,4 +528,80 @@ func leafContains(ls []Leaf, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestLoadComposesCuratedFrontDoorsWithProvenance(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[lanes.trees]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"INDEX.md":  "- [Index owner](docs/owner.md) — canonical blurb\n",
+		"llms.txt":  "- [LLM owner](docs/llm.md) — llm blurb\n- [Duplicate](docs/owner.md)\n",
+		"README.md": "- [Runtime guide](docs/runtime.md) — runtime blurb\n",
+		"AGENTS.md": "- [Agent guide](docs/agent.md) — agent blurb\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSources := map[string][]string{
+		"docs/owner.md": {"INDEX.md", "llms.txt"}, "docs/llm.md": {"llms.txt"},
+		"docs/runtime.md": {"README.md"}, "docs/agent.md": {"AGENTS.md"},
+	}
+	if len(c.Docs) != len(wantSources) {
+		t.Fatalf("docs=%+v", c.Docs)
+	}
+	for _, d := range c.Docs {
+		want, ok := wantSources[d.Path]
+		if !ok {
+			t.Errorf("unexpected doc %+v", d)
+			continue
+		}
+		if !reflect.DeepEqual(d.Sources, want) {
+			t.Errorf("%s sources=%v want %v", d.Path, d.Sources, want)
+		}
+	}
+}
+
+func TestLoadIndexesInlineFrontDoorLinks(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "dos.toml"), []byte("[lanes.trees]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := "Native execution: [`fak-native`](docs/native-inference-goal.md) is the product path.\n"
+	if err := os.WriteFile(filepath.Join(root, "llms.txt"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits := c.SearchDocs("native inference product")
+	if len(hits) == 0 || hits[0].Path != "docs/native-inference-goal.md" {
+		t.Fatalf("hits=%+v", hits)
+	}
+	if !reflect.DeepEqual(hits[0].Sources, []string{"llms.txt"}) {
+		t.Fatalf("sources=%v", hits[0].Sources)
+	}
+}
+
+func TestSearchDocsCanonicalMultiTermTieBreakerPreservesSingleTermWeights(t *testing.T) {
+	c := &Catalog{Docs: []Doc{
+		{Title: "Shared validation incident", Path: "docs/notes/SHARED-INCIDENT.md", Blurb: "shared tree validation"},
+		{Title: "Developer tooling", Path: "docs/dev-tooling.md", Blurb: "shared tree validation", Sources: []string{"INDEX.md", "AGENTS.md"}},
+	}}
+	multi := c.SearchDocs("shared tree validation")
+	if len(multi) != 2 || multi[0].Path != "docs/dev-tooling.md" {
+		t.Fatalf("multi=%+v", multi)
+	}
+	single := c.SearchDocs("shared")
+	if len(single) != 2 || single[0].Path != "docs/notes/SHARED-INCIDENT.md" {
+		t.Fatalf("single=%+v", single)
+	}
 }

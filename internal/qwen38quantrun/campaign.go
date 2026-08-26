@@ -38,7 +38,10 @@ type Lifecycle interface {
 }
 
 type CampaignConfig struct {
-	Endpoint          Config
+	Endpoint Config
+	// ExecutionEngine identifies the runtime that executed model math for evidence
+	// promotion. It is not the HTTP endpoint, planner, transport, or hardware backend.
+	ExecutionEngine   string
 	Arm               string
 	Expected          qwen38quant.Identity
 	Command           []string
@@ -66,6 +69,9 @@ type Campaign struct {
 }
 
 func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen38quant.Corpus) (campaign Campaign, err error) {
+	if cfg.ExecutionEngine != qwen38quant.EngineFakNative && cfg.ExecutionEngine != qwen38quant.EngineLlamaCpp {
+		return Campaign{}, fmt.Errorf("execution engine %q is unknown", cfg.ExecutionEngine)
+	}
 	if cfg.Probe == nil || cfg.Lifecycle == nil {
 		return Campaign{}, errors.New("probe and lifecycle are required")
 	}
@@ -154,8 +160,11 @@ func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen
 			verdict = "HOLD"
 		}
 	}
+	if cfg.ExecutionEngine == qwen38quant.EngineLlamaCpp {
+		verdict = "HOLD"
+	}
 	report := qwen38quant.Report{
-		Schema: qwen38quant.Schema, CorpusID: corpus.ID, CorpusSHA256: qwen38quant.CorpusDigest(corpus), Arm: cfg.Arm,
+		Schema: qwen38quant.Schema, ExecutionEngine: cfg.ExecutionEngine, CorpusID: corpus.ID, CorpusSHA256: qwen38quant.CorpusDigest(corpus), Arm: cfg.Arm,
 		Identity:    before.Identity,
 		Environment: qwen38quant.Environment{Command: append([]string(nil), cfg.Command...), Hardware: before.Hardware, Software: before.Software, ContextTokens: before.ContextTokens, CacheMode: before.CacheMode, RequireDevice: cfg.RequireDevice, DenyFallback: true},
 		Trials:      trials, Verdict: verdict, EvidenceClass: "CAMPAIGN", RawArchiveSHA256: hex.EncodeToString(sum[:]), StaleAfter: cfg.StaleAfter, RollbackThreshold: cfg.RollbackThreshold,

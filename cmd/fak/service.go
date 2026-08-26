@@ -20,21 +20,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/serviceledger"
 	"github.com/anthony-chaudhary/fak/internal/servicespec"
+	"github.com/anthony-chaudhary/fak/internal/servicewatchdog"
 	"github.com/anthony-chaudhary/fak/internal/systemservice"
 )
 
 type serviceResult struct {
-	Manager    string `json:"manager"`
-	Unit       string `json:"unit"`
-	Path       string `json:"path,omitempty"`
-	Active     bool   `json:"active,omitempty"`
-	Executable string `json:"executable,omitempty"`
-	PIDBefore  uint32 `json:"pid_before,omitempty"`
-	PIDAfter   uint32 `json:"pid_after,omitempty"`
-	StateKept  bool   `json:"state_kept,omitempty"`
+	Manager    string                        `json:"manager"`
+	Unit       string                        `json:"unit"`
+	Path       string                        `json:"path,omitempty"`
+	Active     bool                          `json:"active,omitempty"`
+	Executable string                        `json:"executable,omitempty"`
+	PIDBefore  uint32                        `json:"pid_before,omitempty"`
+	PIDAfter   uint32                        `json:"pid_after,omitempty"`
+	StateKept  bool                          `json:"state_kept,omitempty"`
+	Systemd    *servicewatchdog.SystemdState `json:"systemd,omitempty"`
 }
 
 var serviceCommand = exec.Command
+var serviceCommandOutput = exec.Command
 var serviceTick = func(stdout, stderr io.Writer) int {
 	return runResumeWatchdog(stdout, stderr, []string{"--live", "--json"})
 }
@@ -48,6 +51,18 @@ func defaultRootedPath(flagValue *string, segments ...string) {
 		return
 	}
 	*flagValue = filepath.Join(append([]string{string(filepath.Separator)}, segments...)...)
+}
+
+type systemctlBoundary struct{ stdout, stderr io.Writer }
+
+func (b systemctlBoundary) Run(args ...string) error {
+	c := serviceCommand("systemctl", args...)
+	c.Stdout = b.stdout
+	c.Stderr = b.stderr
+	return c.Run()
+}
+func (b systemctlBoundary) Output(args ...string) ([]byte, error) {
+	return serviceCommandOutput("systemctl", args...).Output()
 }
 
 func cmdService(args []string) { os.Exit(runService(os.Stdout, os.Stderr, args)) }
@@ -92,6 +107,7 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	}
 	var manager, name, path, definition, stagedExecutable string
 	var install, status, uninstall func() error
+	var systemdStatus func() (servicewatchdog.SystemdState, error)
 	switch runtime.GOOS {
 	case "windows":
 		result, rc := windowsServiceAction(action, stdout, stderr, *dry)
@@ -110,20 +126,12 @@ func runService(stdout, stderr io.Writer, args []string) int {
 		stagedExecutable = *execPath
 		path = filepath.Join(*unitDir, name)
 		definition, err = systemservice.RenderSystemdSystemUnit(systemservice.SystemdConfig{Executable: stagedExecutable, StateDir: *stateDir})
-		cmd := func(argv ...string) error {
-			c := serviceCommand("systemctl", argv...)
-			c.Stdout = stdout
-			c.Stderr = stderr
-			return c.Run()
-		}
-		install = func() error {
-			if e := cmd("daemon-reload"); e != nil {
-				return e
-			}
-			return cmd("enable", "--now", name)
-		}
-		status = func() error { return cmd("is-active", name) }
-		uninstall = func() error { _ = cmd("disable", "--now", name); return cmd("daemon-reload") }
+		boundary := systemctlBoundary{stdout: stdout, stderr: stderr}
+		manager := servicewatchdog.Manager{Command: boundary, Unit: name}
+		install = manager.Install
+		systemdStatus = manager.Status
+		uninstall = manager.Remove
+		status = func() error { _, e := manager.Status(); return e }
 	case "darwin":
 		manager = "launchd-system"
 		name = systemservice.LaunchdLabel
@@ -208,14 +216,41 @@ func runService(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 	case "status":
-		if status() == nil {
+		if systemdStatus != nil {
+			s, e := systemdStatus()
+			if e != nil {
+				return 3
+			}
+			result.Systemd = &s
+			result.Active = s.ActiveState == "active"
+		} else if status() == nil {
 			result.Active = true
 		} else {
 			return 3
 		}
-	case "uninstall":
-		_ = uninstall()
+	case "uninstall", "remove":
+		if e := uninstall(); e != nil {
+			return 1
+		}
 		if e := os.Remove(path); e != nil && !os.IsNotExist(e) {
+			return 1
+		}
+	case "start", "stop", "restart":
+		if runtime.GOOS != "linux" {
+			serviceUsage(stderr)
+			return 2
+		}
+		manager := servicewatchdog.Manager{Command: systemctlBoundary{stdout: stdout, stderr: stderr}, Unit: name}
+		var e error
+		switch action {
+		case "start":
+			e = manager.Start()
+		case "stop":
+			e = manager.Stop()
+		case "restart":
+			e = manager.Restart()
+		}
+		if e != nil {
 			return 1
 		}
 	default:
@@ -230,9 +265,23 @@ func runService(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 func runServiceLoopContext(ctx context.Context, stdout, stderr io.Writer, interval time.Duration) int {
+	notify, err := servicewatchdog.NewNotifierFromEnv(os.Getenv("FAK_SERVICE_NOTIFY") == "systemd")
+	if err != nil {
+		fmt.Fprintln(stderr, "fak service run:", err)
+		return 1
+	}
+	if err := notify.Ready(); err != nil {
+		fmt.Fprintln(stderr, "fak service run: ready:", err)
+		return 1
+	}
+	defer func() { _ = notify.Stopping() }()
 	for {
 		if rc := serviceTick(stdout, stderr); rc != 0 {
 			return rc
+		}
+		if err := notify.Progress(); err != nil {
+			fmt.Fprintln(stderr, "fak service run: watchdog:", err)
+			return 1
 		}
 		timer := time.NewTimer(interval)
 		select {
@@ -259,7 +308,7 @@ func runServiceLoop(stdout, stderr io.Writer, args []string) int {
 	return runServiceLoopContext(ctx, stdout, stderr, *interval)
 }
 func serviceUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak service install|status|uninstall|run [--dry-run] [--json]")
+	fmt.Fprintln(w, "usage: fak service install|remove|start|stop|restart|status|run [--dry-run] [--json]")
 	fmt.Fprintln(w, "       fak service events [--json] [--ledger-dir D] [--service S]")
 	fmt.Fprintln(w, "       fak service events --ingest windows-xml|journald-json|launchd-ndjson --file F --node N --service S [--workload W] [--unit U] [--json]")
 	fmt.Fprintln(w, "       fak service status --ledger-dir D [--json]    (observed-event rollup; also picked when FAK_SERVICE_LEDGER_DIR is set)")

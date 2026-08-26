@@ -1,3 +1,7 @@
+---
+title: "Launch a new guarded session from text"
+description: "fak session new turns one explicit piece of text into a separate interactive agent terminal. The child always starts behind fak guard;"
+---
 # Launch a new guarded session from text
 
 `fak session new` turns one explicit piece of text into a separate interactive agent

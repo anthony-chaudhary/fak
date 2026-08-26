@@ -1,3 +1,7 @@
+---
+title: "context-ctx names"
+description: "This map positions the current context-ctx coverage backlog. Each entry names the exact repository symbol;"
+---
 # context-ctx names
 
 This map positions the current `context-ctx` coverage backlog. Each entry names the exact repository symbol; the family label remains the broader domain and is not a substitute for the symbol.

@@ -53,18 +53,46 @@ func TestCampaignBuildsValidatorCleanReportAndArchive(t *testing.T) {
 	id := qwen38quant.Identity{Model: "Qwen3.8-27B", CheckpointSHA256: hash64('a'), ArtifactSHA256: hash64('b'), TokenizerSHA256: hash64('c'), TemplateSHA256: hash64('d'), QuantizerRevision: "quant-r1", RuntimeRevision: "runtime-r1", FakModuleRev: "internal/gateway r1+gabcdef0"}
 	observation := Observation{Identity: id, Hardware: "A100 40GB", Software: "fak runtime-r1", Device: "NVIDIA A100-SXM4-40GB", ContextTokens: 16384, CacheMode: "prefix", Resident: true, MemoryBytes: 20 << 30, PowerWatts: 211}
 	probe, lifecycle := &staticProbe{observation: observation}, &lifecycleSpy{}
-	got, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, Arm: "q4_k_m", Expected: id, Command: []string{"fak", "serve"}, RequireDevice: "A100", StaleAfter: "2026-09-20", RollbackThreshold: "quality pass rate below 100%", Probe: probe, Lifecycle: lifecycle}, corpus)
+	got, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, ExecutionEngine: qwen38quant.EngineFakNative, Arm: "q4_k_m", Expected: id, Command: []string{"fak", "serve"}, RequireDevice: "A100", StaleAfter: "2026-09-20", RollbackThreshold: "quality pass rate below 100%", Probe: probe, Lifecycle: lifecycle}, corpus)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := qwen38quant.Validate(got.Report, corpus); err != nil {
 		t.Fatal(err)
 	}
-	if got.Report.Verdict != "PROMOTE" || len(got.Archive) == 0 || probe.calls != 20 || lifecycle.restarts != 1 || lifecycle.ready != 1 || lifecycle.cleanup != 1 {
+	if got.Report.ExecutionEngine != qwen38quant.EngineFakNative || got.Report.Verdict != "PROMOTE" || len(got.Archive) == 0 || probe.calls != 20 || lifecycle.restarts != 1 || lifecycle.ready != 1 || lifecycle.cleanup != 1 {
 		t.Fatalf("unexpected campaign: %#v probe=%d lifecycle=%+v", got.Report, probe.calls, lifecycle)
 	}
 	if contains(string(got.Archive), "secret") {
 		t.Fatal("archive leaked API key")
+	}
+
+	calls = 0
+	comparisonProbe, comparisonLifecycle := &staticProbe{observation: observation}, &lifecycleSpy{}
+	comparison, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, ExecutionEngine: qwen38quant.EngineLlamaCpp, Arm: "q4_k_m", Expected: id, Command: []string{"llama-server", "--model", "exact.gguf"}, RequireDevice: "A100", StaleAfter: "2026-09-20", RollbackThreshold: "quality pass rate below 100%", Probe: comparisonProbe, Lifecycle: comparisonLifecycle}, corpus)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Report.ExecutionEngine != qwen38quant.EngineLlamaCpp || comparison.Report.Verdict != "HOLD" {
+		t.Fatalf("comparison engine/verdict = %q/%q, want llama.cpp/HOLD", comparison.Report.ExecutionEngine, comparison.Report.Verdict)
+	}
+	if err := qwen38quant.Validate(comparison.Report, corpus); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCampaignRejectsMissingOrUnknownEngineBeforeRequests(t *testing.T) {
+	for _, engine := range []string{"", "vllm"} {
+		t.Run(engine, func(t *testing.T) {
+			probe, lifecycle := &staticProbe{}, &lifecycleSpy{}
+			_, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{ExecutionEngine: engine, Probe: probe, Lifecycle: lifecycle}, qwen38quant.DefaultCorpus())
+			if err == nil || !contains(err.Error(), "execution engine") {
+				t.Fatalf("err=%v", err)
+			}
+			if probe.calls != 0 || lifecycle.cleanup != 0 {
+				t.Fatalf("invalid engine touched runtime: probe=%d cleanup=%d", probe.calls, lifecycle.cleanup)
+			}
+		})
 	}
 }
 
@@ -72,7 +100,7 @@ func TestCampaignDeniesFallbackBeforeRequests(t *testing.T) {
 	corpus := qwen38quant.DefaultCorpus()
 	id := qwen38quant.Identity{Model: "x"}
 	probe := &staticProbe{observation: Observation{Identity: id, Hardware: "h", Software: "s", Device: "A100", ContextTokens: 1, CacheMode: "none", Resident: true, FallbackActive: true}}
-	_, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: "http://invalid", APIKey: "secret", Model: "x"}, Arm: "q4_k_m", Expected: id, Command: []string{"x"}, RequireDevice: "A100", Probe: probe, Lifecycle: &lifecycleSpy{}}, corpus)
+	_, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: "http://invalid", APIKey: "secret", Model: "x"}, ExecutionEngine: qwen38quant.EngineFakNative, Arm: "q4_k_m", Expected: id, Command: []string{"x"}, RequireDevice: "A100", Probe: probe, Lifecycle: &lifecycleSpy{}}, corpus)
 	if err == nil || !contains(err.Error(), "fallback") {
 		t.Fatalf("err=%v", err)
 	}
@@ -90,7 +118,7 @@ func TestCampaignCleansUpAfterPreflightFailure(t *testing.T) {
 	id := qwen38quant.Identity{Model: "x"}
 	probe := &staticProbe{observation: Observation{Identity: id, Hardware: "h", Software: "s", Device: "A100", ContextTokens: 1, CacheMode: "none", Resident: true, FallbackActive: true}}
 	lifecycle := &lifecycleSpy{}
-	_, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: "http://invalid", Model: "x"}, Arm: "q4_k_m", Expected: id, Command: []string{"x"}, RequireDevice: "A100", Probe: probe, Lifecycle: lifecycle}, corpus)
+	_, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: "http://invalid", Model: "x"}, ExecutionEngine: qwen38quant.EngineFakNative, Arm: "q4_k_m", Expected: id, Command: []string{"x"}, RequireDevice: "A100", Probe: probe, Lifecycle: lifecycle}, corpus)
 	if err == nil || lifecycle.cleanup != 1 {
 		t.Fatalf("err=%v cleanup=%d", err, lifecycle.cleanup)
 	}

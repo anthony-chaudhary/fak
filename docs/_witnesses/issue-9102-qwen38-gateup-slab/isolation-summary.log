@@ -1,0 +1,13 @@
+source=run-20260826T145606Z scrubbed=true
+global_gpu_lease=held_during_control
+global_gpu_probe="lease is held by another process"
+original_service=com.fak.qwen36-model
+original_service_command_sha256=a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d
+original_service=booted_out_before_control
+watcher_stopped=1 matched_terms=0 unmatched_signals=0 reused_pid_signals=0
+control_server=exact_stopped
+watcher=exact_stopped
+global_gpu_holder=exact_stopped
+restored_model=qwen3.6-27b
+restored_stable_seconds=90
+stale_helper_samples=30

@@ -1,3 +1,7 @@
+---
+title: "guard-gate names"
+description: "This map positions the current guard-gate coverage backlog. Each entry names the exact repository symbol;"
+---
 # guard-gate names
 
 This map positions the current `guard-gate` coverage backlog. Each entry names the exact repository symbol; the family label remains the broader domain and is not a substitute for the symbol.

@@ -55,6 +55,22 @@ func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 	return q8Qwen35HybridPrefillOK(cfg, promptLen)
 }
 
+// q4kQwen35HybridPrefillAtPositionOK preserves the established fresh-prefill
+// amortization threshold while admitting a smaller continuation chunk. Once a
+// session already owns prefix state, forcing a sub-threshold tail through decode
+// would abandon the resident panel path exactly where bounded chunking needs it.
+// Reusing the original gate at its threshold preserves every architecture and
+// diagnostic escape-hatch check before any cache or recurrent state is touched.
+func q4kQwen35HybridPrefillAtPositionOK(cfg Config, promptLen, base int) bool {
+	if promptLen <= 0 || base < 0 {
+		return false
+	}
+	if base == 0 {
+		return q4kQwen35HybridPrefillOK(cfg, promptLen)
+	}
+	return q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt)
+}
+
 // hybridQ4KProj is the per-weight projection dispatch shared by every GEMM in the batched
 // resident-Q4_K hybrid prefill: q4kw-resident -> q4kGemm on the raw f32 activation Xf;
 // otherwise -> q8GemmDispatch on the pre-quantized Q8 panel Xq (CPU qGemm8 by default,
@@ -67,12 +83,112 @@ type hybridQ4KProj func(name string, Xf []float32, Xq *q8Panel) []float32
 // identical to calling proj per name — just fewer Metal command buffers (the prefill-wall lever).
 type hybridQ4KGroup func(names []string, Xf []float32, Xq *q8Panel) [][]float32
 
-func (s *Session) prefillQwen35HybridQ4K(ids []int) []float32 {
-	return s.headResident(s.prefillQwen35HybridQ4KHidden(ids))
+// Qwen35MetalGDNSequenceForwardPath names the resident-state candidate. It is
+// reported only after the native operation ran and its final state was handed
+// to the historical decode path.
+const Qwen35MetalGDNSequenceForwardPath = "metal/qwen35-gdn-preprojected-sequence-v1"
+
+// The Darwin implementation installs this factory at package initialization.
+// The model-only type keeps pure-Go builds free of Darwin/cgo GDNState symbols.
+var newQwen35MetalGDNSequenceBackend func() Qwen35GDNPreprojectedSequenceBackend
+
+type qwen35GDNSequenceSnapshotter interface {
+	SnapshotQwen35GDNAuxState(Qwen35GDNAuxState) (conv, recurrent []float32, err error)
 }
 
-func (s *Session) prefillQwen35HybridQ4KNoLogits(ids []int) {
-	_ = s.prefillQwen35HybridQ4KHidden(ids)
+// EnableQwen35MetalGDNPreprojectedSequence admits the opt-in owner before any
+// prompt state is mutated. Unsupported builds and non-fresh sessions refuse
+// explicitly instead of changing the requested path to host recurrence.
+func (s *Session) EnableQwen35MetalGDNPreprojectedSequence() error {
+	path := Qwen35MetalGDNSequenceForwardPath
+	if s == nil || s.M == nil || !s.M.Cfg.IsQwen35Hybrid() {
+		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "session is not a Qwen hybrid"}
+	}
+	if s.Backend != nil || !s.Q4K || !s.MetalQ4K {
+		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "requires backend-nil resident-Q4_K Metal session"}
+	}
+	if s.Cache == nil || s.Cache.Len() != 0 {
+		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "requires a fresh session before prompt-state mutation"}
+	}
+	if newQwen35MetalGDNSequenceBackend == nil {
+		return &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "native Metal GDN sequence is unavailable in this build"}
+	}
+	accepted, err := s.initQwen35GDNPreprojectedSequence(newQwen35MetalGDNSequenceBackend())
+	if !accepted && err == nil {
+		err = &UnsupportedGDNPreprojectedSequenceError{Path: path, Reason: "native capability did not advertise the canonical sequence contract"}
+	}
+	return err
+}
+
+// FinalizeQwen35MetalGDNPreprojectedSequence performs the one explicit state
+// transfer required by the still-host-owned decode path. All layers are
+// snapshotted and validated before any historical cache row is changed.
+func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
+	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted {
+		return false, nil
+	}
+	q := s.qwen35HAL
+	if q.sequenceFailure != nil {
+		return true, q.sequenceFailure
+	}
+	snapshotter, ok := q.sequenceBackend.(qwen35GDNSequenceSnapshotter)
+	if !ok {
+		return true, s.failQwen35GDNSequence(-1, "final state synchronization", fmt.Errorf("admitted backend cannot snapshot auxiliary state"))
+	}
+	cfg := s.M.Cfg
+	_, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
+	convElems := (cfg.LinearConvKernelDim - 1) * convDim
+	recurrentElems := nV * kHd * vHd
+	type layerSnapshot struct {
+		layer           int
+		conv, recurrent []float32
+	}
+	snapshots := make([]layerSnapshot, 0, len(q.sequenceLayers))
+	for layer, state := range q.sequenceLayers {
+		if !state.valid() {
+			continue
+		}
+		conv, recurrent, err := snapshotter.SnapshotQwen35GDNAuxState(state)
+		if err != nil {
+			return true, s.failQwen35GDNSequence(layer, "final state synchronization", err)
+		}
+		if len(conv) != convElems || len(recurrent) != recurrentElems {
+			return true, s.failQwen35GDNSequence(layer, "final state shape", fmt.Errorf("conv/recurrent elements=%d/%d, want %d/%d", len(conv), len(recurrent), convElems, recurrentElems))
+		}
+		snapshots = append(snapshots, layerSnapshot{layer: layer, conv: conv, recurrent: recurrent})
+	}
+	if s.Cache.linear == nil {
+		s.Cache.linear = newLinearAttnCache(cfg)
+	}
+	for _, snapshot := range snapshots {
+		state := s.Cache.linear.layer(cfg, snapshot.layer)
+		state.conv = make([][]float32, cfg.LinearConvKernelDim-1)
+		for row := range state.conv {
+			start := row * convDim
+			state.conv[row] = append([]float32(nil), snapshot.conv[start:start+convDim]...)
+		}
+		for head := range state.recurrent {
+			start := head * kHd * vHd
+			copy(state.recurrent[head], snapshot.recurrent[start:start+kHd*vHd])
+		}
+	}
+	q.freeSequence()
+	q.sequenceAccepted = false
+	return len(snapshots) > 0, nil
+}
+
+// tryPrefillQwen35HybridQ4K is the production selection seam. A declined
+// geometry returns before the resident implementation can mutate KV, convolution,
+// or recurrent state; the caller retains the historical token-loop behavior.
+func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float32, bool) {
+	if !q4kQwen35HybridPrefillAtPositionOK(s.M.Cfg, len(ids), s.Cache.Len()) {
+		return nil, false
+	}
+	hidden := s.prefillQwen35HybridQ4KHidden(ids)
+	if !wantLogits {
+		return nil, true
+	}
+	return s.headResident(hidden), true
 }
 
 func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
@@ -239,6 +355,8 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	if profile {
 		s.profileQwen35HybridQ4KPrefill(P, start, gemmTime, q4kTime, q8Time, q6kTime, q4kGPUCompute)
 	}
+	s.q4kHybridPrefillChunks++
+	s.q4kHybridPrefillLastBase = base
 	return xf
 }
 
@@ -410,6 +528,21 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 	s.phaseEnd("qwen35_linear_in_proj", t)
 
 	conv := m.tensor(p("linear_attn.conv1d.weight"))
+	aLog := m.tensor(p("linear_attn.A_log"))
+	dtBias := m.tensor(p("linear_attn.dt_bias"))
+	normW := m.tensor(p("linear_attn.norm.weight"))
+	if result, accepted, err := s.tryQwen35GDNPreprojectedSequence(Qwen35GDNPreprojectedSequenceRequest{
+		Layer: l, Tokens: P, Mixed: mixed, Z: zAll, B: bvec, A: avec,
+		Conv1D: conv, ALog: aLog, DTBias: dtBias, Norm: normW, RMSNormEpsilon: eps,
+	}); accepted {
+		if err != nil {
+			panic(err)
+		}
+		t = s.phaseStart()
+		out := proj(p("linear_attn.out_proj.weight"), result.Core, qz(result.Core, P, valDim))
+		s.phaseEnd("qwen35_linear_out_proj", t)
+		return out
+	}
 	convOut := make([]float32, P*convDim)
 	hist := lst.conv
 	t = s.phaseStart()
@@ -443,9 +576,6 @@ func (s *Session) prefillQwen35LinearLayerQ4K(l int, Xn []float32, P int, proj h
 		lst.pushConvRow(mixed[t*convDim:(t+1)*convDim], K-1)
 	}
 
-	aLog := m.tensor(p("linear_attn.A_log"))
-	dtBias := m.tensor(p("linear_attn.dt_bias"))
-	normW := m.tensor(p("linear_attn.norm.weight"))
 	scale := float32(1.0 / math.Sqrt(float64(kHd)))
 	repeat := nV / nK
 	aExp := make([]float32, nV)

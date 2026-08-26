@@ -26,22 +26,26 @@ type auditToolCall struct {
 }
 
 type auditParseState struct {
-	row             AuditTranscriptRow
-	models          map[string]struct{}
-	calls           map[string]auditToolCall
-	seenCalls       map[string]struct{}
-	failureCounts   map[string]int
-	mutationCounts  map[string]int
-	hookDurations   []int64
-	claudeUsageByID map[string]AuditTokens
-	codexRawTotal   *auditCodexRawTokens
-	codexCompleted  AuditTokens
-	codexVersion    string
-	codexResetArmed bool
-	usageSeen       int
-	usageExact      int
-	usageDuplicates int
-	toolErrorEvents []QwenToolErrorEvent
+	row                   AuditTranscriptRow
+	models                map[string]struct{}
+	calls                 map[string]auditToolCall
+	seenCalls             map[string]struct{}
+	failureCounts         map[string]int
+	mutationCounts        map[string]int
+	mutationEvents        []QwenMutationEvent
+	mutationHypothesis    string
+	mutationAccountedFor  int64
+	hookDurations         []int64
+	claudeUsageByID       map[string]AuditTokens
+	codexRawTotal         *auditCodexRawTokens
+	codexCompleted        AuditTokens
+	codexVersion          string
+	codexResetArmed       bool
+	usageSeen             int
+	usageExact            int
+	usageDuplicates       int
+	toolErrorEvents       []QwenToolErrorEvent
+	toolErrorAttributions []qwenToolErrorAttribution
 }
 
 type auditCodexRawTokens struct {
@@ -119,6 +123,11 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	denominator.DuplicateUsageRecords += state.usageDuplicates
 	denominator.UsageRecordsApplied += state.row.UsageRecords
 
+	state.row.usageByID = make(map[string]AuditTokens, len(state.claudeUsageByID))
+	for id, usage := range state.claudeUsageByID {
+		state.row.usageByID[id] = usage
+	}
+
 	state.row.Models = make([]string, 0, len(state.models))
 	for model := range state.models {
 		state.row.Models = append(state.row.Models, model)
@@ -129,11 +138,11 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 			state.row.RepeatedFailures += count - 1
 		}
 	}
-	for _, count := range state.mutationCounts {
-		if count > 1 {
-			state.row.MutationChurn += count - 1
-		}
+	state.row.MutationChurnEvents = DetectQwenMutationChurn(state.mutationEvents)
+	for _, churn := range state.row.MutationChurnEvents {
+		state.row.MutationChurn += churn.Count - 1
 	}
+	applyQwenToolErrorAttribution(state.toolErrorEvents, state.toolErrorAttributions, state.mutationCounts)
 	state.row.HookP95MS = auditPercentile(state.hookDurations, 95)
 	if source == AuditSourceCodex && state.codexRawTotal != nil {
 		state.row.UsageRecords++
@@ -159,6 +168,7 @@ func parseClaudeAuditRecord(record map[string]any, line int, rel string, state *
 		if usage, present := message["usage"]; present {
 			parseClaudeAuditUsage(usage, message, line, rel, state, refusals)
 		}
+		state.mutationHypothesis = auditMutationHypothesis(message["content"])
 		parseClaudeToolCalls(message["content"], line, state)
 		return
 	}
@@ -236,6 +246,7 @@ func parseClaudeToolCalls(content any, line int, state *auditParseState) {
 		state.row.ToolCalls++
 		if call.target != "" {
 			state.mutationCounts[call.target]++
+			auditAppendMutationEvent(state, call.target, QwenMutationWrite)
 		}
 	}
 }
@@ -248,11 +259,15 @@ func parseClaudeToolResults(content any, line int, state *auditParseState) {
 			continue
 		}
 		isError, _ := block["is_error"].(bool)
+		id, _ := block["tool_use_id"].(string)
+		call := state.calls[id]
 		if !isError {
+			if call.target == "" {
+				auditAppendMutationEvent(state, "", QwenMutationWitness)
+			}
 			continue
 		}
-		id, _ := block["tool_use_id"].(string)
-		auditRecordToolFailure(state, state.calls[id], block["content"], line)
+		auditRecordToolFailure(state, call, block["content"], line)
 	}
 }
 
@@ -393,28 +408,61 @@ func parseCodexResponseItem(payload map[string]any, line int, rel string, state 
 		state.row.ToolCalls++
 		if call.target != "" {
 			state.mutationCounts[call.target]++
+			auditAppendMutationEvent(state, call.target, QwenMutationWrite)
 		}
 	case "function_call_output", "custom_tool_call_output":
+		id, _ := payload["call_id"].(string)
+		call := state.calls[id]
 		if !auditOutputIsError(payload["output"]) {
+			if call.target == "" {
+				auditAppendMutationEvent(state, "", QwenMutationWitness)
+			}
 			return
 		}
-		id, _ := payload["call_id"].(string)
-		auditRecordToolFailure(state, state.calls[id], payload["output"], line)
+		auditRecordToolFailure(state, call, payload["output"], line)
 	}
 }
 
 func auditRecordToolFailure(state *auditParseState, call auditToolCall, output any, line int) {
 	state.row.ToolErrors++
 	content := auditText(output)
-	state.toolErrorEvents = append(state.toolErrorEvents, QwenToolErrorEvent{Content: content, Index: line})
 	name := call.name
 	if name == "" {
 		name = "unknown"
 	}
 	signature := name + "\x00" + call.args + "\x00" + auditNormalizedHead(content, 200)
+	state.toolErrorEvents = append(state.toolErrorEvents, QwenToolErrorEvent{Content: content, Index: line})
+	state.toolErrorAttributions = append(state.toolErrorAttributions, qwenToolErrorAttribution{failureKey: signature, mutationTarget: call.target})
 	state.failureCounts[signature]++
 }
 
+func auditAppendMutationEvent(state *auditParseState, target string, kind QwenMutationKind) {
+	accounted := state.row.Tokens.accountedTotal()
+	delta := accounted - state.mutationAccountedFor
+	if delta < 0 {
+		delta = 0
+	}
+	state.mutationAccountedFor = accounted
+	state.mutationEvents = append(state.mutationEvents, QwenMutationEvent{
+		TranscriptID: state.row.TranscriptID, Target: target, Kind: kind,
+		AccountedTokens: uint64(delta), HypothesisID: state.mutationHypothesis,
+	})
+}
+
+// auditMutationHypothesis deterministically uses only explicit assistant text.
+// Empty text leaves the hypothesis unchanged rather than inferring one from edits.
+func auditMutationHypothesis(content any) string {
+	blocks, _ := content.([]any)
+	var text strings.Builder
+	for _, raw := range blocks {
+		block, _ := raw.(map[string]any)
+		if block["type"] != "text" && block["type"] != "input_text" && block["type"] != "output_text" {
+			continue
+		}
+		text.WriteString(auditText(block["text"]))
+	}
+	return strings.TrimSpace(text.String())
+}
 func auditMutationTarget(name string, args any) string {
 	lower := strings.ToLower(name)
 	if !strings.Contains(lower, "edit") && !strings.Contains(lower, "write") && !strings.Contains(lower, "patch") {

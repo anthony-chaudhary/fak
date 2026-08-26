@@ -1,3 +1,7 @@
+---
+title: "Contextual harness preview"
+description: "fak harness preview is the decision seam between a resolved contextual product lock and launch. It keeps the common path quiet:"
+---
 # Contextual harness preview
 
 `fak harness preview` is the decision seam between a resolved contextual product

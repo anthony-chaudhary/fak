@@ -1,0 +1,21 @@
+{
+  "schema": "fak.issue-8385-abort-restoration/1",
+  "generated_at": "2026-08-26T16:31:41Z",
+  "exit_status": 1,
+  "cleanup_status": 0,
+  "failure": "unclassified nonzero exit",
+  "restoration": {
+    "required_at_cleanup": true,
+    "attempted": true,
+    "exact_service_restored_or_preserved": true,
+    "service_type": "Submitted",
+    "verification": [
+      "Submitted service",
+      "argv sha256",
+      "binary sha256",
+      "port owner",
+      "health",
+      "exact model"
+    ]
+  }
+}

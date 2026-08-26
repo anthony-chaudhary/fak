@@ -1,0 +1,828 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "deepseek-ai/deepseek-harness",
+  "url": "https://github.com/deepseek-ai/deepseek-harness",
+  "indexed_revision": "141eb6fef83422698aef7a981029e843e8161534",
+  "observed_at": "2026-08-25T00:00:00Z",
+  "totals": {
+    "files": 7733,
+    "directories": 1233,
+    "bytes": 50013855,
+    "runtime_files": 2924,
+    "test_files": 1898,
+    "docs_files": 2931,
+    "text_lines": 858646
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        ".agents/notes/README.i18n.yaml",
+        ".agents/notes/README.md",
+        ".agents/notes/README.zh.md",
+        "README.i18n.yaml",
+        "README.md",
+        "README.zh.md",
+        "apps/cli/README.i18n.yaml",
+        "apps/cli/README.md",
+        "apps/cli/README.zh.md",
+        "apps/cli/reference/README.i18n.yaml",
+        "apps/cli/reference/README.md",
+        "apps/cli/reference/README.zh.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        ".agents/notes/archived/architecture/2026-06-11-custom-schema-dsl.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-11-custom-schema-dsl.md",
+        ".agents/notes/archived/architecture/2026-06-11-custom-schema-dsl.zh.md",
+        ".agents/notes/archived/architecture/2026-06-11-tool-schemas-in-prompt-assembly.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-11-tool-schemas-in-prompt-assembly.md",
+        ".agents/notes/archived/architecture/2026-06-11-tool-schemas-in-prompt-assembly.zh.md",
+        ".agents/notes/archived/architecture/2026-06-15-turn-enclosure-invariant.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-15-turn-enclosure-invariant.md",
+        ".agents/notes/archived/architecture/2026-06-15-turn-enclosure-invariant.zh.md",
+        ".agents/notes/archived/architecture/2026-06-20-extract-example-app-packages.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-20-extract-example-app-packages.md",
+        ".agents/notes/archived/architecture/2026-06-20-extract-example-app-packages.zh.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".agents/notes/archived/architecture/2026-06-11-custom-schema-dsl.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-11-tool-schemas-in-prompt-assembly.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-15-turn-enclosure-invariant.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-20-extract-example-app-packages.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-20-package-hierarchy.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-07-02-result-time-applied-hunk-diffs.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-07-03-filesystem-directory-listing-seam.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-07-05-windows-fs-permissions.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-07-22-tui-interactive-extension-service.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-07-23-unified-session-query-service.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-07-24-dsh-commander-argument-adapter.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-07-27-tui-chat-channel-module-split.i18n.yaml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".github/issue-management/policy.test.mjs",
+        "apps/cli/tests/args.spec.ts",
+        "apps/cli/tests/built-bin.e2e.ts",
+        "apps/cli/tests/dsh-badge.snapshot.ts",
+        "apps/cli/tests/fixtures/dsh-badge/cordis.yml",
+        "apps/cli/tests/fixtures/dsh-badge/default.cordis.yml",
+        "apps/cli/tests/fixtures/dsh-badge/snapshot.ts",
+        "apps/cli/tests/fixtures/invalid-provider.cordis.yml",
+        "apps/cli/tests/fixtures/memory-mcp-base.cordis.yml",
+        "apps/cli/tests/fixtures/never-dispose.mjs",
+        "apps/cli/tests/fixtures/web-browser-open/open.mjs",
+        "apps/cli/tests/fixtures/web-browser-open/register.mjs"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".agents/notes/implemented/bug-fix/2026-07-31-fail-loud-releases-the-terminal.i18n.yaml",
+        ".agents/notes/implemented/bug-fix/2026-07-31-fail-loud-releases-the-terminal.md",
+        ".agents/notes/implemented/bug-fix/2026-07-31-fail-loud-releases-the-terminal.zh.md",
+        ".agents/notes/implemented/bug-fix/2026-08-04-large-history-pagination-call-stack.i18n.yaml",
+        ".agents/notes/implemented/bug-fix/2026-08-04-large-history-pagination-call-stack.md",
+        ".agents/notes/implemented/bug-fix/2026-08-04-large-history-pagination-call-stack.zh.md",
+        ".agents/notes/implemented/process/2026-07-19-require-agent-notes-for-non-trivial-changes.i18n.yaml",
+        ".agents/notes/implemented/process/2026-07-19-require-agent-notes-for-non-trivial-changes.md",
+        ".agents/notes/implemented/process/2026-07-19-require-agent-notes-for-non-trivial-changes.zh.md",
+        ".agents/notes/implemented/process/2026-08-06-in-repository-landlock-release.i18n.yaml",
+        ".agents/notes/implemented/process/2026-08-06-in-repository-landlock-release.md",
+        ".agents/notes/implemented/process/2026-08-06-in-repository-landlock-release.zh.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/bug.md",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature.md",
+        ".github/ISSUE_TEMPLATE/idea.md",
+        ".github/ISSUE_TEMPLATE/research.md",
+        ".github/ISSUE_TEMPLATE/task.md",
+        ".github/pull_request_template.md"
+      ],
+      "note": "Local issue and pull-request templates plus exhaustive GraphQL discussion read-back at the pinned cutoff; this repository has Discussions enabled but GitHub Issues and Pull Requests disabled."
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "covered",
+      "evidence": [
+        ".agents/notes/archived/simplification/2026-07-21-tui-todo-write-opt-in.i18n.yaml",
+        ".agents/notes/archived/simplification/2026-07-21-tui-todo-write-opt-in.md",
+        ".agents/notes/archived/simplification/2026-07-21-tui-todo-write-opt-in.zh.md",
+        ".agents/notes/implemented/bug-fix/2026-08-02-todo-first-composer-context-order.i18n.yaml",
+        ".agents/notes/implemented/bug-fix/2026-08-02-todo-first-composer-context-order.md",
+        ".agents/notes/implemented/bug-fix/2026-08-02-todo-first-composer-context-order.zh.md",
+        ".agents/notes/implemented/feature/2026-06-29-todo-write-tool.i18n.yaml",
+        ".agents/notes/implemented/feature/2026-06-29-todo-write-tool.md",
+        ".agents/notes/implemented/feature/2026-06-29-todo-write-tool.zh.md",
+        ".agents/notes/implemented/feature/2026-07-23-web-todo-display.i18n.yaml",
+        ".agents/notes/implemented/feature/2026-07-23-web-todo-display.md",
+        ".agents/notes/implemented/feature/2026-07-23-web-todo-display.zh.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        ".agents/notes/implemented/feature/2026-07-31-third-party-memory-mcp-examples.i18n.yaml",
+        ".agents/notes/implemented/feature/2026-07-31-third-party-memory-mcp-examples.md",
+        ".agents/notes/implemented/feature/2026-07-31-third-party-memory-mcp-examples.zh.md",
+        ".agents/notes/implemented/process/2026-07-30-generated-third-party-notices.i18n.yaml",
+        ".agents/notes/implemented/process/2026-07-30-generated-third-party-notices.md",
+        ".agents/notes/implemented/process/2026-07-30-generated-third-party-notices.zh.md",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "apps/cli/package.json",
+        "apps/web/package.json",
+        "examples/acp-agent/package.json",
+        "examples/headless-agent/package.json"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "Candidate-specific fak capabilities queries are recorded in non_tree_study.self_query_axes and the cited study note."
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "All thirteen source-derived candidates and their FAK dispositions are recorded in non_tree_study.candidate_matrix and the cited study note."
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "Study issue #8989 and follow-on issues #8222, #8260, and #8262-#8272 are recorded in non_tree_study.issue_tracking."
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "packages",
+      "files": 3942,
+      "directories": 868,
+      "bytes": 27429072,
+      "runtime_files": 1903,
+      "test_files": 1056,
+      "docs_files": 886,
+      "text_lines": 581765,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 2334
+        },
+        {
+          "language": "Config",
+          "files": 793
+        },
+        {
+          "language": "Docs",
+          "files": 610
+        },
+        {
+          "language": "JavaScript",
+          "files": 6
+        },
+        {
+          "language": "C++",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "packages/AGENTS.md",
+        "packages/CLAUDE.md",
+        "packages/README.i18n.yaml",
+        "packages/README.md",
+        "packages/README.zh.md",
+        "packages/acp/README.i18n.yaml",
+        "packages/acp/README.md",
+        "packages/acp/README.zh.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".agents",
+      "files": 2198,
+      "directories": 45,
+      "bytes": 11075677,
+      "runtime_files": 731,
+      "test_files": 0,
+      "docs_files": 1467,
+      "text_lines": 85691,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 1466
+        },
+        {
+          "language": "Config",
+          "files": 731
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".agents/notes/AGENTS.md",
+        ".agents/notes/README.i18n.yaml",
+        ".agents/notes/README.md",
+        ".agents/notes/README.zh.md",
+        ".agents/notes/archived/AGENTS.md",
+        ".agents/notes/archived/architecture/2026-06-11-custom-schema-dsl.i18n.yaml",
+        ".agents/notes/archived/architecture/2026-06-11-custom-schema-dsl.md",
+        ".agents/notes/archived/architecture/2026-06-11-custom-schema-dsl.zh.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "examples",
+      "files": 631,
+      "directories": 177,
+      "bytes": 2787045,
+      "runtime_files": 84,
+      "test_files": 519,
+      "docs_files": 67,
+      "text_lines": 24420,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 268
+        },
+        {
+          "language": "Docs",
+          "files": 60
+        },
+        {
+          "language": "TypeScript",
+          "files": 56
+        },
+        {
+          "language": "Python",
+          "files": 1
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "examples/AGENTS.md",
+        "examples/CLAUDE.md",
+        "examples/README.i18n.yaml",
+        "examples/README.md",
+        "examples/README.zh.md",
+        "examples/acp-agent/README.i18n.yaml",
+        "examples/acp-agent/README.md",
+        "examples/acp-agent/README.zh.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 330,
+      "directories": 12,
+      "bytes": 3483534,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 330,
+      "text_lines": 58330,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 219
+        },
+        {
+          "language": "Config",
+          "files": 107
+        }
+      ],
+      "example_paths": [
+        "docs/AGENTS.md",
+        "docs/agent-lifecycle.i18n.yaml",
+        "docs/agent-lifecycle.md",
+        "docs/agent-lifecycle.zh.md",
+        "docs/api-gateway.i18n.yaml",
+        "docs/api-gateway.md",
+        "docs/api-gateway.zh.md",
+        "docs/architecture.i18n.yaml"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "apps",
+      "files": 293,
+      "directories": 87,
+      "bytes": 1856206,
+      "runtime_files": 23,
+      "test_files": 257,
+      "docs_files": 126,
+      "text_lines": 32221,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 123
+        },
+        {
+          "language": "TypeScript",
+          "files": 112
+        },
+        {
+          "language": "Config",
+          "files": 29
+        }
+      ],
+      "example_paths": [
+        "apps/cli/README.i18n.yaml",
+        "apps/cli/README.md",
+        "apps/cli/README.zh.md",
+        "apps/cli/composition.md",
+        "apps/cli/config/agent-presets/code/agent.cordis.yml",
+        "apps/cli/config/agent-presets/code/preset.yml",
+        "apps/cli/config/agent-presets/cordis/agent.cordis.yml",
+        "apps/cli/config/agent-presets/cordis/preset.yml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 178,
+      "directories": 10,
+      "bytes": 1996903,
+      "runtime_files": 112,
+      "test_files": 56,
+      "docs_files": 3,
+      "text_lines": 43980,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 152
+        },
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Shell",
+          "files": 5
+        },
+        {
+          "language": "Docs",
+          "files": 3
+        },
+        {
+          "language": "Python",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "scripts/AGENTS.md",
+        "scripts/agent-note-tree.ts",
+        "scripts/archived-agent-notes.spec.ts",
+        "scripts/archived-agent-notes.ts",
+        "scripts/build-exe-for-python-sdk-native-pty.spec.ts",
+        "scripts/build-exe-for-python-sdk-native-pty.ts",
+        "scripts/build-exe-for-python-sdk.ts",
+        "scripts/build-python-release.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "native",
+      "files": 51,
+      "directories": 9,
+      "bytes": 117336,
+      "runtime_files": 12,
+      "test_files": 2,
+      "docs_files": 22,
+      "text_lines": 1426,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 17
+        },
+        {
+          "language": "Config",
+          "files": 14
+        },
+        {
+          "language": "JavaScript",
+          "files": 2
+        },
+        {
+          "language": "TypeScript",
+          "files": 2
+        },
+        {
+          "language": "C",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "native/README.i18n.yaml",
+        "native/README.md",
+        "native/README.zh.md",
+        "native/landlock-run/AGENTS.md",
+        "native/landlock-run/LICENSE",
+        "native/landlock-run/README.i18n.yaml",
+        "native/landlock-run/README.md",
+        "native/landlock-run/README.zh.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 41,
+      "directories": 12,
+      "bytes": 864582,
+      "runtime_files": 24,
+      "test_files": 0,
+      "docs_files": 11,
+      "text_lines": 23739,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 17
+        },
+        {
+          "language": "Docs",
+          "files": 10
+        },
+        {
+          "language": "TypeScript",
+          "files": 8
+        }
+      ],
+      "example_paths": [
+        ".gitlab-ci.yml",
+        ".jscpd.json",
+        ".oxlintrc.json",
+        ".oxlintrc.staged.json",
+        "AGENTS.md",
+        "BENCHMARK.md",
+        "BRAND_GUIDELINES.i18n.yaml",
+        "BRAND_GUIDELINES.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "python",
+      "files": 33,
+      "directories": 8,
+      "bytes": 214398,
+      "runtime_files": 14,
+      "test_files": 7,
+      "docs_files": 11,
+      "text_lines": 3351,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 14
+        },
+        {
+          "language": "Config",
+          "files": 10
+        },
+        {
+          "language": "Docs",
+          "files": 8
+        }
+      ],
+      "example_paths": [
+        "python/README.i18n.yaml",
+        "python/README.md",
+        "python/README.zh.md",
+        "python/development.i18n.yaml",
+        "python/development.md",
+        "python/development.zh.md",
+        "python/sdk/README.i18n.yaml",
+        "python/sdk/README.md"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 27,
+      "directories": 3,
+      "bytes": 139320,
+      "runtime_files": 18,
+      "test_files": 1,
+      "docs_files": 7,
+      "text_lines": 2821,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 18
+        },
+        {
+          "language": "Docs",
+          "files": 7
+        }
+      ],
+      "example_paths": [
+        ".github/AGENTS.md",
+        ".github/ISSUE_TEMPLATE/bug.md",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature.md",
+        ".github/ISSUE_TEMPLATE/idea.md",
+        ".github/ISSUE_TEMPLATE/research.md",
+        ".github/ISSUE_TEMPLATE/task.md",
+        ".github/dependabot.yml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "open_closed_issues_prs_discussions",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "website",
+      "files": 7,
+      "directories": 2,
+      "bytes": 48441,
+      "runtime_files": 3,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 902,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 2
+        },
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "website/.vitepress/config.ts",
+        "website/AGENTS.md",
+        "website/docs.ts",
+        "website/package.json"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".claude",
+      "files": 1,
+      "directories": 0,
+      "bytes": 17,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "patches",
+      "files": 1,
+      "directories": 0,
+      "bytes": 1324,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    }
+  ],
+  "skipped_dirs": [
+    ".git",
+    "vendor"
+  ],
+  "completeness_critic": "exhaustive local tree map at dsh-v0.1.0-rc.8 plus full pinned history/tag/release and GraphQL discussion read-back; GitHub reports Issues and Pull Requests disabled (zero each), while 3,310 discussions existed by the pinned commit timestamp; fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped dependency/cache/control directories: .git, vendor",
+  "non_tree_study": {
+    "observed_at": "2026-08-25",
+    "source_cutoff": {
+      "revision": "141eb6fef83422698aef7a981029e843e8161534",
+      "tag": "dsh-v0.1.0-rc.8",
+      "commit_timestamp": "2026-08-19T15:11:50Z"
+    },
+    "forge_surface": {
+      "issues": {
+        "total": 0,
+        "enabled": false
+      },
+      "pull_requests": {
+        "total": 0,
+        "enabled": false
+      },
+      "discussions": {
+        "total": 3310,
+        "open": 3226,
+        "closed": 84
+      },
+      "method": "GraphQL repository totals established that Issues and Pull Requests are disabled; Discussions were paged to exhaustion and filtered to createdAt no later than the pinned commit timestamp."
+    },
+    "history_surface": {
+      "commits": 12940,
+      "tags_merged": 2,
+      "release_at_cutoff": "dsh-v0.1.0-rc.8",
+      "release_url": "https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.0-rc.8"
+    },
+    "self_query_axes": [
+      {
+        "query": "fak capabilities plugin effect ownership transactional composition replacement durable model-visible turns standing session generations",
+        "result": "native session, routing, context, and control surfaces found; lifecycle gaps routed to explicit leaves"
+      },
+      {
+        "query": "fak capabilities filesystem identity version semantics symlink containment",
+        "result": "no exact capability; observed-version mutation gap routed to #8222"
+      },
+      {
+        "query": "fak capabilities real composition integration tests plugin harness lifecycle",
+        "result": "fleet progress surface found; extension composition gaps routed to #8269-#8272"
+      }
+    ],
+    "candidate_matrix": [
+      {
+        "candidate": "observed-version mutation guard",
+        "disposition": "filed_and_closed",
+        "issue": "#8222"
+      },
+      {
+        "candidate": "claim admitted input before prompt assembly",
+        "disposition": "filed_and_closed",
+        "issue": "#8260"
+      },
+      {
+        "candidate": "exact model-visible request reconstruction",
+        "disposition": "filed_and_closed",
+        "issue": "#8262"
+      },
+      {
+        "candidate": "persist interrupted assistant prefixes",
+        "disposition": "filed_and_closed",
+        "issue": "#8263"
+      },
+      {
+        "candidate": "scheduler-classified steer input",
+        "disposition": "filed_open",
+        "issue": "#8264"
+      },
+      {
+        "candidate": "compaction replacement provenance",
+        "disposition": "filed_open",
+        "issue": "#8265"
+      },
+      {
+        "candidate": "effect-safe tool overlap with ordered commit",
+        "disposition": "filed_and_closed",
+        "issue": "#8266"
+      },
+      {
+        "candidate": "ordered skipped results after cancellation",
+        "disposition": "filed_and_closed",
+        "issue": "#8267"
+      },
+      {
+        "candidate": "durable incomplete-tool repair",
+        "disposition": "filed_and_closed",
+        "issue": "#8268"
+      },
+      {
+        "candidate": "owner-scoped extension effects",
+        "disposition": "filed_and_closed",
+        "issue": "#8269"
+      },
+      {
+        "candidate": "superseded generation reclamation",
+        "disposition": "filed_and_closed",
+        "issue": "#8270"
+      },
+      {
+        "candidate": "mounted-extension readiness audit",
+        "disposition": "filed_and_closed",
+        "issue": "#8271"
+      },
+      {
+        "candidate": "transactional extension-graph swap",
+        "disposition": "filed_and_closed",
+        "issue": "#8272"
+      }
+    ],
+    "issue_tracking": {
+      "study_issue": "https://github.com/anthony-chaudhary/fak/issues/8989",
+      "filed_borrows": [
+        "#8222",
+        "#8260",
+        "#8262",
+        "#8263",
+        "#8264",
+        "#8265",
+        "#8266",
+        "#8267",
+        "#8268",
+        "#8269",
+        "#8270",
+        "#8271",
+        "#8272"
+      ],
+      "open_follow_ons": [
+        "#8264",
+        "#8265"
+      ],
+      "closed_follow_ons": [
+        "#8222",
+        "#8260",
+        "#8262",
+        "#8263",
+        "#8266",
+        "#8267",
+        "#8268",
+        "#8269",
+        "#8270",
+        "#8271",
+        "#8272"
+      ]
+    }
+  }
+}

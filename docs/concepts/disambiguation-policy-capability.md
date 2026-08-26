@@ -1,3 +1,7 @@
+---
+title: "policy-capability names"
+description: "This map positions the current policy-capability coverage backlog. Each entry names the exact repository symbol;"
+---
 # policy-capability names
 
 This map positions the current `policy-capability` coverage backlog. Each entry names the exact repository symbol; the family label remains the broader domain and is not a substitute for the symbol.
