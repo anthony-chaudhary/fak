@@ -112,3 +112,23 @@ func TestValueChainSelfcheckRejectsStaleWitness(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
 }
+
+func TestDispatchTickAutomaticallyRecordsValueChainUsage(t *testing.T) {
+	root := t.TempDir()
+	payload := map[string]any{"action": "would_spawn"}
+	receipt, err := recordDispatchValueChainUsage(root, payload, time.Date(2026, 8, 26, 8, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt["automatic"] != true || receipt["outcome"] != "would_spawn" {
+		t.Fatalf("receipt = %#v", receipt)
+	}
+	ledger, _ := receipt["ledger"].(string)
+	data, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"outcome":"would_spawn"`) {
+		t.Fatalf("ledger = %s", data)
+	}
+}
