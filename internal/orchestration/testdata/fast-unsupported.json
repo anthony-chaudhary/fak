@@ -1,0 +1,1 @@
+{"schema":"fak-orchestration-task/1","id":"fast-unsupported","fast_intent":{"schema":"fak-fast-intent/1","target_completion_ms":30000,"quality_floor":"accepted","cost_ceiling":"bounded","cache_policy":"preserve","fallback_policy":"degrade"}}

@@ -9,7 +9,7 @@ import (
 func TestResolveDeterminismConcurrent(t *testing.T) {
 	workers := 3
 	task := TaskSpec{Schema: "fak-orchestration-task/1", ID: "determinism", WorkClass: WorkRigor, MaxWorkers: &workers}
-	caps := HarnessCapabilities{SupportNative, SupportNative, SupportNative, SupportNative, SupportNative}
+	caps := HarnessCapabilities{SupportNative, SupportNative, SupportNative, SupportNative, SupportNative, SupportNative}
 	const runs = 64
 	results := make(chan []byte, runs)
 	var wg sync.WaitGroup
