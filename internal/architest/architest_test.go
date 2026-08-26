@@ -696,7 +696,8 @@ var tier = map[string]int{
 	"agentqueue":                 1, // stdlib-only deterministic desired-state planner for bounded agent populations (#8875).
 	"supervisionpolicy":          1, // stdlib-only typed fault-domain and bounded restart policy (#8909).
 	"codexsession":               3, // local Codex app-server adapter projected into the public harness protocol (#8736).
-	"hostdiag": 3,
+	"hostdiag":                   3,
+	"shellprov":                  1, // stdlib-only privacy-safe receipt primitive for fak-owned shell launch identity (#9086).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
