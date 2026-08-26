@@ -47,6 +47,12 @@ func TestLifecycleInvocationAppendsPrivacySafeUsage(t *testing.T) {
 	if row.Schema != UsageLedgerSchema || row.Operation != "init" || row.Outcome != "ok" || row.State != StateConfigured {
 		t.Fatalf("unexpected usage row: %+v", row)
 	}
+	folds, err := FoldUsage(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("fold usage: %v", err)
+	}
+	t.Logf("ledger=%s", bytes.TrimSpace(data))
+	t.Logf("weekly_fold=%+v", folds)
 }
 
 func TestUsageLedgerConcurrentAppendAndWeeklyFold(t *testing.T) {
