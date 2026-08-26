@@ -130,7 +130,7 @@ rumor. It is **not exhaustive yet**. The authoritative missing-work list is
 
 Immediate next slices:
 
-1. frontier-lab entity census, including Chinese and regional labs;
+1. finish the checked/unchecked [`slices/frontier-lab-census.md`](slices/frontier-lab-census.md), including Chinese and regional labs;
 2. hyperscaler/neocloud product and filing ledger;
 3. datacenter/power/cooling/network/supply-chain ledger;
 4. production workload-distribution table with exact parameters and sample limits;
