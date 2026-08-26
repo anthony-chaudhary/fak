@@ -240,43 +240,14 @@ func (s *Server) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	tools := responsesToolsToToolDefs(req.Tools)
 
-	ctx := r.Context()
 	reqModel := req.Model
 	if reqModel == "" {
 		reqModel = s.model
 	}
 
-	reqTrace := s.useHTTPTrace(w, r, "")
-	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	ctx, reqTrace, messages, sessionTurn, admitted := s.admitServedRequest(w, r, messages)
 	defer sessionTurn.complete()
-	if canceled {
-		return
-	}
-	if !ok {
-		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, messages); reset {
-			messages = resetMessages
-			reqTrace = newTrace
-			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
-			if canceled {
-				return
-			}
-			if !ok {
-				writeSessionRefusal(w, sessionTurn.state)
-				return
-			}
-		} else {
-			writeSessionRefusal(w, sessionTurn.state)
-			return
-		}
-	}
-
-	// Coherence thrash (#3159): actuate an armed hard reset on this ADMITTED turn (mirrors the
-	// budget-reset block above; a no-op when nothing is armed or no resetter is wired).
-	if reqTrace, messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, messages, sessionTurn); canceled {
-		return
-	}
-	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
-		writeSessionRefusal(w, sessionTurn.state)
+	if !admitted {
 		return
 	}
 	resultAdmissions, err := s.admitInboundResults(ctx, messages, tools, reqTrace)
