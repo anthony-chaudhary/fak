@@ -78,6 +78,7 @@ func (s *Session) Close() {
 		return
 	}
 	s.closeOnce.Do(func() {
+		s.closeQwen35GDNSequence()
 		// Sequence auxiliary state can be owned by a native capability even when
 		// Backend is nil, so its teardown is outside the compute-HAL branch.
 		s.closeQwen35HALState()

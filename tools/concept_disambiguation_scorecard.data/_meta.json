@@ -1107,6 +1107,11 @@
           "category": "incidental",
           "reason": "Regression-fixture invalidation flag, not a cache implementation concept",
           "token": "CacheResetDetected"
+        },
+        {
+          "category": "incidental",
+          "reason": "External normalized JSON provenance field; it reports authoritative runtime telemetry and does not name a fak cache concept.",
+          "token": "runtime_cache_tokens"
         }
       ],
       "id": "cache",
@@ -1367,6 +1372,7 @@
         "runMicroCacheWitness",
         "runVCacheCalibrationRecord",
         "runVCacheCalibrationStatus",
+        "runtime_cache_tokens",
         "selectorCacheKey",
         "shared_prefix_provider_cache_only",
         "strongMatrixCache",
@@ -8543,6 +8549,16 @@
           "category": "incidental",
           "reason": "Fixture envelope field naming, not a reusable policy capability concept",
           "token": "PrefixPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go optional-interface name, not a deployable policy capability.",
+          "token": "Qwen35GDNSequenceCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider admission method, not the kernel policy preflight concept.",
+          "token": "PreflightQwen35GDNSequence"
         }
       ],
       "exclude": [
@@ -8600,8 +8616,10 @@
         "PolicyRevision",
         "PolicySchema",
         "PrefixPosture",
+        "PreflightQwen35GDNSequence",
         "PreflightRefuseWIPLimit",
         "ProgressCallAdjudicated",
+        "Qwen35GDNSequenceCapability",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
         "ReasonCapabilityExpired",
@@ -10516,6 +10534,11 @@
           "category": "incidental",
           "reason": "Request validation helper checks a planner capability and does not define a support or maturity level.",
           "token": "chatDecodeTraceSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed API error, not a support-level taxonomy term.",
+          "token": "ErrQwen35GDNSequenceUnsupported"
         }
       ],
       "exclude": [
@@ -10544,6 +10567,7 @@
         "DescriptionCoverage",
         "DomainCoverage",
         "ErrKVHostSnapshotUnsupported",
+        "ErrQwen35GDNSequenceUnsupported",
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
