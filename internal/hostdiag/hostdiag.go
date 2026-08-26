@@ -127,7 +127,7 @@ func ClassifyCommand(commandLine string) string {
 func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool) {
 	name := strings.ToUpper(strings.TrimSpace(event.Name))
 	isLowVirtualMemory := name == "LOW_VIRTUAL_MEMORY" && event.EventID == 2004
-	isShellCrash := name == "POWERSHELL_CONSOLEHOST_CRASH" && event.EventID == 1000
+	isShellCrash := name == "POWERSHELL_PROCESS_CRASH" && event.EventID == 1000
 	isRadar := name == "RADAR_PRE_LEAK_64" && event.EventID == 1001
 	isResolver := strings.HasPrefix(name, "RESOURCE_EXHAUSTION_") && (event.EventID == 1014 || event.EventID == 1015)
 	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isRadar && !isResolver) {
