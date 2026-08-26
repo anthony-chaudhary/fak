@@ -294,13 +294,76 @@
       "url": "https://github.com/hiraditya/hiraditya.github.io",
       "status": "studied",
       "priority": 13,
-      "why": "The There Is No Address essay and its editorial history were studied as a cross-vendor disaggregation warning: public transport addresses stop before consumer-private locality. FAK can mitigate the split with a consumer-owned route-by-reference, terminal receipts, and full-route pricing; surviving leaves are #8259 and #8261.",
-      "last_checked": "2026-08-20",
+      "why": "The There Is No Address essay and its editorial history were studied as a cross-vendor disaggregation warning: public transport addresses stop before consumer-private locality. FAK mitigates the split with a consumer-owned route-by-reference, terminal receipts, and full-route pricing; #8259 remains open and #8261 shipped.",
+      "last_checked": "2026-08-25",
       "checked_revision": "2547c55f35391c210d274fa7ea36fcbc383b5d8a",
       "stars_at_check": 2,
       "last_push_at_check": "2026-08-20T16:34:48Z",
       "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md",
-      "refresh_issue": "#8992"
+      "refresh_issue": "#8992",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/hiraditya-hiraditya.github.io.json",
+        "indexed_revision": "2547c55f35391c210d274fa7ea36fcbc383b5d8a",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 11,
+        "candidate_count": 5,
+        "filed_issue_count": 2,
+        "completeness_critic": "Exhaustive pinned tree walk plus forge issues/PRs/discussions, release/tag/history, roadmap/TODO, provenance, FAK self-query, candidate decisions, and issue tracking read-back; no required source class remains unexamined.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate 'repos/hiraditya/hiraditya.github.io/issues?state=all&per_page=100'",
+              "gh api --paginate 'repos/hiraditya/hiraditya.github.io/pulls?state=all&per_page=100'",
+              "gh api graphql repository(owner:hiraditya,name:hiraditya.github.io) discussions(first:100)"
+            ],
+            "note": "Read to exhaustion through the pinned revision timestamp: two open issue-only post drafts, 15 closed PRs, one merged PR, and no discussions."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"consumer-owned public private route reference terminal ready receipt full-route pricing\"",
+              "fak capabilities \"topology route selection bytes estimated ready time fabric transfer\""
+            ],
+            "note": "Native routing surfaced; direct read-back keeps terminal readiness in #8259 and recognizes shipped route pricing in #8261."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/hiraditya-hiraditya.github.io.json#non_tree_study.candidate_matrix"
+            ],
+            "note": "Five candidates are filed-existing, shipped-existing, deduplicated, watch-only, or excluded."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8992",
+              "https://github.com/anthony-chaudhary/fak/issues/8259",
+              "https://github.com/anthony-chaudhary/fak/issues/8261"
+            ],
+            "note": "The refresh created no new follow-on; #8259 remains open and #8261 is closed."
+          }
+        ],
+        "issue_refs": [
+          "#8992",
+          "#8259",
+          "#8261"
+        ]
+      }
     },
     {
       "repository": "ai-dynamo/nixl",

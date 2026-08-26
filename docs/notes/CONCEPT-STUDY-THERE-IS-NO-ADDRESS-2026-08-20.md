@@ -241,7 +241,7 @@ The smallest coherent FAK flow is:
 | Candidate | On-axis state | Portfolio route | Disposition |
 |---|---|---|---|
 | Consumer-owned public-to-private realization by opaque reference | PARTIAL substrate, integration absent | DEFAULT | **FILED #8259**; reuse `fabricmap`, do not create a parallel `KVTransferPlan` graph |
-| Byte-sized end-to-end estimated ready time | ABSENT in route choice (`Bytes` unused) | DEFAULT objective, compatibility-preserving | **FILED #8261** |
+| Byte-sized end-to-end estimated ready time | SHIPPED after the original study | DEFAULT objective, compatibility-preserving | **SHIPPED #8261**; the refreshed inventory found no duplicate follow-on |
 | NIXL/RDMA/TMA/CSL engine adapters and measured topology | PARTIAL / hardware-gated | OPTIONAL-MODULE | **DEDUP #3310/#6409** |
 | Bilateral fixed producer/consumer layout capsule | ABSENT | RECIPE | Use only for a named pair with a captured witness; no generic issue yet |
 | Universal neutral KV/layout interchange | ABSENT | WATCH | Revisit only after two incompatible engines and measured conversion economics |
@@ -252,7 +252,7 @@ The smallest coherent FAK flow is:
 Existing issue searches also found #3316 (KV governance events), #3413 (real
 vLLM/SGLang arena import), #5269 (peer KV fetch tier), and #2242 (P/D SLO pool
 planning). None owns terminal consumer-private readiness or byte-sized
-`fabricmap` route selection, so #8259/#8261 are not duplicates.
+`fabricmap` route selection, so #8259 was not a duplicate; #8261 has since shipped and is closed.
 
 ## Licensing and provenance
 
@@ -265,6 +265,23 @@ The site's root MIT file belongs to the Chirpy theme lineage and does not clearl
 grant MIT terms over every authored post, while the rendered site advertises CC
 BY 4.0. Treat the essay as **INSPIRE-only**, paraphrase it, use only short
 attributed quotations if needed, and do not vendor prose or figures.
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue #8992 refreshed the denominator at the same pinned revision. The machine-generated map is
+[`docs/research/inventory/hiraditya-hiraditya.github.io.json`](../research/inventory/hiraditya-hiraditya.github.io.json):
+61 indexed files across 11 reported subsystems, with every local file walked and every required
+non-tree source class recorded separately. GitHub read-back through the revision timestamp found
+17 issue-endpoint records (two open issue-only post drafts and 15 closed pull requests), 15 pull
+requests (one merged), zero discussions, zero releases, and zero tags. Reachable git history has
+306 commits; four touch the target essay. No test/fixture suite, changelog, roadmap, or TODO artifact
+exists in the pinned tree; `tools/test.sh` is a site-build helper, not a test suite.
+
+The FAK decision did not expand. #8259 remains the single open terminal-consumer-readiness leaf;
+#8261 has shipped; adapter/topology measurement remains deduplicated to #3310/#6409; neutral
+interchange stays watch-only; and a fictional universal private-memory address remains excluded.
+The candidate matrix, FAK self-query witness, completeness critic, provenance caveat, and issue
+tracking are pinned in the inventory map. No new follow-on survived this refresh.
 
 ## Coverage and honest limits
 
