@@ -7522,6 +7522,16 @@
           "category": "incidental",
           "reason": "Wire option requests a receipt from an already-selected fak-native route and does not select or define a gateway engine.",
           "token": "fak_decode_trace"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compute trace JSON field names are artifact vocabulary, not gateway engine concepts.",
+          "token": "KernelID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field name for an opaque revision compatibility value, not the gateway or engine concept.",
+          "token": "KernelRevision"
         }
       ],
       "id": "gateway-engine",
@@ -7542,6 +7552,8 @@
         "GatewaySeat",
         "InKernelKVPrefixPressureSource",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
+        "KernelID",
+        "KernelRevision",
         "KernelTurns",
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
@@ -12656,6 +12668,16 @@
           "category": "incidental",
           "reason": "Narrow optional capability interface extends the existing Planner contract for receipt authorship and does not introduce a planning concept.",
           "token": "NativeDecodeTracePlanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local tuning-policy field naming a safe implementation fallback, not a planning concept.",
+          "token": "FallbackCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local per-candidate measurement record, not a plan result concept.",
+          "token": "CandidateResult"
         }
       ],
       "exclude": [
@@ -12676,6 +12698,7 @@
         "CandidateMeanTokensPerS",
         "CandidateOutputNMSE",
         "CandidatePassed",
+        "CandidateResult",
         "CandidateRevision",
         "CandidateRuntimeSHA",
         "CandidateTaskAccuracy",
@@ -12684,6 +12707,7 @@
         "EventPlanUpdated",
         "ExplainFilingPlan",
         "ExplanationSeconds",
+        "FallbackCandidate",
         "FleetBenchPlanDoc",
         "GoCandidateCapability",
         "GoCandidateKind",
