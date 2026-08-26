@@ -380,10 +380,12 @@ func main() {
 			"with #4273's onset) but its magnitude alone is sub-threshold on random weights; a trained repetition " +
 			"attractor could amplify it. The on-artifact early-logit comparison remains the decisive witness."
 	default:
-		res.Verdict = "INSUFFICIENT: quant-induced rho stays small and roughly FLAT in decode length (no material " +
-			"compounding). Weight-quantization MAGNITUDE alone cannot explain #4273 -> the quantized long-context path " +
-			"has an ALGORITHMIC defect (dequant/scale/tensor-mapping), not a precision-magnitude one. The decisive " +
-			"next witness is the on-artifact early token/logit comparison vs llama.cpp/HF on the real 27B Q4_K_M."
+		clauses := []string{
+			"INSUFFICIENT: quant-induced rho stays small and roughly FLAT in decode length, without material compounding.",
+			"Weight-quantization magnitude alone cannot explain #4273; the quantized long-context path has an algorithmic dequant, scale, or tensor-mapping defect rather than a precision-magnitude one.",
+			"The decisive next witness is the on-artifact early token/logit comparison against llama.cpp or HF on the real 27B Q4_K_M.",
+		}
+		res.Verdict = gdn.Verdict(clauses...)
 	}
 
 	if *asJSON {

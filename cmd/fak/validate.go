@@ -202,49 +202,16 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		return code
 	}
 	res.Tip = tip
-	phase = recorder.start("normalize_mine")
-	paths, err := normalizeMinePathsWithin(ctx, r, mine)
-	if code, failed := finishValidateRequiredPhase(stdout, stderr, &res, &recorder, phase, "normalize_mine", err, *asJSON,
-		fmt.Sprintf("fak validate: %v", err)); failed {
+	prep, code, failed := prepareValidateWorkspace(validateWorkspaceRequest{
+		stdout: stdout, stderr: stderr, ctx: ctx, result: &res, recorder: &recorder,
+		root: r, tip: tip, mine: mine, testRun: *testRun, wslTests: *wslTests, asJSON: *asJSON,
+	})
+	if failed {
 		return code
 	}
-	res.Mine = paths
-	res.Overlays.Skipped = append([]string(nil), paths...)
-	effectiveTestRun := strings.TrimSpace(*testRun)
-	if effectiveTestRun != "" {
-		res.TestRun = effectiveTestRun
-		res.TestScope = "explicit"
-	} else if inferred, inferErr := ownedTestRunExpression(r, paths); inferErr == nil && inferred != "" {
-		effectiveTestRun = inferred
-		res.TestRun = inferred
-		res.TestScope = "owned-test-files"
-	}
-	wslWorkspace := runtime.GOOS == "windows" && *wslTests
-	phase = recorder.start("extract_tip")
-	var dir string
-	if wslWorkspace {
-		dir, err = extractCommittedTipWSLWithin(ctx, r, tip)
-	} else {
-		dir, err = extractCommittedTipWithin(ctx, r, tip)
-	}
-	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
-		detail := context.DeadlineExceeded.Error()
-		if err != nil {
-			detail = err.Error()
-		}
-		phase.finishAs("timeout", detail)
-		return finishValidateTimeout(stdout, &res, &recorder, "extract_tip", *asJSON)
-	}
-	phase.finish(err)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak validate: cannot materialize tip %s: %v\n", short(tip), err)
-		return 2
-	}
-	if wslWorkspace {
-		defer cleanupValidateWSLDir(dir)
-	} else {
-		defer os.RemoveAll(dir)
-	}
+	paths, effectiveTestRun := prep.paths, prep.testRun
+	dir, wslWorkspace := prep.dir, prep.wslWorkspace
+	defer prep.cleanup()
 	// Keep the base graph as well as the overlaid graph: a deleted file/package no longer
 	// appears in `go list`, but its importers are still affected and must be tested.
 	baseFileToPkg := map[string]string{}

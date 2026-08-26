@@ -15,7 +15,6 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchorder"
 	"github.com/anthony-chaudhary/fak/internal/dispatchtick"
-	"github.com/anthony-chaudhary/fak/internal/leaseref"
 )
 
 type dispatchWavePrice struct {
@@ -284,143 +283,23 @@ func runDispatchWave(stdout, stderr io.Writer, argv []string) int {
 		dispatchWaveRecordDependencyError(rec, fmt.Errorf("read live issue intents: %w", err))
 		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
 	}
-	heldIssues := map[int]bool{}
-	var explicitRefusals []dispatchWaveIssueRefusal
-	var executionPlan []dispatchWaveExecutionPlan
-	const maxPrelaunchReprice = 8
-	for attempt := 0; ; attempt++ {
-		var price dispatchWavePrice
-		if len(requestedIssues) > 0 {
-			price, err = priceDispatchWaveExplicitIssues(root, router, requestedIssues, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, *freshStartCap, intentHolds, profile)
-		} else {
-			price, err = priceDispatchWavePayloadFilteredWithFreshCap(root, router, *count, len(lanes), *lane, excludedLanes, dispatchtick.DefaultCooldownMinutes, heldIssues, *freshStartCap, profile)
-		}
-		if err != nil {
-			rec["stop_reason"] = "price fan-out: " + err.Error()
-			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
-		}
-		price = dispatchWaveMergeIssueRefusals(price, explicitRefusals)
-		rec["price"] = price
-		dispatchWaveAttachExplicitIssueReceipt(rec, price)
-		rec["planned_lanes"] = append([]string(nil), price.RunLanes...)
-		executionPlan = dispatchWaveExecutionPlans(root, backendNorm, wk, goalID, profile, waveID, shortfall, price.RunTargets, lanes, !*noLedger, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit)
-		executionPlanID := dispatchWaveExecutionPlanID(executionPlan)
-		rec["execution_plan_id"] = executionPlanID
-		rec["execution_plan"] = executionPlan
-		if len(price.RunLanes) == 0 {
-			rec["stop_reason"] = "priced fan-out found no launchable lane"
-			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
-		}
-		requestedExecutionPlan := executionPlan
-		executionAudit, auditedPlan, trancheReceipt, auditErr := auditDispatchWaveExecutionPlanWithFallback(executionPlan, func(plan []dispatchWaveExecutionPlan) ([]dispatchWaveExecutionAudit, error) {
-			return auditDispatchWaveExecutionPlanBounded(root, *maxWorkers, excludedLanes, plan, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, dispatchWaveDependencyTimeout)
-		})
-		if len(trancheReceipt.AttemptedTrancheSizes) > 1 {
-			rec["requested_execution_plan"] = requestedExecutionPlan
-			rec["tranche_fallback"] = trancheReceipt
-			executionPlan = auditedPlan
-			executionPlanID = dispatchWaveExecutionPlanID(executionPlan)
-			rec["execution_plan_id"] = executionPlanID
-			rec["execution_plan"] = executionPlan
-		}
-		if auditErr != nil {
-			rec["execution_plan_audit"] = executionAudit
-			if len(trancheReceipt.AttemptedTrancheSizes) > 0 {
-				rec["tranche_fallback"] = trancheReceipt
-			}
-			dispatchWaveRecordDependencyError(rec, auditErr)
-			return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
-		}
-		rec["execution_plan_audit"] = executionAudit
-		prelaunchGate := dispatchWavePrelaunchGateFromAudit(executionPlanID, executionAudit)
-		rec["prelaunch_gate"] = prelaunchGate
-		readyPlan := dispatchWaveReadyExecutionPlan(executionPlan, executionAudit)
-		rec["ready_execution_plan"] = readyPlan
-		if len(requestedIssues) > 0 {
-			price = dispatchWaveApplyAuditIssueOutcomes(price, executionAudit)
-			explicitRefusals = dispatchWaveMergeRefusalRows(requestedIssues, explicitRefusals, price.RefusedIssues)
-			price = dispatchWaveMergeIssueRefusals(price, explicitRefusals)
-			rec["price"] = price
-			dispatchWaveAttachExplicitIssueReceipt(rec, price)
-		}
-		if prelaunchGate.OK {
-			executionPlan = readyPlan
-		}
-		if *live {
-			rec["live_execution_plan"] = readyPlan
-		}
-		if prelaunchGate.OK {
-			break
-		}
-		// Dry-runs must reprice benign lease/intent races too. Otherwise the required
-		// approval plan can refuse on its first stale candidate even though another safe
-		// lane is available, while --live would silently use a different plan.
-		retryIssues := dispatchWavePrelaunchRetryIssues(executionAudit, *live, attempt, maxPrelaunchReprice)
-		if len(retryIssues) > 0 {
-			added := false
-			for _, issue := range retryIssues {
-				if !heldIssues[issue] {
-					heldIssues[issue] = true
-					added = true
-				}
-			}
-			if added {
-				rec["prelaunch_retries"] = appendDispatchWavePrelaunchRetry(rec["prelaunch_retries"], attempt+1, retryIssues, prelaunchGate)
-				continue
-			}
-		}
-		rec["stop_reason"] = "prelaunch execution audit refused: " + prelaunchGate.Reason
-		rec["ticks"] = []any{}
-		rec["spawned"] = 0
-		rec["ok"] = false
-		return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+	executionPlan, code, done := planDispatchWave(stdout, stderr, dispatchWavePlanRequest{
+		root: root, backend: backendNorm, workKind: wk, goalID: goalID, profile: profile,
+		waveID: waveID, shortfall: shortfall, router: router, requestedIssues: requestedIssues,
+		count: count, lanes: lanes, lane: lane, excludedLanes: excludedLanes,
+		freshStartCap: freshStartCap, maxWorkers: maxWorkers, intentHolds: intentHolds,
+		noLedger: noLedger, codexLoopGate: codexLoopGate, gateSinceHours: codexLoopGateSinceHours,
+		gateLimit: codexLoopGateLimit, live: live, asJSON: asJSON, record: rec,
+	})
+	if done {
+		return code
 	}
-
-	ticks := []any{}
-	spawned := 0
-	limit := len(executionPlan)
-	if !*live {
-		limit = 1
-	}
-	discovery := subscribeDispatchWaveDiscovery(root, limit)
-	defer closeDispatchDiscoverySubscriptions(discovery)
-	for i := 0; i < limit; i++ {
-		row := executionPlan[i]
-		snapshot := <-discovery[i].Snapshots
-		payload, err := evaluateDispatchTick(dispatchWaveExecutionTickOptions(root, *maxWorkers, splitCommaList(*excludeLane), row, *live, i == 0, *codexLoopGate, maxFloat64(0, *codexLoopGateSinceHours), *codexLoopGateLimit, snapshot), stderr)
-		if err != nil {
-			ticks = append(ticks, map[string]any{"ok": false, "error": err.Error(), "rank": i})
-			rec["stop_reason"] = err.Error()
-			break
-		}
-		payload["wave_rank"] = row.Rank
-		payload["wave_target"] = row.Target
-		ticks = append(ticks, payload)
-		if dispatchMapString(payload, "action") == "spawned" {
-			spawned++
-			if *settleS > 0 {
-				time.Sleep(time.Duration(*settleS * float64(time.Second)))
-			}
-			continue
-		}
-		if !*live {
-			if gate, ok := rec["prelaunch_gate"].(dispatchWavePrelaunchGate); ok && !gate.OK {
-				rec["stop_reason"] = "prelaunch execution audit refused: " + gate.Reason
-			} else {
-				rec["stop_reason"] = "dry-run: planned the first wave tick only; re-run with --live to spawn"
-			}
-		} else {
-			rec["stop_reason"] = firstString(dispatchMapString(payload, "verdict"), dispatchMapString(payload, "action"))
-		}
-		break
-	}
-	rec["ticks"] = ticks
-	rec["spawned"] = spawned
-	if rec["stop_reason"] == "" {
-		rec["stop_reason"] = "filled requested wave"
-	}
-	rec["ok"] = !*live || spawned > 0 || len(ticks) > 0 && dispatchMapBool(ticks[len(ticks)-1].(map[string]any), "ok")
-	return writeDispatchWaveResult(stdout, stderr, rec, *asJSON)
+	return executeDispatchWavePlan(stdout, stderr, dispatchWaveExecutionRequest{
+		root: root, plan: executionPlan, maxWorkers: maxWorkers, excludeLane: excludeLane,
+		live: live, settleSeconds: settleS, codexLoopGate: codexLoopGate,
+		gateSinceHours: codexLoopGateSinceHours, gateLimit: codexLoopGateLimit,
+		asJSON: asJSON, record: rec,
+	})
 }
 
 // newDispatchWaveRecord seeds the mutable dispatch-wave result record with the run's static
@@ -552,142 +431,19 @@ func priceDispatchWavePayloadBound(root string, router dispatchtick.RouterPayloa
 		return lanes[i] < lanes[j]
 	})
 
-	issueByLane := map[string]int{}
-	meta := map[string]dispatchWaveCandidate{}
-	cands := make([]dispatchorder.Candidate, 0, len(router.Issues)+len(lanes))
-	unscopedByLane := map[string][]int{}
-	scopedByLane := map[string]bool{}
-	for _, route := range router.Issues {
-		if explicitIssues && !requestedSet[route.Number] {
-			continue
-		}
-		seenRoutes[route.Number] = true
-		lane := strings.TrimSpace(route.Lane)
-		if lane == "" {
-			refuse(route.Number, dispatchWaveIssueRefusalRouting, dispatchWaveReasonIssueUnroutable, route.UnroutedReason)
-			continue
-		}
-		if explicitLane != "" && lane != explicitLane {
-			refuse(route.Number, dispatchWaveIssueRefusalRouting, dispatchWaveReasonLaneMismatch, fmt.Sprintf("routed lane %q does not match pinned lane %q", lane, explicitLane))
-			continue
-		}
-		if exclude[lane] {
-			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonLaneUnavailable, fmt.Sprintf("routed lane %q is excluded or already leased", lane))
-			continue
-		}
-		if detail := strings.TrimSpace(intentHolds[route.Number]); detail != "" {
-			refuse(route.Number, dispatchWaveIssueRefusalIntent, leaseref.ReasonIntentCollision, detail)
-			continue
-		}
-		if liveIssues[route.Number] {
-			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonIssueInFlight, "a live dispatch worker already owns this issue")
-			continue
-		}
-		if cooled[route.Number] {
-			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonIssueCooldown, "the issue is inside the dispatch retry cooldown")
-			continue
-		}
-		if skipIssues[route.Number] {
-			refuse(route.Number, dispatchWaveIssueRefusalEligibility, dispatchWaveReasonIssueIneligible, "the issue is held by the caller or attempt budget")
-			continue
-		}
-		paths := append([]string(nil), route.Paths...)
-		if len(paths) == 0 {
-			unscopedByLane[lane] = append(unscopedByLane[lane], route.Number)
-			continue
-		}
-		scopedByLane[lane] = true
-		id := waveCandidateID(lane, route.Number)
-		leaseID := dispatchIssueLeaseID(lane, route.Number)
-		stepBudget := dispatchWaveRouteStepBudget(route)
-		priority := dispatchtick.PriorityWeightDefault
-		if grp, ok := router.Lanes[lane]; ok {
-			if w, ok := grp.Priority[route.Number]; ok {
-				priority = w
-			}
-		}
-		meta[id] = dispatchWaveCandidate{
-			ID:         id,
-			Lane:       lane,
-			LeaseID:    leaseID,
-			Issue:      route.Number,
-			BaseWeight: priority,
-			ReadySince: dispatchIssueReadySinceStamp(root, readyState, route.Number),
-			StepBudget: stepBudget,
-			Tree:       paths,
-			Scoped:     true,
-		}
-		lastAttempt := int64(0)
-		if attemptedAt, ok := snap.latest[route.Number]; ok {
-			lastAttempt = attemptedAt.Unix()
-		}
-		cands = append(cands, dispatchorder.Candidate{
-			ID:              id,
-			Key:             id,
-			Lane:            leaseID,
-			Tree:            paths,
-			Mode:            "exclusive",
-			UpdatedUnix:     dispatchWaveReleaseStamp(dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(paths)), newlyUnblocked[route.Number]),
-			CreatedUnix:     int64(route.Number),
-			LastAttemptUnix: lastAttempt,
-		})
+	collector := dispatchWaveCandidateCollector{
+		root: root, router: router, explicitIssues: explicitIssues, requestedSet: requestedSet,
+		seenRoutes: seenRoutes, refuse: refuse, exclude: exclude, intentHolds: intentHolds,
+		liveIssues: liveIssues, cooled: cooled, skipIssues: skipIssues,
+		newlyUnblocked: newlyUnblocked, readyState: readyState, snapshot: snap,
+		profile: profile, lanes: lanes, issueByLane: map[string]int{},
+		metadata: map[string]dispatchWaveCandidate{}, candidates: []dispatchorder.Candidate{},
+		unscopedByLane: map[string][]int{}, scopedByLane: map[string]bool{},
+		explicitLane: explicitLane,
 	}
-	for i, lane := range lanes {
-		if explicitLane != "" && lane != explicitLane {
-			continue
-		}
-		if exclude[lane] {
-			continue
-		}
-		if scopedByLane[lane] {
-			continue
-		}
-		grp := router.Lanes[lane]
-		nums := append([]int(nil), unscopedByLane[lane]...)
-		if len(router.Issues) == 0 && !explicitIssues {
-			nums = append([]int(nil), grp.Issues...)
-		}
-		nums = dispatchWaveOrderLaneIssues(root, nums, grp.Priority, readyState)
-		issue, ok := firstLaunchableIssue(nums, liveIssues, cooled, skipIssues)
-		if !ok {
-			continue
-		}
-		priority := dispatchtick.PriorityWeightDefault
-		if w, ok := grp.Priority[issue]; ok {
-			priority = w
-		}
-		id := waveCandidateID(lane, issue)
-		if _, exists := meta[id]; exists {
-			continue
-		}
-		leaseID := dispatchIssueLeaseID(lane, issue)
-		stepBudget := dispatchWaveLaneStepBudget(grp)
-		issueByLane[lane] = issue
-		meta[id] = dispatchWaveCandidate{
-			ID:         id,
-			Lane:       lane,
-			LeaseID:    leaseID,
-			Issue:      issue,
-			BaseWeight: priority,
-			ReadySince: dispatchIssueReadySinceStamp(root, readyState, issue),
-			StepBudget: stepBudget,
-			Tree:       append([]string(nil), grp.Tree...),
-		}
-		lastAttempt := int64(0)
-		if attemptedAt, ok := snap.latest[issue]; ok {
-			lastAttempt = attemptedAt.Unix()
-		}
-		cands = append(cands, dispatchorder.Candidate{
-			ID:              id,
-			Key:             id,
-			Lane:            leaseID,
-			Tree:            grp.Tree,
-			Mode:            "exclusive",
-			UpdatedUnix:     dispatchWaveReleaseStamp(dispatchWaveOrderStamp(profile, priority, stepBudget, dispatchtick.IsCoreSourceLaneTree(grp.Tree)), newlyUnblocked[issue]),
-			CreatedUnix:     int64(grp.Count*len(lanes) + (len(lanes) - i)),
-			LastAttemptUnix: lastAttempt,
-		})
-	}
+	collector.addScopedRoutes()
+	collector.addLaneFallbacks()
+	issueByLane, meta, cands := collector.issueByLane, collector.metadata, collector.candidates
 
 	res := dispatchorder.Plan(dispatchorder.Input{
 		Candidates:      cands,

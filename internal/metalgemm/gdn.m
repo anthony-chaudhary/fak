@@ -355,16 +355,37 @@ int mg_gdn_state_run(int owner,
 
 int mg_gdn_state_seed(int owner, const float *conv, int convElems, const float *recurrent, int recurrentElems) {
     @autoreleasepool {
-        MGGDNState *state = mg_gdn_state_get(owner);
-        if (!state || !conv || !recurrent ||
-            convElems != state.convElems || recurrentElems != state.recurrentElems) return 0;
-        memcpy(state.convState.contents, conv, (size_t)convElems * sizeof(float));
-        memcpy(state.recurrentState.contents, recurrent, (size_t)recurrentElems * sizeof(float));
-#if TARGET_OS_OSX
-        [state.convState didModifyRange:NSMakeRange(0, (NSUInteger)convElems * sizeof(float))];
-        [state.recurrentState didModifyRange:NSMakeRange(0, (NSUInteger)recurrentElems * sizeof(float))];
-#endif
-        return 1;
+        if (owner < 0 || owner >= MG_GDN_MAX_OWNERS || recurrent == NULL) return 0;
+        MGGDNOwner slot;
+        @synchronized(gDev) { slot = gGDNOwners[owner]; }
+        if (slot.conv == NULL || slot.recurrent == NULL) return 0;
+        int convDim = 2 * slot.nK * slot.kHd + slot.nV * slot.vHd;
+        int wantConv = (slot.convKernel - 1) * convDim;
+        int wantRecurrent = slot.nV * slot.kHd * slot.vHd;
+        if (convElems != wantConv || recurrentElems != wantRecurrent ||
+            (wantConv > 0 && conv == NULL)) return 0;
+
+        id<MTLBuffer> convStage = nil;
+        if (wantConv > 0) convStage = mg_gdn_shared(conv, (size_t)wantConv);
+        id<MTLBuffer> recurrentStage = mg_gdn_shared(recurrent, (size_t)wantRecurrent);
+        if ((wantConv > 0 && convStage == nil) || recurrentStage == nil) return 0;
+
+        id<MTLCommandBuffer> command = [gQueue commandBuffer];
+        if (command == nil) return 0;
+        id<MTLBlitCommandEncoder> encoder = [command blitCommandEncoder];
+        if (encoder == nil) return 0;
+        if (wantConv > 0) {
+            [encoder copyFromBuffer:convStage sourceOffset:0
+                           toBuffer:(__bridge id<MTLBuffer>)slot.conv destinationOffset:0
+                               size:(size_t)wantConv * sizeof(float)];
+        }
+        [encoder copyFromBuffer:recurrentStage sourceOffset:0
+                       toBuffer:(__bridge id<MTLBuffer>)slot.recurrent destinationOffset:0
+                           size:(size_t)wantRecurrent * sizeof(float)];
+        [encoder endEncoding];
+        [command commit];
+        [command waitUntilCompleted];
+        return command.status == MTLCommandBufferStatusCompleted;
     }
 }
 

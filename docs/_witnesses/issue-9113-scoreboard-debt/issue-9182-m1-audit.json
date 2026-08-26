@@ -1,0 +1,101 @@
+{
+  "schema": "fak-milestone-m1-evidence-audit/1",
+  "issue": 9182,
+  "parent_issue": 9113,
+  "audited_commit": "286b455221f5b73e27a1cb08a9a4237111150690",
+  "date": "2026-08-26",
+  "constraints": {
+    "detector_logic_changed": false,
+    "configuration_changed": false,
+    "thresholds_changed": false,
+    "exclusions_changed": false,
+    "discovery_changed": false,
+    "baseline_changed": false
+  },
+  "summary": {
+    "m1_cells_audited": 24,
+    "cells_matured": 0,
+    "cells_held": 24,
+    "milestone_debt_before": 81,
+    "milestone_debt_after": 81,
+    "debt_reduction": 0,
+    "requested_aim": 40,
+    "aim_met": false,
+    "finding": "No M1 cell has a current-trunk evidence chain that proves implementation, an accelerated-backend family oracle, a commit-bound green receipt, and its operating envelope. GLM-5.2-DSA x cuda has the strongest historical candidate, but its public green receipt is not bound to the audited commit; the other cells remain fenced or lack a backend-specific family correctness witness."
+  },
+  "evidence_sets": {
+    "non_prenorm_fence": {
+      "implementation": "internal/model/kv.go",
+      "required_symbol": "requirePreNorm",
+      "witness": "internal/covmatrix/covmatrix_test.go",
+      "required_test": "TestClassify",
+      "operating_envelope": "HAL decode/prefill and Metal prefill reject non-PreNorm topologies before the accelerated forward; CPU family oracles do not execute these backend copies."
+    },
+    "mla_backend_exception": {
+      "implementation": "internal/model/kv.go",
+      "required_symbol": "requireGLMDsaSession",
+      "witness": "internal/covmatrix/covmatrix_test.go",
+      "required_test": "TestSparseAttnFenceCoverageMatchesKernel",
+      "operating_envelope": "DeepSeek/GLM MLA sessions permit compute.Backend but still reject Metal. Permission proves reachability, not accelerated-backend numerical correctness."
+    },
+    "minimax_fence": {
+      "implementation": "internal/model/minimax_m3_session.go",
+      "required_symbol": "requireMiniMaxSession",
+      "witness": "internal/model/family_minimax_cpu_oracle_test.go",
+      "required_test": "TestMiniMaxCPUNumericOracle",
+      "operating_envelope": "Only the CPU f32 resident path is wired; Quant, Q4, Q4K, Backend, Metal, and PrecisionPolicy fail closed."
+    },
+    "glm_cuda_historical_candidate": {
+      "implementation": "internal/compute/cuda_specialized.go",
+      "required_symbols": [
+        "DSASparseAttend",
+        "DSAIndexSelect"
+      ],
+      "witness": "internal/model/glm_dsa_cuda_test.go",
+      "required_tests": [
+        "TestCUDAGLMMoeDsaBackendForward",
+        "TestCUDAGLMMoeDsaIndexSelectMatches"
+      ],
+      "receipt": "docs/nightrun/collected.jsonl",
+      "required_receipt_token": "glm52-moe-dsa-gpu-witness",
+      "operating_envelope_reference": "docs/notes/GLM52-DSA-FULL-FORWARD-ON-PURE-KERNEL-GPU-SERVER-2026-06-23.md",
+      "operating_envelope": "Synthetic Q8 GLM-MoE-DSA on CUDA sm_80; cosine 1.0 and argmax exact versus CPU Q8 in the 2026-06-30 receipt. The receipt says the runner cloned origin/main but does not record the tested commit, so it cannot witness the audited 2026-08-26 trunk revision."
+    }
+  },
+  "family_cpu_oracles": {
+    "GPT-NeoX": "internal/model/family_gptneox_cpu_oracle_test.go#TestGPTNeoXCPUNumericOracle",
+    "Falcon": "internal/model/family_falcon_cpu_oracle_test.go#TestFalconCPUNumericOracle",
+    "OLMo2": "internal/model/family_cpu_oracle_test.go#TestOlmo2CPUNumericOracle",
+    "Cohere": "internal/model/family_cohere_cpu_oracle_test.go#TestCohereCPUNumericOracle",
+    "Gemma2/3": "internal/model/family_gemma_cpu_oracle_test.go#TestGemmaCPUNumericOracle",
+    "DeepSeek-MLA": "internal/model/family_deepseek_cpu_oracle_test.go#TestDeepSeekCPUNumericOracle",
+    "GLM-5.2-DSA": "internal/model/family_glm_cpu_oracle_test.go#TestGLMDsaCPUNumericOracle",
+    "MiniMax-MSA": "internal/model/family_minimax_cpu_oracle_test.go#TestMiniMaxCPUNumericOracle"
+  },
+  "cells": [
+    {"family":"GPT-NeoX","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute CUDA."},
+    {"family":"GPT-NeoX","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"Metal path still calls requirePreNorm; CPU oracle does not execute Metal."},
+    {"family":"GPT-NeoX","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute Vulkan."},
+    {"family":"Falcon","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute CUDA."},
+    {"family":"Falcon","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"Metal path still calls requirePreNorm; CPU oracle does not execute Metal."},
+    {"family":"Falcon","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute Vulkan."},
+    {"family":"OLMo2","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute CUDA."},
+    {"family":"OLMo2","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"Metal path still calls requirePreNorm; CPU oracle does not execute Metal."},
+    {"family":"OLMo2","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute Vulkan."},
+    {"family":"Cohere","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute CUDA."},
+    {"family":"Cohere","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"Metal path still calls requirePreNorm; CPU oracle does not execute Metal."},
+    {"family":"Cohere","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute Vulkan."},
+    {"family":"Gemma2/3","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute CUDA."},
+    {"family":"Gemma2/3","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"Metal path still calls requirePreNorm and the family also carries layer-specific RoPE axes; CPU oracle does not execute Metal."},
+    {"family":"Gemma2/3","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"non_prenorm_fence","reason":"HAL path still calls requirePreNorm; CPU oracle does not execute Vulkan."},
+    {"family":"DeepSeek-MLA","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"mla_backend_exception","reason":"Backend is structurally permitted, but no DeepSeek CUDA family oracle and no current commit-bound green receipt were found."},
+    {"family":"DeepSeek-MLA","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"mla_backend_exception","reason":"requireGLMDsaSession explicitly rejects Metal."},
+    {"family":"DeepSeek-MLA","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"mla_backend_exception","reason":"Backend is structurally permitted, but no DeepSeek Vulkan family oracle and no current commit-bound green receipt were found."},
+    {"family":"GLM-5.2-DSA","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"glm_cuda_historical_candidate","reason":"Implementation and device tests exist, but the public green receipt is historical and omits the tested commit; it cannot prove current-trunk M4."},
+    {"family":"GLM-5.2-DSA","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"mla_backend_exception","reason":"requireGLMDsaSession explicitly rejects Metal."},
+    {"family":"GLM-5.2-DSA","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"mla_backend_exception","reason":"Backend is structurally permitted, but Vulkan lacks the CUDA DSA capabilities and no GLM Vulkan family oracle or current receipt was found."},
+    {"family":"MiniMax-MSA","backend":"cuda","current_rung":"M1","verdict":"hold","evidence_set":"minimax_fence","reason":"requireMiniMaxSession explicitly rejects Backend."},
+    {"family":"MiniMax-MSA","backend":"metal","current_rung":"M1","verdict":"hold","evidence_set":"minimax_fence","reason":"requireMiniMaxSession explicitly rejects Metal."},
+    {"family":"MiniMax-MSA","backend":"vulkan","current_rung":"M1","verdict":"hold","evidence_set":"minimax_fence","reason":"requireMiniMaxSession explicitly rejects Backend."}
+  ]
+}

@@ -78,30 +78,7 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 		return attachNativePerformanceSystemBaseline(stdout, stderr, graph, *attachReceiptPath, *attachBaselinePath, *outPath)
 	}
 	if set["gate"] {
-		data, err := os.ReadFile(*gatePath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: read gate request: %v\n", err)
-			return 1
-		}
-		var request nativeperf.GateRequest
-		decoder := json.NewDecoder(strings.NewReader(string(data)))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&request); err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: decode gate request: %v\n", err)
-			return 1
-		}
-		verdict, err := nativeperf.Gate(request)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: gate: %v\n", err)
-			return 1
-		}
-		if code := encodeNativePerformanceJSON(stdout, stderr, verdict); code != 0 {
-			return code
-		}
-		if verdict.Classification == nativeperf.GateRegression {
-			return 3
-		}
-		return 0
+		return runNativePerformanceGate(stdout, stderr, *gatePath)
 	}
 	if err := nativeperf.Validate(graph); err != nil {
 		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
@@ -128,34 +105,7 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 		if set["profile-next"] {
 			path = *profileNextPath
 		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: read profile: %v\n", err)
-			return 1
-		}
-		profile, err := nativeperf.DecodeProfile(data)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
-			return 1
-		}
-		if *profileNextPath != "" {
-			lever, classification, err := nativeperf.NextLeverFromProfile(graph, profile)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak native-performance: profile next: %v\n", err)
-				return 1
-			}
-			return encodeNativePerformanceJSON(stdout, stderr, struct {
-				Classification nativeperf.BottleneckClassification `json:"classification"`
-				Lever          nativeperf.Lever                    `json:"lever"`
-				Override       *nativeperf.SelectionOverride       `json:"selection_override,omitempty"`
-			}{classification, *lever, profile.Override})
-		}
-		classification, err := nativeperf.ClassifyProfile(graph, profile)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: classify profile: %v\n", err)
-			return 1
-		}
-		return encodeNativePerformanceJSON(stdout, stderr, classification)
+		return runNativePerformanceProfile(stdout, stderr, graph, path, *profileNextPath != "")
 	}
 	if *baselineLever != "" {
 		receipt, err := nativeperf.BaselineTemplate(graph, *baselineLever)
@@ -166,32 +116,7 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 		return encodeNativePerformanceJSON(stdout, stderr, receipt)
 	}
 	if *compareBaseline != "" {
-		baselineData, err := os.ReadFile(*compareBaseline)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: read baseline: %v\n", err)
-			return 1
-		}
-		candidateData, err := os.ReadFile(*compareCandidate)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: read candidate: %v\n", err)
-			return 1
-		}
-		baseline, err := nativeperf.DecodeReceipt(baselineData)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
-			return 1
-		}
-		candidate, err := nativeperf.DecodeReceipt(candidateData)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
-			return 1
-		}
-		comparison, err := nativeperf.CompareReceipts(graph, baseline, candidate)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak native-performance: compare: %v\n", err)
-			return 1
-		}
-		return encodeNativePerformanceJSON(stdout, stderr, comparison)
+		return runNativePerformanceCompare(stdout, stderr, graph, *compareBaseline, *compareCandidate)
 	}
 	if *jsonOut {
 		enc := json.NewEncoder(stdout)

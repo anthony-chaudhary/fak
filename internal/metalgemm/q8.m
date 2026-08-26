@@ -468,6 +468,7 @@ int mg_issue8833_q8_encode_gemv(void* command, int wid, void* xq, void* xd, void
     [e setBuffer:(__bridge id<MTLBuffer>)xd offset:0 atIndex:3];
     [e setBuffer:(__bridge id<MTLBuffer>)y offset:0 atIndex:4];
     [e setBytes:&W.nblk length:sizeof(int) atIndex:5];
+    [e setBytes:&W.out length:sizeof(int) atIndex:6];
     [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
         threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
     [e endEncoding];

@@ -43,14 +43,28 @@ func executeMixedQKV(selector MixedQKVSelector, in MixedQKVInput) (out MixedQKVR
 			CompletedWait: e.completed_wait != 0, HostReadback: e.host_readback != 0,
 			Encoders: int(e.encoders), GPUMilliseconds: float64(e.gpu_milliseconds),
 			WaitMilliseconds: float64(e.wait_milliseconds), TimingAvailable: e.timing_available != 0}
-		if selector == MixedQKVControl { event.Operation = ExecutionOperation("mixed-qkv-control")
-		} else { event.Operation = ExecutionOperation("mixed-qkv-candidate") }
+		if selector == MixedQKVControl {
+			event.Operation = ExecutionOperation("mixed-qkv-control")
+		} else {
+			event.Operation = ExecutionOperation("mixed-qkv-candidate")
+		}
 		out.Observation.Events = append(out.Observation.Events, event)
-		if in.Observer != nil { in.Observer.ObserveExecution(ScopedExecutionEvent{CallID: id, Event: event}) }
+		if in.Observer != nil {
+			in.Observer.ObserveExecution(ScopedExecutionEvent{CallID: id, Event: event})
+		}
 	}
-	if rc == 1 { return decline("native setup declined before encoding") }
-	if rc != 0 { return out, &MixedQKVError{CallID: id, Stage: MixedQKVSubmitted, Detail: "native command buffer failed"} }
+	if rc == 1 {
+		return decline("native setup declined before encoding")
+	}
+	if rc != 0 {
+		return out, &MixedQKVError{CallID: id, Stage: MixedQKVSubmitted, Detail: "native command buffer failed"}
+	}
 	return out, nil
 }
 
-func boolInt(v bool) C.int { if v { return 1 }; return 0 }
+func boolInt(v bool) C.int {
+	if v {
+		return 1
+	}
+	return 0
+}

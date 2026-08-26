@@ -130,13 +130,17 @@ func TestGDNSequenceMetalParityStateIdentityAndReset(t *testing.T) {
 }
 
 func TestGDNSequenceMetalSeedMatchesCPUOracleAndOwnsState(t *testing.T) {
-	corpus := makeOracleGDNCorpus(2, 1)
-	g := nativeGDNGeometry(corpus.Geometry)
+	oracleGeometry := oracleGDNGeometry{nK: 2, nV: 4, kHd: 4, vHd: 8, kernel: 3}
+	panels := []oracleGDNPanel{
+		oracleGDNFixture(oracleGeometry, 2, .1),
+		oracleGDNFixture(oracleGeometry, 1, .7),
+	}
+	g := nativeGDNGeometry(oracleGeometry)
 	seedSource, err := NewGDNState(g)
 	if err != nil {
 		t.Fatalf("NewGDNState(seed): %v", err)
 	}
-	first := nativeGDNPanel(corpus.Panels[0])
+	first := nativeGDNPanel(panels[0])
 	if _, _, accepted, err := seedSource.Run(first); err != nil || !accepted {
 		t.Fatalf("seed source run: accepted=%v err=%v", accepted, err)
 	}
@@ -146,16 +150,20 @@ func TestGDNSequenceMetalSeedMatchesCPUOracleAndOwnsState(t *testing.T) {
 	}
 	seedSource.Close()
 
-	want := newOracleGDNState(corpus.Geometry)
+	want := newOracleGDNState(oracleGeometry)
 	want.conv = append(want.conv[:0], seedConv...)
 	want.recurrent = append(want.recurrent[:0], seedRecurrent...)
-	wantOut := want.run(corpus.Panels[1])
+	wantOut := oracleGDNRun(oracleGeometry, panels[1], want)
 
 	state, err := NewGDNState(g)
 	if err != nil {
 		t.Fatalf("NewGDNState: %v", err)
 	}
 	defer state.Close()
+	if state.owner != 0 {
+		t.Fatalf("seed regression requires the first valid native owner, got %d", state.owner)
+	}
+	convHandle, recurrentHandle := state.Handles()
 	beforeConv, beforeRecurrent, _ := state.Snapshot()
 	if err := state.Seed(seedConv[:len(seedConv)-1], seedRecurrent); err == nil {
 		t.Fatal("short seed accepted")
@@ -166,18 +174,77 @@ func TestGDNSequenceMetalSeedMatchesCPUOracleAndOwnsState(t *testing.T) {
 	if err := state.Seed(seedConv, seedRecurrent); err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	gotOut, accounting, accepted, err := state.Run(nativeGDNPanel(corpus.Panels[1]))
+	seededConv, seededRecurrent, err := state.Snapshot()
+	if err != nil {
+		t.Fatalf("seeded snapshot before run: %v", err)
+	}
+	requireGDNParity(t, "seed install convolution", seedConv, seededConv)
+	requireGDNParity(t, "seed install recurrent", seedRecurrent, seededRecurrent)
+	if gotConv, gotRecurrent := state.Handles(); gotConv != convHandle || gotRecurrent != recurrentHandle {
+		t.Fatalf("seed changed handles from %d/%d to %d/%d", convHandle, recurrentHandle, gotConv, gotRecurrent)
+	}
+	if err := state.Reset(); err != nil {
+		t.Fatalf("Reset after seed: %v", err)
+	}
+	resetConv, resetRecurrent, err := state.Snapshot()
+	if err != nil {
+		t.Fatalf("reset snapshot: %v", err)
+	}
+	for name, values := range map[string][]float32{"conv": resetConv, "recurrent": resetRecurrent} {
+		for i, value := range values {
+			if value != 0 {
+				t.Fatalf("reset %s[%d]=%g, want zero", name, i, value)
+			}
+		}
+	}
+	if gotConv, gotRecurrent := state.Handles(); gotConv != convHandle || gotRecurrent != recurrentHandle {
+		t.Fatalf("reset changed handles from %d/%d to %d/%d", convHandle, recurrentHandle, gotConv, gotRecurrent)
+	}
+	if err := state.Seed(seedConv, seedRecurrent); err != nil {
+		t.Fatalf("reseed after reset: %v", err)
+	}
+	gotOut, accounting, accepted, err := state.Run(nativeGDNPanel(panels[1]))
 	if err != nil || !accepted {
 		t.Fatalf("seeded run: accepted=%v err=%v", accepted, err)
 	}
 	requireGDNAccounting(t, accounting, 1)
-	requireGDNParity(t, "seeded output", wantOut.Core, gotOut)
+	requireGDNParity(t, "seeded output", wantOut, gotOut)
 	gotConv, gotRecurrent, err := state.Snapshot()
 	if err != nil {
 		t.Fatalf("seeded snapshot: %v", err)
 	}
 	requireGDNParity(t, "seeded convolution", want.conv, gotConv)
 	requireGDNParity(t, "seeded recurrent", want.recurrent, gotRecurrent)
+}
+
+func TestGDNSequenceMetalSeedSupportsEmptyConvolutionWindow(t *testing.T) {
+	g := oracleGDNGeometry{nK: 1, nV: 1, kHd: 2, vHd: 2, kernel: 1}
+	state, err := NewGDNState(nativeGDNGeometry(g))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	conv, recurrent, err := state.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conv) != 0 {
+		t.Fatalf("kernel-1 convolution window has %d elements, want zero", len(conv))
+	}
+	for i := range recurrent {
+		recurrent[i] = float32(i+1) / 16
+	}
+	if err := state.Seed(conv, recurrent); err != nil {
+		t.Fatalf("seed empty convolution window: %v", err)
+	}
+	gotConv, gotRecurrent, err := state.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotConv) != 0 {
+		t.Fatalf("seeded kernel-1 convolution window has %d elements", len(gotConv))
+	}
+	requireGDNParity(t, "kernel-1 seeded recurrent", recurrent, gotRecurrent)
 }
 
 func TestGDNSequenceMetalValidationBeforeMutationAndOwnerIsolation(t *testing.T) {

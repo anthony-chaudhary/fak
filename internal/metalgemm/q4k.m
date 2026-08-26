@@ -1222,6 +1222,29 @@ int mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execu
     }
 }
 
+// mg_issue8833_q4k_encode_gemv appends the established scalar Q4_K GEMV to a caller-owned
+// command buffer and caller-owned shared buffers. The mixed-QKV owner is solely responsible for
+// commit, completion wait, and host readback. Keep the registered weight offset: mapped GGUF spans
+// may begin after the Metal buffer base.
+int mg_issue8833_q4k_encode_gemv(void* command, int wid, void* x, void* y) {
+    if (command == NULL || x == NULL || y == NULL || psoQ4KGemv == nil ||
+        wid < 0 || wid >= gNQ4 || gQ4[wid].buf == NULL) return 0;
+    id<MTLCommandBuffer> cb = (__bridge id<MTLCommandBuffer>)command;
+    Q4KW W = gQ4[wid];
+    id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+    if (e == nil) return 0;
+    [e setComputePipelineState:psoQ4KGemv];
+    [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:W.offset atIndex:0];
+    [e setBuffer:(__bridge id<MTLBuffer>)x offset:0 atIndex:1];
+    [e setBuffer:(__bridge id<MTLBuffer>)y offset:0 atIndex:2];
+    [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+    [e setBytes:&W.out length:sizeof(int) atIndex:4];
+    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+        threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+    [e endEncoding];
+    return 1;
+}
+
 // mg_q4k_gemv_batch runs n decode GEMVs of the SAME weight wid into ONE command buffer (one
 // commit + one waitUntilCompleted): Xcat is n contiguous activation rows (n*in floats), Ycat
 // receives n result rows (n*out floats). It exists to MEASURE how much of mg_q4k_gemv's

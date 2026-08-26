@@ -6,21 +6,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 )
 
 const (
-	guardResourcePollDefault   = time.Second
-	guardTreeCommitDefault     = uint64(64) << 30
-	guardSystemHeadroomDefault = uint64(16) << 30
-	guardTreeRSSFallback       = uint64(4) << 30
-	guardTreeRSSMinimum        = uint64(1) << 30
+	guardResourcePollDefault    = time.Second
+	guardTreeCommitDefault      = uint64(64) << 30
+	guardSystemHeadroomDefault  = uint64(16) << 30
+	guardTreeRSSFallback        = uint64(4) << 30
+	guardTreeRSSMinimum         = uint64(1) << 30
+	guardResourceDetailMaxBytes = 512
+)
+
+var (
+	guardResourceBearerPattern      = regexp.MustCompile(`(?i)\bbearer\s+\S+`)
+	guardResourceSecretPattern      = regexp.MustCompile(`(?i)((?:token|secret|passw(?:or)?d|api[-_]?key|credential|authorization)\s*[=:]\s*)\S+`)
+	guardResourcePrivateHostPattern = regexp.MustCompile(`(?i)\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:internal|corp|lan|local|intranet)\b`)
+	guardResourcePrivateIPv4Pattern = regexp.MustCompile(`\b(?:10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\b`)
 )
 
 type guardResourcePolicy struct {
@@ -42,6 +52,7 @@ type guardResourceDecision struct {
 	ThresholdBytes uint64
 	HeadroomBytes  uint64
 	OwnedPIDs      []int
+	Detail         string
 }
 
 type guardResourceReceipt struct {
@@ -195,6 +206,33 @@ func guardResourceReason(d guardResourceDecision) string {
 	return fmt.Sprintf("%s metric=%s tree_bytes=%d threshold=%d system_bytes=%d limit=%d headroom=%d offender_pid=%d", d.Reason, metric, d.TreeBytes, d.ThresholdBytes, d.SystemBytes, d.SystemLimit, d.HeadroomBytes, d.Offender.PID)
 }
 
+// scrubGuardResourceDetail makes collector diagnostics safe for the durable
+// child-resource receipt. The detail remains useful for public invariants and
+// PID lists, but never carries secret-shaped values, private hosts or absolute
+// machine paths. It is normalized to one line and byte-bounded before any
+// terminal or persistence surface sees it.
+func scrubGuardResourceDetail(detail string) string {
+	fields := strings.Fields(detail)
+	for i, field := range fields {
+		if strings.ContainsAny(field, `/\`) {
+			fields[i] = "[path]"
+		}
+	}
+	detail = strings.Join(fields, " ")
+	detail = guardResourceBearerPattern.ReplaceAllString(detail, "Bearer [redacted]")
+	detail = guardResourceSecretPattern.ReplaceAllString(detail, "${1}[redacted]")
+	detail = guardResourcePrivateHostPattern.ReplaceAllString(detail, "[host]")
+	detail = guardResourcePrivateIPv4Pattern.ReplaceAllString(detail, "[ip]")
+	if len(detail) <= guardResourceDetailMaxBytes {
+		return detail
+	}
+	detail = detail[:guardResourceDetailMaxBytes-3]
+	for !utf8.ValidString(detail) {
+		detail = detail[:len(detail)-1]
+	}
+	return strings.TrimSpace(detail) + "..."
+}
+
 func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy guardResourcePolicy) <-chan guardChildWaitEvent {
 	out := make(chan guardChildWaitEvent, 1)
 	go func() {
@@ -229,7 +267,8 @@ func startGuardChildResourceMonitor(rootPID int, traceID, agent string, policy g
 }
 
 func guardResourceMonitorFailure(rootPID int, snapshot procguard.MemorySnapshot, reason, detail string) guardChildWaitEvent {
-	d := guardResourceDecision{Stop: true, Reason: reason, Metric: snapshot.Metric, TreeBytes: snapshot.TreeBytes, SystemBytes: snapshot.SystemBytes, SystemLimit: snapshot.SystemLimit, Offender: procguard.MemoryProcess{PID: rootPID}}
+	detail = scrubGuardResourceDetail(detail)
+	d := guardResourceDecision{Stop: true, Reason: reason, Metric: snapshot.Metric, TreeBytes: snapshot.TreeBytes, SystemBytes: snapshot.SystemBytes, SystemLimit: snapshot.SystemLimit, Offender: procguard.MemoryProcess{PID: rootPID}, Detail: detail}
 	for _, process := range snapshot.Processes {
 		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
 		if process.PID == rootPID {
@@ -239,7 +278,11 @@ func guardResourceMonitorFailure(rootPID int, snapshot procguard.MemorySnapshot,
 	if len(d.OwnedPIDs) == 0 {
 		d.OwnedPIDs = []int{rootPID}
 	}
-	return guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: reason + ": " + detail, Resource: &d}
+	eventReason := reason
+	if detail != "" {
+		eventReason += ": " + detail
+	}
+	return guardChildWaitEvent{Kind: guardChildResourceLimit, Reason: eventReason, Resource: &d}
 }
 
 func guardWriteResourceReceipt(event guardChildWaitEvent, traceID, agent string, rootPID int) error {
@@ -275,7 +318,7 @@ func guardWriteResourceReceipt(event guardChildWaitEvent, traceID, agent string,
 }
 
 func newGuardResourceReceipt(traceID, agent string, rootPID int, d guardResourceDecision) guardResourceReceipt {
-	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, OffenderCommand: d.Offender.CommandLine, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: "reap_tree", DescendantsSurvive: false}
+	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: "reap_tree", DescendantsSurvive: false, Detail: scrubGuardResourceDetail(d.Detail)}
 	if d.Metric == procguard.MemoryMetricRSS {
 		receipt.TreeRSSBytes = uint64Pointer(d.TreeBytes)
 	} else {

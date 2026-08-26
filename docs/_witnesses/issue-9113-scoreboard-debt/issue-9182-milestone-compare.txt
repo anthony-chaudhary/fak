@@ -1,0 +1,8 @@
+command: fak milestone-scorecard --compare docs/_witnesses/issue-9113-scoreboard-debt/issue-9182-milestone-before.json
+audited_commit: 286b455221f5b73e27a1cb08a9a4237111150690
+milestone_debt: 81 -> 81 (flat by 0)
+climb_debt: 72 -> 72
+roadmap_debt: 9 -> 9
+matured_cells: 32 -> 32
+milestone_progress: 38.8 -> 38.8
+verdict: target not met; no evidence-incomplete M1 cell was promoted
