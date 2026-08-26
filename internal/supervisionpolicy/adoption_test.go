@@ -112,3 +112,27 @@ func TestTakeoverAdoptsLiveChildrenExactlyOnceAndFencesOldCoordinator(t *testing
 		t.Fatalf("quarantined PID command: ok=%v err=%v", ok, err)
 	}
 }
+
+func TestTakeoverContentionReturnsFenceNotPlatformIOError(t *testing.T) {
+	for i := 0; i < 25; i++ {
+		store := AdoptionStore{Path: filepath.Join(t.TempDir(), "adoption.json")}
+		if err := store.Initialize("coordinator-1", 1, nil); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		errs := make(chan error, 2)
+		for _, owner := range []string{"coordinator-2", "coordinator-3"} {
+			owner := owner
+			go func() {
+				<-start
+				_, err := store.Takeover(owner, 1, time.Now(), time.Second, nil)
+				errs <- err
+			}()
+		}
+		close(start)
+		first, second := <-errs, <-errs
+		if (first == nil) == (second == nil) || (!errors.Is(first, ErrFenced) && !errors.Is(second, ErrFenced)) {
+			t.Fatalf("iteration %d errors = (%v, %v), want one winner and one fence", i, first, second)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"os"
 	"path/filepath"
 	"sort"
@@ -189,15 +190,18 @@ func (s AdoptionStore) withLock(fn func() error) error {
 		timeout = 2 * time.Second
 	}
 	deadline := time.Now().Add(timeout)
-	lock := s.Path + ".lock"
+	lock, err := os.OpenFile(s.Path+".lock", os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	for {
-		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		err = flock.TryLock(lock)
 		if err == nil {
-			_ = f.Close()
-			defer os.Remove(lock)
+			defer flock.Unlock(lock)
 			return fn()
 		}
-		if !errors.Is(err, os.ErrExist) {
+		if !errors.Is(err, flock.ErrLockBusy) {
 			return err
 		}
 		if !time.Now().Before(deadline) {
