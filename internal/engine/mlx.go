@@ -72,18 +72,22 @@ func EnvMLXConfig() MLXConfig {
 	}
 }
 
+type mlxEngineState struct {
+	cfg    MLXConfig
+	client *http.Client
+}
+
 // MLXEngine is an abi.EngineDriver/LifecycleEngine adapter for an MLX-fronting
 // server on Apple Silicon.
 type MLXEngine struct {
-	cfg    MLXConfig
-	client *http.Client
+	oneShotLifecycle[mlxEngineState]
 }
 
 // NewMLXEngine builds an MLX driver over public mlx-lm/vllm-mlx surfaces.
 func NewMLXEngine(cfg MLXConfig) *MLXEngine {
 	cfg.WorkerID = defaultWorkerID(cfg.WorkerID, "mlx")
 	client := defaultHTTPClient(cfg.Client)
-	return &MLXEngine{cfg: cfg, client: client}
+	return &MLXEngine{oneShotLifecycle: newOneShotLifecycle(mlxEngineState{cfg: cfg, client: client})}
 }
 
 // Caps advertises MLX ride-mode support: OpenAI-compatible frontend dispatch,
@@ -106,7 +110,7 @@ func (e *MLXEngine) WeightBearing() bool { return true }
 // stream=true and returns a live request handle. MLX owns Metal execution behind
 // that frontend; fak stays in front as the governance plane, recording the served
 // result under engine="mlx".
-func (e *MLXEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
+func (e mlxEngineState) admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("mlx: FAK_MLX_BASE_URL or MLXConfig.BaseURL is required")
 	}
@@ -134,13 +138,8 @@ func (e *MLXEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineReque
 	return r, nil
 }
 
-// Complete drains the live stream and returns the assembled result.
-func (e *MLXEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	return completeViaAdmit(ctx, e, c)
-}
-
 func (e *MLXEngine) metricsURL() (string, error) {
-	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "mlx", "FAK_MLX_METRICS_URL", true)
+	return deriveMetricsURL(e.state.cfg.MetricsURL, e.state.cfg.BaseURL, "mlx", "FAK_MLX_METRICS_URL", true)
 }
 
 // ScrapeServingMetrics reads the MLX server's Prometheus endpoint and normalizes it
@@ -158,10 +157,10 @@ func (e *MLXEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSna
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
+	if e.state.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.state.cfg.APIKey)
 	}
-	resp, err := e.client.Do(req)
+	resp, err := e.state.client.Do(req)
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
@@ -174,7 +173,7 @@ func (e *MLXEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSna
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	return ParseMLXPrometheus(e.cfg.WorkerID, string(raw)), nil
+	return ParseMLXPrometheus(e.state.cfg.WorkerID, string(raw)), nil
 }
 
 // ParseMLXPrometheus maps vLLM-format worker metrics from a vllm-mlx deployment into

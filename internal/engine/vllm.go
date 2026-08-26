@@ -67,12 +67,16 @@ func EnvVLLMConfig() VLLMConfig {
 	}
 }
 
-// VLLMEngine is a vLLM V1 adapter behind abi.EngineDriver/LifecycleEngine.
-type VLLMEngine struct {
+type vllmEngineState struct {
 	cfg       VLLMConfig
 	client    *http.Client
 	cache     *CacheEventRecorder
 	residency *PrefixResidencyIndex
+}
+
+// VLLMEngine is a vLLM V1 adapter behind abi.EngineDriver/LifecycleEngine.
+type VLLMEngine struct {
+	oneShotLifecycle[vllmEngineState]
 }
 
 // NewVLLMEngine builds a vLLM driver over public vLLM surfaces.
@@ -80,7 +84,8 @@ func NewVLLMEngine(cfg VLLMConfig) *VLLMEngine {
 	cfg.WorkerID = defaultWorkerID(cfg.WorkerID, "vllm")
 	client := defaultHTTPClient(cfg.Client)
 	cache, residency := defaultCacheAndResidency(cfg.CacheRecorder, cfg.Residency)
-	return &VLLMEngine{cfg: cfg, client: client, cache: cache, residency: residency}
+	state := vllmEngineState{cfg: cfg, client: client, cache: cache, residency: residency}
+	return &VLLMEngine{oneShotLifecycle: newOneShotLifecycle(state)}
 }
 
 // Caps advertises the vLLM adapter, the OpenAI HTTP surface, lifecycle streaming,
@@ -102,7 +107,7 @@ func (e *VLLMEngine) WeightBearing() bool { return true }
 
 // Admit submits one request to vLLM with stream=true and returns a live request
 // handle whose Tokens channel receives SSE deltas as vLLM emits them.
-func (e *VLLMEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
+func (e vllmEngineState) admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("vllm: FAK_VLLM_BASE_URL or VLLMConfig.BaseURL is required")
 	}
@@ -140,12 +145,12 @@ func (e *VLLMEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 // stays dependency-free by taking the decoded batch stream at this seam, so a
 // process-local bridge or test fixture can feed the same residency/index logic.
 func (e *VLLMEngine) RunKVEventSubscription(ctx context.Context) error {
-	if e.cfg.KVEvents == nil {
+	if e.state.cfg.KVEvents == nil {
 		return errors.New("vllm: KVEvents source is not configured")
 	}
-	defer e.cfg.KVEvents.Close()
+	defer e.state.cfg.KVEvents.Close()
 	for {
-		batch, err := e.cfg.KVEvents.Next(ctx)
+		batch, err := e.state.cfg.KVEvents.Next(ctx)
 		if err != nil {
 			if errors.Is(err, io.EOF) || errors.Is(err, context.Canceled) {
 				return nil
@@ -154,11 +159,6 @@ func (e *VLLMEngine) RunKVEventSubscription(ctx context.Context) error {
 		}
 		e.RecordVLLMKVEventBatch(batch)
 	}
-}
-
-// Complete drains the live stream and returns the assembled result.
-func (e *VLLMEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	return completeViaAdmit(ctx, e, c)
 }
 
 // buildOpenAIRequest lowers a tool call onto an OpenAI-compatible frontend: it
@@ -668,9 +668,9 @@ func (s *VLLMJSONKVEventSource) Close() error {
 // RecordVLLMKVEventBatch folds one decoded vLLM KV-event batch into the
 // per-worker residency index and the shared cache-event recorder.
 func (e *VLLMEngine) RecordVLLMKVEventBatch(batch VLLMKVEventBatch) []CacheEventResult {
-	worker := strmatch.FirstNonEmpty(batch.WorkerID, e.cfg.WorkerID)
-	model := strmatch.FirstNonEmpty(batch.ModelID, e.cfg.Model)
-	return RecordVLLMKVEventBatch(worker, model, batch.TokenizerID, e.residency, e.cache, batch)
+	worker := strmatch.FirstNonEmpty(batch.WorkerID, e.state.cfg.WorkerID)
+	model := strmatch.FirstNonEmpty(batch.ModelID, e.state.cfg.Model)
+	return RecordVLLMKVEventBatch(worker, model, batch.TokenizerID, e.state.residency, e.state.cache, batch)
 }
 
 // RecordVLLMKVEventBatch is the pure lowering function for vLLM KV events.
@@ -934,7 +934,7 @@ func (e *VLLMEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSn
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	resp, err := e.client.Do(req)
+	resp, err := e.state.client.Do(req)
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
@@ -947,7 +947,7 @@ func (e *VLLMEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSn
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	return ParseVLLMPrometheus(e.cfg.WorkerID, string(raw)), nil
+	return ParseVLLMPrometheus(e.state.cfg.WorkerID, string(raw)), nil
 }
 
 // deriveMetricsURL resolves an engine's Prometheus /metrics endpoint: a configured
@@ -977,7 +977,7 @@ func deriveMetricsURL(configured, baseURL, engine, metricsEnv string, stripV1 bo
 }
 
 func (e *VLLMEngine) metricsURL() (string, error) {
-	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "vllm", "FAK_VLLM_METRICS_URL", true)
+	return deriveMetricsURL(e.state.cfg.MetricsURL, e.state.cfg.BaseURL, "vllm", "FAK_VLLM_METRICS_URL", true)
 }
 
 type metricSumCount struct {

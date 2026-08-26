@@ -99,6 +99,34 @@ type admitStreamer interface {
 	Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error)
 }
 
+// oneShotAdmitter is the adapter-specific half of oneShotLifecycle. Keeping the
+// state as a value lets an engine value be copied without leaving a lifecycle
+// shim pointing back at the original instance.
+type oneShotAdmitter interface {
+	admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error)
+}
+
+// oneShotLifecycle promotes the shared Admit/Complete lifecycle onto ridden
+// engines. S owns all adapter state, so the zero value and ordinary value copies
+// keep using their own state without self pointers or constructor-bound closures.
+type oneShotLifecycle[S oneShotAdmitter] struct {
+	state S
+}
+
+func newOneShotLifecycle[S oneShotAdmitter](state S) oneShotLifecycle[S] {
+	return oneShotLifecycle[S]{state: state}
+}
+
+// Admit opens the adapter-specific live request stream.
+func (e *oneShotLifecycle[S]) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
+	return e.state.admit(ctx, c)
+}
+
+// Complete drains the live stream and returns the assembled result.
+func (e *oneShotLifecycle[S]) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
+	return completeViaAdmit(ctx, e, c)
+}
+
 // completeViaAdmit is the shared one-shot EngineDriver shim for a lifecycle engine:
 // Admit the call, drain its Tokens stream, then return the assembled Result with the
 // originating call bound on when the engine left it nil. Every lifecycle engine's

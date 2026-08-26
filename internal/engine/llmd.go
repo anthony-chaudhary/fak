@@ -55,12 +55,16 @@ func EnvLLMDConfig() LLMDConfig {
 	}
 }
 
+type llmdEngineState struct {
+	cfg  LLMDConfig
+	vllm *VLLMEngine
+}
+
 // LLMDEngine is an abi.EngineDriver/LifecycleEngine adapter for an llm-d managed
 // fleet. It reuses the vLLM-compatible request and metrics lowerings because llm-d
 // frontends route OpenAI-compatible requests to vLLM workers.
 type LLMDEngine struct {
-	cfg  LLMDConfig
-	vllm *VLLMEngine
+	oneShotLifecycle[llmdEngineState]
 }
 
 // NewLLMDEngine builds an llm-d driver over public llm-d/vLLM-compatible surfaces.
@@ -79,7 +83,7 @@ func NewLLMDEngine(cfg LLMDConfig) *LLMDEngine {
 		Residency:     cfg.Residency,
 		KVEvents:      cfg.KVEvents,
 	})
-	return &LLMDEngine{cfg: cfg, vllm: vllm}
+	return &LLMDEngine{oneShotLifecycle: newOneShotLifecycle(llmdEngineState{cfg: cfg, vllm: vllm})}
 }
 
 // Caps advertises llm-d ride-mode support: OpenAI-compatible frontend dispatch,
@@ -105,7 +109,7 @@ func (e *LLMDEngine) WeightBearing() bool { return true }
 // Admit submits one request to the llm-d OpenAI-compatible frontend with
 // stream=true and returns a live request handle. llm-d owns placement behind that
 // frontend; fak records the served result under engine="llm-d".
-func (e *LLMDEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
+func (e llmdEngineState) admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("llm-d: FAK_LLMD_BASE_URL or LLMDConfig.BaseURL is required")
 	}
@@ -113,7 +117,7 @@ func (e *LLMDEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 	if err != nil {
 		return nil, err
 	}
-	cctx, cancel, resp, err := postStreamingRequest(ctx, e.vllm.client, endpoint, e.cfg.APIKey, body, "llm-d", kind)
+	cctx, cancel, resp, err := postStreamingRequest(ctx, e.vllm.state.client, endpoint, e.cfg.APIKey, body, "llm-d", kind)
 	if err != nil {
 		return nil, err
 	}
@@ -133,19 +137,14 @@ func (e *LLMDEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequ
 	return r, nil
 }
 
-// Complete drains the live stream and returns the assembled result.
-func (e *LLMDEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	return completeViaAdmit(ctx, e, c)
-}
-
 // RunKVEventSubscription consumes decoded vLLM KV-event batches from the llm-d
 // worker plane when a deployment supplies that bridge.
 func (e *LLMDEngine) RunKVEventSubscription(ctx context.Context) error {
-	return e.vllm.RunKVEventSubscription(ctx)
+	return e.state.vllm.RunKVEventSubscription(ctx)
 }
 
 func (e *LLMDEngine) metricsURL() (string, error) {
-	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "llm-d", "FAK_LLMD_METRICS_URL", true)
+	return deriveMetricsURL(e.state.cfg.MetricsURL, e.state.cfg.BaseURL, "llm-d", "FAK_LLMD_METRICS_URL", true)
 }
 
 // ScrapeServingMetrics reads the llm-d/vLLM Prometheus endpoint and normalizes it
@@ -159,10 +158,10 @@ func (e *LLMDEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSn
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
+	if e.state.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.state.cfg.APIKey)
 	}
-	resp, err := e.vllm.client.Do(req)
+	resp, err := e.state.vllm.state.client.Do(req)
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
@@ -175,7 +174,7 @@ func (e *LLMDEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetricsSn
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	return ParseLLMDPrometheus(e.cfg.WorkerID, string(raw)), nil
+	return ParseLLMDPrometheus(e.state.cfg.WorkerID, string(raw)), nil
 }
 
 // ParseLLMDPrometheus maps vLLM-style worker metrics from an llm-d deployment into

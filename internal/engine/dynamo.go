@@ -50,18 +50,22 @@ func EnvDynamoConfig() DynamoConfig {
 	}
 }
 
+type dynamoEngineState struct {
+	cfg    DynamoConfig
+	client *http.Client
+}
+
 // DynamoEngine is an abi.EngineDriver/LifecycleEngine adapter for a Dynamo-managed
 // P/D serving pool.
 type DynamoEngine struct {
-	cfg    DynamoConfig
-	client *http.Client
+	oneShotLifecycle[dynamoEngineState]
 }
 
 // NewDynamoEngine builds a Dynamo driver over public Dynamo surfaces.
 func NewDynamoEngine(cfg DynamoConfig) *DynamoEngine {
 	cfg.WorkerID = defaultWorkerID(cfg.WorkerID, "dynamo")
 	client := defaultHTTPClient(cfg.Client)
-	return &DynamoEngine{cfg: cfg, client: client}
+	return &DynamoEngine{oneShotLifecycle: newOneShotLifecycle(dynamoEngineState{cfg: cfg, client: client})}
 }
 
 // Caps advertises Dynamo ride-mode support: OpenAI-compatible frontend dispatch,
@@ -84,7 +88,7 @@ func (e *DynamoEngine) WeightBearing() bool { return true }
 // Admit submits one request to Dynamo's OpenAI-compatible frontend with stream=true
 // and returns a live request handle. Dynamo owns routing across its P/D pool behind
 // that frontend; fak stays in front as the governance plane.
-func (e *DynamoEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
+func (e dynamoEngineState) admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("dynamo: FAK_DYNAMO_BASE_URL or DynamoConfig.BaseURL is required")
 	}
@@ -112,13 +116,8 @@ func (e *DynamoEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 	return r, nil
 }
 
-// Complete drains the live stream and returns the assembled result.
-func (e *DynamoEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	return completeViaAdmit(ctx, e, c)
-}
-
 func (e *DynamoEngine) metricsURL() (string, error) {
-	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "dynamo", "FAK_DYNAMO_METRICS_URL", true)
+	return deriveMetricsURL(e.state.cfg.MetricsURL, e.state.cfg.BaseURL, "dynamo", "FAK_DYNAMO_METRICS_URL", true)
 }
 
 // ScrapeServingMetrics reads Dynamo's Prometheus endpoint and returns one normalized
@@ -132,10 +131,10 @@ func (e *DynamoEngine) ScrapeServingMetrics(ctx context.Context) (DynamoServingM
 	if err != nil {
 		return DynamoServingMetrics{}, err
 	}
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
+	if e.state.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.state.cfg.APIKey)
 	}
-	resp, err := e.client.Do(req)
+	resp, err := e.state.client.Do(req)
 	if err != nil {
 		return DynamoServingMetrics{}, err
 	}
@@ -148,7 +147,7 @@ func (e *DynamoEngine) ScrapeServingMetrics(ctx context.Context) (DynamoServingM
 	if err != nil {
 		return DynamoServingMetrics{}, err
 	}
-	return ParseDynamoPrometheus(e.cfg.WorkerID, string(raw)), nil
+	return ParseDynamoPrometheus(e.state.cfg.WorkerID, string(raw)), nil
 }
 
 // DynamoServingMetrics is Dynamo's multi-worker view normalized into fak's L2

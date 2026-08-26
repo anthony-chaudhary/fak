@@ -88,12 +88,16 @@ func EnvSGLangConfig() SGLangConfig {
 	}
 }
 
-// SGLangEngine is the SGLang adapter behind abi.EngineDriver/LifecycleEngine.
-type SGLangEngine struct {
+type sglangEngineState struct {
 	cfg       SGLangConfig
 	client    *http.Client
 	cache     *CacheEventRecorder
 	residency *PrefixResidencyIndex
+}
+
+// SGLangEngine is the SGLang adapter behind abi.EngineDriver/LifecycleEngine.
+type SGLangEngine struct {
+	oneShotLifecycle[sglangEngineState]
 }
 
 // NewSGLangEngine builds an SGLang driver over public SGLang surfaces.
@@ -101,7 +105,8 @@ func NewSGLangEngine(cfg SGLangConfig) *SGLangEngine {
 	cfg.WorkerID = defaultWorkerID(cfg.WorkerID, "sglang")
 	client := defaultHTTPClient(cfg.Client)
 	cache, residency := defaultCacheAndResidency(cfg.CacheRecorder, cfg.Residency)
-	return &SGLangEngine{cfg: cfg, client: client, cache: cache, residency: residency}
+	state := sglangEngineState{cfg: cfg, client: client, cache: cache, residency: residency}
+	return &SGLangEngine{oneShotLifecycle: newOneShotLifecycle(state)}
 }
 
 // Caps advertises the SGLang adapter, the native /generate surface, lifecycle
@@ -123,16 +128,16 @@ func (e *SGLangEngine) WeightBearing() bool { return true }
 
 // Residency exposes the per-worker prefix-residency index the radix poll feeds, so a
 // router can read it for cache-aware dispatch.
-func (e *SGLangEngine) Residency() *PrefixResidencyIndex { return e.residency }
+func (e *SGLangEngine) Residency() *PrefixResidencyIndex { return e.state.residency }
 
 // CacheRecorder exposes the cache-event recorder fed by RadixAttention prefix-cache
 // hits surfaced on each /generate turn.
-func (e *SGLangEngine) CacheRecorder() *CacheEventRecorder { return e.cache }
+func (e *SGLangEngine) CacheRecorder() *CacheEventRecorder { return e.state.cache }
 
 // Admit submits one request to SGLang's native /generate with stream=true and
 // returns a live request handle whose Tokens channel receives SSE deltas as SGLang
 // emits them.
-func (e *SGLangEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
+func (e sglangEngineState) admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRequest, error) {
 	if strings.TrimSpace(e.cfg.BaseURL) == "" {
 		return nil, errors.New("sglang: FAK_SGLANG_BASE_URL or SGLangConfig.BaseURL is required")
 	}
@@ -164,17 +169,12 @@ func (e *SGLangEngine) Admit(ctx context.Context, c *abi.ToolCall) (abi.EngineRe
 	return r, nil
 }
 
-// Complete drains the live stream and returns the assembled result.
-func (e *SGLangEngine) Complete(ctx context.Context, c *abi.ToolCall) (*abi.Result, error) {
-	return completeViaAdmit(ctx, e, c)
-}
-
 // buildGenerateBody shapes the native SGLang /generate request. SGLang takes a raw
 // `text` prompt (or input_ids/input_embeds) plus sampling_params; it is single-model
 // per server, so no model field is injected. A caller-supplied JSON object is passed
 // through verbatim with stream forced on; a non-object/empty args synthesizes a
 // prompt from the tool name so the offline dispatch chain still drives it.
-func (e *SGLangEngine) buildGenerateBody(c *abi.ToolCall, args []byte) ([]byte, error) {
+func (e sglangEngineState) buildGenerateBody(c *abi.ToolCall, args []byte) ([]byte, error) {
 	obj := decodeOrEmptyJSONObject(args)
 	_, hasText := obj["text"]
 	_, hasInputIDs := obj["input_ids"]
@@ -190,12 +190,12 @@ func (e *SGLangEngine) buildGenerateBody(c *abi.ToolCall, args []byte) ([]byte, 
 // metricsURL derives the SGLang Prometheus endpoint when not configured explicitly.
 // SGLang's HTTP root is not an OpenAI /v1 frontend, so no /v1 suffix is stripped.
 func (e *SGLangEngine) metricsURL() (string, error) {
-	return deriveMetricsURL(e.cfg.MetricsURL, e.cfg.BaseURL, "sglang", "FAK_SGLANG_METRICS_URL", false)
+	return deriveMetricsURL(e.state.cfg.MetricsURL, e.state.cfg.BaseURL, "sglang", "FAK_SGLANG_METRICS_URL", false)
 }
 
 func (e *SGLangEngine) radixURL() (string, error) {
-	if strings.TrimSpace(e.cfg.RadixURL) != "" {
-		return e.cfg.RadixURL, nil
+	if strings.TrimSpace(e.state.cfg.RadixURL) != "" {
+		return e.state.cfg.RadixURL, nil
 	}
 	return "", errors.New("sglang: FAK_SGLANG_RADIX_URL or SGLangConfig.RadixURL is required for radix residency polling")
 }
@@ -211,10 +211,10 @@ func (e *SGLangEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetrics
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
+	if e.state.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.state.cfg.APIKey)
 	}
-	resp, err := e.client.Do(req)
+	resp, err := e.state.client.Do(req)
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
@@ -227,7 +227,7 @@ func (e *SGLangEngine) ScrapeServingMetrics(ctx context.Context) (ServingMetrics
 	if err != nil {
 		return ServingMetricsSnapshot{}, err
 	}
-	return ParseSGLangPrometheus(e.cfg.WorkerID, string(raw)), nil
+	return ParseSGLangPrometheus(e.state.cfg.WorkerID, string(raw)), nil
 }
 
 // ParseSGLangPrometheus extracts the SGLang scheduler metric names and maps them
@@ -309,10 +309,10 @@ func (e *SGLangEngine) PollRadixResidency(ctx context.Context) (SGLangRadixSnaps
 	if err != nil {
 		return SGLangRadixSnapshot{}, err
 	}
-	if e.cfg.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
+	if e.state.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.state.cfg.APIKey)
 	}
-	resp, err := e.client.Do(req)
+	resp, err := e.state.client.Do(req)
 	if err != nil {
 		return SGLangRadixSnapshot{}, err
 	}
@@ -329,7 +329,7 @@ func (e *SGLangEngine) PollRadixResidency(ctx context.Context) (SGLangRadixSnaps
 	if err := json.Unmarshal(raw, &snap); err != nil {
 		return SGLangRadixSnapshot{}, fmt.Errorf("sglang: decode radix snapshot JSON: %w", err)
 	}
-	RecordSGLangRadixSnapshot(e.cfg.WorkerID, e.cfg.Model, e.residency, snap)
+	RecordSGLangRadixSnapshot(e.state.cfg.WorkerID, e.state.cfg.Model, e.state.residency, snap)
 	return snap, nil
 }
 

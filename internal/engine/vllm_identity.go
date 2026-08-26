@@ -45,7 +45,7 @@ type vllmControls struct {
 // call meta and folds them into the request controls. Priority is only derived
 // when the served engine advertises priority scheduling; otherwise it is dropped
 // and the request degrades to the engine's FCFS default.
-func (e *VLLMEngine) deriveVLLMControls(c *abi.ToolCall) vllmControls {
+func (e vllmEngineState) deriveVLLMControls(c *abi.ToolCall) vllmControls {
 	var ctrl vllmControls
 	if c == nil || c.Meta == nil {
 		return ctrl

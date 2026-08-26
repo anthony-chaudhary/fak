@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
@@ -115,5 +116,28 @@ func TestAdapterAbortStopsMidStream(t *testing.T) {
 	}
 	if _, err := req.Result(); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Result err = %v, want context.Canceled", err)
+	}
+}
+
+func TestOneShotLifecycleZeroValuesReportMissingConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		engine abi.EngineDriver
+		want   string
+	}{
+		{name: "dynamo", engine: &DynamoEngine{}, want: "DynamoConfig.BaseURL is required"},
+		{name: "llm-d", engine: &LLMDEngine{}, want: "LLMDConfig.BaseURL is required"},
+		{name: "mlx", engine: &MLXEngine{}, want: "MLXConfig.BaseURL is required"},
+		{name: "sglang", engine: &SGLangEngine{}, want: "SGLangConfig.BaseURL is required"},
+		{name: "vllm", engine: &VLLMEngine{}, want: "VLLMConfig.BaseURL is required"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := tt.engine.Complete(context.Background(), lcCall("ask", `{}`))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Complete error = %v, want containing %q", err, tt.want)
+			}
+		})
 	}
 }
