@@ -577,7 +577,7 @@ func orchestrationWorkerArgs(req orchestrationWorkerLaunchRequest, auditPath str
 		args = append(args, "--session-id", req.RunID+"-"+req.Role.ID)
 	}
 	return append(args,
-		"--", "codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--dangerously-bypass-hook-trust", "--json",
+		"--", "codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--json",
 		"-c", "model="+strconv.Quote(req.Model), "-c", "model_reasoning_effort="+strconv.Quote(req.Effort), "-",
 	)
 }

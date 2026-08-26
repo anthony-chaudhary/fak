@@ -31,7 +31,6 @@ func TestMixedQ4KQ8Observation(t *testing.T) {
 		if q8ws[i] == nil {
 			t.Fatalf("UploadQ8[%d] returned nil", i)
 		}
-		defer q8ws[i].Release()
 	}
 	x := make([]float32, in)
 	xq := make([]int8, in)

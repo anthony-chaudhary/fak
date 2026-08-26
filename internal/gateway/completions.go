@@ -56,8 +56,6 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateCompletionSampling(req)) {
 		return
 	}
-	ctx := r.Context()
-
 	reqModel := req.Model
 	if reqModel == "" {
 		reqModel = s.model
@@ -65,40 +63,11 @@ func (s *Server) handleCompletions(w http.ResponseWriter, r *http.Request) {
 	// The legacy wire has no message array; the whole request is one user prompt.
 	messages := []agent.Message{{Role: agent.RoleUser, Content: prompt}}
 
-	reqTrace := s.useHTTPTrace(w, r, "")
-	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
-	if canceled {
+	ctx, reqTrace, messages, sessionTurn, admitted := s.admitServedRequest(w, r, messages)
+	if !admitted {
 		return
-	}
-	if !ok {
-		// Budget drained: opt-in human-like reset when wired, else the historical
-		// refusal. Mirrors the chat + Anthropic wires.
-		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, messages); reset {
-			messages = resetMessages
-			reqTrace = newTrace
-			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
-			if canceled {
-				return
-			}
-			if !ok {
-				writeSessionRefusal(w, sessionTurn.state)
-				return
-			}
-		} else {
-			writeSessionRefusal(w, sessionTurn.state)
-			return
-		}
 	}
 
-	// Coherence thrash (#3159): actuate an armed hard reset on this ADMITTED turn (mirrors the
-	// budget-reset block above; a no-op when nothing is armed or no resetter is wired).
-	if reqTrace, messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, messages, sessionTurn); canceled {
-		return
-	}
-	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
-		writeSessionRefusal(w, sessionTurn.state)
-		return
-	}
 	// #5514 (the legacy half of #5399): completeServed below blocks for the WHOLE decode,
 	// and this handler used to write its first byte only after that returned —
 	// writeCompletionStream is what set the SSE headers and the 200. So a stream:true

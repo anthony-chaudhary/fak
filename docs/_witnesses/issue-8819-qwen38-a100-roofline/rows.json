@@ -1,0 +1,107 @@
+[
+  {
+    "arm": "cold_unique",
+    "iteration": 1,
+    "e2e_ms": 6714.43,
+    "status": 200,
+    "text": "\ufffd",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 1,
+      "total_tokens": 30,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "arm": "cold_unique",
+    "iteration": 2,
+    "e2e_ms": 6730.85,
+    "status": 200,
+    "text": "alia",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 1,
+      "total_tokens": 30,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "arm": "cold_unique",
+    "iteration": 3,
+    "e2e_ms": 6753.42,
+    "status": 200,
+    "text": "\u53ef\u3002",
+    "quality_pass": false,
+    "usage": {
+      "prompt_tokens": 29,
+      "completion_tokens": 2,
+      "total_tokens": 31,
+      "prompt_tokens_details": {}
+    }
+  },
+  {
+    "arm": "cold_unique",
+    "iteration": 4,
+    "e2e_ms": 6895.64,
+    "status": 502,
+    "text": "",
+    "quality_pass": false,
+    "usage": {}
+  },
+  {
+    "arm": "cold_unique",
+    "iteration": 5,
+    "e2e_ms": 6838.11,
+    "status": 502,
+    "text": "",
+    "quality_pass": false,
+    "usage": {}
+  },
+  {
+    "arm": "cache_identical",
+    "iteration": 1,
+    "e2e_ms": 6636.26,
+    "status": 502,
+    "text": "",
+    "quality_pass": false,
+    "usage": {}
+  },
+  {
+    "arm": "cache_identical",
+    "iteration": 2,
+    "e2e_ms": 4898.85,
+    "status": 502,
+    "text": "",
+    "quality_pass": false,
+    "usage": {}
+  },
+  {
+    "arm": "cache_identical",
+    "iteration": 3,
+    "e2e_ms": 4913.07,
+    "status": 502,
+    "text": "",
+    "quality_pass": false,
+    "usage": {}
+  },
+  {
+    "arm": "cache_identical",
+    "iteration": 4,
+    "e2e_ms": 4917.14,
+    "status": 502,
+    "text": "",
+    "quality_pass": false,
+    "usage": {}
+  },
+  {
+    "arm": "cache_identical",
+    "iteration": 5,
+    "e2e_ms": 4913.98,
+    "status": 502,
+    "text": "",
+    "quality_pass": false,
+    "usage": {}
+  }
+]

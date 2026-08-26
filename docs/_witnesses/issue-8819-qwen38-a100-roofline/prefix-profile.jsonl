@@ -1,0 +1,4 @@
+{"schema":"fak.prefix-profile/1","at":"2026-08-26T01:25:05.284726672Z","operation":"device_clone","component":"complete","duration_ns":29187348,"host_bytes":9392,"device_bytes":161218560,"transfer_bytes":0,"tokens":22,"backend":"cuda"}
+{"schema":"fak.prefix-profile/1","at":"2026-08-26T01:25:10.183587891Z","operation":"device_clone","component":"complete","duration_ns":29140401,"host_bytes":9392,"device_bytes":161218560,"transfer_bytes":0,"tokens":22,"backend":"cuda"}
+{"schema":"fak.prefix-profile/1","at":"2026-08-26T01:25:15.096685997Z","operation":"device_clone","component":"complete","duration_ns":29155826,"host_bytes":9392,"device_bytes":161218560,"transfer_bytes":0,"tokens":22,"backend":"cuda"}
+{"schema":"fak.prefix-profile/1","at":"2026-08-26T01:25:20.012904289Z","operation":"device_clone","component":"complete","duration_ns":28452156,"host_bytes":9392,"device_bytes":161218560,"transfer_bytes":0,"tokens":22,"backend":"cuda"}

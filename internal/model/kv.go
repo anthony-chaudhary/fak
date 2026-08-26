@@ -84,6 +84,8 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 
 // Clone makes a second independent owner for lookup; the cache retains the original.
 func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
+	started := prefixProfileStart()
+	defer func() { emitPrefixProfile(started, "device_clone", "complete", p, nil) }()
 	if p == nil || p.Cache == nil {
 		return nil, nil
 	}
