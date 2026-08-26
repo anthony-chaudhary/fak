@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hostdiag"
+	"github.com/anthony-chaudhary/fak/internal/shellprov"
 )
 
 func TestHostdiagHistoricalFixtureIsRetainedUnresolved(t *testing.T) {
@@ -116,3 +117,49 @@ func TestAppendHostdiagRowConcurrentComplete(t *testing.T) {
 }
 
 func timeUnixMilli(ms int64) time.Time { return time.UnixMilli(ms) }
+
+func TestHostdiagCorrelatesExactOwnedShellReceipt(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "hostdiag.jsonl")
+	fixture := filepath.Join(dir, "events.json")
+	provenance := filepath.Join(dir, "shell.jsonl")
+	event := hostdiag.ResourceEvent{TimeMS: 2000, Source: "Application Error", EventID: 1000, RecordID: "1", Name: "POWERSHELL_PROCESS_CRASH", App: "powershell.exe", ProcessID: 42, ProcessStartMS: 1000}
+	data, err := json.Marshal([]hostdiag.ResourceEvent{event})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixture, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := shellprov.New(time.UnixMilli(1100), shellprov.Fields{ParentPID: 7, ChildPID: 42, ChildCreatedUTCMS: 1000, LaunchClass: shellprov.LaunchProbe, ShellImage: shellprov.ShellPowerShell, ShellEdition: shellprov.EditionDesktop, ShellVersion: "5.1", Outcome: shellprov.OutcomeFailed, ErrorClass: shellprov.ErrorConsoleFault})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := shellprov.Append(provenance, receipt, 10); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runHostdiag(&stdout, &stderr, []string{"correlate", "--fixture", fixture, "--ledger", ledger, "--shell-provenance", provenance}); rc != 0 {
+		t.Fatalf("runHostdiag rc=%d stderr=%s", rc, stderr.String())
+	}
+	var got hostdiag.Correlation
+	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "identified" || got.OwnedLaunch == nil || got.OwnedLaunch.ChildPID != 42 || got.OwnedLaunch.ChildCreatedUTCMS != 1000 {
+		t.Fatalf("correlation = %+v", got)
+	}
+	if strings.Contains(stdout.String(), "argv") || strings.Contains(stdout.String(), "secret") {
+		t.Fatalf("correlation leaked launch content: %s", stdout.String())
+	}
+}
+
+func TestLoadOwnedShellLaunchesRejectsMalformedReceipt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "shell.jsonl")
+	if err := os.WriteFile(path, []byte("{\"schema\":\"foreign\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOwnedShellLaunches(path); err == nil {
+		t.Fatal("accepted foreign shell receipt")
+	}
+}

@@ -1,6 +1,7 @@
 package hostdiag
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -111,5 +112,41 @@ func TestClassifyCommandDoesNotRetainArguments(t *testing.T) {
 	}
 	if got := ClassifyCommand(`C:\bin\fak.exe unusual --token secret`); got != "other" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestPowerShellCrashIdentifiesExactOwnedLaunch(t *testing.T) {
+	event := ResourceEvent{TimeMS: 2000, Source: "Application Error", EventID: 1000, Name: "POWERSHELL_PROCESS_CRASH", App: "powershell.exe", ProcessID: 42, ProcessStartMS: 1000}
+	launch := OwnedShellLaunch{ParentPID: 7, ChildPID: 42, ChildCreatedUTCMS: 1000, LaunchID: "sha256:test", LaunchClass: "probe", ShellImage: "powershell", ShellEdition: "desktop", ShellVersion: "5.1", Outcome: "failed", ErrorClass: "console_fault"}
+	got, ok := CorrelateWithOwnedLaunches(event, nil, []OwnedShellLaunch{launch})
+	if !ok || got.Status != "identified" || got.OwnedLaunch == nil {
+		t.Fatalf("correlation = %+v, ok=%v", got, ok)
+	}
+	if got.OwnedLaunch.ChildPID != 42 || got.OwnedLaunch.ChildCreatedUTCMS != 1000 || got.OwnedLaunch.ParentPID != 7 {
+		t.Fatalf("owned launch = %+v", got.OwnedLaunch)
+	}
+}
+
+func TestPowerShellCrashPrefersNewestTerminalReceipt(t *testing.T) {
+	event := ResourceEvent{TimeMS: 2000, Source: "Application Error", EventID: 1000, Name: "POWERSHELL_PROCESS_CRASH", App: "powershell.exe", ProcessID: 42, ProcessStartMS: 1000}
+	started := OwnedShellLaunch{TimestampUTCMS: 1100, ParentPID: 7, ChildPID: 42, ChildCreatedUTCMS: 1000, LaunchID: "sha256:test", Outcome: "started", ErrorClass: "none"}
+	terminal := started
+	terminal.TimestampUTCMS = 1900
+	terminal.Outcome = "failed"
+	terminal.ErrorClass = "console_fault"
+	got, ok := CorrelateWithOwnedLaunches(event, nil, []OwnedShellLaunch{terminal, started})
+	if !ok || got.OwnedLaunch == nil || got.OwnedLaunch.Outcome != "failed" || got.OwnedLaunch.ErrorClass != "console_fault" {
+		t.Fatalf("correlation = %+v, ok=%v", got, ok)
+	}
+}
+func TestPowerShellCrashRejectsPIDReuse(t *testing.T) {
+	event := ResourceEvent{TimeMS: 3000, Source: "Application Error", EventID: 1000, Name: "POWERSHELL_PROCESS_CRASH", App: "powershell.exe", ProcessID: 42, ProcessStartMS: 2000}
+	launch := OwnedShellLaunch{ParentPID: 7, ChildPID: 42, ChildCreatedUTCMS: 1000, LaunchID: "sha256:old", LaunchClass: "probe", ShellImage: "powershell", ShellEdition: "desktop", ShellVersion: "5.1", Outcome: "succeeded", ErrorClass: "none"}
+	got, ok := CorrelateWithOwnedLaunches(event, nil, []OwnedShellLaunch{launch})
+	if !ok || got.Status != "historical_unresolved" || got.OwnedLaunch != nil {
+		t.Fatalf("PID-reused correlation = %+v, ok=%v", got, ok)
+	}
+	if !strings.Contains(got.Reason, "exact PID and process creation time") {
+		t.Fatalf("reason = %q", got.Reason)
 	}
 }

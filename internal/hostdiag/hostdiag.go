@@ -40,6 +40,20 @@ type ResourceCulprit struct {
 	Bytes uint64 `json:"bytes"`
 }
 
+type OwnedShellLaunch struct {
+	TimestampUTCMS    int64  `json:"timestamp_utc_ms"`
+	ParentPID         int    `json:"parent_pid"`
+	ChildPID          int    `json:"child_pid"`
+	ChildCreatedUTCMS int64  `json:"child_created_utc_ms"`
+	LaunchID          string `json:"launch_id"`
+	LaunchClass       string `json:"launch_class"`
+	ShellImage        string `json:"shell_image"`
+	ShellEdition      string `json:"shell_edition"`
+	ShellVersion      string `json:"shell_version"`
+	Outcome           string `json:"outcome"`
+	ErrorClass        string `json:"error_class"`
+}
+
 type ApplicationFault struct {
 	AppVersion    string `json:"app_version,omitempty"`
 	Module        string `json:"module,omitempty"`
@@ -68,16 +82,18 @@ func ParseLowVirtualMemoryCulprits(message string) []ResourceCulprit {
 }
 
 type ResourceEvent struct {
-	TimeMS   int64             `json:"time_ms"`
-	Source   string            `json:"source"`
-	EventID  int               `json:"windows_event_id"`
-	RecordID string            `json:"record_id,omitempty"`
-	Name     string            `json:"event_name"`
-	ReportID string            `json:"report_id,omitempty"`
-	App      string            `json:"app,omitempty"`
-	Message  string            `json:"message,omitempty"`
-	Culprits []ResourceCulprit `json:"culprits,omitempty"`
-	Fault    *ApplicationFault `json:"application_fault,omitempty"`
+	TimeMS         int64             `json:"time_ms"`
+	Source         string            `json:"source"`
+	EventID        int               `json:"windows_event_id"`
+	RecordID       string            `json:"record_id,omitempty"`
+	Name           string            `json:"event_name"`
+	ReportID       string            `json:"report_id,omitempty"`
+	App            string            `json:"app,omitempty"`
+	Message        string            `json:"message,omitempty"`
+	Culprits       []ResourceCulprit `json:"culprits,omitempty"`
+	Fault          *ApplicationFault `json:"application_fault,omitempty"`
+	ProcessID      int               `json:"process_id,omitempty"`
+	ProcessStartMS int64             `json:"process_start_ms,omitempty"`
 }
 
 type Correlation struct {
@@ -92,6 +108,7 @@ type Correlation struct {
 	App           string            `json:"app,omitempty"`
 	Culprits      []ResourceCulprit `json:"culprits,omitempty"`
 	Fault         *ApplicationFault `json:"application_fault,omitempty"`
+	OwnedLaunch   *OwnedShellLaunch `json:"owned_shell_launch,omitempty"`
 	Status        string            `json:"status"`
 	Reason        string            `json:"reason"`
 	Candidates    []ProcessSample   `json:"candidates,omitempty"`
@@ -125,6 +142,10 @@ func ClassifyCommand(commandLine string) string {
 }
 
 func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool) {
+	return CorrelateWithOwnedLaunches(event, samples, nil)
+}
+
+func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, launches []OwnedShellLaunch) (Correlation, bool) {
 	name := strings.ToUpper(strings.TrimSpace(event.Name))
 	isLowVirtualMemory := name == "LOW_VIRTUAL_MEMORY" && event.EventID == 2004
 	isShellCrash := name == "POWERSHELL_PROCESS_CRASH" && event.EventID == 1000
@@ -162,14 +183,31 @@ func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool)
 		}
 		return candidates[i].PID < candidates[j].PID
 	})
+	var owned *OwnedShellLaunch
+	if isShellCrash && event.ProcessID > 0 && event.ProcessStartMS > 0 {
+		for i := range launches {
+			launch := &launches[i]
+			if launch.ChildPID == event.ProcessID && launch.ChildCreatedUTCMS == event.ProcessStartMS && (owned == nil || launch.TimestampUTCMS > owned.TimestampUTCMS) {
+				copy := *launch
+				owned = &copy
+			}
+		}
+	}
 	status, reason := "historical_unresolved", "no durable fak process census spans the event time"
+	if isShellCrash {
+		if owned != nil {
+			status, reason = "identified", "PowerShell crash PID and process creation time exactly match a fak-owned launch receipt"
+		} else {
+			reason = "no exact PID and process creation time match in fak-owned launch receipts"
+		}
+	}
 	if len(candidates) == 1 {
 		status, reason = "identified", "one durable fak process census spans the event time"
 	} else if len(candidates) > 1 {
 		status, reason = "ambiguous", "multiple durable fak process census rows span the event time"
 	}
 	key := strings.Join([]string{strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID), strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), name}, "|")
-	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, OwnedLaunch: owned, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
 }
 
 func eventNamesFakPID(culprits []ResourceCulprit, pid int) bool {
