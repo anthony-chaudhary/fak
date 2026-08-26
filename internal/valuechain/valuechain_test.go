@@ -1,6 +1,10 @@
 package valuechain
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func f(v float64) *float64 { return &v }
 func TestAuditSupportSharedContextEconomics(t *testing.T) {
@@ -83,5 +87,41 @@ func TestAuditRejectsNegativeMeasurements(t *testing.T) {
 				t.Fatal("negative measurement was accepted")
 			}
 		})
+	}
+}
+
+func TestAuditReportsInvocationOutcomeCounts(t *testing.T) {
+	manifest := Manifest{Schema: Schema, Name: "outcomes", Stages: []Stage{{ID: "outcome", Kind: "outcome"}}, Arms: []Arm{{ID: "baseline", Default: true}}}
+	input := Input{Schema: Schema, Observations: []Observation{
+		{ID: "ok", TraceID: "t-ok", StageID: "outcome", Arm: "baseline", Provenance: "receipt", InvocationOutcome: "success"},
+		{ID: "deny", TraceID: "t-deny", StageID: "outcome", Arm: "baseline", Provenance: "policy receipt", InvocationOutcome: "refusal"},
+		{ID: "broken", TraceID: "t-broken", StageID: "outcome", Arm: "baseline", Provenance: "error receipt", InvocationOutcome: "error"},
+	}}
+
+	report, err := Audit(manifest, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := (OutcomeCounts{Success: 1, Refusal: 1, Error: 1})
+	if report.InvocationOutcomes != want {
+		t.Fatalf("invocation outcomes = %+v, want %+v", report.InvocationOutcomes, want)
+	}
+	readout, err := json.Marshal(report.InvocationOutcomes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(readout)
+	t.Logf("captured invocation outcome readout: %s", got)
+	if got != `{"success":1,"refusal":1,"error":1}` {
+		t.Fatalf("captured invocation outcome readout = %s", got)
+	}
+}
+
+func TestAuditRejectsUnknownInvocationOutcome(t *testing.T) {
+	_, err := Audit(Manifest{Schema: Schema, Name: "outcomes", Stages: []Stage{{ID: "outcome", Kind: "outcome"}}, Arms: []Arm{{ID: "baseline", Default: true}}}, Input{Schema: Schema, Observations: []Observation{
+		{ID: "unknown", TraceID: "t", StageID: "outcome", Arm: "baseline", Provenance: "receipt", InvocationOutcome: "maybe"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), `invalid invocation_outcome "maybe"`) {
+		t.Fatalf("error = %v, want invalid invocation_outcome detail", err)
 	}
 }

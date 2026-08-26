@@ -1,3 +1,7 @@
+---
+title: "Ponytail medium default dogfood audit (updated 2026-08-24)"
+description: "Default-on is mechanically ready and its exact fragment is now benchmark-addressable; effectiveness is mixed / NOT-YET."
+---
 # Ponytail medium default dogfood audit (updated 2026-08-24)
 
 ## Verdict

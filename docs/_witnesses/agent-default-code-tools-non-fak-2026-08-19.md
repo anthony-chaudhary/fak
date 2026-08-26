@@ -1,3 +1,7 @@
+---
+title: "Default `fak agent` repository tools in a non-FAK repository — 2026-08-19"
+description: "Verdict: fak agent now arms bounded repository-native tools by default when launched from an arbitrary repository,"
+---
 # Default `fak agent` repository tools in a non-FAK repository — 2026-08-19
 
 **Verdict:** `fak agent` now arms bounded repository-native tools by default when launched from an arbitrary repository, while retaining explicit workspace selection and opt-out controls.

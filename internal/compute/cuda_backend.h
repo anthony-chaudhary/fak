@@ -40,6 +40,8 @@ void fcuda_h2d(void *d, const void *h, size_t bytes);
 void fcuda_d2h(void *h, const void *d, size_t bytes);
 void fcuda_d2d(void *dst, const void *src, size_t bytes);
 void fcuda_sync(void);
+double fcuda_event_elapsed_ms_start(void);
+double fcuda_event_elapsed_ms_end(void);
 
 /* Device-specific allocation/copy helpers for multi-GPU collectives. The ordinary
  * fcuda_malloc/fcuda_h2d/fcuda_d2h path is device-0 + pooled. These helpers deliberately use

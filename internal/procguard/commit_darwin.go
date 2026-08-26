@@ -4,6 +4,7 @@ package procguard
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,6 +25,14 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 // tables by PID. The relation table defines ownership; every owned PID must have
 // an RSS row or the sample is typed as incomplete instead of looking healthy.
 func joinDarwinMemorySnapshot(rootPID int, census, relations []Proc) (MemorySnapshot, string) {
+	return joinDarwinMemorySnapshotWithProbe(rootPID, census, relations, darwinProcessAlive)
+}
+
+// joinDarwinMemorySnapshotWithProbe keeps liveness reconciliation injectable so
+// the two-snapshot exit race has a deterministic regression witness. The RSS and
+// relation tables are collected by separate ps processes; a descendant may exit
+// after appearing in one table and before the join examines it.
+func joinDarwinMemorySnapshotWithProbe(rootPID int, census, relations []Proc, processAlive func(int) (bool, error)) (MemorySnapshot, string) {
 	s := MemorySnapshot{Metric: MemoryMetricRSS, RootPID: rootPID}
 	if rootPID <= 0 {
 		return s, "invalid root pid"
@@ -75,6 +84,18 @@ func joinDarwinMemorySnapshot(rootPID int, census, relations []Proc) (MemorySnap
 				process.Name = rss.Name
 			}
 		} else {
+			// The root is the fail-closed anchor for the entire ownership walk. A
+			// missing root RSS row is never reconciled away, even if it exits while
+			// sampling; only already-exited descendants are harmless churn.
+			if pid != rootPID {
+				alive, err := processAlive(pid)
+				if err != nil {
+					return s, fmt.Sprintf("probe missing rss pid %d: %v", pid, err)
+				}
+				if !alive {
+					continue
+				}
+			}
 			missing = append(missing, pid)
 		}
 		s.Processes = append(s.Processes, process)
@@ -83,6 +104,21 @@ func joinDarwinMemorySnapshot(rootPID int, census, relations []Proc) (MemorySnap
 		return s, fmt.Sprintf("owned pids missing from rss census: %v", missing)
 	}
 	return s, ""
+}
+
+// darwinProcessAlive distinguishes normal exit churn from telemetry failures.
+// EPERM proves the PID still exists and therefore keeps a missing RSS row fatal;
+// ESRCH is the only result that permits skipping a descendant.
+func darwinProcessAlive(pid int) (bool, error) {
+	err := syscall.Kill(pid, 0)
+	switch {
+	case err == nil, errors.Is(err, syscall.EPERM):
+		return true, nil
+	case errors.Is(err, syscall.ESRCH):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 func joinDetails(details ...string) string {

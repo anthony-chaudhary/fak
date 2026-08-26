@@ -1,3 +1,7 @@
+---
+title: "Incremental session-history index"
+description: "fak vcache session-mine can retain a privacy-safe index across runs instead of reparsing every historical transcript:"
+---
 # Incremental session-history index
 
 `fak vcache session-mine` can retain a privacy-safe index across runs instead of reparsing every historical transcript:

@@ -3,7 +3,9 @@ package compute
 import (
 	"errors"
 	"math"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
@@ -123,6 +125,10 @@ func (c *cpuBackend) q4kRows(w Tensor, in int) (raw []byte, rowBytes int) {
 // Q8_0 reproduces qMatRows (quantize the activation, per-block int8 dot). One method,
 // two dtypes — the duplication the audit ranked hardest, expressed as dispatch.
 func (c *cpuBackend) MatMul(w, x Tensor) Tensor {
+	started := time.Now()
+	defer func() {
+		computetrace.Record(computetrace.Event{Operation: "matmul", Phase: "kernel", Backend: c.Name(), Device: "host", Kernel: w.Dtype.String() + "_matmul", StartedAt: started.UTC(), DurationNS: time.Since(started).Nanoseconds(), TimerDomain: "host_monotonic", Bytes: int64((w.Numel() + x.Numel()) * w.Dtype.Bytes()), Shapes: [][]int{w.Shape, x.Shape}, ProvenanceDigest: computetrace.Digest(c.Name(), w.Dtype.String(), "matmul")})
+	}()
 	out, in := w.Shape[0], w.Shape[1]
 	xf := c.f32(x)
 	y := make([]float32, out)

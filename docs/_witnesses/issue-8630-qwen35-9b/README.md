@@ -1,3 +1,8 @@
+---
+title: "Issue #8630 — Qwen3.5-9B quality-proxy result"
+description: "Reference documentation for Issue #8630 — Qwen3.5-9B quality-proxy result, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8630 — Qwen3.5-9B quality-proxy result
 
 **Verdict: PROMOTE to pinned Qwen3.5-27B scale rehearsal.**

@@ -1,3 +1,7 @@
+---
+title: "Missing vCache calibration launch-posture witness — 2026-08-18"
+description: "Verdict: in a temporary non-FAK Git repository with an empty private ledger, fak doctor launch-posture --entrypoint guard --harness codex --provider openai..."
+---
 # Missing vCache calibration launch-posture witness — 2026-08-18
 
 **Verdict:** in a temporary non-FAK Git repository with an empty private ledger, `fak doctor launch-posture --entrypoint guard --harness codex --provider openai --json` exits 1 and reports `vcache-calibration` as `inert` with the action `run a real fak guard/serve session through this provider`.

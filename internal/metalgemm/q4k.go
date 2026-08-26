@@ -24,6 +24,7 @@ typedef struct {
 } mg_execution_event;
 int  mg_q4k_upload(const unsigned char* raw, int out, int in);
 int  mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in);
+int  mg_q4k_upload_span(const unsigned char* raw, size_t nbytes, size_t offset, int out, int in);
 int  mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execution_event* event);
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
@@ -49,6 +50,7 @@ import "C"
 import (
 	"errors"
 	"math"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -134,6 +136,27 @@ var (
 // On Apple unified memory it first tries newBufferWithBytesNoCopy against the existing resident
 // Go bytes, keeping their backing array pinned until ResetQ4K. If Metal rejects the no-copy
 // buffer, it falls back to the older shared-buffer copy upload.
+// UploadQ4KMappedSpan registers a Q4_K tensor inside a page-aligned, externally owned mapping.
+// raw must remain mapped until Reset. Metal releases only its buffer handle; it never unmaps raw.
+func UploadQ4KMappedSpan(raw []byte, offset, out, in int) *Q4KWeight {
+	if !Available() || in <= 0 || in%256 != 0 || out <= 0 || len(raw) == 0 || offset < 0 || offset%32 != 0 {
+		return nil
+	}
+	need := (in / 256) * out * 144
+	if offset > len(raw) || need > len(raw)-offset {
+		return nil
+	}
+	base := unsafe.Pointer(unsafe.SliceData(raw))
+	pageSize := os.Getpagesize()
+	if uintptr(base)%uintptr(pageSize) != 0 || len(raw)%pageSize != 0 {
+		return nil
+	}
+	wid := int(C.mg_q4k_upload_span((*C.uchar)(base), C.size_t(len(raw)), C.size_t(offset), C.int(out), C.int(in)))
+	if wid < 0 {
+		return nil
+	}
+	return &Q4KWeight{id: C.int(wid), Out: out, In: in, noCopy: true}
+}
 func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
 	if !Available() || in <= 0 || in%256 != 0 || out <= 0 {
 		return nil

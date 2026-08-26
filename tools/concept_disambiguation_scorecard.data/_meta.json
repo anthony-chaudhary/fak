@@ -1092,6 +1092,26 @@
           "category": "incidental",
           "reason": "observed campaign receipt field, not a distinct cache mechanism",
           "token": "cache_reset_receipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Concrete Qwen swap codec function, not a new cache concept",
+          "token": "qwenhybridkvcachetohost"
+        },
+        {
+          "category": "incidental",
+          "reason": "Concrete Qwen swap restore codec function, not a new cache concept",
+          "token": "qwenhybridkvcachefromhost"
+        },
+        {
+          "category": "incidental",
+          "reason": "Regression-fixture invalidation flag, not a cache implementation concept",
+          "token": "CacheResetDetected"
+        },
+        {
+          "category": "incidental",
+          "reason": "External normalized JSON provenance field; it reports authoritative runtime telemetry and does not name a fak cache concept.",
+          "token": "runtime_cache_tokens"
         }
       ],
       "id": "cache",
@@ -1111,6 +1131,7 @@
         "CacheLineageChanged",
         "CacheLookupMS",
         "CacheReadRate",
+        "CacheResetDetected",
         "CacheSourceResolution",
         "CacheSourceSelfTestReport",
         "CacheSourceSelfTestSchemaVersion",
@@ -1335,6 +1356,8 @@
         "qwen38CacheKey",
         "qwen38_cache_campaign",
         "qwen38_cache_report",
+        "qwenhybridkvcachefromhost",
+        "qwenhybridkvcachetohost",
         "registerCacheLevers",
         "renderinkernelchatmlrequest",
         "replaceMicroCacheWitness",
@@ -1349,6 +1372,7 @@
         "runMicroCacheWitness",
         "runVCacheCalibrationRecord",
         "runVCacheCalibrationStatus",
+        "runtime_cache_tokens",
         "selectorCacheKey",
         "shared_prefix_provider_cache_only",
         "strongMatrixCache",
@@ -1377,21 +1401,15 @@
       "classifications": [
         {
           "category": "incidental",
-          "reason": "Literal FAK_PREFILL_NO_ATTN environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new attention concept.",
-          "token": "fakprefillnoattn"
-        },
-        {
-          "category": "incidental",
-          "reason": "Literal FAK_QATTN_GQA environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new attention concept.",
-          "token": "fakqattngqa"
+          "reason": "Private helper deriving configured full-attention layer indices, not a new attention concept",
+          "token": "qwenfullattentionlayers"
         }
       ],
       "id": "attention",
       "ignore": [
         "attentions",
         "attentive",
-        "fakprefillnoattn",
-        "fakqattngqa",
+        "qwenfullattentionlayers",
         "tattn"
       ],
       "known_tokens": [],
@@ -5574,18 +5592,18 @@
         },
         {
           "category": "incidental",
-          "reason": "Issue #8739 implementation symbol scoped to the established Codex logical-session continuity contract",
-          "token": "CodexSession"
+          "reason": "CLI adapter implementation symbol, not a distinct operator session-runtime concept",
+          "token": "runSessionJournalAudit"
         },
         {
           "category": "incidental",
-          "reason": "Issue #8739 persistence record scoped to the established Codex logical-session continuity contract",
-          "token": "CodexSessionState"
+          "reason": "test clock seam, not an operator-visible session-runtime concept",
+          "token": "sessionJournalAuditNow"
         },
         {
           "category": "incidental",
-          "reason": "Issue #8739 constructor scoped to the established Codex logical-session continuity contract",
-          "token": "OpenCodexSession"
+          "reason": "human-output renderer implementation symbol, not a session-runtime concept",
+          "token": "renderSessionJournalAudit"
         }
       ],
       "id": "session-runtime",
@@ -5598,8 +5616,6 @@
         "AttributeOutcomes",
         "BeginSessionEffect",
         "BytesPerSession",
-        "CodexSession",
-        "CodexSessionState",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "CoveredSessions",
@@ -5625,7 +5641,6 @@
         "NewSessionAffinityGateway",
         "NewSessionRow",
         "ObservedSessions",
-        "OpenCodexSession",
         "OutcomeEvidence",
         "OutcomeSession",
         "PROVIDER_SESSION_CLEAR",
@@ -5825,6 +5840,7 @@
         "recoveryInventory",
         "recoverySessionDiag",
         "refusalSafeSessionID",
+        "renderSessionJournalAudit",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
         "reportFromSessions",
@@ -5846,6 +5862,7 @@
         "runSessionHistoryRefresh",
         "runSessionHistoryStatus",
         "runSessionIndexHealth",
+        "runSessionJournalAudit",
         "runSessionMine",
         "runSessionMove",
         "runSessionMoveAdmit",
@@ -5904,6 +5921,7 @@
         "sessionDiscoverySchema",
         "sessionEnvelopeRefusalReasonOrder",
         "sessionEnvelopeRefusalReasons",
+        "sessionJournalAuditNow",
         "sessionLocked",
         "sessionMemoryPattern",
         "sessionMoveDestination",
@@ -7474,6 +7492,46 @@
           "category": "incidental",
           "reason": "Gateway-to-vDSO adapter, not a new gateway engine concept",
           "token": "revokeVDSOWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows syscall DLL handle, not a gateway engine.",
+          "token": "pgKernel32"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows accounting field, not a gateway engine.",
+          "token": "TotalKernelTime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows accounting field, not a gateway engine.",
+          "token": "ThisPeriodTotalKernelTime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Versioned receipt provenance constant names the already-canonical fak-native engine and does not define a new gateway engine abstraction.",
+          "token": "NativeDecodeTraceEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Capability method reports native trace support on the existing in-kernel planner and does not define an engine family member.",
+          "token": "NativeDecodeTraceSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire option requests a receipt from an already-selected fak-native route and does not select or define a gateway engine.",
+          "token": "fak_decode_trace"
+        },
+        {
+          "category": "incidental",
+          "reason": "Compute trace JSON field names are artifact vocabulary, not gateway engine concepts.",
+          "token": "KernelID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Field name for an opaque revision compatibility value, not the gateway or engine concept.",
+          "token": "KernelRevision"
         }
       ],
       "id": "gateway-engine",
@@ -7494,12 +7552,18 @@
         "GatewaySeat",
         "InKernelKVPrefixPressureSource",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
+        "KernelID",
+        "KernelRevision",
         "KernelTurns",
+        "NativeDecodeTraceEngine",
+        "NativeDecodeTraceSupported",
         "NewSessionAffinityGateway",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
         "RegisterEngines",
         "SessionAffinityGateway",
+        "ThisPeriodTotalKernelTime",
+        "TotalKernelTime",
         "WithAffinity",
         "bashEngine",
         "cacheEmitter",
@@ -7516,6 +7580,7 @@
         "engineered",
         "engineering",
         "engineers",
+        "fak_decode_trace",
         "fak_gateway_compaction_thrash_sessions_total",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
         "fak_gateway_kv_prefix_tier_evictions_total",
@@ -7551,6 +7616,7 @@
         "microcachedemo",
         "nativeReasonMessageRoleUnsupported",
         "newInKernelPrefixPressureBridge",
+        "pgKernel32",
         "publicGatewayURL",
         "query_public_policy",
         "renderinkernelchatmlrequest",
@@ -8490,6 +8556,21 @@
           "category": "incidental",
           "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct policy capability.",
           "token": "qwenEmptyUsagePolicyReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture envelope field naming, not a reusable policy capability concept",
+          "token": "PrefixPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go optional-interface name, not a deployable policy capability.",
+          "token": "Qwen35GDNSequenceCapability"
+        },
+        {
+          "category": "incidental",
+          "reason": "Provider admission method, not the kernel policy preflight concept.",
+          "token": "PreflightQwen35GDNSequence"
         }
       ],
       "exclude": [
@@ -8546,8 +8627,11 @@
         "PolicyOriginEvidencePath",
         "PolicyRevision",
         "PolicySchema",
+        "PrefixPosture",
+        "PreflightQwen35GDNSequence",
         "PreflightRefuseWIPLimit",
         "ProgressCallAdjudicated",
+        "Qwen35GDNSequenceCapability",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
         "ReasonCapabilityExpired",
@@ -10412,6 +10496,61 @@
           "category": "incidental",
           "reason": "Decode sentinel for rejected extra JSON fields, not a reusable support-maturity concept",
           "token": "UnsupportedFields"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed audit exclusion counter, not a provider support-maturity state",
+          "token": "ExcludedUnsupportedProvider"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation type or receipt row; not a product maturity label.",
+          "token": "LimitSupport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation type or receipt row; not a product maturity label.",
+          "token": "unsupportedFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private OS adapter type; not a product maturity label.",
+          "token": "cgroupFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private OS adapter type; not a product maturity label.",
+          "token": "observeFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private OS adapter type; not a product maturity label.",
+          "token": "windowsFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private OS adapter interface; not a product maturity label.",
+          "token": "nativeFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal receipt construction helper, not a product maturity label.",
+          "token": "requestedSupport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean capability method reports availability of an opt-in receipt and does not claim product maturity or support status.",
+          "token": "NativeDecodeTraceSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request validation helper checks a planner capability and does not define a support or maturity level.",
+          "token": "chatDecodeTraceSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed API error, not a support-level taxonomy term.",
+          "token": "ErrQwen35GDNSequenceUnsupported"
         }
       ],
       "exclude": [
@@ -10440,9 +10579,11 @@
         "DescriptionCoverage",
         "DomainCoverage",
         "ErrKVHostSnapshotUnsupported",
+        "ErrQwen35GDNSequenceUnsupported",
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
+        "ExcludedUnsupportedProvider",
         "FormatUnsupported",
         "GuideCoverage",
         "INVALID_EVIDENCE",
@@ -10451,10 +10592,12 @@
         "KVQUANT_UNKNOWN_SCHEME",
         "KVQUANT_UNSUPPORTED_TRANSITION",
         "LadderMaturity",
+        "LimitSupport",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
         "MinSupport",
         "NATIVE_MESSAGE_ROLE_UNSUPPORTED",
+        "NativeDecodeTraceSupported",
         "NonCacheParity",
         "OutcomeSupported",
         "PARTIAL_COVERAGE",
@@ -10540,6 +10683,8 @@
         "achievedMaturity",
         "backend_does_not_support_transition",
         "calendar_coverage",
+        "cgroupFaultDomain",
+        "chatDecodeTraceSupported",
         "cmdLaunchParityCheck",
         "cmdManageParity",
         "compareParity",
@@ -10577,10 +10722,12 @@
         "marshalWorkCoverageForTest",
         "maturityBaselineRunWitness",
         "maturityBaselineUsage",
+        "nativeFaultDomain",
         "nativeReasonMessageRoleUnsupported",
         "normalizeAchievedMaturity",
         "normalizeCoverage",
         "numareplicapolicyunsupported",
+        "observeFaultDomain",
         "parityPanelHeader",
         "paritybench",
         "parityreport",
@@ -10589,6 +10736,7 @@
         "provenance_correctness",
         "recurrentevictunsupportederror",
         "registrationCoverage",
+        "requestedSupport",
         "resolveParityPublication",
         "robustnessTasks",
         "runInfoWorkCoverage",
@@ -10615,6 +10763,7 @@
         "targetcoverage",
         "topncoverage",
         "unsupported",
+        "unsupportedFaultDomain",
         "unsupported_activation",
         "unsupported_encoding",
         "unsupported_event_kinds",
@@ -10624,6 +10773,7 @@
         "unsupported_runtime_fusion",
         "unsupported_scale",
         "unsupported_version",
+        "windowsFaultDomain",
         "workCoverage",
         "workCoverageUnavailableSources",
         "workCoverageUnavailableText"
@@ -11618,6 +11768,21 @@
           "category": "incidental",
           "reason": "Local CLI formatting helper for the #8777 safe-sync advisory, not a distinct render or materialization concept.",
           "token": "renderCommitSyncAdvisory"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private renderer helper; the documented concepts are the generated identity pages, not the helper name.",
+          "token": "rendercanonicalentry"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private renderer helper; the documented concepts are the generated identity pages, not the helper name.",
+          "token": "renderidentitypage"
+        },
+        {
+          "category": "incidental",
+          "reason": "specific CLI renderer, not a reusable render-materialization concept",
+          "token": "renderSessionJournalAudit"
         }
       ],
       "id": "render-materialize",
@@ -11691,6 +11856,7 @@
         "renderSchedLauncherTable",
         "renderSearchHuman",
         "renderSeatCells",
+        "renderSessionJournalAudit",
         "renderSessionOpen",
         "renderShellChoice",
         "renderSweepParkedText",
@@ -11698,7 +11864,9 @@
         "renderValidate",
         "renderVelocityLeg",
         "renderWorkpattern",
+        "rendercanonicalentry",
         "rendered",
+        "renderidentitypage",
         "rendering",
         "renderinkernelchatmlrequest",
         "renders",
@@ -12495,6 +12663,21 @@
           "category": "incidental",
           "reason": "it is the local DTO for the bounded #8971 capture recipe, not a reusable planning concept",
           "token": "nativecapacitycaptureplan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Narrow optional capability interface extends the existing Planner contract for receipt authorship and does not introduce a planning concept.",
+          "token": "NativeDecodeTracePlanner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local tuning-policy field naming a safe implementation fallback, not a planning concept.",
+          "token": "FallbackCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local per-candidate measurement record, not a plan result concept.",
+          "token": "CandidateResult"
         }
       ],
       "exclude": [
@@ -12510,12 +12693,12 @@
         "BaselineDecodeMicroseconds",
         "BaselineTaskAccuracy",
         "BuildSweepPlan",
-        "CandidateAliases",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
         "CandidateMeanTokensPerS",
         "CandidateOutputNMSE",
         "CandidatePassed",
+        "CandidateResult",
         "CandidateRevision",
         "CandidateRuntimeSHA",
         "CandidateTaskAccuracy",
@@ -12524,6 +12707,7 @@
         "EventPlanUpdated",
         "ExplainFilingPlan",
         "ExplanationSeconds",
+        "FallbackCandidate",
         "FleetBenchPlanDoc",
         "GoCandidateCapability",
         "GoCandidateKind",
@@ -12540,6 +12724,7 @@
         "MaintenanceSeconds",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
+        "NativeDecodeTracePlanner",
         "NewCandidates",
         "NormalizeWorkflowPlanAccess",
         "NoteCandidates",
@@ -13463,11 +13648,6 @@
           "category": "incidental",
           "reason": "Server listener endpoint constrained to loopback networking, not an agent execution loop.",
           "token": "LoopbackEndpoint"
-        },
-        {
-          "category": "incidental",
-          "reason": "Literal FAK_QWEN35_PREFILL_TOKEN_LOOP environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new loop concept.",
-          "token": "fakqwen35prefilltokenloop"
         }
       ],
       "id": "loop",
@@ -13509,7 +13689,6 @@
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
-        "fakqwen35prefilltokenloop",
         "findcodexlooparchivemanifest",
         "isLoopbackFleetHost",
         "keepSuperloopAlive",

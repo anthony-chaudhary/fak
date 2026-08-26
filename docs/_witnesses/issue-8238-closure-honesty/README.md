@@ -1,3 +1,7 @@
+---
+title: "Issue #8238 closure-honesty witness"
+description: "This directory preserves the live receipts and the row-complete reconciliation for 8238."
+---
 # Issue #8238 closure-honesty witness
 
 This directory preserves the live receipts and the row-complete reconciliation for

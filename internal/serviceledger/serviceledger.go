@@ -43,6 +43,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -207,11 +208,12 @@ func (e *Event) dedupeKey() string {
 // Ledger is the append-only observed-event store: one JSON line per event,
 // with an in-memory exact-once index rebuilt on Open.
 type Ledger struct {
-	mu      sync.Mutex
-	path    string // empty = in-memory only
-	seen    map[string]struct{}
-	events  []Event
-	nextSeq uint64
+	mu       sync.Mutex
+	path     string // empty = in-memory only
+	recovery RecoveryReceipt
+	seen     map[string]struct{}
+	events   []Event
+	nextSeq  uint64
 }
 
 // DefaultDir resolves the durable ledger directory.
@@ -228,6 +230,23 @@ func DefaultDir() string {
 // Memory returns an unpersisted ledger (tests, dry runs).
 func Memory() *Ledger { return &Ledger{seen: map[string]struct{}{}} }
 
+// RecoveryReceipt reports a bounded startup repair without exposing event contents.
+type RecoveryReceipt struct {
+	DiscardedTailBytes int64  `json:"discarded_tail_bytes,omitempty"`
+	RecoveredSequence  uint64 `json:"recovered_sequence,omitempty"`
+	CorruptionClass    string `json:"corruption_class,omitempty"`
+	OperatorAction     string `json:"operator_action,omitempty"`
+}
+
+// Recovery returns the startup recovery receipt. A zero value means no repair was needed.
+func (l *Ledger) Recovery() RecoveryReceipt { return l.recovery }
+
+type diskRecord struct {
+	Version  int             `json:"version"`
+	Event    json.RawMessage `json:"event"`
+	Checksum string          `json:"sha256"`
+}
+
 // Open loads (or lazily creates) the ledger under dir, replaying events.jsonl
 // to rebuild the exact-once index. Malformed lines are refused, not skipped:
 // an append-only ledger that silently drops rows cannot witness anything.
@@ -241,18 +260,29 @@ func Open(dir string) (*Ledger, error) {
 		return nil, err
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	line := 0
+	var validBytes int64
 	for sc.Scan() {
 		line++
-		raw := strings.TrimSpace(sc.Text())
+		rawBytes := append([]byte(nil), sc.Bytes()...)
+		recordEnd := validBytes + int64(len(rawBytes)) + 1
+		if recordEnd > info.Size() {
+			break // final line lacks a commit newline: an unacknowledged torn tail
+		}
+		validBytes = recordEnd
+		raw := strings.TrimSpace(string(rawBytes))
 		if raw == "" {
 			continue
 		}
-		var e Event
-		if err := json.Unmarshal([]byte(raw), &e); err != nil {
-			return nil, fmt.Errorf("serviceledger: %s line %d: %w", l.path, line, err)
+		e, err := decodeRecord([]byte(raw))
+		if err != nil {
+			return nil, fmt.Errorf("serviceledger: interior corruption in %s line %d: %w", l.path, line, err)
 		}
 		l.seen[e.dedupeKey()] = struct{}{}
 		l.events = append(l.events, e)
@@ -262,6 +292,16 @@ func Open(dir string) (*Ledger, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	if info.Size() > validBytes {
+		discarded := info.Size() - validBytes
+		if err := f.Close(); err != nil {
+			return nil, err
+		}
+		if err := os.Truncate(l.path, validBytes); err != nil {
+			return nil, fmt.Errorf("serviceledger: repair truncated tail: %w", err)
+		}
+		l.recovery = RecoveryReceipt{DiscardedTailBytes: discarded, RecoveredSequence: l.nextSeq, CorruptionClass: "truncated_tail", OperatorAction: "none; append was not acknowledged"}
 	}
 	return l, nil
 }
@@ -319,23 +359,74 @@ func (l *Ledger) Events() []Event {
 	return out
 }
 
+func decodeRecord(raw []byte) (Event, error) {
+	var framed diskRecord
+	if err := json.Unmarshal(raw, &framed); err == nil && framed.Version != 0 {
+		if framed.Version != 1 || len(framed.Event) == 0 || framed.Checksum == "" {
+			return Event{}, fmt.Errorf("invalid record framing version %d", framed.Version)
+		}
+		sum := sha256.Sum256(framed.Event)
+		if !strings.EqualFold(framed.Checksum, hex.EncodeToString(sum[:])) {
+			return Event{}, errors.New("record checksum mismatch")
+		}
+		var ev Event
+		if err := json.Unmarshal(framed.Event, &ev); err != nil {
+			return Event{}, fmt.Errorf("framed event: %w", err)
+		}
+		return ev, nil
+	}
+	var ev Event // Read legacy unframed rows written before durability framing.
+	if err := json.Unmarshal(raw, &ev); err != nil {
+		return Event{}, err
+	}
+	return ev, nil
+}
+
+func syncParentDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil // NTFS FlushFileBuffers on the created file is the portable boundary.
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
+}
 func (l *Ledger) persistLocked(ev Event) error {
 	if err := os.MkdirAll(filepath.Dir(l.path), 0o700); err != nil {
 		return err
 	}
-	b, err := json.Marshal(&ev)
+	eventBytes, err := json.Marshal(&ev)
 	if err != nil {
 		return err
 	}
+	sum := sha256.Sum256(eventBytes)
+	recordBytes, err := json.Marshal(diskRecord{Version: 1, Event: eventBytes, Checksum: hex.EncodeToString(sum[:])})
+	if err != nil {
+		return err
+	}
+	_, statErr := os.Stat(l.path)
+	created := errors.Is(statErr, os.ErrNotExist)
 	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
-	if _, err = f.Write(append(b, '\n')); err != nil {
+	if _, err = f.Write(append(recordBytes, '\n')); err != nil {
 		f.Close()
 		return err
 	}
-	return f.Close()
+	if err = f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if created {
+		return syncParentDir(filepath.Dir(l.path))
+	}
+	return nil
 }
 
 // Redaction: command-line secret values and private infrastructure

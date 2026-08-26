@@ -1,0 +1,55 @@
+{
+  "schema": "fak.ultracode_tokenizer_portability.v1",
+  "canonical_digest": "sha256:202f34095bee0e5a9994b1994f9482a755121dbe9b16b1e93be5f0a5819d5f28",
+  "results": [
+    {
+      "tokenizer": {
+        "family": "qwen",
+        "model": "Qwen/Qwen2.5-0.5B-Instruct",
+        "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+        "source": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct"
+      },
+      "provenance": {
+        "omitted_bytes": 251,
+        "omitted_messages": 2,
+        "model_input_tokens": 50,
+        "runtime_prefix_read_tokens": 30
+      },
+      "apparent_scope_share": 0.620253164556962
+    },
+    {
+      "tokenizer": {
+        "family": "llama",
+        "model": "hf-internal-testing/llama-tokenizer",
+        "revision": "d02ad6cb9dd2c2296a6332199fa2fdca5938fef0",
+        "source": "https://huggingface.co/hf-internal-testing/llama-tokenizer"
+      },
+      "provenance": {
+        "omitted_bytes": 251,
+        "omitted_messages": 2,
+        "model_input_tokens": 57,
+        "runtime_prefix_read_tokens": 30
+      },
+      "apparent_scope_share": 0.6428571428571429
+    },
+    {
+      "tokenizer": {
+        "family": "gpt2-bpe",
+        "model": "openai-community/gpt2",
+        "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+        "source": "https://huggingface.co/openai-community/gpt2"
+      },
+      "provenance": {
+        "omitted_bytes": 251,
+        "omitted_messages": 2,
+        "model_input_tokens": 55,
+        "runtime_prefix_read_tokens": 30
+      },
+      "apparent_scope_share": 0.625
+    }
+  ],
+  "tokenizer_only_scope_share_movement": 0.022603978300180905,
+  "promotion_evidence": "promote toward gen/now after replay reproduces all tokenizer receipts and an integrated evaluator accepts equal outcomes",
+  "demotion_evidence": "demote or retire when tokenizer receipts cannot be reproduced or outcome parity abstains",
+  "invalidating_assumption": "runtime cache-token telemetry is authoritative and comparable while only the tokenizer is substituted"
+}

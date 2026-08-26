@@ -1,3 +1,7 @@
+---
+title: "GPT-5.6 Sol execution routing for guarded workers"
+description: "Status (2026-08-17): FAK classifies every orchestration task as standard, max, ultra, or pro before a worker launch."
+---
 # GPT-5.6 Sol execution routing for guarded workers
 
 **Status (2026-08-17): FAK classifies every orchestration task as `standard`, `max`, `ultra`, or `pro` before a worker launch. `pro` is recorded but fails closed because Codex CLI 0.147.0 cannot transmit `reasoning.mode`.**

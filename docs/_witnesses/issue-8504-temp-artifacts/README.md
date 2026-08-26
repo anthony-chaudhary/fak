@@ -1,3 +1,8 @@
+---
+title: "Issue #8504: live stale-temp-artifact dogfood"
+description: "Reference documentation for Issue #8504: live stale-temp-artifact dogfood, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8504: live stale-temp-artifact dogfood
 
 On 2026-08-22, the `temp-artifacts` spine from commit

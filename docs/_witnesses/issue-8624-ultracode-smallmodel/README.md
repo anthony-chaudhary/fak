@@ -1,3 +1,7 @@
+---
+title: "Issue #8624 — observed small-model Ultracode cache frontier"
+description: "Verdict: on qwen2.5:0.5b through the sanctioned fak-realmodel node, every bounded agentic cell at widths 1, 2, 4,"
+---
 # Issue #8624 — observed small-model Ultracode cache frontier
 
 **Verdict:** on `qwen2.5:0.5b` through the sanctioned `fak-realmodel` node, every bounded agentic cell at widths 1, 2, 4, and 8 retained the frozen accepted outcome while reducing scoped context and reusing a shared prefix. The evaluator therefore hill-climbed both multi-agent modes through width 8.
@@ -73,3 +77,20 @@ Report `B-A`, `C-A`, and `D-A`; call any fusion term only as `D - B - C + A`, wi
 - `shared_prefix_read_tokens` is the largest Ollama llama-server `cached n_tokens` value for each task in the source log. This is runtime-authored KV/prompt-cache telemetry, not a value inferred from wall time.
 - All responses normalized to the same `ACCEPTED` outcome digest before savings were credited.
 - The claim excludes raw single-request throughput, traditional batching, billed tokens, and spend. It applies only to this observed model/runtime/task envelope.
+
+## Scoped-prefix regression contract (#8680)
+
+The 62.7% scoped-context / 37.3% runtime-prefix attribution above is bound to
+`internal/ultracodebench/testdata/scoped-prefix-regression-v1.json` at
+**corpus-row: observed-positive-qwen25-05b**. The affected-package test loads
+that row and the five predeclared negative/abstain controls without a live model
+call; removing the row or this reference fails the fast gate.
+
+Refresh the observed row quarterly, or sooner when the evaluator, harness,
+runtime, model, tokenizer, task, or cache posture changes. Promotion evidence is
+a second versioned campaign inside the bounded ranges with equal accepted
+outcomes and disjoint authoritative accounting. Demote or retire the claim when
+a refresh abstains, leaves the ranges, or loses replayable telemetry. The
+invalidating assumption is that scoped omission and runtime prefix reads remain
+separable under the named warm-prefix factorial cache posture; a cache reset or
+overlapping token attribution invalidates the comparison.

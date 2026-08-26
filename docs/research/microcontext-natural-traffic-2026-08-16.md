@@ -1,3 +1,7 @@
+---
+title: "Natural-traffic tool-admission calibration — 2026-08-16"
+description: "On 120 naturally distributed public GitHub-issue questions (93 tune / 27 frozen held-out),"
+---
 # Natural-traffic tool-admission calibration — 2026-08-16
 
 ## Verdict

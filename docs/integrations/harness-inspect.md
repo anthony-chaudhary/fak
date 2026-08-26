@@ -1,3 +1,7 @@
+---
+title: "Inspect a harness before trusting it"
+description: "Most people should not need to build an agent harness from scratch. Start from a useful resolved product,"
+---
 # Inspect a harness before trusting it
 
 Most people should not need to build an agent harness from scratch. Start from a useful resolved product, then **trust but verify** its effective behavior before launch.

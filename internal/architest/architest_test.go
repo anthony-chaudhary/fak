@@ -395,6 +395,7 @@ var tier = map[string]int{
 	"dispatchsweep":       2, // pure queue-drain loop core for `fak dispatch sweep`: find next issue -> spawn one worker -> repeat, until a tick refuses or the best-effort agent ceiling is hit; tick+settle are injected and the cmd/fak shell runs the Go tick evaluator. stdlib-only, imports nothing internal, off the hot path.
 	"issuesmallness":      1, // pure issue-template smallness lint: one deliverable + one witness classifier and dry-run report fold; stdlib-only, off the hot path.
 	"procguard":           2, // native port of tools/proc_resource_guard.py's operator/control-pane modes (#1412): the runaway-process guard's richer surface — sustained per-core CPU-pin dimension, orphaned-helper/idle-shell sprawl reaping, cross-tick streak ledger, opt-in --enact reaper, and the "fleet-proc-resource-guard/1" JSON contract. Reuses dispatchtick(1)'s resource-level classifier for the thread/handle/ws core; imports dispatchtick(1)+stdlib, off the hot path.
+	"proctest":            1, // stdlib-only black-box process containment witness harness (#9051); test helper contracts, off the hot path.
 	"fleetmon":            2, // headless-worker fleet monitor/janitor/fold/replace (#1856-#1859): pure evidence-derived worker classification, stale-child-command detection, witnessed run-ledger fold, and stuck-worker replacement. Reuses procguard(1)'s process forest + tree-kill; imports procguard(1)+stdlib, off the hot path.
 	"dojo":                2, // the prediction-vs-reality gym's pure scoring/fold/ledger/board core: Prediction/Outcome/Episode scoring + the cross-lever leaderboard fold; stdlib-only, imports nothing internal (the corpus-scanning levers live in cmd/fak), off the hot path.
 	"looprecover":         1, // pure loop-recovery decision helper; stdlib-only, imports nothing internal, off the hot path.
@@ -696,6 +697,17 @@ var tier = map[string]int{
 	"agentqueue":                 1, // stdlib-only deterministic desired-state planner for bounded agent populations (#8875).
 	"supervisionpolicy":          1, // stdlib-only typed fault-domain and bounded restart policy (#8909).
 	"codexsession":               3, // local Codex app-server adapter projected into the public harness protocol (#8736).
+	"hostdiag":                   3,
+	"shellprov":                  1, // stdlib-only privacy-safe receipt primitive for fak-owned shell launch identity (#9086).
+	"qwenworkbudget":             5, // campaign-boundary adapter over canonical trajectory audit rollups and typed Qwen amplification policy; imports trajectory(4).
+	"ultracodetokenizer":         1,
+	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
+	"studydrift":                 1, // stdlib-only source refresh and supersession receipt primitive (#8611).
+	"servicewatchdog":            2, // systemd lifecycle read-back and watchdog progress integration (#8654).
+	"computetrace":               1, // stdlib-only bounded compute-event artifact schema and recorder.
+	"ultracodenegcontrol":        1,
+	"computetune":                1, // stdlib-only offline tuning decision primitive over replayable compute traces (#8608).
+	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

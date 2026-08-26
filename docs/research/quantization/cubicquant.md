@@ -1,3 +1,7 @@
+---
+title: "CubicQuant bounded evaluation (arXiv:2608.06763v1)"
+description: "Supported for bounded scalar-reconstruction research; delegate model quality and hardware performance."
+---
 # CubicQuant bounded evaluation (arXiv:2608.06763v1)
 
 ## Verdict

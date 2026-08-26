@@ -1,0 +1,45 @@
+{
+  "schema": "fak-ultracode-negative-control-campaign/1",
+  "envelope": {
+    "model": "qwen2.5:0.5b",
+    "runtime": "Ollama/llama.cpp",
+    "tokenizer": "qwen2.5",
+    "task": "issue-8624-frozen-agentic-task",
+    "cache_posture": "warm-prefix",
+    "campaign_version": "issue-8624-v1"
+  },
+  "controls": [
+    {
+      "name": "shuffled-role",
+      "expected_verdict": "NO_GAIN",
+      "expected_attribution": "none",
+      "predeclared_before_run": true,
+      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
+      "observed": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"negative-controls/shuffled-role.json"}
+    },
+    {
+      "name": "duplicated-context",
+      "expected_verdict": "NO_GAIN",
+      "expected_attribution": "none",
+      "predeclared_before_run": true,
+      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
+      "observed": {"accepted_outcome":"accepted-v1","input_tokens":1300,"authoritative_usage":true,"source_receipt":"negative-controls/duplicated-context.json"}
+    },
+    {
+      "name": "omitted-required-context",
+      "expected_verdict": "ABSTAIN",
+      "expected_attribution": "none",
+      "predeclared_before_run": true,
+      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
+      "observed": {"accepted_outcome":"rejected-missing-requirement","input_tokens":700,"authoritative_usage":true,"source_receipt":"negative-controls/omitted-required-context.json"}
+    },
+    {
+      "name": "random-truncation",
+      "expected_verdict": "ABSTAIN",
+      "expected_attribution": "none",
+      "predeclared_before_run": true,
+      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
+      "observed": {"accepted_outcome":"rejected-truncated-instruction","input_tokens":650,"authoritative_usage":true,"source_receipt":"negative-controls/random-truncation.json"}
+    }
+  ]
+}

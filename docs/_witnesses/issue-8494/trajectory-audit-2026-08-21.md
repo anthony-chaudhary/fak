@@ -1,3 +1,7 @@
+---
+title: "Cross-harness trajectory audit"
+description: "Schema: fak-trajectory-audit/1"
+---
 # Cross-harness trajectory audit
 
 Schema: `fak-trajectory-audit/1`

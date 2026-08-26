@@ -1,3 +1,7 @@
+---
+title: "Derive a harness from one verified import plus a typed delta"
+description: "fak harness derive is the short path from “this support harness is useful” to “this is my product.” It imports an immutable resolved lock,"
+---
 # Derive a harness from one verified import plus a typed delta
 
 `fak harness derive` is the short path from “this support harness is useful” to “this is my product.” It imports an immutable resolved lock, verifies its identity and launch shape, applies only a bounded typed delta, and emits another ordinary product lock accepted by generated `fak harness init` products.

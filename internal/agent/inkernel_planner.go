@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -55,6 +56,15 @@ type InKernelPlanner struct {
 	maxNew      int
 	temp        float64
 	seed        int64
+	// decodeTraceNow is an injectable monotonic clock used only by explicitly
+	// traced requests. nil selects time.Now; the default path never reads it.
+	decodeTraceNow func() time.Time
+
+	// qwenQ4KPrefillChunkTokens and its typed parse error are resolved once at
+	// construction. The error is request-gated to the exact resident hybrid path,
+	// so an unrelated model remains byte-for-byte on its historical forward.
+	qwenQ4KPrefillChunkTokens    int
+	qwenQ4KPrefillChunkConfigErr *InKernelQwenQ4KPrefillChunkConfigError
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
@@ -181,18 +191,21 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	if len(cpuOffloadExpertsOpt) > 0 {
 		cpuOffloadExperts = cpuOffloadExpertsOpt[0]
 	}
+	prefillChunkTokens, prefillChunkErr := resolveInKernelQwenQ4KPrefillChunkTokens(os.Getenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS"))
 	p := &InKernelPlanner{
-		m:                 m,
-		tok:               tok,
-		modelID:           modelID,
-		q4k:               q4k,
-		quant:             true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
-		backend:           backend,
-		metal:             metal,
-		cpuOffloadExperts: cpuOffloadExperts,
-		maxNew:            envInt("FAK_INKERNEL_MAX_TOKENS", 256),
-		temp:              envFloat("FAK_INKERNEL_TEMP", 0),
-		seed:              int64(envInt("FAK_INKERNEL_SEED", 0)),
+		m:                            m,
+		tok:                          tok,
+		modelID:                      modelID,
+		q4k:                          q4k,
+		quant:                        true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
+		backend:                      backend,
+		metal:                        metal,
+		cpuOffloadExperts:            cpuOffloadExperts,
+		maxNew:                       envInt("FAK_INKERNEL_MAX_TOKENS", 256),
+		temp:                         envFloat("FAK_INKERNEL_TEMP", 0),
+		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
+		qwenQ4KPrefillChunkTokens:    prefillChunkTokens,
+		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -231,6 +244,25 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		p.batchDecode = true
 	}
 	return p
+}
+
+func resolveInKernelQwenQ4KPrefillChunkTokens(raw string) (int, *InKernelQwenQ4KPrefillChunkConfigError) {
+	switch raw {
+	case "":
+		return inKernelQwenQ4KPrefillChunkTokens, nil
+	case "512":
+		return 512, nil
+	case "1024":
+		return 1024, nil
+	case "2048":
+		return 2048, nil
+	case "4096":
+		return 4096, nil
+	case "8192":
+		return 8192, nil
+	default:
+		return 0, &InKernelQwenQ4KPrefillChunkConfigError{Value: raw}
+	}
 }
 
 func inKernelPlannerPrefixReuseSupported(m *model.Model, backend compute.Backend) bool {
@@ -296,6 +328,10 @@ func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
 
 // Model reports the model id (for /v1/models provenance + the planner seam).
 func (p *InKernelPlanner) Model() string { return p.modelID }
+
+// NativeDecodeTraceSupported declares that this planner owns the token-commit
+// seam used by NativeDecodeTrace. It performs no model work.
+func (p *InKernelPlanner) NativeDecodeTraceSupported() bool { return true }
 
 // StreamingSupported enables the gateway's semantic SSE path for in-kernel runs.
 // The backend projects each completed turn as one content delta; tool lifecycle
@@ -625,7 +661,7 @@ type inKernelGenerateResult struct {
 	stopped           bool
 }
 
-func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
+func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (res inKernelGenerateResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {
@@ -635,7 +671,7 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	if err != nil {
 		return inKernelGenerateResult{}, err
 	}
@@ -651,8 +687,8 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	}, nil
 }
 
-func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
-	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func(), measurementOpt ...*nativeInferenceMeasurement) (inKernelGenerateResult, error) {
+	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	if err == nil {
 		return res, nil
 	}
@@ -665,7 +701,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	if onRetry != nil {
 		onRetry()
 	}
-	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
 	return retryRes, retryErr
 }
@@ -762,7 +798,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			panic(r)
 		}
 	}()
+	if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
+		return nil, p.qwenQ4KPrefillChunkConfigErr
+	}
 	sp := applySampleOpts(opts...)
+	var requestStarted time.Time
+	if sp.NativeInferenceReceipt {
+		requestStarted = time.Now()
+	}
 	maxNew := p.maxNew
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
 		maxNew = *sp.MaxTokens
@@ -795,6 +838,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	if sp.PresencePenalty != nil {
 		presPenalty = *sp.PresencePenalty
+	}
+	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
+		return nil, &NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
 
 	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice)
@@ -834,9 +880,23 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, err
 		}
 	}
+	var measurement *nativeInferenceMeasurement
+	if sp.NativeInferenceReceipt || sp.DecodeTrace {
+		measurement = &nativeInferenceMeasurement{
+			startedAt:         requestStarted,
+			inferenceDisabled: !sp.NativeInferenceReceipt,
+		}
+		if sp.DecodeTrace {
+			measurement.traceNow = p.decodeTraceNow
+			if measurement.traceNow == nil {
+				measurement.traceNow = time.Now
+			}
+		}
+	}
 	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 		sb.Reset()
-	})
+		measurement.reset()
+	}, measurement)
 	if err != nil {
 		return nil, err
 	}
@@ -916,6 +976,18 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		ProviderCache: &compReuseEntry,
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 	}
+	if sp.NativeInferenceReceipt {
+		comp.NativeInference = p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
+	}
+	if sp.DecodeTrace {
+		events := make([]NativeDecodeTraceEvent, len(measurement.traceEvents))
+		copy(events, measurement.traceEvents)
+		comp.DecodeTrace = &NativeDecodeTrace{
+			Schema: NativeDecodeTraceSchema,
+			Engine: NativeDecodeTraceEngine,
+			Events: events,
+		}
+	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
 	// claimed-but-unparseable call — the SAME normalization every proxy adapter runs, so
@@ -923,7 +995,13 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
 	// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
 	comp = normalizeCompletionToolCalls(comp)
-	comp = enforceForcedToolChoice(comp, sp.ToolChoice, tools, messages)
+	// A length finish is a conformance failure only when the caller actually
+	// forced a named tool. Calling enforceForcedToolChoice for an omitted/auto
+	// choice marks every max_tokens completion as dropped before it even resolves
+	// the effective tool name, which would make an exact T64 receipt unreachable.
+	if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
+		comp = enforceForcedToolChoice(comp, sp.ToolChoice, tools, messages)
+	}
 	// Fail closed on a TRUNCATED tool call: the in-kernel finishReason is "stop"/"length"
 	// (never "tool_calls"), so normalizeCompletionToolCalls cannot infer a drop from the
 	// finish reason. If decode emitted an unclosed <tool_call> opener that the lift could
@@ -933,6 +1011,24 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		comp.ToolCallsDropped = true
 	}
 	return comp, nil
+}
+
+func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *NativeInferenceReceipt {
+	backend, forwardPath := p.executionIdentity()
+	return &NativeInferenceReceipt{
+		TokenIDs:           append([]int(nil), measurement.tokenIDs...),
+		TokenLogprobs:      append([]float64(nil), measurement.logprobs...),
+		PrefillSeconds:     prefillS,
+		TTFTSeconds:        measurement.ttftS,
+		DecodeSeconds:      decodeS,
+		Model:              p.modelID,
+		Engine:             "inkernel",
+		Backend:            backend,
+		ForwardPath:        forwardPath,
+		Q4K:                p.q4k,
+		FallbackActive:     false,
+		PrefillChunkTokens: p.nativeInferencePrefillChunkTokens(),
+	}
 }
 
 func (p *InKernelPlanner) requiresDeviceSerialization() bool {

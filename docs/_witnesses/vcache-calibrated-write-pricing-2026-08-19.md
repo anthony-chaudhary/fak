@@ -1,3 +1,7 @@
+---
+title: "Calibrated 5m/1h cache-write pricing — 2026-08-19"
+description: "Verdict: provider probe evidence can now replace the static cache-write price independently for the 5-minute and 1-hour tiers,"
+---
 # Calibrated 5m/1h cache-write pricing — 2026-08-19
 
 **Verdict:** provider probe evidence can now replace the static cache-write price independently for the 5-minute and 1-hour tiers, and the live served-session spend meter records when that measured pricing is active.

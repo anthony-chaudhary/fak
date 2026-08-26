@@ -1,3 +1,7 @@
+---
+title: "Qwen3.8 Metal OSS hot-path study`r`n`r`n> Issue: #8823 · Parent performance target: #8697"
+description: "Date: 2026-08-24. This is a source study, not an implementation or performance result. The three upstream trees were already cloned locally;"
+---
 # Qwen3.8 Metal OSS hot-path study`r`n`r`n> Issue: #8823 · Parent performance target: #8697
 
 Date: 2026-08-24. This is a source study, not an implementation or performance result. The three upstream trees were already cloned locally; all paths and symbols below were inspected at the exact revisions shown.

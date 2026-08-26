@@ -1,3 +1,7 @@
+---
+title: "Ponytail managed-context ablation (#6689)"
+description: "fak armbench ponytail-managed extends the pinned upstream agentic runner from 6688 without refetching its fixtures."
+---
 # Ponytail managed-context ablation (#6689)
 
 `fak armbench ponytail-managed` extends the pinned upstream agentic runner from

@@ -1,3 +1,8 @@
+---
+title: "Issue #8622 — Qwen3.5-27B scale rehearsal"
+description: "Reference documentation for Issue #8622 — Qwen3.5-27B scale rehearsal, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8622 — Qwen3.5-27B scale rehearsal
 
 **Verdict: PROMOTE to exact pinned Qwen3.8-27B.**

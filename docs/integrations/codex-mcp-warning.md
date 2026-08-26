@@ -1,3 +1,7 @@
+---
+title: "Diagnose Codex MCP startup warnings"
+description: "Codex CLI 0.147.0 can print MCP startup interrupted even after every named server initialized (upstream openai/codex37418)."
+---
 # Diagnose Codex MCP startup warnings
 
 Codex CLI 0.147.0 can print `MCP startup interrupted` even after every named

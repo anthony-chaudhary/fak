@@ -11,8 +11,8 @@ func TestKVCapacityDialectFixturesNormalizeEquivalentResidentTokens(t *testing.T
 	block := readKVFixture(t, "testdata/kv-capacity-block.json", KVDialectBlock)
 	direct := readKVFixture(t, "testdata/kv-capacity-direct.json", KVDialectDirect)
 
-	blockSnapshot := NormalizeKVCapacity(block, nil)
-	directSnapshot := NormalizeKVCapacity(direct, nil)
+	blockSnapshot := normalizeKVCapacity(block, nil)
+	directSnapshot := normalizeKVCapacity(direct, nil)
 	assertDerivedUint64(t, blockSnapshot.Normalized.ResidentTokens, 16_384, UnitTokens, MethodBlocksTimesBlockTokens, ConfidenceExact)
 	assertDerivedUint64(t, directSnapshot.Normalized.ResidentTokens, 16_384, UnitTokens, MethodDirectObservation, ConfidenceExact)
 	assertDerivedUint64(t, blockSnapshot.Normalized.TotalTokens, 32_768, UnitTokens, MethodBlocksTimesBlockTokens, ConfidenceExact)
@@ -59,7 +59,7 @@ func TestKVCapacityMissingBlockGeometryIsUnavailable(t *testing.T) {
 	sample.Native.BlockTokens = nil
 	delete(sample.RawMetrics, "kv_block_size_tokens")
 
-	snapshot := NormalizeKVCapacity(sample, nil)
+	snapshot := normalizeKVCapacity(sample, nil)
 	resident := snapshot.Normalized.ResidentTokens
 	if resident.Value != nil {
 		t.Fatalf("resident tokens=%d, want unavailable rather than a guessed zero or block count", *resident.Value)
@@ -77,7 +77,7 @@ func TestKVCapacityMissingBlockGeometryIsUnavailable(t *testing.T) {
 
 func TestKVCapacityUsesObservedBytesBeforeGeometryEstimate(t *testing.T) {
 	sample := readKVFixture(t, "testdata/kv-capacity-direct.json", KVDialectDirect)
-	observed := NormalizeKVCapacity(sample, nil)
+	observed := normalizeKVCapacity(sample, nil)
 	assertDerivedUint64(t, observed.Normalized.ResidentBytes, 2_147_483_648, UnitBytes, MethodDirectObservation, ConfidenceExact)
 	if observed.Normalized.ResidentBytes.Sources[0].Nature != NatureObserved {
 		t.Fatalf("observed byte provenance=%+v", observed.Normalized.ResidentBytes)
@@ -85,7 +85,7 @@ func TestKVCapacityUsesObservedBytesBeforeGeometryEstimate(t *testing.T) {
 
 	sample.Native.ResidentBytes = nil
 	delete(sample.RawMetrics, "kv_resident_bytes")
-	estimated := NormalizeKVCapacity(sample, nil)
+	estimated := normalizeKVCapacity(sample, nil)
 	assertDerivedUint64(t, estimated.Normalized.ResidentBytes, 2_147_483_648, UnitBytes, MethodModelGeometryEstimate, ConfidenceEstimated)
 	if estimated.Normalized.ResidentBytes.Sources[0].Nature != NatureObserved {
 		t.Fatalf("estimated byte sources should begin with resident-token observation: %+v", estimated.Normalized.ResidentBytes)
@@ -133,7 +133,7 @@ func TestKVCapacityValidatesUnitsDenominatorsAndImpossibleOccupancy(t *testing.T
 		t.Run(test.name, func(t *testing.T) {
 			sample := readKVFixture(t, "testdata/kv-capacity-block.json", KVDialectBlock)
 			test.edit(&sample)
-			snapshot := NormalizeKVCapacity(sample, nil)
+			snapshot := normalizeKVCapacity(sample, nil)
 			if snapshot.Validation.Valid {
 				t.Fatalf("validation=%+v, want invalid", snapshot.Validation)
 			}
@@ -151,7 +151,7 @@ func TestKVCapacityRejectsCounterResetsAndIdentityChangesBetweenScrapes(t *testi
 	current.RuntimeID = "runtime-restarted"
 	current.ScrapedAt = previous.ScrapedAt.Add(1)
 
-	snapshot := NormalizeKVCapacity(current, &previous)
+	snapshot := normalizeKVCapacity(current, &previous)
 	if snapshot.Validation.TemporalComparable {
 		t.Fatalf("validation=%+v, want temporal comparison refused", snapshot.Validation)
 	}
@@ -172,7 +172,7 @@ func TestKVCapacityComputesCounterDeltasOnlyAcrossComparableScrapes(t *testing.T
 	previous.Native.Preemptions.Value = 1
 	current.ScrapedAt = previous.ScrapedAt.Add(1)
 
-	snapshot := NormalizeKVCapacity(current, &previous)
+	snapshot := normalizeKVCapacity(current, &previous)
 	if !snapshot.Validation.TemporalComparable {
 		t.Fatalf("validation=%+v, want comparable stable identity and ordered scrapes", snapshot.Validation)
 	}
@@ -180,7 +180,7 @@ func TestKVCapacityComputesCounterDeltasOnlyAcrossComparableScrapes(t *testing.T
 	assertDerivedUint64(t, snapshot.CounterDeltas.Preemptions, 1, UnitCount, MethodCounterDelta, ConfidenceExact)
 
 	current.ScrapedAt = previous.ScrapedAt
-	snapshot = NormalizeKVCapacity(current, &previous)
+	snapshot = normalizeKVCapacity(current, &previous)
 	if snapshot.Validation.TemporalComparable || !hasKVValidationCode(snapshot.Validation.Issues, ValidationInvalidScrapeOrder) {
 		t.Fatalf("same-time scrape validation=%+v", snapshot.Validation)
 	}
@@ -188,7 +188,7 @@ func TestKVCapacityComputesCounterDeltasOnlyAcrossComparableScrapes(t *testing.T
 
 func TestKVCapacityDerivesReusableAndHighWaterTokensWithoutErasingNativeUnits(t *testing.T) {
 	sample := readKVFixture(t, "testdata/kv-capacity-block.json", KVDialectBlock)
-	snapshot := NormalizeKVCapacity(sample, nil)
+	snapshot := normalizeKVCapacity(sample, nil)
 	assertDerivedUint64(t, snapshot.Normalized.ReusableTokens, 4_096, UnitTokens, MethodBlocksTimesBlockTokens, ConfidenceExact)
 	assertDerivedUint64(t, snapshot.Normalized.HighWaterMarkTokens, 19_200, UnitTokens, MethodBlocksTimesBlockTokens, ConfidenceExact)
 	if snapshot.Native.ReusableBlocks.Value != 256 || snapshot.Native.HighWaterMarkBlocks.Value != 1_200 {

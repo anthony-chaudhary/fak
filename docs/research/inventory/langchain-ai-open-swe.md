@@ -1,3 +1,8 @@
+---
+title: "Study inventory: langchain-ai/open-swe"
+description: "Reference documentation for Study inventory: langchain-ai/open-swe, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Study inventory: langchain-ai/open-swe
 
 - **Schema:** `fak-study-inventory-map/1`

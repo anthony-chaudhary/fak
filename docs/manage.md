@@ -1,3 +1,7 @@
+---
+title: "`fak manage`: the managed-agent front door"
+description: "fak manage is the primary command for running and operating an agent through fak. Its short spelling is fak m:"
+---
 # `fak manage`: the managed-agent front door
 
 `fak manage` is the primary command for running and operating an agent through fak.

@@ -1,0 +1,84 @@
+{
+  "schema": "fak.issue-9094-qwen38-kv-reserve-reject/1",
+  "issue": 9094,
+  "verdict": "REJECT",
+  "reason": "the pinned control could not complete P=32800/T=8 before the predeclared Mac safety boundary, so the candidate was not admitted",
+  "source": {
+    "base_revision": "36d56da5a70075c90013c930be0f12545f328713",
+    "modules": [
+      "internal/agent@r344+gd8659420f",
+      "internal/model@r475+gf0908ba4d"
+    ],
+    "control_binary_sha256": "90331a95b38306bf6d56a09a24e638babe9f71bf457a918258630d7ed6de4f7d"
+  },
+  "candidate": {
+    "executed": false,
+    "code_shipped": false,
+    "prepared_binary_sha256": "8f9216cf19a8269194db132f7ada19acd5bf2eed1910ae10e2b0cef9e6270ca5",
+    "prepared_diff_sha256": "ce94e80449fd3f48abb765851557f1b951a08eb8ba6fa64d79c0b3d66b1a5ab6",
+    "disposition": "reverted after the control failed the safety gate"
+  },
+  "envelope": {
+    "hardware": "Apple M3 Pro, 36 GiB unified memory",
+    "engine": "fak-native inkernel",
+    "backend": "Metal",
+    "q4k": true,
+    "fallback_active": false,
+    "model_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "corpus_sha256": "91a85ef82edaeaedace31f9b091b0f0c9af1897ba0b4f32b1c241d72d6408e0f",
+    "prompt_sha256": "eafba2115b741f1beae1a131eb11859f72c4e543d6144dd1d76e9b18a3a1fa51",
+    "prompt_tokens": 32800,
+    "output_tokens": 8,
+    "prefill_chunk_tokens": 512,
+    "gguf_load_workers": 12,
+    "cache_displacement_bytes": 48368448672
+  },
+  "safety_limits": {
+    "peak_footprint_bytes": 61162389504,
+    "minimum_free_memory_percent": 10,
+    "swap_delta_bytes": 12884901888,
+    "swap_limit_basis": "below issue #8972's observed +13,591.19 MiB unsafe boundary",
+    "required_consecutive_crossings": 3
+  },
+  "control": {
+    "started_at": "2026-08-26T13:25:52Z",
+    "completed_at": "2026-08-26T13:29:31Z",
+    "completed_response": false,
+    "long_request_native_receipt": null,
+    "request_error_after_controlled_stop": "EOF",
+    "safety_trip": "swap",
+    "peak_sampled_rss_bytes": 18144788480,
+    "peak_sampled_footprint_bytes": 44023414784,
+    "time_l_peak_footprint_bytes": 44914704520,
+    "minimum_free_memory_percent": 27,
+    "baseline_compressor_pages": 11417,
+    "maximum_compressor_pages": 1281685,
+    "compressor_delta_pages": 1270268,
+    "baseline_swap_bytes": 3040083968,
+    "maximum_swap_bytes": 16327576125,
+    "swap_delta_bytes": 13287492157,
+    "swap_delta_mib": 12671.94,
+    "teardown_clean": true
+  },
+  "isolation": {
+    "global_gpu_lease_held": true,
+    "arms_serialized": true,
+    "service_label": "com.fak.qwen36-model",
+    "service_command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "watcher_matched_terms": 0,
+    "watcher_unmatched_signals": 0,
+    "watcher_reused_pid_signals": 0,
+    "restored_model": "qwen3.6-27b",
+    "restored_stable_seconds": 90,
+    "stale_helper_samples": 30
+  },
+  "artifacts": {
+    "control_arm_json_sha256": "c4438f9faed779ee690e8a10a9df1b60b51680aef70e27198bb1e7b97a73231c",
+    "control_memory_samples_sha256": "795e8831695ec446eb9e0be06c7c9df382bd8d46f94c84534a6c0df91a9543c5",
+    "safety_trip_sha256": "5a929d96609e7f94efe027d531c599213a37849d2c086268f8687a25c1a07135",
+    "watcher_log_sha256": "84a86be8e4fa2b5e9f9b76480d54e78ec6c9dcf357216523b59c0c3fc1f620c5",
+    "restore_samples_sha256": "d742cd9932e51c0461cd897259b39debeb23e0d333706c125d1901708bf52659",
+    "stale_helper_samples_sha256": "e0d5c65f9395cad2330fa6c1d8f7dee97736f1e8838b04792e9237ab9c67bd84"
+  },
+  "conclusion": "Do not ship one-shot full-attention KV reservation from this experiment. The control itself cannot produce an admissible matched receipt inside the Mac safety boundary, so candidate value and safety cannot be established."
+}

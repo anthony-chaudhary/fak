@@ -1,3 +1,7 @@
+---
+title: "Issue #8168 live paired artifact"
+description: "Verdict: ABSTAIN. This is a live provider run, not the offline selfcheck. It supports no Ultracode value claim because effective treatment activation was not..."
+---
 # Issue #8168 live paired artifact
 
 Verdict: **ABSTAIN**. This is a live provider run, not the offline selfcheck. It supports no Ultracode value claim because effective treatment activation was not observable, the fleet outcome had no joined effect/witness/reconciliation receipt, the declared token envelope was not enforced, and subscription spend was unavailable.

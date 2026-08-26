@@ -44,6 +44,19 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		fmt.Fprintf(&out, "\n%s token semantics: %s.\n", denominator.Source, denominator.TokenSemantics)
 	}
 
+	out.WriteString("\n## Mutation churn interventions\n\n")
+	out.WriteString("| Transcript | Target | Writes | Accounted tokens | Intervention |\n")
+	out.WriteString("|---|---|---:|---:|---|\n")
+	churnRows := 0
+	for _, transcript := range result.Transcripts {
+		for _, churn := range transcript.MutationChurnEvents {
+			fmt.Fprintf(&out, "| %s | %s | %d | %d | %s |\n", escapeAuditMarkdown(churn.TranscriptID), escapeAuditMarkdown(churn.Target), churn.Count, churn.AccountedTokens, escapeAuditMarkdown(string(churn.Intervention)))
+			churnRows++
+		}
+	}
+	if churnRows == 0 {
+		out.WriteString("| none | none | 0 | 0 | observe-only |\n")
+	}
 	out.WriteString("\n## Token-weighted bottlenecks\n\n")
 	if len(result.Bottlenecks) == 0 {
 		out.WriteString("No sessions were in the selected window.\n")
@@ -59,10 +72,10 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 
 	if len(result.ToolErrorFamilies) > 0 {
 		out.WriteString("\n## Tool error families\n\n")
-		out.WriteString("| Family | Count | First event | Last event | Tokens |\n")
-		out.WriteString("|---|---:|---:|---:|---:|\n")
+		out.WriteString("| Family | Calls | Accounted tokens | Repeated failures | Mutation churn | First event | Last event |\n")
+		out.WriteString("|---|---:|---:|---:|---:|---:|---:|\n")
 		for _, family := range result.ToolErrorFamilies {
-			fmt.Fprintf(&out, "| %s | %d | %d | %d | %d |\n", family.Family, family.Count, family.FirstIndex, family.LastIndex, family.Tokens)
+			fmt.Fprintf(&out, "| %s | %d | %d | %d | %d | %d | %d |\n", family.Family, family.Count, family.Tokens, family.RepeatedFailures, family.MutationChurn, family.FirstIndex, family.LastIndex)
 		}
 	}
 

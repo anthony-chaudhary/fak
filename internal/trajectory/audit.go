@@ -91,33 +91,37 @@ type AuditDenominatorRow struct {
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
 type AuditTranscriptRow struct {
-	Schema           string      `json:"schema"`
-	Kind             string      `json:"kind"`
-	Source           string      `json:"source"`
-	TranscriptID     string      `json:"session_id"`
-	SourcePath       string      `json:"source_path"`
-	Models           []string    `json:"models"`
-	Tokens           AuditTokens `json:"tokens"`
-	ToolCalls        int         `json:"tool_calls"`
-	ToolErrors       int         `json:"tool_errors"`
-	RepeatedFailures int         `json:"repeated_failures"`
-	MutationChurn    int         `json:"mutation_churn"`
-	HookP95MS        *int64      `json:"hook_p95_ms"`
-	UsageRecords     int         `json:"usage_records"`
+	Schema              string              `json:"schema"`
+	Kind                string              `json:"kind"`
+	Source              string              `json:"source"`
+	TranscriptID        string              `json:"session_id"`
+	SourcePath          string              `json:"source_path"`
+	Models              []string            `json:"models"`
+	Tokens              AuditTokens         `json:"tokens"`
+	ToolCalls           int                 `json:"tool_calls"`
+	ToolErrors          int                 `json:"tool_errors"`
+	RepeatedFailures    int                 `json:"repeated_failures"`
+	MutationChurn       int                 `json:"mutation_churn"`
+	MutationChurnEvents []QwenMutationChurn `json:"mutation_churn_events,omitempty"`
+	HookP95MS           *int64              `json:"hook_p95_ms"`
+	UsageRecords        int                 `json:"usage_records"`
+	SourcePaths         []string            `json:"source_paths,omitempty"`
+	usageByID           map[string]AuditTokens
 }
 
 // AuditBottleneckRow ranks sessions by exact accounted tokens. DominantBucket
 // explains the largest token component without fabricating a cross-vendor price.
 type AuditBottleneckRow struct {
-	Schema          string `json:"schema"`
-	Kind            string `json:"kind"`
-	Rank            int    `json:"rank"`
-	Source          string `json:"source"`
-	TranscriptID    string `json:"session_id"`
-	SourcePath      string `json:"source_path"`
-	AccountedTokens int64  `json:"accounted_tokens"`
-	DominantBucket  string `json:"dominant_bucket"`
-	DominantTokens  int64  `json:"dominant_tokens"`
+	Schema          string   `json:"schema"`
+	Kind            string   `json:"kind"`
+	Rank            int      `json:"rank"`
+	Source          string   `json:"source"`
+	TranscriptID    string   `json:"session_id"`
+	SourcePath      string   `json:"source_path"`
+	SourcePaths     []string `json:"source_paths,omitempty"`
+	AccountedTokens int64    `json:"accounted_tokens"`
+	DominantBucket  string   `json:"dominant_bucket"`
+	DominantTokens  int64    `json:"dominant_tokens"`
 }
 
 // AuditSummaryRow is the machine-wide exact rollup and baseline input.
@@ -126,6 +130,8 @@ type AuditSummaryRow struct {
 	Kind                                string      `json:"kind"`
 	Sources                             int         `json:"sources"`
 	Transcripts                         int         `json:"sessions"`
+	RawFragments                        int         `json:"raw_fragments"`
+	CanonicalTranscripts                int         `json:"canonical_transcripts"`
 	FilesDiscovered                     int         `json:"files_discovered"`
 	FilesScanned                        int         `json:"files_scanned"`
 	FixtureFilesExcluded                int         `json:"fixture_files_excluded"`
@@ -268,8 +274,12 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		BroadEfficiencySupported: len(result.Refusals) == 0,
 		RefusalCount:             len(result.Refusals),
 	}
-	result.Summary = summarizeAudit(result.Denominators, result.Transcripts, allHookDurations)
-	result.Bottlenecks = rankAuditBottlenecks(result.Transcripts)
+	canonical, canonicalRefusals := canonicalAuditTranscripts(result.Transcripts)
+	result.Refusals = append(result.Refusals, canonicalRefusals...)
+	result.Summary = summarizeAudit(result.Denominators, canonical, allHookDurations)
+	result.Summary.RawFragments = len(result.Transcripts)
+	result.Summary.CanonicalTranscripts = len(canonical)
+	result.Bottlenecks = rankAuditBottlenecks(canonical)
 	result.ToolErrorFamilies = rankQwenToolErrorFamilies(allToolErrorEvents)
 	if opts.Baseline != nil {
 		result.Baseline = auditBaselineDeltas(result.Summary, *opts.Baseline)
@@ -623,6 +633,15 @@ func WriteAuditJSONL(w io.Writer, result AuditResult) error {
 	}
 	for _, row := range result.Transcripts {
 		rows = append(rows, row)
+	}
+	for _, transcript := range result.Transcripts {
+		for _, churn := range transcript.MutationChurnEvents {
+			rows = append(rows, struct {
+				Schema string `json:"schema"`
+				Kind   string `json:"kind"`
+				QwenMutationChurn
+			}{AuditSchema, "mutation_churn", churn})
+		}
 	}
 	for _, row := range result.Bottlenecks {
 		rows = append(rows, row)

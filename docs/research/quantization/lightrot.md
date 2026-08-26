@@ -1,3 +1,7 @@
+---
+title: "LightRot bounded low-bit evaluation (arXiv:2607.27704)"
+description: "Status: modeled contract shipped; model-quality and hardware-performance claims not yet observed."
+---
 # LightRot bounded low-bit evaluation (arXiv:2607.27704)
 
 Status: **modeled contract shipped; model-quality and hardware-performance claims not yet observed**.

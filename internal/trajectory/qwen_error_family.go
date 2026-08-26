@@ -10,15 +10,20 @@ type QwenToolErrorEvent struct {
 	Content string `json:"content"`
 	Index   int    `json:"index"`
 	Tokens  uint64 `json:"tokens"`
+
+	repeatedFailures int
+	mutationChurn    int
 }
 
 // QwenToolErrorFamily summarizes occurrences of one classified error family.
 type QwenToolErrorFamily struct {
-	Family     string `json:"family"`
-	Count      int    `json:"count"`
-	FirstIndex int    `json:"first_index"`
-	LastIndex  int    `json:"last_index"`
-	Tokens     uint64 `json:"tokens"`
+	Family           string `json:"family"`
+	Count            int    `json:"count"`
+	FirstIndex       int    `json:"first_index"`
+	LastIndex        int    `json:"last_index"`
+	Tokens           uint64 `json:"tokens"`
+	RepeatedFailures int    `json:"repeated_failures"`
+	MutationChurn    int    `json:"mutation_churn"`
 }
 
 func classifyQwenToolError(content string) string {
@@ -51,6 +56,8 @@ func rankQwenToolErrorFamilies(events []QwenToolErrorEvent) []QwenToolErrorFamil
 		summary.Count++
 		summary.LastIndex = event.Index
 		summary.Tokens += event.Tokens
+		summary.RepeatedFailures += event.repeatedFailures
+		summary.MutationChurn += event.mutationChurn
 	}
 
 	families := make([]QwenToolErrorFamily, 0, len(byFamily))

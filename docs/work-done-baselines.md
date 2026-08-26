@@ -1,3 +1,7 @@
+---
+title: "Work-done baselines"
+description: "fak info reports work avoided relative to a named, versioned alternative. The current default is direct-provider/v1:"
+---
 # Work-done baselines
 
 `fak info` reports work avoided relative to a named, versioned alternative. The current default is `direct-provider/v1`: the same observed session and provider workload, with fak-local response reuse and inline serving disabled on the baseline arm. The candidate arm keeps provider caching and the fak mechanisms that were actually configured for the session.

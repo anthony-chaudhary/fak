@@ -1,3 +1,7 @@
+---
+title: "Durable forest lifecycle envelopes"
+description: "internal/fleetbus schema fak-fleet-lifecycle/1 carries durable forest transitions over the directory bus. Requests support prepare, pause, checkpoint,"
+---
 # Durable forest lifecycle envelopes
 
 `internal/fleetbus` schema `fak-fleet-lifecycle/1` carries durable forest transitions over the directory bus. Requests support `prepare`, `pause`, `checkpoint`, `restore`, `resume`, `stop`, `cancel`, and `status` with transaction/forest/member identity, generation, deadline, capability, causal predecessor, idempotency key, and root authority. ACKs carry accepted/completed/refused/unsupported plus checkpoint and read-back references.

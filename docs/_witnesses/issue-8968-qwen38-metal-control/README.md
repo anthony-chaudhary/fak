@@ -1,3 +1,8 @@
+---
+title: "Issue 8968 — Qwen3.8 Metal control-token profile"
+description: "Reference documentation for Issue 8968 — Qwen3.8 Metal control-token profile, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue 8968 — Qwen3.8 Metal control-token profile
 
 This bundle is the control-only input that selects the next optimization boundary for #8324. It

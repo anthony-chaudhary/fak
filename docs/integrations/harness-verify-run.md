@@ -1,3 +1,7 @@
+---
+title: "Verify what a harness actually ran"
+description: "A verified lock proves what the harness promised before launch. fak harness verify-run compares that promise with a runtime observation,"
+---
 # Verify what a harness actually ran
 
 A verified lock proves what the harness promised before launch. `fak harness verify-run` compares that promise with a runtime observation, so “trust but verify” continues after execution.

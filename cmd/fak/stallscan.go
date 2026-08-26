@@ -29,7 +29,10 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,6 +41,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/stallscan"
 )
 
@@ -114,7 +118,21 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		fmt.Fprintf(stderr, "fak stallscan: cannot create log dir: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stderr, "fak stallscan --watch: interval=%s log=%s (Ctrl-C to stop)\n", interval, logPath)
+	lock, err := acquireStallWatchLock(logPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak stallscan --watch: cannot own log %s: %v\n", logPath, err)
+		return 1
+	}
+	defer func() {
+		_ = flock.Unlock(lock)
+		_ = lock.Close()
+	}()
+	watchID, err := newStallWatchID()
+	if err != nil {
+		fmt.Fprintf(stderr, "fak stallscan --watch: cannot create watch identity: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stderr, "fak stallscan --watch: interval=%s log=%s watch=%s (Ctrl-C to stop)\n", interval, logPath, watchID)
 
 	// Per-PID first-seen census for the GROWTH (trajectory) axis: a leak is a
 	// slope, not a level, so we compare each sample against the count a process
@@ -123,6 +141,8 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 	// robust to per-interval noise (the baseline is first-seen, not last-tick).
 	baseHandles := map[int]stallscan.ProcHandles{}
 	baseThreads := map[int]stallscan.ProcThreads{}
+	started := time.Now().UTC()
+	var sequence uint64
 
 	tick := func() int {
 		sample, gerr := gatherStallSample(topN)
@@ -132,7 +152,15 @@ func runStallscanWatch(stdout, stderr io.Writer, interval time.Duration, logPath
 		}
 		baseline := updateGrowthBaseline(baseHandles, baseThreads, sample)
 		v := stallscan.ClassifyWithBaseline(baseline, sample, stallscan.DefaultThresholds())
-		appendStallJSONL(logPath, stallFingerprintSkewed(sample, v, stallscanSkewGuard(stallscanBuildSkew())), maxBytes)
+		sequence++
+		rec := stallWatchRecord(
+			stallFingerprintSkewed(sample, v, stallscanSkewGuard(stallscanBuildSkew())),
+			watchID, sequence, started, time.Now().UTC(), interval,
+		)
+		if err := appendStallJSONL(logPath, rec, maxBytes); err != nil {
+			fmt.Fprintf(stderr, "fak stallscan --watch: evidence write failed: %v\n", err)
+			return 1
+		}
 		if v.Level != stallscan.LevelCalm {
 			fmt.Fprintf(stdout, "%s  %-8s %-18s %s\n",
 				time.Now().UTC().Format("15:04:05"), v.Level, v.Cause, stallJoinReasons(v.Reasons))
@@ -224,21 +252,63 @@ func stallJoinReasons(rs []string) string {
 	return out
 }
 
-// appendStallJSONL appends one compact JSON line; best-effort by contract — a
-// failed append must never crash the monitor.
-func appendStallJSONL(path string, rec map[string]any, maxBytes int64) {
+// acquireStallWatchLock gives one watcher exclusive ownership of a JSONL path.
+func stallWatchRecord(rec map[string]any, id string, sequence uint64, started, sampled time.Time, interval time.Duration) map[string]any {
+	rec["watch"] = map[string]any{
+		"id": id, "sequence": sequence, "started_at": started,
+		"sampled_at": sampled, "interval_ms": interval.Milliseconds(),
+		"healthy": true,
+	}
+	return rec
+}
+
+func acquireStallWatchLock(path string) (*os.File, error) {
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	if err := flock.TryLock(lock); err != nil {
+		_ = lock.Close()
+		if errors.Is(err, flock.ErrLockBusy) {
+			return nil, fmt.Errorf("another watcher owns this JSONL")
+		}
+		return nil, err
+	}
+	return lock, nil
+}
+
+func newStallWatchID() (string, error) {
+	var id [8]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(id[:]), nil
+}
+
+var boundStallLogForWatch = boundStallLog
+
+func appendStallJSONL(path string, rec map[string]any, maxBytes int64) error {
+	b, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("encode record: %w", err)
+	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return
+		return fmt.Errorf("open log: %w", err)
 	}
-	b, err := json.Marshal(rec)
-	if err == nil {
-		_, err = f.Write(append(b, '\n'))
+	if _, err = f.Write(append(b, '\n')); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("append record: %w", err)
 	}
-	_ = f.Close()
-	if err == nil && maxBytes > 0 {
-		_ = boundStallLog(path, maxBytes)
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close log: %w", err)
 	}
+	if maxBytes > 0 {
+		if err := boundStallLogForWatch(path, maxBytes); err != nil {
+			return fmt.Errorf("rotate log: %w", err)
+		}
+	}
+	return nil
 }
 
 // boundStallLog prevents a long-lived watcher from becoming the resource leak it

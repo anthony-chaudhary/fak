@@ -1,3 +1,7 @@
+---
+title: "Provenance-locked multi-arm benchmark runner"
+description: "fak armbench runs every comparison arm from one immutable JSON manifest. It is the shared harness for the Caveman/Ponytail benchmark work under 6674;"
+---
 # Provenance-locked multi-arm benchmark runner
 
 `fak armbench` runs every comparison arm from one immutable JSON manifest. It is

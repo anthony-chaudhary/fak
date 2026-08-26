@@ -1,3 +1,7 @@
+---
+title: "Control a default harness without rebuilding it"
+description: "fak harness inspect answers what is active. fak harness override turns one changeable inspection row into a concrete, reviewable layer proposal."
+---
 # Control a default harness without rebuilding it
 
 `fak harness inspect` answers what is active. `fak harness override` turns one **changeable** inspection row into a concrete, reviewable layer proposal.

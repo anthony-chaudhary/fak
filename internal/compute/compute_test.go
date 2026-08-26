@@ -3,6 +3,8 @@ package compute
 import (
 	"math"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 )
 
 // lcg is a tiny deterministic PRNG (no global math/rand, no Date.now-style nondeterminism)
@@ -408,5 +410,22 @@ func TestKVResidentBytes(t *testing.T) {
 	want := int64(21*F32.Bytes() + 2*8)
 	if got != want {
 		t.Fatalf("kvResidentBytes() = %d, want %d", got, want)
+	}
+}
+
+func TestMatMulEmitsOptInHostTrace(t *testing.T) {
+	r, disable := computetrace.Enable(2, "run", "request")
+	defer disable()
+	c := cpu()
+	w := NewF32(c, []int{1, 2}, []float32{1, 2})
+	x := NewF32(c, []int{2}, []float32{3, 4})
+	_ = c.MatMul(w, x)
+	got := r.Artifact()
+	if len(got.Events) != 1 {
+		t.Fatalf("events=%d", len(got.Events))
+	}
+	e := got.Events[0]
+	if e.Operation != "matmul" || e.Backend != "cpu-ref" || e.TimerDomain != "host_monotonic" || e.RunID != "run" || e.RequestID != "request" {
+		t.Fatalf("event=%+v", e)
 	}
 }

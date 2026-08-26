@@ -1,3 +1,7 @@
+---
+title: "Caveman context-treatment factorial (#6683)"
+description: "Verdict: SHIPPED with bounded evidence. The harness crosses normal and pinned Caveman style with passthrough, tool-result compression only,"
+---
 # Caveman context-treatment factorial (#6683)
 
 **Verdict: SHIPPED with bounded evidence.** The harness crosses normal and pinned Caveman style with passthrough, tool-result compression only, context shedding only, both, and the tuned bundle over native one-shot and growing multi-turn tool-result workloads at pressure 1/4/12. Routing, policy, and semantic response reuse are explicitly disabled in every manifest.

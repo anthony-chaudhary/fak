@@ -212,6 +212,12 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **How fak maps to what enterprises are buying** (runtime enforcement · prove-it · cost kill-switch · NHI · tamper-evident audit · air-gap) — every stat sourced, every claim fenced shipped/ticketed | [Enterprise positioning](enterprise-positioning.md) |
 | **A machine-readable map (for LLMs)** | [llms.txt](https://github.com/anthony-chaudhary/fak/blob/main/llms.txt) |
 
+## Additional documentation routes
+
+- **Session control and trajectory:** [Child-agent registration and lineage](session-child-registration.md), [Session lifecycle reconciliation](session-lifecycle-reconciliation.md), [Trajectory assurance receipt](trajectory-assurance.md), and [Workflow concepts: the operator's middle layer](workflow-concepts.md).
+- **Tool-result and work accounting:** [Operate tool-result budgets safely](tool-result-budget-operations.md), [Work-accounting coverage](work-accounting-coverage.md), [Work delivery: recording is not readiness](work-delivery.md), [Work-done baselines](work-done-baselines.md), [Work-done history](work-done-history.md), [Work-done query contract](work-done-query.md), and [Work-done source provenance](work-done-sources.md).
+- **Captured read-backs and witnesses:** [Current task queue read-back](witnesses/task-queue-current.md) and [Issue 9020 — owned Metal session profile](_witnesses/issue-9020-metal-profile.md).
+
 ---
 
 <sub>License: Apache-2.0 · [Report a vulnerability](https://github.com/anthony-chaudhary/fak/blob/main/SECURITY.md) · Keywords: Fused
@@ -253,3 +259,46 @@ LLM agent fleet, agentic AI, Go.</sub>
 <!-- BREADCRUMB-JSONLD:END -->
 
 - [KV capacity normalization](kv-capacity-normalization.md) — compare block-oriented and direct KV metrics in tokens, bytes, and occupancy without inventing unavailable values.
+
+# Scoreboard debt discovery index
+
+These links expose captured evidence and maintained scorecard/research clusters to the documentation crawler without changing their content or scorecard coverage.
+
+
+# Scoreboard debt discovery index
+
+These links expose captured evidence and maintained scorecard/research clusters to the documentation crawler without changing their content or scorecard coverage.
+
+- [armbench-caveman-native](_witnesses/armbench-caveman-native/README.md)
+- [armbench-caveman-passthrough](_witnesses/armbench-caveman-passthrough/README.md)
+- [caveman-pairwise-judge-v2](_witnesses/caveman-pairwise-judge-v2/README.md)
+- [issue-8308-qwen38-bf16](_witnesses/issue-8308-qwen38-bf16/README.md)
+- [issue-8311-qwen38-q5km](_witnesses/issue-8311-qwen38-q5km/README.md)
+- [issue-8360-qwen38-mac-metal](_witnesses/issue-8360-qwen38-mac-metal/README.md)
+- [issue-8504-temp-artifacts](_witnesses/issue-8504-temp-artifacts/README.md)
+- [issue-8544-open-witnessed-closure](_witnesses/issue-8544-open-witnessed-closure/README.md)
+- [issue-8621-qwen35-0.8b](_witnesses/issue-8621-qwen35-0.8b/README.md)
+- [issue-8622-qwen35-27b](_witnesses/issue-8622-qwen35-27b/README.md)
+- [issue-8629-qwen35-0.8b-valid-smoke](_witnesses/issue-8629-qwen35-0.8b-valid-smoke/README.md)
+- [issue-8630-qwen35-9b](_witnesses/issue-8630-qwen35-9b/README.md)
+- [issue-8819-qwen38-a100-roofline](_witnesses/issue-8819-qwen38-a100-roofline/README.md)
+- [issue-8968-qwen38-metal-control](_witnesses/issue-8968-qwen38-metal-control/README.md)
+- [issue-9044-q8-metal-residency](_witnesses/issue-9044-q8-metal-residency/README.md)
+- [issue-CHILD-qwen38-startup-bisect](_witnesses/issue-CHILD-qwen38-startup-bisect/README.md)
+- [qwen38-27b-2026-08-19](_witnesses/qwen38-27b-2026-08-19/README.md)
+- [lightgap-scorecard](lightgap-scorecard/README.md)
+- [ceilings](lightgap-scorecard/ceilings.md)
+- [dents](lightgap-scorecard/dents.md)
+- [model](lightgap-scorecard/model.md)
+- [segment-fleet-operator](lightgap-scorecard/segment-fleet-operator.md)
+- [segment-framework-builder](lightgap-scorecard/segment-framework-builder.md)
+- [segment-local-first](lightgap-scorecard/segment-local-first.md)
+- [segment-platform-team](lightgap-scorecard/segment-platform-team.md)
+- [segment-regulated](lightgap-scorecard/segment-regulated.md)
+- [segment-researcher](lightgap-scorecard/segment-researcher.md)
+- [segment-solo-max](lightgap-scorecard/segment-solo-max.md)
+- [unrun](lightgap-scorecard/unrun.md)
+- [contract](portability/contract/README.md)
+- [inventory](research/inventory/README.md)
+- [langchain-ai-open-swe](research/inventory/langchain-ai-open-swe.md)
+- [obra-superpowers](research/inventory/obra-superpowers.md)

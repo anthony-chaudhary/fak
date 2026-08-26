@@ -674,6 +674,7 @@ typedef struct {
     int out;
     int in;
     int nblk;
+    NSUInteger offset;
 } Q4KW;
 
 #define MG_MAX_Q4 8192
@@ -687,6 +688,7 @@ static int q4k_register_buffer(id<MTLBuffer> b, int out, int in, int nblk) {
     gQ4[id].out = out;
     gQ4[id].in = in;
     gQ4[id].nblk = nblk;
+    gQ4[id].offset = 0;
     return id;
 }
 
@@ -746,12 +748,12 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
         mg_execution_event_encoder(event, e1);
         [e1 setComputePipelineState:psoQ4KGemv];
         [e1 setBuffer:xb offset:0 atIndex:1];
-        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:G.offset atIndex:0];
         [e1 setBuffer:gMlpGate offset:0 atIndex:2];
         [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
         [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
         [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:U.offset atIndex:0];
         [e1 setBuffer:gMlpUp offset:0 atIndex:2];
         [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
         [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
@@ -774,7 +776,7 @@ void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y
         mg_execution_event_encoder(event, e3);
         [e3 setComputePipelineState:psoQ4KGemv];
         [e3 setBuffer:gMlpInter offset:0 atIndex:1];
-        [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
+        [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:D.offset atIndex:0];
         [e3 setBuffer:yb offset:0 atIndex:2];
         [e3 setBytes:&D.nblk length:sizeof(int) atIndex:3];
         [e3 setBytes:&D.out  length:sizeof(int) atIndex:4];
@@ -976,12 +978,12 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
         for (int e = 0; e < n; e++) {
             Q4KW G = gQ4[gate_wids[e]], U = gQ4[up_wids[e]];
             NSUInteger off = (NSUInteger)((long)e * I * 4);
-            [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+            [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:G.offset atIndex:0];
             [e1 setBuffer:gMlpGateK offset:off atIndex:2];
             [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
             [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
             [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+            [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:U.offset atIndex:0];
             [e1 setBuffer:gMlpUpK offset:off atIndex:2];
             [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
             [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
@@ -1057,12 +1059,12 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
         mg_execution_event_encoder(event, e1);
         [e1 setComputePipelineState:psoQ4KGemv];
         [e1 setBuffer:xb offset:0 atIndex:1];
-        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:0 atIndex:0];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)G.buf offset:G.offset atIndex:0];
         [e1 setBuffer:gMlpGate offset:0 atIndex:2];
         [e1 setBytes:&G.nblk length:sizeof(int) atIndex:3];
         [e1 setBytes:&G.out  length:sizeof(int) atIndex:4];
         [e1 dispatchThreadgroups:MTLSizeMake((NSUInteger)G.out,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];
-        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:0 atIndex:0];
+        [e1 setBuffer:(__bridge id<MTLBuffer>)U.buf offset:U.offset atIndex:0];
         [e1 setBuffer:gMlpUp offset:0 atIndex:2];
         [e1 setBytes:&U.nblk length:sizeof(int) atIndex:3];
         [e1 setBytes:&U.out  length:sizeof(int) atIndex:4];
@@ -1128,6 +1130,20 @@ static long q4k_page_round(long bytes) {
 // Metal buffer without copying. The caller owns and pins raw until mg_q4k_reset releases the
 // retained buffer. This is the Apple-unified-memory residency path: the GPU reads the same
 // GGUF bytes already held by the model, so the first prefill does not pay an 8+ GB memcpy.
+int mg_q4k_upload_span(const unsigned char* raw, size_t nbytes, size_t offset, int out, int in) {
+    if (raw == NULL || nbytes == 0 || offset > nbytes) return -1;
+    int nblk = 0;
+    long bytes = 0;
+    if (q4k_upload_preflight(out, in, &nblk, &bytes) != 0 || (size_t)bytes > nbytes - offset) return -1;
+    id<MTLBuffer> b = [gDev newBufferWithBytesNoCopy:(void*)raw
+                                              length:(NSUInteger)nbytes
+                                             options:MTLResourceStorageModeShared
+                                         deallocator:nil];
+    if (b == nil) return -1;
+    int id = q4k_register_buffer(b, out, in, nblk);
+    if (id >= 0) gQ4[id].offset = (NSUInteger)offset;
+    return id;
+}
 int mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in) {
     if (raw == NULL) return -1;
     int nblk = 0;
@@ -1185,7 +1201,7 @@ int mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execu
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
         [e setComputePipelineState:pso];
-        [e setBuffer:wbuf offset:0 atIndex:0];
+        [e setBuffer:wbuf offset:W.offset atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
         [e setBuffer:yb   offset:0 atIndex:2];
         [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
@@ -1231,7 +1247,7 @@ void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execut
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ4KGemv];
-        [e setBuffer:wbuf offset:0 atIndex:0];
+        [e setBuffer:wbuf offset:W.offset atIndex:0];
         [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
         [e setBytes:&W.out  length:sizeof(int) atIndex:4];
         for (int i = 0; i < n; i++) {
@@ -1270,7 +1286,7 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ4KGemvMulti[n - 4]];
-        [e setBuffer:wbuf offset:0 atIndex:0];
+        [e setBuffer:wbuf offset:W.offset atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
         [e setBuffer:yb   offset:0 atIndex:2];
         [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
@@ -1314,7 +1330,7 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
         [e setBuffer:xb offset:0 atIndex:1]; // shared activation for every weight in the group
         for (int i = 0; i < n; i++) {
             Q4KW Wi = gQ4[wids[i]];
-            [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:0 atIndex:0];
+            [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:Wi.offset atIndex:0];
             [e setBuffer:yb offset:(NSUInteger)((long)yoff[i] * 4) atIndex:2];
             [e setBytes:&Wi.nblk length:sizeof(int) atIndex:3];
             [e setBytes:&Wi.out  length:sizeof(int) atIndex:4];
@@ -1369,7 +1385,7 @@ int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_
         [e setBuffer:gQXBuf offset:0 atIndex:1];
         for (int i = 0; i < nq4; i++) {
             Q4KW W = gQ4[q4_wids[i]];
-            [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
+            [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:W.offset atIndex:0];
             [e setBuffer:gQYBuf offset:(NSUInteger)((long)q4_yoff[i] * 4) atIndex:2];
             [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
             [e setBytes:&W.out length:sizeof(int) atIndex:4];
@@ -1429,7 +1445,7 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, m
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
         [e setComputePipelineState:q4k_gemm_pso()];
-        [e setBuffer:wbuf offset:0 atIndex:0];
+        [e setBuffer:wbuf offset:W.offset atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
         [e setBuffer:yb   offset:0 atIndex:2];
         [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
@@ -1496,7 +1512,7 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
         for (int i = 0; i < n; i++) {
             Q4KW Wi = gQ4[wids[i]];
             int rowBlocks = (Wi.out + BM - 1) / BM;
-            [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:0 atIndex:0];
+            [e setBuffer:(__bridge id<MTLBuffer>)Wi.buf offset:Wi.offset atIndex:0];
             [e setBuffer:yb offset:(NSUInteger)((long)yoff[i] * 4) atIndex:2];
             [e setBytes:&Wi.nblk length:sizeof(int) atIndex:3];
             [e setBytes:&Wi.out  length:sizeof(int) atIndex:4];

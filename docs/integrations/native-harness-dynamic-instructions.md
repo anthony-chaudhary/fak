@@ -1,3 +1,7 @@
+---
+title: "Dynamic instructions in a fak-native harness"
+description: "The public pkg/harnesskit instruction plane lets a harness adjust application instructions at a declared run, thread,"
+---
 # Dynamic instructions in a fak-native harness
 
 The public [`pkg/harnesskit`](../../pkg/harnesskit) instruction plane lets a harness adjust application instructions at a declared run, thread, or turn boundary without replacing fak's kernel-owned policy prefix.

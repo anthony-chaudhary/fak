@@ -163,8 +163,14 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdLearningObservation(args)
 	case "host-crash":
 		cmdHostCrash(args)
+	case "hostdiag":
+		cmdHostdiag(args)
+	case "shellprov":
+		cmdShellprov(args)
 	case "host-relaunch-broker":
 		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, args))
+	case "watchdog-audit-run":
+		os.Exit(runWatchdogAuditRunner(os.Stdout, os.Stderr, args))
 	case "schedscan":
 		cmdSchedScan(args)
 	case "growthgate":
@@ -215,6 +221,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 
 func dispatchCoreVerbB(name string, args []string) bool {
 	switch name {
+	case "compute-trace":
+		os.Exit(runComputeTrace(os.Stdout, os.Stderr, args))
 	case "loop-score":
 		cmdLoopScore(args)
 	case "waiting":

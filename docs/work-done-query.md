@@ -1,3 +1,7 @@
+---
+title: "Work-done query contract"
+description: "fak info --work-done-json is the automation and future-UI seam for the same accounting object rendered by the TUI. It emits fak.info.work-done-query/1;"
+---
 # Work-done query contract
 
 `fak info --work-done-json` is the automation and future-UI seam for the same accounting object rendered by the TUI. It emits `fak.info.work-done-query/1`; consumers must use stable enum and field values, not terminal labels.

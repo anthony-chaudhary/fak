@@ -1,3 +1,8 @@
+---
+title: "Related-system inventory maps"
+description: "Reference documentation for Related-system inventory maps, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Related-system inventory maps
 
 Machine-assisted maps in this directory are generated from pinned local checkouts with `fak study-inventory`.

@@ -1,3 +1,7 @@
+---
+title: "Work-done source provenance"
+description: "fak info classifies runtime work with the versioned fak.info.work-source/1 taxonomy. Collection records the source before rendering;"
+---
 # Work-done source provenance
 
 `fak info` classifies runtime work with the versioned `fak.info.work-source/1` taxonomy. Collection records the source before rendering; the UI does not infer provenance from labels.

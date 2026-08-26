@@ -1,3 +1,7 @@
+---
+title: "Harness stack compatibility resolution"
+description: "fak harness stack resolve answers whether a requested harness/model/tool/policy/runtime/hardware stack can compose."
+---
 # Harness stack compatibility resolution
 
 `fak harness stack resolve` answers whether a requested harness/model/tool/policy/runtime/hardware stack can compose. It keeps hard compatibility separate from recommendations and returns a provenance-bearing receipt rather than a bare yes/no.

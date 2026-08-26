@@ -1,3 +1,7 @@
+---
+title: "Frame loss between master agents and subagents"
+description: "Measured 2026-08-14 from local Claude Code transcripts. This finding is recomputable with:"
+---
 # Frame loss between master agents and subagents
 
 **Measured 2026-08-14 from local Claude Code transcripts.** This finding is

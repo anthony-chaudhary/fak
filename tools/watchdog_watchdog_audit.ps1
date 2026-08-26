@@ -78,9 +78,13 @@ Get-ScheduledTask -ErrorAction SilentlyContinue |
     $i = Get-ScheduledTaskInfo -TaskName $t.TaskName -TaskPath $t.TaskPath -ErrorAction SilentlyContinue
     $hr = Fmt-Hr $i.LastTaskResult
     $lt = "$($t.Principal.LogonType)"
-    $down = ($hr -ne '0x0' -and $hr -ne '-' -and $hr -ne '0x41303' -and $hr -ne '0x41301')  # exclude "ready"/"running" sentinels
-    $latent = ($lt -eq 'Interactive')
-    $tower += [pscustomobject]@{ Task = $t.TaskName; LogonType = $lt; LastResult = $hr; Down = $down; Latent = $latent }
+    $enabled = [bool]$t.Settings.Enabled
+    # A deliberately disabled/retired task cannot be a live supervision-tower outage.
+    # Keep it in the inventory for provenance, but exclude stale scheduler results and
+    # InteractiveToken risk from the active DOWN/latent verdict.
+    $down = ($enabled -and $hr -ne '0x0' -and $hr -ne '-' -and $hr -ne '0x41303' -and $hr -ne '0x41301')  # exclude "ready"/"running" sentinels
+    $latent = ($enabled -and $lt -eq 'Interactive')
+    $tower += [pscustomobject]@{ Task = $t.TaskName; Enabled = $enabled; LogonType = $lt; LastResult = $hr; Down = $down; Latent = $latent }
   }
 $down = @($tower | Where-Object { $_.Down })
 $latent = @($tower | Where-Object { $_.Latent -and -not $_.Down })

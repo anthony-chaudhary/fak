@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -10,6 +12,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
+
+const inKernelQwenQ4KPrefillChunkTokens = 512
+
+type inKernelPrefillSession interface {
+	PrefillNoLogits([]int)
+	Prefill([]int) []float32
+}
 
 func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool) {
 	gen, promptTok, matched, prefillS, decodeS, stopped, _ = p.generateReusedContext(context.Background(), ids, maxNew, temp, topP, topK, stops, emit)
@@ -27,7 +36,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // path, so every existing caller (which passes 0, 0) is unaffected. The per-token
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
-func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -187,7 +196,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			prefillAt = checkpoint
 		}
 		if prefillAt < len(ids) {
-			logits = s.Prefill(ids[prefillAt:])
+			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			if err != nil {
+				return
+			}
 		}
 		prefillS = time.Since(tp).Seconds()
 	}
@@ -243,6 +255,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
 	}
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
+	}
 	ln := &decodeLane{
 		s:           s,
 		logits:      logits,
@@ -257,7 +273,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		freqPenalty: freqPenalty,
 		presPenalty: presPenalty,
 		maxNew:      maxNew,
+		measurement: measurement,
 	}
+	measurement.startDecodeTrace()
 	td := time.Now()
 	if p.batchDecode {
 		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
@@ -279,6 +297,48 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	return
 }
 
+// prefillDivergentSuffix bounds the temporary prompt panels used by the resident
+// Qwen hybrid Q4_K path. #9066 proves that PrefillNoLogits and Prefill append the
+// same KV, convolution, recurrent, and position state at nonzero cache positions;
+// only the last chunk needs the distribution consumed by decode. Other forward
+// paths keep the historical single Prefill call because they do not share that
+// append proof.
+func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernelPrefillSession, ids []int) ([]float32, error) {
+	chunkTokens := p.effectiveQwenQ4KPrefillChunkTokens()
+	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
+		return s.Prefill(ids), nil
+	}
+	for len(ids) > chunkTokens {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s.PrefillNoLogits(ids[:chunkTokens])
+		ids = ids[chunkTokens:]
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.Prefill(ids), nil
+}
+
+func (p *InKernelPlanner) qwenQ4KPrefillChunkTarget() bool {
+	return p != nil && p.m != nil && p.backend == nil && p.q4k && p.m.Cfg.IsQwen35Hybrid()
+}
+
+func (p *InKernelPlanner) effectiveQwenQ4KPrefillChunkTokens() int {
+	if p != nil && p.qwenQ4KPrefillChunkTokens > 0 {
+		return p.qwenQ4KPrefillChunkTokens
+	}
+	return inKernelQwenQ4KPrefillChunkTokens
+}
+
+func (p *InKernelPlanner) nativeInferencePrefillChunkTokens() int {
+	if !p.qwenQ4KPrefillChunkTarget() {
+		return 0
+	}
+	return p.effectiveQwenQ4KPrefillChunkTokens()
+}
+
 // decodeLane is one request's live decode state. decodeOne runs one token's worth of the
 // decode loop body EXCEPT the model forward, so the serial driver (Session.Step) and the
 // opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
@@ -298,11 +358,99 @@ type decodeLane struct {
 	freqPenalty float64
 	presPenalty float64
 	maxNew      int
+	measurement *nativeInferenceMeasurement
 
 	gen     int
 	stopped bool
 	done    bool
 	err     error
+}
+
+type nativeInferenceMeasurement struct {
+	startedAt         time.Time
+	tokenIDs          []int
+	logprobs          []float64
+	ttftS             float64
+	inferenceDisabled bool
+	traceNow          func() time.Time
+	traceStartedAt    time.Time
+	traceEvents       []NativeDecodeTraceEvent
+}
+
+func (m *nativeInferenceMeasurement) reset() {
+	if m == nil {
+		return
+	}
+	m.tokenIDs = m.tokenIDs[:0]
+	m.logprobs = m.logprobs[:0]
+	m.ttftS = 0
+	m.traceStartedAt = time.Time{}
+	m.traceEvents = m.traceEvents[:0]
+}
+
+func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
+	if m == nil || m.inferenceDisabled {
+		return nil
+	}
+	lp, err := chosenTokenLogprob(logits, token)
+	if err != nil {
+		return err
+	}
+	if len(m.tokenIDs) == 0 {
+		m.ttftS = time.Since(m.startedAt).Seconds()
+	}
+	m.tokenIDs = append(m.tokenIDs, token)
+	m.logprobs = append(m.logprobs, lp)
+	return nil
+}
+
+func (m *nativeInferenceMeasurement) startDecodeTrace() {
+	if m == nil || m.traceNow == nil {
+		return
+	}
+	m.traceStartedAt = m.traceNow()
+	m.traceEvents = m.traceEvents[:0]
+}
+
+func (m *nativeInferenceMeasurement) recordDecodeTrace(tokenIndex int) error {
+	if m == nil || m.traceNow == nil {
+		return nil
+	}
+	wantIndex := len(m.traceEvents) + 1
+	if tokenIndex != wantIndex {
+		return fmt.Errorf("native decode trace token index %d, want %d", tokenIndex, wantIndex)
+	}
+	elapsed := m.traceNow().Sub(m.traceStartedAt).Nanoseconds()
+	if elapsed < 0 || (len(m.traceEvents) > 0 && elapsed < m.traceEvents[len(m.traceEvents)-1].ElapsedNS) {
+		return fmt.Errorf("native decode trace clock moved backwards at token %d", tokenIndex)
+	}
+	m.traceEvents = append(m.traceEvents, NativeDecodeTraceEvent{TokenIndex: tokenIndex, ElapsedNS: elapsed})
+	return nil
+}
+
+func chosenTokenLogprob(logits []float32, token int) (float64, error) {
+	if token < 0 || token >= len(logits) || len(logits) == 0 {
+		return 0, fmt.Errorf("chosen token %d outside logits size %d", token, len(logits))
+	}
+	maxLogit := math.Inf(-1)
+	for _, raw := range logits {
+		v := float64(raw)
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, fmt.Errorf("non-finite model logit")
+		}
+		if v > maxLogit {
+			maxLogit = v
+		}
+	}
+	var expSum float64
+	for _, raw := range logits {
+		expSum += math.Exp(float64(raw) - maxLogit)
+	}
+	lp := float64(logits[token]) - maxLogit - math.Log(expSum)
+	if math.IsNaN(lp) || math.IsInf(lp, 0) {
+		return 0, fmt.Errorf("non-finite chosen-token log probability")
+	}
+	return lp, nil
 }
 
 // decodeOne runs one decode iteration for a lane EXCEPT the forward step. It mirrors the body
@@ -323,27 +471,33 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.stopped, ln.done = true, true
 		return 0, false
 	}
+	if err := ln.measurement.record(ln.logits, next); err != nil {
+		ln.err, ln.done = err, true
+		return 0, false
+	}
 	if ln.counts != nil && next < len(ln.counts) {
 		ln.counts[next]++
 	}
-	if ln.emit != nil && ln.emit(next) {
-		ln.gen++ // this token WAS generated; count it before finishing
+	emitStopped := ln.emit != nil && ln.emit(next)
+	ln.gen++ // this non-stop token was emitted/generated; trace only after this count.
+	if err := ln.measurement.recordDecodeTrace(ln.gen); err != nil {
+		ln.err, ln.done = err, true
+		return 0, false
+	}
+	if emitStopped {
 		ln.stopped, ln.done = true, true
 		return 0, false
 	}
 	if ln.emit != nil {
 		if err := ctx.Err(); err != nil {
-			ln.gen++ // this token was emitted before cancellation became visible
 			ln.err, ln.done = err, true
 			return 0, false
 		}
 	}
-	if ln.gen == ln.maxNew-1 {
-		ln.gen++ // this token was generated; avoid computing unused next-token logits.
+	if ln.gen == ln.maxNew {
 		ln.done = true
 		return 0, false
 	}
-	ln.gen++ // matches the serial loop's post-increment before the next Step.
 	return next, true
 }
 

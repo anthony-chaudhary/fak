@@ -1,3 +1,7 @@
+---
+title: "Agent Zero study: a transparent computer agent versus a governed agent kernel"
+description: "Agent Zero is a transparent, extensible computer-agent product. Its strongest transferable mechanism is the explicit event seam:"
+---
 # Agent Zero study: a transparent computer agent versus a governed agent kernel
 
 **Observed:** 2026-08-18  

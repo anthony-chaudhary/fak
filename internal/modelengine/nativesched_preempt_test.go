@@ -530,3 +530,31 @@ func drainIssue31Requests(t *testing.T, s *NativeScheduler, calls []*abi.ToolCal
 	}
 	return out
 }
+
+func TestNativeSchedulerQwenSwapPreemptionResumes(t *testing.T) {
+	cfg := SyntheticConfig()
+	cfg.NumLayers = 4
+	cfg.LayerTypes = []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"}
+	cfg.FullAttentionInterval = 4
+	cfg.LinearConvKernelDim = 3
+	cfg.LinearKeyHeadDim = cfg.HeadDim
+	cfg.LinearValueHeadDim = cfg.HeadDim
+	cfg.LinearNumKeyHeads = cfg.NumKVHeads
+	cfg.LinearNumValueHeads = cfg.NumHeads
+	cfg.AttnOutputGate = true
+	cfg.NormGain1p = true
+	m := model.NewSynthetic(cfg)
+	calls := issue31Calls()
+	want := drainIssue31Scheduler(t, m, calls, NativePreemptionPolicy{})
+	got, stats := drainIssue31SchedulerWithStats(t, m, calls, NativePreemptionPolicy{
+		MaxBlocks:   1,
+		BlockTokens: 16,
+		Mode:        NativePreemptSwap,
+	})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Qwen swap output = %v, want %v", got, want)
+	}
+	if stats.SwapPreemptions == 0 || stats.Readmitted == 0 || stats.SwapBytes == 0 || stats.SwapRestoredBytes == 0 {
+		t.Fatalf("Qwen swap stats = %+v, want nonzero swap/readmission counters", stats)
+	}
+}

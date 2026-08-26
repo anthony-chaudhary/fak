@@ -1,0 +1,706 @@
+{
+  "schema": "fak-ultracode-complexity-crossover/1",
+  "campaign_version": "issue8674-qwen0.5b-v1",
+  "model": "qwen2.5:0.5b@a8b0c5157701",
+  "runtime": "Ollama/llama.cpp on fak-realmodel",
+  "tokenizer": "qwen2",
+  "cache_posture": "cold/warm API calls; API exposes evaluated prompt tokens but no authoritative prefix-hit count, therefore prefix_read_tokens=0",
+  "source_receipt": "Ollama /api/generate JSON responses captured 2026-08-26 on sanctioned fak-realmodel node",
+  "promotion_evidence": "repeat on a second model/runtime and observe the crossover within one rung before promotion to gen/now",
+  "demotion_evidence": "retire this campaign if replay changes any frozen full-context outcome or authoritative telemetry becomes unavailable",
+  "invalidating_assumption": "the synthetic dependency ladder predicts crossover behavior for repository tasks",
+  "rungs": [
+    {
+      "number": 1,
+      "name": "independent lookup",
+      "dependency_depth": 0,
+      "task": "Known value: ALPHA",
+      "frozen_check": "JSON value equals ALPHA",
+      "cells": [
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 169,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:06.911986322Z;value=ALPHA"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 43,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:07.799396281Z;value=ALPHA"
+        },
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 169,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:08.923368129Z;value=ALPHA"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 43,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:09.785273693Z;value=ALPHA"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 338,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:13.050007258Z;value=ALPHA"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 86,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:14.749165542Z;value=ALPHA"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 338,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:16.662439206Z;value=ALPHA"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 86,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:19.203400267Z;value=ALPHA"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 676,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:21.475650816Z;value=ALPHA"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 172,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:22.184343175Z;value=ALPHA"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 676,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:23.493439787Z;value=ALPHA"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 172,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:31.978178597Z;value=ALPHA"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 1352,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:33.456975986Z;value=ALPHA"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 344,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:34.143193611Z;value=ALPHA"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 1352,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:42.958913689Z;value=ALPHA"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "73ab66a033c267e00b7429bb256f6deb2734ebc4cd4ff5b564a8c9f9b2c8a719",
+          "input_tokens": 344,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:43.739801589Z;value=ALPHA"
+        }
+      ]
+    },
+    {
+      "number": 2,
+      "name": "single-file constrained lookup",
+      "dependency_depth": 1,
+      "task": "File value: BRAVO",
+      "frozen_check": "JSON value equals BRAVO",
+      "cells": [
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 170,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:45.180357764Z;value=BRAVO"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 44,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:45.991474516Z;value=BRAVO"
+        },
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 170,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:47.314778058Z;value=BRAVO"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 44,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:08/26/2026 13:27:55;value=BRAVO"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 340,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:57.107645115Z;value=BRAVO"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 88,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:57.868624702Z;value=BRAVO"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 340,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:27:59.23652246Z;value=BRAVO"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 88,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:00.028291896Z;value=BRAVO"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 680,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:01.334962417Z;value=BRAVO"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 176,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:04.599800781Z;value=BRAVO"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 680,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:06.007691468Z;value=BRAVO"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 176,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:06.761322594Z;value=BRAVO"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 1360,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:08.086674428Z;value=BRAVO"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 352,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:08.881016217Z;value=BRAVO"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 1360,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:12.675846608Z;value=BRAVO"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "f3233097bacb2526cb78cb72d2e1bbeb8e3675abac47990f678a505f3ad6daa7",
+          "input_tokens": 352,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:28:13.469438096Z;value=BRAVO"
+        }
+      ]
+    },
+    {
+      "number": 3,
+      "name": "cross-file read-only join",
+      "dependency_depth": 2,
+      "task": "File A value: CHARLIE; File B requests it",
+      "frozen_check": "JSON value equals CHARLIE",
+      "cells": [
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 50,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:54.221280401Z;value=CHARLIE"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 47,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:54.838434552Z;value=File B"
+        },
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 50,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:55.514491474Z;value=CHARLIE"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 47,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:56.148741218Z;value=File B"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 100,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:56.820757074Z;value=CHARLIE"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 94,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:57.441818949Z;value=File B"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 100,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:58.114452942Z;value=CHARLIE"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 94,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:58.74070011Z;value=File B"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 200,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:22:59.416379758Z;value=CHARLIE"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 188,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:00.031433898Z;value=File B"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 200,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:00.70332778Z;value=CHARLIE"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 188,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:01.328832423Z;value=File B"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "cold",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 400,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:02.021348346Z;value=CHARLIE"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 376,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:02.653220529Z;value=File B"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "warm",
+          "accepted": true,
+          "outcome_digest": "c086a7adca37ae7c07042990ee1c1c8efdfb2278b240bbb9b9479d4318b1a1f5",
+          "input_tokens": 400,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:03.312367915Z;value=CHARLIE"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "95a96cb17ae82a43942157cc5de3cb0a16971152dfe1908955dd48606704f56c",
+          "input_tokens": 376,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:03.916421327Z;value=File B"
+        }
+      ]
+    },
+    {
+      "number": 4,
+      "name": "cross-file dependent diagnosis",
+      "dependency_depth": 3,
+      "task": "File A invariant: DELTA; File B violates it",
+      "frozen_check": "JSON value equals DELTA",
+      "cells": [
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 49,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:04.682315086Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 47,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:05.465826053Z;value=File B violates an invariant from omitted File A"
+        },
+        {
+          "width": 1,
+          "context": "full",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 49,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:06.225609286Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 1,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 47,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:07.015686402Z;value=File B violates an invariant from omitted File A"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 98,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:07.767102223Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 94,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:08.582716021Z;value=File B violates an invariant from omitted File A"
+        },
+        {
+          "width": 2,
+          "context": "full",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 98,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:09.335276576Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 2,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 94,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:10.124131572Z;value=File B violates an invariant from omitted File A"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 196,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:10.889185658Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 188,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:11.685555244Z;value=File B violates an invariant from omitted File A"
+        },
+        {
+          "width": 4,
+          "context": "full",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 196,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:12.452173378Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 4,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 188,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:13.233532987Z;value=File B violates an invariant from omitted File A"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 392,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:14.02109603Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "cold",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 376,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:14.810714705Z;value=File B violates an invariant from omitted File A"
+        },
+        {
+          "width": 8,
+          "context": "full",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "6f890e01c4736fbc49ce1ba0b324f1a1b6dcd3cb918af2b6e4390bfe7a6399cb",
+          "input_tokens": 392,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:15.594521797Z;value=File B violates the invariant 'DELTA'"
+        },
+        {
+          "width": 8,
+          "context": "scoped",
+          "cache": "warm",
+          "accepted": false,
+          "outcome_digest": "fe7284f6f9eaad5096862c33edc50a764c14dc1140c0fb6b4173061936b1b0ee",
+          "input_tokens": 376,
+          "cached_tokens": 0,
+          "source_receipt": "ollama-created-at:2026-08-26T13:23:16.378623002Z;value=File B violates an invariant from omitted File A"
+        }
+      ]
+    },
+    {
+      "number": 5,
+      "name": "cross-turn constrained plan",
+      "dependency_depth": 4,
+      "task": "Earlier constraint: ECHO",
+      "frozen_check": "JSON value equals ECHO",
+      "cells": []
+    },
+    {
+      "number": 6,
+      "name": "cross-file effectful repair",
+      "dependency_depth": 5,
+      "task": "Config required value: FOXTROT",
+      "frozen_check": "JSON value equals FOXTROT",
+      "cells": []
+    }
+  ]
+}

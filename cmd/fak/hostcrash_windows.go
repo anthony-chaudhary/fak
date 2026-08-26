@@ -45,6 +45,54 @@ func gatherHostCrashEvents(since time.Duration) ([]hostfault.ApplicationError100
 	return kept, nil
 }
 
+func gatherHostSystemEvents(since time.Duration) ([]hostfault.WindowsSystemEvent, error) {
+	millis := since.Milliseconds()
+	script := strings.Replace(hostSystemEventPS, "__MILLIS__", strconv.FormatInt(millis, 10), 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	configureDispatchHelperCommand(cmd)
+	out, err := cmd.Output()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return nil, fmt.Errorf("Get-WinEvent System incidents: timed out after 30s")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("Get-WinEvent System incidents: %w", err)
+	}
+	var events []hostfault.WindowsSystemEvent
+	if err := json.Unmarshal(out, &events); err != nil {
+		return nil, fmt.Errorf("parse System incidents JSON: %w", err)
+	}
+	cutoff := time.Now().Add(-since).UnixMilli()
+	kept := events[:0]
+	for _, event := range events {
+		if event.TimeMS >= cutoff {
+			kept = append(kept, event)
+		}
+	}
+	return kept, nil
+}
+
+const hostSystemEventPS = `
+$ErrorActionPreference='Stop'
+$since=(Get-Date).AddMilliseconds(-__MILLIS__)
+$rows=@(Get-WinEvent -FilterHashtable @{LogName='System';Id=41,6008,1001;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
+  $provider=[string]$_.ProviderName; $id=[int]$_.Id
+  if(($id -eq 41 -and $provider -eq 'Microsoft-Windows-Kernel-Power') -or ($id -eq 6008 -and $provider -eq 'EventLog') -or ($id -eq 1001 -and $provider -eq 'Microsoft-Windows-WER-SystemErrorReporting')){
+    $msg=[string]$_.Message; $code=''; $params=@(); $dump=''; $report=''
+    if($id -eq 1001){
+      $p=@($_.Properties | ForEach-Object { [string]$_.Value })
+      if($p.Count -ge 1 -and $p[0] -match '^\s*(0x[0-9a-fA-F]+)\s*\(([^)]*)\)'){ $code=$Matches[1]; $params=@($Matches[2] -split '\s*,\s*') }
+      if($p.Count -ge 2){ $dump=$p[1].Trim() }
+      if($p.Count -ge 3){ $report=$p[2].Trim() }
+    }
+    [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=$provider;windows_event_id=$id;record_id=[string]$_.RecordId;bugcheck_code=$code;parameters=$params;dump_path=$dump;report_id=$report;message=$msg}
+  }
+})
+'['+(($rows|ForEach-Object{$_|ConvertTo-Json -Compress}) -join ',')+']'
+`
+
 const hostCrashEventPS = `
 $ErrorActionPreference='Stop'
 $since=(Get-Date).AddMilliseconds(-__MILLIS__)

@@ -1,3 +1,7 @@
+---
+title: "Monitored related repositories"
+description: "Checked: 2026-08-25 Machine source: monitored-repositories.json Refresh view: fak study-monitor --due-days 14 (add --json for automation) Inventory gate:"
+---
 # Monitored related repositories
 
 **Checked:** 2026-08-25

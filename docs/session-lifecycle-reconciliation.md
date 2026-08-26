@@ -1,3 +1,7 @@
+---
+title: "Session lifecycle reconciliation"
+description: "fak-dev sessiondiag --inventory [--json] is the read-only lifecycle oracle for Codex/fak session artifacts. Its output is always a dry-run (readonly:"
+---
 # Session lifecycle reconciliation
 
 `fak-dev sessiondiag --inventory [--json]` is the read-only lifecycle oracle for Codex/fak session artifacts. Its output is always a dry-run (`read_only: true`) and joins thread state, the latest turn, writer locks, guard launch receipts, spawn edges, child registrations, and independently observed PID plus process-start identity.

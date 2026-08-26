@@ -1,3 +1,7 @@
+---
+title: "Agent skill portability research — 2026-08-14"
+description: "The gap behind fak commit 0094bae9c8e668a31459c0a614aae2e0b15b97b0 was real: Claude's canonical fleet-wave body changed,"
+---
 # Agent skill portability research — 2026-08-14
 
 ## Verdict

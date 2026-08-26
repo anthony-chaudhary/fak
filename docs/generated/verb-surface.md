@@ -1,3 +1,7 @@
+---
+title: "fak verb surface (generated)"
+description: "Generated reference for fak CLI verbs, their purpose, implementation surface, and help coverage, produced by go run ./cmd/verbsdoc from the Go source tree."
+---
 # fak verb surface (generated)
 
 > Generated from Go source by `go run ./cmd/verbsdoc`; do not edit.
@@ -6,6 +10,8 @@ parsed files: 1021<br>
 rows: 1084<br>
 unverified rows: 0 / 1084<br>
 source-only rows absent from help: 849
+
+## Surface table
 
 | VERB | PURPOSE | IMPLEMENTS | DOC | PRECONDITION | REFUSES | HELP |
 |---|---|---|---|---|---|---|

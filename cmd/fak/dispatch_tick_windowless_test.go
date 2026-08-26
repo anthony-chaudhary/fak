@@ -531,3 +531,42 @@ func TestDispatchWindowlessSpawnHelper(t *testing.T) {
 	}
 	os.Exit(0)
 }
+
+// TestDispatchWorkerOutlivesLauncherScope is the #9064 regression witness. The
+// dispatch tick is a short-lived launcher, so the worker must remain alive after
+// spawnDispatchIssueWorker returns; a kill-on-close Job Object owned by the tick
+// violated that contract and reaped every guarded worker before its first turn.
+func TestDispatchWorkerOutlivesLauncherScope(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	runsDir := t.TempDir()
+	release := filepath.Join(t.TempDir(), "release")
+	env := envMap(os.Environ())
+	env[dispatchWindowlessHelperEnv] = "1"
+	env[dispatchWindowlessReleaseEnv] = release
+
+	spawned, err := spawnDispatchIssueWorker(
+		[]string{exe, "-test.run=TestDispatchWindowlessSpawnHelper"}, env,
+		t.TempDir(), runsDir, 9064, "dispatch", "codex", "resolve-dispatch-9064",
+		[]string{"cmd/fak/dispatch_tick_worker.go"}, dispatchtick.Account{}, nil, "", "", 0,
+	)
+	if err != nil {
+		t.Fatalf("spawnDispatchIssueWorker: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.WriteFile(release, []byte("release"), 0o644)
+		dispatchWindowlessWaitFor(t, "worker exit", 10*time.Second, func() bool {
+			return !dispatchPIDAlive(spawned.PID)
+		})
+	})
+
+	dispatchWindowlessWaitFor(t, "worker marker after launcher return", 30*time.Second, func() bool {
+		b, _ := os.ReadFile(spawned.Log)
+		return strings.Contains(string(b), dispatchWindowlessStdoutMarker)
+	})
+	if !dispatchPIDAlive(spawned.PID) {
+		t.Fatalf("worker pid %d exited when launcher scope returned", spawned.PID)
+	}
+}

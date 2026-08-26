@@ -1,3 +1,7 @@
+---
+title: "Portability adapter SDK"
+description: "The internal/portability adapter seam keeps object-specific meaning outside the stable package/context contract."
+---
 # Portability adapter SDK
 
 The `internal/portability` adapter seam keeps object-specific meaning outside the

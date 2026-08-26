@@ -396,6 +396,76 @@ type Completion struct {
 	// format it failed to parse. Set by normalizeCompletionToolCalls.
 	ToolCallsDropped bool
 	ServiceTier      modelroute.ServiceMode
+	// NativeInference is populated only when the caller explicitly requested a
+	// receipt and this planner executed the model math in-kernel. It is captured at
+	// the logits/decode seam, never reconstructed from text or gateway timing.
+	NativeInference *NativeInferenceReceipt
+	// DecodeTrace is populated only for an explicitly requested in-kernel decode.
+	// Its events are authored at the native token-commit seam; proxy text and SSE
+	// fragments are never eligible sources.
+	DecodeTrace *NativeDecodeTrace
+}
+
+const (
+	NativeDecodeTraceSchema = "fak.native-decode-trace/1"
+	NativeDecodeTraceEngine = "fak-native"
+)
+
+// NativeDecodeTrace is the versioned, engine-authored timeline of generated-token
+// commits for one buffered in-kernel completion.
+type NativeDecodeTrace struct {
+	Schema string                   `json:"schema"`
+	Engine string                   `json:"engine"`
+	Events []NativeDecodeTraceEvent `json:"events"`
+}
+
+// NativeDecodeTraceEvent records one non-stop generated token after it has been
+// emitted and counted. TokenIndex is 1-based and consecutive within the attempt.
+type NativeDecodeTraceEvent struct {
+	TokenIndex int   `json:"token_index"`
+	ElapsedNS  int64 `json:"elapsed_ns"`
+}
+
+// NativeInferenceReceipt binds generated tokens and their normalized chosen-token
+// log probabilities to the native model execution which produced them. Logprobs
+// are log_softmax over the unmodified model logits, so receipt capture is supported
+// only for greedy sampling without bias or repetition penalties.
+type NativeInferenceReceipt struct {
+	TokenIDs           []int     `json:"token_ids"`
+	TokenLogprobs      []float64 `json:"token_logprobs"`
+	PrefillSeconds     float64   `json:"prefill_seconds"`
+	TTFTSeconds        float64   `json:"ttft_seconds"`
+	DecodeSeconds      float64   `json:"decode_seconds"`
+	Model              string    `json:"model"`
+	Engine             string    `json:"engine"`
+	Backend            string    `json:"backend"`
+	ForwardPath        string    `json:"forward_path"`
+	Q4K                bool      `json:"q4k"`
+	FallbackActive     bool      `json:"fallback_active"`
+	PrefillChunkTokens int       `json:"prefill_chunk_tokens"`
+}
+
+// InKernelQwenQ4KPrefillChunkConfigError is retained by a planner when the
+// bounded Qwen resident-Q4_K prefill control is nonempty but not one of the
+// supported widths. Targeted requests return it before tokenization or model
+// execution; unrelated model paths do not acquire a new failure mode.
+type InKernelQwenQ4KPrefillChunkConfigError struct {
+	Value string
+}
+
+func (e *InKernelQwenQ4KPrefillChunkConfigError) Error() string {
+	return fmt.Sprintf("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS=%q: want one of 512, 1024, 2048, 4096, 8192", e.Value)
+}
+
+// NativeInferenceReceiptUnsupportedError is returned before model execution when
+// receipt semantics would be ambiguous. The receipt contract is intentionally
+// narrower than ordinary sampling rather than guessing what modified logits mean.
+type NativeInferenceReceiptUnsupportedError struct {
+	Reason string
+}
+
+func (e *NativeInferenceReceiptUnsupportedError) Error() string {
+	return "native inference receipt unsupported: " + e.Reason
 }
 
 // SampleParams are the per-request sampling overrides a CALLER may attach to one
@@ -446,6 +516,12 @@ type SampleParams struct {
 	// if that token has appeared at all this turn (count>0), independent of how many
 	// times — see sampleLogitsWithPenalty. nil is a no-op.
 	PresencePenalty *float64
+	// NativeInferenceReceipt requests the strict native measurement envelope. It is
+	// false by default, preserving both planner work and response bytes.
+	NativeInferenceReceipt bool
+	// DecodeTrace requests native token-commit timestamps. It is false by default,
+	// so ordinary turns allocate no trace slice and perform no per-token clock read.
+	DecodeTrace bool
 	// GuidedDecode carries provider-native guided-decode fields that are not part of
 	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
 	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,
@@ -483,6 +559,14 @@ type Planner interface {
 	Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error)
 	// Model is the model id (for provenance).
 	Model() string
+}
+
+// NativeDecodeTracePlanner marks planners which author token traces at their own
+// native decode seam. Callers use this capability before inference so a proxy or
+// wrapper cannot be mistaken for a native trace source.
+type NativeDecodeTracePlanner interface {
+	Planner
+	NativeDecodeTraceSupported() bool
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,7 @@
+---
+title: "Caveman blinded pairwise quality judge"
+description: "cmd/caveman-pairwise-judge implements issue 8809's corpus-bounded quality gate. It calibrates a pinned OpenAI-compatible judge on immutable human labels,"
+---
 # Caveman blinded pairwise quality judge
 
 `cmd/caveman-pairwise-judge` implements issue #8809's corpus-bounded quality gate. It calibrates a pinned OpenAI-compatible judge on immutable human labels, then compares every matched `normal`↔`native_medium` and `normal`↔`caveman` prompt/trial pair in both presentation orders.

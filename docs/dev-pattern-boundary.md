@@ -1,3 +1,7 @@
+---
+title: "Development tooling boundary: portable patterns versus fak machinery"
+description: "Status: accepted for the fak / fak-dev split (6019, 6028)."
+---
 # Development tooling boundary: portable patterns versus fak machinery
 
 Status: **accepted for the `fak` / `fak-dev` split** (#6019, #6028).

@@ -1,3 +1,7 @@
+---
+title: "Safe public registry lifecycle"
+description: "fak profile continuity registry-selfcheck captures the local-first lifecycle for 6603."
+---
 # Safe public registry lifecycle
 
 `fak profile continuity registry-selfcheck` captures the local-first lifecycle for #6603. The implementation consumes the `fak.portability/v1` package from #6598/#6599, runs every public payload through the #6600 egress gate, and leaves #6601 sync and #6602 organization governance as the metadata-distribution and authorization planes.

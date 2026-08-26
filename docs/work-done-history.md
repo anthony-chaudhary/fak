@@ -1,3 +1,7 @@
+---
+title: "Work-done history"
+description: "WORK DONE history is opt-in, privacy-safe, and baseline/workload aware. A history file stores at most 256 fak.info.work-done-history/1 records."
+---
 # Work-done history
 
 WORK DONE history is opt-in, privacy-safe, and baseline/workload aware. A history file stores at most 256 `fak.info.work-done-history/1` records. Records contain query timestamps/windows, evidence-bearing metrics, stable source enums, baseline identity, and SHA-256 workload/run identities. Raw workload keys, run keys, prompts, tool arguments, and filesystem paths are never persisted.

@@ -1,3 +1,7 @@
+---
+title: "Native harness dependency management: research frame"
+description: "Date: 2026-08-15 Master: 6886 Related masters: 6887, 6889 Status: research input, not a shipped compatibility claim"
+---
 # Native harness dependency management: research frame
 
 **Date:** 2026-08-15  
