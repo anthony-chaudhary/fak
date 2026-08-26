@@ -228,56 +228,19 @@ Refresh this note when any pinned repository revision materially changes the cit
 when A2A publishes a stable generation/replay release, when the installed Claude Code
 version changes, or when #8488/#8490/#8334/#8168 land. The deterministic companion checker
 guards shape and privacy; it does not convert stale evidence into current evidence.
+## A2A exhaustive-inventory refresh — 2026-08-25
 
-### Claude Code exhaustive refresh (2026-08-25)
+Issue [#8997](https://github.com/anthony-chaudhary/fak/issues/8997) closes the denominator gap for the A2A row. The machine-readable map is [`docs/research/inventory/a2aproject-a2a.json`](../research/inventory/a2aproject-a2a.json), generated from the repository at pinned revision [`16ba52690519bf55b9388e34d4db356efa88aa51`](https://github.com/a2aproject/A2A/commit/16ba52690519bf55b9388e34d4db356efa88aa51) (commit time `2026-08-18T17:09:55Z`, tree `82b60edbf0f7887e8332bd45c91e1ac294f31d5e`).
 
-Issue #8995 refreshes the Claude Code denominator without changing the study's
-recommendation. The public repository is now pinned at
-`005c5dade90c2c59c88d819d8723e7b579addb5e` (commit time
-`2026-08-25T22:31:44Z`); the deterministic exhaustive tree map is
-[`docs/research/inventory/anthropics-claude-code.json`](../research/inventory/anthropics-claude-code.json).
-Relative to the prior `16440d0f...` pin, only `CHANGELOG.md` and `feed.xml` changed.
-The newly documented release entries refine product behavior, but do not add a public
-runtime implementation or overturn any twelve-axis decision above.
+The refresh covered README/docs, architecture and binding governance, protobuf/JSON/OpenAPI runtime contracts, examples and generated conformance surfaces, all 613 commits reachable from the pin, 11 releases (latest at the cutoff: `v1.0.1`), the roadmap and source TODOs, and Apache-2.0 provenance. GitHub REST pagination filtered records by creation time at the commit cutoff: 756 issues (175 open, 581 closed) and 908 pull requests (46 open, 862 closed; 588 merged by the cutoff). Discussions cannot be historically snapshotted by GitHub; all 359 current discussions were denominator-checked on 2026-08-25 and candidate threads were bounded by creation date. The inventory records this limitation rather than presenting a current count as commit-time state. There is no dedicated in-tree tests/fixtures directory; examples, schemas, generated validators, and CI are the nearest executable conformance evidence. SDK implementations in linked repositories remain out of this repository row.
 
-The complete source-class read is:
+Field-borrow self-query classified the candidates as follows:
 
-| Source class | Pinned evidence and boundary | FAK decision |
+| Candidate | FAK decision | Follow-on |
 |---|---|---|
-| README and docs | `README.md`, `SECURITY.md`, plugin READMEs, agent/command/skill references, and examples in the exhaustive map | Use as composition and operator-UX evidence, not as an execution protocol. |
-| Architecture/design | Public plugin manifests, coordinator commands, agent prompts, hook contracts, and development guidance | Borrow the spirit of role composition; keep fak's typed DAG, leases, receipts, and witness boundary. |
-| Runtime source | Public shell/Python/JS hook and plugin helpers only; the proprietary Claude Code runtime is absent from this repository | Do not infer runtime guarantees from prompts or changelog claims. |
-| Tests/fixtures | Public plugin test scripts, examples, and testing guidance; no complete product-runtime test suite is published | Treat these as plugin examples, not proof of runtime semantics. |
-| History/changelog/releases | Full local history through the pin, `CHANGELOG.md`, `feed.xml`, 199 GitHub releases, latest `v2.1.246` at observation | Refresh behavior claims while preserving the existing WATCH/EXCLUDE boundaries. |
-| Issues/PRs/discussions | Dated GraphQL counts: 86,934 issues (14,172 open, 72,762 closed), 1,276 PRs (728 open, 386 closed, 162 merged); targeted agent/workflow/subagent/worktree/resume/plugin/hook searches; discussions disabled (0) | Use issue/PR evidence for failure modes and direction, never as shipped proof. |
-| Roadmap/TODOs | Changelog direction, targeted open issue/PR searches, and TODO-bearing public plugin sources | Keep unreleased direction WATCH-only. |
-| License/provenance | `LICENSE.md`, repository metadata, and absence of a GitHub SPDX declaration | Inspiration only: the public code may be used, modified, and distributed solely with Anthropic services; no direct fak port. |
-| fak self-query | Three `fak capabilities` intents plus docs/leaves/verbs/claims lexical fallback and source grep, recorded in the map | Specialist composition is owned; recovery is owned with tracked hardening; packaging is a different boundary. |
-| Candidate matrix | Four source-anchored candidates in the map | Two already owned, one inspiration-only, one already tracked; no new borrow survives. |
-| Completeness critic | Deterministic tree inventory plus explicit non-tree counts, query methods, unavailable proprietary runtime, disabled discussions, and limited public tests | Negative claims remain bounded to public evidence. |
-| Issue tracking | Study issue #8995 and existing follow-ons #8168, #8334, #8488, #8490 | No duplicate issue filed; these remain the complete actionable set. |
+| A2A v1 wire binding and Agent Card discovery | **DEFER**: FAK has no claimed public A2A binding; orchestration stays transport-neutral. | Scope a separate end-to-end binding spine with an external interoperability witness before implementation. |
+| Snapshot before streaming resubscribe | **ALREADY OWNED** by portable session/context continuity plus orchestration effect readback. | None. |
+| Task cancellation, authorization, and terminal-state discipline | **ALREADY OWNED ABOVE PROTOCOL** by session/task control, policy adjudication, leases, and witness gates. | Preserve these stronger semantics if a binding is added. |
+| JSON Schema fidelity, structured output, and extension governance | **CONDITIONAL** on an approved binding spine. | Treat as binding conformance work, not an independent capability. |
 
-The refreshed field-borrow portfolio is therefore unchanged but better witnessed:
-
-- **Already owned:** role-specific coordinator composition and persistent guarded loops.
-  Claude's public `feature-dev` and `ralph-wiggum` examples are useful prompts and UX,
-  while fak already supplies typed task identity, capability-gated concurrency, lane/effect
-  leases, goal gates, cancellation readback, and independent completion evidence.
-- **Inspiration only:** the marketplace package shape combining agents, commands, hooks,
-  and skills. Its discoverability is worth retaining as UX prior art, but the license and
-  runtime boundary rule out a direct port.
-- **Already tracked:** background-task lifecycle, durable messaging/artifacts, cancellation,
-  and selective recovery. The deduplicated work remains #8168, #8334, #8488, and #8490.
-- **No new follow-on:** the delta since the prior pin is release documentation, not a new
-  source-backed gap. Filing another issue would duplicate the existing portfolio.
-
-The row-specific readiness witness is:
-
-```powershell
-fak study-monitor --registry docs/research/monitored-repositories.json --inventory-check --json
-# select repository == "anthropics/claude-code" -> ready: true
-```
-
-Refresh this Claude-specific inventory when the checked revision changes materially in
-public plugins, hooks, agents, tests, or license terms; release-note-only movement may be
-re-adjudicated without assuming that proprietary runtime source became public.
+No new borrow issue was filed: the distinct missing binding is a deferred product decision, while the other candidates are already owned or conditional on that decision. The durable follow-on is recorded in the map and registry instead of being promoted into an unsupported implementation claim.
