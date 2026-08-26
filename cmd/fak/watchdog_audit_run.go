@@ -134,3 +134,41 @@ func defaultWatchdogAuditLog() string {
 	}
 	return filepath.Join(base, "fak-watchdog-audit", "audit.jsonl")
 }
+func runWatchdogAuditHealth(stdout, stderr io.Writer, argv []string, now func() time.Time) int {
+	fs := flag.NewFlagSet("watchdog-audit-health", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	logPath := fs.String("log", defaultWatchdogAuditLog(), "bounded JSONL receipt ledger")
+	maxAge := fs.Duration("max-age", 30*time.Minute, "maximum age of the newest receipt")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 || *logPath == "" || *maxAge <= 0 {
+		fmt.Fprintln(stderr, "watchdog-audit-health: --log and positive --max-age are required")
+		return 2
+	}
+	raw, err := os.ReadFile(*logPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "watchdog-audit-health: read ledger: %v\n", err)
+		return 1
+	}
+	lines := bytes.Split(bytes.TrimSpace(raw), []byte{'\n'})
+	if len(lines) == 0 || len(lines[0]) == 0 {
+		fmt.Fprintln(stderr, "watchdog-audit-health: ledger has no receipts")
+		return 1
+	}
+	var receipt watchdogAuditReceipt
+	if err := json.Unmarshal(lines[len(lines)-1], &receipt); err != nil || receipt.Schema != "fak.watchdog-audit-receipt.v1" {
+		fmt.Fprintln(stderr, "watchdog-audit-health: newest receipt is malformed")
+		return 1
+	}
+	age := now().Sub(receipt.RecordedAt)
+	if receipt.RecordedAt.IsZero() || age < 0 || age > *maxAge {
+		fmt.Fprintf(stderr, "watchdog-audit-health: newest receipt is stale (recorded_at=%s age=%s max_age=%s)\n", receipt.RecordedAt.Format(time.RFC3339), age.Round(time.Second), *maxAge)
+		return 1
+	}
+	if _, err := stdout.Write(append(lines[len(lines)-1], '\n')); err != nil {
+		fmt.Fprintf(stderr, "watchdog-audit-health: write output: %v\n", err)
+		return 1
+	}
+	return receipt.ExitStatus
+}

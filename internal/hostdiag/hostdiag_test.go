@@ -316,3 +316,67 @@ func TestPowerShellCrashRejectsPIDReuse(t *testing.T) {
 		t.Fatalf("reason = %q", got.Reason)
 	}
 }
+
+func TestCorrelateRetainsBoundedApplicationHang(t *testing.T) {
+	event := ResourceEvent{
+		TimeMS:         1720000000000,
+		Source:         "Application Hang",
+		EventID:        1002,
+		RecordID:       "103681",
+		Name:           "WINDOWS_APPLICATION_HANG",
+		ReportID:       "report-123",
+		App:            "chrome.exe",
+		Hang:           &ApplicationHang{AppVersion: "151.0.7922.109", Class: "Cross-process"},
+		Message:        `raw message X:\private\chrome.exe --private-flag`,
+		ProcessID:      42,
+		ProcessStartMS: 1719999999000,
+	}
+	sample := NewProcessSample(time.UnixMilli(event.TimeMS), 42, time.UnixMilli(event.TimeMS-1000), "fak.exe", "sha", "rev", "hostdiag", "session", 1, 1, 1, 1)
+	launch := OwnedShellLaunch{ChildPID: 42, ChildCreatedUTCMS: event.ProcessStartMS, LaunchID: "owned"}
+
+	got, ok := CorrelateWithOwnedLaunches(event, []ProcessSample{sample}, []OwnedShellLaunch{launch})
+	if !ok {
+		t.Fatal("application hang was rejected")
+	}
+	if got.EventName != "WINDOWS_APPLICATION_HANG" || got.Status != "historical_unresolved" || !got.Observational {
+		t.Fatalf("unexpected correlation: %+v", got)
+	}
+	if len(got.Candidates) != 0 || got.OwnedLaunch != nil {
+		t.Fatalf("application hang was attributed: candidates=%+v owned=%+v", got.Candidates, got.OwnedLaunch)
+	}
+	if got.Hang == nil || got.Hang.AppVersion != "151.0.7922.109" || got.Hang.Class != "Cross-process" {
+		t.Fatalf("bounded hang identity not retained: %+v", got.Hang)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"raw message", `X:\\private`, "private-flag", "process_id", "process_start_ms", "command_line"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("correlation leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestCorrelateRejectsMalformedApplicationHang(t *testing.T) {
+	valid := ResourceEvent{TimeMS: 1720000000000, Source: "Application Hang", EventID: 1002, RecordID: "103612", Name: "WINDOWS_APPLICATION_HANG", ReportID: "report-123", App: "explorer.exe", Hang: &ApplicationHang{AppVersion: "10.0.26100.8875", Class: "Unknown"}}
+	tests := map[string]func(*ResourceEvent){
+		"provider":   func(event *ResourceEvent) { event.Source = "Application Error" },
+		"event ID":   func(event *ResourceEvent) { event.EventID = 1000 },
+		"app":        func(event *ResourceEvent) { event.App = "" },
+		"version":    func(event *ResourceEvent) { event.Hang.AppVersion = "" },
+		"report ID":  func(event *ResourceEvent) { event.ReportID = "" },
+		"hang class": func(event *ResourceEvent) { event.Hang.Class = "Novel class" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			event := valid
+			hang := *valid.Hang
+			event.Hang = &hang
+			mutate(&event)
+			if _, ok := Correlate(event, nil); ok {
+				t.Fatalf("malformed application hang accepted: %+v", event)
+			}
+		})
+	}
+}

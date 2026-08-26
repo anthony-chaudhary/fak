@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
+	"github.com/anthony-chaudhary/fak/internal/systembaseline"
 )
 
 func TestNativePerformanceJSONIsValidAndSeparatesEvidence(t *testing.T) {
@@ -110,14 +112,141 @@ func TestNativePerformanceRejectsInvalidArguments(t *testing.T) {
 		{"--capacity-receipt="},
 		{"--profile", "profile.json", "--json"},
 		{"--profile", "profile.json", "--profile-next", "profile.json"},
+		{"--attach-receipt", "receipt.json"},
+		{"--system-baseline", "baseline.json"},
+		{"--out", "receipt.json"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := runNativePerformance(&stdout, &stderr, args); code != 2 {
 			t.Fatalf("args=%v exit=%d, want 2", args, code)
 		}
-		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --capacity-plan | --capacity-receipt FILE]") {
+		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --attach-receipt RECEIPT --system-baseline ATTESTATION [--out FILE] | --capacity-plan | --capacity-receipt FILE]") {
 			t.Fatalf("args=%v stderr=%q", args, stderr.String())
 		}
+	}
+}
+
+func TestNativePerformanceAttachSystemBaseline(t *testing.T) {
+	receipt := gateRequestFixture(t).Candidate
+	receipt.Schema = nativeperf.ReceiptSchemaV1
+	attestation := nativePerformanceSystemBaselineFixture()
+	dir := t.TempDir()
+	receiptPath := filepath.Join(dir, "receipt-v1.json")
+	baselinePath := filepath.Join(dir, "system-baseline.json")
+	writeNativePerformanceJSONFixture(t, receiptPath, receipt)
+	writeNativePerformanceJSONFixture(t, baselinePath, attestation)
+
+	var stdout, stderr bytes.Buffer
+	if code := runNativePerformance(&stdout, &stderr, []string{"--attach-receipt", receiptPath, "--system-baseline", baselinePath}); code != 0 {
+		t.Fatalf("first append exit=%d stderr=%s", code, stderr.String())
+	}
+	first, err := nativeperf.DecodeReceipt(stdout.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Schema != nativeperf.ReceiptSchemaV2 || len(first.SystemBaselines) != 1 {
+		t.Fatalf("first=%+v", first)
+	}
+	originalData, err := os.ReadFile(receiptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := nativeperf.DecodeReceipt(originalData)
+	if err != nil || original.Schema != nativeperf.ReceiptSchemaV1 || len(original.SystemBaselines) != 0 {
+		t.Fatalf("input mutated: %+v err=%v", original, err)
+	}
+
+	secondInput := filepath.Join(dir, "receipt-one.json")
+	secondOutput := filepath.Join(dir, "receipt-two.json")
+	if err := os.WriteFile(secondInput, stdout.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	secondAttestation := nativePerformanceSystemBaselineFixture()
+	secondAttestation.Window.IntervalNS = 2
+	secondAttestation.Seal()
+	writeNativePerformanceJSONFixture(t, baselinePath, secondAttestation)
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNativePerformance(&stdout, &stderr, []string{"--attach-receipt", secondInput, "--system-baseline", baselinePath, "--out", secondOutput}); code != 0 || stdout.Len() != 0 {
+		t.Fatalf("second append exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	secondData, err := os.ReadFile(secondOutput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := nativeperf.DecodeReceipt(secondData)
+	if err != nil || len(second.SystemBaselines) != 2 {
+		t.Fatalf("second=%+v err=%v", second, err)
+	}
+	if info, err := os.Stat(secondOutput); err != nil {
+		t.Fatal(err)
+	} else if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("output mode=%o", info.Mode().Perm())
+	}
+}
+
+func TestNativePerformanceAttachRejectsTamperAndOverfill(t *testing.T) {
+	receipt := gateRequestFixture(t).Candidate
+	attestation := nativePerformanceSystemBaselineFixture()
+	dir := t.TempDir()
+	receiptPath := filepath.Join(dir, "receipt.json")
+	baselinePath := filepath.Join(dir, "system-baseline.json")
+	writeNativePerformanceJSONFixture(t, receiptPath, receipt)
+	attestation.CommandExitCode = 9
+	writeNativePerformanceJSONFixture(t, baselinePath, attestation)
+	var stdout, stderr bytes.Buffer
+	if code := runNativePerformance(&stdout, &stderr, []string{"--attach-receipt", receiptPath, "--system-baseline", baselinePath}); code != 1 || !strings.Contains(stderr.String(), "canonical digest mismatch") {
+		t.Fatalf("tamper exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+
+	for i := range receipt.Repetitions {
+		attestation = nativePerformanceSystemBaselineFixture()
+		attestation.Window.IntervalNS = int64(i + 1)
+		attestation.Seal()
+		var err error
+		receipt, err = nativeperf.AttachSystemBaseline(nativeperf.ActiveGraph(), receipt, attestation)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeNativePerformanceJSONFixture(t, receiptPath, receipt)
+	overfillAttestation := nativePerformanceSystemBaselineFixture()
+	overfillAttestation.Window.IntervalNS = 99
+	overfillAttestation.Seal()
+	writeNativePerformanceJSONFixture(t, baselinePath, overfillAttestation)
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNativePerformance(&stdout, &stderr, []string{"--attach-receipt", receiptPath, "--system-baseline", baselinePath}); code != 1 || !strings.Contains(stderr.String(), "cover every repetition") {
+		t.Fatalf("overfill exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+}
+
+func nativePerformanceSystemBaselineFixture() systembaseline.Report {
+	metric := systembaseline.Metric{Available: true, Value: 1, Unit: "percent", Source: "test"}
+	report := systembaseline.Report{
+		Schema: systembaseline.Schema, Verdict: systembaseline.VerdictClean,
+		Baseline:        systembaseline.Window{StartedAtUTC: "2026-08-25T23:59:59Z", EndedAtUTC: "2026-08-26T00:00:00Z", DurationNS: 1e9, Samples: 2},
+		BaselineHost:    systembaseline.HostTotals{CPUPercent: metric},
+		BaselineSampler: systembaseline.SamplerOverhead{CountedSamples: 1, WallNS: 1e7, DutyPercent: metric},
+		Window:          systembaseline.Window{StartedAtUTC: "2026-08-26T00:00:00Z", EndedAtUTC: "2026-08-26T00:00:01Z", DurationNS: 1e9, Samples: 2},
+		CommandSampler:  systembaseline.SamplerOverhead{CountedSamples: 1, WallNS: 1e7, DutyPercent: metric},
+		Coverage:        systembaseline.Coverage{SUTRootPID: 7, DescendantAttribution: "sampled_pid_ppid_tree"},
+		Host:            systembaseline.HostTotals{CPUPercent: metric},
+		Attribution:     systembaseline.Attribution{SUTCPUPercentOfHost: metric, NonSUTCPUPercentOfHost: metric},
+		Policy:          systembaseline.DefaultPolicy(), TopNonSUT: []systembaseline.Consumer{}, Findings: []systembaseline.Finding{},
+	}
+	report.Seal()
+	return report
+}
+
+func writeNativePerformanceJSONFixture(t *testing.T, path string, value any) {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

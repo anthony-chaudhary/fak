@@ -2,7 +2,6 @@ package agenticbench
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -189,14 +188,4 @@ func addToolCallCount(counts *toolCallCoverageCounts, disposition toolCallDispos
 	case toolCallUnobservable:
 		counts.Unobservable++
 	}
-}
-
-// toolCallCoverageClasses returns stable class ordering for renderers.
-func toolCallCoverageClasses(receipt toolCallCoverageReceipt) []string {
-	classes := make([]string, 0, len(receipt.ByClass))
-	for class := range receipt.ByClass {
-		classes = append(classes, class)
-	}
-	sort.Strings(classes)
-	return classes
 }
