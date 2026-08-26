@@ -1,6 +1,7 @@
 package ggufload
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"math"
@@ -9,12 +10,16 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
+const ggufHeaderBufferSize = 64 << 10
+
 // Read parses a GGUF header from r — magic, version, the metadata key/value table, and the
 // tensor directory — and returns a *File with each tensor's aligned absolute file offset
 // resolved. It reads only the header (not the tensor data blob), and errors on a bad magic,
 // an unsupported version, or a misaligned tensor offset.
 func Read(r io.Reader) (*File, error) {
-	rr := &countingReader{r: r}
+	// Keep countingReader outside the buffer: rr.n is the exact number of header bytes
+	// consumed by the parser, independent of any source bytes prefetched by bufio.
+	rr := &countingReader{r: bufio.NewReaderSize(r, ggufHeaderBufferSize)}
 	magic := make([]byte, 4)
 	if err := rr.readFull(magic); err != nil {
 		return nil, err
