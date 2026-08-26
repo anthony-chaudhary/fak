@@ -1,0 +1,1234 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "ai-dynamo/dynamo",
+  "url": "https://github.com/ai-dynamo/dynamo",
+  "indexed_revision": "f494601ef16b2a17b35ca340c656287b2787971a",
+  "observed_at": "2026-08-26T22:01:04Z",
+  "totals": {
+    "files": 5401,
+    "directories": 1438,
+    "bytes": 121058969,
+    "runtime_files": 3026,
+    "test_files": 1164,
+    "docs_files": 1114,
+    "text_lines": 1670419
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        ".devcontainer/README.md",
+        ".github/codeowners/README.md",
+        ".github/workflows/templates/README.md",
+        "README.md",
+        "README.zh-CN.md",
+        "agent-docs/rules/README.md",
+        "benchmarks/README.md",
+        "benchmarks/burstgpt_loadgen/README.md",
+        "benchmarks/cuda_custom_storage/README.md",
+        "benchmarks/frontend/README.md",
+        "benchmarks/frontend/scripts/README.md",
+        "benchmarks/frontend/scripts/bpf/README.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "deploy/operator/internal/testing/clusterenv/DESIGN.md",
+        "deploy/operator/internal/testing/golden/DESIGN.md",
+        "deploy/operator/internal/testing/operatorenv/DESIGN.md",
+        "docs/fern/assets/img/architecture.png",
+        "docs/fern/assets/img/dynamo-architecture.svg",
+        "docs/fern/assets/img/frontpage-architecture.png",
+        "docs/fern/assets/img/kv-cache-mgr-design.png",
+        "docs/fern/assets/img/kvbm-architecture.png",
+        "docs/fern/assets/img/planner-architecture.svg",
+        "docs/fern/pages/blog/_assets/flash-indexer/tools/design_tokens.yaml",
+        "docs/fern/pages/developer-guide/knowledge-base/concepts/fault-tolerance/graceful-shutdown-architecture.md",
+        "docs/fern/pages/developer-guide/knowledge-base/concepts/fault-tolerance/request-cancellation-architecture.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".agents/skills/dynamo-agent-harness/agents/openai.yaml",
+        ".agents/skills/dynamo-agent-harness/scripts/drive_harness.py",
+        ".agents/skills/dynamo-clone-hotpath-audit/scripts/clone_inventory.py",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/analyze_folded.py",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/capture_offcpu.sh",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/env.sh",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/extract_throughput.py",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/isolate.sh",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/profile_oncpu.sh",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/run_aiperf.sh",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/smoke.sh",
+        ".agents/skills/dynamo-frontend-benchmark/scripts/start.sh"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".agents/skills/dynamo-agent-harness/scripts/test_drive_harness.py",
+        ".agents/skills/visual-review/tests/test_render_review.py",
+        ".github/codeowners/test_codeowners.py",
+        ".github/workflows/test_report.yaml",
+        "benchmarks/prefix_data_generator/tests/conftest.py",
+        "benchmarks/prefix_data_generator/tests/mock_server.py",
+        "benchmarks/prefix_data_generator/tests/test_roundtrip_hashes.py",
+        "benchmarks/prefix_data_generator/tests/test_sampler.py",
+        "benchmarks/prefix_data_generator/tests/test_synthesizer.py",
+        "components/src/dynamo/common/backend/tests/test_backend_bindings.py",
+        "components/src/dynamo/common/backend/tests/test_disagg_helpers.py",
+        "components/src/dynamo/common/backend/tests/test_dp_rank.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".github/release.yml",
+        ".github/workflows/linear-release.yml",
+        ".github/workflows/release.yml",
+        ".github/workflows/release_rc_announcement.yml",
+        "container/compliance/base_sboms/release@16a103b8-amd64.cdx.json",
+        "container/compliance/base_sboms/release@16a103b8-arm64.cdx.json",
+        "docs/fern/components/ReleaseHeader.tsx",
+        "docs/fern/components/ReleaseSummaryCards.tsx",
+        "docs/fern/components/ReleaseSupportMatrix.tsx",
+        "docs/fern/components/ReleaseTimeline.tsx",
+        "docs/fern/components/releases.data.ts",
+        "docs/fern/pages/reference/general/nightly-releases.md"
+      ],
+      "note": "Local release machinery and documentation were inventoried; the companion corpus adds 45 GitHub releases and 85 tags through the observation cutoff. No root CHANGELOG file exists at the pin."
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "external_required",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/agent-reported.yml",
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/contribution_request.yml",
+        ".github/ISSUE_TEMPLATE/dep-light.yml",
+        ".github/ISSUE_TEMPLATE/dep.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/pull_request_template.md",
+        "docs/research/inventory/ai-dynamo-dynamo-corpus.jsonl"
+      ],
+      "note": "GraphQL cursor traversal covered 1,867 issues and 11,902 pull requests; 19 top-level discussions, 45 releases, and 85 tags are indexed. Review/comment bodies are represented by explicit aggregate coverage receipts rather than copied prose."
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "deploy/inference-gateway/ext-proc/src/epp.rs",
+        "lib/kv-router/src/tracking_hash.rs",
+        "docs/research/inventory/ai-dynamo-dynamo-corpus.jsonl"
+      ],
+      "note": "No standalone roadmap path exists, but roadmap links, TODO/deprecation markers, and their issue joins were classified from the complete tree and forge corpus."
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        ".github/scripts/events/package.json",
+        ".github/scripts/package.json",
+        "Cargo.toml",
+        "LICENSE",
+        "benchmarks/pyproject.toml",
+        "deploy/inference-gateway/epp/go.mod",
+        "deploy/inference-gateway/ext-proc/Cargo.toml",
+        "deploy/operator/LICENSE.txt",
+        "deploy/operator/go.mod",
+        "examples/router/custom-policy-example/catalog/Cargo.toml",
+        "examples/router/custom-policy-example/disagg-filter-score-pick/Cargo.toml",
+        "examples/router/custom-policy-example/epp/Cargo.toml"
+      ],
+      "note": "Root Apache-2.0 plus scoped exceptions: MIT DeepSeek-V3.2 test data, 19 CC-BY-4.0 agent-skill/doc files, NVIDIA-proprietary Fern assets, and separately licensed vendored JavaScript. No gitlinks/submodules were present."
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "evidence": [
+        "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md#reconciliation-with-nixl-and-existing-fak-work"
+      ],
+      "note": "FAK capability queries were followed by direct code-reference searches so declarations without production callers were not mislabeled PRESENT."
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "evidence": [
+        "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md#deterministic-candidate-priority-map"
+      ],
+      "note": "Eight ranked construction candidates and explicit excluded/watch/benchmark-only candidates were adjudicated against current FAK seams."
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "evidence": [
+        "https://github.com/anthony-chaudhary/fak/issues/9271",
+        "https://github.com/anthony-chaudhary/fak/issues/8772",
+        "https://github.com/anthony-chaudhary/fak/issues/5272",
+        "https://github.com/anthony-chaudhary/fak/issues/5274",
+        "https://github.com/anthony-chaudhary/fak/issues/6419",
+        "https://github.com/anthony-chaudhary/fak/issues/8259",
+        "https://github.com/anthony-chaudhary/fak/issues/8261",
+        "https://github.com/anthony-chaudhary/fak/issues/8993"
+      ],
+      "note": "Broad open/closed repository search plus mechanism-specific searches yielded dedup joins. This worker created no child issue."
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "lib",
+      "files": 1706,
+      "directories": 409,
+      "bytes": 29381340,
+      "runtime_files": 1287,
+      "test_files": 292,
+      "docs_files": 113,
+      "text_lines": 677491,
+      "languages": [
+        {
+          "language": "Rust",
+          "files": 1161
+        },
+        {
+          "language": "Python",
+          "files": 205
+        },
+        {
+          "language": "Config",
+          "files": 113
+        },
+        {
+          "language": "Docs",
+          "files": 113
+        },
+        {
+          "language": "Shell",
+          "files": 11
+        },
+        {
+          "language": "C",
+          "files": 1
+        },
+        {
+          "language": "C++",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "lib/backend-common/AGENTS.md",
+        "lib/backend-common/CLAUDE.md",
+        "lib/backend-common/Cargo.toml",
+        "lib/backend-common/README.md",
+        "lib/backend-common/examples/mocker/Cargo.toml",
+        "lib/backend-common/examples/mocker/Dockerfile",
+        "lib/backend-common/examples/mocker/README.md",
+        "lib/backend-common/examples/mocker/docker-compose.yml",
+        "lib/backend-common/examples/mocker/src/engine.rs",
+        "lib/backend-common/examples/mocker/src/main.rs",
+        "lib/backend-common/src/adapter.rs",
+        "lib/backend-common/src/args.rs"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "components",
+      "files": 872,
+      "directories": 149,
+      "bytes": 9640172,
+      "runtime_files": 473,
+      "test_files": 369,
+      "docs_files": 30,
+      "text_lines": 235678,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 797
+        },
+        {
+          "language": "Config",
+          "files": 34
+        },
+        {
+          "language": "Docs",
+          "files": 30
+        },
+        {
+          "language": "Shell",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "components/README.md",
+        "components/src/dynamo/common/__init__.py",
+        "components/src/dynamo/common/backend/AGENTS.md",
+        "components/src/dynamo/common/backend/CLAUDE.md",
+        "components/src/dynamo/common/backend/README.md",
+        "components/src/dynamo/common/backend/__init__.py",
+        "components/src/dynamo/common/backend/disagg.py",
+        "components/src/dynamo/common/backend/dp_rank.py",
+        "components/src/dynamo/common/backend/engine.py",
+        "components/src/dynamo/common/backend/health_check.py",
+        "components/src/dynamo/common/backend/logprobs.py",
+        "components/src/dynamo/common/backend/metrics.py"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 617,
+      "directories": 146,
+      "bytes": 28081960,
+      "runtime_files": 0,
+      "test_files": 7,
+      "docs_files": 617,
+      "text_lines": 169149,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 221
+        },
+        {
+          "language": "TypeScript",
+          "files": 42
+        },
+        {
+          "language": "Python",
+          "files": 36
+        },
+        {
+          "language": "Config",
+          "files": 32
+        },
+        {
+          "language": "Shell",
+          "files": 6
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "docs/fern/.gitignore",
+        "docs/fern/AGENTS.md",
+        "docs/fern/CLAUDE.md",
+        "docs/fern/assets/NVIDIA_dark.svg",
+        "docs/fern/assets/NVIDIA_light.svg",
+        "docs/fern/assets/NVIDIA_symbol.svg",
+        "docs/fern/assets/diagrams/agentic_hints_workflow.d2",
+        "docs/fern/assets/diagrams/discovery_plane.d2",
+        "docs/fern/assets/diagrams/discovery_plane_lease.d2",
+        "docs/fern/assets/diagrams/event_plane_transport.d2",
+        "docs/fern/assets/dynamo-community-meeting.ics",
+        "docs/fern/assets/fonts/NVIDIASans.woff2"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "readme_docs",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "deploy",
+      "files": 616,
+      "directories": 140,
+      "bytes": 11792538,
+      "runtime_files": 356,
+      "test_files": 200,
+      "docs_files": 41,
+      "text_lines": 215217,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 360
+        },
+        {
+          "language": "Config",
+          "files": 137
+        },
+        {
+          "language": "Docs",
+          "files": 40
+        },
+        {
+          "language": "Python",
+          "files": 32
+        },
+        {
+          "language": "Rust",
+          "files": 19
+        },
+        {
+          "language": "Shell",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        "deploy/CONTRIBUTING.md",
+        "deploy/__init__.py",
+        "deploy/checkpoint-placeholder/Dockerfile",
+        "deploy/helm/README.md",
+        "deploy/helm/charts/platform/Chart.yaml",
+        "deploy/helm/charts/platform/Makefile",
+        "deploy/helm/charts/platform/README.md",
+        "deploy/helm/charts/platform/README.md.gotmpl",
+        "deploy/helm/charts/platform/components/operator/Chart.yaml",
+        "deploy/helm/charts/platform/components/operator/files/manager-role.yaml",
+        "deploy/helm/charts/platform/components/operator/templates/component-serviceaccount.yaml",
+        "deploy/helm/charts/platform/components/operator/templates/deployment.yaml"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "recipes",
+      "files": 377,
+      "directories": 288,
+      "bytes": 1832805,
+      "runtime_files": 289,
+      "test_files": 0,
+      "docs_files": 55,
+      "text_lines": 48769,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 282
+        },
+        {
+          "language": "Docs",
+          "files": 55
+        },
+        {
+          "language": "Shell",
+          "files": 7
+        }
+      ],
+      "example_paths": [
+        "recipes/AGENTS.md",
+        "recipes/CLAUDE.md",
+        "recipes/CONTRIBUTING.md",
+        "recipes/README.md",
+        "recipes/accuracy/README.md",
+        "recipes/accuracy/accuracy.yaml",
+        "recipes/deepseek-r1/README.md",
+        "recipes/deepseek-r1/model-cache/model-cache.yaml",
+        "recipes/deepseek-r1/model-cache/model-download-sglang.yaml",
+        "recipes/deepseek-r1/model-cache/model-download.yaml",
+        "recipes/deepseek-r1/sglang/README.md",
+        "recipes/deepseek-r1/sglang/deepep.json"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "examples",
+      "files": 301,
+      "directories": 81,
+      "bytes": 991225,
+      "runtime_files": 259,
+      "test_files": 2,
+      "docs_files": 32,
+      "text_lines": 28110,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 119
+        },
+        {
+          "language": "Shell",
+          "files": 110
+        },
+        {
+          "language": "Docs",
+          "files": 32
+        },
+        {
+          "language": "Python",
+          "files": 17
+        },
+        {
+          "language": "Rust",
+          "files": 15
+        }
+      ],
+      "example_paths": [
+        "examples/README.md",
+        "examples/__init__.py",
+        "examples/backends/mocker/deploy/agg.yaml",
+        "examples/backends/mocker/deploy/disagg.yaml",
+        "examples/backends/sample/launch/agg.sh",
+        "examples/backends/sample/launch/agg_diffusion.sh",
+        "examples/backends/sample/launch/disagg.sh",
+        "examples/backends/sample/launch/multimodal_agg.sh",
+        "examples/backends/sample/launch/multimodal_disagg.sh",
+        "examples/backends/sample/launch/multimodal_smoke_client.py",
+        "examples/backends/sglang/deploy/README.md",
+        "examples/backends/sglang/deploy/agg.yaml"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "tests",
+      "files": 277,
+      "directories": 48,
+      "bytes": 3321017,
+      "runtime_files": 0,
+      "test_files": 277,
+      "docs_files": 17,
+      "text_lines": 89445,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 220
+        },
+        {
+          "language": "Config",
+          "files": 24
+        },
+        {
+          "language": "Docs",
+          "files": 17
+        },
+        {
+          "language": "Shell",
+          "files": 12
+        },
+        {
+          "language": "C",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "tests/AGENTS.md",
+        "tests/CLAUDE.md",
+        "tests/README.md",
+        "tests/__init__.py",
+        "tests/basic/autodeploy_engine_config.yaml",
+        "tests/basic/test_autodeploy_backend.py",
+        "tests/basic/test_cuda_version_consistency.py",
+        "tests/benchmarks/__init__.py",
+        "tests/benchmarks/conftest.py",
+        "tests/benchmarks/multimodal/__init__.py",
+        "tests/benchmarks/multimodal/jsonl/__init__.py",
+        "tests/benchmarks/multimodal/jsonl/test_main.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "container",
+      "files": 176,
+      "directories": 15,
+      "bytes": 19585894,
+      "runtime_files": 62,
+      "test_files": 7,
+      "docs_files": 90,
+      "text_lines": 111203,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 90
+        },
+        {
+          "language": "Python",
+          "files": 40
+        },
+        {
+          "language": "Config",
+          "files": 22
+        },
+        {
+          "language": "Shell",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        "container/README.md",
+        "container/compliance/README.md",
+        "container/compliance/__init__.py",
+        "container/compliance/audit_image_sbom.py",
+        "container/compliance/base_sboms/__init__.py",
+        "container/compliance/base_sboms/capture_baseline_sbom.py",
+        "container/compliance/base_sboms/check_drift.py",
+        "container/compliance/base_sboms/cuda-dl-base@8315e245-amd64.cdx.json",
+        "container/compliance/base_sboms/cuda@2ab6381d-amd64.cdx.json",
+        "container/compliance/base_sboms/cuda@2ab6381d-arm64.cdx.json",
+        "container/compliance/base_sboms/cuda@8b2705ea-amd64.cdx.json",
+        "container/compliance/base_sboms/cuda@8b2705ea-arm64.cdx.json"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "benchmarks",
+      "files": 149,
+      "directories": 36,
+      "bytes": 13039799,
+      "runtime_files": 115,
+      "test_files": 5,
+      "docs_files": 17,
+      "text_lines": 21897,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 84
+        },
+        {
+          "language": "Docs",
+          "files": 17
+        },
+        {
+          "language": "Shell",
+          "files": 15
+        },
+        {
+          "language": "Config",
+          "files": 12
+        },
+        {
+          "language": "C++",
+          "files": 9
+        }
+      ],
+      "example_paths": [
+        "benchmarks/README.md",
+        "benchmarks/__init__.py",
+        "benchmarks/burstgpt_loadgen/README.md",
+        "benchmarks/burstgpt_loadgen/convert.py",
+        "benchmarks/cuda_custom_storage/Makefile",
+        "benchmarks/cuda_custom_storage/README.md",
+        "benchmarks/cuda_custom_storage/custom_storage_operation.cpp",
+        "benchmarks/cuda_custom_storage/custom_storage_operation.hpp",
+        "benchmarks/cuda_custom_storage/roundtrip.cpp",
+        "benchmarks/cuda_custom_storage/roundtrip_common.cpp",
+        "benchmarks/cuda_custom_storage/roundtrip_common.hpp",
+        "benchmarks/cuda_custom_storage/storage.cpp"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 111,
+      "directories": 31,
+      "bytes": 1172548,
+      "runtime_files": 103,
+      "test_files": 2,
+      "docs_files": 4,
+      "text_lines": 28532,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 82
+        },
+        {
+          "language": "Python",
+          "files": 15
+        },
+        {
+          "language": "Shell",
+          "files": 5
+        },
+        {
+          "language": "Docs",
+          "files": 4
+        },
+        {
+          "language": "JavaScript",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        ".github/FILTERS.md",
+        ".github/ISSUE_TEMPLATE/agent-reported.yml",
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/contribution_request.yml",
+        ".github/ISSUE_TEMPLATE/dep-light.yml",
+        ".github/ISSUE_TEMPLATE/dep.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/actionlint.yaml",
+        ".github/actions/bootstrap-buildkit/action.yml",
+        ".github/actions/build-deploy-component/action.yml",
+        ".github/actions/builder-refresher/action.yml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "open_closed_issues_prs_discussions",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".agents",
+      "files": 70,
+      "directories": 52,
+      "bytes": 608792,
+      "runtime_files": 28,
+      "test_files": 2,
+      "docs_files": 37,
+      "text_lines": 11853,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 37
+        },
+        {
+          "language": "Python",
+          "files": 12
+        },
+        {
+          "language": "Config",
+          "files": 9
+        },
+        {
+          "language": "Shell",
+          "files": 9
+        }
+      ],
+      "example_paths": [
+        ".agents/skills/analyze-aiperf-results/SKILL.md",
+        ".agents/skills/author-baseline-dgd/SKILL.md",
+        ".agents/skills/configure-aiperf-benchmark/SKILL.md",
+        ".agents/skills/consult-perf-knowledge/SKILL.md",
+        ".agents/skills/create-optimization-hypothesis/SKILL.md",
+        ".agents/skills/debug-session/SKILL.md",
+        ".agents/skills/dep-create/SKILL.md",
+        ".agents/skills/dep-status/SKILL.md",
+        ".agents/skills/dep-update/SKILL.md",
+        ".agents/skills/deploy-dynamo-recipe/SKILL.md",
+        ".agents/skills/dynamo-agent-harness/SKILL.md",
+        ".agents/skills/dynamo-agent-harness/agents/openai.yaml"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "dev",
+      "files": 34,
+      "directories": 2,
+      "bytes": 737473,
+      "runtime_files": 28,
+      "test_files": 1,
+      "docs_files": 3,
+      "text_lines": 23276,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 25
+        },
+        {
+          "language": "Python",
+          "files": 4
+        },
+        {
+          "language": "Docs",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "dev/docker-compose.yml",
+        "dev/docker-observability-xpu.yml",
+        "dev/docker-observability.yml",
+        "dev/observability/README.md",
+        "dev/observability/dynamo_local_resource_monitor.py",
+        "dev/observability/dynamo_local_resource_monitor.yml",
+        "dev/observability/grafana-datasource-local-resource-monitor.yml",
+        "dev/observability/grafana-datasources.yml",
+        "dev/observability/grafana_dashboards/DASHBOARD_METRICS.md",
+        "dev/observability/grafana_dashboards/README.md",
+        "dev/observability/grafana_dashboards/dashboard-providers.yml",
+        "dev/observability/grafana_dashboards/dcgm-metrics.json"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "agent-docs",
+      "files": 31,
+      "directories": 12,
+      "bytes": 162206,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 31,
+      "text_lines": 2125,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 31
+        }
+      ],
+      "example_paths": [
+        "agent-docs/guides/deployment/kubernetes-recipe-workflow.md",
+        "agent-docs/guides/knob-tuning/dynamo.md",
+        "agent-docs/guides/knob-tuning/sglang.md",
+        "agent-docs/guides/knob-tuning/tensorrt-llm.md",
+        "agent-docs/guides/knob-tuning/tuning-hierarchy.md",
+        "agent-docs/guides/knob-tuning/vllm.md",
+        "agent-docs/guides/model-sizing/classification.md",
+        "agent-docs/guides/model-sizing/memory.md",
+        "agent-docs/guides/model-sizing/parallelism.md",
+        "agent-docs/guides/optimization/optimize-loop.md",
+        "agent-docs/guides/rate-matching/matching.md",
+        "agent-docs/references/definitions.md"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 28,
+      "directories": 20,
+      "bytes": 500449,
+      "runtime_files": 8,
+      "test_files": 0,
+      "docs_files": 10,
+      "text_lines": 2436,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 10
+        },
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Python",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".coderabbit.yaml",
+        ".pre-commit-config.yaml",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CODE_OF_CONDUCT.md",
+        "CONTRIBUTING.md",
+        "CONTRIBUTORS.md",
+        "Cargo.toml",
+        "DCO.md",
+        "LICENSE",
+        "README.md",
+        "README.zh-CN.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "agents",
+      "files": 10,
+      "directories": 5,
+      "bytes": 32702,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 10,
+      "text_lines": 602,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 10
+        }
+      ],
+      "example_paths": [
+        "agents/hypothesis-challenger/AGENTS.md",
+        "agents/hypothesis-challenger/CLAUDE.md",
+        "agents/hypothesis-generator/AGENTS.md",
+        "agents/hypothesis-generator/CLAUDE.md",
+        "agents/perf-analyzer/AGENTS.md",
+        "agents/perf-analyzer/CLAUDE.md",
+        "agents/recipe-deployer/AGENTS.md",
+        "agents/recipe-deployer/CLAUDE.md",
+        "agents/user-interviewer/AGENTS.md",
+        "agents/user-interviewer/CLAUDE.md"
+      ]
+    },
+    {
+      "path": ".devcontainer",
+      "files": 7,
+      "directories": 3,
+      "bytes": 40491,
+      "runtime_files": 5,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 898,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 3
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".devcontainer/README.md",
+        ".devcontainer/gen_devcontainer_json.py",
+        ".devcontainer/post-create.sh",
+        ".devcontainer/sglang/devcontainer.json",
+        ".devcontainer/trtllm/devcontainer.json",
+        ".devcontainer/vllm/devcontainer.json"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".ai",
+      "files": 6,
+      "directories": 0,
+      "bytes": 55236,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 6,
+      "text_lines": 1461,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        ".ai/bash-launch-guidelines.md",
+        ".ai/ci-guidelines.md",
+        ".ai/linear-ticket-refs.md",
+        ".ai/pytest-guidelines.md",
+        ".ai/python-guidelines.md",
+        ".ai/test-model-size-guardrails.md"
+      ]
+    },
+    {
+      "path": ".codex",
+      "files": 6,
+      "directories": 1,
+      "bytes": 4992,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 94,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        ".codex/agents/hypothesis-challenger.toml",
+        ".codex/agents/hypothesis-generator.toml",
+        ".codex/agents/perf-analyzer.toml",
+        ".codex/agents/recipe-deployer.toml",
+        ".codex/agents/user-interviewer.toml",
+        ".codex/config.toml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 6,
+      "directories": 0,
+      "bytes": 76450,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 2162,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        "scripts/check_action_pins.py",
+        "scripts/dco_check.py",
+        "scripts/generate_kustomize_openapi.py",
+        "scripts/kustomize-matrix.py",
+        "scripts/validate_agent_instructions.py",
+        "scripts/validate_skills.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".cargo",
+      "files": 1,
+      "directories": 0,
+      "bytes": 880,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 21,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".cargo/config.toml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    }
+  ],
+  "non_tree_study": {
+    "source_cutoff": {
+      "revision": "f494601ef16b2a17b35ca340c656287b2787971a",
+      "commit_timestamp": "2026-08-26T21:38:45Z",
+      "observed_at": "2026-08-26T22:01:04Z",
+      "default_branch": "main",
+      "repository_push_at_observation": "2026-08-26T21:58:09Z",
+      "boundary": "Tree conclusions are pinned to the commit. Forge records are bounded by observed_at. GitHub compare capped its July-18 delta at 250 commits and 300 files; REST /issues hit the page-100 ceiling, so issue and PR completeness uses GraphQL cursor exhaustion."
+    },
+    "github_surface": {
+      "corpus_path": "docs/research/inventory/ai-dynamo-dynamo-corpus.jsonl",
+      "issues": 1867,
+      "pull_requests": 11902,
+      "discussions": 19,
+      "releases": 45,
+      "tags": 85,
+      "issue_comments_aggregate": 30000,
+      "review_comments_aggregate": 60100,
+      "body_policy": "Metadata and compact generated classifications only. Large comment, review, and reply surfaces are aggregate coverage receipts rather than copied bodies."
+    },
+    "worldview": "Dynamo is an orchestration layer above vLLM, SGLang, TensorRT-LLM, and related backends for owned multi-GPU and multi-node serving. FAK borrows mechanisms only where they strengthen its governed gateway or fak-native Qwen3.8 serving path; Dynamo never becomes a silent execution fallback.",
+    "self_query_axes": [
+      "tier-weighted cache overlap worker routing",
+      "anticipated decode output footprint live load routing",
+      "cache event source identity consolidation first store last remove",
+      "request input trigger tool result retry gateway ingress receipt",
+      "frequency value KV admission readmission native radix cache",
+      "atomic route selection occupancy booking cancellation fallback",
+      "consumer-ready two-source KV transfer rendezvous",
+      "replay capability version topology hooks provider ablation"
+    ],
+    "candidate_matrix": [
+      {
+        "id": "C01",
+        "candidate": "cross-source cache-event consolidation",
+        "centrality": "Core",
+        "score": 95,
+        "fak_state": "open construction ticket #9307",
+        "disposition": "construction-ready-new-ticket",
+        "fak_join": [
+          "#9271",
+          "#3320",
+          "#9307"
+        ],
+        "source": "lib/kvbm-consolidator/src/tracker.rs:240-333@f494601ef16b2a17b35ca340c656287b2787971a"
+      },
+      {
+        "id": "C02",
+        "candidate": "live anticipated decode-footprint routing",
+        "centrality": "Core",
+        "score": 92,
+        "fak_state": "open construction ticket #9308",
+        "disposition": "reopen-or-integration-successor",
+        "fak_join": [
+          "#5274",
+          "#9308"
+        ],
+        "source": "lib/llm/src/kv_router/routing_host/request_guard.rs:543-557@f494601ef16b2a17b35ca340c656287b2787971a"
+      },
+      {
+        "id": "C03",
+        "candidate": "live tier-weighted overlap routing",
+        "centrality": "Core",
+        "score": 91,
+        "fak_state": "open construction ticket #9309",
+        "disposition": "reopen-or-integration-successor",
+        "fak_join": [
+          "#5272",
+          "#9309"
+        ],
+        "source": "lib/kv-router/src/scheduling/overlap.rs:201-223@f494601ef16b2a17b35ca340c656287b2787971a"
+      },
+      {
+        "id": "C04",
+        "candidate": "InputTrigger stamping at live gateway ingress",
+        "centrality": "Core",
+        "score": 88,
+        "fak_state": "open construction ticket #9310",
+        "disposition": "reopen-or-integration-successor",
+        "fak_join": [
+          "#6419",
+          "#8772",
+          "#9310"
+        ],
+        "source": "components/src/dynamo/thunderagent_router/router.py:245-300@f494601ef16b2a17b35ca340c656287b2787971a"
+      },
+      {
+        "id": "C05",
+        "candidate": "live value/frequency KV admission and readmission",
+        "centrality": "Core",
+        "score": 86,
+        "fak_state": "open construction ticket #9311",
+        "disposition": "construction-ready-new-ticket",
+        "fak_join": [
+          "#4296",
+          "#3419",
+          "#9311"
+        ],
+        "source": "lib/llm/src/block_manager/offload/filter.rs@f494601ef16b2a17b35ca340c656287b2787971a"
+      },
+      {
+        "id": "E01",
+        "candidate": "versioned replay and ThunderAgent A/B contract",
+        "centrality": "Enabling",
+        "score": 85,
+        "fak_state": "existing owner",
+        "disposition": "deduplicate",
+        "fak_join": [
+          "#8772"
+        ],
+        "source": "components/src/dynamo/replay/simulation.py:53-70@f494601ef16b2a17b35ca340c656287b2787971a"
+      },
+      {
+        "id": "C06",
+        "candidate": "atomic cache-aware selection and occupancy booking",
+        "centrality": "Core",
+        "score": 82,
+        "fak_state": "open construction ticket #9312",
+        "disposition": "construction-ready-new-ticket-after-race-repro",
+        "fak_join": [
+          "#9271",
+          "#9312"
+        ],
+        "source": "lib/runtime/src/routing_policy/occupancy.rs:188-235@f494601ef16b2a17b35ca340c656287b2787971a"
+      },
+      {
+        "id": "E02",
+        "candidate": "consumer-ready two-source KV rendezvous",
+        "centrality": "Core",
+        "score": 71,
+        "fak_state": "existing owners",
+        "disposition": "deduplicate",
+        "fak_join": [
+          "#3259",
+          "#3310",
+          "#3413",
+          "#8259"
+        ],
+        "source": "lib/llm/src/block_manager/connector/scheduler.rs:539-585@ea89e8bdfcc8b9c95514fa9beabc5bd8296ec546"
+      }
+    ],
+    "issue_tracking": {
+      "parent": "#9271",
+      "broad_fak_search": {
+        "records": 102,
+        "open": 25,
+        "closed": 77
+      },
+      "known_joins": [
+        "#8772",
+        "#8259",
+        "#8261",
+        "#8993",
+        "#5272",
+        "#5274",
+        "#6419",
+        "#5276",
+        "#5277",
+        "#3888",
+        "#2242",
+        "#3259",
+        "#3310",
+        "#3413",
+        "#6409"
+      ],
+      "new_issues_created": 0,
+      "fak_issue_refs": [
+        "#9307",
+        "#9308",
+        "#9309",
+        "#9310",
+        "#9311",
+        "#9312"
+      ],
+      "study_receipt": "study_a5808ac41de4fbff614b981d1e4950c1e0caa458c56fc31ca0365127fac1ec82"
+    },
+    "license_boundary": "Clean-room Go adaptation only. Root Apache-2.0 does not erase scoped MIT, CC-BY-4.0, NVIDIA-proprietary, generated, or vendored obligations.",
+    "completeness_critic": "All 20 top-level subsystems and every non-skipped regular file were classified at the pin. Manual semantic reads targeted decision-bearing routing, replay, planner, KVBM/GMS, frontend, tracing, and agent-scheduling code plus tests/docs. Generated assets, vendored dependencies, SBOMs, fixtures, bindings, and backend recipes were inventoried but not exhaustively interpreted. LFS pointer content was not fetched. Related repositories were adjacency-checked; only NIXL reuses an existing exhaustive inventory."
+  },
+  "skipped_dirs": [
+    ".agents/skills/visual-review/assets/vendor",
+    ".git"
+  ],
+  "completeness_critic": "Exhaustive 5,401-file pinned local inventory plus cursor-exhausted GitHub issue/PR history, discussions, releases/tags, TODO and provenance scans, FAK self-query, candidate adjudication, and issue joins. Skipped dependency/cache/control directories: .agents/skills/visual-review/assets/vendor, .git. Large comment/review/reply bodies are represented by aggregate coverage receipts; LFS objects were unavailable; these and semantically unread generated/vendor/fixture paths remain explicit boundaries."
+}
