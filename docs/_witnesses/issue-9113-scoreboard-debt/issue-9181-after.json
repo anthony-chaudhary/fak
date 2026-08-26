@@ -1,0 +1,66 @@
+{
+  "schema": "fak-concept-disambiguation-scorecard-witness/1",
+  "issue": 9181,
+  "phase": "after",
+  "command": "python tools/concept_disambiguation_scorecard.py --json",
+  "compare_command": "python tools/concept_disambiguation_scorecard.py --compare docs/_witnesses/issue-9113-scoreboard-debt/issue-9181-before.json",
+  "scorecard_schema": "fak-concept-disambiguation-scorecard/1",
+  "corpus": {
+  "score": 98.1,
+  "grade": "A",
+  "rows": 2499,
+  "disambiguation_debt": 81,
+  "clarity_defects": 0,
+  "coverage_debt": 81,
+  "coverage": {
+    "discovered": 2706,
+    "covered": 2625,
+    "coverage_pct": 97.0,
+    "coverage_debt": 81
+  },
+  "critical_defects": {
+    "well_formed": 0,
+    "disambiguated": 0,
+    "reference_resolves": 0,
+    "pair_separated": 0,
+    "pair_mutual": 0,
+    "grounded": 0,
+    "index_resolves": 0,
+    "clarity_consistent": 0
+  },
+  "separation": {
+    "mutual": 201,
+    "undrawn": 0
+  },
+  "index": {
+    "ambiguous_keys": 74
+  },
+  "debt_by_group": {
+    "well-formed": 0,
+    "distinctness": 0,
+    "separation": 0,
+    "indexed": 0,
+    "grounded": 0,
+    "honesty": 0
+  },
+  "crystal_concepts": 787,
+  "guard_gate": {
+    "discovered": 485,
+    "covered": 484,
+    "coverage_pct": 99.8,
+    "uncovered": [
+      "guardrows"
+    ],
+    "residual_verdict": "guardRows is a repeated local slice-variable name in unrelated functions, not a shared domain concept. It remains uncovered because issue #9181 forbids detector or classification-config edits and adding a catalog row would be false coverage."
+  }
+  },
+  "comparison": {
+    "debt_delta": -50,
+    "clarity_debt_delta": -29,
+    "coverage_debt_delta": -21,
+    "score_delta": 13.7,
+    "crystal_concepts_delta": 21,
+    "verdict": "not yet 2x: total debt is 81 and the baseline-derived 2x target is 65 or lower"
+  },
+  "capture_note": "This compact witness retains the scorecard values needed to reproduce and review issue #9181; the full report's catalog and lookup-index payloads are intentionally omitted."
+}

@@ -12,9 +12,7 @@
         "compaction",
         "fullcontexttokens"
       ],
-      "aliases": [
-        "microcontextdemo"
-      ],
+      "aliases": [],
       "grounding": "microcontext",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",

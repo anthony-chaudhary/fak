@@ -24,9 +24,10 @@
       "family": "plan",
       "kind": "symbol",
       "definition": "internal/modelroute's FindingPlan is the deterministic output of PlanCrossAuditFindings: one FindingPlanItem per audit receipt plus per-action counts, and PlannedSubjects lists the issue numbers a cross-audit loop tick planned to audit.",
-      "distinction": "It plans cross-audit FINDING ACTIONS (create/update/reopen/escalate per receipt), NOT a conversation resident view (ctxplan) nor an issue-sync BuildPlan.",
+      "distinction": "It plans cross-audit FINDING actions (create/update/reopen/escalate) from model-auditor receipts. It is not quality.FilingPlan, which plans a quality-regression issue lifecycle and may close an issue after a green window, nor an issue-sync BuildPlan.",
       "distinct_from": [
-        "BuildPlan (action planner)"
+        "BuildPlan (action planner)",
+        "filingplan"
       ],
       "aliases": [
         "plancrossauditfindings",
