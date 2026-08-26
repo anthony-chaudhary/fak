@@ -31,6 +31,21 @@ one optional dependency is `openssl`, used only to mint a throwaway root for wit
 2; without it that witness prints `SKIP` and the rest still runs. A captured run is
 in [`EXAMPLE-OUTPUT.md`](EXAMPLE-OUTPUT.md).
 
+With an existing `fak` binary the seven offline witnesses complete in a few
+seconds; the optional OpenSSL certificate mint can add a few more. The expected
+exit codes, tokens, assertions, and final pass/fail result are deterministic for a
+fixed `fak` binary and tool set. Temporary paths, certificate expiry timestamps,
+and the names of cloud variables already present on the host can vary, and the
+captured run labels those normalizations explicitly.
+
+## What you see
+
+Each witness prints the real `doctor`, `guard`, or `recover` output followed by
+assertion lines. The script returns zero only after all assertions pass. Run
+`bash examples/corporate-tls/selfcheck.sh` to exercise the separate strict-mode
+regression: it forces the first normally-successful command to fail and proves the
+main script stops before witness 2 or the success summary.
+
 The seven witnesses:
 
 | # | Host posture | Expect |

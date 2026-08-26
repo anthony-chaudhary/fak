@@ -297,6 +297,7 @@ type demoOptions struct {
 	largeInputOutput              string
 	verifyLargeInputPath          string
 	largeInputSelfcheck           bool
+	capturedSelfcheck             bool
 	selectorOutput                string
 	verifySelectorPath            string
 	selectorSelfcheck             bool
@@ -524,6 +525,7 @@ func registerDemoFlagsA(o *demoOptions) {
 	flag.StringVar(&o.verifyEffectsPath, "verify-effects", "", "verify effect-safety artifact")
 	flag.StringVar(&o.verifyAPIOnlyPath, "verify-api-only", "", "verify captured S6 API-only artifact")
 	flag.BoolVar(&o.largeInputSelfcheck, "large-input-selfcheck", false, "run the fixture-backed 1,000-record large-input operator proof")
+	flag.BoolVar(&o.capturedSelfcheck, "captured-selfcheck", false, "run the compact deterministic documentation witness")
 	flag.StringVar(&o.largeInputOutput, "large-input-output", "", "write the large-input operator proof artifact")
 	flag.StringVar(&o.verifyLargeInputPath, "verify-large-input", "", "verify a captured large-input operator artifact")
 	flag.BoolVar(&o.selectorSelfcheck, "filter-selector-selfcheck", false, "run the adaptive filter-selector proof")
@@ -693,6 +695,15 @@ func registerDemoFlagsB(o *demoOptions) {
 }
 
 func runDemoCommands1(o demoOptions) bool {
+	if o.capturedSelfcheck {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := runCapturedSelfcheck(ctx, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "microcontextdemo: captured selfcheck:", err)
+			os.Exit(1)
+		}
+		return true
+	}
 	if o.verifyFairnessPath != "" {
 		runVerify("verify-fairness", o.verifyFairnessPath, verifyFairnessArtifact)
 		return true

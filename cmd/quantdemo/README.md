@@ -16,6 +16,16 @@ This uses no network, model, GPU, or mutable local state. It validates four cont
 and prints the immutable pins. Unknown format/version returns `ABSTAIN/UNKNOWN_FORMAT`; an
 unlisted runtime returns `DELEGATE/RUNTIME_NOT_PINNED`; and a known format/runtime with an
 unwitnessed quantization returns `REFUSE/COMBINATION_NOT_LISTED`. There is no silent fallback.
+With a warm Go build cache the selfcheck completes in under one second; an initial run may take
+longer while Go compiles the package. Its output is deterministic and byte-identical across
+re-runs, with the exact render locked to [EXAMPLE-OUTPUT.md](EXAMPLE-OUTPUT.md) by a Go test.
+
+## What you see
+
+Each `PASS` line names an asserted part of the compatibility contract: the four typed fixture
+decisions, the immutable artifact and runtime pins, and the deliberately narrow composability
+claim. The repository-wide [claim ledger](../../CLAIMS.md) documents the evidence labels used by
+fak; this demo does not turn its offline fixtures into live quality or performance evidence.
 
 ## Immutable live pins
 
@@ -62,6 +72,5 @@ Success means both paths returned an OpenAI-compatible response to the same dete
 request, and the output records each body independently. Text equality is not asserted because
 runtime scheduling can vary. No timing is compared: the gateway adds capabilities and an extra
 hop, while a direct call is the honest alternative when those capabilities are not needed.
-
 
 

@@ -1,0 +1,3831 @@
+{
+  "schema": "fleet-demo-quality-scorecard/1",
+  "ok": false,
+  "verdict": "ACTION",
+  "finding": "demo_debt",
+  "reason": "19 unit(s) of demo-debt across 104 demos; mean 96.8/100; weakest: cmd/microcontextdemo (67.4/100, 3 defect(s))",
+  "next_action": "retire demo-debt worst-first (see corpus.worst + demo.defects): add a one-command runner, capture EXAMPLE-OUTPUT.md, state what the demo does NOT claim, add cleanup; re-run to prove the drop",
+  "workspace": "C:\\Users\\USER\\AppData\\Local\\Fleet\\worker-worktrees\\fak-worker-wt-demo2-9020c93f3d90",
+  "corpus": {
+    "n_demos": 104,
+    "mean_score": 96.8,
+    "grade": "A",
+    "median_score": 100.0,
+    "min_score": 67.4,
+    "max_score": 100.0,
+    "grade_distribution": {
+      "A": 94,
+      "B": 2,
+      "C": 6,
+      "D": 2,
+      "F": 0
+    },
+    "demo_debt": 19,
+    "worst": [
+      {
+        "path": "cmd/microcontextdemo",
+        "score": 67.4,
+        "grade": "D",
+        "n_defects": 3
+      },
+      {
+        "path": "cmd/microharnessdemo",
+        "score": 67.4,
+        "grade": "D",
+        "n_defects": 3
+      },
+      {
+        "path": "cmd/fabricmapdemo",
+        "score": 74.4,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "examples/independent-server",
+        "score": 77.5,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "cmd/dashboarddemo",
+        "score": 77.5,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "cmd/microfleetdemo",
+        "score": 77.5,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "cmd/microcachedemo",
+        "score": 79.5,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "cmd/disambiguationdemo",
+        "score": 79.6,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "cmd/quantdemo",
+        "score": 88.0,
+        "grade": "B",
+        "n_defects": 1
+      },
+      {
+        "path": "cmd/qwen36codedemo",
+        "score": 89.0,
+        "grade": "B",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/mobile-ffi",
+        "score": 91.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/playground",
+        "score": 93.1,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/trace-authoring",
+        "score": 93.1,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/grammar-repair-demo",
+        "score": 94.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/dropindemo",
+        "score": 94.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/bench-latency",
+        "score": 95.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/gpu-smoke",
+        "score": 95.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/turntax",
+        "score": 95.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/autogen-groupchat",
+        "score": 96.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/crewai-crew",
+        "score": 96.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/fanbench",
+        "score": 96.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/plan-cfi",
+        "score": 96.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/extseamsdemo",
+        "score": 96.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/normgate-evasion",
+        "score": 96.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/deny-as-value",
+        "score": 96.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/grammar-repair",
+        "score": 96.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/addressable-evict",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/admit-and-log",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/agent-ab",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/context-debugger",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/corporate-tls",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/dogfood-claude",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/fleet-reuse-demo",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/frontierswe-harbor-shim",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/loader-properties",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/openai-agents-guardrail",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/policy-loader-properties",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/radixattention",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/remote-vm-guard",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/self-modify-floor",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/session-reload",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/vdso-cache-hit",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/verified-memory-recall",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/vm-fs-guard",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/marketdemo",
+        "score": 98.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/adjudication-demo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/affectedtests-comparison",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/agentdojo-redteam",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/auth-hardening",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/commit-audit-in-60s",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/component-contracts",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/compose-ollama",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/deny-in-60s",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/escalation-demo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/extdriver",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/federated-changes",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/ifc-taint-flow",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/mcp",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/mcp-client",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/observability",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/openai-sdk-minimal",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/policy-hot-reload",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/preflight-ladder",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/presets",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/quarantine-demo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/shared-task-record",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/shared-task-record-verdicts",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/skill-program",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/steward-demo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/trace-reset",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/wire-proof",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/wire-quarantine-demo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/witness-gate",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/a2ademo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/agentbenchdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/archreportdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/cachedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/ctxdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/ctxplandemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/cxlpooldemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/fanoutdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/generationcontroldemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/guarddemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/harnesswebdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/hwcachedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/instructiondemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/memqdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/poisonedmcpdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/resultbudgetdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/sessionintentdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/simpledemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/stackpreflightdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/stackresolvedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/supportgraphdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/timewolfdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/tokendemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/toolcallcontroldemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/trychatdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/turntaxdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/unseedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/workloadfitdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/causalbench",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/deletioncert",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/demorace",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      }
+    ]
+  },
+  "demos": [
+    {
+      "path": "examples/addressable-evict",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=6",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/adjudication-demo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'demo_test.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=3 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/admit-and-log",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/affectedtests-comparison",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.ps1']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/agent-ab",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=6",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/agentdojo-redteam",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/auth-hardening",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=5",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/autogen-groupchat",
+      "score": 96.2,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['groupchat_demo.py']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=9",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/bench-latency",
+      "score": 95.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=6",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/commit-audit-in-60s",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/component-contracts",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.ps1']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/compose-ollama",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/context-debugger",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=7",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/corporate-tls",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/crewai-crew",
+      "score": 96.2,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['crew_demo.py']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=8",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/deny-as-value",
+      "score": 96.6,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=8",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/deny-in-60s",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=7",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/dogfood-claude",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.ps1', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=8",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/escalation-demo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/extdriver",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/fanbench",
+      "score": 96.2,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=6",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/federated-changes",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/fleet-reuse-demo",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'demo_test.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=5",
+        "self_contained": "scripts=3 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/frontierswe-harbor-shim",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['fak_routed.py', 'fak_routed_test.py']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/gpu-smoke",
+      "score": 95.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['run-cuda.sh', 'run-vulkan.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/grammar-repair",
+      "score": 96.6,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=6",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/grammar-repair-demo",
+      "score": 94.2,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 90,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=False \u00b7 run-cmd-in-readme=True \u00b7 scripts=\u2014",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=0 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/ifc-taint-flow",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/independent-server",
+      "score": 77.5,
+      "grade": "C",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 62,
+        "honest_scope": 48,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['fixture.go', 'main.go', 'selfcheck_test.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=3 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly"
+      ],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 2
+    },
+    {
+      "path": "examples/loader-properties",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=7",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/mcp",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['verify.py']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=8",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/mcp-client",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['client.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=7",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/mobile-ffi",
+      "score": 91.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 88,
+        "documented": 78
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['adjudicate.go', 'adjudicate_test.go', 'libfakmobile.go', 'main.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=5",
+        "self_contained": "scripts=4 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=False \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no run/usage section and no visible run command \u2014 hard to find how to start",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/normgate-evasion",
+      "score": 96.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 90,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/observability",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/openai-agents-guardrail",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'guarded_tool.py']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/openai-sdk-minimal",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['app.py']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/plan-cfi",
+      "score": 96.2,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/playground",
+      "score": 93.1,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 78
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['play.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=6",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=False \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "documented: no run/usage section and no visible run command \u2014 hard to find how to start",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/policy-hot-reload",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=5",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/policy-loader-properties",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/preflight-ladder",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/presets",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=False \u00b7 run-cmd-in-readme=True \u00b7 scripts=\u2014",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=0 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/quarantine-demo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=9",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/radixattention",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/remote-vm-guard",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/self-modify-floor",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=6",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/session-reload",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=7",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/shared-task-record",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh', 'validate_shared_items.py']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/shared-task-record-verdicts",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/skill-program",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.ps1']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/steward-demo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/trace-authoring",
+      "score": 93.1,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 78
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=False \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "documented: no run/usage section and no visible run command \u2014 hard to find how to start",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/trace-reset",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/turntax",
+      "score": 95.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=5",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/vdso-cache-hit",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/verified-memory-recall",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/vm-fs-guard",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/wire-proof",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['verify.py']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=5",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/wire-quarantine-demo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demo.py', 'run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=7",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/witness-gate",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['run.sh']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=4",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/a2ademo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/agentbenchdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/archreportdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/cachedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/ctxdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['arms.go', 'main.go', 'scenario.go', 'scenario_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=4 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/ctxplandemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/cxlpooldemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/dashboarddemo",
+      "score": 77.5,
+      "grade": "C",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 62,
+        "honest_scope": 48,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly"
+      ],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 2
+    },
+    {
+      "path": "cmd/disambiguationdemo",
+      "score": 79.6,
+      "grade": "C",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 62,
+        "honest_scope": 48,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly"
+      ],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 2
+    },
+    {
+      "path": "cmd/dropindemo",
+      "score": 94.2,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 90,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go', 'print.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=3 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/extseamsdemo",
+      "score": 96.2,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/fabricmapdemo",
+      "score": 74.4,
+      "grade": "C",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 48,
+        "honest_scope": 48,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=False",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=1 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly"
+      ],
+      "soft": [
+        "reproducible: no exit-code / determinism statement \u2014 the demo doesn't say how to tell pass from fail (a CI gate needs this)",
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 2
+    },
+    {
+      "path": "cmd/fanoutdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/generationcontroldemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/guarddemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/harnesswebdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/hwcachedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/instructiondemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/marketdemo",
+      "score": 98.4,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/memqdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/microcachedemo",
+      "score": 79.5,
+      "grade": "C",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 62,
+        "honest_scope": 58,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly"
+      ],
+      "soft": [
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 2
+    },
+    {
+      "path": "cmd/microcontextdemo",
+      "score": 67.4,
+      "grade": "D",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 62,
+        "honest_scope": 48,
+        "self_contained": 88,
+        "documented": 48
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['ab.go', 'ab_test.go', 'agent.go', 'artifact_test.go', 'batch_execution.go', 'controlled_soak.go', 'controlled_soak_test.go', 'corpus_bench.go', 'corpus_bench_test.go', 'counterfactual_admission.go', 'counterfactual_admission_test.go', 'disagreement_audit.go', 'disagreement_audit_test.go', 'effect_batch.go', 'effect_batch_test.go', 'fairness.go', 'fairness_test.go', 'falsification_bench.go', 'falsification_bench_test.go', 'filter_tool_scheduler.go', 'filter_tool_scheduler_test.go', 'health_scorecard.go', 'health_scorecard_test.go', 'large_input.go', 'large_input_selector.go', 'large_input_selector_test.go', 'large_input_test.go', 'lineage_test.go', 'live_filter_tool_scheduler.go', 'live_filter_tool_scheduler_test.go', 'live_input.go', 'live_input_test.go', 'live_semantic_matrix.go', 'live_semantic_matrix_test.go', 'main.go', 'main_test.go', 'multiturn_descriptor.go', 'multiturn_descriptor_test.go', 'natural_multitool.go', 'natural_multitool_test.go', 'natural_traffic.go', 'natural_traffic_test.go', 'openai.go', 'openai_test.go', 'provenance_fold.go', 'provenance_fold_test.go', 'quality.go', 'reason.go', 'reason_test.go', 'resources.go', 'resources_unix.go', 'resources_windows.go', 'routing_voi.go', 'routing_voi_test.go', 's2b_verify.go', 's2b_verify_test.go', 's3.go', 's3_test.go', 's4compat.go', 's4compat_test.go', 's4descriptor.go', 's4descriptor_test.go', 's4effects.go', 's4effects_test.go', 's6api.go', 's6api_test.go', 'semantic_residual.go', 'semantic_residual_test.go', 'strong_live_matrix.go', 'strong_live_matrix_test.go', 'tail_policy_matrix.go', 'tail_policy_matrix_test.go', 'tool_enrichment.go', 'tool_enrichment_test.go', 'tuned_baselines.go', 'tuned_baselines_test.go', 'usage_test.go', 'verify.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=78 \u00b7 prereqs-stated=False",
+        "documented": "H1=0 \u00b7 run-section=False \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 1
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly",
+        "documented: no H1 title (a '# Title' line) in the README"
+      ],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no run/usage section and no visible run command \u2014 hard to find how to start",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 3
+    },
+    {
+      "path": "cmd/microfleetdemo",
+      "score": 77.5,
+      "grade": "C",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 62,
+        "honest_scope": 48,
+        "self_contained": 88,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly"
+      ],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 2
+    },
+    {
+      "path": "cmd/microharnessdemo",
+      "score": 67.4,
+      "grade": "D",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 62,
+        "honest_scope": 48,
+        "self_contained": 88,
+        "documented": 48
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['determinism_test.go', 'edge_adversarial_test.go', 'live_adapter_test.go', 'main.go', 'main_test.go', 'refusal_recovery_test.go', 'usage_ledger.go', 'usage_ledger_test.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=False \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=8 \u00b7 prereqs-stated=False",
+        "documented": "H1=0 \u00b7 run-section=False \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 1,
+        "self_contained": 0,
+        "documented": 1
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like",
+        "honest_scope: no scope / 'what this does not claim' statement \u2014 a demo that only shows the win overclaims; state the boundary honestly",
+        "documented: no H1 title (a '# Title' line) in the README"
+      ],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no run/usage section and no visible run command \u2014 hard to find how to start",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 3
+    },
+    {
+      "path": "cmd/poisonedmcpdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/quantdemo",
+      "score": 88.0,
+      "grade": "B",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 62,
+        "honest_scope": 90,
+        "self_contained": 100,
+        "documented": 90
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['contract.go', 'main.go', 'main_test.go']",
+        "reproducible": "captured-output=False \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=3 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 1,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [
+        "reproducible: no captured example output: no EXAMPLE-OUTPUT.md and no in-README sample run \u2014 a reader cannot tell what a correct run looks like"
+      ],
+      "soft": [
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 1
+    },
+    {
+      "path": "cmd/qwen36codedemo",
+      "score": 89.0,
+      "grade": "B",
+      "axes": {
+        "runnable": 86,
+        "reproducible": 100,
+        "honest_scope": 90,
+        "self_contained": 88,
+        "documented": 78
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=False \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=0",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=False",
+        "documented": "H1=1 \u00b7 run-section=False \u00b7 output-section=False"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [
+        "runnable: a runnable script exists but the README shows no paste-able command to launch it",
+        "honest_scope: no link to a deeper doc (CLAIMS / STATUS / an explainer) to back the claim",
+        "self_contained: no stated prerequisites \u2014 a cold runner can't tell what to install first",
+        "documented: no run/usage section and no visible run command \u2014 hard to find how to start",
+        "documented: no 'what you see' / output-explainer section \u2014 the reader is left to interpret the run alone"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/resultbudgetdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/sessionintentdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/simpledemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go', 'net_test.go', 'stats.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=5",
+        "self_contained": "scripts=4 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/stackpreflightdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/stackresolvedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/supportgraphdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/timewolfdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/tokendemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['cli.go', 'cold.go', 'cold_test.go', 'main.go', 'main_test.go', 'served.go', 'served_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=7 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/toolcallcontroldemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/trychatdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go', 'model_live.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=3 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/turntaxdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/unseedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/workloadfitdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=EXAMPLE-OUTPUT.md \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/causalbench",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['main.go', 'main_test.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=1",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/deletioncert",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['deletioncert_test.go', 'events.go', 'main.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=3",
+        "self_contained": "scripts=3 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/demorace",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "runnable": 100,
+        "reproducible": 100,
+        "honest_scope": 100,
+        "self_contained": 100,
+        "documented": 100
+      },
+      "axis_detail": {
+        "runnable": "entry-script=True \u00b7 run-cmd-in-readme=True \u00b7 scripts=['demorace_test.go', 'main.go']",
+        "reproducible": "captured-output=True \u00b7 checkable=True",
+        "honest_scope": "scope-statement=True \u00b7 deeper-doc-links=2",
+        "self_contained": "scripts=2 \u00b7 prereqs-stated=True",
+        "documented": "H1=1 \u00b7 run-section=True \u00b7 output-section=True"
+      },
+      "axis_debt": {
+        "runnable": 0,
+        "reproducible": 0,
+        "honest_scope": 0,
+        "self_contained": 0,
+        "documented": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    }
+  ]
+}

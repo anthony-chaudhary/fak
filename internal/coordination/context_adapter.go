@@ -285,12 +285,12 @@ func (a *ContextAdapter) Observe(ctx context.Context) (ContextObservation, error
 			freshFor = 0
 		}
 		residencies = append(residencies, ContextResidency{
-			StableID:              stableContextID("ctx", source.Identity),
+			StableID:              stableCoordinationID("ctx", source.Identity),
 			Kind:                  source.Kind,
 			Generation:            source.Generation,
 			Bytes:                 source.Bytes,
 			Tokens:                source.Tokens,
-			Location:              ContextLocation{Kind: source.LocationKind, StableID: stableContextID("loc", source.LocationIdentity)},
+			Location:              ContextLocation{Kind: source.LocationKind, StableID: stableCoordinationID("loc", source.LocationIdentity)},
 			Age:                   now.Sub(source.ResidentSince),
 			FreshFor:              freshFor,
 			Current:               observationCurrent && source.Generation == source.CurrentGeneration && now.Before(source.FreshUntil),
@@ -514,12 +514,12 @@ func validBoundContextAction(action ContextAction) bool {
 		return action.ResourceID == "" && action.Generation == 0 && action.Source == (ContextLocation{}) &&
 			action.Destination == (ContextLocation{}) && action.Bytes == 0 && action.Tokens == 0 && action.ValidUntil.IsZero()
 	}
-	return validStableContextID(action.ResourceID, "ctx") && action.Generation > 0 &&
+	return validStableCoordinationID(action.ResourceID, "ctx") && action.Generation > 0 &&
 		validBoundContextLocation(action.Source) && validBoundContextLocation(action.Destination) && !action.ValidUntil.IsZero()
 }
 
 func validBoundContextLocation(location ContextLocation) bool {
-	return validContextLocationKind(location.Kind) && validStableContextID(location.StableID, "loc")
+	return validContextLocationKind(location.Kind) && validStableCoordinationID(location.StableID, "loc")
 }
 
 func validContextActionKind(kind ContextActionKind) bool {
@@ -615,7 +615,7 @@ func (a *ContextAdapter) validProducedContextPlan(plan ContextPlan) bool {
 			}
 		} else if action.ResourceID != plan.Reference.ResourceID || action.Generation != plan.Reference.Generation ||
 			action.Source != plan.Reference.Location || action.ValidUntil != plan.Reference.ValidUntil ||
-			!validStableContextID(plan.Reference.ResourceID, "ctx") || plan.Reference.Generation == 0 ||
+			!validStableCoordinationID(plan.Reference.ResourceID, "ctx") || plan.Reference.Generation == 0 ||
 			!validBoundContextLocation(plan.Reference.Location) {
 			return false
 		}
@@ -633,7 +633,7 @@ func contextPlanFingerprint(plan ContextPlan) string {
 	if err != nil {
 		return ""
 	}
-	return stableContextID("planfp", encoded)
+	return stableCoordinationID("planfp", encoded)
 }
 
 type ContextTracePhase string
@@ -690,7 +690,7 @@ func (a *ContextAdapter) SelfCheck(ctx context.Context, input Input, request Con
 	return ContextAdapterSelfCheck{Observation: observation, Plan: plan, Apply: apply, Trace: trace}
 }
 
-func stableContextID(prefix string, identity []byte) string {
+func stableCoordinationID(prefix string, identity []byte) string {
 	sum := sha256.Sum256(identity)
 	return prefix + "_" + hex.EncodeToString(sum[:16])
 }
@@ -702,27 +702,27 @@ func makeObservationID(observation ContextObservation) string {
 	if err != nil {
 		return ""
 	}
-	return stableContextID("obs", encoded)
+	return stableCoordinationID("obs", encoded)
 }
 
 func makeContextActionID(observationID string, action ContextAction) string {
-	return stableContextID("act", []byte(strings.Join([]string{observationID, string(action.Kind), action.ResourceID,
+	return stableCoordinationID("act", []byte(strings.Join([]string{observationID, string(action.Kind), action.ResourceID,
 		fmt.Sprint(action.Generation), fmt.Sprint(action.Bytes), fmt.Sprint(action.Tokens),
 		string(action.Source.Kind), action.Source.StableID, string(action.Destination.Kind), action.Destination.StableID,
 		action.ValidUntil.UTC().Format(time.RFC3339Nano)}, "\x00")))
 }
 
 func makeContextPlanID(reference ContextPlanReference, action ContextAction) string {
-	return stableContextID("cplan", []byte(strings.Join([]string{reference.ObservationID, reference.ResourceID,
+	return stableCoordinationID("cplan", []byte(strings.Join([]string{reference.ObservationID, reference.ResourceID,
 		fmt.Sprint(reference.Generation), string(reference.Location.Kind), reference.Location.StableID,
 		reference.ValidUntil.UTC().Format(time.RFC3339Nano), action.ID, string(action.Kind)}, "\x00")))
 }
 
 func makeFallbackContextPlanID(reference ContextPlanReference) string {
-	return stableContextID("cplan", []byte("fallback\x00"+reference.ObservationID))
+	return stableCoordinationID("cplan", []byte("fallback\x00"+reference.ObservationID))
 }
 
-func validStableContextID(value, prefix string) bool {
+func validStableCoordinationID(value, prefix string) bool {
 	wantPrefix := prefix + "_"
 	if !strings.HasPrefix(value, wantPrefix) || len(value) != len(wantPrefix)+32 {
 		return false
