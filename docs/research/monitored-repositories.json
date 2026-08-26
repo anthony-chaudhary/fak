@@ -256,12 +256,86 @@
       "status": "studied",
       "priority": 10,
       "why": "Plugin-first agent harness deeply studied for reversible effect ownership, transactional composition replacement, durable model-visible events, standing session generations, guarded filesystem identity/version semantics, and real-composition tests. One net-new FAK gap survived as #8222; the other strongest candidates map to existing work or deliberate static-binary/default-deny divergences.",
-      "last_checked": "2026-08-20",
+      "last_checked": "2026-08-25",
       "checked_revision": "141eb6fef83422698aef7a981029e843e8161534",
       "stars_at_check": 172283,
       "last_push_at_check": "2026-08-19T15:37:57Z",
       "study_note": "docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md",
-      "refresh_issue": "#8989"
+      "refresh_issue": "#8989 (inventory refresh complete)",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/deepseek-ai-deepseek-harness.json",
+        "indexed_revision": "141eb6fef83422698aef7a981029e843e8161534",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 13,
+        "candidate_count": 13,
+        "filed_issue_count": 13,
+        "completeness_critic": "exhaustive local tree map at dsh-v0.1.0-rc.8 plus full pinned history/tag/release and GraphQL discussion read-back; GitHub reports Issues and Pull Requests disabled (zero each), while 3,310 discussions existed by the pinned commit timestamp; fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped dependency/cache/control directories: .git, vendor",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api graphql -f query=\"repository issues pullRequests discussions\"",
+              "https://github.com/deepseek-ai/deepseek-harness/discussions"
+            ],
+            "note": "At the pinned cutoff GitHub Issues and Pull Requests were disabled (zero each); all 3,310 discussions were read back: 3,226 open and 84 closed."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"plugin effect ownership transactional composition replacement durable model-visible turns standing session generations\"",
+              "fak capabilities \"filesystem identity version semantics symlink containment\"",
+              "fak capabilities \"real composition integration tests plugin harness lifecycle\""
+            ]
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/deepseek-ai-deepseek-harness.json#non_tree_study.candidate_matrix",
+              "docs/notes/CONCEPT-STUDY-DEEPSEEK-HARNESS-2026-08-20.md#candidate-to-fak-decision-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8989",
+              "https://github.com/anthony-chaudhary/fak/issues/8222",
+              "https://github.com/anthony-chaudhary/fak/issues/8260",
+              "https://github.com/anthony-chaudhary/fak/issues/8262"
+            ],
+            "note": "The map records the complete #8262-#8272 range; #8264 and #8265 remain open, all other follow-ons are closed."
+          }
+        ],
+        "issue_refs": [
+          "#8989",
+          "#8222",
+          "#8260",
+          "#8262",
+          "#8263",
+          "#8264",
+          "#8265",
+          "#8266",
+          "#8267",
+          "#8268",
+          "#8269",
+          "#8270",
+          "#8271",
+          "#8272"
+        ]
+      }
     },
     {
       "repository": "rdi-berkeley/agents-last-exam",
