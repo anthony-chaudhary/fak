@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **113** (clarity 0 + coverage 113) |
-| **Crystal-clear concepts (and climbing)** | **788** crystal of 2500 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2626 / 2739** (95.9% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 201 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **74** of 3465 indexed names |
+| **Disambiguation-debt (drive to 0)** | **108** (clarity 0 + coverage 108) |
+| **Crystal-clear concepts (and climbing)** | **793** crystal of 2505 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2631 / 2739** (96.1% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 202 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **74** of 3470 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 97.3/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 97.5/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2500 concepts - score 97.3/100 (grade A) - disambiguation-debt 113
+concept-disambiguation chart - 2505 concepts - score 97.5/100 (grade A) - disambiguation-debt 108
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #############............... 788
+  * crystal       #############............... 793
   o defined       ############################ 1712
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -39,7 +39,7 @@ clarity ladder (count of concepts, best -> fog):
   . undocumented  ............................ 0
 
 clarity mix by family (each cell = one concept):
-  attention        ******ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (71 concept(s); 6 crystal)
+  attention        ***********ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (76 concept(s); 11 crystal)
   cache            ***************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (239 concept(s); 63 crystal)
   context-ctx      *********************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (214 concept(s); 57 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
@@ -66,11 +66,11 @@ coverage by family (positioned / discovered):
   policy-capability ##########################.. 186/199
   session-runtime  ###########################. 255/268
   cache            ###########################. 284/295
-  attention        #########################... 76/85
   context-ctx      ###########################. 228/235
   render-materialize ###########################. 198/205
   support-maturity ##########################.. 56/61
   witness-proof    ###########################. 156/161
+  attention        ###########################. 81/85
   guard-gate       ############################ 485/489
   gateway-engine   ############################ 184/187
   loop             ###########################. 88/91
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 95.9%  (2626/2739 confusable tokens positioned)
+namespace coverage  [###############################.] 96.1%  (2631/2739 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 201
+  mutual       ############################ 202
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 201/201
+  pairs separated   [################################] 202/202
 
-name index: 3465 lookup name(s) -> 2500 concept(s), 74 ambiguous
+name index: 3470 lookup name(s) -> 2505 concept(s), 74 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 201 |
-| **Separated from each other (drive to all)** | **201 / 201** (201 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 202 |
+| **Separated from each other (drive to all)** | **202 / 202** (202 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1674 / 4504 |
+| Boundaries drawn (mutual / total) | 1692 / 4522 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3465 over 2500 concepts |
+| Lookup names indexed | 3470 over 2505 concepts |
 | Lookup names landing on several concepts | 74 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2500 |
+| Concepts carrying a contrast set | 2505 |
 
 ## The concepts (best verdict first)
 
@@ -141,6 +141,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | attention | **attn_gate** - The Qwen3.5-hybrid attention output-gate flag (attnGate in the qwen35/GGUF config) - whether the attention block multiplies its output by a learned per-head gate. |
 | * | crystal | symbol | attention | **attn_q_norm** - The per-head query-normalization weight tensor (blk.N.attn_q_norm.weight, canonicalized to self_attn.q_norm.weight) that applies QK-norm to the attention query projection in Qwen3.5-class GGUFs. |
 | * | crystal | config | attention | **full_attention_interval** - The Qwen3.5 hybrid-attention layer period (cfg.FullAttentionInterval, GGUF full_attention_interval): every Nth layer runs full (global) attention while the rest run the local/linear path. |
+| * | crystal | symbol | attention | **preparePrefillAttention (cache and output setup)** - preparePrefillAttention appends one layer's raw key, transformed key, and value panels to the KV cache, resolves that layer's sliding window, and allocates the zeroed attention output panel for the incoming prefill rows. |
+| * | crystal | symbol | attention | **fillAttentionScores (raw single-head score fill)** - fillAttentionScores writes scaled query-key dot products for one query head across a contiguous key-position range without applying softmax or mixing values. |
+| * | crystal | symbol | attention | **fillSoftmaxAttentionScores (single-head score and softmax)** - fillSoftmaxAttentionScores fills one query head's scaled query-key scores and then normalizes that score row in place with softmax. |
+| * | crystal | symbol | attention | **fillSoftmaxAttentionScores3 (three-head score and softmax)** - fillSoftmaxAttentionScores3 traverses the shared key range once through scoreDot3 for exactly three query heads and then normalizes the three resulting score rows independently. |
+| * | crystal | symbol | attention | **accumulateAttentionValues (single-head value reduction)** - accumulateAttentionValues performs the in-order weighted value-vector accumulation for one query head by applying each normalized attention score to the matching KV value head. |
 | * | crystal | symbol | attention | **AttnKind** - The attention-architecture tag on a kvbudget.Shape (MLA is the zero value, MHA the other member) that selects which per-token KV-cache element formula sizes the cache: the compressed MLA latent plus decoupled rope key, plus a DSA indexer key when the shape declares index layers, or the full per-head K+V of standard multi-head / grouped-query attention. |
 | * | crystal | symbol | cache | **PromptCacheKey** - The OpenAI Responses-wire cross-shard cache-routing hint (prompt_cache_key): a stable key derived from the cacheable HEAD that pins requests sharing a prefix onto one upstream automatic-prefix-cache node (#5186). |
 | * | crystal | symbol | cache | **SilentCacheInvalidation** - The post-fire reconciliation signal (#2791): a compaction that FIRED - which by construction proves the protected prefix was spliced byte-identically, since verifySplicedBody turns any byte-inequality into a prefix_mismatch identity return - yet whose provider reported zero cache_read and nonzero cache_creation, evidencing the provider re-created the very prefix fak preserved (a TTL expiry or capacity eviction fak cannot prevent). |
@@ -2772,17 +2777,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2830/4504 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2500 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2830/4522 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2505 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 201 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 202 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3465 lookup name(s) resolves - 74 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3470 lookup name(s) resolves - 74 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2793,11 +2798,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | policy-capability | 186 | 199 | 13 |
 | session-runtime | 255 | 268 | 13 |
 | cache | 284 | 295 | 11 |
-| attention | 76 | 85 | 9 |
 | context-ctx | 228 | 235 | 7 |
 | render-materialize | 198 | 205 | 7 |
 | support-maturity | 56 | 61 | 5 |
 | witness-proof | 156 | 161 | 5 |
+| attention | 81 | 85 | 4 |
 | guard-gate | 485 | 489 | 4 |
 | gateway-engine | 184 | 187 | 3 |
 | loop | 88 | 91 | 3 |
