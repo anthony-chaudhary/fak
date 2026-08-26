@@ -1,0 +1,62 @@
+{
+  "schema": "fak.qwen38-prefill-chunk-safety-verdict/1",
+  "issue": 8972,
+  "verdict": "REFUSE_UNSAFE",
+  "reason": "memory-pressure boundary crossed before a response",
+  "source_revision": "b13d17647381472c3008829dd689e2c76c3e7a8f",
+  "module_revision": "internal/agent@r344+gd8659420f",
+  "runtime_binary_sha256": "965104f0fed80fb405ffd3e299afc754a4dcf21923414c18efa5977182499681",
+  "helper_binary_sha256": "7e176b41c7dae0c13cb80e789ffd4b9d7af7ab3bbbb15d57685224972eb2d396",
+  "helper_source_sha256": "d2bdfb89b37135b9de8d61a8bbf40d983b91edfc5607ba5d582ef591da4d28f9",
+  "runtime_command_sha256": "5b1fd5629bda4566ec2e3bab8aeea660fd810a661b0d08e582e901251063ebdf",
+  "engine": "inkernel",
+  "backend": "metal",
+  "q4k": true,
+  "fallback_active": false,
+  "prefill_chunk_tokens": 1024,
+  "workload": {
+    "fixture_id": "long-context-needle-v1",
+    "expected_prompt_tokens": 32800,
+    "max_output_tokens": 8
+  },
+  "observation": {
+    "response_completed": false,
+    "client_error": "EOF after controlled server termination",
+    "candidate_peak_observed_rss_kib": 7730128,
+    "before": {
+      "memory_free_percent": 89,
+      "compressor_pages": 80275,
+      "swap_total_mib": 3072.0,
+      "swap_used_mib": 2223.19
+    },
+    "unsafe_boundary": {
+      "memory_free_percent": 36,
+      "free_pages": 4054,
+      "compressor_pages": 1248856,
+      "swap_total_mib": 16384.0,
+      "swap_used_mib": 15814.38,
+      "swap_free_mib": 569.62
+    },
+    "after_controlled_stop": {
+      "memory_free_percent": 90,
+      "free_pages": 677326,
+      "compressor_pages": 31844,
+      "swap_total_mib": 4096.0,
+      "swap_used_mib": 2784.94
+    }
+  },
+  "comparator_quiescence": {
+    "original_pid": 31698,
+    "original_command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "supervisor_respawns_terminated": 20,
+    "unmatched_identity_signals": 0,
+    "pid_reuse_signals": 0
+  },
+  "restoration": {
+    "pid": 85288,
+    "command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "stable_health_and_model_seconds": 90,
+    "model": "qwen3.6-27b"
+  },
+  "conclusion": "1024-token chunks are outside the safe 36 GiB Mac envelope for this 32,800-token workload; keep 512 as the safety ceiling until allocation ownership is reduced. No timing or quality row is admissible from this run."
+}
