@@ -3,18 +3,22 @@ package vdso
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
-
 	// The tier-2 cache stores a result Ref produced by an upstream engine; in these
 	// tests we Emit inline-payload results, so the blob backend is not strictly
 	// required for the cache path. But the tier-1/tier-3 served() path calls
 	// abi.ActiveResolver().Put() to re-store the computed output, so a registered
 	// resolver keeps that path on its primary (blob) branch instead of the inline
-	// fallback. Blank-import wires abi.ActiveResolver() to a real backend.
-	_ "github.com/anthony-chaudhary/fak/internal/blob"
+	// fallback. Importing blob wires abi.ActiveResolver() to a real backend; resize
+	// tests also use that backend to witness exact cache-owned pin release.
+	"github.com/anthony-chaudhary/fak/internal/blob"
 )
 
 // roCall builds a read-only + idempotent tool call with inline args (the routing
@@ -333,6 +337,280 @@ func TestUnit36_LRUEviction(t *testing.T) {
 	}
 	if _, ok := v.Lookup(ctx, c2); !ok {
 		t.Fatalf("entry c2: ok=false, want true (should be resident)")
+	}
+}
+
+func TestTier2ResizeShrinksByLRUAndStartsGeneration(t *testing.T) {
+	ctx := context.Background()
+	oldMax := blob.Default.MaxBytes()
+	blob.Default.SetMaxBytes(0)
+	defer blob.Default.SetMaxBytes(oldMax)
+
+	v := New(3)
+	a := roCall("resize_item", `{"id":"a"}`)
+	b := roCall("resize_item", `{"id":"b"}`)
+	c := roCall("resize_item", `{"id":"c"}`)
+	put := func(label string) abi.Ref {
+		t.Helper()
+		ref, err := blob.Default.Put(ctx, []byte(label+":"+strings.Repeat(label, 400)))
+		if err != nil {
+			t.Fatalf("put %s payload: %v", label, err)
+		}
+		if ref.Kind != abi.RefBlob {
+			t.Fatalf("put %s kind=%d, want blob-backed ref", label, ref.Kind)
+		}
+		return ref
+	}
+	ar, br, cr := put("a"), put("b"), put("c")
+
+	// One extra independent pin on B makes exact accounting observable: after the
+	// resize's one unpin B must still resolve; after releasing this pin it must not.
+	blob.Default.Pin(br.Digest)
+	v.Emit(abi.Event{Kind: abi.EvComplete, Call: a, Result: &abi.Result{Call: a, Status: abi.StatusOK, Payload: ar}})
+	v.Emit(abi.Event{Kind: abi.EvComplete, Call: b, Result: &abi.Result{Call: b, Status: abi.StatusOK, Payload: br}})
+	v.Emit(abi.Event{Kind: abi.EvComplete, Call: c, Result: &abi.Result{Call: c, Status: abi.StatusOK, Payload: cr}})
+	if _, ok := v.Lookup(ctx, a); !ok { // LRU [a,c,b]: B alone is the tail victim.
+		t.Fatal("touch A: cache miss")
+	}
+	blob.Default.SetMaxBytes(1)
+
+	type observation struct {
+		state Tier2CacheState
+		aHit  bool
+		tool  string
+	}
+	observed := make(chan observation, 1)
+	v.SetCacheEventSink(func(ev CacheEvent) {
+		if ev.Kind != CacheEvict {
+			return
+		}
+		state := v.Tier2State() // re-enter v.mu: callback must run after resize unlocks.
+		_, hit := v.Lookup(ctx, a)
+		observed <- observation{state: state, aHit: hit, tool: ev.Entry.Derivation.Tool}
+	})
+	type resizeResult struct {
+		receipt Tier2ResizeReceipt
+		err     error
+	}
+	finished := make(chan resizeResult, 1)
+	go func() {
+		r, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 2, Reason: "bounded-live-test"})
+		finished <- resizeResult{receipt: r, err: err}
+	}()
+
+	var result resizeResult
+	select {
+	case result = <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("ResizeTier2 deadlocked with reentrant CacheEvict observer")
+	}
+	if result.err != nil {
+		t.Fatalf("ResizeTier2: %v", result.err)
+	}
+	if got, want := result.receipt, (Tier2ResizeReceipt{
+		OldCapacity: 3, NewCapacity: 2, OldOccupancy: 3, NewOccupancy: 2,
+		Evicted: 1, OldGeneration: 1, NewGeneration: 2, Changed: true,
+		Reason: "bounded-live-test", Timestamp: result.receipt.Timestamp,
+	}); got != want {
+		t.Fatalf("resize receipt=%+v, want %+v", got, want)
+	}
+	select {
+	case got := <-observed:
+		if got.state != (Tier2CacheState{Capacity: 2, Occupancy: 2, Evictions: 1, Generation: 2}) {
+			t.Fatalf("observer state=%+v, want resized state", got.state)
+		}
+		if !got.aHit || got.tool != b.Tool {
+			t.Fatalf("observer A hit=%v evicted tool=%q, want true/%q", got.aHit, got.tool, b.Tool)
+		}
+	default:
+		t.Fatal("missing CacheEvict observation")
+	}
+	if _, ok := v.Lookup(ctx, b); ok {
+		t.Fatal("B survived shrink, want sole LRU victim")
+	}
+	for name, call := range map[string]*abi.ToolCall{"A": a, "C": c} {
+		if _, ok := v.Lookup(ctx, call); !ok {
+			t.Fatalf("%s was not retained by shrink", name)
+		}
+	}
+	if _, err := blob.Default.Resolve(ctx, br); err != nil {
+		t.Fatalf("resize released more than its one cache-owned B pin: %v", err)
+	}
+	blob.Default.Unpin(br.Digest)
+	if _, err := blob.Default.Resolve(ctx, br); err == nil {
+		t.Fatal("B still resolves after independent pin release; resize did not release its cache-owned pin")
+	}
+}
+
+func TestTier2ResizeGrowNoopInvalidAndRollback(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
+	v := New(2)
+	v.now = func() time.Time { return now }
+	a := roCall("resize_config", `{"id":"a"}`)
+	b := roCall("resize_config", `{"id":"b"}`)
+	v.Emit(completeEvent(a, `{"value":"a"}`))
+	v.Emit(completeEvent(b, `{"value":"b"}`))
+
+	evictions := 0
+	v.SetCacheEventSink(func(ev CacheEvent) {
+		if ev.Kind == CacheEvict {
+			evictions++
+		}
+	})
+	grow, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 4, Reason: "growth"})
+	if err != nil {
+		t.Fatalf("grow: %v", err)
+	}
+	if grow != (Tier2ResizeReceipt{
+		OldCapacity: 2, NewCapacity: 4, OldOccupancy: 2, NewOccupancy: 2,
+		OldGeneration: 1, NewGeneration: 2, Changed: true, Reason: "growth", Timestamp: now,
+	}) {
+		t.Fatalf("grow receipt=%+v", grow)
+	}
+	if evictions != 0 {
+		t.Fatalf("grow emitted %d evictions, want 0", evictions)
+	}
+	for _, call := range []*abi.ToolCall{a, b} {
+		if _, ok := v.Lookup(ctx, call); !ok {
+			t.Fatalf("grow discarded fitting entry %s", call.Tool)
+		}
+	}
+
+	noop, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 4, Reason: "repeat"})
+	if err != nil {
+		t.Fatalf("no-op: %v", err)
+	}
+	if noop.Changed || noop.OldGeneration != 2 || noop.NewGeneration != 2 || noop.Evicted != 0 {
+		t.Fatalf("no-op receipt=%+v, want stable generation and no eviction", noop)
+	}
+	lastGood := v.Tier2State()
+	if _, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 0, Reason: "invalid"}); !errors.Is(err, ErrInvalidTier2Capacity) {
+		t.Fatalf("invalid resize error=%v, want ErrInvalidTier2Capacity", err)
+	}
+	if got := v.Tier2State(); got != lastGood {
+		t.Fatalf("invalid resize mutated state: got %+v want %+v", got, lastGood)
+	}
+
+	rollback, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 2, Reason: "rollback"})
+	if err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if !rollback.Changed || rollback.OldGeneration != 2 || rollback.NewGeneration != 3 || rollback.Evicted != 0 {
+		t.Fatalf("rollback receipt=%+v, want generation 2->3 without eviction", rollback)
+	}
+	if got := v.Tier2State(); got != (Tier2CacheState{Capacity: 2, Occupancy: 2, Evictions: 0, Generation: 3}) {
+		t.Fatalf("rollback state=%+v", got)
+	}
+}
+
+func TestTier2ResizeConcurrentLookupEmit(t *testing.T) {
+	v := New(4)
+	ctx := context.Background()
+	calls := make([]*abi.ToolCall, 8)
+	for i := range calls {
+		calls[i] = roCall("resize_race", `{"id":`+strconv.Itoa(i)+`}`)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 200; i++ {
+			v.Lookup(ctx, calls[i%len(calls)])
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 200; i++ {
+			v.Emit(completeEvent(calls[i%len(calls)], `{"iteration":`+strconv.Itoa(i)+`}`))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		capacities := []int{1, 8, 2, 7, 3, 6, 4, 5}
+		for i := 0; i < 200; i++ {
+			if _, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: capacities[i%len(capacities)]}); err != nil {
+				t.Errorf("concurrent resize: %v", err)
+				return
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	state := v.Tier2State()
+	if state.Occupancy > state.Capacity {
+		t.Fatalf("incoherent state after race: %+v", state)
+	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if len(v.cache) != v.lru.Len() || v.lru.Len() != state.Occupancy {
+		t.Fatalf("map/LRU/state occupancy disagree: map=%d lru=%d state=%d", len(v.cache), v.lru.Len(), state.Occupancy)
+	}
+	for el := v.lru.Front(); el != nil; el = el.Next() {
+		e := el.Value.(*entry)
+		if v.cache[e.key] != el {
+			t.Fatalf("LRU entry %q is not indexed by its element", e.key)
+		}
+	}
+}
+
+func TestTier2ResizeSameInstanceThreeTwoFourThree(t *testing.T) {
+	ctx := context.Background()
+	v := New(3)
+	a := roCall("resize_same", `{"id":"a"}`)
+	b := roCall("resize_same", `{"id":"b"}`)
+	c := roCall("resize_same", `{"id":"c"}`)
+	d := roCall("resize_same", `{"id":"d"}`)
+	e := roCall("resize_same", `{"id":"e"}`)
+	for i, call := range []*abi.ToolCall{a, b, c} {
+		v.Emit(completeEvent(call, `{"value":`+strconv.Itoa(i)+`}`))
+	}
+	if _, ok := v.Lookup(ctx, a); !ok { // B becomes the 3->2 victim.
+		t.Fatal("touch A: cache miss")
+	}
+	shrink, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 2})
+	if err != nil || shrink.NewGeneration != 2 {
+		t.Fatalf("3->2 resize receipt=%+v err=%v", shrink, err)
+	}
+	if _, ok := v.Lookup(ctx, b); ok {
+		t.Fatal("B hit after 3->2 shrink")
+	}
+	for _, call := range []*abi.ToolCall{a, c} {
+		if _, ok := v.Lookup(ctx, call); !ok {
+			t.Fatalf("retained entry %q missed after 3->2", string(call.Args.Inline))
+		}
+	}
+
+	grow, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 4})
+	if err != nil || grow.NewGeneration != 3 || grow.NewOccupancy != 2 {
+		t.Fatalf("2->4 resize receipt=%+v err=%v", grow, err)
+	}
+	v.Emit(completeEvent(d, `{"value":3}`))
+	v.Emit(completeEvent(e, `{"value":4}`))
+	if got := v.Tier2State(); got.Occupancy != 4 || got.Generation != 3 {
+		t.Fatalf("grown same-instance state=%+v, want occupancy 4 generation 3", got)
+	}
+
+	rollback, err := v.ResizeTier2(Tier2ResizeRequest{Capacity: 3})
+	if err != nil || rollback.NewGeneration != 4 || rollback.Evicted != 1 {
+		t.Fatalf("4->3 resize receipt=%+v err=%v", rollback, err)
+	}
+	if _, ok := v.Lookup(ctx, a); ok {
+		t.Fatal("A hit after becoming the 4->3 LRU victim")
+	}
+	for _, call := range []*abi.ToolCall{c, d, e} {
+		if _, ok := v.Lookup(ctx, call); !ok {
+			t.Fatalf("entry %q missed after same-instance 3->2->4->3", string(call.Args.Inline))
+		}
+	}
+	if got := v.Tier2State(); got.Capacity != 3 || got.Occupancy != 3 || got.Generation != 4 {
+		t.Fatalf("final same-instance state=%+v", got)
 	}
 }
 
