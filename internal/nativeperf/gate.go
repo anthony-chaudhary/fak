@@ -5,15 +5,22 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/systembaseline"
 )
 
 const (
-	GateRequestSchema  = "fak-native-performance-gate-request/v1"
-	GateVerdictSchema  = "fak-native-performance-gate-verdict/v1"
-	BisectPacketSchema = "fak-native-performance-bisect-packet/v1"
-	GatePass           = "pass"
-	GateInvestigate    = "investigate"
-	GateRegression     = "regression"
+	GateRequestSchemaV1 = "fak-native-performance-gate-request/v1"
+	GateRequestSchemaV2 = "fak-native-performance-gate-request/v2"
+	GateRequestSchema   = GateRequestSchemaV2
+	GatePolicySchemaV1  = "fak-native-performance-gate-policy/v1"
+	GatePolicySchemaV2  = "fak-native-performance-gate-policy/v2"
+	GatePolicySchema    = GatePolicySchemaV2
+	GateVerdictSchema   = "fak-native-performance-gate-verdict/v1"
+	BisectPacketSchema  = "fak-native-performance-bisect-packet/v1"
+	GatePass            = "pass"
+	GateInvestigate     = "investigate"
+	GateRegression      = "regression"
 )
 
 // QualityMetric binds quality evidence to the same end-to-end receipt.
@@ -31,21 +38,23 @@ type ModuleRevision struct {
 
 // GatePolicy is valid only for one exact envelope and accepted revision.
 type GatePolicy struct {
-	Schema                 string  `json:"schema"`
-	EnvelopeID             string  `json:"envelope_id"`
-	ChangedLeverID         string  `json:"changed_lever_id"`
-	AcceptedRevision       string  `json:"accepted_revision"`
-	MinimumRepetitions     int     `json:"minimum_repetitions"`
-	MaximumNoisePercent    float64 `json:"maximum_noise_percent"`
-	InvestigateDropPercent float64 `json:"investigate_drop_percent"`
-	RegressionDropPercent  float64 `json:"regression_drop_percent"`
-	MinimumThroughput      float64 `json:"minimum_throughput_tokens_per_second"`
-	MaximumPeakBytes       uint64  `json:"maximum_peak_bytes"`
-	QualityMetric          string  `json:"quality_metric"`
-	MinimumQualityScore    float64 `json:"minimum_quality_score"`
-	QualityHigherIsBetter  bool    `json:"quality_higher_is_better"`
-	RequiredEngine         string  `json:"required_engine"`
-	RequiredForwardPath    string  `json:"required_forward_path"`
+	Schema                     string  `json:"schema"`
+	EnvelopeID                 string  `json:"envelope_id"`
+	ChangedLeverID             string  `json:"changed_lever_id"`
+	AcceptedRevision           string  `json:"accepted_revision"`
+	MinimumRepetitions         int     `json:"minimum_repetitions"`
+	MaximumNoisePercent        float64 `json:"maximum_noise_percent"`
+	InvestigateDropPercent     float64 `json:"investigate_drop_percent"`
+	RegressionDropPercent      float64 `json:"regression_drop_percent"`
+	MinimumThroughput          float64 `json:"minimum_throughput_tokens_per_second"`
+	MaximumPeakBytes           uint64  `json:"maximum_peak_bytes"`
+	QualityMetric              string  `json:"quality_metric"`
+	MinimumQualityScore        float64 `json:"minimum_quality_score"`
+	QualityHigherIsBetter      bool    `json:"quality_higher_is_better"`
+	RequiredEngine             string  `json:"required_engine"`
+	RequiredForwardPath        string  `json:"required_forward_path"`
+	RequireSystemBaseline      bool    `json:"require_system_baseline,omitempty"`
+	AllowSampledSystemBaseline bool    `json:"allow_sampled_system_baseline,omitempty"`
 }
 
 // GateRequest compares one candidate with the envelope's last accepted witness.
@@ -92,16 +101,25 @@ type GateVerdict struct {
 
 // Gate returns a typed verdict and, for non-pass results, a guarded bisect packet.
 func Gate(r GateRequest) (GateVerdict, error) {
-	if r.Schema != GateRequestSchema {
-		return GateVerdict{}, fmt.Errorf("gate request schema must be %q", GateRequestSchema)
+	if r.Schema != GateRequestSchemaV1 && r.Schema != GateRequestSchemaV2 {
+		return GateVerdict{}, fmt.Errorf("gate request schema must be %q or %q", GateRequestSchemaV1, GateRequestSchemaV2)
 	}
 	p := r.Policy
 	if err := validateGatePolicy(p); err != nil {
 		return GateVerdict{}, err
 	}
+	if r.Schema == GateRequestSchemaV1 && p.Schema != GatePolicySchemaV1 {
+		return GateVerdict{}, fmt.Errorf("v1 gate requests require a v1 gate policy")
+	}
 	g := ActiveGraph()
 	a, c := r.LastAccepted, r.Candidate
-	if err := ValidateReceipt(g, a); err != nil {
+	acceptedEvidence := a
+	if p.RequireSystemBaseline {
+		// Ambient evidence has its own investigate classification below; do not
+		// turn malformed measurement evidence into a structural gate error.
+		acceptedEvidence = withoutSystemBaselineEvidence(acceptedEvidence)
+	}
+	if err := ValidateReceipt(g, acceptedEvidence); err != nil {
 		return GateVerdict{}, fmt.Errorf("last accepted: %w", err)
 	}
 	// Identity and fallback are gate dimensions, so normalize only those fields
@@ -110,6 +128,9 @@ func Gate(r GateRequest) (GateVerdict, error) {
 	candidateEvidence.Execution.Engine = "fak-native"
 	candidateEvidence.Execution.ForwardPath = a.Execution.ForwardPath
 	candidateEvidence.Execution.FallbackCount = 0
+	if p.RequireSystemBaseline {
+		candidateEvidence = withoutSystemBaselineEvidence(candidateEvidence)
+	}
 	if err := ValidateReceipt(g, candidateEvidence); err != nil {
 		return GateVerdict{}, fmt.Errorf("candidate: %w", err)
 	}
@@ -135,32 +156,103 @@ func Gate(r GateRequest) (GateVerdict, error) {
 	an, cn := noisePercent(a.Repetitions), noisePercent(c.Repetitions)
 	drop := (am - cm) / am * 100
 	checks := []GateCheck{gateCheck("engine", c.Execution.Engine == p.RequiredEngine, fmt.Sprintf("got %s; require %s", c.Execution.Engine, p.RequiredEngine)), gateCheck("forward_path", c.Execution.ForwardPath == p.RequiredForwardPath, fmt.Sprintf("got %s; require %s", c.Execution.ForwardPath, p.RequiredForwardPath)), gateCheck("fallback", c.Execution.FallbackCount == 0, fmt.Sprintf("count=%d", c.Execution.FallbackCount)), gateCheck("memory", c.Memory.PeakBytes <= p.MaximumPeakBytes, fmt.Sprintf("peak=%d ceiling=%d", c.Memory.PeakBytes, p.MaximumPeakBytes)), gateCheck("quality", qualityPass(c.Quality, p), fmt.Sprintf("%s=%g floor=%g", c.Quality.Name, c.Quality.Score, p.MinimumQualityScore)), gateCheck("throughput_floor", cm >= p.MinimumThroughput, fmt.Sprintf("mean=%g floor=%g", cm, p.MinimumThroughput))}
-	class, hard := GatePass, false
+	ambStatus, ambDetail := systemBaselineGateState(a, c, p.RequireSystemBaseline, p.AllowSampledSystemBaseline)
+	if p.RequireSystemBaseline {
+		checks = append(checks, GateCheck{Name: "system_baseline", Status: ambStatus, Detail: ambDetail})
+	}
+	class, independentHard, throughputFloorFailed := GatePass, false, false
 	for _, x := range checks {
-		if x.Status == "fail" {
-			hard = true
+		if x.Status != "fail" {
+			continue
+		}
+		if x.Name == "throughput_floor" {
+			throughputFloorFailed = true
+		} else {
+			independentHard = true
 		}
 	}
-	if hard || drop >= p.RegressionDropPercent {
+	if independentHard {
+		class = GateRegression
+	} else if ambStatus == "investigate" {
+		class = GateInvestigate
+	} else if throughputFloorFailed || drop >= p.RegressionDropPercent {
 		class = GateRegression
 	} else if an > p.MaximumNoisePercent || cn > p.MaximumNoisePercent || drop >= p.InvestigateDropPercent {
 		class = GateInvestigate
 	}
 	suspects := changedModules(a.ModuleVersions, c.ModuleVersions)
 	v := GateVerdict{GateVerdictSchema, p.EnvelopeID, class, a.Revision, c.Revision, am, cm, -drop, an, cn, checks, nil, nil}
-	if class != GatePass {
+	if class != GatePass && (ambStatus != "investigate" || class == GateRegression) {
 		v.SuspectModules = suspects
 		v.Bisect = &BisectPacket{BisectPacketSchema, p.EnvelopeID, a.Revision, c.Revision, suspects, []string{fmt.Sprintf("dos arbitrate --lane native-performance --paths %s", suspectPaths(suspects)), "fak native-performance --gate gate-request.json"}, "first revision classified regression under the exact envelope, quality, identity, memory, and throughput policy"}
 	}
 	return v, nil
+}
+
+func withoutSystemBaselineEvidence(receipt ExperimentReceipt) ExperimentReceipt {
+	receipt.SystemBaselines = nil
+	receipt.Repetitions = append([]Repetition(nil), receipt.Repetitions...)
+	for i := range receipt.Repetitions {
+		receipt.Repetitions[i].SystemBaselineDigest = ""
+	}
+	return receipt
+}
+
+func systemBaselineGateState(a, c ExperimentReceipt, required, allowSampled bool) (string, string) {
+	if !required {
+		return "pass", "legacy policy does not require per-repetition system baselines"
+	}
+	seenDigests := map[string]string{}
+	for _, side := range []struct {
+		name    string
+		receipt ExperimentReceipt
+	}{{"last_accepted", a}, {"candidate", c}} {
+		if side.receipt.Schema != ReceiptSchemaV2 {
+			return "investigate", fmt.Sprintf("%s uses legacy receipt schema without ambient evidence contract", side.name)
+		}
+		if len(side.receipt.SystemBaselines) != len(side.receipt.Repetitions) {
+			return "investigate", fmt.Sprintf("%s has %d system baselines for %d repetitions", side.name, len(side.receipt.SystemBaselines), len(side.receipt.Repetitions))
+		}
+		for i, attestation := range side.receipt.SystemBaselines {
+			if err := attestation.Validate(); err != nil || attestation.Verdict == systembaseline.VerdictInvalid {
+				return "investigate", fmt.Sprintf("%s repetition %d has invalid system baseline", side.name, i)
+			}
+			if len(attestation.TopNonSUT) > 0 {
+				return "investigate", fmt.Sprintf("%s repetition %d contains high-cardinality process identities", side.name, i)
+			}
+			if side.receipt.Repetitions[i].SystemBaselineDigest != attestation.Digest {
+				return "investigate", fmt.Sprintf("%s repetition %d has invalid or reused system baseline binding", side.name, i)
+			}
+			if prior, reused := seenDigests[attestation.Digest]; reused {
+				return "investigate", fmt.Sprintf("%s repetition %d reuses system baseline evidence from %s", side.name, i, prior)
+			}
+			seenDigests[attestation.Digest] = fmt.Sprintf("%s repetition %d", side.name, i)
+			if attestation.Coverage.DescendantAttribution == "sampled_pid_ppid_tree" && !allowSampled {
+				return "investigate", fmt.Sprintf("%s repetition %d uses sampled descendant attribution without policy opt-in", side.name, i)
+			}
+			if attestation.Coverage.DescendantAttribution == "" {
+				return "investigate", fmt.Sprintf("%s repetition %d has unknown descendant attribution", side.name, i)
+			}
+			if attestation.Baseline.Samples < 2 || attestation.Baseline.DurationNS <= 0 || !attestation.BaselineHost.CPUPercent.Available || attestation.Verdict != systembaseline.VerdictClean || !attestation.Host.CPUPercent.Available || !attestation.Attribution.SUTCPUPercentOfHost.Available || !attestation.Attribution.NonSUTCPUPercentOfHost.Available {
+				return "investigate", fmt.Sprintf("%s repetition %d has contaminated or required-unknown system baseline", side.name, i)
+			}
+		}
+	}
+	return "pass", "every repetition has a clean system baseline with host/SUT/non-SUT CPU attribution"
 }
 func validateGatePolicy(p GatePolicy) error {
 	_, envelope, err := findLeverEnvelope(ActiveGraph(), p.ChangedLeverID)
 	if err != nil || envelope.ID != p.EnvelopeID {
 		return fmt.Errorf("gate policy lever must belong to its exact envelope")
 	}
-	if p.Schema != "fak-native-performance-gate-policy/v1" || p.EnvelopeID == "" || p.ChangedLeverID == "" || p.AcceptedRevision == "" || p.MinimumRepetitions < 2 || p.MaximumNoisePercent < 0 || p.InvestigateDropPercent < 0 || p.RegressionDropPercent <= p.InvestigateDropPercent || p.MinimumThroughput <= 0 || p.MaximumPeakBytes == 0 || p.QualityMetric == "" || p.RequiredEngine != "fak-native" || p.RequiredForwardPath == "" {
+	if (p.Schema != GatePolicySchemaV1 && p.Schema != GatePolicySchemaV2) || p.EnvelopeID == "" || p.ChangedLeverID == "" || p.AcceptedRevision == "" || p.MinimumRepetitions < 2 || p.MaximumNoisePercent < 0 || p.InvestigateDropPercent < 0 || p.RegressionDropPercent <= p.InvestigateDropPercent || p.MinimumThroughput <= 0 || p.MaximumPeakBytes == 0 || p.QualityMetric == "" || p.RequiredEngine != "fak-native" || p.RequiredForwardPath == "" {
 		return fmt.Errorf("invalid envelope-scoped gate policy")
+	}
+	if p.Schema == GatePolicySchemaV1 && (p.RequireSystemBaseline || p.AllowSampledSystemBaseline) {
+		return fmt.Errorf("v1 gate policy cannot require system baseline evidence")
+	}
+	if p.AllowSampledSystemBaseline && !p.RequireSystemBaseline {
+		return fmt.Errorf("sampled system baseline opt-in requires system baseline evidence")
 	}
 	return nil
 }

@@ -5,6 +5,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/systembaseline"
 )
 
 func validReceipt(t *testing.T, role, lever string) ExperimentReceipt {
@@ -70,6 +72,91 @@ func TestValidateReceiptFailsClosed(t *testing.T) {
 				t.Fatalf("err=%v want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateReceiptRejectsTamperedSystemBaseline(t *testing.T) {
+	r := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	r.SystemBaselines = []systembaseline.Report{baselineAttestation(systembaseline.VerdictClean, true)}
+	r.SystemBaselines[0].CommandExitCode = 9
+	err := ValidateReceipt(ActiveGraph(), r)
+	if err == nil || !strings.Contains(err.Error(), "canonical digest mismatch") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestValidateReceiptSchemaCompatibilityAndAggregateAmbient(t *testing.T) {
+	legacy := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	legacy.Schema = ReceiptSchemaV1
+	if err := ValidateReceipt(ActiveGraph(), legacy); err != nil {
+		t.Fatalf("legacy v1: %v", err)
+	}
+	legacy.SystemBaselines = []systembaseline.Report{baselineAttestation(systembaseline.VerdictClean, true)}
+	if err := ValidateReceipt(ActiveGraph(), legacy); err == nil || !strings.Contains(err.Error(), "v1 receipts cannot carry") {
+		t.Fatalf("legacy ambient err=%v", err)
+	}
+
+	v2 := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	attestation := baselineAttestation(systembaseline.VerdictClean, true)
+	attestation.Policy.IncludeTopConsumers = true
+	attestation.TopNonSUT = []systembaseline.Consumer{{Image: "other.exe", PID: 42, CPUAvailable: true}}
+	attestation.Seal()
+	v2.SystemBaselines = []systembaseline.Report{attestation}
+	if err := ValidateReceipt(ActiveGraph(), v2); err == nil || !strings.Contains(err.Error(), "high-cardinality") {
+		t.Fatalf("high-cardinality err=%v", err)
+	}
+}
+
+func TestAttachSystemBaselineUpgradesAndPreservesRepetitionOrder(t *testing.T) {
+	receipt := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	receipt.Schema = ReceiptSchemaV1
+	for i := range receipt.Repetitions {
+		attestation := baselineAttestation(systembaseline.VerdictClean, true)
+		attestation.Window.IntervalNS = int64(i + 1)
+		attestation.Seal()
+		var err error
+		receipt, err = AttachSystemBaseline(ActiveGraph(), receipt, attestation)
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		if receipt.Schema != ReceiptSchemaV2 || len(receipt.SystemBaselines) != i+1 {
+			t.Fatalf("append %d receipt=%+v", i, receipt)
+		}
+	}
+	attestation := baselineAttestation(systembaseline.VerdictClean, true)
+	if _, err := AttachSystemBaseline(ActiveGraph(), receipt, attestation); err == nil || !strings.Contains(err.Error(), "cover every repetition") {
+		t.Fatalf("overfill err=%v", err)
+	}
+}
+
+func TestValidateReceiptRejectsBindingHolesMismatchAndReuse(t *testing.T) {
+	base := validReceipt(t, RoleCandidate, "metal.command-buffer-amortization")
+	attestation := baselineAttestation(systembaseline.VerdictClean, true)
+	bound, err := AttachSystemBaseline(ActiveGraph(), base, attestation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatch := bound
+	mismatch.Repetitions = append([]Repetition(nil), bound.Repetitions...)
+	mismatch.Repetitions[0].SystemBaselineDigest = "sha256:" + strings.Repeat("0", 64)
+	if err := ValidateReceipt(ActiveGraph(), mismatch); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatch err=%v", err)
+	}
+	hole := base
+	hole.Repetitions = append([]Repetition(nil), base.Repetitions...)
+	hole.Repetitions[1].SystemBaselineDigest = attestation.Digest
+	if err := ValidateReceipt(ActiveGraph(), hole); err == nil || !strings.Contains(err.Error(), "binding hole") {
+		t.Fatalf("hole err=%v", err)
+	}
+	if _, err := AttachSystemBaseline(ActiveGraph(), bound, attestation); err == nil || !strings.Contains(err.Error(), "reuses an attestation digest") {
+		t.Fatalf("reuse err=%v", err)
+	}
+	legacy := base
+	legacy.Schema = ReceiptSchemaV1
+	legacy.Repetitions = append([]Repetition(nil), base.Repetitions...)
+	legacy.Repetitions[0].SystemBaselineDigest = attestation.Digest
+	if err := ValidateReceipt(ActiveGraph(), legacy); err == nil || !strings.Contains(err.Error(), "v1 repetition") {
+		t.Fatalf("legacy binding err=%v", err)
 	}
 }
 

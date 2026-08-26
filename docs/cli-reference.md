@@ -30,6 +30,7 @@ envelopes.
 fak native-performance
 fak native-performance --json
 fak native-performance --baseline metal.command-buffer-amortization > baseline.json
+fak native-performance --attach-receipt RECEIPT --system-baseline ATTESTATION --out NEXT
 fak native-performance --compare baseline.json --candidate candidate.json
 fak native-performance --profile profile.json
 fak native-performance --profile-next profile.json
@@ -94,6 +95,42 @@ a joint matched receipt. CUDA #8635 targets are hypotheses, not measurements, an
 never combined with the Metal throughput curve. Graph semantics, the update checklist,
 strict synthetic fixture status, and source provenance are in
 [`NATIVE-PERFORMANCE-HILLCLIMB.md`](benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md).
+
+## `bench system-baseline`: qualify one benchmark repetition
+
+Wrap exactly one repetition, including its quiet pre-command baseline, and retain the
+versioned attestation:
+
+```bash
+fak bench system-baseline --baseline-duration 2s --interval 250ms --max-sampler-duty-percent 10 --out system-rep-1.json -- <one benchmark repetition>
+fak bench system-baseline --verify system-rep-1.json
+fak native-performance --attach-receipt RECEIPT --system-baseline ATTESTATION --out NEXT
+```
+
+`--verify` strictly decodes and validates an existing attestation without running a
+command. A `clean` verdict means the required CPU attribution is available and the
+configured contamination ceiling was met; `investigate` means contamination was observed
+or required attribution is unknown; `invalid` means the window or command cannot be used.
+The attestation reports sampler wall duty separately for the baseline and command windows.
+Duty above `--max-sampler-duty-percent` produces `investigate`; the wrapper never corrects
+CPU or throughput for sampler cost and never silently drops a sample.
+
+Run the attachment command once per repetition, passing each `NEXT` receipt as the next
+call's `RECEIPT`; attestations append in repetition order. The first attachment upgrades a
+legacy `fak-native-performance-receipt/v1` to v2, and attachment refuses to overfill the
+1:1 `system_baselines`/`repetitions` sequence. Each repetition stores the exact attached
+attestation digest; digest mismatch or reuse is rejected.
+
+A strict `fak-native-performance-gate-policy/v2` must set both
+`require_system_baseline: true` and `allow_sampled_system_baseline: true` to accept the v1
+sampler's `sampled_pid_ppid_tree` coverage. Without that explicit sampled-coverage opt-in,
+even a valid `clean` attestation produces an `investigate` gate result.
+
+By default the artifact contains aggregate data only. `--top-consumers` opts into as many
+as five scrubbed executable-image and PID records; this is local, high-cardinality evidence
+and should be omitted from public artifacts unless needed. V1 samples host totals and
+PID/PPID-tree CPU and RSS on Linux and Windows. It does not yet capture PSI, cgroup or Job
+Object accounting, GPU activity, or complete short-lived-descendant attribution.
 
 ## `dup cache-maintain`: bound the shared token-window cache
 
@@ -575,6 +612,7 @@ fak scorecard control-pane [--json|--check|--pin] [--post]   # LOCAL producer fo
 fak bench-loop status|next|walk|run [--json]   # benchmark super-loop manager: folds registry, recorded runs, nightrun ledger, local next selection, and authority gap; run delegates to fak nightrun run
 fak bench post    --rollup latest|regression [--n N] [--catalog PATH] [--baseline PATH] [--dry-run]   # post a bench-channel rollup: the latest catalog runs (WITNESSED/OBSERVED-labeled) or tok/s drops vs the pinned baseline. FAK_BENCH_* workspace (token falls back to the scoreboard token)
 fak bench request [--now STAMP | --plan-json FILE] [--top N] [--dry-run]   # post a bench RUN-REQUEST (the bench_plan next-test-per-machine) to the bench channel. A request is a POST, not a dispatch — no inbound listener; the bench-nodes act on it out-of-band
+fak bench system-baseline [--baseline-duration 1s --interval 250ms --max-sampler-duty-percent 10 --out FILE] [--top-consumers] -- COMMAND... | --verify FILE   # attest ambient host and sampled process-tree load for exactly one benchmark repetition
 fak blockers post [--severity status|operator|clear] --title ... [--detail ... --owner "<@U>" --action ... --action-url URL --ref ...] [--dry-run]   # post a BLOCKER to the central Slack #blockers channel: a background `status` line records quietly, an `operator` one is SURFACED (pages <!here>/owner, red, with a do-this-next). FAK_BLOCKERS_* (token falls back to the scoreboard token; #blockers is the built-in default)
 fak blockers feed --issues FILE [--label blocked --repo-url URL] [--dry-run]   # CI roll-up: fold a `gh issue list --json number,title,url,assignees,labels` payload into one card — clear when empty, operator (paged) when a blocker is UNOWNED, background status when all are assigned
 fak chatrelay --endpoint URL --channel C0X [--model M --mention <@U> --system S --prime=false --once --interval 3s --dry-run]   # bridge ONE Slack channel to a `fak serve` /v1/chat/completions endpoint: poll history, forward each human message, post the reply in-thread. Generic chatbot front end — no shell, no command router; channel text is chatbot input, never a command. FAK_CHATRELAY_* (token falls back to the scoreboard token; channel has NO fallback). See docs/fak/slack-sessions.md
