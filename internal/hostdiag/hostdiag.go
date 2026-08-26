@@ -40,6 +40,14 @@ type ResourceCulprit struct {
 	Bytes uint64 `json:"bytes"`
 }
 
+type ApplicationFault struct {
+	AppVersion    string `json:"app_version,omitempty"`
+	Module        string `json:"module,omitempty"`
+	ModuleVersion string `json:"module_version,omitempty"`
+	ExceptionCode string `json:"exception_code,omitempty"`
+	FaultOffset   string `json:"fault_offset,omitempty"`
+}
+
 var lowVirtualMemoryCulpritRE = regexp.MustCompile(`(?i)([a-z0-9_.-]+\.exe)\s+\((\d+)\)\s+consumed\s+(\d+)\s+bytes`)
 
 // ParseLowVirtualMemoryCulprits extracts the typed process rows present in the
@@ -69,6 +77,7 @@ type ResourceEvent struct {
 	App      string            `json:"app,omitempty"`
 	Message  string            `json:"message,omitempty"`
 	Culprits []ResourceCulprit `json:"culprits,omitempty"`
+	Fault    *ApplicationFault `json:"application_fault,omitempty"`
 }
 
 type Correlation struct {
@@ -82,6 +91,7 @@ type Correlation struct {
 	ReportID      string            `json:"report_id,omitempty"`
 	App           string            `json:"app,omitempty"`
 	Culprits      []ResourceCulprit `json:"culprits,omitempty"`
+	Fault         *ApplicationFault `json:"application_fault,omitempty"`
 	Status        string            `json:"status"`
 	Reason        string            `json:"reason"`
 	Candidates    []ProcessSample   `json:"candidates,omitempty"`
@@ -116,11 +126,18 @@ func ClassifyCommand(commandLine string) string {
 
 func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool) {
 	name := strings.ToUpper(strings.TrimSpace(event.Name))
-	if event.TimeMS <= 0 || !(name == "RADAR_PRE_LEAK_64" || name == "LOW_VIRTUAL_MEMORY" || event.EventID == 1014 || event.EventID == 1015 || event.EventID == 2004) {
+	isLowVirtualMemory := name == "LOW_VIRTUAL_MEMORY" && event.EventID == 2004
+	isShellCrash := name == "POWERSHELL_CONSOLEHOST_CRASH" && event.EventID == 1000
+	isRadar := name == "RADAR_PRE_LEAK_64" && event.EventID == 1001
+	isResolver := strings.HasPrefix(name, "RESOURCE_EXHAUSTION_") && (event.EventID == 1014 || event.EventID == 1015)
+	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isRadar && !isResolver) {
 		return Correlation{}, false
 	}
 	app := strings.TrimSpace(event.App)
-	if name != "LOW_VIRTUAL_MEMORY" && event.EventID != 2004 && app != "" && !strings.EqualFold(app, "fak.exe") {
+	if isShellCrash && !strings.EqualFold(app, "pwsh.exe") && !strings.EqualFold(app, "powershell.exe") {
+		return Correlation{}, false
+	}
+	if isRadar && !strings.EqualFold(app, "fak.exe") {
 		return Correlation{}, false
 	}
 	candidates := make([]ProcessSample, 0)
@@ -146,7 +163,7 @@ func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool)
 		status, reason = "ambiguous", "multiple durable fak process census rows span the event time"
 	}
 	key := strings.Join([]string{strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID), strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), name}, "|")
-	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
 }
 
 func digest(value string) string {

@@ -53,6 +53,14 @@ $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='W
     [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='RADAR_PRE_LEAK_64';report_id=$report;app='fak.exe';message=$msg}
   }
 })
+$rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Application Error';Id=1000;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
+  $xml=[xml]$_.ToXml(); $fields=@{}; foreach($d in $xml.Event.EventData.Data){ $fields[[string]$d.Name]=[string]$d.'#text' }
+  $app=[string]$fields.AppName
+  if($app -ieq 'pwsh.exe' -or $app -ieq 'powershell.exe'){
+    $fault=[pscustomobject]@{app_version=[string]$fields.AppVersion;module=[string]$fields.ModuleName;module_version=[string]$fields.ModuleVersion;exception_code=[string]$fields.ExceptionCode;fault_offset=[string]$fields.FaultingOffset}
+    [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='POWERSHELL_CONSOLEHOST_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;application_fault=$fault;message=[string]$_.Message}
+  }
+})
 $rows += @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Resource-Exhaustion-Detector';Id=2004;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
   $msg=[string]$_.Message
   [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='LOW_VIRTUAL_MEMORY';report_id='';app='';message=$msg}

@@ -66,8 +66,16 @@ func TestCorrelateRetainsLowVirtualMemoryCulprits(t *testing.T) {
 	}
 }
 
+func TestCorrelateRetainsPowerShellConsoleHostCrash(t *testing.T) {
+	event := ResourceEvent{TimeMS: 1000, Source: "Application Error", EventID: 1000, RecordID: "110382", Name: "POWERSHELL_CONSOLEHOST_CRASH", App: "pwsh.exe", Fault: &ApplicationFault{AppVersion: "7.6.5.500", Module: "Microsoft.PowerShell.ConsoleHost.dll", ModuleVersion: "7.6.5.500", ExceptionCode: "80131623", FaultOffset: "000000000004d072"}}
+	got, ok := Correlate(event, nil)
+	if !ok || got.Status != "historical_unresolved" || got.Fault == nil || got.Fault.Module != "Microsoft.PowerShell.ConsoleHost.dll" || got.Fault.ExceptionCode != "80131623" || !got.Observational {
+		t.Fatalf("got=%+v ok=%v", got, ok)
+	}
+}
+
 func TestCorrelateRejectsUnrelated(t *testing.T) {
-	for _, event := range []ResourceEvent{{TimeMS: 1, EventID: 1001, Name: "APPCRASH", App: "fak.exe"}, {TimeMS: 1, EventID: 1001, Name: "RADAR_PRE_LEAK_64", App: "other.exe"}, {Name: "RADAR_PRE_LEAK_64", App: "fak.exe"}} {
+	for _, event := range []ResourceEvent{{TimeMS: 1, EventID: 1000, Name: "POWERSHELL_CONSOLEHOST_CRASH", App: "other.exe"}, {TimeMS: 1, EventID: 1001, Name: "APPCRASH", App: "fak.exe"}, {TimeMS: 1, EventID: 1001, Name: "RADAR_PRE_LEAK_64", App: "other.exe"}, {Name: "RADAR_PRE_LEAK_64", App: "fak.exe"}} {
 		if _, ok := Correlate(event, nil); ok {
 			t.Fatalf("accepted %+v", event)
 		}
