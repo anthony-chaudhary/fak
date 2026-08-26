@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **123** (clarity 30 + coverage 93) |
+| **Disambiguation-debt (drive to 0)** | **131** (clarity 29 + coverage 102) |
 | **Crystal-clear concepts (and climbing)** | **766** crystal of 2479 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2602 / 2695** (96.5% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2603 / 2705** (96.2% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **1** of 198 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **74** of 3444 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 84.6/100 (grade B) |
+| Legacy bounded score (saturates; not the driver) | 84.4/100 (grade B) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2479 concepts - score 84.6/100 (grade B) - disambiguation-debt 123
+concept-disambiguation chart - 2479 concepts - score 84.4/100 (grade B) - disambiguation-debt 131
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       #############............... 766
@@ -62,19 +62,19 @@ clarity mix by family (each cell = one concept):
   witness-proof    *********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (149 concept(s); 69 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ###########################. 462/483
+  guard-gate       ###########################. 462/484
+  plan             ###########################. 362/381
   cache            ###########################. 281/294
-  plan             ###########################. 362/374
   policy-capability ##########################.. 184/196
   session-runtime  ###########################. 252/263
   attention        #########################... 76/85
   support-maturity #########################... 55/61
   render-materialize ###########################. 198/203
-  context-ctx      ############################ 227/231
+  context-ctx      ############################ 228/232
   witness-proof    ###########################. 156/160
   score-debt       ###########################. 87/90
+  gateway-engine   ############################ 184/186
   pool             ###########################. 38/40
-  gateway-engine   ############################ 184/185
   loop             ############################ 88/89
   cross-cluster    ............................ 0/0
   decision         ############################ 58/58
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 96.5%  (2602/2695 confusable tokens positioned)
+namespace coverage  [###############################.] 96.2%  (2603/2705 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 196
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **197 / 198** (196 mutual, 1 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **1** |
 | Entangled concepts (own twin undrawn) | 5 |
-| Boundaries drawn (mutual / total) | 1616 / 4450 |
+| Boundaries drawn (mutual / total) | 1620 / 4452 |
 | Dangling `distinct_from` references (drive to 0) | 6 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -2749,7 +2749,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| grounded | `grounded` | 0 | 9 | 9 ungrounded concept(s) |
+| grounded | `grounded` | 0 | 8 | 8 ungrounded concept(s) |
 | separation | `reference_resolves` | 16 | 6 | 6 dangling distinct_from reference(s) |
 | honesty | `clarity_consistent` | 10 | 5 | 5 verdict overclaim(s) |
 | well-formed | `well_formed` | 52 | 4 | 4 malformed field(s) |
@@ -2759,7 +2759,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 90 | 1 | 1 one-sided boundary on a confusable pair |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2834/4450 boundaries drawn one-way only |
+| separation | `mutuality_soft` | 80 | 0 | 2832/4452 boundaries drawn one-way only |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
@@ -2768,19 +2768,19 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 462 | 483 | 21 |
+| guard-gate | 462 | 484 | 22 |
+| plan | 362 | 381 | 19 |
 | cache | 281 | 294 | 13 |
-| plan | 362 | 374 | 12 |
 | policy-capability | 184 | 196 | 12 |
 | session-runtime | 252 | 263 | 11 |
 | attention | 76 | 85 | 9 |
 | support-maturity | 55 | 61 | 6 |
 | render-materialize | 198 | 203 | 5 |
-| context-ctx | 227 | 231 | 4 |
+| context-ctx | 228 | 232 | 4 |
 | witness-proof | 156 | 160 | 4 |
 | score-debt | 87 | 90 | 3 |
+| gateway-engine | 184 | 186 | 2 |
 | pool | 38 | 40 | 2 |
-| gateway-engine | 184 | 185 | 1 |
 | loop | 88 | 89 | 1 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 58 | 58 | 0 |

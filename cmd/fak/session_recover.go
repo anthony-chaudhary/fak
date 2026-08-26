@@ -206,6 +206,16 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		}
 		*receipts = filepath.Join(base, "fak", "session-recovery")
 	}
+	regDir := resolveSweepRegDir("")
+	if _, invalid, err := resume.LoadIdentityRowsStrict(regDir); err != nil || invalid > 0 {
+		path := resume.IdentityLedgerPath(regDir)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak session recover: identity authority unreadable: %s: %v\n", path, err)
+		} else {
+			fmt.Fprintf(stderr, "fak session recover: identity authority malformed: %s: %d invalid non-empty row(s)\n", path, invalid)
+		}
+		return 2
+	}
 	selectionLimit := *limit
 	if doLive && *all && !limitExplicit {
 		selectionLimit = int(^uint(0) >> 1)
