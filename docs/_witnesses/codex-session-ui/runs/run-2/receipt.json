@@ -1,0 +1,7 @@
+{
+  "fak_module": "internal/codexsession@detached-tip-f0fb4474e2",
+  "fak_commit": "f0fb4474e257000285c2eb529a73d41b723ecfde",
+  "session_engine": "deterministic replay (no model invocation)",
+  "provider_claim": "not observed",
+  "codex_role": "owner=codex events are fixture inputs, not live provider observations"
+}
