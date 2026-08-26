@@ -1,3 +1,8 @@
+---
+title: "fak recall core dumps and context debugger"
+description: "fak recall persists integrity-checked session pages and quarantine state; cdb inspects the core image without laundering sealed content."
+---
+
 # Session core-dump + context debugger (recall + cdb)
 
 [← Claims index](../../CLAIMS.md)
@@ -11,4 +16,3 @@
 - [SHIPPED] ECC-style metadata integrity for recall cells (#783/#785, epic #782): the CAS already self-verifies a page's BODY (a blob must hash to its key or load fails closed), but the page table carries integrity-critical METADATA the body digest does not cover — `Quarantined`/`QID`/`Taint`/`Digest`/`Len` — whose silent flip (e.g. `Quarantined` true→false to release a sealed page) would sail past the body check. `recall.computeSyndrome` binds that subset into a per-page check word stamped on `Page.Syndrome` at persist time, and `ClassifyFault(page, body)` → `FaultClass` is the syndrome read: `FaultClean` (check agrees, body present), `FaultRepairable` (body authoritative but metadata disagrees — re-derivable, the ECC single-error case), `FaultErasure` (body gone/rotted — uncorrectable locally, needs quarantine/tombstone/refuse), `FaultUnchecked` (a pre-rung page with no syndrome — honest absence of evidence, never a false fault). `Session.Verify()` is the read-only scrub classifier over a whole image. Default-neutral by `omitempty` (a pre-rung manifest is byte-identical). This is a corruption/tamper-EVIDENCE syndrome, NOT a Hamming code and NOT a secret-keyed MAC (a local image on the operator's disk makes no confidentiality claim). Witness: `go test ./internal/recall -run 'Syndrome|ClassifyFault|FaultClass|Verify'` (`TestSyndrome_CatchesEachIntegrityField`, `TestClassifyFault`, `TestVerify_EndToEnd`, `TestSyndrome_DefaultNeutral`); `docs/MEMORY-ECC-INTEGRITY.md`.
 - [STUB] The off-path **patrol scrub** driver over persisted recall/sessionimage images (#784) and the **cross-witness/cross-agent parity** disagreement check before reuse (#786) are the named follow-on rungs of epic #782: `Session.Verify()` is the classifier the scrub consumes, and `Page.Witness`/`Page.TrustEpoch` are the per-page substrate the parity check would read, but neither the offline scrub loop nor the disagreement comparator is wired yet.
 - [SHIPPED] Inherited detection ceiling, surfaced not hidden: the same real-session run sealed 2 of 59 pages — two large base64 image renders flagged `SECRET_EXFIL`, FALSE POSITIVES (the documented `≈100% evadable + FP-prone on our own context` ceiling). `cdb` makes the gate's decision durable/queryable; it does not improve the decision. Witness: `fak debug --session <real>` `info.sealed==2` on benign images.
-

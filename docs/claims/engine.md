@@ -1,3 +1,8 @@
+---
+title: "fak engine: OpenAI-compatible inference client"
+description: "fak's engine layer provides OpenAI-compatible chat completion clients, local/remote routing, cassette replay, usage extraction, and deterministic mocks."
+---
+
 # Engine
 
 [← Claims index](../../CLAIMS.md)
@@ -21,4 +26,3 @@
 - [SHIPPED] **Apple Silicon GPU backend (Metal/MPS) — first light (issue #300 / C-001).** A `//go:build darwin && metal` `compute.Backend` (`internal/compute/metal*`) runs the in-kernel forward pass on a **real Apple M3 Pro** GPU, registered as an `Approx` peer so `cpu-ref` stays the Default. GEMM uses `MPSMatrixMultiplication`; the seven elementwise/reduction ops are runtime-compiled MSL compute kernels (compiled in-process by cgo's clang — no offline kernel build). **Numerical parity witnessed:** a full multi-layer synthetic Llama decode (6-token prompt + 8 greedy steps) is **argmax-exact** with **logit cosine = 1.0** vs cpu-ref, and the op-level MPS MatMul matches at cosine = 1.0 (max|Δ| = 1.9e-6). Throughput is **not** yet claimed: this synchronous (encode→commit→wait per op) first increment targets correctness; batched command buffers, async, and quantized device GEMM are tracked follow-ups (the Go MatMul refuses non-F32 weights). Witness: `CGO_ENABLED=1 go test -tags metal ./internal/compute/` (TestMetalMatMulApproxMatchesRef, TestMetalForwardMatchesRef).
 - [SHIPPED] Live-seam honesty: a run carries a real transcript hash XOR the explicit RED flag `live_seam_unverified` — never a silent skip (unit 46).
 - [SHIPPED] The live seam is now exercised end-to-end: `fak agent` drove this kernel with a real OpenAI-compatible model (gemini-2.5-flash / -flash-lite and local Qwen2.5-1.5B/0.5B), every run carrying a real `transcript_sha` (not the `live_seam_unverified` flag). The v0.1 `fak bench` remains a deterministic OFFLINE replay by design; the live A/B is the separate `fak agent` lane. Witness: `experiments/agent-live/*.json` (each `live:true`); see `LIVE-RESULTS.md`.
-

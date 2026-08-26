@@ -1358,15 +1358,9 @@ func (c *cudaBackend) RestoreKVFromHost(state KVHostSnapshot) (out KVStore, err 
 func (k *cudaKV) Free() {
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
-	free := func(d *dslice) {
+	releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *dslice) {
 		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fcuda_free(pointer) })
-	}
-	for l := range k.K {
-		free(&k.K[l])
-		free(&k.Kraw[l])
-		free(&k.V[l])
-	}
-	k.pos = nil
+	})
 }
 
 // itoaC is a tiny int->string for the tier label (avoids importing strconv into the
