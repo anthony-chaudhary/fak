@@ -241,7 +241,7 @@ The smallest coherent FAK flow is:
 | Candidate | On-axis state | Portfolio route | Disposition |
 |---|---|---|---|
 | Consumer-owned public-to-private realization by opaque reference | PARTIAL substrate, integration absent | DEFAULT | **FILED #8259**; reuse `fabricmap`, do not create a parallel `KVTransferPlan` graph |
-| Byte-sized end-to-end estimated ready time | ABSENT in route choice (`Bytes` unused) | DEFAULT objective, compatibility-preserving | **FILED #8261** |
+| Byte-sized end-to-end estimated ready time | SHIPPED after the original study | DEFAULT objective, compatibility-preserving | **SHIPPED #8261**; the refreshed inventory found no duplicate follow-on |
 | NIXL/RDMA/TMA/CSL engine adapters and measured topology | PARTIAL / hardware-gated | OPTIONAL-MODULE | **DEDUP #3310/#6409** |
 | Bilateral fixed producer/consumer layout capsule | ABSENT | RECIPE | Use only for a named pair with a captured witness; no generic issue yet |
 | Universal neutral KV/layout interchange | ABSENT | WATCH | Revisit only after two incompatible engines and measured conversion economics |
@@ -252,7 +252,7 @@ The smallest coherent FAK flow is:
 Existing issue searches also found #3316 (KV governance events), #3413 (real
 vLLM/SGLang arena import), #5269 (peer KV fetch tier), and #2242 (P/D SLO pool
 planning). None owns terminal consumer-private readiness or byte-sized
-`fabricmap` route selection, so #8259/#8261 are not duplicates.
+`fabricmap` route selection, so #8259 was not a duplicate; #8261 has since shipped and is closed.
 
 ## Licensing and provenance
 
@@ -265,6 +265,23 @@ The site's root MIT file belongs to the Chirpy theme lineage and does not clearl
 grant MIT terms over every authored post, while the rendered site advertises CC
 BY 4.0. Treat the essay as **INSPIRE-only**, paraphrase it, use only short
 attributed quotations if needed, and do not vendor prose or figures.
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue #8992 refreshed the denominator at the same pinned revision. The machine-generated map is
+[`docs/research/inventory/hiraditya-hiraditya.github.io.json`](../research/inventory/hiraditya-hiraditya.github.io.json):
+61 indexed files across 11 reported subsystems, with every local file walked and every required
+non-tree source class recorded separately. GitHub read-back through the revision timestamp found
+17 issue-endpoint records (two open issue-only post drafts and 15 closed pull requests), 15 pull
+requests (one merged), zero discussions, zero releases, and zero tags. Reachable git history has
+306 commits; four touch the target essay. No test/fixture suite, changelog, roadmap, or TODO artifact
+exists in the pinned tree; `tools/test.sh` is a site-build helper, not a test suite.
+
+The FAK decision did not expand. #8259 remains the single open terminal-consumer-readiness leaf;
+#8261 has shipped; adapter/topology measurement remains deduplicated to #3310/#6409; neutral
+interchange stays watch-only; and a fictional universal private-memory address remains excluded.
+The candidate matrix, FAK self-query witness, completeness critic, provenance caveat, and issue
+tracking are pinned in the inventory map. No new follow-on survived this refresh.
 
 ## Coverage and honest limits
 
@@ -289,3 +306,48 @@ semantic and deterministic witnesses only.
 - `study-repo` supplied the pinned NIXL docs/code/tests/history/issues/releases
   audit and completeness critic.
 - Parent/spine links: #3259, #6377, #3310, #3316, #6409.
+
+## Exhaustive NIXL refresh (2026-08-25)
+
+Issue #8993 refreshes the NIXL denominator without changing the essay's core
+conclusion. The pinned source is
+[`ai-dynamo/nixl@b0cbb237354d72b83500d5214d2b4484f9866fa3`](https://github.com/ai-dynamo/nixl/tree/b0cbb237354d72b83500d5214d2b4484f9866fa3)
+(commit time `2026-08-25T17:36:59Z`). The generated exhaustive map is
+[`docs/research/inventory/ai-dynamo-nixl.json`](../research/inventory/ai-dynamo-nixl.json):
+776 files, 163 directories, 14 immediate subsystems, 392 runtime files, 185 test
+files, and 80 documentation files. The only skipped control directory was
+`.git`.
+
+The non-tree denominator is also pinned to that commit timestamp. GitHub REST
+pagination found 250 issues (67 open, 183 closed) and 1,904 pull requests (198
+open, 1,706 closed) created by the cutoff. GraphQL reported zero discussions.
+The release/history pass covered 20 published releases and 28 reachable tags;
+`v1.4.0` was latest. Repository-wide TODO, FIXME, unsupported, and deprecation
+searches supplied the roadmap surface because no dedicated roadmap file exists.
+The provenance pass covered Apache-2.0 core licensing, attribution manifests,
+the proprietary component notice, the separately licensed DeepEP example,
+`SECURITY.md`, and `CONTRIBUTING.md`.
+
+Representative source read-back corrected the generated classifier's narrow
+architecture label: `docs/nixl.md`, `docs/BackendGuide.md`, the C++/Python/Rust
+APIs, descriptors, agent/metadata lifecycle, backend plugins, telemetry and
+tracing, registration tests, and benchmark harnesses were inspected directly.
+The completeness critic therefore treats filenames as discovery aids, not proof
+of semantic coverage.
+
+### Refreshed borrow decisions and follow-ons
+
+| Candidate | Pinned evidence | FAK decision | Follow-on |
+|---|---|---|---|
+| Consumer-ready admission above transfer completion | `src/api/cpp/nixl.h`; upstream PR [#2051](https://github.com/ai-dynamo/nixl/pull/2051) | **Borrow the boundary, not the subsystem.** NIXL owns transfer and remote-metadata lifetime; FAK owns terminal consumer-private readiness. | Existing #8259 |
+| Byte-sized end-to-end ready-time pricing | `src/api/cpp/nixl_params.h`; `benchmark/nixlbench/` | **FAK-native.** Route price must include consumer realization, not only substrate transfer. | Existing #8261 |
+| Standby-then-commit activation under live traffic | merged upstream PR [#2138](https://github.com/ai-dynamo/nixl/pull/2138) | **Borrow the lifecycle pattern.** Preserve active views while staging replacements, then independently receipt activation. | Evidence for #8259; no duplicate issue |
+| Request-scoped transfer correlation | open upstream PR [#2137](https://github.com/ai-dynamo/nixl/pull/2137) | **Watch.** The observability shape is attractive but not settled at the cutoff. | Monitor upstream; file only after stable semantics and a FAK gap witness |
+| Backend adapters and measured topology | `docs/BackendGuide.md`; `src/plugins/` | **Optional and hardware-gated.** Never make a convenience path silently replace fak-native execution. | Deduplicated to #3310/#6409 |
+
+Candidate-specific `fak capabilities` self-queries found native routing and
+capability-floor surfaces and no exact built-in NIXL adapter. That is not a
+reason to manufacture parity: it reinforces the existing division in which
+NIXL may serve as an explicitly selected transfer substrate while FAK retains
+route admission, pricing, lifecycle governance, and receipts. No new issue was
+filed because every surviving action is already owned or explicitly watched.
