@@ -1092,6 +1092,39 @@ func writeSSEData(w http.ResponseWriter, v any) error {
 	return nil
 }
 
+type codexServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// codexServiceTierCatalog translates provider routing metadata at the public
+// gateway seam. Codex selects a tier by its provider wire value, while the
+// portable mode remains advertised separately through additional_speed_tiers.
+func codexServiceTierCatalog(rows []map[string]string) []codexServiceTier {
+	catalog := make([]codexServiceTier, 0, len(rows))
+	for _, row := range rows {
+		mode := strings.TrimSpace(row["mode"])
+		id := strings.TrimSpace(row["wire_value"])
+		if id == "" {
+			id = mode
+		}
+		name := strings.ReplaceAll(mode, "_", " ")
+		if name == "" {
+			name = id
+		}
+		if name != "" {
+			name = strings.ToUpper(name[:1]) + name[1:]
+		}
+		catalog = append(catalog, codexServiceTier{
+			ID:          id,
+			Name:        name,
+			Description: name + " service tier",
+		})
+	}
+	return catalog
+}
+
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	data := []map[string]any{{"id": s.model, "object": "model", "owned_by": "fak"}}
 	// Dual mode (local model alongside the API upstream): advertise the in-kernel
@@ -1131,6 +1164,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if contract, ok := modelroute.LookupProviderContract("openai"); ok {
 		tiers, tierRows = modelroute.SupportedServiceTierMetadata(contract)
 	}
+	tierCatalog := codexServiceTierCatalog(tierRows)
 	codexModels := make([]map[string]any, 0, len(data))
 	for _, row := range data {
 		id := strings.TrimSpace(fmt.Sprint(row["id"]))
@@ -1170,7 +1204,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"use_responses_lite":               false,
 			"priority":                         0,
 			"additional_speed_tiers":           tiers,
-			"service_tiers":                    tierRows,
+			"service_tiers":                    tierCatalog,
 			"availability_nux":                 nil,
 		})
 	}
