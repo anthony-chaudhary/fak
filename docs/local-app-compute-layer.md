@@ -1,38 +1,48 @@
 # Ship local inference as an app capability, not a localhost server
 
+**One-line product:** An app bundles fak once, declares the outcomes it needs, and gets measured local execution with explicit handoff when the Mac cannot meet the contract.
+
 **Status:** proposed product contract for issue [#9131](https://github.com/anthony-chaudhary/fak/issues/9131)
-**v1:** signed macOS apps on Apple Silicon; fak-native Metal; no cloud control plane
 
-## Verdict
+## TL;DR
 
-The valuable product is an **embeddable compute appliance for one app**. A developer adds a small SDK and signed helper to the app bundle. The helper owns model selection, installation, admission, execution, updates, resource budgets, and recovery. The SDK keeps a familiar model-call shape while exposing facts a cloud API hides: whether a request can run locally, what it costs the user's machine, what is happening now, why execution moved elsewhere, and whether the result met the app's quality and latency envelope.
+The product is an **app-scoped compute appliance** for Apple Silicon. It is not a daemon that users install and operate.
 
-An OpenAI-compatible localhost endpoint is useful for migration, but is not the product. It does not solve distribution, user trust, device diversity, quality guarantees, resource contention, upgrades, support, or explicit fallback.
+A developer adds a Swift SDK, signed helper, compute manifest, and model-pack channel to the app. fak then owns the difficult local-compute work:
 
-> **The app declares an outcome envelope; fak turns each supported Mac into a measured, app-scoped inference appliance and returns a verifiable execution receipt.**
+- install and supervise the runtime;
+- qualify each task on the current Mac;
+- acquire and verify model packs;
+- protect foreground memory, battery, and latency;
+- execute through fak-native Metal;
+- expose typed progress and lifecycle events;
+- propose cloud handoff instead of hiding fallback;
+- return a scrubbed receipt that proves what ran where.
 
-## Customer and alternative
+The durable abstraction is an **outcome contract** such as `application-draft@1`. An OpenAI-compatible endpoint is only the migration bridge.
 
-**For:** one engineer shipping an agentic desktop product to roughly 10,000 users, initially on Apple Silicon Macs.
+## Customer, problem, and alternative
 
-**Problem:** moving work from a cloud API to customer machines currently means becoming a runtime vendor: package an engine, choose/download models, classify hardware, prevent memory pressure, retain quality, manage helper lifecycle, explain network use, recover from corruption, and create support diagnostics.
+**For:** one engineer shipping an agentic desktop product to about 10,000 users. The first release supports Apple Silicon Macs.
 
-**Today:** keep Gemini/OpenAI/Codex as default; tell users to install Ollama or LM Studio; embed llama.cpp; or assemble MLX/Core ML and custom lifecycle code. Each can execute tokens. None is an app-complete compute contract.
+**Problem:** moving work from a cloud API to customer machines makes the app vendor responsible for a runtime. The vendor must package an engine, choose models, qualify hardware, manage memory pressure, preserve quality, supervise a helper, explain network use, recover from bad updates, and support diverse machines.
 
-**Better because:** one integration supplies a signed app-scoped runtime, deterministic admission, measured envelopes, visible local/cloud decisions, typed events, safe updates, and support receipts.
+**Today:** keep Gemini or OpenAI as the default; ask users to install Ollama or LM Studio; embed llama.cpp; or assemble MLX and custom lifecycle code. Each option can generate tokens. None provides an app-complete compute contract.
 
-**Witness:** a clean Mac installs a sample job-application app, completes onboarding, executes a real task through fak-native Metal, displays lifecycle/execution events, produces a scrubbed receipt naming engine and envelope, and exercises explicit cloud handoff. No separate runtime installation or terminal command is required.
+**Better because:** one integration provides a signed app-scoped runtime. It also provides measured envelopes, visible local-versus-cloud decisions, safe updates, and support receipts.
 
-**Centrality: Core.** This turns fak's engine, gateway, policy, cache, and observability into an adoptable product. P1: local execution is the primary path. P2: a developer ships a real app outcome. P3: one integration replaces assembly and support of a separate runtime. P4: install-to-ready, device coverage, local accepted-result share, latency/quality, handoff reason, and update behavior are visible.
+**Witness:** a clean Mac installs a sample job-application app and completes onboarding. The app runs a real task through fak-native Metal, displays lifecycle and execution events, and produces a scrubbed receipt. A separate fixture demonstrates explicit cloud handoff. No terminal command or separate runtime installation is required.
 
-## What developers ship
+**Centrality: Core.** Local execution is the primary path (P1). A real app outcome completes (P2). One integration replaces runtime assembly and support (P3). Install-to-result evidence makes adoption visible (P4).
 
-1. **`FakKit` Swift SDK:** typed requests, structured output, cancellation, backpressure, events, receipts, and an OpenAI-wire migration adapter.
-2. **Signed `fak-runtime` helper:** app-scoped XPC service or supervised sidecar, authenticated client, native Metal engine, isolated failure domain.
-3. **Compute manifest:** signed tasks, model packs, quality/context/latency bounds, storage/memory budgets, local/cloud policy, and update channels.
-4. **Model packs:** content-addressed signed manifests and quantized weights fetched after install; resumable, revocable, independently updateable.
+## What the app vendor ships
 
-The v1 golden path is a Swift package plus app-bundled helper. Tauri/Electron/native apps can launch the same helper later. Users should not install or operate a separate general-purpose server.
+1. **`FakKit` Swift SDK.** It provides typed requests, structured output, streaming, cancellation, backpressure, events, receipts, and an OpenAI-wire adapter.
+2. **Signed `fak-runtime` helper.** This is an app-scoped XPC service or supervised sidecar. It authenticates its client, isolates crashes, and runs the native Metal engine.
+3. **Compute manifest.** This signed file declares tasks, eligible model packs, quality and latency bounds, resource budgets, locality rules, and update channels.
+4. **Model packs.** Signed manifests point to content-addressed weights. Downloads are resumable, revocable, and independent of app releases.
+
+The v1 golden path is a Swift package plus an app-bundled helper. Tauri, Electron, and other native hosts can launch the same helper later. Users never need to operate a general-purpose model server.
 
 ```swift
 let compute = try await FakKit.start(manifest: "JobApplyCompute")
@@ -41,46 +51,84 @@ for await event in compute.events { productState.consume(event) }
 let result = try await compute.run(
     task: "job-application-tailor",
     input: applicationContext,
-    constraints: .init(privacy: .localRequired,
-                       deadline: .seconds(20),
-                       qualityFloor: "job-apply-v1"))
+    constraints: .init(
+        privacy: .localRequired,
+        deadline: .seconds(20),
+        qualityFloor: "job-apply-v1"))
 
 support.attach(result.receipt.scrubbed())
 ```
 
-For existing OpenAI-wire code, migration changes transport/base URL and model alias while retaining streaming, tool calls, schema output, cancellation, usage, and stable errors. Production adoption then adds a compute manifest, readiness/handoff UI, and receipts.
+Existing OpenAI-wire code can first change its transport, base URL, and model alias. Streaming, tool calls, schema output, cancellation, usage, and stable errors remain available. Production adoption then adds a compute manifest, readiness UI, handoff UI, and receipts.
 
 ## Product primitives
 
 ### Outcome contracts, not model names
 
-The app asks for `job-application-tailor@1`, not a particular Qwen quantization. A task contract declares input/output schemas, tool grammar, context/output bounds, quality fixture and floor, latency class, data-locality rule, eligible pack/runtime versions, memory/disk/energy/concurrency limits, and handoff authority. Models and kernels can evolve without an app release, but cannot silently weaken behavior.
+The app requests `job-application-tailor@1`, not a specific quantization. Its task contract declares:
 
-### Deterministic device admission
+- input, output, and tool schemas;
+- context and output bounds;
+- a quality fixture and acceptance floor;
+- a latency class and data-locality rule;
+- eligible pack and runtime versions;
+- memory, disk, energy, and concurrency limits;
+- authority for remote handoff.
 
-At onboarding and after material changes, fak runs a representative fixture and emits:
+Models and kernels can change without an app release. They cannot silently weaken the declared behavior.
 
-- `ready`: quality, memory, and latency envelopes witnessed;
-- `ready_degraded`: only named tasks or bounds admitted;
+### Deterministic admission per task
+
+At onboarding, fak inspects the machine and runs a representative fixture. It repeats admission after a material runtime, pack, OS, or hardware change. Each task receives one state:
+
+- `ready`: quality, memory, and latency envelopes passed;
+- `ready_degraded`: only named bounds passed;
 - `download_required` or `warming`;
-- `temporarily_unavailable`: pressure, battery, thermal, disk, or competing work;
-- `unsupported`: no declared task can be met.
+- `temporarily_unavailable`: current pressure, battery, thermal, disk, or contention prevents use;
+- `unsupported`: no declared envelope passed.
 
-Admission uses measured machine facts, not only chip labels. UI can say “Local for extraction and drafting; approval needed for long-form cloud review,” rather than presenting a misleading global percentage.
+Admission uses measurements from this machine, not only its chip label. The app can say, “Local for extraction and drafting; approval needed for long-form cloud review.” It does not show one misleading global support percentage.
 
-### Resource coexistence is correctness
+### Resource coexistence is part of correctness
 
-The compute allowance covers memory high-water mark, pressure response, foreground/background concurrency, queue bounds, battery/AC and Low Power Mode, thermal downshift, disk reservation/eviction, and foreground latency. User modes are Automatic, Prefer local, Local only, and Pause local. A request that violates this allowance is not locally capable now: it queues, selects an already-qualified smaller envelope, or offers handoff.
+A local result is not successful if it makes the host app or the rest of the Mac unusable. The compute allowance therefore covers:
+
+- memory high-water marks and pressure response;
+- foreground and background concurrency;
+- queue bounds and cancellation;
+- battery state, AC power, and Low Power Mode;
+- thermal downshift;
+- disk reservation and eviction;
+- foreground latency impact.
+
+User modes are Automatic, Prefer local, Local only, and Pause local. Work that exceeds the current allowance can queue or select an already-qualified smaller envelope. Otherwise fak proposes handoff.
 
 ### Explicit handoff, never invisible fallback
 
-Fallback has three policies: eligibility (may this data leave?), trigger (deadline, unsupported feature, quality miss, pressure, fault, or user choice), and authority (pre-consented, ask, or never). A handoff event names the reason, data classes, destination chosen by the app, consequence, and alternatives. The app owns cloud credentials and provider UX; fak returns a normalized handoff package and preserves request identity. Receipts record every attempt and never label remote work local.
+Remote handoff has three separate decisions:
 
-Measure local-eligible, local-attempted, local-accepted, and local-result-used shares plus reason-coded handoffs. A single “percent local” conceals quality rejects and fallback loops.
+1. **Eligibility:** may these data classes leave the device?
+2. **Trigger:** did the local path hit a deadline risk, unsupported feature, quality miss, pressure event, fault, or user request?
+3. **Authority:** was handoff pre-consented, must the app ask now, or is it forbidden?
+
+A handoff event names the reason, affected data classes, destination class, consequence, and alternatives. The app owns cloud credentials, billing, provider selection, and consent UX. fak preserves request identity and returns a normalized handoff package.
+
+Receipts record every local and remote attempt. Remote work is never labeled local.
+
+### Measure locality honestly
+
+A single “percent local” hides quality rejects and fallback loops. Measure four separate shares:
+
+- **eligible:** policy and admitted capability allowed a local attempt;
+- **attempted:** local execution started;
+- **accepted:** the result met the task contract;
+- **used:** the app used the accepted local result.
+
+Every gap carries a reason code. Cloud savings count only accepted, used local results after retry and verification cost.
 
 ### Developer event plane
 
-Events are versioned, ordered per operation, replayable from a bounded local journal, and exposed as Swift `AsyncSequence`, callback, or local SSE.
+Events are versioned and ordered per operation. A bounded local journal supports replay. The SDK exposes Swift `AsyncSequence`; callbacks and local SSE are adapters.
 
 | Family | Examples | Product use |
 |---|---|---|
@@ -93,75 +141,150 @@ Events are versioned, ordered per operation, replayable from a bounded local jou
 | terminal | `request.completed`, `request.failed`, `request.cancelled` | deterministic state |
 | maintenance | `update.available`, `update.applied`, `rollback.applied` | safe lifecycle |
 
-Every event includes an ID, operation ID, monotonic sequence, timestamps, task contract, runtime/pack revisions, privacy class, and stable reason code. Prompt and output text are absent by default.
+Every event carries an event ID, operation ID, sequence, timestamp, task contract, relevant revisions, privacy class, and stable reason code. Prompt and output text are absent by default.
 
 ### Receipts are the trust and support primitive
 
-Each operation returns a scrubbed receipt naming local/remote/mixed execution; actual fak-native engine; task/runtime/kernel/pack revisions; admitted envelope; observed TTFT, decode rate, total latency, queue and peak memory; token/cache facts; quality verification; retries/downshifts/handoffs; policy and user authority; and terminal diagnostic code. Receipts omit prompts, output, paths, usernames, and stable device identifiers. Debug bundles require separate user preview and consent.
+Each operation returns a scrubbed receipt. It records:
+
+- local, remote, or mixed execution;
+- the actual fak-native engine;
+- task, runtime, kernel, and pack revisions;
+- admitted and observed envelopes;
+- time to first token, decode rate, queue time, and total latency;
+- peak memory and token/cache facts;
+- quality verification;
+- retries, downshifts, and handoffs;
+- policy authority and terminal diagnostic code.
+
+Receipts omit prompts, outputs, private paths, usernames, and stable device identifiers. A debug bundle requires a separate user preview and consent step.
 
 ### Guarantees are bounded envelopes
 
-fak cannot promise one token rate across every Mac. It can guarantee that readiness requires a representative fixture; admitted work remains inside declared bounds; updates pass fixture canaries before activation; misses are typed rather than silently changing quality or engine; last-known-good packs remain rollbackable; local-required data never enters handoff; and native/performance paths never silently execute through llama.cpp. Device classes (M1–M4 and memory bands initially) remain subordinate to per-device admission.
+fak cannot promise one token rate across every Mac. It can promise the following:
+
+- readiness requires a representative task fixture;
+- admitted work stays inside declared bounds or ends with a typed miss;
+- updates pass fixture canaries before activation;
+- a miss never silently changes quality, locality, or engine;
+- last-known-good packs remain rollbackable;
+- local-required data never enters a handoff package;
+- native performance work never silently executes through llama.cpp.
+
+Initial device classes can use M1–M4 and memory bands for planning. Per-device admission remains authoritative.
 
 ### Installation and updates are product UI
 
-First run verifies helper/manifest, inspects machine and task needs, shows exact download/storage/privacy/capability, fetches a signed resumable starter pack, verifies/stages atomically, runs fixtures, activates only on success, retains last known good, and emits readiness per task. Runtime updates ride normal app updates in v1. Model packs use a signed app-controlled channel with staged activation, fixture gating, revocation, and rollback.
+First run verifies the helper and manifest, then inspects task needs. The app shows the exact download size, storage reservation, privacy boundary, and expected capability. fak fetches the starter pack, verifies it, stages it atomically, runs fixtures, and activates it only after success. Tasks become available independently rather than waiting behind one global spinner.
+
+Runtime updates ride normal signed and notarized app updates in v1. Model packs use a signed app-controlled channel. That channel supports staged activation, fixture gating, revocation, and rollback.
+
+The app manifest also carries model license and redistribution metadata. Installation refuses a pack when the vendor lacks the declared entitlement or when required attribution is missing. The app vendor, not fak, owns commercial model terms.
+
+### App sandbox and local security boundary
+
+The helper accepts only authenticated requests from its host app. It binds to XPC or a loopback endpoint protected by a per-install capability. It does not expose a general LAN service. Sandboxed file access uses explicit app-provided handles or mediated tools. Code signing, notarization, helper identity, pack signatures, and downgrade protection are part of admission.
+
+### Offline behavior and data lifecycle
+
+After the required pack is present, local-required tasks work without a network connection. Downloads pause and resume safely. Remote-eligible work returns a typed `network_unavailable` state rather than spinning.
+
+Uninstall and “delete local AI data” remove app-scoped packs, journals, receipts, and credentials according to the manifest. Shared caches are out of scope for v1. Diagnostic export always has a preview step.
 
 ### Failure is a designed state
 
-Stable classes include incompatible OS/runtime, insufficient memory/disk, unavailable/corrupt/revoked pack, admission failure, deadline risk, pressure, helper restart, schema/tool mismatch, quality reject, and handoff prohibited/declined/failed. Each maps to an app action and safe receipt. Crash loops trip a circuit breaker while the host app stays usable.
+Stable failure classes cover incompatible OS or runtime, insufficient memory or disk, unavailable packs, corrupt or revoked packs, admission failure, deadline risk, pressure, helper restart, schema mismatch, tool mismatch, quality reject, and handoff failure. Each class maps to an app action and safe receipt. Crash loops trip a circuit breaker while the host app remains usable.
+
+### Developer testing and compatibility
+
+FakKit ships an in-process fake and deterministic fixture runner. Product teams can test every readiness, progress, pressure, failure, and handoff state without downloading a model. Golden-wire fixtures cover the supported OpenAI subset.
+
+The SDK, manifest, event, reason-code, and receipt schemas use explicit versions. Minor revisions are additive. Breaking revisions require a new major contract and a migration window. The product publishes the supported runtime-pack-SDK matrix.
 
 ## Job-application app example
 
-The manifest defines:
+The app declares four outcome contracts:
 
-- `resume-extract@1`: local required, structured, small/interactive;
-- `job-fit@1`: local preferred, quality-gated, interactive;
-- `application-draft@1`: local preferred, medium context, cloud only after consent;
-- `browser-action-plan@1`: local required for planning; browser tools remain under fak policy.
+| Task | Locality and envelope |
+|---|---|
+| `resume-extract@1` | local required, structured, small, interactive |
+| `job-fit@1` | local preferred, quality-gated, interactive |
+| `application-draft@1` | local preferred, medium context, cloud only after consent |
+| `browser-action-plan@1` | local required for planning; browser tools remain under fak policy |
 
-The app bundles FakKit, helper, and manifest. First run downloads the smallest pack covering initial tasks and witnesses readiness. Features appear as each task becomes ready instead of waiting behind one global spinner.
+The app bundles FakKit, its helper, and the manifest. First run downloads the smallest pack that covers the initial tasks. Admission makes each feature available as soon as its fixture passes.
 
-Request flow: validate schema/privacy/admission/allowance; reserve memory and deadline; stream scheduling and output events; execute via fak-native Metal and mediated tools; verify schema and task quality; return output and receipt. If the envelope cannot be met, return a handoff proposal rather than disguising a cloud retry.
+For each request, fak validates the schema, privacy rule, admission state, and current resource allowance. It reserves memory and deadline budget, streams events, and executes through fak-native Metal. Mediated tools remain behind the existing fak policy floor. Finally, it verifies the output schema and task-quality rule before returning the output and receipt.
 
-**Day-one migration:** change transport/base URL, task alias, and retain stream/tool/schema behavior.
-**Production adoption:** add manifest, consume readiness/handoff events, render download/privacy/resource states, attach receipts.
-A no-code local replacement is not promised because an app that hides fallback and resource states cannot be trustworthy.
+If the envelope cannot be met, the app receives a handoff proposal. It never receives a disguised cloud retry.
+
+**Day-one migration:** change transport, base URL, and task alias while retaining stream, tool, and schema behavior.
+
+**Production adoption:** add the manifest; consume readiness and handoff events; render download and resource states; attach receipts to support flows.
+
+A no-code replacement is not promised. An app that hides fallback and resource state cannot provide a trustworthy local product.
 
 ## v1 boundary
 
-- macOS 14+ signed/notarized app integration; Apple Silicon execution only;
-- Swift SDK, app-scoped helper, compute-manifest schema;
-- one signed model pack selected for supported 16 GB+ machines;
+Ship:
+
+- macOS 14+ signed and notarized app integration;
+- Apple Silicon execution only;
+- Swift SDK and app-scoped helper;
+- compute-manifest and task-contract schemas;
+- one commercially usable signed pack for supported 16 GB+ machines;
 - OpenAI-compatible streaming adapter plus native task API;
-- readiness, download, generation, pressure, handoff, and terminal events;
-- local-only/local-preferred policy and app-owned remote callback;
-- bounded receipt and local diagnostic export;
-- job-application sample with structured output and one mediated tool;
+- readiness, asset, generation, pressure, handoff, maintenance, and terminal events;
+- Local only and Prefer local policy with an app-owned remote callback;
+- scrubbed receipts and consented diagnostic export;
+- deterministic test fake and compatibility fixtures;
+- a job-application sample with structured output and one mediated tool;
 - measured admission and rollback-gated updates.
 
-Defer cloud control, Windows/Linux, arbitrary BYO models, LAN serving, cross-app sharing, provider billing, and a model marketplace.
+Defer cloud control, Windows, Linux, arbitrary bring-your-own models, LAN serving, cross-app sharing, provider billing, shared caches, and a model marketplace.
 
 ## Smallest working spine
 
-A signed sample app installs on a clean declared Apple Silicon Mac. It starts the bundled helper, downloads/verifies one pack, runs admission, and executes `resume-extract@1` plus `application-draft@1` through fak-native Metal. UI renders typed events. A second fixture forces local unavailability and demonstrates app-owned, user-approved remote handoff. Both runs emit scrubbed receipts.
+A signed sample app installs on a clean supported Mac. It starts the bundled helper, downloads and verifies one pack, runs admission, then executes `resume-extract@1` and `application-draft@1` through fak-native Metal. The UI renders typed events.
 
-Capture install-to-ready time/bytes; Mac/OS/memory/power envelope; fixture quality; TTFT/latency/tokens per second/peak memory/disk; restart and cancellation; absence of separate runtime install; receipt engine and location truth; and rollback after a deliberately rejected pack update.
+A second fixture forces local unavailability. The app shows the reason and completes a user-approved remote handoff. Both runs emit scrubbed receipts.
 
-Compose rather than reopen existing work: native Qwen/Metal [#8011](https://github.com/anthony-chaudhary/fak/issues/8011), resource admission [#8163](https://github.com/anthony-chaudhary/fak/issues/8163), router coexistence [#8176](https://github.com/anthony-chaudhary/fak/issues/8176), lifecycle demo [#8555](https://github.com/anthony-chaudhary/fak/issues/8555), and receipt/outcome joining [#8402](https://github.com/anthony-chaudhary/fak/issues/8402).
+The captured witness includes:
+
+- install-to-ready time and bytes;
+- Mac, OS, memory, and power envelope;
+- fixture quality result;
+- time to first token, total latency, decode rate, memory, and disk;
+- restart, offline, and cancellation behavior;
+- no separate runtime installation;
+- truthful engine and location fields in each receipt;
+- rollback after a deliberately rejected pack update;
+- uninstall and local-data deletion.
+
+Compose existing work instead of reopening it: native Qwen/Metal [#8011](https://github.com/anthony-chaudhary/fak/issues/8011), resource admission [#8163](https://github.com/anthony-chaudhary/fak/issues/8163), router coexistence [#8176](https://github.com/anthony-chaudhary/fak/issues/8176), lifecycle demo [#8555](https://github.com/anthony-chaudhary/fak/issues/8555), and outcome receipts [#8402](https://github.com/anthony-chaudhary/fak/issues/8402).
 
 ## Borrowed field patterns
 
-- Apple's Foundation Models framework validates task-native guided generation and tools, but system model availability does not replace an app-controlled quality/performance envelope: <https://developer.apple.com/documentation/foundationmodels>.
-- MLX/MLX-LM demonstrate Apple unified-memory-native execution and conversion; fak should borrow ergonomics while owning application guarantees: <https://github.com/ml-explore/mlx> and <https://github.com/ml-explore/mlx-lm>.
-- Ollama validates a simple local API and named artifacts, but a separately operated general runtime is not app embedding: <https://docs.ollama.com/api/introduction>.
-- LM Studio validates OpenAI-wire migration and shows that endpoint compatibility is table stakes: <https://lmstudio.ai/docs/developer/openai-compat>.
-- llama.cpp is benchmark/reference and borrowing source; the fak-native invariant still governs product execution: <https://github.com/ggml-org/llama.cpp>.
-- Tauri sidecars validate bundled helper distribution; fak adds signing, authenticated app scope, lifecycle, update, and receipt contracts: <https://v2.tauri.app/develop/sidecar/>.
+- Apple Foundation Models validates task-native guided generation and tools. System-model availability does not replace an app-controlled quality envelope: <https://developer.apple.com/documentation/foundationmodels>.
+- MLX and MLX-LM demonstrate unified-memory-native execution and friendly model workflows. fak should borrow the ergonomics while retaining its own guarantees: <https://github.com/ml-explore/mlx> and <https://github.com/ml-explore/mlx-lm>.
+- Ollama validates a simple local API and named artifacts. A separately operated general runtime is not app embedding: <https://docs.ollama.com/api/introduction>.
+- LM Studio validates OpenAI-wire migration. Endpoint compatibility is table stakes: <https://lmstudio.ai/docs/developer/openai-compat>.
+- llama.cpp remains a benchmark, reference, and borrowing source. The fak-native invariant still governs product execution: <https://github.com/ggml-org/llama.cpp>.
+- Tauri sidecars validate bundled-helper distribution. fak adds authenticated app scope, lifecycle, signed updates, admission, and receipts: <https://v2.tauri.app/develop/sidecar/>.
 - OpenAI streaming and structured output are migration baselines, not the durable abstraction: <https://platform.openai.com/docs/api-reference/responses>.
 
-## Moat and measures
+## Moat, economics, and measures
 
-The moat is not Metal token generation. It is the outcome graph across diverse machines: task contracts and quality fixtures; per-device admission; coexistence scheduling; signed updates proven before activation; events/receipts joined to app outcomes; privacy-preserving local analytics; and policy-mediated tools at the same checkpoint as performance.
+Metal token generation alone is not the moat. The compounding asset is the outcome graph across diverse machines:
 
-For each task and device class measure install-to-ready success/time; eligible, attempted, accepted, and used local shares; reason-coded handoffs; p50/p95 TTFT and end-to-end latency; peak memory/disk and foreground impact; crash-free operations and rollback; incidents resolved from receipts; and cloud cost avoided only for accepted local results net of retries and verification. Optimize accepted outcomes per customer-visible resource cost, not a global local percentage.
+- task contracts and quality fixtures;
+- per-device admission history;
+- coexistence scheduling;
+- signed updates proven before activation;
+- receipts joined to app outcomes;
+- privacy-preserving local analytics;
+- policy-mediated tools at the same checkpoint as performance.
+
+For each task and device class, measure install-to-ready success and time; local eligibility, attempts, acceptance, and use; reason-coded handoffs; p50 and p95 latency; peak memory and disk; foreground impact; crash-free operations; rollback success; and support resolution from receipts.
+
+The vendor-facing unit is **accepted local outcomes per active device-month**. Cost accounting includes CDN bytes, storage, verification, retries, support, and any remote attempt. Report cloud cost avoided only after those costs. Optimize customer-visible outcomes per resource cost, not raw tokens or one global local percentage.
