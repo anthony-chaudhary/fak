@@ -1,6 +1,6 @@
 # Architecture report demo
 
-Prerequisite: Go 1.26+ (the repository toolchain setting can fetch it automatically). No key, network service, Git metadata, or GPU is required.
+Prerequisite: Go 1.26+ (the repository toolchain setting can fetch it automatically). No key, network service, Git metadata, or GPU is required. On a warm Go build cache the selfcheck completes in under 3 seconds; the first run can take longer while Go fetches the declared toolchain and compiles the package.
 
 Run the enforced architecture-graph report through its production Go seam:
 

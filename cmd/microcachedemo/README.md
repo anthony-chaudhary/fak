@@ -15,7 +15,13 @@ that keep fleet sharing safe:
   undeclared private tool remains keyed by `vdso.MetaPrincipal`, so agent B
   cannot read agent A's cached result.
 
-No key, model, GPU, subprocess, browser, or network is required.
+No key, model, GPU, subprocess, browser, or network is required. Go 1.26 or
+newer is the only prerequisite. With the toolchain and module cache already
+available, the selfcheck completes in a few seconds (2.6 seconds in the captured
+Windows run); a cold toolchain download or first compile can take longer. Its
+fixed corpus has no clock or randomness, so the reported counts and selfcheck
+verdict are deterministic. Success exits 0 and an invariant failure exits
+nonzero.
 
 ## Run it
 
@@ -25,7 +31,12 @@ go run ./cmd/microcachedemo -selfcheck
 go run ./cmd/microcachedemo -json
 ```
 
-Representative deterministic render:
+The exact selfcheck transcript is in [EXAMPLE-OUTPUT.md](EXAMPLE-OUTPUT.md).
+
+## What you see
+
+The default deterministic render separates observed engine calls and vDSO hits
+from modeled output tokens, then reports the policy and tenancy assertions:
 
 ```text
 FAK MICRO-CACHE - one shared kernel turns a swarm into four upstream calls
@@ -52,6 +63,10 @@ shown separately and labeled in JSON; it is not a provider bill or latency claim
 `-selfcheck` requires exactly four engine calls, 252 native vDSO hits, identical
 answers, zero denied-action engine calls, a public cross-agent cache hit, and one
 engine call per principal for the private lookup.
+
+This demo does not claim provider-level cache behavior, end-to-end latency, or
+workload-wide savings. It proves the native in-process reuse, policy, and
+principal-isolation invariants only for the fixed local corpus.
 
 Together with [`../microfleetdemo`](../microfleetdemo/README.md), this gives two
 complementary runnable spines: bounded context/residency for many long-lived tiny
