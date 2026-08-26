@@ -360,12 +360,73 @@
       "status": "studied",
       "priority": 18,
       "why": "Stable cross-vendor task, context, lifecycle, message, artifact, cancellation, authorization, and snapshot-before-resubscribe semantics were studied as a public standard. Fak should interoperate at this envelope and keep planning, leases, effects, and witness above it.",
-      "last_checked": "2026-08-21",
+      "last_checked": "2026-08-25",
       "checked_revision": "16ba52690519bf55b9388e34d4db356efa88aa51",
       "stars_at_check": 25448,
       "last_push_at_check": "2026-08-21T19:46:58Z",
       "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
-      "refresh_issue": "#8997"
+      "refresh_issue": "#8997",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/a2aproject-a2a.json",
+        "indexed_revision": "16ba52690519bf55b9388e34d4db356efa88aa51",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 10,
+        "candidate_count": 4,
+        "filed_issue_count": 0,
+        "completeness_critic": "Exhaustive pinned tree and history map plus cutoff-filtered GitHub issues/PRs, current discussion denominator with historical limitation explicit, releases, roadmap/TODOs, Apache-2.0 provenance, FAK self-query, candidate decisions, and issue tracking; no dedicated in-tree tests directory and linked SDK repositories are explicit boundaries.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate --slurp repos/a2aproject/A2A/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh api --paginate --slurp repos/a2aproject/A2A/pulls?state=all&per_page=100&sort=created&direction=asc",
+              "gh api graphql repository(owner:a2aproject,name:A2A) discussions(first:100)"
+            ],
+            "note": "At the 2026-08-18T17:09:55Z pin: 756 issues and 908 PRs by creation cutoff; all 359 current discussions denominator-checked on 2026-08-25 because GitHub cannot reconstruct historical discussion state."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"agent interoperability protocol task state message artifact streaming cancellation push notification authorization agent card\"",
+              "fak capabilities \"A2A agent protocol task lifecycle context message artifact cancellation authorization streaming resubscribe\"",
+              "fak capabilities \"A2A AgentCard resubscribe task lifecycle artifact\""
+            ],
+            "note": "FAK owns lifecycle/cancellation/authorization/witness above transport and snapshot-before-resume internally; it does not claim a public A2A wire binding."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/a2aproject-a2a.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8997",
+              "https://github.com/anthony-chaudhary/fak/issues/8936"
+            ],
+            "note": "No new borrow issue: two candidates are owned, and binding/conformance work remains a separately scoped deferred spine."
+          }
+        ],
+        "issue_refs": [
+          "#8997",
+          "#8936"
+        ]
+      }
     },
     {
       "repository": "openai/codex",
