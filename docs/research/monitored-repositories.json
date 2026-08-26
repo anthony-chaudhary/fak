@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-25T21:18:01Z",
+  "updated_at": "2026-08-25T19:30:00-07:00",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -449,12 +449,74 @@
       "status": "studied",
       "priority": 20,
       "why": "Gemini CLI provider-clear behavior was studied at its typed lifecycle seam: clear, with new as an alias, ends the old session, mints a session id, and emits SessionStart(Clear). The provider session-reset guide records the integration consequence and exact upstream evidence.",
-      "last_checked": "2026-08-22",
-      "checked_revision": "e90c63fa158b8facd1872d32b34b07e516308f2b",
-      "stars_at_check": 106610,
-      "last_push_at_check": "2026-08-22T01:10:05Z",
+      "last_checked": "2026-08-25",
+      "checked_revision": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+      "stars_at_check": 106686,
+      "last_push_at_check": "2026-08-26T01:07:54Z",
       "study_note": "docs/integrations/provider-session-reset.md",
-      "refresh_issue": "#8999"
+      "refresh_issue": "#8999",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/google-gemini-gemini-cli.json",
+        "indexed_revision": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 18,
+        "candidate_count": 3,
+        "filed_issue_count": 0,
+        "completeness_critic": "exhaustive local tree map plus pinned GitHub history/release/issue/PR/discussion metadata, roadmap and license audit, FAK self-query, candidate adjudication, and issue tracking; skipped dependency/cache/control directories: .git, packages/core/vendor",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api graphql -f query=<repository issue/pullRequest/discussion/release aggregate query>",
+              "gh api repos/google-gemini/gemini-cli/commits/64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+              "gh api repos/google-gemini/gemini-cli/license",
+              "gh api repos/google-gemini/gemini-cli/releases?per_page=5"
+            ],
+            "note": "14,309 issues, 12,659 pull requests, 662 discussions, and 601 releases at the observation cutoff; detailed state counts and method are in the map."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"provider session reset clear new session lifecycle event\"",
+              "fak capabilities \"session checkpoint resume conversation persistence trace continuity\"",
+              "fak capabilities \"MCP OAuth trust policy extensions hooks lifecycle security\""
+            ],
+            "note": "Queries found FAK-owned portable-session, context-reuse, live-control, and capability-floor seams; no distinct unowned Gemini mechanism survived."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/google-gemini-gemini-cli.json#candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8999",
+              "https://github.com/anthony-chaudhary/fak/issues/8220"
+            ],
+            "note": "Provider adaptation is already owned; remaining live dogfood is already tracked, so no new borrow issue was filed."
+          }
+        ],
+        "issue_refs": [
+          "#8999",
+          "#8220"
+        ]
+      }
     },
     {
       "repository": "sgl-project/mini-sglang",
@@ -475,12 +537,80 @@
       "status": "studied",
       "priority": 22,
       "why": "FLA's MIT naive, chunked-prefill, and fused-recurrent GDN implementations were studied as an independent correctness oracle for fak's resident Qwen sequence work. The Python/PyTorch/Triton runtime and broad architecture catalog are excluded; packed multi-request state and graph capture remain watch items behind existing #8344 and #8391.",
-      "last_checked": "2026-08-22",
-      "checked_revision": "bc3b101dcb713ddc5bd8924b66754eb68b5ccf89",
-      "stars_at_check": 5600,
-      "last_push_at_check": "2026-08-22T12:16:00Z",
+      "last_checked": "2026-08-25",
+      "checked_revision": "8f787def80f6b6862f4f8b84581810d3db537c2d",
+      "stars_at_check": 5623,
+      "last_push_at_check": "2026-08-25T20:24:58Z",
       "study_note": "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md",
-      "refresh_issue": "#9001"
+      "refresh_issue": "#9001",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/fla-org-flash-linear-attention.json",
+        "indexed_revision": "8f787def80f6b6862f4f8b84581810d3db537c2d",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate repos/fla-org/flash-linear-attention/issues?state=all&per_page=100",
+              "gh pr list --repo fla-org/flash-linear-attention --state all --limit 100 --json number,title,state,createdAt,updatedAt,url",
+              "gh api --paginate repos/fla-org/flash-linear-attention/releases?per_page=100",
+              "gh api repos/fla-org/flash-linear-attention/milestones?state=all",
+              "gh api graphql repository discussions first 10"
+            ],
+            "note": "On 2026-08-25, audited 1,161 issues/PRs (90 open, 1,071 closed), 21 releases, three open milestones, and all six discussions."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "go run ./cmd/fak capabilities 'GDN gated delta net chunked prefill fused recurrent final state cu_seqlens resident sequence'",
+              "go run ./cmd/fak-dev index docs 'GDN gated delta net chunked prefill fused recurrent final state cu_seqlens resident sequence'",
+              "go run ./cmd/fak-dev index leaves 'GDN gated delta net chunked prefill fused recurrent final state cu_seqlens resident sequence'",
+              "go run ./cmd/fak capabilities 'packed variable length multi request recurrent state offsets graph capture GDN'",
+              "go run ./cmd/fak-dev index docs 'packed variable length multi request recurrent state offsets graph capture GDN'",
+              "go run ./cmd/fak-dev index leaves 'packed variable length multi request recurrent state offsets graph capture GDN'",
+              "go run ./cmd/fak capabilities 'Triton PyTorch linear attention architecture catalog TileLang ROCm AMD backend'"
+            ],
+            "note": "Self-query confirmed the resident GDN implementation and existing packed-state/graph follow-ons; it found no reason to import FLA runtime or backend machinery."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md#refreshed-candidate-matrix-and-fak-decisions"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9001",
+              "https://github.com/anthony-chaudhary/fak/issues/8344",
+              "https://github.com/anthony-chaudhary/fak/issues/8391"
+            ]
+          }
+        ],
+        "subsystem_count": 12,
+        "candidate_count": 5,
+        "filed_issue_count": 0,
+        "issue_refs": [
+          "#9001",
+          "#8344",
+          "#8391"
+        ],
+        "completeness_critic": "739/739 tracked paths mapped at the pinned revision; README/design/runtime/tests/history/releases/issues/PRs/discussions/roadmap/license and FAK self-query were read; every candidate has an adopt/adapt/monitor/reject decision and every actionable follow-on is tied to an existing issue."
+      }
     },
     {
       "repository": "flashinfer-ai/flashinfer",
@@ -488,12 +618,104 @@
       "status": "studied",
       "priority": 21,
       "why": "Production GPU-kernel control-plane analogue: reusable attention plans/workspace, correctness-gated profile tuning, JIT/artifact identity, and trace/replay mechanisms map directly to FAK compute HAL gaps.",
-      "last_checked": "2026-08-22",
+      "last_checked": "2026-08-25",
       "checked_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
       "stars_at_check": 6209,
       "last_push_at_check": "2026-08-22T11:34:52Z",
       "study_note": "docs/research/flashinfer-study-2026-08-22.md",
-      "refresh_issue": "#9002"
+      "refresh_issue": "#9002",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/flashinfer-ai-flashinfer.json",
+        "indexed_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 20,
+        "candidate_count": 5,
+        "filed_issue_count": 3,
+        "completeness_critic": "exhaustive pinned local-tree map plus full Git history and tags; paged GitHub issues, pull requests, releases, and all discussions through the pinned commit timestamp; distributed TODOs, license provenance, fak self-query, candidate adjudication, and issue read-back recorded under non_tree_study; skipped dependency/cache/control directories: .git",
+        "source_evidence": [
+          {
+            "class": "history_changelog_releases",
+            "evidence": [
+              "git rev-list --count fb28d7242b3506a2348265962041acc1fb56cca4",
+              "git tag --merged fb28d7242b3506a2348265962041acc1fb56cca4",
+              "gh api --paginate repos/flashinfer-ai/flashinfer/releases?per_page=100"
+            ],
+            "note": "2,850 commits, 311 merged tags, and 359 releases through the pinned timestamp; no checked-in changelog."
+          },
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate repos/flashinfer-ai/flashinfer/issues?state=all&per_page=100",
+              "gh pr list --repo flashinfer-ai/flashinfer --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:flashinfer-ai,name:flashinfer) discussions(first:100)"
+            ],
+            "note": "Pinned denominator: 1,211 issues, 3,434 pull requests, and all 24 discussions; states read back on 2026-08-25."
+          },
+          {
+            "class": "roadmap_todos",
+            "evidence": [
+              "docs/research/inventory/flashinfer-ai-flashinfer.json#non_tree_study.history_roadmap_license"
+            ],
+            "note": "No roadmap file; 408 TODO/FIXME lines in 170 runtime files plus the complete tracker ledger cover distributed planning evidence."
+          },
+          {
+            "class": "license_provenance",
+            "evidence": [
+              "./LICENSE",
+              "./NOTICE",
+              "licenses/LICENSE.cutlass.txt",
+              "licenses/LICENSE.flashattention3.txt",
+              "licenses/LICENSE.fmt.txt",
+              "licenses/LICENSE.spdlog.txt"
+            ],
+            "note": "Apache-2.0 repository with NVIDIA notice and bundled dependency licenses; no source copied into fak."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities reusable attention plan workspace lifecycle correctness gated profile tuning JIT artifact identity trace replay GPU kernels",
+              "fak capabilities FlashInfer cubin cache workspace plan replay profiler"
+            ],
+            "note": "Queries returned context/cache surfaces but no native compute-HAL substitute; existing issues #8607-#8609 remain the applicable gaps."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/flashinfer-ai-flashinfer.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9002",
+              "https://github.com/anthony-chaudhary/fak/issues/8607",
+              "https://github.com/anthony-chaudhary/fak/issues/8608",
+              "https://github.com/anthony-chaudhary/fak/issues/8609"
+            ],
+            "note": "GitHub read-back confirmed all three FlashInfer-derived follow-ons remain open; no duplicate follow-on was filed."
+          }
+        ],
+        "issue_refs": [
+          "#9002",
+          "#8607",
+          "#8608",
+          "#8609"
+        ]
+      }
     },
     {
       "repository": "SemiAnalysisAI/InferenceX",
@@ -506,7 +728,73 @@
       "stars_at_check": 1480,
       "last_push_at_check": "2026-08-24T18:19:19Z",
       "study_note": "docs/notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md",
-      "refresh_issue": "#9003"
+      "refresh_issue": "#9003",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/semianalysisai-inferencex.json",
+        "indexed_revision": "0b0138fd7de0a6f927f9769b19d594d01f586107",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 11,
+        "candidate_count": 5,
+        "filed_issue_count": 3,
+        "completeness_critic": "exhaustive local tree map plus pinned-cutoff GitHub issue, pull-request, discussion, release, history, roadmap/TODO, and license/provenance read-back; candidate-specific fak self-query, adjudication, and issue tracking are recorded under non_tree_study; skipped dependency/cache/control directories: .git",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh issue list --repo SemiAnalysisAI/InferenceX --state all --limit 1000 --json ...",
+              "gh api --paginate repos/SemiAnalysisAI/InferenceX/pulls?state=all&per_page=100",
+              "gh api repos/SemiAnalysisAI/InferenceX/discussions?per_page=100",
+              "gh api repos/SemiAnalysisAI/InferenceX/releases?per_page=100"
+            ],
+            "note": "Pinned-cutoff read-back: 389 issues, 2,299 pull requests, all 4 discussions, and the sole release."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"benchmark serving metrics receipt time to first token inter token latency power energy quality\"",
+              "fak capabilities \"artifact reuse ingestion integrity benchmark lineage source revision\"",
+              "fak capabilities \"agentic continuous inference client server lifecycle judge task success\""
+            ],
+            "note": "Candidate-specific self-query confirmed native receipt, artifact, routing, trajectory, and session-control surfaces; remaining applicable gaps are already tracked."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/semianalysisai-inferencex.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9003",
+              "https://github.com/anthony-chaudhary/fak/issues/8773",
+              "https://github.com/anthony-chaudhary/fak/issues/8774",
+              "https://github.com/anthony-chaudhary/fak/issues/8775"
+            ],
+            "note": "No novel unowned borrow survived; applicable findings remain deduplicated to the three existing open follow-ons."
+          }
+        ],
+        "issue_refs": [
+          "#9003",
+          "#8773",
+          "#8774",
+          "#8775"
+        ]
+      }
     },
     {
       "repository": "Mchicao/endless",
