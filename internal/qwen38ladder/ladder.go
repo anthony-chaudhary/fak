@@ -3,6 +3,7 @@
 package qwen38ladder
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -121,6 +122,9 @@ func Decode(r io.Reader) (Evidence, error) {
 	if len(e.Corpora) == 0 && e.CorpusSHA == "" {
 		return e, errors.New("corpus_sha256 is required for legacy evidence")
 	}
+	if err := validateLegacyResultCorpusIdentities(e); err != nil {
+		return e, err
+	}
 	if len(e.Corpora) > 0 {
 		if e.Confidence == nil {
 			return e, errors.New("confidence is required with corpora")
@@ -149,6 +153,9 @@ func hold(code, reason string, stage Stage) (Decision, error) {
 func Evaluate(e Evidence) (Decision, error) {
 	if len(e.Corpora) > 0 {
 		return evaluateMulti(e)
+	}
+	if err := validateLegacyResultCorpusIdentities(e); err != nil {
+		return Decision{}, err
 	}
 	if len(e.Results) > len(Stages) {
 		return Decision{}, errors.New("more results than ladder stages")
@@ -185,6 +192,27 @@ func Evaluate(e Evidence) (Decision, error) {
 	}
 	next := Stages[len(e.Results)]
 	return Decision{Verdict: "PROMOTE", NextStage: &next, Reason: "all cheaper stages passed; run the paired experiment at the next stage"}, nil
+}
+
+func validateLegacyResultCorpusIdentities(e Evidence) error {
+	if len(e.Corpora) > 0 || len(e.Results) == 0 {
+		return nil
+	}
+	annotated := 0
+	for i, result := range e.Results {
+		if result.CorpusSHA == "" {
+			continue
+		}
+		annotated++
+		decoded, err := hex.DecodeString(result.CorpusSHA)
+		if err != nil || len(decoded) != 32 {
+			return fmt.Errorf("result %d corpus_sha256 must be exactly 64 hexadecimal characters", i)
+		}
+	}
+	if annotated != 0 && annotated != len(e.Results) {
+		return errors.New("legacy result corpus_sha256 must be present for every result or none")
+	}
+	return nil
 }
 
 func evaluateMulti(e Evidence) (Decision, error) {

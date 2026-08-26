@@ -1,6 +1,12 @@
 package qwen38ladder
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -169,6 +175,104 @@ func TestDecodeAcceptsLegacyAndRequiresExplicitMultiCorpusConfidence(t *testing.
 	if _, err := Decode(strings.NewReader(multi)); err == nil || !strings.Contains(err.Error(), "confidence is required") {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+func TestPerResultCorpusIdentity(t *testing.T) {
+	witnessDir := filepath.Join("..", "..", "docs", "_witnesses")
+	evidencePath := filepath.Join(witnessDir, "issue-8623-qwen38-27b", "evidence-complete.json")
+	f, err := os.Open(evidencePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := Decode(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("decode committed evidence: %v", err)
+	}
+
+	sources := []struct {
+		stageID string
+		path    string
+	}{
+		{"smoke", filepath.Join(witnessDir, "issue-8629-qwen35-0.8b-valid-smoke", "raw-run.json")},
+		{"behavior", filepath.Join(witnessDir, "issue-8629-qwen35-0.8b-valid-smoke", "raw-run-2b.json")},
+		{"width", filepath.Join(witnessDir, "issue-8629-qwen35-0.8b-valid-smoke", "raw-run-4b.json")},
+		{"quality-proxy", filepath.Join(witnessDir, "issue-8630-qwen35-9b", "raw-run.json")},
+		{"scale-rehearsal", filepath.Join(witnessDir, "issue-8622-qwen35-27b", "raw-run.json")},
+		{"target", filepath.Join(witnessDir, "issue-8623-qwen38-27b", "raw-run.json")},
+	}
+	if len(e.Results) != len(sources) {
+		t.Fatalf("results=%d, source runs=%d", len(e.Results), len(sources))
+	}
+	for i, source := range sources {
+		var raw struct {
+			CorpusSHA string `json:"corpus_sha256"`
+		}
+		data, readErr := os.ReadFile(source.path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if decodeErr := json.Unmarshal(data, &raw); decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if e.Results[i].StageID != source.stageID || e.Results[i].CorpusSHA != raw.CorpusSHA {
+			t.Fatalf("result %d corpus identity = %s/%s, source = %s/%s", i, e.Results[i].StageID, e.Results[i].CorpusSHA, source.stageID, raw.CorpusSHA)
+		}
+	}
+
+	targetCorpus, err := os.ReadFile(filepath.Join(witnessDir, "issue-8623-qwen38-27b", "corpus.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetDigest := sha256.Sum256(targetCorpus)
+	targetSHA := hex.EncodeToString(targetDigest[:])
+	if err := requireResultCorpusIdentity(e, "target", targetSHA); err != nil {
+		t.Fatal(err)
+	}
+	decision, err := Evaluate(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded Decision
+	recordedOutput, err := os.ReadFile(filepath.Join(witnessDir, "issue-8623-qwen38-27b", "evaluator-output.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(recordedOutput, &recorded); err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != recorded.Verdict || decision.ImprovementPct != recorded.ImprovementPct || decision.Reason != recorded.Reason {
+		t.Fatalf("decision = %#v", decision)
+	}
+
+	t.Run("missing target binding", func(t *testing.T) {
+		mutated := e
+		mutated.Results = append([]Result(nil), e.Results...)
+		mutated.Results[len(mutated.Results)-1].CorpusSHA = ""
+		if _, err := Evaluate(mutated); err == nil || !strings.Contains(err.Error(), "every result or none") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("mismatched target binding", func(t *testing.T) {
+		mutated := e
+		mutated.Results = append([]Result(nil), e.Results...)
+		mutated.Results[len(mutated.Results)-1].CorpusSHA = strings.Repeat("f", 64)
+		if err := requireResultCorpusIdentity(mutated, "target", targetSHA); err == nil {
+			t.Fatal("mismatched target corpus identity was accepted")
+		}
+	})
+}
+
+func requireResultCorpusIdentity(e Evidence, stageID, expectedSHA string) error {
+	for _, result := range e.Results {
+		if result.StageID == stageID {
+			if result.CorpusSHA != expectedSHA {
+				return fmt.Errorf("%s corpus_sha256 = %q, want %q", stageID, result.CorpusSHA, expectedSHA)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("missing %s result", stageID)
 }
 
 func multiEvidence(stageCount int) Evidence {
