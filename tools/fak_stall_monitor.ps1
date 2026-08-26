@@ -104,9 +104,10 @@ if ($Install) {
   # InteractiveToken. The broker drains a typed durable spool and does no sensing,
   # policy, retry, or ownership work.
   $brokerSpool = Join-Path (Split-Path -Parent $Log) 'relaunch'
+  New-Item -ItemType Directory -Force -Path $brokerSpool -ErrorAction Stop | Out-Null
   $brokerArgs = "host-relaunch-broker --dir `"$brokerSpool`""
   $brokerAction = New-ScheduledTaskAction -Execute $fak -Argument $brokerArgs
-  $brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited
+  $brokerPrincipal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
   $brokerTrigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $brokerSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
   try {
@@ -118,7 +119,11 @@ if ($Install) {
   $broker = Get-ScheduledTask -TaskName 'FakHostRelaunchBroker' -ErrorAction Stop
   if ($watchdog.Principal.LogonType -ne 'S4U') { throw "FakStallMonitor principal is $($watchdog.Principal.LogonType), want S4U" }
   if ($broker.Principal.LogonType -ne 'InteractiveToken') { throw "FakHostRelaunchBroker principal is $($broker.Principal.LogonType), want InteractiveToken" }
-  if ($broker.Actions.Execute -ne $fak -or $broker.Actions.Arguments -notmatch '^host-relaunch-broker(?:\s|$)') { throw 'FakHostRelaunchBroker action read-back mismatch' }
+  if ($broker.Actions.Execute -ne $fak -or $broker.Actions.Arguments -ne $brokerArgs) { throw 'FakHostRelaunchBroker action read-back mismatch' }
+  if (-not (Test-Path -LiteralPath $broker.Actions.Execute -PathType Leaf)) { throw "FakHostRelaunchBroker executable is missing: $($broker.Actions.Execute)" }
+  if (-not (Test-Path -LiteralPath $brokerSpool -PathType Container)) { throw "FakHostRelaunchBroker spool is missing: $brokerSpool" }
+  $brokerInfo = Get-ScheduledTaskInfo -TaskName 'FakHostRelaunchBroker' -ErrorAction Stop
+  if ([uint32]$brokerInfo.LastTaskResult -eq 0x80070002) { throw 'FakHostRelaunchBroker last run failed: executable not found (0x80070002)' }
   Write-Host "[stall-mon] installed FakStallMonitor (AtStartup/S4U) + on-demand FakHostRelaunchBroker (InteractiveToken adapter)."
   Write-Host "[stall-mon] UNDO: Unregister-ScheduledTask -TaskName 'FakStallMonitor' -Confirm:`$false; Unregister-ScheduledTask -TaskName 'FakHostRelaunchBroker' -Confirm:`$false"
   return
