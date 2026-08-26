@@ -88,3 +88,9 @@ not fabricate a hardware witness.
 - [Nightrun](nightrun/README.md) — schedule and read recurring evidence.
 - [Backend selection](supported/backends.md) — choose model execution separately from the
   node that hosts it.
+
+### Anthony laptop (registered baseline)
+
+`anthony-laptop` is registered for offline, CPU, single-GPU CUDA, dataset, and single-user serving benchmarks. It is explicitly excluded from public serving, unattended overnight work, multi-GPU work, and datacenter-network measurements. `fak bench-loop fleet status --json` reports the registration and its latest comparable baseline.
+
+The authenticated route and raw evidence live behind the sanctioned private bridge; public coordinates are intentionally absent. The scrubbed three-trial receipt, rerun class, power/thermal preconditions, cleanup rules, and known measurement limitations are in [`docs/_witnesses/issue-8486-anthony-laptop/`](_witnesses/issue-8486-anthony-laptop/README.md). Authorized operators must use the current adjacent `fak-private` runbook rather than copying a route from public documentation.

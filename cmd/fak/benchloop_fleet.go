@@ -202,8 +202,9 @@ func runBenchFleetStatus(stdout, stderr io.Writer, argv []string) int {
 		Queued   int                    `json:"queued"`
 		Utility  benchloop.FleetUtility `json:"utility"`
 		Requests []benchFleetRequest    `json:"requests"`
+		Nodes    []benchloop.FleetNode  `json:"nodes"`
 	}
-	got := status{Schema: "fak.bench-loop.fleet-status.v1", Queue: filepath.ToSlash(queue)}
+	got := status{Schema: "fak.bench-loop.fleet-status.v1", Queue: filepath.ToSlash(queue), Nodes: benchloop.RegisteredFleetNodes()}
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue

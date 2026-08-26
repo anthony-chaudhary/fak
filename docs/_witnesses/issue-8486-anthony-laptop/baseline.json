@@ -1,0 +1,37 @@
+{
+  "schema": "fak.benchmark-node-baseline.v1",
+  "issue": 8486,
+  "captured_at": "2026-08-26",
+  "node": "anthony-laptop",
+  "route": {"class": "sanctioned-private-bridge", "authenticated_round_trip": true, "private_coordinates_omitted": true},
+  "inventory": {
+    "os": "Windows/amd64",
+    "cpu": "captured privately; public model string withheld",
+    "ram": "captured privately; public capacity withheld",
+    "gpu": "CUDA SM89; 8 GiB class",
+    "driver": "CUDA-capable; exact private inventory retained",
+    "power_mode": "AC power; performance mode",
+    "toolchain": "Go toolchain auto; canonical CUDA build",
+    "fak_source_revision": "a0eacd4f63dc92fac68d722de269cfe59acbdfc4"
+  },
+  "capabilities": ["offline", "cpu", "gpu", "dataset", "serving-single-user"],
+  "excluded": ["public-serving", "unattended-overnight", "multi-gpu", "datacenter-network"],
+  "benchmark": {
+    "workload": "Qwen2.5-3B-Instruct Q8_0 quantize-at-load; P32/D32; fak-native CUDA; require-non-reference",
+    "trials": 3,
+    "exit_codes": [0, 0, 0],
+    "load_seconds": [86.459, 189.551, 173.714],
+    "prefill_tok_s": [24.226, 17.448, 23.449],
+    "decode_tok_s": [38.769, 41.137, 41.411],
+    "mean_prefill_tok_s": 21.708,
+    "mean_decode_tok_s": 40.439,
+    "peak_vram_mib": 4838,
+    "minimum_free_vram_mib": 3114,
+    "peak_power_w": [58.51, 59.50, 59.38],
+    "peak_temp_c": [65, 71, 66],
+    "engine": "fak-in-kernel via compute HAL backend cuda",
+    "backend": "cuda/sm_89/approx"
+  },
+  "limitations": ["TTFT missing", "generated/quality output missing", "CUDA fallback count and identity unknown; tracked by #9121"],
+  "raw_evidence": "retained in the authorized private evidence store; public artifact is intentionally scrubbed"
+}

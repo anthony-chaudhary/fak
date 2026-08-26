@@ -667,3 +667,28 @@ func TestBenchFleetCatalogDoesNotRegressLastRun(t *testing.T) {
 		t.Fatalf("runs = %d, want 2", got.Machines["node-a"].Runs)
 	}
 }
+
+func TestBenchFleetStatusReportsRegisteredAnthonyLaptop(t *testing.T) {
+	root := t.TempDir()
+	var out, errOut bytes.Buffer
+	if code := runBenchFleetStatus(&out, &errOut, []string{"--workspace", root, "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, errOut.String())
+	}
+	var got struct {
+		Nodes []struct {
+			Name, State, Witness string
+			Baseline             *struct {
+				Trials int `json:"trials"`
+			} `json:"baseline"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Nodes) != 1 || got.Nodes[0].Name != "anthony-laptop" || got.Nodes[0].State != "registered" {
+		t.Fatalf("nodes=%#v", got.Nodes)
+	}
+	if got.Nodes[0].Baseline == nil || got.Nodes[0].Baseline.Trials != 3 || got.Nodes[0].Witness == "" {
+		t.Fatalf("node=%#v", got.Nodes[0])
+	}
+}
