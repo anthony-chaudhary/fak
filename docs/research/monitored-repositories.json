@@ -334,12 +334,79 @@
       "status": "studied",
       "priority": 16,
       "why": "Public plugin agents, coordinator workflows, advanced recovery recipes, release claims, and proprietary-license boundary were studied against fak's twelve-axis Ultracode orchestration contract. Public examples inspire composition, but do not replace fak leases, effect receipts, or independent witness.",
-      "last_checked": "2026-08-21",
-      "checked_revision": "16440d0f6ee8c47f34169687044b89eafa8b0f8d",
-      "stars_at_check": 142314,
-      "last_push_at_check": "2026-08-21T19:54:23Z",
+      "last_checked": "2026-08-25",
+      "checked_revision": "005c5dade90c2c59c88d819d8723e7b579addb5e",
+      "stars_at_check": 143015,
+      "last_push_at_check": "2026-08-25T22:31:52Z",
       "study_note": "docs/notes/CONCEPT-STUDY-ULTRACODE-WORKFLOWS-2026-08-21.md",
-      "refresh_issue": "#8995"
+      "refresh_issue": "#8995",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/anthropics-claude-code.json",
+        "indexed_revision": "005c5dade90c2c59c88d819d8723e7b579addb5e",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 10,
+        "candidate_count": 4,
+        "filed_issue_count": 0,
+        "completeness_critic": "Deterministic exhaustive local-tree map at the pinned revision plus dated GitHub counts and targeted issue/PR searches. The public repository is a plugin/example/documentation distribution, not the proprietary Claude Code runtime; discussions are disabled, tests are limited to public plugin scripts/examples, and those boundaries are explicit rather than inferred as absence.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api graphql repository(owner:anthropics,name:claude-code) issue/pullRequest/release/discussion totalCount and state counts",
+              "gh api search/issues for agent workflow, subagent, worktree, task resume, background agent, plugins, and hooks"
+            ],
+            "note": "Observed 86,934 issues, 1,276 pull requests, 199 releases, and zero discussions (disabled) on 2026-08-25; targeted searches sampled the orchestration/recovery seams without pretending every issue body is pinned tree content."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"bounded concurrent coding agent fleet leases independent witness reconciliation\"",
+              "fak capabilities \"agent task messaging cancellation resume recovery\"",
+              "fak capabilities \"plugins specialist agents workflow composition\"",
+              "fak index docs|leaves|verbs|claims \"ultracode workflow coordinator recovery claude code\""
+            ],
+            "note": "Capability queries plus lexical tree/index fallback classify the candidates as owned, owned-with-follow-ons, or present at a different license/runtime boundary."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/anthropics-claude-code.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8995",
+              "#8168",
+              "#8334",
+              "#8488",
+              "#8490"
+            ],
+            "note": "No duplicate borrow issue was filed; the existing follow-ons remain the complete actionable set."
+          }
+        ],
+        "issue_refs": [
+          "#8995",
+          "#8168",
+          "#8334",
+          "#8488",
+          "#8490"
+        ]
+      }
     },
     {
       "repository": "langchain-ai/langgraph",
