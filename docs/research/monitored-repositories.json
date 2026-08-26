@@ -412,12 +412,80 @@
       "status": "studied",
       "priority": 22,
       "why": "FLA's MIT naive, chunked-prefill, and fused-recurrent GDN implementations were studied as an independent correctness oracle for fak's resident Qwen sequence work. The Python/PyTorch/Triton runtime and broad architecture catalog are excluded; packed multi-request state and graph capture remain watch items behind existing #8344 and #8391.",
-      "last_checked": "2026-08-22",
-      "checked_revision": "bc3b101dcb713ddc5bd8924b66754eb68b5ccf89",
-      "stars_at_check": 5600,
-      "last_push_at_check": "2026-08-22T12:16:00Z",
+      "last_checked": "2026-08-25",
+      "checked_revision": "8f787def80f6b6862f4f8b84581810d3db537c2d",
+      "stars_at_check": 5623,
+      "last_push_at_check": "2026-08-25T20:24:58Z",
       "study_note": "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md",
-      "refresh_issue": "#9001"
+      "refresh_issue": "#9001",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/fla-org-flash-linear-attention.json",
+        "indexed_revision": "8f787def80f6b6862f4f8b84581810d3db537c2d",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate repos/fla-org/flash-linear-attention/issues?state=all&per_page=100",
+              "gh pr list --repo fla-org/flash-linear-attention --state all --limit 100 --json number,title,state,createdAt,updatedAt,url",
+              "gh api --paginate repos/fla-org/flash-linear-attention/releases?per_page=100",
+              "gh api repos/fla-org/flash-linear-attention/milestones?state=all",
+              "gh api graphql repository discussions first 10"
+            ],
+            "note": "On 2026-08-25, audited 1,161 issues/PRs (90 open, 1,071 closed), 21 releases, three open milestones, and all six discussions."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "go run ./cmd/fak capabilities 'GDN gated delta net chunked prefill fused recurrent final state cu_seqlens resident sequence'",
+              "go run ./cmd/fak-dev index docs 'GDN gated delta net chunked prefill fused recurrent final state cu_seqlens resident sequence'",
+              "go run ./cmd/fak-dev index leaves 'GDN gated delta net chunked prefill fused recurrent final state cu_seqlens resident sequence'",
+              "go run ./cmd/fak capabilities 'packed variable length multi request recurrent state offsets graph capture GDN'",
+              "go run ./cmd/fak-dev index docs 'packed variable length multi request recurrent state offsets graph capture GDN'",
+              "go run ./cmd/fak-dev index leaves 'packed variable length multi request recurrent state offsets graph capture GDN'",
+              "go run ./cmd/fak capabilities 'Triton PyTorch linear attention architecture catalog TileLang ROCm AMD backend'"
+            ],
+            "note": "Self-query confirmed the resident GDN implementation and existing packed-state/graph follow-ons; it found no reason to import FLA runtime or backend machinery."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md#refreshed-candidate-matrix-and-fak-decisions"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9001",
+              "https://github.com/anthony-chaudhary/fak/issues/8344",
+              "https://github.com/anthony-chaudhary/fak/issues/8391"
+            ]
+          }
+        ],
+        "subsystem_count": 12,
+        "candidate_count": 5,
+        "filed_issue_count": 0,
+        "issue_refs": [
+          "#9001",
+          "#8344",
+          "#8391"
+        ],
+        "completeness_critic": "739/739 tracked paths mapped at the pinned revision; README/design/runtime/tests/history/releases/issues/PRs/discussions/roadmap/license and FAK self-query were read; every candidate has an adopt/adapt/monitor/reject decision and every actionable follow-on is tied to an existing issue."
+      }
     },
     {
       "repository": "flashinfer-ai/flashinfer",

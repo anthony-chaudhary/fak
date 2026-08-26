@@ -240,3 +240,47 @@ Primary code and project sources, all observed 2026-08-22:
 FAK sources and backlog were read from the current `main` checkout and GitHub state on
 2026-08-22. Module evidence is cited as `internal/compute@r2+g8ce4659e59`; #8344 and #8391
 remain the authoritative open work items.
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue [#9001](https://github.com/anthony-chaudhary/fak/issues/9001) refreshes the
+study denominator at upstream revision
+`8f787def80f6b6862f4f8b84581810d3db537c2d` (FLA 0.6.0). The deterministic map
+is [`docs/research/inventory/fla-org-flash-linear-attention.json`](../research/inventory/fla-org-flash-linear-attention.json):
+739 tracked files in 153 directories, 7,744,131 bytes and 193,783 text lines,
+partitioned into 12 top-level subsystems. Its completeness critic reports
+739/739 Git paths indexed, with zero missing and zero untracked-at-revision paths.
+
+### Source-class audit
+
+| Source class | Pinned evidence and result |
+|---|---|
+| README/docs | `README.md`, `INSTALL.md`, `CONTRIBUTING.md`, operation READMEs, and the 37 documentation-class files in the map describe the supported architecture/backend surface. |
+| Architecture/design | `.github/ISSUE_TEMPLATE/rfc.yml`, the operation split under `fla/ops/`, model integrations under `fla/models/`, and the naive/chunked/fused-recurrent schedule boundary were inspected. There is no separate architecture document. |
+| Runtime source | All 574 runtime-class files are in the map. The refresh re-read GDN/GDN2 recurrent and chunked paths, Qwen3-Next integration, backend dispatch, cache/state handling, and the post-study Ascend additions. |
+| Tests/fixtures | All 121 test-class files are mapped. `tests/ops/test_gdn.py`, `tests/ops/test_gdn2.py`, context-parallel tests, and benchmark verification preserve the useful correctness ladder. |
+| History/changelog/releases | Git history from the former pin `bc3b101d...` to the new pin has seven commits (1,142 insertions/513 deletions across 31 files); GitHub exposes 21 releases, headed by 0.6.0 on 2026-08-25. The delta is chiefly Ascend, GDN2 GVA, DPLR, docs, and release metadata; it does not overturn the prior GDN decision. |
+| Issues/PRs/discussions | The paginated GitHub audit covered 1,161 issue/PR records: 42 open and 343 closed issues, 48 open and 728 closed PRs. It also covered all six discussions. Recent merged work includes backend lookup caching (#996), dense no-cache short-convolution fusion (#972), and a correctness-gated kernel optimization loop (#959); open #890 records a TileLang race rather than evidence for importing that stack. |
+| Roadmap/TODOs | GitHub has three open milestones: “FLA v1.0.0 release” (4 open/9 closed), “Native varlen support” (2/2), and “Enhanced testing” (0/1, overdue). Tree TODOs and open issues reinforce that varlen, backend coverage, and kernel hardening remain active rather than stable contracts. |
+| License/provenance | `LICENSE` remains MIT; `pyproject.toml` declares MIT and Python >=3.10. FAK may study or adapt algorithms with attribution, but no upstream source is copied by this refresh. |
+| FAK self-query | `fak capabilities` plus `fak-dev index docs|leaves` were queried for GDN schedules/state, packed varlen multi-request state and graph capture, and Triton/PyTorch/TileLang/ROCm backends. Results confirm FAK's resident GDN spine and the existing #8344/#8391 gaps; they do not justify a second runtime. |
+| Candidate matrix | The five dispositions below cover every mechanism that survived the source audit. |
+| Completeness critic | The generated critic is exact for the pinned tree (739/739); this section supplies the non-tree denominator. No source class remains only asserted. |
+| Issue tracking | This denominator refresh is #9001. Actionable packed-state and graph-capture work remains owned by #8344 and #8391; no duplicate follow-on is filed. |
+
+### Refreshed candidate matrix and FAK decisions
+
+| Candidate | FAK decision | Evidence-backed reason | Follow-on |
+|---|---|---|---|
+| Naive -> chunked-prefill -> fused-recurrent GDN correctness ladder | **ADOPT as oracle** | The three schedules and tests remain the clearest independent cross-check for FAK-native resident GDN semantics. | Keep using pinned equations/tests as diagnosis evidence; copy no Python/Triton runtime. |
+| Explicit `initial_state` / `output_final_state` recurrent-state contract | **ADAPT, FAK-native** | It matches FAK's resident sequence-state boundary while leaving allocation, scheduling, and ownership with FAK. | Existing packed multi-request/state-layout work stays in #8344. |
+| Packed variable-length execution (`cu_seqlens`) and native-varlen roadmap | **MONITOR then adapt** | FLA's open milestone shows the contract is still moving; FAK needs request isolation and deterministic offsets, not API parity. | #8344 owns the witnessed FAK-native design. |
+| Capture-safe fixed buffers and backend-dispatch lookup caching | **MONITOR** | Recent history makes dispatch/capture discipline concrete, but the transferable invariant is stable allocation/selection, not FLA's Python dispatch implementation. | #8391 owns graph-capture proof; reconsider only with a native receipt. |
+| PyTorch/Triton/TileLang/ROCm/Ascend runtime and broad model catalog | **REJECT** | Importing it would violate the fak-native execution invariant, duplicate runtime ownership, and expand the dependency/validation envelope far beyond the GDN problem. | None; benchmark/reference use must stay explicitly selected. |
+
+### Completeness-critic verdict
+
+The refresh found no hidden candidate that changes the original verdict. The upstream
+0.6.0 delta expands and hardens accelerator backends, while FAK's useful borrowing seam
+remains the schedule/state **contract** and its correctness witnesses. All actionable gaps
+are already represented by #8344 or #8391, so #9001 creates no new follow-on issue.
