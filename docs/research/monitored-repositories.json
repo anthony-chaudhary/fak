@@ -23,14 +23,55 @@
           "runtime_source",
           "tests_fixtures",
           "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
           "roadmap_todos",
           "license_provenance",
-          "completeness_critic"
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
         ],
         "subsystem_count": 18,
-        "candidate_count": 0,
+        "candidate_count": 4,
         "filed_issue_count": 0,
-        "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+        "completeness_critic": "exhaustive local tree map plus pinned-timestamp GitHub issue, pull-request, and complete discussion read-back; fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped dependency/cache/control directories: .git",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate --slurp repos/ruvnet/ruflo/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo ruvnet/ruflo --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:ruvnet,name:ruflo) discussions(first:100)"
+            ],
+            "note": "Paged GitHub read-back through the pinned commit timestamp: 1,613 issues, 1,291 pull requests, and all 86 discussions."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"power of two choices mesh load balancing scheduler routing\"",
+              "fak capabilities \"memory retrieval BM25 semantic fusion evaluation benchmark\"",
+              "fak capabilities \"persisted swarm health liveness lease worker status telemetry\"",
+              "fak capabilities \"doctor environment drift runtime dependency health preflight\""
+            ],
+            "note": "Candidate-specific fak queries returned native routing, fleet-health, and capability-floor surfaces; the retrieval-fusion query returned no exact capability and was adjudicated stay-minimal rather than inventing a gap."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/ruvnet-ruflo.json#candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8931"
+            ],
+            "note": "All candidates were rejected, stay-minimal, or already owned; no borrow issue survived."
+          }
+        ],
+        "issue_refs": [
+          "#8931"
+        ]
       }
     },
     {
