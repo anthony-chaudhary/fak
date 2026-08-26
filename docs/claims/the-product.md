@@ -1,3 +1,8 @@
+---
+title: "The fak product: witnessed agent-kernel capabilities"
+description: "This claim ledger records fak's shipped product surfaces, including lock-aware Git maintenance, issue fan-out, and bounded micro-context execution."
+---
+
 # The product
 
 [← Claims index](../../CLAIMS.md)
@@ -5,7 +10,7 @@
 
 - [SHIPPED] **Daily lock-aware Git hygiene** — `fak git daily --selfcheck` performs a deterministic, non-destructive maintenance pass that reports stale Git lock files without deleting them, and the registered daily cron path runs the same command; witnessed by `cmd/fak/git_daily_test.go` and `internal/gitdaily/gitdaily_test.go`.
 - [SHIPPED] **Spine-first issue fan-out planner** — `fak-dev issue fanout` expands one witnessed working spine into a bounded set of full-contract QA, dogfood, product, observability, integration, documentation, and release candidates; it refuses a missing spine witness and emits stable marker keys for downstream deduplication. Witness: `go test ./internal/issuefanout`; `fak-dev issue fanout --title probe --leaf issuefanout --spine 5b8f0bd1 --max 3 --json`; live-repository dogfood commit `2a7e67c90d` (#2514); durable invocation-ledger commit `3d58f944eb` (#2515).
-- [SHIPPED] fak provides a bounded micro-context fabric with one immutable agent base: the synthetic floor schedules 10,000 logical contexts, controlled-kernel witnesses complete 100 and 1,000 real-model contexts, and the cache-observable S2b fixture reconciles 4,859 reused prompt tokens with endpoint-native counters. The 10,000 real-model soak remains tracked separately; logical contexts are not physical model slots. ([research contract](docs/research/micro-context-fabrics.md), [S2b witness](docs/research/micro-context-s2b-kernel-cache-ab.md))
+- [SHIPPED] fak provides a bounded micro-context fabric with one immutable agent base: the synthetic floor schedules 10,000 logical contexts, controlled-kernel witnesses complete 100 and 1,000 real-model contexts, and the cache-observable S2b fixture reconciles 4,859 reused prompt tokens with endpoint-native counters. The 10,000 real-model soak remains tracked separately; logical contexts are not physical model slots. ([research contract](../research/micro-context-fabrics.md), [S2b witness](../research/micro-context-s2b-kernel-cache-ab.md))
 
 - [SHIPPED] The gateway samples model-output prose into a bounded, non-blocking shadow queue and counts shared `internal/negframe.Classify` findings as `fak_negframe_output_negatives_total{surface="model_output"}` without rewriting or delaying response bytes; queue saturation drops telemetry and increments a labeled drop counter. Witness: `go test ./internal/gateway -run TestOutputNegation -count=1` (`TestOutputNegationCounter`, `TestOutputNegationAuditReturnsBeforeClassification`).
 - [STUB] Full-stream model-output negation auditing remains intentionally unwired: #3567 ships sampled observe-only telemetry, not an inline full-stream classifier or output rewriter.
@@ -17,4 +22,3 @@
 - [SHIPPED] Operator-heaviness scorecard: `fak operator heaviness` grades how hard the repo feels to drive from the top-level verb surface, front-door `fak guard` flag count, structured refusal vocabulary, doc-map discoverability, and the in-product appeal channel; the control-pane payload exposes hard `heaviness_debt` plus continual `heaviness_pressure`, so humans can track cognitive load drift without turning every soft signal into a page. Witness: `.\test.ps1 ./internal/heavinessscore`; `.\test.ps1 -run OperatorHeaviness ./cmd/fak`.
 - [SHIPPED] Human operator effectiveness is now a first-class ongoing program: `internal/worktype` declares `human-operator-effectiveness` as never "done", `docs/human-operator-effectiveness.md` names its operating rule, and `fak program report` tracks its first deterministic frontier signal from operator-heaviness lightness (`max(0, 100 - heaviness_pressure)`, forced to 0 on hard `heaviness_debt`) beside kernel and cache programs. Witness: `.\test.ps1 ./internal/worktype`; `.\test.ps1 ./internal/programreport`; `.\test.ps1 -run ProgramReport ./cmd/fak`.
 - [SHIPPED] The whole module passes the Go data-race detector with **zero data races**, enforced by the `race-detector` CI job on every push/PR. `-race` needs cgo + a C compiler (absent on the Windows dev box: `CGO_ENABLED=0`, no gcc — run it via WSL/Linux/macOS or CI). Witness: `go test -race -count=1 -timeout=25m ./...` exit 0, 0 `DATA RACE`; `.github/workflows/ci.yml` (race-detector job); `docs/testing/race-detector.md` (E-001 / issue #12).
-

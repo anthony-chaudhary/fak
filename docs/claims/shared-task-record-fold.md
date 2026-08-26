@@ -1,3 +1,8 @@
+---
+title: "fak shared task record fold"
+description: "sharedtask applies revisioned task patches, auto-merges commuting edits, returns typed conflicts, publishes accepted events, and filters scoped read views."
+---
+
 # Shared task record fold
 
 [← Claims index](../../CLAIMS.md)
@@ -8,4 +13,3 @@
 - [SHIPPED] `internal/sharedtask` has in-process live reader handshakes for shared task adapters: `SubscribeView` keeps the raw task-topic subscription plus current scoped `TaskView`, while `ScopedEventTopic` / `PublishEventScoped` / `ApplyAndPublishScoped` / `SubscribeScopedView` partition future accepted event rows by reader max-scope, so a tenant-scoped event does not land in a fleet-scoped inbox; missing tasks cancel the subscription, and private/quarantined event bodies are still refused by the `a2achan` floor. This is live in-process collaboration plumbing, not durable cross-process delivery. Witness: `go test ./internal/sharedtask` (`TestSubscribeViewReturnsScopedSnapshotAndFutureEvents`, `TestSubscribeViewMissingTaskCancelsSubscription`, `TestPublishEventScopedFiltersReaderTopics`, `TestPublishEventScopedRefusesPrivateOrQuarantinedBody`, `TestApplyAndPublishScopedUsesReaderScopeTopics`, `TestSubscribeScopedViewMissingTaskCancelsSubscription`).
 - [SHIPPED] `internal/sharedtask` has a portable materialized journal for one task: `Store.Journal` exports the initial record plus each accepted event paired with the post-event record snapshot, `Journal.Verify` checks schema/task/rev/event-chain/digest integrity, and `LoadJournal` restores current state and accepted events into a fresh store. This is snapshot-based replay, not a claim that raw event rows alone rebuild state, and it is not a hosted durable task service. Witness: `go test ./internal/sharedtask` (`TestJournalRoundTripRestoresCurrentRecordAndEvents`).
 - [SHIPPED] The shared task contract has executable docs and fixtures: `internal/sharedtask/contract.go` (the Go port of the retired `tools/shared_task_contract.py`) validates JSON examples in `docs/shared-task-record-contract.md`, validates the mixed fixture lifecycle in `examples/shared-task-record/`, and validates non-acceptance collaboration verdict bodies in `examples/shared-task-record-verdicts/`. Witness: `go test ./internal/sharedtask -run TestContract` (`TestContractDocExamplesValidate`, `TestContractSequenceFixtureValidates`, `TestContractVerdictsFixtureValidates`), pinning the exact per-schema fixture counts captured from the Python validator at port time.
-

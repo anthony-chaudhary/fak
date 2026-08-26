@@ -1,3 +1,8 @@
+---
+title: "Bounded microagents construct harnesses in fak"
+description: "microharnessdemo composes three bounded child-task patterns and proves receipt-only root context; it does not claim the production microagent host is shipped."
+---
+
 # Bounded microagents construct harnesses (`cmd/microharnessdemo`)
 
 [← Claims index](../../CLAIMS.md)
