@@ -107,6 +107,87 @@ func TestJoinDarwinMemorySnapshotKeepsRootAndProbeFailuresFatal(t *testing.T) {
 	}
 }
 
+func TestCollectDarwinMemorySnapshotRecollectsStartRace(t *testing.T) {
+	root := Proc{PID: 100, PPID: IntPtr(1), Name: "root", WSMB: IntPtr(11)}
+	child := Proc{PID: 101, PPID: IntPtr(100), Name: "child", WSMB: IntPtr(7)}
+	censusCalls := 0
+	relationCalls := 0
+	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(100, func() ([]Proc, string) {
+		censusCalls++
+		if censusCalls == 1 {
+			return []Proc{root}, ""
+		}
+		return []Proc{root, child}, ""
+	}, func() ([]Proc, string) {
+		relationCalls++
+		return []Proc{root, child}, ""
+	}, func(pid int) (bool, error) {
+		if pid != child.PID {
+			t.Fatalf("unexpected liveness probe pid=%d", pid)
+		}
+		return true, nil
+	})
+	if detail != "" {
+		t.Fatalf("start race was not reconciled: detail=%q snapshot=%+v", detail, snapshot)
+	}
+	if censusCalls != 2 || relationCalls != 2 {
+		t.Fatalf("collections census=%d relations=%d, want one bounded recollection", censusCalls, relationCalls)
+	}
+	if snapshot.TreeBytes != 18<<20 || len(snapshot.Processes) != 2 || snapshot.Processes[1].PID != child.PID {
+		t.Fatalf("reconciled snapshot=%+v", snapshot)
+	}
+}
+
+func TestCollectDarwinMemorySnapshotPersistentMissingRowsFailClosed(t *testing.T) {
+	root := Proc{PID: 100, PPID: IntPtr(1), Name: "root", WSMB: IntPtr(11)}
+	child := Proc{PID: 101, PPID: IntPtr(100), Name: "child", WSMB: IntPtr(7)}
+	for _, tc := range []struct {
+		name       string
+		census     []Proc
+		wantDetail string
+	}{
+		{name: "live root", census: []Proc{child}, wantDetail: "owned pids missing from rss census: [100]"},
+		{name: "live descendant", census: []Proc{root}, wantDetail: "owned pids missing from rss census: [101]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			censusCalls := 0
+			relationCalls := 0
+			snapshot, detail := collectDarwinMemorySnapshotWithCollectors(100, func() ([]Proc, string) {
+				censusCalls++
+				return tc.census, ""
+			}, func() ([]Proc, string) {
+				relationCalls++
+				return []Proc{root, child}, ""
+			}, func(int) (bool, error) { return true, nil })
+			if !strings.Contains(detail, tc.wantDetail) {
+				t.Fatalf("persistent missing row detail=%q snapshot=%+v", detail, snapshot)
+			}
+			if censusCalls != darwinMemorySnapshotAttempts || relationCalls != darwinMemorySnapshotAttempts {
+				t.Fatalf("collections census=%d relations=%d, want bounded attempts=%d", censusCalls, relationCalls, darwinMemorySnapshotAttempts)
+			}
+		})
+	}
+}
+
+func TestCollectDarwinMemorySnapshotCollectorErrorsDoNotRetry(t *testing.T) {
+	root := Proc{PID: 100, PPID: IntPtr(1), Name: "root", WSMB: IntPtr(11)}
+	censusCalls := 0
+	relationCalls := 0
+	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(100, func() ([]Proc, string) {
+		censusCalls++
+		return nil, "rss collector failed"
+	}, func() ([]Proc, string) {
+		relationCalls++
+		return []Proc{root}, ""
+	}, func(int) (bool, error) { return true, nil })
+	if !strings.Contains(detail, "rss collector failed") || !strings.Contains(detail, "owned pids missing from rss census: [100]") {
+		t.Fatalf("collector failure lost fail-closed detail=%q snapshot=%+v", detail, snapshot)
+	}
+	if censusCalls != 1 || relationCalls != 1 {
+		t.Fatalf("collector failure retried: census=%d relations=%d", censusCalls, relationCalls)
+	}
+}
+
 func TestCollectMemorySnapshotOwnProcessUsesRSS(t *testing.T) {
 	child := exec.Command("sleep", "5")
 	if err := child.Start(); err != nil {
