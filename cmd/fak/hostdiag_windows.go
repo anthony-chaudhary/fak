@@ -58,12 +58,12 @@ $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='A
   $app=[string]$fields.AppName
   if($app -ieq 'pwsh.exe' -or $app -ieq 'powershell.exe' -or $app -ieq 'explorer.exe'){
     $fault=[pscustomobject]@{app_version=[string]$fields.AppVersion;module=[string]$fields.ModuleName;module_version=[string]$fields.ModuleVersion;exception_code=[string]$fields.ExceptionCode;fault_offset=[string]$fields.FaultingOffset}
-    $pid=0; if([string]$fields.ProcessId -match '^0x([0-9a-f]+)$'){ $pid=[Convert]::ToInt32($Matches[1],16) }
+    $processId=0; if([string]$fields.ProcessId -match '^0x([0-9a-f]+)$'){ $processId=[Convert]::ToInt32($Matches[1],16) }
     $created=0; if([string]$fields.ProcessCreationTime -match '^0x([0-9a-f]+)$'){ $created=[DateTimeOffset]::FromFileTime([Convert]::ToInt64($Matches[1],16)).ToUnixTimeMilliseconds() }
     if($app -ieq 'explorer.exe'){
-      [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='WINDOWS_SHELL_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;process_id=$pid;process_start_ms=$created;application_fault=$fault}
+      [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='WINDOWS_SHELL_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;process_id=$processId;process_start_ms=$created;application_fault=$fault}
     } else {
-      [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='POWERSHELL_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;process_id=$pid;process_start_ms=$created;application_fault=$fault;message=[string]$_.Message}
+      [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='POWERSHELL_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;process_id=$processId;process_start_ms=$created;application_fault=$fault;message=[string]$_.Message}
     }
   }
 })

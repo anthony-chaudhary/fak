@@ -9,6 +9,14 @@ import (
 	"testing"
 )
 
+func TestHostdiagWindowsCollectorAvoidsReadOnlyPIDVariable(t *testing.T) {
+	if strings.Contains(hostdiagEventPS, "$pid=") || strings.Contains(hostdiagEventPS, "process_id=$pid") {
+		t.Fatal("collector assigns PowerShell's read-only $PID automatic variable")
+	}
+	if !strings.Contains(hostdiagEventPS, "$processId=0") || !strings.Contains(hostdiagEventPS, "process_id=$processId") {
+		t.Fatal("collector does not use bounded processId local")
+	}
+}
 func TestHostdiagWindowsCollectorParses(t *testing.T) {
 	script := strings.Replace(hostdiagEventPS, "__MILLIS__", "60000", 1)
 	command := `$source=[Console]::In.ReadToEnd(); $errors=$null; [System.Management.Automation.Language.Parser]::ParseInput($source,[ref]$null,[ref]$errors)>$null; if($errors.Count){$errors|ForEach-Object{$_.Message}; exit 1}`
