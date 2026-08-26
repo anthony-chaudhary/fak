@@ -699,6 +699,7 @@ var tier = map[string]int{
 	"codexsession":               3, // local Codex app-server adapter projected into the public harness protocol (#8736).
 	"hostdiag":                   3,
 	"shellprov":                  1, // stdlib-only privacy-safe receipt primitive for fak-owned shell launch identity (#9086).
+	"qwenworkbudget":             5, // campaign-boundary adapter over canonical trajectory audit rollups and typed Qwen amplification policy; imports trajectory(4).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
