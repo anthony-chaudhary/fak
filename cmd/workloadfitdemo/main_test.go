@@ -4,6 +4,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/cmd/internal/democapture"
 )
 
 func TestSelfcheck(t *testing.T) {
@@ -15,5 +17,8 @@ func TestSelfcheck(t *testing.T) {
 		if !strings.Contains(string(out), want) {
 			t.Fatalf("missing %q\n%s", want, out)
 		}
+	}
+	if err := democapture.MatchMarkdown("EXAMPLE-OUTPUT.md", out); err != nil {
+		t.Fatal(err)
 	}
 }

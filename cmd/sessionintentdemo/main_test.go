@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/cmd/internal/democapture"
 )
 
 func TestSelfcheckCapturesDistinctEffortSemantics(t *testing.T) {
@@ -15,5 +17,8 @@ func TestSelfcheckCapturesDistinctEffortSemantics(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q in %s", want, out.String())
 		}
+	}
+	if err := democapture.MatchMarkdown("EXAMPLE-OUTPUT.md", out.Bytes()); err != nil {
+		t.Fatal(err)
 	}
 }
