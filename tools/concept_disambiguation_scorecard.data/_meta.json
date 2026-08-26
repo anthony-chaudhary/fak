@@ -12742,6 +12742,21 @@
           "category": "incidental",
           "reason": "Enum label for deterministic study-import ledger disposition; it is not a planning concept.",
           "token": "ImportCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Promotion ladder receipt field naming an immutable environment digest; not a new planning concept.",
+          "token": "CandidateEnvironmentSHA"
+        },
+        {
+          "category": "incidental",
+          "reason": "JSON spelling of the immutable promotion-ladder environment digest; not a new planning concept.",
+          "token": "candidate_environment_sha256"
+        },
+        {
+          "category": "incidental",
+          "reason": "Promotion-ladder evidence sample collection field; not a new planning concept.",
+          "token": "CandidateSamples"
         }
       ],
       "exclude": [
@@ -12759,12 +12774,14 @@
         "BuildSweepPlan",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
+        "CandidateEnvironmentSHA",
         "CandidateMeanTokensPerS",
         "CandidateOutputNMSE",
         "CandidatePassed",
         "CandidateResult",
         "CandidateRevision",
         "CandidateRuntimeSHA",
+        "CandidateSamples",
         "CandidateTaskAccuracy",
         "Candidates",
         "DecodeInterleavePlan",
@@ -12860,6 +12877,7 @@
         "candidatePaths",
         "candidateRate",
         "candidateReport",
+        "candidate_environment_sha256",
         "candidate_evaluations",
         "candidate_mean_tokens_per_second",
         "candidate_requires_auth_relevance",
