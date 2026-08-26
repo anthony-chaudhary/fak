@@ -1,0 +1,9 @@
+{
+  "schema":"fak.ultracode.conservation-report.v1",
+  "verdict":"ENABLE",
+  "reason":"all full-context tokens have one authoritative accounting owner",
+  "baseline_tokens":1000,
+  "by_class":{"prefix_read":373,"scoped_away":627},
+  "claimed_savings":1000,
+  "conserved":true
+}
