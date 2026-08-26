@@ -7,7 +7,7 @@
 # --probe=false, and every `fak guard` run is stopped by design at a gate (or by an
 # --api-key-env that is deliberately unset) BEFORE any gateway binds, any child
 # spawns, or any credential is read. No key, no model, no GPU, no network.
-set -uo pipefail   # deliberately NOT -e: most witnesses assert on a NON-zero exit
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
@@ -109,8 +109,8 @@ echo "== 3/7  the no-network signal: a sibling runtime knows something fak does 
 # the platform default IS the "works in my shell, degrades inside fak" bug.
 SIB="${CA:-$TMP/corp-root.pem}"
 [ -f "$SIB" ] || printf '%s\n' "-----BEGIN CERTIFICATE-----" "(placeholder)" "-----END CERTIFICATE-----" >"$SIB"
-"${CLEAN[@]}" AWS_CA_BUNDLE="$(hostpath "$SIB")" "$FAK_BIN" doctor trust --probe=false >"$OUT" 2>&1
-code=$?
+code=0
+"${CLEAN[@]}" AWS_CA_BUNDLE="$(hostpath "$SIB")" "$FAK_BIN" doctor trust --probe=false >"$OUT" 2>&1 || code=$?
 cat "$OUT"
 expect_exit 1 "$code" "a finding exits 1, so CI can route on it"
 expect_text "sibling-trust-vars" "the sibling row"
@@ -124,8 +124,8 @@ echo "== 4/7  a declared bundle that does not load: UPSTREAM_TRUST_UNVERIFIED ==
 # store and failing later on a chain nothing in the error names.
 NOT_PEM="$TMP/not-a-pem.txt"
 echo "Hi, please find the root CA attached." >"$NOT_PEM"
-"${CLEAN[@]}" FAK_CA_BUNDLE="$(hostpath "$NOT_PEM")" "$FAK_BIN" guard "${GUARD_STOP[@]}" -- claude >"$OUT" 2>&1
-code=$?
+code=0
+"${CLEAN[@]}" FAK_CA_BUNDLE="$(hostpath "$NOT_PEM")" "$FAK_BIN" guard "${GUARD_STOP[@]}" -- claude >"$OUT" 2>&1 || code=$?
 cat "$OUT"
 expect_exit 2 "$code" "refused before the gateway binds or the child spawns"
 expect_text "reason: UPSTREAM_TRUST_UNVERIFIED" "the closed-vocabulary token"
@@ -138,8 +138,8 @@ echo "== 5/7  a request-signed cloud upstream: UPSTREAM_UNSUPPORTED =="
 # This is the bail that replaced a 24h STALE_CRED park: a Bedrock-routed child never
 # reads ANTHROPIC_BASE_URL, so fak's gateway would adjudicate nothing — and the
 # credential it used to complain about was never the problem.
-"${CLEAN[@]}" CLAUDE_CODE_USE_BEDROCK=1 "$FAK_BIN" guard "${GUARD_STOP[@]}" -- claude >"$OUT" 2>&1
-code=$?
+code=0
+"${CLEAN[@]}" CLAUDE_CODE_USE_BEDROCK=1 "$FAK_BIN" guard "${GUARD_STOP[@]}" -- claude >"$OUT" 2>&1 || code=$?
 cat "$OUT"
 expect_exit 2 "$code" "refused at the posture, before any credential is read"
 expect_text "reason: UPSTREAM_UNSUPPORTED" "the closed-vocabulary token"
@@ -150,10 +150,11 @@ refute_text "setup-token" "and never advice that cannot apply here"
 echo
 
 echo "== 6/7  the waiver is loud, not silent =="
+code=0
 "${CLEAN[@]}" CLAUDE_CODE_USE_BEDROCK=1 FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM=1 \
-  "$FAK_BIN" guard "${GUARD_STOP[@]}" -- claude >"$OUT" 2>&1
-code=$?
+  "$FAK_BIN" guard "${GUARD_STOP[@]}" -- claude >"$OUT" 2>&1 || code=$?
 cat "$OUT"
+expect_exit 2 "$code" "the waiver reaches the deliberately empty API-key guardrail"
 expect_text "proceeding under FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM=1" "the waiver announces itself on every launch"
 expect_text "fak will see NONE of this session's model traffic" "in the words that matter"
 refute_text "reason: UPSTREAM_UNSUPPORTED" "the refusal is downgraded, so the bail block is gone"

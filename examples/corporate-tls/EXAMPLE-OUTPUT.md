@@ -80,6 +80,7 @@ fak guard: the wrapped agent is routed to AWS Bedrock (SigV4-signed requests) by
 == 6/7  the waiver is loud, not silent ==
 fak guard: UPSTREAM_UNSUPPORTED — proceeding under FAK_GUARD_ALLOW_UNSUPPORTED_UPSTREAM=1: the hook floor, tool brokering, transcript, and sandbox still apply, but fak will see NONE of this session's model traffic.
 fak guard: --api-key-env FAK_CORPORATE_TLS_EXAMPLE_KEY is set but that env var is empty — export it for API billing, drop the flag to use your Claude Pro/Max subscription, or pass --anthropic-oauth to force the subscription.
+  PASS  exit 2 — the waiver reaches the deliberately empty API-key guardrail
   PASS  the waiver announces itself on every launch
   PASS  in the words that matter
   PASS  the refusal is downgraded, so the bail block is gone
@@ -115,7 +116,7 @@ note: to route this session through fak's gateway instead, unset the cloud selec
   PASS  and says plainly what it is not
 
 ================================================================
-corporate-tls: 32 passed, 0 failed
+corporate-tls: 33 passed, 0 failed
 corporate-tls: PASS
 
   Nothing here needed a proxy, a certificate store, admin rights, or -k. A clean

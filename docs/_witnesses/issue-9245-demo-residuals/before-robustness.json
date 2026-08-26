@@ -1,0 +1,3160 @@
+{
+  "schema": "fleet-demo-robustness-scorecard/1",
+  "ok": false,
+  "verdict": "ACTION",
+  "finding": "robustness_debt",
+  "reason": "19 unit(s) of robustness-debt across 104 demos; mean 96.1/100; weakest: cmd/microcontextdemo (63.3/100, 3 defect(s))",
+  "next_action": "retire robustness-debt worst-first (see corpus.worst + demo.defects): bound unbounded waits, pin/offline run-time deps, state runtime + a stability guarantee; re-run to prove the drop",
+  "workspace": "C:\\Users\\USER\\AppData\\Local\\Fleet\\worker-worktrees\\fak-worker-wt-demo2-9020c93f3d90",
+  "corpus": {
+    "n_demos": 104,
+    "mean_score": 96.1,
+    "grade": "A",
+    "median_score": 100.0,
+    "min_score": 63.3,
+    "max_score": 100.0,
+    "grade_distribution": {
+      "A": 93,
+      "B": 6,
+      "C": 2,
+      "D": 3,
+      "F": 0
+    },
+    "robustness_debt": 19,
+    "axis_debt": {
+      "simplicity": 2,
+      "speed": 11,
+      "durability": 6
+    },
+    "worst": [
+      {
+        "path": "cmd/microcontextdemo",
+        "score": 63.3,
+        "grade": "D",
+        "n_defects": 3
+      },
+      {
+        "path": "examples/corporate-tls",
+        "score": 65.7,
+        "grade": "D",
+        "n_defects": 3
+      },
+      {
+        "path": "examples/independent-server",
+        "score": 65.7,
+        "grade": "D",
+        "n_defects": 3
+      },
+      {
+        "path": "cmd/fabricmapdemo",
+        "score": 76.2,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "cmd/microharnessdemo",
+        "score": 76.2,
+        "grade": "C",
+        "n_defects": 2
+      },
+      {
+        "path": "cmd/archreportdemo",
+        "score": 88.1,
+        "grade": "B",
+        "n_defects": 1
+      },
+      {
+        "path": "cmd/dashboarddemo",
+        "score": 88.1,
+        "grade": "B",
+        "n_defects": 1
+      },
+      {
+        "path": "cmd/disambiguationdemo",
+        "score": 88.1,
+        "grade": "B",
+        "n_defects": 1
+      },
+      {
+        "path": "cmd/microcachedemo",
+        "score": 88.1,
+        "grade": "B",
+        "n_defects": 1
+      },
+      {
+        "path": "cmd/microfleetdemo",
+        "score": 88.1,
+        "grade": "B",
+        "n_defects": 1
+      },
+      {
+        "path": "cmd/quantdemo",
+        "score": 88.1,
+        "grade": "B",
+        "n_defects": 1
+      },
+      {
+        "path": "examples/admit-and-log",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/agent-ab",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/context-debugger",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/deny-in-60s",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/playground",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/preflight-ladder",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/remote-vm-guard",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/session-reload",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/vm-fs-guard",
+        "score": 91.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/adjudication-demo",
+        "score": 92.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/quarantine-demo",
+        "score": 92.2,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/shared-task-record",
+        "score": 93.4,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/auth-hardening",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/deny-as-value",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/escalation-demo",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/federated-changes",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/fleet-reuse-demo",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/grammar-repair",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/ifc-taint-flow",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/loader-properties",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/observability",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/plan-cfi",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/policy-hot-reload",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/policy-loader-properties",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/self-modify-floor",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/shared-task-record-verdicts",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/trace-authoring",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/trace-reset",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/vdso-cache-hit",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/verified-memory-recall",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/wire-quarantine-demo",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/witness-gate",
+        "score": 95.8,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/tokendemo",
+        "score": 97.6,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/addressable-evict",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/affectedtests-comparison",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/agentdojo-redteam",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/autogen-groupchat",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/bench-latency",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/commit-audit-in-60s",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/component-contracts",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/compose-ollama",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/crewai-crew",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/dogfood-claude",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/extdriver",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/fanbench",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/frontierswe-harbor-shim",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/gpu-smoke",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/grammar-repair-demo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/mcp",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/mcp-client",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/mobile-ffi",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/normgate-evasion",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/openai-agents-guardrail",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/openai-sdk-minimal",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/presets",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/radixattention",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/skill-program",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/steward-demo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/turntax",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "examples/wire-proof",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/a2ademo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/agentbenchdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/cachedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/ctxdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/ctxplandemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/cxlpooldemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/dropindemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/extseamsdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/fanoutdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/generationcontroldemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/guarddemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/harnesswebdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/hwcachedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/instructiondemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/marketdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/memqdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/poisonedmcpdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/qwen36codedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/resultbudgetdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/sessionintentdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/simpledemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/stackpreflightdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/stackresolvedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/supportgraphdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/timewolfdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/toolcallcontroldemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/trychatdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/turntaxdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/unseedemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/workloadfitdemo",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/causalbench",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/deletioncert",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      },
+      {
+        "path": "cmd/demorace",
+        "score": 100.0,
+        "grade": "A",
+        "n_defects": 0
+      }
+    ]
+  },
+  "demos": [
+    {
+      "path": "examples/addressable-evict",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=41 \u00b7 quickstart=False \u00b7 prereqs=['go', 'python'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/adjudication-demo",
+      "score": 92.2,
+      "grade": "A",
+      "axes": {
+        "simplicity": 88,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=346 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'ollama', 'python'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "simplicity: 4 prerequisites (curl, go, ollama, python) \u2014 more moving parts than a one-tool demo",
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/admit-and-log",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=38 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/affectedtests-comparison",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=30 \u00b7 quickstart=False \u00b7 prereqs=\u2014 \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/agent-ab",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=84 \u00b7 quickstart=False \u00b7 prereqs=['go', 'ollama'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/agentdojo-redteam",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=40 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/auth-hardening",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=107 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/autogen-groupchat",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=208 \u00b7 quickstart=False \u00b7 prereqs=['go', 'node', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/bench-latency",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=63 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/commit-audit-in-60s",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=67 \u00b7 quickstart=False \u00b7 prereqs=['python'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/component-contracts",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=27 \u00b7 quickstart=False \u00b7 prereqs=\u2014 \u00b7 files=6",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/compose-ollama",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=38 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'docker'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/context-debugger",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=193 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/corporate-tls",
+      "score": 65.7,
+      "grade": "D",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 36
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=189 \u00b7 quickstart=False \u00b7 prereqs=['docker'] \u00b7 files=3",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=False \u00b7 set-e-missing=['run.sh']"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 2
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')",
+        "durability: no stability / determinism guarantee \u2014 the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it",
+        "durability: shell entry without `set -e` in `run.sh` \u2014 a mid-script failure passes silently; add `set -euo pipefail`"
+      ],
+      "soft": [],
+      "n_defects": 3
+    },
+    {
+      "path": "examples/crewai-crew",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=207 \u00b7 quickstart=False \u00b7 prereqs=['go', 'node', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/deny-as-value",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=26 \u00b7 quickstart=False \u00b7 prereqs=['python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/deny-in-60s",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=26 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/dogfood-claude",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=85 \u00b7 quickstart=False \u00b7 prereqs=['go', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/escalation-demo",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=307 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/extdriver",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=149 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/fanbench",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=74 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/federated-changes",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=265 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'python'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/fleet-reuse-demo",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=345 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'python'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/frontierswe-harbor-shim",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=198 \u00b7 quickstart=False \u00b7 prereqs=['python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/gpu-smoke",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=284 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/grammar-repair",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=26 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/grammar-repair-demo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=0 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/ifc-taint-flow",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=307 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'python'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/independent-server",
+      "score": 65.7,
+      "grade": "D",
+      "axes": {
+        "simplicity": 65,
+        "speed": 66,
+        "durability": 66
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=829 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=False \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 1,
+        "speed": 1,
+        "durability": 1
+      },
+      "defects": [
+        "simplicity: oversized entry surface (829 lines) with no quickstart / 'start here' pointer \u2014 name the small core a reader should read first",
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')",
+        "durability: no stability / determinism guarantee \u2014 the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it"
+      ],
+      "soft": [],
+      "n_defects": 3
+    },
+    {
+      "path": "examples/loader-properties",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=131 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=8",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/mcp",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=278 \u00b7 quickstart=True \u00b7 prereqs=['go', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/mcp-client",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=358 \u00b7 quickstart=False \u00b7 prereqs=['go', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/mobile-ffi",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=250 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=8",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/normgate-evasion",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=22 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/observability",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=135 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/openai-agents-guardrail",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=448 \u00b7 quickstart=False \u00b7 prereqs=['go', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/openai-sdk-minimal",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=83 \u00b7 quickstart=False \u00b7 prereqs=['python'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/plan-cfi",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=59 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/playground",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=116 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/policy-hot-reload",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=173 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'node'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/policy-loader-properties",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=62 \u00b7 quickstart=False \u00b7 prereqs=\u2014 \u00b7 files=7",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/preflight-ladder",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=79 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/presets",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=0 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=2",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/quarantine-demo",
+      "score": 92.2,
+      "grade": "A",
+      "axes": {
+        "simplicity": 88,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=411 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'ollama', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "simplicity: 4 prerequisites (curl, go, ollama, python) \u2014 more moving parts than a one-tool demo",
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/radixattention",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=71 \u00b7 quickstart=False \u00b7 prereqs=['go', 'node'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/remote-vm-guard",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=82 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/self-modify-floor",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=83 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/session-reload",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=147 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/shared-task-record",
+      "score": 93.4,
+      "grade": "A",
+      "axes": {
+        "simplicity": 92,
+        "speed": 100,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=186 \u00b7 quickstart=False \u00b7 prereqs=['go', 'python'] \u00b7 files=22",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "simplicity: 22 files in the demo dir \u2014 a larger surface to skim",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/shared-task-record-verdicts",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=14 \u00b7 quickstart=False \u00b7 prereqs=['python'] \u00b7 files=8",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/skill-program",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=38 \u00b7 quickstart=False \u00b7 prereqs=\u2014 \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/steward-demo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=219 \u00b7 quickstart=False \u00b7 prereqs=['go', 'python'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/trace-authoring",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=18 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/trace-reset",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=156 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/turntax",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=18 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/vdso-cache-hit",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=56 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/verified-memory-recall",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=39 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/vm-fs-guard",
+      "score": 91.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 88
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=306 \u00b7 quickstart=False \u00b7 prereqs=['docker', 'go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact",
+        "durability: shell-only entry (`.sh`) with no `.ps1` and no cross-platform note \u2014 a Windows user can't tell how to run it"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/wire-proof",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=183 \u00b7 quickstart=False \u00b7 prereqs=['go', 'python'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/wire-quarantine-demo",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=243 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'python'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "examples/witness-gate",
+      "score": 95.8,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 88,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=53 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "speed: builds the whole binary (`go build`) with no `go run` fast path \u2014 slower cold start and a leftover artifact"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/a2ademo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=143 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=2",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/agentbenchdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=237 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/archreportdemo",
+      "score": 88.1,
+      "grade": "B",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=103 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 0
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')"
+      ],
+      "soft": [],
+      "n_defects": 1
+    },
+    {
+      "path": "cmd/cachedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=299 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/ctxdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=940 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=6",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/ctxplandemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=481 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/cxlpooldemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=296 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/dashboarddemo",
+      "score": 88.1,
+      "grade": "B",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=67 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 0
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')"
+      ],
+      "soft": [],
+      "n_defects": 1
+    },
+    {
+      "path": "cmd/disambiguationdemo",
+      "score": 88.1,
+      "grade": "B",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=74 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 0
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')"
+      ],
+      "soft": [],
+      "n_defects": 1
+    },
+    {
+      "path": "cmd/dropindemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=373 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=6",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/extseamsdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=120 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/fabricmapdemo",
+      "score": 76.2,
+      "grade": "C",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 66
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=61 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=2",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=False \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 1
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')",
+        "durability: no stability / determinism guarantee \u2014 the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it"
+      ],
+      "soft": [],
+      "n_defects": 2
+    },
+    {
+      "path": "cmd/fanoutdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=209 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/generationcontroldemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=88 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/guarddemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=523 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/harnesswebdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=10 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/hwcachedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=216 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/instructiondemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=93 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/marketdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=49 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/memqdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=172 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/microcachedemo",
+      "score": 88.1,
+      "grade": "B",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=234 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 0
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')"
+      ],
+      "soft": [],
+      "n_defects": 1
+    },
+    {
+      "path": "cmd/microcontextdemo",
+      "score": 63.3,
+      "grade": "D",
+      "axes": {
+        "simplicity": 57,
+        "speed": 66,
+        "durability": 66
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=11766 \u00b7 quickstart=False \u00b7 prereqs=['node'] \u00b7 files=78",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=False",
+        "durability": "floating-deps=0 \u00b7 stability-stated=False \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 1,
+        "speed": 1,
+        "durability": 1
+      },
+      "defects": [
+        "simplicity: oversized entry surface (11766 lines) with no quickstart / 'start here' pointer \u2014 name the small core a reader should read first",
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')",
+        "durability: no stability / determinism guarantee \u2014 the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it"
+      ],
+      "soft": [
+        "simplicity: 78 files in the demo dir \u2014 a larger surface to skim"
+      ],
+      "n_defects": 3
+    },
+    {
+      "path": "cmd/microfleetdemo",
+      "score": 88.1,
+      "grade": "B",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=255 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 0
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')"
+      ],
+      "soft": [],
+      "n_defects": 1
+    },
+    {
+      "path": "cmd/microharnessdemo",
+      "score": 76.2,
+      "grade": "C",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 66
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=699 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=8",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=False \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 1
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')",
+        "durability: no stability / determinism guarantee \u2014 the README doesn't say whether a re-run is repeatable (deterministic / byte-identical / pinned); state it"
+      ],
+      "soft": [],
+      "n_defects": 2
+    },
+    {
+      "path": "cmd/poisonedmcpdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=287 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/quantdemo",
+      "score": 88.1,
+      "grade": "B",
+      "axes": {
+        "simplicity": 100,
+        "speed": 66,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=293 \u00b7 quickstart=False \u00b7 prereqs=['curl', 'go', 'node'] \u00b7 files=4",
+        "speed": "runtime-stated=False \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 1,
+        "durability": 0
+      },
+      "defects": [
+        "speed: no stated expected runtime \u2014 the README never says how long a run takes; state it (e.g. 'runs in ~Ns', 'completes in seconds')"
+      ],
+      "soft": [],
+      "n_defects": 1
+    },
+    {
+      "path": "cmd/qwen36codedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=285 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=6",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/resultbudgetdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=378 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/sessionintentdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=62 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/simpledemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=1432 \u00b7 quickstart=True \u00b7 prereqs=['curl', 'go'] \u00b7 files=7",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/stackpreflightdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=80 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/stackresolvedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=90 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/supportgraphdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=49 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/timewolfdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=301 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=5",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/tokendemo",
+      "score": 97.6,
+      "grade": "A",
+      "axes": {
+        "simplicity": 92,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=2736 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=9",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [
+        "simplicity: 9 files in the demo dir \u2014 a larger surface to skim"
+      ],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/toolcallcontroldemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=71 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/trychatdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=724 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=6",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/turntaxdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=495 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/unseedemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=566 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/workloadfitdemo",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=55 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/causalbench",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=327 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=3",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/deletioncert",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=778 \u00b7 quickstart=True \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    },
+    {
+      "path": "cmd/demorace",
+      "score": 100.0,
+      "grade": "A",
+      "axes": {
+        "simplicity": 100,
+        "speed": 100,
+        "durability": 100
+      },
+      "axis_detail": {
+        "simplicity": "entry-loc=558 \u00b7 quickstart=False \u00b7 prereqs=['go'] \u00b7 files=4",
+        "speed": "runtime-stated=True \u00b7 unbounded-waits=\u2014 \u00b7 go-run=True",
+        "durability": "floating-deps=0 \u00b7 stability-stated=True \u00b7 set-e-missing=\u2014"
+      },
+      "axis_debt": {
+        "simplicity": 0,
+        "speed": 0,
+        "durability": 0
+      },
+      "defects": [],
+      "soft": [],
+      "n_defects": 0
+    }
+  ]
+}
