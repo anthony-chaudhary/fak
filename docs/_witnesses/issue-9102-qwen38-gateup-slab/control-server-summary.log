@@ -1,0 +1,8 @@
+source=run-20260826T145606Z/01-control-rep1/server.stderr.log scrubbed=true
+2026-08-26T14:58:12Z listening addr=127.0.0.1:19102 engine=inkernel model=qwen38:27b
+2026-08-26T14:58:26Z warmup engine=inkernel backend=metal forward_path=metal/qwen35-hybrid-session-v1 q4k=true prompt_tokens=14 prefill_seconds=14.72 completion_tokens=1
+2026-08-26T15:00:28Z control engine=inkernel backend=metal forward_path=metal/qwen35-hybrid-session-v1 q4k=true prompt_tokens=512 prefill_seconds=64.81 completion_tokens=8 decode_seconds=56.28
+2026-08-26T15:00:30Z control_http status=200 response_bytes=1302 duration_ms=137142.069
+control_selector FAK_Q4K_GATEUP_SLAB=0
+control_gateup_slab_execution_lines=0
+candidate_executed=false

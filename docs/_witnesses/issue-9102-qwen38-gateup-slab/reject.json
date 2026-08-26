@@ -1,0 +1,118 @@
+{
+  "schema": "fak.issue-9102-qwen38-gateup-slab-reject/1",
+  "issue": 9102,
+  "verdict": "REJECT",
+  "reason": "the pinned default-off control completed its native P=512/T=8 response only after three consecutive samples crossed the predeclared +12 GiB swap gate; the candidate was therefore not admitted",
+  "source": {
+    "base_revision": "d306fa7e35c033943990a8241673470e115e9477",
+    "control_binary_sha256": "721a153a10dfc4eb99e09b1dfcf3a1f330b7cbc16aaacc8c31a070950870f86e",
+    "candidate_binary_sha256": "50642174deb7f528efece58f278b8796472ab6b3205b9a568e6a51ad41e17135",
+    "candidate_diff_sha256": "370546bfcff240baf505beffdb0ad97c1698f02976ea555d01442a7c652f6e10",
+    "config_sha256": "89ac20bac433b8618e22cb45642c86113f99f08c0b2436abb099155a60964e1e",
+    "campaign_script_sha256": "07bca43b44d9305ae068e88b8fa4e3f941578e7dd77cba5efab127bba0216934"
+  },
+  "candidate": {
+    "executed": false,
+    "arm_directory_created": false,
+    "runtime_selector": "FAK_Q4K_GATEUP_SLAB=1",
+    "default_enabled": false,
+    "code_disposition": "ship deterministic implementation default-off; no KEEP claim"
+  },
+  "control": {
+    "executed": true,
+    "runtime_selector": "FAK_Q4K_GATEUP_SLAB=0",
+    "started_at": "2026-08-26T14:58:13.246967Z",
+    "completed_at": "2026-08-26T15:00:30.395582Z",
+    "completed_response": true,
+    "valid_response": true,
+    "wall_seconds": 137.148615,
+    "response_sha256": "0982ae09f3320a4ec1e26094914a9f15381fa58a51f8e761c1e92b20aa1f6d34",
+    "request_sha256": "85213adc2dbbfd7c814a2ba615b2baa6f8e2f1f03ea5c288c0e761c7aa506bb9",
+    "native_receipt": {
+      "model": "qwen38:27b",
+      "engine": "inkernel",
+      "backend": "metal",
+      "forward_path": "metal/qwen35-hybrid-session-v1",
+      "q4k": true,
+      "fallback_active": false,
+      "prompt_tokens": 512,
+      "completion_tokens": 8,
+      "prefill_chunk_tokens": 512,
+      "prefill_seconds": 64.81099575,
+      "ttft_seconds": 77.313835416,
+      "decode_seconds": 56.27728775
+    }
+  },
+  "envelope": {
+    "hardware": "Apple M3 Pro, 36 GiB unified memory, 18 GPU cores",
+    "model_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "prompt_sha256": "b65dd6d80ff9707468ed0d46dc20523671ac2930ec0cd8a29b4015c887eb373c",
+    "displacement_a_sha256": "33c45709dc2638426f1b86abc71a4dc4ecf6aae94fea583308b38459d99fee71",
+    "displacement_b_sha256": "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5",
+    "gguf_load_workers": 12,
+    "context_budget_tokens": 65536,
+    "native_admission_token_budget": 65536,
+    "fresh_process": true,
+    "exclusive_machine_lease": true
+  },
+  "safety_gate": {
+    "maximum_swap_delta_bytes": 12884901888,
+    "required_consecutive_crossings": 3,
+    "maximum_peak_footprint_bytes": 61162389504,
+    "minimum_free_memory_percent": 10,
+    "first_recorded_swap_bytes": 2947872195,
+    "derived_swap_limit_bytes": 15832774083,
+    "crossings_before_response": [
+      {
+        "sample": 129,
+        "timestamp": "2026-08-26T15:00:24Z",
+        "swap_bytes": 16086141501,
+        "delta_from_first_recorded_bytes": 13138269306
+      },
+      {
+        "sample": 130,
+        "timestamp": "2026-08-26T15:00:25Z",
+        "swap_bytes": 16535194173,
+        "delta_from_first_recorded_bytes": 13587321978
+      },
+      {
+        "sample": 131,
+        "timestamp": "2026-08-26T15:00:26Z",
+        "swap_bytes": 16535194173,
+        "delta_from_first_recorded_bytes": 13587321978
+      }
+    ],
+    "response_completed_after_crossings": true
+  },
+  "observed_memory": {
+    "peak_sampled_rss_bytes": 17910644736,
+    "minimum_free_memory_percent": 25,
+    "maximum_compressor_pages": 1299308,
+    "maximum_swap_bytes": 16535194173,
+    "post_request_footprint_captured": false
+  },
+  "isolation": {
+    "global_gpu_lease_held": true,
+    "arms_serialized": true,
+    "watcher_matched_terms": 0,
+    "watcher_unmatched_signals": 0,
+    "watcher_reused_pid_signals": 0,
+    "restored_model": "qwen3.6-27b",
+    "restored_service_command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "restored_stable_seconds": 90,
+    "stale_helper_samples": 30
+  },
+  "artifacts": {
+    "campaign-state.log": "860b54dc531dd513ceab5c4adcf9e89839bd269a04bbf8ce657f62a633234a4a",
+    "control-memory-samples.raw.tsv": "e3080facbf9d7b05e9a40c19c1a79dfcf937019fcf9c0836691bda8af685d646",
+    "control-response.json": "efbe3ef9fc89b46ad447714b5558a58a99fc2f69c5f6b115c9ab6b8b384fb25c",
+    "control-server-summary.log": "4acb125910fba4646ec122af819b5e092cc326e7a6fffc31221e4a08ccbd1a39",
+    "isolation-summary.log": "4fec84933f9fc1f440475106008b78c024ea7f689ce38cafe516febf9a397ecd",
+    "watcher.log": "84a86be8e4fa2b5e9f9b76480d54e78ec6c9dcf357216523b59c0c3fc1f620c5",
+    "restore.log": "981a89a50a75cec8cb5973c45d06c1dd5ad5eec330b8fae6c627b80b3a647272",
+    "restore-models.json": "245715f95437973677acf27417e0b251cc40e1132e29392d4550c67559528fb5",
+    "restore-samples.tsv": "2ca5ab330468fb22d25ccd21035988a40df35e168a7b7b6357809c95f53cbef2",
+    "stale-helper-samples.tsv": "6c5a5d8b995ae5ef7dd33c74d34dab10250237daa294406e4196cacfc284f4ad"
+  },
+  "conclusion": "REJECT the Mac performance promotion. The default-off control completed, but not inside the declared swap envelope; candidate value and safety were not measured. Keep the implementation disabled by default."
+}
