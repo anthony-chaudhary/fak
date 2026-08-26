@@ -425,12 +425,104 @@
       "status": "studied",
       "priority": 21,
       "why": "Production GPU-kernel control-plane analogue: reusable attention plans/workspace, correctness-gated profile tuning, JIT/artifact identity, and trace/replay mechanisms map directly to FAK compute HAL gaps.",
-      "last_checked": "2026-08-22",
+      "last_checked": "2026-08-25",
       "checked_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
       "stars_at_check": 6209,
       "last_push_at_check": "2026-08-22T11:34:52Z",
       "study_note": "docs/research/flashinfer-study-2026-08-22.md",
-      "refresh_issue": "#9002"
+      "refresh_issue": "#9002",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/flashinfer-ai-flashinfer.json",
+        "indexed_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 20,
+        "candidate_count": 5,
+        "filed_issue_count": 3,
+        "completeness_critic": "exhaustive pinned local-tree map plus full Git history and tags; paged GitHub issues, pull requests, releases, and all discussions through the pinned commit timestamp; distributed TODOs, license provenance, fak self-query, candidate adjudication, and issue read-back recorded under non_tree_study; skipped dependency/cache/control directories: .git",
+        "source_evidence": [
+          {
+            "class": "history_changelog_releases",
+            "evidence": [
+              "git rev-list --count fb28d7242b3506a2348265962041acc1fb56cca4",
+              "git tag --merged fb28d7242b3506a2348265962041acc1fb56cca4",
+              "gh api --paginate repos/flashinfer-ai/flashinfer/releases?per_page=100"
+            ],
+            "note": "2,850 commits, 311 merged tags, and 359 releases through the pinned timestamp; no checked-in changelog."
+          },
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate repos/flashinfer-ai/flashinfer/issues?state=all&per_page=100",
+              "gh pr list --repo flashinfer-ai/flashinfer --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:flashinfer-ai,name:flashinfer) discussions(first:100)"
+            ],
+            "note": "Pinned denominator: 1,211 issues, 3,434 pull requests, and all 24 discussions; states read back on 2026-08-25."
+          },
+          {
+            "class": "roadmap_todos",
+            "evidence": [
+              "docs/research/inventory/flashinfer-ai-flashinfer.json#non_tree_study.history_roadmap_license"
+            ],
+            "note": "No roadmap file; 408 TODO/FIXME lines in 170 runtime files plus the complete tracker ledger cover distributed planning evidence."
+          },
+          {
+            "class": "license_provenance",
+            "evidence": [
+              "./LICENSE",
+              "./NOTICE",
+              "licenses/LICENSE.cutlass.txt",
+              "licenses/LICENSE.flashattention3.txt",
+              "licenses/LICENSE.fmt.txt",
+              "licenses/LICENSE.spdlog.txt"
+            ],
+            "note": "Apache-2.0 repository with NVIDIA notice and bundled dependency licenses; no source copied into fak."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities reusable attention plan workspace lifecycle correctness gated profile tuning JIT artifact identity trace replay GPU kernels",
+              "fak capabilities FlashInfer cubin cache workspace plan replay profiler"
+            ],
+            "note": "Queries returned context/cache surfaces but no native compute-HAL substitute; existing issues #8607-#8609 remain the applicable gaps."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/flashinfer-ai-flashinfer.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9002",
+              "https://github.com/anthony-chaudhary/fak/issues/8607",
+              "https://github.com/anthony-chaudhary/fak/issues/8608",
+              "https://github.com/anthony-chaudhary/fak/issues/8609"
+            ],
+            "note": "GitHub read-back confirmed all three FlashInfer-derived follow-ons remain open; no duplicate follow-on was filed."
+          }
+        ],
+        "issue_refs": [
+          "#9002",
+          "#8607",
+          "#8608",
+          "#8609"
+        ]
+      }
     },
     {
       "repository": "SemiAnalysisAI/InferenceX",
@@ -517,12 +609,73 @@
       "status": "studied",
       "priority": 18,
       "why": "Experimental Codex open-turn continuation analogue: one typed wait_for_user_input rendezvous keeps repeated operator messages inside one provider turn. The narrow candidate is a capability-gated, policy-preserving matched experiment; the Bun TUI, Codex-specific host, parallel worker stack, and approval shortcuts are excluded.",
-      "last_checked": "2026-08-24",
+      "last_checked": "2026-08-25",
       "checked_revision": "bbf449ca624aca90d8cda0bc21100f2a73a56bf4",
       "stars_at_check": 2,
       "last_push_at_check": "2026-08-21T14:38:07Z",
       "study_note": "docs/notes/CONCEPT-STUDY-ENDLESS-2026-08-24.md",
-      "refresh_issue": "#9004"
+      "refresh_issue": "#9004",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/mchicao-endless.json",
+        "indexed_revision": "bbf449ca624aca90d8cda0bc21100f2a73a56bf4",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 7,
+        "candidate_count": 3,
+        "filed_issue_count": 0,
+        "completeness_critic": "exhaustive pinned tree map plus complete GitHub issue, pull-request, discussion, release, tag, branch, and history read-back; fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped control directory: .git",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate --slurp repos/Mchicao/endless/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo Mchicao/endless --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:Mchicao,name:endless) discussions(first:100)",
+              "gh api repos/Mchicao/endless/releases?per_page=100",
+              "gh api repos/Mchicao/endless/tags?per_page=100"
+            ],
+            "note": "Exhaustive GitHub read-back returned zero issues, pull requests, discussions, releases, and tags."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"open provider turn wait for user input rendezvous session continuation policy capability\"",
+              "fak capabilities \"operator input during one model turn pause resume control live session\"",
+              "fak capabilities \"parallel worker terminal tui codex host approval bypass\""
+            ],
+            "note": "Queries found native capability-floor, turn-tax, live-control, context-reuse, carry-forward, and fleet-monitoring surfaces; no equivalent typed in-provider-turn user rendezvous."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/mchicao-endless.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9004"
+            ],
+            "note": "All candidates were rejected or already owned; no borrow issue survived."
+          }
+        ],
+        "issue_refs": [
+          "#9004"
+        ]
+      }
     },
     {
       "repository": "vllm-project/vllm",

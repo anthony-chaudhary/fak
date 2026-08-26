@@ -20,11 +20,14 @@ typedef struct {
     int host_readback;
 } mg_execution_event;
 int  mg_q8_upload(const signed char* codes, const float* scales, int out, int in);
+int  mg_q8_upload_nocopy_owned(const signed char* codes, const float* scales, int out, int in,
+                               signed char** owned_codes, float** owned_scales);
 void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event);
 void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event);
 void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q8_reset(void);
+void mg_q8_release(int wid);
 */
 import "C"
 
@@ -56,6 +59,39 @@ func UploadQ8(codes []int8, scales []float32, out, in int) *Q8Weight {
 		return nil
 	}
 	return &Q8Weight{id: id, Out: out, In: in, Nblk: nblk}
+}
+
+// UploadQ8NoCopyOwned publishes one immutable Q8 payload from a page-aligned native owner and
+// returns CPU slices aliasing that same owner. Metal and the CPU oracle therefore share one copy.
+// The aliases remain valid until ResetQ8; callers must release Metal state before discarding them.
+func UploadQ8NoCopyOwned(codes []int8, scales []float32, out, in int) (*Q8Weight, []int8, []float32) {
+	if !Available() || in <= 0 || in%32 != 0 || out <= 0 {
+		return nil, nil, nil
+	}
+	nblk := in / 32
+	codeLen, scaleLen := out*in, out*nblk
+	if len(codes) < codeLen || len(scales) < scaleLen {
+		return nil, nil, nil
+	}
+	var ownedCodes *C.schar
+	var ownedScales *C.float
+	id := C.mg_q8_upload_nocopy_owned((*C.schar)(unsafe.Pointer(&codes[0])), (*C.float)(unsafe.Pointer(&scales[0])),
+		C.int(out), C.int(in), &ownedCodes, &ownedScales)
+	if id < 0 || ownedCodes == nil || ownedScales == nil {
+		return nil, nil, nil
+	}
+	q := unsafe.Slice((*int8)(unsafe.Pointer(ownedCodes)), codeLen)
+	d := unsafe.Slice((*float32)(unsafe.Pointer(ownedScales)), scaleLen)
+	return &Q8Weight{id: id, Out: out, In: in, Nblk: nblk}, q, d
+}
+
+// Release drops Metal views before freeing the no-copy native owner. It is idempotent.
+func (w *Q8Weight) Release() {
+	if w == nil || w.id < 0 {
+		return
+	}
+	C.mg_q8_release(w.id)
+	w.id = -1
 }
 
 // GEMV computes y[Out] = W · x for one Q8_0-quantized activation: xq are the in int8 codes, xd the

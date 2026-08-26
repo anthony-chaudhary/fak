@@ -81,3 +81,5 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 func (m *Model) metalQ8Weights() map[string]bool {
 	return nil
 }
+
+func (m *Model) releaseMetalQ8() {}

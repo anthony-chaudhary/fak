@@ -589,7 +589,11 @@ func (m *Model) SetWeightCloser(c io.Closer) {
 
 // CloseWeights releases a retained lazy-weight checkpoint source once.
 func (m *Model) CloseWeights() error {
-	if m == nil || m.weightCloser == nil {
+	if m == nil {
+		return nil
+	}
+	m.releaseMetalQ8()
+	if m.weightCloser == nil {
 		return nil
 	}
 	s := m.weightCloser
