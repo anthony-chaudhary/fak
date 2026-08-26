@@ -137,8 +137,9 @@ type Event struct {
 	SourceDigest string             `json:"source_digest,omitempty"` // denied-source identity; raw source is never recorded
 }
 
-// DefaultPath resolves the journal path: the explicit override, otherwise the
-// machine-global store shared by every account on the host.
+// DefaultPath resolves the explicit override when set. Otherwise it uses the
+// platform store: per-user Application Support on Darwin, ProgramData on
+// Windows, and the machine-global /var/lib/fak store on other Unix systems.
 func DefaultPath() string {
 	if p := strings.TrimSpace(os.Getenv(EnvPath)); p != "" {
 		return p
