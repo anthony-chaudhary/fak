@@ -389,6 +389,8 @@ concurrent = [
   "httptrust",
   "cloudroute",
   "tempartifact",
+  "valuechain",
+  "hostdiag",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -541,6 +543,8 @@ autopick = [
   "httptrust",
   "cloudroute",
   "tempartifact",
+  "valuechain",
+  "hostdiag",
   # new-leaf:lane
 ]
 
@@ -1151,6 +1155,8 @@ harnessmodelsetconformance = ["internal/harnessmodelsetconformance/**"]
 httptrust = ["internal/httptrust/**"]
 cloudroute = ["internal/cloudroute/**"]
 tempartifact = ["internal/tempartifact/**"]
+valuechain = ["internal/valuechain/**"]
+hostdiag = ["internal/hostdiag/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose
@@ -1274,6 +1280,13 @@ worker_launch_template = 'tools/.bin/dispatchworker --lane {lane}'
 # typed-core direction is refusable with a structured, citable reason from a closed
 # set, not free-text -- the same discipline fak imposes on tool results. The floor
 # under each is the architest gate (`go test ./internal/architest`).
+[reasons.VALUECHAIN_UNWITNESSED]
+category = "STALE_CLAIM"
+refusal = false
+summary = "value-chain economics result lacks its declared durable usage or outcome witness"
+fix = "capture the valuechain usage/outcome receipt, then rerun the valuechain fold before claiming adoption or economics"
+see_also = ["docs/problems-we-solve.md", "internal/valuechain"]
+
 [reasons.MICROHARNESS_UNWITNESSED]
 category = "STALE_CLAIM"
 refusal  = false
