@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
+	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -27,8 +28,248 @@ import (
 
 func testBool(v bool) *bool { return &v }
 
+func testString(v string) *string                 { return &v }
+func testInt(v int) *int                          { return &v }
+func testFloat64(v float64) *float64              { return &v }
+func testDuration(v time.Duration) *time.Duration { return &v }
+
+type testCloser func() error
+
+func (c testCloser) Close() error { return c() }
+
+func testCompleteBenchFlags() *benchFlags {
+	return &benchFlags{
+		dir: testString("fixture-dir"), hf: testString(""), gguf: testString(""),
+		lean: testBool(false), q4k: testBool(false), streamQ4K: testBool(false),
+		name: testString(""), out: testString(""), prefillSizesCSV: testString("16"),
+		prefillReps: testInt(1), decodeReps: testInt(1), decodeSteps: testInt(1), decodePrompt: testInt(1),
+		quant: testBool(false), metal: testBool(false), verify: testBool(false),
+		backendName: testString("legacy"), requireNonReference: testBool(false),
+		workloadPath: testString(""), workloadPrefillCap: testInt(0), loadOnly: testBool(false),
+		loadProfile: testBool(false), loadProfileTrace: testBool(false), loadProfileTraceEvery: testInt(25),
+		phaseProfile: testBool(false), budget: testFloat64(0), preflight: testBool(false), smoke: testBool(false),
+		smokeDeadline: testDuration(90 * time.Second), fitCheck: testBool(true), loadProgress: testBool(true),
+		checkpoint: testString(""), resume: testString(""), nativeProfileOut: testString(""), nativeProfileReadback: testString(""),
+	}
+}
+
 func testBenchFlags(q4k, quant, metal bool) *benchFlags {
 	return &benchFlags{q4k: testBool(q4k), quant: testBool(quant), metal: testBool(metal)}
+}
+
+func TestStreamQ4KValidation(t *testing.T) {
+	valid := testCompleteBenchFlags()
+	*valid.gguf = "fixture.gguf"
+	*valid.q4k = true
+	*valid.streamQ4K = true
+	*valid.loadProfile = true
+	*valid.loadProfileTrace = true
+	if err := validateFlagCombinations(valid); err != nil {
+		t.Fatalf("valid streamed Q4_K load rejected: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		edit func(*benchFlags)
+		want string
+	}{
+		{name: "missing q4k", edit: func(f *benchFlags) { *f.q4k = false }, want: "requires exact -gguf and -q4k"},
+		{name: "missing gguf", edit: func(f *benchFlags) { *f.gguf = "" }, want: "requires exact -gguf and -q4k"},
+		{name: "lean remains incompatible", edit: func(f *benchFlags) { *f.lean = true }, want: "omit -lean"},
+		{name: "native profile envelope unchanged", edit: func(f *benchFlags) { *f.nativeProfileOut = "profile.json" }, want: "not yet admitted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := testCompleteBenchFlags()
+			*f.gguf = "fixture.gguf"
+			*f.q4k = true
+			*f.streamQ4K = true
+			tt.edit(f)
+			err := validateFlagCombinations(f)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validation error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestQ4KLoaderSelectorPreservesResidentDefault(t *testing.T) {
+	originalResident, originalStreamed := loadResidentQ4K, loadStreamedDenseQ4K
+	defer func() {
+		loadResidentQ4K, loadStreamedDenseQ4K = originalResident, originalStreamed
+	}()
+	var residentCalls, streamedCalls int
+	var gotProfiler *ggufload.LoadProfiler
+	loadResidentQ4K = func(path string, p *ggufload.LoadProfiler) (*model.Model, error) {
+		residentCalls++
+		gotProfiler = p
+		return &model.Model{}, nil
+	}
+	loadStreamedDenseQ4K = func(path string, p *ggufload.LoadProfiler) (*model.Model, error) {
+		streamedCalls++
+		gotProfiler = p
+		return &model.Model{}, nil
+	}
+
+	f := testCompleteBenchFlags()
+	*f.gguf = "/tmp/fixture.gguf"
+	*f.q4k = true
+	profiler := ggufload.NewLoadProfiler()
+	_, name, err := loadModel(f, profiler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if residentCalls != 1 || streamedCalls != 0 || gotProfiler != profiler {
+		t.Fatalf("resident selection calls resident=%d streamed=%d profiler=%p want %p", residentCalls, streamedCalls, gotProfiler, profiler)
+	}
+	if name != "fixture.gguf [gguf-q4k]" {
+		t.Fatalf("resident label = %q", name)
+	}
+
+	*f.streamQ4K = true
+	_, name, err = loadModel(f, profiler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if residentCalls != 1 || streamedCalls != 1 || gotProfiler != profiler {
+		t.Fatalf("streamed selection calls resident=%d streamed=%d profiler=%p want %p", residentCalls, streamedCalls, gotProfiler, profiler)
+	}
+	if name != "fixture.gguf [gguf-q4k-streamed-dense]" {
+		t.Fatalf("streamed label = %q", name)
+	}
+}
+
+func TestStreamQ4KProfilerIdentity(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*f.gguf = "fixture.gguf"
+	*f.q4k = true
+	*f.streamQ4K = true
+	*f.loadProfile = true
+	lp := newGGUFLoadProfiler(f)
+	if lp == nil || lp.Progress == nil {
+		t.Fatal("streamed Q4_K must be progress/profile capable")
+	}
+	mode, source := ggufLoadProfileIdentity(f)
+	profile := lp.Snapshot(mode, source, 123)
+	if profile.Mode != "gguf-streamed-dense-q4k" || profile.Source != "fixture.gguf (streamed dense Q4_K)" {
+		t.Fatalf("profile identity = mode %q source %q", profile.Mode, profile.Source)
+	}
+
+	*f.streamQ4K = false
+	if got := newGGUFLoadProfiler(f); got != nil {
+		t.Fatal("resident Q4_K default unexpectedly changed its historical profiler behavior")
+	}
+}
+
+func TestLoadWorkerControlReadback(t *testing.T) {
+	tests := []struct {
+		name          string
+		literal       string
+		explicit      bool
+		wantSource    string
+		wantEffective int
+	}{
+		{name: "unset", wantSource: "unset"},
+		{name: "valid explicit preserves literal", literal: " 1 ", explicit: true, wantSource: "explicit", wantEffective: 1},
+		{name: "invalid explicit stays typed", literal: "many", explicit: true, wantSource: "explicit"},
+		{name: "zero explicit is invalid", literal: "0", explicit: true, wantSource: "explicit"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			control := readLoadWorkerControl(func(string) (string, bool) { return tt.literal, tt.explicit }, 12)
+			if control.FAKGGUFLoadWorkers != tt.literal || control.Source != tt.wantSource || control.GOMAXPROCS != 12 {
+				t.Fatalf("control = %+v", control)
+			}
+			if tt.wantEffective == 0 {
+				if control.EffectiveCount != nil {
+					t.Fatalf("invalid/unset control derived effective=%d", *control.EffectiveCount)
+				}
+				encoded, err := json.Marshal(control)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(string(encoded), `"effective_count"`) {
+					t.Fatalf("invalid/unset control emitted a numeric effective count: %s", encoded)
+				}
+			} else if control.EffectiveCount == nil || *control.EffectiveCount != tt.wantEffective {
+				t.Fatalf("effective = %v, want %d", control.EffectiveCount, tt.wantEffective)
+			}
+		})
+	}
+}
+
+func TestStreamQ4KSourceFingerprintAndReportIdentity(t *testing.T) {
+	t.Setenv("FAK_GGUF_LOAD_WORKERS", " 1 ")
+	f := testCompleteBenchFlags()
+	*f.gguf = "fixture.gguf"
+	*f.q4k = true
+	*f.streamQ4K = true
+
+	wantSource := "fixture.gguf (streamed dense Q4_K)"
+	if got := loadSource("", *f.gguf, "", false, true, true); got != wantSource {
+		t.Fatalf("load source = %q, want %q", got, wantSource)
+	}
+	fingerprint := modelbenchFingerprint(f, "fixture")
+	if fingerprint["stream_q4k"] != true || fingerprint["source"] != wantSource {
+		t.Fatalf("fingerprint stream identity = %#v", fingerprint)
+	}
+	fpControl, ok := fingerprint["load_worker_control"].(loadWorkerControl)
+	if !ok || fpControl.EffectiveCount == nil || *fpControl.EffectiveCount != 1 || fpControl.FAKGGUFLoadWorkers != " 1 " {
+		t.Fatalf("fingerprint worker control = %#v", fingerprint["load_worker_control"])
+	}
+	report := loadReportIdentity(f)
+	if report["stream_q4k"] != true || report["source"] != wantSource {
+		t.Fatalf("report stream identity = %#v", report)
+	}
+	reportControl, ok := report["load_worker_control"].(loadWorkerControl)
+	if !ok || reportControl.EffectiveCount == nil || *reportControl.EffectiveCount != 1 {
+		t.Fatalf("report worker control = %#v", report["load_worker_control"])
+	}
+}
+
+func TestTransferredWeightCloserRunsExactlyOnce(t *testing.T) {
+	t.Run("normal and repeated cleanup", func(t *testing.T) {
+		f := testCompleteBenchFlags()
+		*f.streamQ4K = true
+		calls := 0
+		m := &model.Model{}
+		m.SetWeightCloser(testCloser(func() error { calls++; return nil }))
+		if !bindLoadedModelWeights(f, m) {
+			t.Fatal("streamed model ownership was not transferred to the command guard")
+		}
+		if err := f.closeTransferredWeights(); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.closeTransferredWeights(); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 {
+			t.Fatalf("closer calls = %d, want 1", calls)
+		}
+	})
+
+	t.Run("terminal status closes before exit", func(t *testing.T) {
+		f := testCompleteBenchFlags()
+		var events []string
+		f.bindWeightCloser(func() error { events = append(events, "close"); return nil })
+		f.processExit = func(code int) { events = append(events, fmt.Sprintf("exit:%d", code)) }
+		f.exit(2)
+		_ = f.closeTransferredWeights()
+		if !reflect.DeepEqual(events, []string{"close", "exit:2"}) {
+			t.Fatalf("terminal lifecycle = %v", events)
+		}
+	})
+
+	t.Run("close error forces failure status", func(t *testing.T) {
+		f := testCompleteBenchFlags()
+		f.bindWeightCloser(func() error { return fmt.Errorf("close failed") })
+		gotCode := 0
+		f.processExit = func(code int) { gotCode = code }
+		f.exit(2)
+		if gotCode != 1 {
+			t.Fatalf("exit code = %d, want 1 after close failure", gotCode)
+		}
+	})
 }
 
 func TestParsePositiveInts(t *testing.T) {
