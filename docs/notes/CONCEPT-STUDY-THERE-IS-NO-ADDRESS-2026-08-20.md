@@ -306,3 +306,48 @@ semantic and deterministic witnesses only.
 - `study-repo` supplied the pinned NIXL docs/code/tests/history/issues/releases
   audit and completeness critic.
 - Parent/spine links: #3259, #6377, #3310, #3316, #6409.
+
+## Exhaustive NIXL refresh (2026-08-25)
+
+Issue #8993 refreshes the NIXL denominator without changing the essay's core
+conclusion. The pinned source is
+[`ai-dynamo/nixl@b0cbb237354d72b83500d5214d2b4484f9866fa3`](https://github.com/ai-dynamo/nixl/tree/b0cbb237354d72b83500d5214d2b4484f9866fa3)
+(commit time `2026-08-25T17:36:59Z`). The generated exhaustive map is
+[`docs/research/inventory/ai-dynamo-nixl.json`](../research/inventory/ai-dynamo-nixl.json):
+776 files, 163 directories, 14 immediate subsystems, 392 runtime files, 185 test
+files, and 80 documentation files. The only skipped control directory was
+`.git`.
+
+The non-tree denominator is also pinned to that commit timestamp. GitHub REST
+pagination found 250 issues (67 open, 183 closed) and 1,904 pull requests (198
+open, 1,706 closed) created by the cutoff. GraphQL reported zero discussions.
+The release/history pass covered 20 published releases and 28 reachable tags;
+`v1.4.0` was latest. Repository-wide TODO, FIXME, unsupported, and deprecation
+searches supplied the roadmap surface because no dedicated roadmap file exists.
+The provenance pass covered Apache-2.0 core licensing, attribution manifests,
+the proprietary component notice, the separately licensed DeepEP example,
+`SECURITY.md`, and `CONTRIBUTING.md`.
+
+Representative source read-back corrected the generated classifier's narrow
+architecture label: `docs/nixl.md`, `docs/BackendGuide.md`, the C++/Python/Rust
+APIs, descriptors, agent/metadata lifecycle, backend plugins, telemetry and
+tracing, registration tests, and benchmark harnesses were inspected directly.
+The completeness critic therefore treats filenames as discovery aids, not proof
+of semantic coverage.
+
+### Refreshed borrow decisions and follow-ons
+
+| Candidate | Pinned evidence | FAK decision | Follow-on |
+|---|---|---|---|
+| Consumer-ready admission above transfer completion | `src/api/cpp/nixl.h`; upstream PR [#2051](https://github.com/ai-dynamo/nixl/pull/2051) | **Borrow the boundary, not the subsystem.** NIXL owns transfer and remote-metadata lifetime; FAK owns terminal consumer-private readiness. | Existing #8259 |
+| Byte-sized end-to-end ready-time pricing | `src/api/cpp/nixl_params.h`; `benchmark/nixlbench/` | **FAK-native.** Route price must include consumer realization, not only substrate transfer. | Existing #8261 |
+| Standby-then-commit activation under live traffic | merged upstream PR [#2138](https://github.com/ai-dynamo/nixl/pull/2138) | **Borrow the lifecycle pattern.** Preserve active views while staging replacements, then independently receipt activation. | Evidence for #8259; no duplicate issue |
+| Request-scoped transfer correlation | open upstream PR [#2137](https://github.com/ai-dynamo/nixl/pull/2137) | **Watch.** The observability shape is attractive but not settled at the cutoff. | Monitor upstream; file only after stable semantics and a FAK gap witness |
+| Backend adapters and measured topology | `docs/BackendGuide.md`; `src/plugins/` | **Optional and hardware-gated.** Never make a convenience path silently replace fak-native execution. | Deduplicated to #3310/#6409 |
+
+Candidate-specific `fak capabilities` self-queries found native routing and
+capability-floor surfaces and no exact built-in NIXL adapter. That is not a
+reason to manufacture parity: it reinforces the existing division in which
+NIXL may serve as an explicitly selected transfer substrate while FAK retains
+route admission, pricing, lifecycle governance, and receipts. No new issue was
+filed because every surviving action is already owned or explicitly watched.
