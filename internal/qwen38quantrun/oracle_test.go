@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -42,6 +43,146 @@ func TestRunOracleBindsQualityBeforePerformance(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "adapter-secret") {
 		t.Fatal("raw oracle archive retained the adapter secret")
+	}
+}
+
+func TestRunOracleBindsMatchedP32T64Receipt(t *testing.T) {
+	dir := t.TempDir()
+	corpus := qwen38quant.DefaultCorpus()
+	corpusPath := filepath.Join(dir, "corpus.json")
+	writeJSONTest(t, corpusPath, corpus)
+	ref := writeOracleRuntimeFixture(t, dir, "llama.cpp", corpus, 0)
+	candidate := writeOracleRuntimeFixture(t, dir, "fak", corpus, 0.0001)
+	writeMatchedMeasurementFixture(t, ref.measurementPath, oracleRuntimeReference)
+	writeMatchedMeasurementFixture(t, candidate.measurementPath, oracleRuntimeCandidate)
+	cfg := validOracleConfig(ref, candidate)
+	configPath := filepath.Join(dir, "oracle.json")
+	writeJSONTest(t, configPath, cfg)
+
+	report, err := RunOracle(context.Background(), configPath, corpusPath, filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Verdict != "HOLD" {
+		t.Fatalf("verdict=%q want comparator-bound HOLD", report.Verdict)
+	}
+}
+
+func TestRunOracleRefusesInvalidMatchedP32T64Receipt(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		mutate func(*OracleMeasurementRun)
+	}{
+		{name: "missing repetition", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions = run.Matched.Repetitions[:2]
+		}},
+		{name: "duplicate repetition", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[2].Repetition = 2
+		}},
+		{name: "out of range repetition", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[0].Repetition = 0
+		}},
+		{name: "prefill shape drift", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.PrefillTokens = 31
+		}},
+		{name: "decode shape drift", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.DecodeTokens = 63
+		}},
+		{name: "temperature drift", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Temperature = 0.1
+		}},
+		{name: "engine tamper", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.Engine = "llama.cpp"
+		}},
+		{name: "backend tamper", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.Backend = "cpu"
+		}},
+		{name: "forward path tamper", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.ForwardPath = "cpu/reference"
+		}},
+		{name: "q4k tamper", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.Q4K = false
+		}},
+		{name: "fallback active", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.FallbackActive = oracleBool(true)
+		}},
+		{name: "fallback state omitted", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.FallbackActive = nil
+		}},
+		{name: "candidate marked comparator", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.ComparatorOnly = oracleBool(true)
+		}},
+		{name: "reference not comparator", target: oracleRuntimeReference, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.ComparatorOnly = oracleBool(false)
+		}},
+		{name: "comparator state omitted", target: oracleRuntimeReference, mutate: func(run *OracleMeasurementRun) {
+			run.Execution.ComparatorOnly = nil
+		}},
+		{name: "missing RSS", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[0].RSSBytes = 0
+		}},
+		{name: "missing OS footprint", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[0].OSFootprintBytes = 0
+		}},
+		{name: "generated token tamper", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[0].Tokens[0] = "drift"
+		}},
+		{name: "empty generated token", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[0].Tokens[0] = ""
+		}},
+		{name: "nondeterministic generated tokens", target: "both", mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[1].Tokens[0] = "other"
+		}},
+		{name: "logit tamper", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.Repetitions[0].Logits[0] += 1
+		}},
+		{name: "prompt hash tamper", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Matched.PromptSHA256 = strings.Repeat("d", 64)
+		}},
+		{name: "mixed schema versions", target: oracleRuntimeCandidate, mutate: func(run *OracleMeasurementRun) {
+			run.Schema = OracleMeasurementSchema
+			run.Execution = nil
+			run.Matched = nil
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			corpus := qwen38quant.DefaultCorpus()
+			corpusPath := filepath.Join(dir, "corpus.json")
+			writeJSONTest(t, corpusPath, corpus)
+			ref := writeOracleRuntimeFixture(t, dir, "llama.cpp", corpus, 0)
+			candidate := writeOracleRuntimeFixture(t, dir, "fak", corpus, 0)
+			writeMatchedMeasurementFixture(t, ref.measurementPath, oracleRuntimeReference)
+			writeMatchedMeasurementFixture(t, candidate.measurementPath, oracleRuntimeCandidate)
+			targets := []string{candidate.measurementPath}
+			switch tt.target {
+			case oracleRuntimeReference:
+				targets = []string{ref.measurementPath}
+			case "both":
+				targets = []string{ref.measurementPath, candidate.measurementPath}
+			}
+			for _, target := range targets {
+				var measurement OracleMeasurementRun
+				readJSONTest(t, target, &measurement)
+				tt.mutate(&measurement)
+				writeJSONTest(t, target, measurement)
+			}
+			cfg := validOracleConfig(ref, candidate)
+			configPath := filepath.Join(dir, "oracle.json")
+			writeJSONTest(t, configPath, cfg)
+			reportPath, archivePath := filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json")
+
+			if _, err := RunOracle(context.Background(), configPath, corpusPath, reportPath, archivePath); err == nil {
+				t.Fatal("invalid matched receipt was accepted")
+			}
+			for _, path := range []string{reportPath, archivePath} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("%s exists after refusal", path)
+				}
+			}
+		})
 	}
 }
 
@@ -93,10 +234,62 @@ func TestRunOracleRefusesMissingHardwareEvidence(t *testing.T) {
 }
 
 func TestRunOracleRefusesRevisionDrift(t *testing.T) {
-	cfg := validOracleConfig(oracleFixturePaths{}, oracleFixturePaths{})
+	dir := t.TempDir()
+	corpus := qwen38quant.DefaultCorpus()
+	corpusPath := filepath.Join(dir, "corpus.json")
+	writeJSONTest(t, corpusPath, corpus)
+	ref := writeOracleRuntimeFixture(t, dir, "llama.cpp", corpus, 0)
+	candidate := writeOracleRuntimeFixture(t, dir, "fak", corpus, 0)
+	cfg := validOracleConfig(ref, candidate)
 	cfg.RevisionCommand = oracleHelperCommand("revision-drift", "")
-	if err := validateOracleConfig(cfg); err == nil {
-		t.Fatal("fixture should still satisfy static config validation")
+	configPath := filepath.Join(dir, "oracle.json")
+	writeJSONTest(t, configPath, cfg)
+	reportPath, archivePath := filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json")
+
+	_, err := RunOracle(context.Background(), configPath, corpusPath, reportPath, archivePath)
+	if err == nil || !strings.Contains(err.Error(), "revision drift") {
+		t.Fatalf("err=%v", err)
+	}
+	for _, path := range []string{reportPath, archivePath} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("%s exists after revision refusal", path)
+		}
+	}
+}
+
+func TestValidateOracleConfigRefusesPinnedRevisionDrift(t *testing.T) {
+	paths := oracleFixturePaths{
+		adapterPath: "adapter.json", reportPath: "report.json", archivePath: "archive.json", measurementPath: "measurement.json",
+	}
+	cfg := validOracleConfig(paths, paths)
+	cfg.LlamaCPPRevision = strings.Repeat("b", 40)
+	if err := validateOracleConfig(cfg); err == nil || !strings.Contains(err.Error(), "pinned oracle") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestMatchesPinnedLlamaCPPRevision(t *testing.T) {
+	const buildLine = "built with AppleClang 21.0.0.21000101 for Darwin arm64\n"
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{name: "immutable full revision", output: PinnedLlamaCPPRevision + "\n", want: true},
+		{name: "installed b9828 identity", output: "version: 9828 (ebd048fc5)\n" + buildLine, want: true},
+		{name: "wrong build", output: "version: 9827 (ebd048fc5)\n" + buildLine},
+		{name: "wrong revision", output: "version: 9828 (deadbeef0)\n" + buildLine},
+		{name: "dirty revision suffix", output: "version: 9828 (ebd048fc5-dirty)\n" + buildLine},
+		{name: "missing build metadata", output: "version: 9828 (ebd048fc5)\n"},
+		{name: "identity not first", output: "warning\nversion: 9828 (ebd048fc5)\n" + buildLine},
+		{name: "drifted full revision", output: strings.Repeat("b", 40) + "\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesPinnedLlamaCPPRevision([]byte(tt.output)); got != tt.want {
+				t.Fatalf("matchesPinnedLlamaCPPRevision(%q)=%v want %v", tt.output, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -107,7 +300,8 @@ func TestOracleHelperProcess(t *testing.T) {
 	mode, path := os.Args[len(os.Args)-2], os.Args[len(os.Args)-1]
 	switch mode {
 	case "revision":
-		os.Stdout.WriteString(PinnedLlamaCPPRevision + "\n")
+		os.Stdout.WriteString("version: " + PinnedLlamaCPPBuild + " (" + PinnedLlamaCPPRevision[:9] + ")\n")
+		os.Stdout.WriteString("built with AppleClang 21.0.0.21000101 for Darwin arm64\n")
 	case "revision-drift":
 		os.Stdout.WriteString(strings.Repeat("b", 40) + "\n")
 	case "measurement":
@@ -190,6 +384,40 @@ func writeOracleRuntimeFixture(t *testing.T, dir, name string, corpus qwen38quan
 	writeJSONTest(t, paths.measurementPath, measurement)
 	return paths
 }
+
+func writeMatchedMeasurementFixture(t *testing.T, path, role string) {
+	t.Helper()
+	var measurement OracleMeasurementRun
+	readJSONTest(t, path, &measurement)
+	measurement.Schema = OracleMeasurementV2Schema
+	measurement.Matched = &OracleMatchedEnvelope{
+		PromptSHA256: strings.Repeat("c", 64), Temperature: 0, PrefillTokens: 32, DecodeTokens: 64,
+	}
+	for repetition := 1; repetition <= 3; repetition++ {
+		measurement.Matched.Repetitions = append(measurement.Matched.Repetitions, OracleMatchedRepetition{
+			Repetition: repetition, Tokens: slices.Repeat([]string{"tok"}, 64), Logits: []float64{4, 2, 1},
+			TTFTMS: 10, PrefillSeconds: 0.1, PrefillTokensPerSecond: 320,
+			DecodeSeconds: 1, DecodeTokensPerSecond: 64, RSSBytes: 24 << 30, OSFootprintBytes: 26 << 30,
+		})
+	}
+	switch role {
+	case oracleRuntimeReference:
+		measurement.Execution = &OracleExecutionIdentity{
+			Engine: qwen38quant.EngineLlamaCpp, Backend: oracleMetalBackend, ForwardPath: oracleLlamaForward,
+			Q4K: true, FallbackActive: oracleBool(false), ComparatorOnly: oracleBool(true),
+		}
+	case oracleRuntimeCandidate:
+		measurement.Execution = &OracleExecutionIdentity{
+			Engine: oracleNativeEngine, Backend: oracleMetalBackend, ForwardPath: oracleNativeForward,
+			Q4K: true, FallbackActive: oracleBool(false), ComparatorOnly: oracleBool(false),
+		}
+	default:
+		t.Fatalf("unknown role %q", role)
+	}
+	writeJSONTest(t, path, measurement)
+}
+
+func oracleBool(value bool) *bool { return &value }
 
 func validOracleConfig(ref, candidate oracleFixturePaths) OracleConfig {
 	return OracleConfig{
