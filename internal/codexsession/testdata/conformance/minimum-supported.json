@@ -1,0 +1,7 @@
+{
+  "fixture": "minimum-supported",
+  "binaryVersion": "codex-cli 0.42.0",
+  "protocolVersion": "app-server/experimental-v1",
+  "events": ["thread/started", "item/started", "item/agentMessage/delta", "item/completed", "turn/completed"],
+  "authorityMethods": ["item/commandExecution/requestApproval", "item/fileChange/requestApproval"]
+}
