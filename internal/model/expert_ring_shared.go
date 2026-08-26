@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -327,6 +328,18 @@ type SharedExpertRingStats struct {
 	// the number to watch before trusting any of the ratios above: a ring that refused half its
 	// demands is reporting the coalescing of the half it kept.
 	Refusals int64 `json:"refusals"`
+}
+
+// SwapExpertRingEvictPolicy serializes an operation-atomic policy transition with the existing
+// shared-ring mutex while attached sessions remain live. The mutex does not establish a global
+// turn barrier; callers requiring turn-level trace attribution must quiesce attached sessions.
+func (sh *SharedExpertRing) SwapExpertRingEvictPolicy(policy ExpertRingEvictPolicy) (ExpertRingPolicySwapReceipt, error) {
+	if sh == nil || sh.ring == nil {
+		return ExpertRingPolicySwapReceipt{}, fmt.Errorf("shared expert ring: not enabled")
+	}
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	return sh.ring.swapPolicy(policy)
 }
 
 // CoalescingRatio is demands per page-in — #5243's B*K/|U(B)| in its raw form, over the whole

@@ -121,6 +121,9 @@ type pagedRing struct {
 	// byte-for-byte; under ExpertRingEvictValueAware the ring picks victims by decaying heat and
 	// evicts them BEFORE Admit, so Admit fits without choosing.
 	policy ExpertRingEvictPolicy
+	// policyGeneration identifies the policy-local measurement epoch. It starts at one so zero
+	// remains an uninitialized/not-a-ring value in exported receipts, stats, and traces.
+	policyGeneration uint64
 	// heat is the per-weight decaying access counter the value-aware policy ranks on, and lastUse
 	// the recency clock it tie-breaks on. heat is nil under LRU (never allocated) and RETAINS an
 	// evicted weight's count as ghost heat. accesses drives the decay cadence.
@@ -177,9 +180,10 @@ func newPagedRing(be compute.Backend, budgetBytes int64) *pagedRing {
 		be = compute.Default()
 	}
 	return &pagedRing{
-		be:       be,
-		pool:     polymodel.NewPool(budgetBytes),
-		resident: map[polymodel.ModelID]compute.Tensor{},
+		be:               be,
+		pool:             polymodel.NewPool(budgetBytes),
+		resident:         map[polymodel.ModelID]compute.Tensor{},
+		policyGeneration: 1,
 	}
 }
 
