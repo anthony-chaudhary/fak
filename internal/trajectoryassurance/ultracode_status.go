@@ -215,15 +215,3 @@ func outcomePolarity(value string) State {
 		return Unknown
 	}
 }
-
-// evidencePolarity recognizes the sole v1 producer value. Positive
-// effect-readback, witness, and reconciliation enums are not yet part of the
-// producer contract; unsupported values therefore fail closed as UNKNOWN.
-func evidencePolarity(value string) State {
-	switch strings.TrimSpace(value) {
-	case "not_observed":
-		return Unknown
-	default:
-		return Unknown
-	}
-}

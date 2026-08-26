@@ -4,14 +4,13 @@ package systembaseline
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
-
-const linuxClockTicks = uint64(100)
 
 func capturePlatform() Snapshot {
 	s := Snapshot{At: time.Now().UTC(), Host: readLinuxHost()}
@@ -51,11 +50,14 @@ func readLinuxHost() HostSample {
 				}
 				ticks = append(ticks, n)
 			}
-			if len(ticks) >= 4 {
-				total, idle, _ := canonicalLinuxCPUTicks(ticks)
-				h.CPUAvailable = true
-				h.TotalCPUNS = total * uint64(time.Second) / linuxClockTicks
-				h.BusyCPUNS = (total - idle) * uint64(time.Second) / linuxClockTicks
+			if total, idle, ok := canonicalLinuxCPUTicks(ticks); ok {
+				totalNS, totalOK := linuxCPUTicksToNS(total)
+				busyNS, busyOK := linuxCPUTicksToNS(total - idle)
+				if totalOK && busyOK {
+					h.CPUAvailable = true
+					h.TotalCPUNS = totalNS
+					h.BusyCPUNS = busyNS
+				}
 			}
 		}
 	}
@@ -105,5 +107,12 @@ func readLinuxProcess(pid int) (ProcessSample, bool) {
 	if rss < 0 {
 		rss = 0
 	}
-	return ProcessSample{PID: pid, PPID: ppid, StartID: start, Image: raw[open+1 : close], CPUAvailable: true, CPUNS: (user + sys) * uint64(time.Second) / linuxClockTicks, RSSAvailable: true, RSSBytes: uint64(rss) * uint64(os.Getpagesize())}, true
+	if sys > math.MaxUint64-user {
+		return ProcessSample{}, false
+	}
+	cpuNS, ok := linuxCPUTicksToNS(user + sys)
+	if !ok || uint64(rss) > math.MaxUint64/uint64(os.Getpagesize()) {
+		return ProcessSample{}, false
+	}
+	return ProcessSample{PID: pid, PPID: ppid, StartID: start, Image: raw[open+1 : close], CPUAvailable: true, CPUNS: cpuNS, RSSAvailable: true, RSSBytes: uint64(rss) * uint64(os.Getpagesize())}, true
 }

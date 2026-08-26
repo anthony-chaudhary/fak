@@ -1,0 +1,10 @@
+{
+  "schema": "fak-codex-session-ui-dogfood/1",
+  "runs_match": true,
+  "semantic_sha256": "0f36a6ff852d256dd5c9c2645878e9e4327a91be75b2f865b0f5fa11ded2b599",
+  "diff_sha256": "282790f49040024fe9b3d304a92dfa90beb1aa7cfbd49aac69c89b7a78cbb7cd",
+  "capture_count": 12,
+  "focused_test": "go test ./...: PASS",
+  "scrub": "PASS",
+  "evidence_class": "deterministic fak-controlled replay; no live Codex behavior claimed"
+}

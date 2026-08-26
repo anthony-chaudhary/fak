@@ -102,56 +102,23 @@ type metricDesc struct {
 // the Prometheus descriptor table are all driven by this one table — add a
 // metric here and every surface picks it up.
 var metricTable = []metricDesc{
-	{
-		Key: "tokens_per_second", Type: OpenMetricGauge,
-		Help: "Decode throughput in tokens per second.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.TokensPerSecond) },
-		set:  func(d *DeviceMetrics, v float64) { d.TokensPerSecond = &v },
-	},
-	{
-		Key: "queue_depth", Type: OpenMetricGauge,
-		Help: "Requests waiting in the engine queue.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.QueueDepth) },
-		set:  func(d *DeviceMetrics, v float64) { d.QueueDepth = &v },
-	},
-	{
-		Key: "kv_cache_bytes", Type: OpenMetricGauge,
-		Help: "KV-cache memory in use, in bytes.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.KVCacheBytes) },
-		set:  func(d *DeviceMetrics, v float64) { d.KVCacheBytes = &v },
-	},
-	{
-		Key: "ttft_seconds", Type: OpenMetricGauge,
-		Help: "Time to first token, in seconds.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.TTFTSeconds) },
-		set:  func(d *DeviceMetrics, v float64) { d.TTFTSeconds = &v },
-	},
-	{
-		Key: "in_flight", Type: OpenMetricGauge,
-		Help: "Requests currently being served.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.InFlight) },
-		set:  func(d *DeviceMetrics, v float64) { d.InFlight = &v },
-	},
-	{
-		Key: "utilization_ratio", Type: OpenMetricGauge,
-		Help: "Device compute utilization as a 0..1 ratio.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.UtilizationRatio) },
-		set:  func(d *DeviceMetrics, v float64) { d.UtilizationRatio = &v },
-	},
-	{
-		Key: "memory_used_bytes", Type: OpenMetricGauge,
-		Help: "Device memory in use, in bytes.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.MemoryUsedBytes) },
-		set:  func(d *DeviceMetrics, v float64) { d.MemoryUsedBytes = &v },
-	},
-	{
-		Key: "power_watts", Type: OpenMetricGauge,
-		Help: "Device power draw, in watts.",
-		get:  func(d DeviceMetrics) (float64, bool) { return deref(d.PowerWatts) },
-		set:  func(d *DeviceMetrics, v float64) { d.PowerWatts = &v },
-	},
+	newMetricDesc("tokens_per_second", "Decode throughput in tokens per second.", func(d *DeviceMetrics) **float64 { return &d.TokensPerSecond }),
+	newMetricDesc("queue_depth", "Requests waiting in the engine queue.", func(d *DeviceMetrics) **float64 { return &d.QueueDepth }),
+	newMetricDesc("kv_cache_bytes", "KV-cache memory in use, in bytes.", func(d *DeviceMetrics) **float64 { return &d.KVCacheBytes }),
+	newMetricDesc("ttft_seconds", "Time to first token, in seconds.", func(d *DeviceMetrics) **float64 { return &d.TTFTSeconds }),
+	newMetricDesc("in_flight", "Requests currently being served.", func(d *DeviceMetrics) **float64 { return &d.InFlight }),
+	newMetricDesc("utilization_ratio", "Device compute utilization as a 0..1 ratio.", func(d *DeviceMetrics) **float64 { return &d.UtilizationRatio }),
+	newMetricDesc("memory_used_bytes", "Device memory in use, in bytes.", func(d *DeviceMetrics) **float64 { return &d.MemoryUsedBytes }),
+	newMetricDesc("power_watts", "Device power draw, in watts.", func(d *DeviceMetrics) **float64 { return &d.PowerWatts }),
 }
 
+func newMetricDesc(key, help string, field func(*DeviceMetrics) **float64) metricDesc {
+	return metricDesc{
+		Key: key, Help: help, Type: OpenMetricGauge,
+		get: func(d DeviceMetrics) (float64, bool) { return deref(*field(&d)) },
+		set: func(d *DeviceMetrics, v float64) { *field(d) = &v },
+	}
+}
 func deref(p *float64) (float64, bool) {
 	if p == nil {
 		return 0, false

@@ -544,14 +544,6 @@ func effectiveInventoryMode(repo Repository) string {
 	return InventoryModeStandard
 }
 
-func missingRequiredSourceClasses(have []string) []string {
-	seen := make(map[string]bool, len(have))
-	for _, item := range have {
-		seen[item] = true
-	}
-	return missingRequiredSourceClassesFromSet(seen)
-}
-
 func missingRequiredSourceClassesFromSet(seen map[string]bool) []string {
 	var missing []string
 	for _, required := range RequiredInventorySourceClasses {

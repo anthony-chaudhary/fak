@@ -335,6 +335,51 @@ SCORECARDS: list[dict[str, str]] = [
     {"key": "flow", "debt": "flow_debt", "script": "", "cmd": "go run ./cmd/fak score flow --json", "label": "flow-metrics"},
 ]
 
+# Every scorecard implementation must be represented by the default portfolio
+# fold or explicitly classified here. Keeping this authority beside SCORECARDS
+# lets the report itself expose coverage (#9228).
+EXCLUDED_SCORECARDS: dict[str, str] = {
+    "vcache_scorecard_gate.py": "CI gate wrapper, not a portfolio debt scorecard",
+    "skill_slop_scorecard.py": (
+        "per-file HARD admission gate requiring positional paths; it emits no "
+        "corpus debt integer suitable for the portfolio fold"
+    ),
+    "behavior_contract_scorecard.py": (
+        "advisory change-detector gate; folding requires a separately reviewed "
+        "baseline migration"
+    ),
+    "commit_quality_scorecard.py": (
+        "eventual commit-scoring superset; folding beside commit_subject would "
+        "double-count that KPI until its clean-tree migration lands"
+    ),
+}
+
+
+def scorecard_index_coverage(root: Path) -> dict[str, Any]:
+    """Return deterministic coverage of Python scorecard implementations."""
+    discovered = sorted(
+        path.name
+        for path in (root / "tools").glob("*_scorecard.py")
+        if not path.name.endswith("_test.py") and path.name != Path(__file__).name
+    )
+    discovered_set = set(discovered)
+    registered_set = {card["script"] for card in SCORECARDS if card.get("script")}
+    registered = sorted(discovered_set & registered_set)
+    excluded = sorted(discovered_set & set(EXCLUDED_SCORECARDS))
+    unindexed = sorted(discovered_set - registered_set - set(EXCLUDED_SCORECARDS))
+    return {
+        "ok": not unindexed,
+        "discovered_count": len(discovered),
+        "registered_count": len(registered),
+        "excluded_count": len(excluded),
+        "unindexed_count": len(unindexed),
+        "discovered": discovered,
+        "registered": registered,
+        "excluded": [{"script": n, "reason": EXCLUDED_SCORECARDS[n]} for n in excluded],
+        "unindexed": unindexed,
+    }
+
+
 # The scorecards folded via `go run ./cmd/fak …` (no python script). When one of
 # THESE errors, the cause is almost always a working tree that does not COMPILE —
 # the `go run` build step failed on uncommitted WIP — NOT a bug in the card. This
@@ -579,6 +624,7 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
     regressed = trend["direction"] == "regressed"
     version_changed = trend.get("version_changed") or []
     early_warning = trend.get("early_warning") or []
+    index_coverage = scorecard_index_coverage(Path(workspace))
     ew_note = ""
     if early_warning and not regressed:
         # The hidden case the early-warning lens exists for (#712): a metric rose
@@ -639,8 +685,9 @@ def fold(metrics: list[dict[str, Any]], baseline: dict[str, Any] | None,
 
     return {
         "schema": SCHEMA,
-        "ok": ok,
-        "verdict": verdict,
+        "ok": ok and index_coverage["ok"],
+        "verdict": verdict if index_coverage["ok"] else "ACTION",
+        "index_coverage": index_coverage,
         "finding": finding,
         "reason": reason,
         "next_action": next_action,
@@ -980,8 +1027,17 @@ def render(payload: dict[str, Any]) -> str:
         f"({payload['measured']} measured, {payload['errored']} errored)  @{payload['commit']}",
         f"  grade severity: {payload.get('grade_breakdown', 'n/a')}",
         f"  trend: {payload['trend']['summary']}",
+        "  index coverage: "
+        f"registered={payload.get('index_coverage', {}).get('registered_count', 0)}/"
+        f"{payload.get('index_coverage', {}).get('discovered_count', 0)} "
+        f"excluded={payload.get('index_coverage', {}).get('excluded_count', 0)} "
+        f"unindexed={payload.get('index_coverage', {}).get('unindexed_count', 0)}",
         "",
     ]
+    coverage = payload.get("index_coverage") or {}
+    if coverage.get("unindexed"):
+        lines.append("  UNINDEXED: " + ", ".join(coverage["unindexed"]))
+        lines.append("")
     for m in payload["metrics"]:
         debt = m["debt"] if m["debt"] is not None else f"ERR ({m['error']})"
         grade = f" [{m['grade']}]" if m.get("grade") else ""
