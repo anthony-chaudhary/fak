@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 89,
+    "entry_count": 90,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -97,6 +97,7 @@
       "Data Center Watch",
       "DeepSeek",
       "FineServe",
+      "GitHub Copilot coding agent",
       "Google",
       "Google Cloud",
       "Google internal developer tools",
@@ -750,7 +751,13 @@
       "evidence_class": "production_measurement",
       "confidence": "high",
       "claim": "A worldwide cloud study found bursty arrivals and differing token behavior across language, multimodal, and reasoning workloads; per-client composition explains aggregate patterns better than one global distribution.",
-      "quantified": {},
+      "quantified": {
+        "duration_months": 4,
+        "requests": 3540000000,
+        "model_groups": 12,
+        "gpu_scale": "O(10K)",
+        "regions": "dozens"
+      },
       "assumptions": [
         "Client mixture is a primary driver of aggregate workload shape.",
         "Stationary Poisson arrivals and one token histogram are often inadequate."
@@ -783,7 +790,14 @@
       "evidence_class": "production_measurement",
       "confidence": "medium_high",
       "claim": "A global commercial marketplace trace reports distinct fluctuation regimes across model architecture, scale, and task intent, plus sharp traffic shifts after model releases or availability changes.",
-      "quantified": {},
+      "quantified": {
+        "task_sample_requests": 100000,
+        "silver_labeled_requests": 20000,
+        "task_classes": 10,
+        "dense_output_peak_input_tokens_low": 1500,
+        "dense_output_peak_input_tokens_high": 2000,
+        "dense_output_drop_long_input_pct_gt": 60
+      },
       "assumptions": [
         "Model choice and market events make workload mixes nonstationary."
       ],
@@ -1558,7 +1572,13 @@
       "quantified": {
         "sessions_approx": 4300,
         "llm_steps_approx": 350000,
-        "tool_calls_approx": 430000
+        "tool_calls_approx": 430000,
+        "developers": 43,
+        "collection_months_approx": 8,
+        "llm_calls_per_request_avg": 8.8,
+        "tool_calls_per_request_avg": 10.8,
+        "completion_minutes_avg": 4.3,
+        "completion_minutes_p90_gt": 6.4
       },
       "assumptions": [
         "Coding-agent demand differs from chat: closed loops, appended context, tool latency, and human-paced idle gaps affect cache residency."
@@ -3162,6 +3182,61 @@
       ],
       "fak_implications": [
         "Track optical BOM, packaging integration, yield, and capacity access alongside accelerator orders."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "github-copilot-agentic-production-2026",
+      "category": "workload_trace",
+      "entity": "GitHub Copilot coding agent",
+      "topic": [
+        "coding_agents",
+        "user_heterogeneity",
+        "kv_cache",
+        "tool_failures",
+        "compaction"
+      ],
+      "published_at": "2026-07-30",
+      "event_at": "2026-06-07",
+      "source_title": "Agentic Coding in the Wild: Characterizing GitHub Copilot at Production Scale",
+      "source_url": "https://arxiv.org/html/2608.00101v1",
+      "source_kind": "production_trace_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "A sampled week of GitHub Copilot coding-agent telemetry shows session-structured cache reuse, alternating tool/model phases, costly compaction and retry loops, and a 50x range in per-turn token use across five user archetypes.",
+      "quantified": {
+        "users": 3200000,
+        "sessions": 13500000,
+        "turns": 95100000,
+        "llm_calls": 760500000,
+        "tool_calls": 774700000,
+        "prompt_tokens": 44900000000000,
+        "completion_tokens": 39300000000,
+        "agent_initiated_llm_calls_pct": 87,
+        "cached_tokens_session_avg_pct": 90,
+        "cached_tokens_turn_boundary_pct": 55,
+        "cached_tokens_after_model_switch_pct": 8,
+        "sessions_with_compaction_pct": 7.8,
+        "tokens_in_compacted_sessions_pct": 44,
+        "prompt_tokens_dropped_by_compaction_pct_gt": 70,
+        "turns_with_tool_failure_pct": 9,
+        "retry_compute_amplification_up_to": 4,
+        "user_archetypes": 5,
+        "per_turn_tokens_low": 23000,
+        "per_turn_tokens_high": 1100000,
+        "container_idle_minutes_avg": 4.1,
+        "kv_idle_minutes_avg": 2.9
+      },
+      "assumptions": [
+        "Coding-agent scheduling and caching must operate at session/turn scope and preserve heterogeneous user and tool behavior."
+      ],
+      "contradictions_or_limits": [
+        "The sample covers one product and one week; hidden reasoning tokens were excluded, and models/tools evolve rapidly."
+      ],
+      "fak_implications": [
+        "Replay turns, tools, failures, switches, compaction, and idle gaps; report request-weighted and token-weighted outcomes."
       ],
       "rumor": {
         "is_rumor": false

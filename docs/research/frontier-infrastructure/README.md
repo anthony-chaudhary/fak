@@ -11,7 +11,8 @@ or an unlabeled market rumor.
 The machine-readable source of truth is [`index.json`](index.json). The derived
 [`workload-assumptions.md`](workload-assumptions.md) registry converts the ledger into
 benchmark assumptions and explicitly bounds Zipfian, batching, cluster, and userbase
-claims. [`startups-landscape.md`](startups-landscape.md) is the adjacent-provider taxonomy
+claims. [`workload-parameters.md`](workload-parameters.md) records measured populations,
+parameters, and exact limits for replay and generation. [`startups-landscape.md`](startups-landscape.md) is the adjacent-provider taxonomy
 and watchlist. [`refresh-protocol.md`](refresh-protocol.md) defines the online-search,
 contradiction, and rumor lifecycle. The `slices/` directory is reserved for independently
 researched coverage ledgers.
@@ -122,20 +123,20 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **89 dated entries** across frontier labs, hyperscalers,
+The current spine contains **90 dated entries** across frontier labs, hyperscalers,
 AI clouds, accelerators, serving systems, measured workload traces, workload models,
-physical capacity, supply chains, standards, market signals, and one explicitly labeled
-rumor. It is **not exhaustive yet**. The authoritative missing-work list is
+physical capacity, supply chains, standards, market signals, and three explicitly labeled
+rumors. It is **not exhaustive yet**. The authoritative missing-work list is
 `coverage.explicit_gaps` in `index.json`.
 
 Immediate next slices:
 
 1. finish the checked/unchecked [`slices/frontier-lab-census.md`](slices/frontier-lab-census.md), including Chinese and regional labs;
-2. hyperscaler/neocloud product and filing ledger;
-3. datacenter/power/cooling/network/supply-chain ledger;
-4. production workload-distribution table with exact parameters and sample limits;
+2. extend the [`workload-parameters.md`](workload-parameters.md) ledger with missing production distributions;
+3. hyperscaler/neocloud product and filing ledger;
+4. datacenter/power/cooling/network/supply-chain ledger;
 5. startup, release, acquisition, failure, and rumor chronology;
-6. contradiction matrix and a schema/link validator.
+6. contradiction matrix and recurring validator.
 
 The clearest workload-distribution evidence so far is not a universal Zipf law. It is a
 set of **heavy-tailed, category-dependent, nonstationary** behaviors: model popularity
