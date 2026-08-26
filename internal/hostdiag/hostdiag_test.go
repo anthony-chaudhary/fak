@@ -1,6 +1,7 @@
 package hostdiag
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -106,12 +107,57 @@ func TestCorrelateRejectsUnrelated(t *testing.T) {
 	}
 }
 
-func TestClassifyCommandDoesNotRetainArguments(t *testing.T) {
-	if got := ClassifyCommand(`C:\bin\fak.exe guard --api-key secret`); got != "guard" {
-		t.Fatalf("got %q", got)
+func TestClassifyCommandUsesClosedAllowlist(t *testing.T) {
+	tests := []struct {
+		commandLine string
+		want        string
+	}{
+		{`C:\bin\fak.exe guard --api-key secret`, "guard"},
+		{`C:\bin\fak.exe model inspect --token secret`, "model"},
+		{`C:\bin\fak.exe bench run --credential secret`, "bench"},
+		{`C:\bin\fak.exe test ./internal/hostdiag`, "test"},
+		{`C:\bin\fak.exe validate --mine internal/hostdiag`, "validate"},
+		{`C:\bin\fak.exe hostdiag census --ledger private.jsonl`, "hostdiag"},
+		{`C:\bin\fak.exe unusual --token secret`, "other"},
+		{`C:\bin\fak.exe api-key secret`, "other"},
+		{`C:\bin\fak.exe secret-token`, "other"},
 	}
-	if got := ClassifyCommand(`C:\bin\fak.exe unusual --token secret`); got != "other" {
-		t.Fatalf("got %q", got)
+	for _, test := range tests {
+		t.Run(test.want+"/"+test.commandLine, func(t *testing.T) {
+			if got := ClassifyCommand(test.commandLine); got != test.want {
+				t.Fatalf("ClassifyCommand(%q) = %q, want %q", test.commandLine, got, test.want)
+			}
+		})
+	}
+}
+
+func TestProcessSampleJSONRoundTripOmitsCommandLine(t *testing.T) {
+	commandLine := `C:\bin\fak.exe model inspect --api-key census-secret`
+	sample := NewProcessSample(time.UnixMilli(2000), 42, time.UnixMilli(1000), `C:\bin\fak.exe`, "sha", "rev", ClassifyCommand(commandLine), "session", 10, 20, 3, 4)
+
+	payload, err := json.Marshal(sample)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var roundTrip ProcessSample
+	if err := json.Unmarshal(payload, &roundTrip); err != nil {
+		t.Fatal(err)
+	}
+	if roundTrip.CommandClass != "model" {
+		t.Fatalf("command class = %q, want model", roundTrip.CommandClass)
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"argv", "command_line", "commandLine"} {
+		if _, ok := fields[forbidden]; ok {
+			t.Fatalf("privacy-sensitive field %q persisted in %s", forbidden, payload)
+		}
+	}
+	if strings.Contains(string(payload), "census-secret") || strings.Contains(string(payload), "--api-key") {
+		t.Fatalf("command arguments persisted in %s", payload)
 	}
 }
 

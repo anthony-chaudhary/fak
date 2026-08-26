@@ -133,7 +133,7 @@ func ClassifyCommand(commandLine string) string {
 		return "root"
 	}
 	verb := strings.ToLower(strings.TrimLeft(fields[1], "-"))
-	for _, allowed := range []string{"guard", "serve", "agent", "gateway", "stallscan", "host-crash", "watchdog-audit-run", "ultracode", "run", "preflight"} {
+	for _, allowed := range []string{"guard", "serve", "agent", "gateway", "stallscan", "host-crash", "watchdog-audit-run", "ultracode", "run", "preflight", "model", "bench", "test", "validate", "hostdiag"} {
 		if verb == allowed {
 			return verb
 		}
