@@ -11,6 +11,6 @@ description: "Verdict: a real two-turn Codex session in a temporary non-FAK Git 
 - Resumed turn: `39,739` input tokens, `3,456` cached input tokens.
 - Ingest: `fak vcache calibration-record --provider openai --model gpt-5.6-sol --source probe:codex-non-fak-repo-2026-08-18 --telemetry combined.jsonl --output calibration.jsonl`.
 - Readout: `fak vcache calibration-status --file calibration.jsonl --providers openai --json` returned `ok: true`, `state: fresh`.
-- Structured artifact: [`vcache-provider-calibration-live-2026-08-18.json`](vcache-provider-calibration-live-2026-08-18.json).
+- Structured artifact: [`vcache-provider-calibration-live-2026-08-18.json`](../_witnesses/vcache-provider-calibration-live-2026-08-18.json).
 
 This is deliberately narrow evidence. It does not claim Anthropic coverage, observed writes, measured TTL/minimum-prefix constants, or that the estimator now steers runtime cache policy. Those remain requirements of #1497.

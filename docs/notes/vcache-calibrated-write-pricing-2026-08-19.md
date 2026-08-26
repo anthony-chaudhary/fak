@@ -12,6 +12,6 @@ description: "Verdict: provider probe evidence can now replace the static cache-
 - `TestMeasuredWriteMultipliersChangeServedSpendByTier` proves fresh values change cache-creation spend independently, while an unmeasured value cannot steer accounting.
 - The served-spend pricing source gains `+vcache-calibrated-write`, making the live override diagnosable rather than silent.
 
-Structured artifact: [`vcache-calibrated-write-pricing-2026-08-19.json`](vcache-calibrated-write-pricing-2026-08-19.json).
+Structured artifact: [`vcache-calibrated-write-pricing-2026-08-19.json`](../_witnesses/vcache-calibrated-write-pricing-2026-08-19.json).
 
 This retires the calibrated 5m/1h write-multiplier acceptance item in #8090. Executable heartbeat actions, mismatch demotion, real-session prediction error, and provider-wide live probes remain in that issue.

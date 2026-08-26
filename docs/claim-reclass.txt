@@ -48,3 +48,8 @@ commit: 2379fab5c2efbfb4c00a15a96049a75ce69fc294
 type: fix
 witness: internal/managedocs/managedocs.go
 reason: The landed subject says test(managedocs), but the diff only refreshes two generated guard-table rows and changes no test source. The evidence supports generated-data maintenance, not a test-code claim.
+
+commit: dd21623ca3fbb04e1098e216ece890da3726668a
+type: docs
+witness: docs/_witnesses/issue-9238-q6k-mm.json
+reason: The landed subject says test(metalgemm), but the diff adds only an immutable JSON adjudication witness and changes no test source. The artifact deterministically records the issue ordering-guard decision from an already committed exact-artifact hardware receipt; the evidence supports a documentation/data claim, not a test-code claim.

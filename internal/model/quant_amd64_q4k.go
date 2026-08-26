@@ -47,29 +47,6 @@ func detectAVX512VNNI() bool {
 	return ecx7&avx512vnni != 0
 }
 
-// q4kInt8Default resolves FAK_KQ_INT8 once: the GLM-5.2 mixed-quant offloaded-expert lever. The
-// SCALAR int8 reduction already beats the f32 dequant path on amd64 (skips the 256-f32 per-super-block
-// dequant); the AVX2 kernel here accelerates it further. Default OFF — the int8 path is APPROXIMATE
-// (activation quantization), so it rides FAK_KQ_INT8 until a real-weights witness clears it.
-var q4kInt8Default = func() bool {
-	switch os.Getenv("FAK_KQ_INT8") {
-	case "1", "on", "true":
-		return true
-	}
-	return false
-}()
-
-// q4kSDOTEnabled reports whether the resident-Q4_K int8 decode path is active. It does NOT depend on
-// the SIMD tier — the scalar int8 reducer is the fallback when AVX2 is absent, and it still beats f32
-// — so this tracks only the FAK_KQ_INT8 gate (and the test force). The kernel tier (q4kReduceRow)
-// decides scalar-vs-AVX2 independently.
-func q4kSDOTEnabled() bool {
-	if q4kSDOTForce != 0 {
-		return q4kSDOTForce > 0
-	}
-	return q4kInt8Default
-}
-
 func q4kExtractOnceGemmEnabled() bool {
 	return false
 }

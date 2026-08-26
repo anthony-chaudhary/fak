@@ -11,6 +11,6 @@ description: "Verdict: the default stale-read mechanism now reaches decoded Open
 - `TestDecodedStaleReadElisionProtectsRecentAndUneditedReads` proves the recent working-set tail and reads without a later same-path edit stay byte-identical.
 - Guard and serve already default `--elide-stale-reads` on through `gateway.DefaultElideStaleReads`; `--elide-stale-reads=false` remains the independent opt-out.
 
-Structured artifact: [`openai-stale-read-elision-non-fak-2026-08-18.json`](openai-stale-read-elision-non-fak-2026-08-18.json).
+Structured artifact: [`openai-stale-read-elision-non-fak-2026-08-18.json`](../_witnesses/openai-stale-read-elision-non-fak-2026-08-18.json).
 
 This retires stale-read elision for decoded OpenAI-compatible traffic under #8089. Cold-tool deferral and cross-backend vCache signaling remain.

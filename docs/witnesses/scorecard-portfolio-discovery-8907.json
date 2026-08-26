@@ -1,0 +1,1329 @@
+{
+  "schema": "fak-scorecard-portfolio-discovery/1",
+  "coverage_debt": 101,
+  "coverage_debt_unit": "portfolio_gap",
+  "domain_debt_included": false,
+  "inventory": {
+    "python_producers": [
+      "behavior_contract",
+      "bench_dx",
+      "claim_repro",
+      "code_quality",
+      "code_slop",
+      "commit_quality",
+      "concept_disambiguation",
+      "cuda_dev",
+      "demo_quality",
+      "demo_robustness",
+      "doc_appeal",
+      "docs",
+      "industry",
+      "intent_literal",
+      "learning",
+      "observability",
+      "persona_fit",
+      "persona_readiness",
+      "popularization_readiness",
+      "product",
+      "release_readiness",
+      "repo_hygiene",
+      "rsi_maturity",
+      "skill_slop",
+      "sota_coverage",
+      "stability",
+      "steerability",
+      "tooling_quality"
+    ],
+    "go_score_routes": [
+      "agent-readiness",
+      "brittleness",
+      "cache-health",
+      "cachevalue-gate",
+      "code-quality",
+      "concept-usage",
+      "conflation",
+      "default-value",
+      "dogfood",
+      "dojo-rsi",
+      "flow",
+      "focus",
+      "guard-accuracy",
+      "guard-rsi",
+      "guard-verdict-rsi",
+      "issue-hygiene",
+      "lightgap",
+      "loop",
+      "loop-index",
+      "milestone",
+      "negation-tax",
+      "negation_operator",
+      "negframe",
+      "product",
+      "propagation",
+      "qa-process",
+      "repo-hygiene",
+      "seo",
+      "skill-effectiveness",
+      "sota-coverage",
+      "support-maturity",
+      "token-defaults",
+      "ui-quality",
+      "verifier-exposure"
+    ],
+    "python_pane_bindings": [
+      "agent",
+      "appeal",
+      "behavior_contract",
+      "bench_dx",
+      "claim_repro",
+      "code",
+      "commit_subject",
+      "conceptusage",
+      "conflation",
+      "cuda_dev",
+      "demo",
+      "disambiguation",
+      "doc",
+      "dogfood",
+      "flow",
+      "growth",
+      "guard_accuracy",
+      "guard_rsi",
+      "heaviness",
+      "hygiene",
+      "intent_literal",
+      "learning",
+      "lightgap",
+      "loopindex",
+      "maturity",
+      "milestone",
+      "milestone_climb",
+      "observability",
+      "parity",
+      "persona",
+      "persona_fit",
+      "popularization",
+      "product",
+      "propagation",
+      "readme",
+      "release",
+      "robustness",
+      "rsi_maturity",
+      "seo",
+      "slop",
+      "sota",
+      "stability",
+      "steer",
+      "support_maturity",
+      "tokendefaults",
+      "tooling_quality",
+      "ui_quality"
+    ],
+    "go_pane_bindings": [
+      "agent",
+      "antipattern",
+      "appeal",
+      "behavior_contract",
+      "bench_dx",
+      "claim_repro",
+      "code",
+      "conceptusage",
+      "conflation",
+      "cuda_dev",
+      "demo",
+      "disambiguation",
+      "doc",
+      "dogfood",
+      "flow",
+      "growth",
+      "guard_rsi",
+      "heaviness",
+      "hygiene",
+      "intent_literal",
+      "learning",
+      "loopindex",
+      "maturity",
+      "milestone",
+      "milestone_climb",
+      "negation_operator",
+      "negation_tax",
+      "negframe",
+      "observability",
+      "osp_residual",
+      "parity",
+      "persona",
+      "persona_fit",
+      "product",
+      "propagation",
+      "readme",
+      "release",
+      "robustness",
+      "rsi_maturity",
+      "seo",
+      "slop",
+      "sota_coverage",
+      "stability",
+      "steer",
+      "support_maturity",
+      "tokendefaults",
+      "tooling_quality",
+      "ui_quality"
+    ],
+    "detector_versions": {
+      "behavior_contract": "fleet-behavior-contract-scorecard/1",
+      "python:behavior_contract": "fleet-behavior-contract-scorecard/1",
+      "python:bench_dx": "fak-bench-dx-scorecard/1",
+      "python:claim_repro": "fleet-claim-repro-scorecard/1",
+      "python:code_quality": "fleet-code-quality-scorecard/1",
+      "python:code_slop": "fleet-code-slop-scorecard/1",
+      "python:commit_quality": "fleet-commit-quality-scorecard/1",
+      "python:concept_disambiguation": "fak-concept-disambiguation-scorecard/1",
+      "python:cuda_dev": "fak-cuda-dev-scorecard/1",
+      "python:demo_quality": "fleet-demo-quality-scorecard/1",
+      "python:demo_robustness": "fleet-demo-robustness-scorecard/1",
+      "python:doc_appeal": "fleet-doc-appeal-scorecard/1",
+      "python:docs": "fleet-docs-scorecard/1",
+      "python:industry": "fak-industry-scorecard/2",
+      "python:intent_literal": "fak-intent-literal-scorecard/1",
+      "python:learning": "fleet-learning-scorecard/1",
+      "python:observability": "fak-observability-scorecard/1",
+      "python:persona_fit": "fak-persona-fit-scorecard/1",
+      "python:persona_readiness": "fak-persona-readiness-scorecard/1",
+      "python:popularization_readiness": "fak-popularization-readiness-scorecard/1",
+      "python:product": "fak-product-scorecard/1",
+      "python:release_readiness": "fak-release-readiness/1",
+      "python:repo_hygiene": "fak-repo-hygiene-scorecard/1",
+      "python:rsi_maturity": "fak-rsi-maturity-scorecard/1",
+      "python:skill_slop": "fleet-skill-slop-scorecard/1",
+      "python:sota_coverage": "fak-sota-coverage-scorecard/1",
+      "python:stability": "fak-stability-scorecard/1",
+      "python:steerability": "fak-steerability-scorecard/1",
+      "python:tooling_quality": "fleet-tooling-quality-scorecard/1"
+    },
+    "baseline_entries": [
+      "agent",
+      "appeal",
+      "behavior_contract",
+      "bench_dx",
+      "claim_repro",
+      "code",
+      "commit_subject",
+      "conceptusage",
+      "conflation",
+      "cuda_dev",
+      "demo",
+      "disambiguation",
+      "doc",
+      "dogfood",
+      "flow",
+      "growth",
+      "guard_accuracy",
+      "guard_rsi",
+      "heaviness",
+      "hygiene",
+      "intent_literal",
+      "learning",
+      "loopindex",
+      "maturity",
+      "milestone",
+      "milestone_climb",
+      "observability",
+      "parity",
+      "persona",
+      "persona_fit",
+      "popularization",
+      "product",
+      "propagation",
+      "readme",
+      "release",
+      "robustness",
+      "rsi_maturity",
+      "seo",
+      "slop",
+      "sota",
+      "stability",
+      "steer",
+      "support_maturity",
+      "tokendefaults",
+      "tooling_quality",
+      "ui_quality"
+    ],
+    "python_capped_debt": [
+      "doc_appeal"
+    ],
+    "duplicate_bindings": null,
+    "non_integer_baseline": null,
+    "bound_score_routes": [
+      "agent-readiness",
+      "concept-usage",
+      "conflation",
+      "dogfood",
+      "flow",
+      "guard-accuracy",
+      "guard-rsi",
+      "lightgap",
+      "loop-index",
+      "milestone",
+      "negation-tax",
+      "negation_operator",
+      "negframe",
+      "seo",
+      "support-maturity",
+      "token-defaults",
+      "ui-quality"
+    ]
+  },
+  "gaps": [
+    {
+      "rank": 1,
+      "kind": "go_score_route_unbound",
+      "producer": "brittleness",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 2,
+      "kind": "go_score_route_unbound",
+      "producer": "cache-health",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 3,
+      "kind": "go_score_route_unbound",
+      "producer": "cachevalue-gate",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 4,
+      "kind": "go_score_route_unbound",
+      "producer": "code-quality",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 5,
+      "kind": "go_score_route_unbound",
+      "producer": "default-value",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 6,
+      "kind": "go_score_route_unbound",
+      "producer": "dojo-rsi",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 7,
+      "kind": "go_score_route_unbound",
+      "producer": "focus",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 8,
+      "kind": "go_score_route_unbound",
+      "producer": "guard-verdict-rsi",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 9,
+      "kind": "go_score_route_unbound",
+      "producer": "issue-hygiene",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 10,
+      "kind": "go_score_route_unbound",
+      "producer": "loop",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 11,
+      "kind": "go_score_route_unbound",
+      "producer": "qa-process",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 12,
+      "kind": "go_score_route_unbound",
+      "producer": "repo-hygiene",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 13,
+      "kind": "go_score_route_unbound",
+      "producer": "skill-effectiveness",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 14,
+      "kind": "go_score_route_unbound",
+      "producer": "verifier-exposure",
+      "reach": 3,
+      "consequence": "Go-backed scorecard is absent from the native control-pane portfolio",
+      "provenance": [
+        "cmd/fak/score.go:scoreRoutes",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 15,
+      "kind": "producer_debt_capped",
+      "producer": "doc_appeal",
+      "reach": 3,
+      "consequence": "producer caps debt instead of emitting an unbounded integer",
+      "provenance": [
+        "tools/doc_appeal_scorecard.py"
+      ]
+    },
+    {
+      "rank": 16,
+      "kind": "python_producer_unbound",
+      "producer": "code_quality",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/code_quality_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 17,
+      "kind": "python_producer_unbound",
+      "producer": "code_slop",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/code_slop_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 18,
+      "kind": "python_producer_unbound",
+      "producer": "commit_quality",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/commit_quality_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 19,
+      "kind": "python_producer_unbound",
+      "producer": "concept_disambiguation",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/concept_disambiguation_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 20,
+      "kind": "python_producer_unbound",
+      "producer": "demo_quality",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/demo_quality_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 21,
+      "kind": "python_producer_unbound",
+      "producer": "demo_robustness",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/demo_robustness_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 22,
+      "kind": "python_producer_unbound",
+      "producer": "doc_appeal",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/doc_appeal_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 23,
+      "kind": "python_producer_unbound",
+      "producer": "docs",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/docs_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 24,
+      "kind": "python_producer_unbound",
+      "producer": "industry",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/industry_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 25,
+      "kind": "python_producer_unbound",
+      "producer": "persona_readiness",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/persona_readiness_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 26,
+      "kind": "python_producer_unbound",
+      "producer": "popularization_readiness",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/popularization_readiness_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 27,
+      "kind": "python_producer_unbound",
+      "producer": "release_readiness",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/release_readiness_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 28,
+      "kind": "python_producer_unbound",
+      "producer": "repo_hygiene",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/repo_hygiene_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 29,
+      "kind": "python_producer_unbound",
+      "producer": "skill_slop",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/skill_slop_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 30,
+      "kind": "python_producer_unbound",
+      "producer": "sota_coverage",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/sota_coverage_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 31,
+      "kind": "python_producer_unbound",
+      "producer": "steerability",
+      "reach": 3,
+      "consequence": "executable detector debt is invisible to Python control-pane operators",
+      "provenance": [
+        "tools/steerability_scorecard.py",
+        "tools/scorecard_control_pane.py:SCORECARDS"
+      ]
+    },
+    {
+      "rank": 32,
+      "kind": "baseline_entry_missing",
+      "producer": "antipattern",
+      "reach": 2,
+      "consequence": "bound detector has no pinned baseline entry",
+      "provenance": [
+        "tools/scorecard_baseline.json:metrics"
+      ]
+    },
+    {
+      "rank": 33,
+      "kind": "baseline_entry_missing",
+      "producer": "lightgap",
+      "reach": 2,
+      "consequence": "bound detector has no pinned baseline entry",
+      "provenance": [
+        "tools/scorecard_baseline.json:metrics"
+      ]
+    },
+    {
+      "rank": 34,
+      "kind": "baseline_entry_missing",
+      "producer": "negation_operator",
+      "reach": 2,
+      "consequence": "bound detector has no pinned baseline entry",
+      "provenance": [
+        "tools/scorecard_baseline.json:metrics"
+      ]
+    },
+    {
+      "rank": 35,
+      "kind": "baseline_entry_missing",
+      "producer": "negation_tax",
+      "reach": 2,
+      "consequence": "bound detector has no pinned baseline entry",
+      "provenance": [
+        "tools/scorecard_baseline.json:metrics"
+      ]
+    },
+    {
+      "rank": 36,
+      "kind": "baseline_entry_missing",
+      "producer": "negframe",
+      "reach": 2,
+      "consequence": "bound detector has no pinned baseline entry",
+      "provenance": [
+        "tools/scorecard_baseline.json:metrics"
+      ]
+    },
+    {
+      "rank": 37,
+      "kind": "baseline_entry_missing",
+      "producer": "osp_residual",
+      "reach": 2,
+      "consequence": "bound detector has no pinned baseline entry",
+      "provenance": [
+        "tools/scorecard_baseline.json:metrics"
+      ]
+    },
+    {
+      "rank": 38,
+      "kind": "baseline_entry_missing",
+      "producer": "sota_coverage",
+      "reach": 2,
+      "consequence": "bound detector has no pinned baseline entry",
+      "provenance": [
+        "tools/scorecard_baseline.json:metrics"
+      ]
+    },
+    {
+      "rank": 39,
+      "kind": "detector_version_unpinned",
+      "producer": "agent",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 40,
+      "kind": "detector_version_unpinned",
+      "producer": "antipattern",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 41,
+      "kind": "detector_version_unpinned",
+      "producer": "appeal",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 42,
+      "kind": "detector_version_unpinned",
+      "producer": "bench_dx",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 43,
+      "kind": "detector_version_unpinned",
+      "producer": "claim_repro",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 44,
+      "kind": "detector_version_unpinned",
+      "producer": "code",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 45,
+      "kind": "detector_version_unpinned",
+      "producer": "commit_subject",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 46,
+      "kind": "detector_version_unpinned",
+      "producer": "conceptusage",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 47,
+      "kind": "detector_version_unpinned",
+      "producer": "conflation",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 48,
+      "kind": "detector_version_unpinned",
+      "producer": "cuda_dev",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 49,
+      "kind": "detector_version_unpinned",
+      "producer": "demo",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 50,
+      "kind": "detector_version_unpinned",
+      "producer": "disambiguation",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 51,
+      "kind": "detector_version_unpinned",
+      "producer": "doc",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 52,
+      "kind": "detector_version_unpinned",
+      "producer": "dogfood",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 53,
+      "kind": "detector_version_unpinned",
+      "producer": "flow",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 54,
+      "kind": "detector_version_unpinned",
+      "producer": "growth",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 55,
+      "kind": "detector_version_unpinned",
+      "producer": "guard_accuracy",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 56,
+      "kind": "detector_version_unpinned",
+      "producer": "guard_rsi",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 57,
+      "kind": "detector_version_unpinned",
+      "producer": "heaviness",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 58,
+      "kind": "detector_version_unpinned",
+      "producer": "hygiene",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 59,
+      "kind": "detector_version_unpinned",
+      "producer": "intent_literal",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 60,
+      "kind": "detector_version_unpinned",
+      "producer": "learning",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 61,
+      "kind": "detector_version_unpinned",
+      "producer": "lightgap",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 62,
+      "kind": "detector_version_unpinned",
+      "producer": "loopindex",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 63,
+      "kind": "detector_version_unpinned",
+      "producer": "maturity",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 64,
+      "kind": "detector_version_unpinned",
+      "producer": "milestone",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 65,
+      "kind": "detector_version_unpinned",
+      "producer": "milestone_climb",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 66,
+      "kind": "detector_version_unpinned",
+      "producer": "negation_operator",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 67,
+      "kind": "detector_version_unpinned",
+      "producer": "negation_tax",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 68,
+      "kind": "detector_version_unpinned",
+      "producer": "negframe",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 69,
+      "kind": "detector_version_unpinned",
+      "producer": "observability",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 70,
+      "kind": "detector_version_unpinned",
+      "producer": "osp_residual",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 71,
+      "kind": "detector_version_unpinned",
+      "producer": "parity",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 72,
+      "kind": "detector_version_unpinned",
+      "producer": "persona",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 73,
+      "kind": "detector_version_unpinned",
+      "producer": "persona_fit",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 74,
+      "kind": "detector_version_unpinned",
+      "producer": "popularization",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 75,
+      "kind": "detector_version_unpinned",
+      "producer": "product",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 76,
+      "kind": "detector_version_unpinned",
+      "producer": "propagation",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 77,
+      "kind": "detector_version_unpinned",
+      "producer": "readme",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 78,
+      "kind": "detector_version_unpinned",
+      "producer": "release",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 79,
+      "kind": "detector_version_unpinned",
+      "producer": "robustness",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 80,
+      "kind": "detector_version_unpinned",
+      "producer": "rsi_maturity",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 81,
+      "kind": "detector_version_unpinned",
+      "producer": "seo",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 82,
+      "kind": "detector_version_unpinned",
+      "producer": "slop",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 83,
+      "kind": "detector_version_unpinned",
+      "producer": "sota",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 84,
+      "kind": "detector_version_unpinned",
+      "producer": "sota_coverage",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 85,
+      "kind": "detector_version_unpinned",
+      "producer": "stability",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 86,
+      "kind": "detector_version_unpinned",
+      "producer": "steer",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 87,
+      "kind": "detector_version_unpinned",
+      "producer": "support_maturity",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 88,
+      "kind": "detector_version_unpinned",
+      "producer": "tokendefaults",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 89,
+      "kind": "detector_version_unpinned",
+      "producer": "tooling_quality",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 90,
+      "kind": "detector_version_unpinned",
+      "producer": "ui_quality",
+      "reach": 2,
+      "consequence": "baseline cannot distinguish detector changes from debt changes",
+      "provenance": [
+        "tools/scorecard_baseline.json:detector_versions"
+      ]
+    },
+    {
+      "rank": 91,
+      "kind": "pane_binding_mismatch",
+      "producer": "antipattern",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 92,
+      "kind": "pane_binding_mismatch",
+      "producer": "commit_subject",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 93,
+      "kind": "pane_binding_mismatch",
+      "producer": "guard_accuracy",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 94,
+      "kind": "pane_binding_mismatch",
+      "producer": "lightgap",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 95,
+      "kind": "pane_binding_mismatch",
+      "producer": "negation_operator",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 96,
+      "kind": "pane_binding_mismatch",
+      "producer": "negation_tax",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 97,
+      "kind": "pane_binding_mismatch",
+      "producer": "negframe",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 98,
+      "kind": "pane_binding_mismatch",
+      "producer": "osp_residual",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 99,
+      "kind": "pane_binding_mismatch",
+      "producer": "popularization",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 100,
+      "kind": "pane_binding_mismatch",
+      "producer": "sota",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    },
+    {
+      "rank": 101,
+      "kind": "pane_binding_mismatch",
+      "producer": "sota_coverage",
+      "reach": 2,
+      "consequence": "Python and Go control panes discover different portfolios",
+      "provenance": [
+        "tools/scorecard_control_pane.py:SCORECARDS",
+        "internal/scorecardpane/controlpane.go:Cards"
+      ]
+    }
+  ]
+}

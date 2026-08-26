@@ -1,8 +1,14 @@
+---
+title: "Migrate a signed job-application desktop app to fak in 15 minutes"
+description: "Step-by-step migration runbook for bundling the fak helper into a signed desktop job-application app, with protocol, security, readiness, and rollback checks."
+---
 # Migrate a job-apply app to fak in 15 minutes
 
 This runbook is the shortest supported path for a **signed desktop app that already sends a job-application prompt to a model**. It replaces that transport with the bundled fak helper while leaving the app's forms and rendering code intact. The user installs one app bundle: they do **not** install Ollama or LM Studio and do not run terminal setup.
 
 The stable protocol and security boundaries are defined in [Local-app compute layer](local-app-compute-layer.md). Names such as `FakKit` below describe the thin host-app adapter you own; they are integration pseudocode, not a claim that fak ships an Apple framework or package manager artifact.
+
+Repository proof: [`local_app_runbook_test.go`](../cmd/fak/local_app_runbook_test.go) checks this runbook for the required helper launch, readiness, streaming, cancellation, fallback, and rollback contract.
 
 ## The 15-minute day-one migration
 

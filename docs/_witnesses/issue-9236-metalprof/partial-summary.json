@@ -1,0 +1,97 @@
+{
+  "schema": "fak.metal-prefill-attribution.v1",
+  "issue": 9236,
+  "status": "partial_not_closeable",
+  "captured_at": "2026-08-26",
+  "envelope": {
+    "model": "Qwen3.8-27B-Q4_K_M",
+    "model_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "prompt_tokens": 32,
+    "residency": "streamed/single-residency",
+    "device": "Apple M3 Pro 18-core GPU",
+    "fak_engine": "fak-native Metal",
+    "fak_fallback_count": 0,
+    "llama_cpp_revision": "ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0"
+  },
+  "fak": {
+    "source_module": "internal/model@r496+g4d48a81c7",
+    "binary_sha256": "e011df35b0329d59ad690a499f80a224ba76c0fc0aaa6c4519e70b6b74ea6963",
+    "runs": [
+      {
+        "rep": 1,
+        "wall_ms": 4614.3,
+        "q4k_wall_ms": 1646.3,
+        "q4k_gpu_execute_ms": 1368.5,
+        "q4k_roundtrip_ms": 277.8,
+        "q8_cpu_ms": 1010.8,
+        "q6k_wall_ms": 1270.7,
+        "residual_ms": 686.4
+      },
+      {
+        "rep": 2,
+        "wall_ms": 4495.5,
+        "q4k_wall_ms": 1615.5,
+        "q4k_gpu_execute_ms": 1369.0,
+        "q4k_roundtrip_ms": 246.5,
+        "q8_cpu_ms": 928.4,
+        "q6k_wall_ms": 1275.6,
+        "residual_ms": 676.0
+      },
+      {
+        "rep": 3,
+        "wall_ms": 7089.9,
+        "q4k_wall_ms": 2837.6,
+        "q4k_gpu_execute_ms": 1394.9,
+        "q4k_roundtrip_ms": 1442.7,
+        "q8_cpu_ms": 1779.8,
+        "q6k_wall_ms": 1529.4,
+        "residual_ms": 943.0
+      }
+    ],
+    "raw_hashes": {
+      "stdout": "5d1771e61000cdbc812b10ce858a7c44078f6093a946148c1ae5e6e7e5a2e1bd",
+      "stderr": "506fd10c6c0cf2b479ffd68b14882c0841c5c1f47b10c7939d1405eac2436ede"
+    }
+  },
+  "llama_cpp": {
+    "runs_tok_s": [
+      77.4647,
+      77.3419,
+      77.6197
+    ],
+    "mean_tok_s": 77.4754,
+    "mean_wall_ms": 413.0,
+    "raw_json_sha256": "a55fab8499b4ee824234a32a91ed31c4558769350a562ef6f904f94d0b7586d0"
+  },
+  "unavailable": [
+    "per-family Q6_K GPU execution duration",
+    "Q8 projection GPU execution duration",
+    "attention GPU execution duration",
+    "norm/activation/elementwise GPU execution duration",
+    "copy GPU execution duration",
+    "submit-to-GPU-start queue latency",
+    "GPU-end-to-completion/wait-return latency",
+    "H2D and D2H operation counts, bytes, and memcpy/blit time",
+    "CPU self-time by orchestration, quantization, host elementwise/SwiGLU/residual, allocation/GC, and driver calls",
+    "command-buffer, encoder, dispatch, kernel and pipeline identity counts",
+    "GPU occupancy, bandwidth and counter evidence",
+    "immutable Instruments/Metal raw artifacts",
+    "randomized interleaved arm order",
+    "RSS, swap and thermal state"
+  ],
+  "instrumentation": {
+    "tool": "xctrace",
+    "available": false,
+    "reason": "xcrun unable to find utility xctrace on the registered host"
+  },
+  "decision": {
+    "close_issue": false,
+    "reason": "required Instruments attribution and immutable raw artifacts are unavailable; no implementation leaf is authorized"
+  },
+  "validation": {
+    "focused_go_test": "pass",
+    "validate_mine": "infrastructure_failure",
+    "validate_error": "detached Windows worktree .git pointer was interpreted as a WSL path and produced a non-repository path",
+    "command": "fak validate --mine docs/_witnesses/issue-9236-metalprof"
+  }
+}

@@ -11,30 +11,6 @@ import (
 	"syscall"
 )
 
-// mappedQ4KSpanRangeError reports a logical file range that cannot be mapped
-// without reading outside the checkpoint or overflowing the host address size.
-type mappedQ4KSpanRangeError struct {
-	Offset   int64
-	Length   int
-	FileSize int64
-	Reason   string
-}
-
-func (e *mappedQ4KSpanRangeError) Error() string {
-	return fmt.Sprintf("model: invalid mapped Q4_K span offset=%d length=%d file_size=%d: %s", e.Offset, e.Length, e.FileSize, e.Reason)
-}
-
-// mappedQ4KSpanUnavailableError is the portable result for a platform without
-// the read-only range-mapping implementation. Darwin defines it too so future
-// package callers can use errors.As without platform-specific source.
-type mappedQ4KSpanUnavailableError struct {
-	GOOS string
-}
-
-func (e *mappedQ4KSpanUnavailableError) Error() string {
-	return fmt.Sprintf("model: mapped Q4_K spans unavailable on %s", e.GOOS)
-}
-
 // mappedQ4KSpanOwner retains both the file and its page-aligned mapping. bytes
 // aliases read-only OS memory and remains valid only while this owner is open.
 type mappedQ4KSpanOwner struct {

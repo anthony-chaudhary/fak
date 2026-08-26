@@ -15,11 +15,11 @@ This is the measuring stick for the repo-3x program — the structural counterpa
 
 | Metric | Value |
 |---|---|
-| **Hygiene-debt (total HARD defects)** | **59** |
+| **Hygiene-debt (total HARD defects)** | **48** |
 | **a11y-debt (accessibility HARD defects)** | **1** |
 | Composite score | 68.2/100 (grade D) |
-| Advisory (soft) signals | 576 |
-| Debt by group | verbosity:26 · organization:32 · indexing:0 · accessibility:1 |
+| Advisory (soft) signals | 602 |
+| Debt by group | verbosity:26 · organization:21 · indexing:0 · accessibility:1 |
 
 ## Per-KPI
 
@@ -27,28 +27,25 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| organization | `placement` | 0 | 29 | 29 misplaced dated doc(s) |
-| verbosity | `redundancy` | 0 | 16 | 16 near-duplicate pair(s), 19 candidate(s) |
+| organization | `placement` | 0 | 18 | 18 misplaced dated doc(s) |
+| verbosity | `redundancy` | 0 | 16 | 16 near-duplicate pair(s), 18 candidate(s) |
 | verbosity | `bloat` | 0 | 10 | 10 oversized, 13 long |
 | organization | `dir_discipline` | 64 | 3 | 3 near-duplicate dir group(s) |
-| accessibility | `ai_tells` | 82 | 1 | 1 AI-tell phrase(s) across 483 doc(s) |
-| accessibility | `plain_language` | 67 | 0 | 189 dense doc(s), 431 doc(s) with undefined acronyms, 23 literal-reader idiom(s) |
-| accessibility | `jargon` | 86 | 0 | 284 naked first-screen jargon term(s) (0.3/doc) |
+| accessibility | `ai_tells` | 82 | 1 | 1 AI-tell phrase(s) across 510 doc(s) |
+| accessibility | `plain_language` | 67 | 0 | 196 dense doc(s), 452 doc(s) with undefined acronyms, 23 literal-reader idiom(s) |
+| accessibility | `jargon` | 86 | 0 | 288 naked first-screen jargon term(s) (0.3/doc) |
 | organization | `root_hygiene` | 100 | 0 | root holds only front-door / meta files |
 | indexing | `index_presence` | 100 | 0 | all expected index surfaces present |
 | indexing | `index_integrity` | 100 | 0 | every index entry resolves |
-| indexing | `orphans` | 100 | 0 | 780/780 reader-facing docs reachable from an index (100.0%) |
+| indexing | `orphans` | 100 | 0 | 803/803 reader-facing docs reachable from an index (100.0%) |
 | accessibility | `alt_text` | 100 | 0 | every doc image carries alt-text |
 
 ## Hygiene-debt work-list
 
-### `placement` (organization) — 29 defect(s), score 0
-- dated/research doc outside docs/notes/: docs/_witnesses/agent-default-code-tools-non-fak-2026-08-19.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/defaults-selfcheck-non-fak-2026-08-19.md → move it and index it
+### `placement` (organization) — 18 defect(s), score 0
 - dated/research doc outside docs/notes/: docs/_witnesses/dispatch-thread-pressure-2026-08-14.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/end-to-end-value-chain-selfcheck-2026-08-13.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/fleet-res-rollup-2026-08-13.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/guard-codex-default-profiles-non-fak-2026-08-18.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/harness-web-demo/DOGFOOD-LIVE-WORK-2026-08-22.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/harness-web-demo/EDGE-ADVERSARIAL-2026-08-20.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/harness-web-demo/LIVE-CODING-GPT-5.6-SOL-2026-08-15.md → move it and index it
@@ -57,21 +54,13 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 - dated/research doc outside docs/notes/: docs/_witnesses/harness-web-demo/OPERATOR-HOME-2026-08-20.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/harness-web-demo/SHIPPED-FAK-LAUNCH-2026-08-15.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/issue-8494/trajectory-audit-2026-08-21.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/launch-posture-cross-wire-non-fak-2026-08-19.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/launch-posture-missing-vcache-calibration-2026-08-18.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/manage-parity-2026-08-13.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/manage-parity-hooks-2026-08-14.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/managed-tool-search-compat-2026-08-13.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/micro-paired-value-2026-08-13.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/microagent-real-kernel-2026-08-12.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/openai-decoded-context-view-default-non-fak-2026-08-18.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/openai-stale-read-elision-non-fak-2026-08-18.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/vcache-calibrated-steering-non-fak-2026-08-18.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/vcache-calibrated-ttl-tier-non-fak-2026-08-18.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/vcache-calibrated-write-pricing-2026-08-19.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/vcache-forced-mismatch-demotion-2026-08-19.md → move it and index it
-- dated/research doc outside docs/notes/: docs/_witnesses/vcache-provider-calibration-live-2026-08-18.md → move it and index it
 - dated/research doc outside docs/notes/: docs/_witnesses/wip-ownership-seam-2026-08-13.md → move it and index it
+- dated/research doc outside docs/notes/: docs/claims/fan-out-benchmark-fanbench-one-master-goal-n-sub-agents-n-1-1024.md → move it and index it
 
 ### `redundancy` (verbosity) — 16 defect(s), score 0
 - near-duplicate (96%): docs/concepts/disambiguation-attention.md ≈ docs/concepts/disambiguation-decision.md — consolidate to one
@@ -92,13 +81,13 @@ Twelve KPIs, each 0–100, in four groups. `debt` = units of HARD hygiene-debt. 
 - near-duplicate (94%): docs/concepts/disambiguation-loop.md ≈ docs/concepts/disambiguation-policy-capability.md — consolidate to one
 
 ### `bloat` (verbosity) — 10 defect(s), score 0
-- oversized doc INDEX.md (1002 lines > 1000) — split into sections or trim
+- oversized doc INDEX.md (1005 lines > 1000) — split into sections or trim
 - oversized doc LEARNING-PATH.md (2763 lines > 1000) — split into sections or trim
 - oversized doc docs/FAQ.md (2947 lines > 1000) — split into sections or trim
 - oversized doc docs/_witnesses/issue-8494/trajectory-audit-2026-08-21.md (1031 lines > 1000) — split into sections or trim
 - oversized doc docs/cli-reference.md (1461 lines > 1000) — split into sections or trim
-- oversized doc docs/concept-disambiguation-scorecard/INDEX.md (3654 lines > 1000) — split into sections or trim
-- oversized doc docs/concept-disambiguation-scorecard/README.md (2793 lines > 1000) — split into sections or trim
+- oversized doc docs/concept-disambiguation-scorecard/INDEX.md (3674 lines > 1000) — split into sections or trim
+- oversized doc docs/concept-disambiguation-scorecard/README.md (2813 lines > 1000) — split into sections or trim
 - oversized doc docs/fak/concept-glossary.md (2389 lines > 1000) — split into sections or trim
 - oversized doc docs/generated/disambiguation/canonical-terms.md (1024 lines > 1000) — split into sections or trim
 - oversized doc docs/generated/verb-surface.md (1102 lines > 1000) — split into sections or trim

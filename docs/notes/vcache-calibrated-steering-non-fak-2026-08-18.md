@@ -13,6 +13,6 @@ description: "Verdict: fresh measured provider calibration now changes two runti
 - `TestFreshReadMultiplierChangesRuntimePricingDecision` proves fresh measured read pricing changes the live cost calculation while an unmeasured value cannot.
 - Stale, observation-only, and model-mismatched rows preserve defaults; focused tests cover each fallback.
 
-Structured artifact: [`vcache-calibrated-steering-non-fak-2026-08-18.json`](vcache-calibrated-steering-non-fak-2026-08-18.json).
+Structured artifact: [`vcache-calibrated-steering-non-fak-2026-08-18.json`](../_witnesses/vcache-calibrated-steering-non-fak-2026-08-18.json).
 
 This is a steering spine, not closure of #1497: calibrated TTL-tier choice, cache-write multipliers, heartbeat warming, and provider-wide live probes remain open.
