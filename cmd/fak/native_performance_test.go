@@ -114,7 +114,7 @@ func TestNativePerformanceRejectsInvalidArguments(t *testing.T) {
 		if code := runNativePerformance(&stdout, &stderr, args); code != 2 {
 			t.Fatalf("args=%v exit=%d, want 2", args, code)
 		}
-		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE]") {
+		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE]") {
 			t.Fatalf("args=%v stderr=%q", args, stderr.String())
 		}
 	}
@@ -143,6 +143,8 @@ func TestNativePerformanceCompareReceipts(t *testing.T) {
 	fill := func(r *nativeperf.ExperimentReceipt, role, rev string, delta float64) {
 		r.Role, r.Revision, r.Machine.ScrubbedID = role, rev, "lab-class-a"
 		r.Memory = nativeperf.MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
+		r.Quality = nativeperf.QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+		r.ModuleVersions = []nativeperf.ModuleRevision{{Module: "internal/model", Revision: "r1+gtest"}}
 		r.Commands = []string{"fak run-model --native --receipt-out receipt.json"}
 		r.ProfilerArtifacts = []nativeperf.ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}
 		for i := range r.Repetitions {
@@ -178,7 +180,7 @@ func TestNativePerformanceCompareReceipts(t *testing.T) {
 	if comparison.DeltaTokensPerS != 1 || comparison.ChangedLeverID != "metal.command-buffer-amortization" {
 		t.Fatalf("comparison=%+v", comparison)
 	}
-	candidate.Execution.FallbackCount = 1
+	candidate.Execution.FallbackCount = -1
 	data, _ := json.Marshal(candidate)
 	_ = os.WriteFile(candidatePath, data, 0600)
 	stdout.Reset()
@@ -330,4 +332,68 @@ func TestNativePerformanceProfileReadAndDecodeErrors(t *testing.T) {
 
 func nativePerformanceProfileFixture(name string) string {
 	return filepath.Join("..", "..", "internal", "nativeperf", "testdata", "native-performance-profile", name)
+}
+
+func TestNativePerformanceGateExitCodes(t *testing.T) {
+	request := gateRequestFixture(t)
+	dir := t.TempDir()
+	path := dir + "/gate.json"
+	write := func() {
+		data, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	var stdout, stderr bytes.Buffer
+	if code := runNativePerformance(&stdout, &stderr, []string{"--gate", path}); code != 0 {
+		t.Fatalf("pass exit=%d stderr=%s", code, stderr.String())
+	}
+	var verdict nativeperf.GateVerdict
+	if err := json.Unmarshal(stdout.Bytes(), &verdict); err != nil || verdict.Classification != nativeperf.GatePass {
+		t.Fatalf("verdict=%+v err=%v", verdict, err)
+	}
+	for i := range request.Candidate.Repetitions {
+		request.Candidate.Repetitions[i].TokensPerSecond = 80
+	}
+	write()
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNativePerformance(&stdout, &stderr, []string{"--gate", path}); code != 3 {
+		t.Fatalf("regression exit=%d stderr=%s", code, stderr.String())
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &verdict); err != nil || verdict.Bisect == nil {
+		t.Fatalf("verdict=%+v err=%v", verdict, err)
+	}
+}
+
+func gateRequestFixture(t *testing.T) nativeperf.GateRequest {
+	t.Helper()
+	baseline, err := nativeperf.BaselineTemplate(nativeperf.ActiveGraph(), "metal.command-buffer-amortization")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fill := func(r *nativeperf.ExperimentReceipt, role, revision string) {
+		r.Role, r.Revision, r.Machine.ScrubbedID = role, revision, "lab-class-a"
+		r.Memory = nativeperf.MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
+		r.Quality = nativeperf.QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+		r.ModuleVersions = []nativeperf.ModuleRevision{{Module: "internal/model", Revision: "r1+g" + revision}}
+		r.Commands = []string{"fak native-run --receipt-out receipt.json"}
+		r.ProfilerArtifacts = []nativeperf.ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}
+		for i := range r.Repetitions {
+			r.Repetitions[i] = nativeperf.Repetition{EndToEndMilliseconds: 100, TokensPerSecond: 100}
+		}
+		if role == nativeperf.RoleCandidate {
+			r.ChangedAxes = []string{"lever:" + r.ChangedLeverID}
+		}
+	}
+	candidate := baseline
+	candidate.UnchangedControls = append([]string(nil), baseline.UnchangedControls...)
+	candidate.Repetitions = append([]nativeperf.Repetition(nil), baseline.Repetitions...)
+	fill(&baseline, nativeperf.RoleBaseline, "good")
+	fill(&candidate, nativeperf.RoleCandidate, "bad")
+	return nativeperf.GateRequest{Schema: nativeperf.GateRequestSchema, Policy: nativeperf.GatePolicy{Schema: "fak-native-performance-gate-policy/v1", EnvelopeID: baseline.EnvelopeID, ChangedLeverID: baseline.ChangedLeverID, AcceptedRevision: baseline.Revision, MinimumRepetitions: 3, MaximumNoisePercent: 2, InvestigateDropPercent: 2, RegressionDropPercent: 5, MinimumThroughput: 90, MaximumPeakBytes: 1200, QualityMetric: "exact_match", MinimumQualityScore: 1, QualityHigherIsBetter: true, RequiredEngine: "fak-native", RequiredForwardPath: baseline.Execution.ForwardPath}, LastAccepted: baseline, Candidate: candidate}
 }

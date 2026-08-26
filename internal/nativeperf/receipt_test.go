@@ -15,6 +15,8 @@ func validReceipt(t *testing.T, role, lever string) ExperimentReceipt {
 	}
 	r.Role, r.Revision, r.Machine.ScrubbedID = role, "rev-123", "lab-node-class-a"
 	r.Memory = MemoryMetrics{PeakBytes: 1000, ResidentBytes: 900}
+	r.Quality = QualityMetric{Name: "exact_match", Score: 1, HigherIsBetter: true}
+	r.ModuleVersions = []ModuleRevision{{Module: "internal/model", Revision: "r10+gaaaaaaa"}}
 	r.Commands = []string{"fak run-model --native --receipt-out receipt.json"}
 	r.ProfilerArtifacts = []ArtifactRef{{Path: "profiles/run.json", SHA256: strings.Repeat("a", 64)}}
 	for i := range r.Repetitions {
@@ -53,8 +55,8 @@ func TestValidateReceiptFailsClosed(t *testing.T) {
 		want string
 	}{
 		{"envelope drift", func(r *ExperimentReceipt) { r.EnvelopeID = "other" }, "does not belong"},
-		{"native identity", func(r *ExperimentReceipt) { r.Execution.Engine = "other" }, "must name fak-native"},
-		{"fallback", func(r *ExperimentReceipt) { r.Execution.FallbackCount = 1 }, "fallback count"},
+		{"missing engine", func(r *ExperimentReceipt) { r.Execution.Engine = "" }, "must name an engine"},
+		{"negative fallback", func(r *ExperimentReceipt) { r.Execution.FallbackCount = -1 }, "fallback count"},
 		{"missing repetition", func(r *ExperimentReceipt) { r.Repetitions = nil }, "repetition count"},
 		{"private host", func(r *ExperimentReceipt) { r.Machine.ScrubbedID = "user@host" }, "private path/host"},
 		{"multi axis", func(r *ExperimentReceipt) { r.ChangedAxes = []string{"lever:" + r.ChangedLeverID, "batch"} }, "exactly the candidate lever"},

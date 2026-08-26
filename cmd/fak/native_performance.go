@@ -28,6 +28,7 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	compareCandidate := fs.String("candidate", "", "candidate receipt FILE used with --compare")
 	profilePath := fs.String("profile", "", "validate and classify native profile FILE")
 	profileNextPath := fs.String("profile-next", "", "select next lever from native profile FILE")
+	gatePath := fs.String("gate", "", "classify a candidate against the last accepted envelope receipt in FILE")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -48,12 +49,41 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if set["profile-next"] {
 		modeCount++
 	}
-	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") {
-		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE]")
+	if set["gate"] {
+		modeCount++
+	}
+	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") {
+		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE]")
 		return 2
 	}
 
 	graph := nativeperf.ActiveGraph()
+	if set["gate"] {
+		data, err := os.ReadFile(*gatePath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: read gate request: %v\n", err)
+			return 1
+		}
+		var request nativeperf.GateRequest
+		decoder := json.NewDecoder(strings.NewReader(string(data)))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&request); err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: decode gate request: %v\n", err)
+			return 1
+		}
+		verdict, err := nativeperf.Gate(request)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: gate: %v\n", err)
+			return 1
+		}
+		if code := encodeNativePerformanceJSON(stdout, stderr, verdict); code != 0 {
+			return code
+		}
+		if verdict.Classification == nativeperf.GateRegression {
+			return 3
+		}
+		return 0
+	}
 	if err := nativeperf.Validate(graph); err != nil {
 		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
 		return 1
