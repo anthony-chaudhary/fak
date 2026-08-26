@@ -1102,6 +1102,11 @@
           "category": "incidental",
           "reason": "Concrete Qwen swap restore codec function, not a new cache concept",
           "token": "qwenhybridkvcachefromhost"
+        },
+        {
+          "category": "incidental",
+          "reason": "Regression-fixture invalidation flag, not a cache implementation concept",
+          "token": "CacheResetDetected"
         }
       ],
       "id": "cache",
@@ -1121,6 +1126,7 @@
         "CacheLineageChanged",
         "CacheLookupMS",
         "CacheReadRate",
+        "CacheResetDetected",
         "CacheSourceResolution",
         "CacheSourceSelfTestReport",
         "CacheSourceSelfTestSchemaVersion",
@@ -7480,6 +7486,21 @@
           "category": "incidental",
           "reason": "Gateway-to-vDSO adapter, not a new gateway engine concept",
           "token": "revokeVDSOWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows syscall DLL handle, not a gateway engine.",
+          "token": "pgKernel32"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows accounting field, not a gateway engine.",
+          "token": "TotalKernelTime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows accounting field, not a gateway engine.",
+          "token": "ThisPeriodTotalKernelTime"
         }
       ],
       "id": "gateway-engine",
@@ -7506,6 +7527,8 @@
         "PrivateAgentBEngineCalls",
         "RegisterEngines",
         "SessionAffinityGateway",
+        "ThisPeriodTotalKernelTime",
+        "TotalKernelTime",
         "WithAffinity",
         "bashEngine",
         "cacheEmitter",
@@ -7557,6 +7580,7 @@
         "microcachedemo",
         "nativeReasonMessageRoleUnsupported",
         "newInKernelPrefixPressureBridge",
+        "pgKernel32",
         "publicGatewayURL",
         "query_public_policy",
         "renderinkernelchatmlrequest",
@@ -8496,6 +8520,11 @@
           "category": "incidental",
           "reason": "Implementation identifier for the #8699 Qwen empty-usage launch guard, not a distinct policy capability.",
           "token": "qwenEmptyUsagePolicyReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture envelope field naming, not a reusable policy capability concept",
+          "token": "PrefixPosture"
         }
       ],
       "exclude": [
@@ -8552,6 +8581,7 @@
         "PolicyOriginEvidencePath",
         "PolicyRevision",
         "PolicySchema",
+        "PrefixPosture",
         "PreflightRefuseWIPLimit",
         "ProgressCallAdjudicated",
         "ReasonArmCapabilityBundled",
@@ -10436,8 +10466,28 @@
         },
         {
           "category": "incidental",
-          "reason": "Private implementation type or receipt row; not a product maturity label.",
+          "reason": "Private OS adapter type; not a product maturity label.",
           "token": "cgroupFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private OS adapter type; not a product maturity label.",
+          "token": "observeFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private OS adapter type; not a product maturity label.",
+          "token": "windowsFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private OS adapter interface; not a product maturity label.",
+          "token": "nativeFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal receipt construction helper, not a product maturity label.",
+          "token": "requestedSupport"
         }
       ],
       "exclude": [
@@ -10606,10 +10656,12 @@
         "marshalWorkCoverageForTest",
         "maturityBaselineRunWitness",
         "maturityBaselineUsage",
+        "nativeFaultDomain",
         "nativeReasonMessageRoleUnsupported",
         "normalizeAchievedMaturity",
         "normalizeCoverage",
         "numareplicapolicyunsupported",
+        "observeFaultDomain",
         "parityPanelHeader",
         "paritybench",
         "parityreport",
@@ -10618,6 +10670,7 @@
         "provenance_correctness",
         "recurrentevictunsupportederror",
         "registrationCoverage",
+        "requestedSupport",
         "resolveParityPublication",
         "robustnessTasks",
         "runInfoWorkCoverage",
@@ -10654,6 +10707,7 @@
         "unsupported_runtime_fusion",
         "unsupported_scale",
         "unsupported_version",
+        "windowsFaultDomain",
         "workCoverage",
         "workCoverageUnavailableSources",
         "workCoverageUnavailableText"

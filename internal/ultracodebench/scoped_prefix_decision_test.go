@@ -19,6 +19,7 @@ func TestEvaluateScopedPrefixEvidenceVerdicts(t *testing.T) {
 		{"positive", func(*ScopedPrefixEvidence) {}, ScopedPrefixEnable},
 		{"negative control failure", func(e *ScopedPrefixEvidence) { e.Rows[0].NegativeControlPass = false }, ScopedPrefixDisable},
 		{"missing telemetry", func(e *ScopedPrefixEvidence) { e.Rows[0].AuthoritativeMetric = false }, ScopedPrefixAbstain},
+		{"outcome mismatch", func(e *ScopedPrefixEvidence) { e.Rows[0].AcceptedOutcomeEqual = false }, ScopedPrefixAbstain},
 		{"expired evidence", func(e *ScopedPrefixEvidence) { e.ExpiresAt = now }, ScopedPrefixAbstain},
 		{"uncertain net gain", func(e *ScopedPrefixEvidence) { e.Rows[0].Uncertainty = 30 }, ScopedPrefixHold},
 	}
@@ -115,10 +116,14 @@ func TestScopedPrefixRegressionCorpus(t *testing.T) {
 	if len(corpus.Rows) != 6 {
 		t.Fatalf("rows = %d, want six predeclared cases", len(corpus.Rows))
 	}
+	wantRows := map[string]bool{"observed-positive-qwen25-05b": true, "no-gain-control": true, "unequal-outcome": true, "missing-telemetry": true, "double-counted-savings": true, "cache-reset": true}
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	seen := map[string]bool{}
 	for _, row := range corpus.Rows {
 		t.Run(row.ID, func(t *testing.T) {
+			if !wantRows[row.ID] {
+				t.Fatalf("unexpected corpus row %q", row.ID)
+			}
 			if row.ID == "" || seen[row.ID] {
 				t.Fatalf("missing or duplicate row id %q", row.ID)
 			}
