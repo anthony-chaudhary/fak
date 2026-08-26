@@ -130,10 +130,10 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **151 dated entries**, **146 unique source URLs**, and
+The current spine contains **154 dated entries**, **149 unique source URLs**, and
 **121 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
-and **3 explicit rumors**. It is broad, but it is not entity-complete. The
+and **2 explicit rumors**. It is broad, but it is not entity-complete. The
 requirement-level verdict is in [`coverage-audit.md`](coverage-audit.md); the detailed
 missing slices remain machine-readable under `coverage.explicit_gaps` in `index.json`.
 

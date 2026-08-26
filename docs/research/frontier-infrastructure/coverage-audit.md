@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **151** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **146** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Entries | **154** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **149** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
 | Distinct entity labels | **121** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 18; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 15; `policy_regulation` 5; `serving_system` 17; `standard` 2; `supply_chain` 10; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 79; `vendor_claim` 21; `reported_observation` 11; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 10; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 104; `medium_high` 38; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **151/151 published; 151/151 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
-| Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
+| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 18; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 18; `policy_regulation` 5; `serving_system` 17; `standard` 2; `supply_chain` 10; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 79; `vendor_claim` 21; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 10; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 104; `medium_high` 42; `medium` 6; `low` 2. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **154/154 published; 154/154 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 151 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 154 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -238,10 +238,9 @@ deployment/acquisition/failure states and periodic resolution checks.
 
 ### 12. Rumors and resolution history — **Unverified**
 
-**Present:** **3** rumor entries are explicitly labeled with origin/provenance fields and
-kept out of factual capacity totals.
+**Present:** **2** open rumor entries are explicitly labeled and kept out of factual capacity totals. The OpenAI personnel-departure entry moved to reported observation after primary spokesperson confirmation, while its strategic interpretation remains bounded.
 
-**Present:** each current rumor now has an explicit open/unverified status, last-check date, and expiry.
+**Present:** each open rumor has a state, last-check date, expiry, corroboration note, and fragment-level resolution. Anthropic–Decart talks are independently corroborated but unclosed; the NVIDIA price direction is partially corroborated while magnitude/scope remain unverified.
 
 **Missing:** complete original-source lineage, circular-republication detection,
 independent corroboration graph, claim-fragment matching, and later
@@ -286,8 +285,8 @@ dates, affected hardware/services, implementation status, and later amendments.
 | Benchmark/synthetic | **14 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
 | Official statements | **79 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
 | Vendor claims | **21 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
-| Analyst/reported evidence | **17 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
-| Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
+| Analyst/reported evidence | **21 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
+| Rumor | **2 entries** | Watch-only until independently corroborated or resolved. |
 
 ## Preserved explicit gaps
 

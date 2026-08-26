@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T18:56:00-07:00",
-  "issue": 9318,
+  "updated_at": "2026-08-26T19:22:00-07:00",
+  "issue": 9305,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 151,
+    "entry_count": 154,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -1340,7 +1340,7 @@
       "source_kind": "credible_reporting",
       "evidence_class": "rumor",
       "confidence": "low",
-      "claim": "Tom's Hardware relayed reports that NVIDIA warned major customers of AI-server price increases above 15%, attributed to memory costs and constrained HBM supply.",
+      "claim": "Bloomberg-origin reporting said some NVIDIA AI-server configurations would rise by more than 15% because of memory costs. NVIDIA’s August 26 earnings call corroborated severe memory-cost pressure and planned product price increases, but not the exact 15% figure, customer notice, or configuration list.",
       "quantified": {
         "reported_price_increase_pct_gt": 15
       },
@@ -1348,7 +1348,8 @@
         "HBM availability and price can become a system-level accelerator bottleneck."
       ],
       "contradictions_or_limits": [
-        "The customer warning and exact increase were not confirmed by NVIDIA in the indexed source."
+        "The cost-pressure and general price-increase direction are corroborated; the specific >15% magnitude and affected systems remain unconfirmed by NVIDIA primary materials.",
+        "Reported server-system prices may include OEM, memory configuration, and delivery-window effects rather than one NVIDIA chip list price."
       ],
       "fak_implications": [
         "Treat accelerator price and delivery as uncertain, memory-sensitive variables; do not present this report as confirmed."
@@ -1356,11 +1357,11 @@
       "rumor": {
         "is_rumor": true,
         "origin": "industry reporting relayed by Tom's Hardware",
-        "corroboration": "memory-price pressure is broadly reported, but the specific NVIDIA customer notice remains unconfirmed here",
-        "status": "open_unverified",
+        "corroboration": "NVIDIA earnings commentary corroborated extreme memory costs and planned product price increases; it did not confirm the reported >15% magnitude or exact customer/configuration claims.",
+        "status": "partially_corroborated_open",
         "last_checked_at": "2026-08-26",
         "expires_at": "2026-11-30",
-        "resolution": "No primary confirmation or refutation recorded as of the last check."
+        "resolution": "Direction partially corroborated; magnitude and scope remain unverified."
       }
     },
     {
@@ -2522,7 +2523,7 @@
       "source_kind": "credible_reporting",
       "evidence_class": "rumor",
       "confidence": "low",
-      "claim": "Bloomberg reporting said Anthropic was in talks to acquire AI infrastructure startup Decart for about $6B.",
+      "claim": "Bloomberg reported that Anthropic was in talks to acquire Decart for roughly $6B; Reuters later independently reported the acquisition talks, while both companies declined to comment and no final agreement was recorded.",
       "quantified": {
         "reported_deal_value_usd": 6000000000
       },
@@ -2530,7 +2531,8 @@
         "Frontier labs may acquire infrastructure optimization capability rather than only lease capacity."
       ],
       "contradictions_or_limits": [
-        "Talks may fail or change; no completed transaction or official confirmation is indexed."
+        "Independent reporting supports that talks occurred, but the $6B term, final scope, closing, and integration remain unconfirmed.",
+        "Talks can change or collapse and must not be treated as acquired capacity, staff, IP, or product."
       ],
       "fak_implications": [
         "Watch Decart’s technical seam and any official filing, but do not treat the acquisition as fact."
@@ -2538,11 +2540,11 @@
       "rumor": {
         "is_rumor": true,
         "origin": "Bloomberg reporting summarized in Bloomberg Technology video",
-        "corroboration": "Multiple later outlets repeated the report, but independent sourcing is not established in this ledger.",
-        "status": "open_unverified",
+        "corroboration": "Reuters independently reported the talks after Bloomberg; both companies declined to comment. The final price, terms, and closing remain unconfirmed.",
+        "status": "independently_corroborated_open",
         "last_checked_at": "2026-08-26",
         "expires_at": "2026-11-30",
-        "resolution": "No primary confirmation or refutation recorded as of the last check."
+        "resolution": "Talks corroborated; transaction not confirmed or closed as of the last check."
       }
     },
     {
@@ -2559,27 +2561,30 @@
       "source_title": "OpenAI’s Head of Data Centers Has Left the Company",
       "source_url": "https://www.wsj.com/tech/ai/openais-head-of-data-centers-has-left-company-6d24fd83",
       "source_kind": "credible_reporting",
-      "evidence_class": "rumor",
-      "confidence": "low",
-      "claim": "The Wall Street Journal reported that OpenAI’s head of datacenters left amid an infrastructure reorganization and a greater use of leases/cloud partnerships.",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "OpenAI confirmed that data-center head Chris Malone left the company. Reporting also described an infrastructure-team reorganization and renewed full-facility leasing, but causal and strategic interpretations remain reported rather than primary-confirmed.",
       "quantified": {},
       "assumptions": [
         "Organizational execution and build-versus-lease strategy can alter capacity delivery independent of announced capital."
       ],
       "contradictions_or_limits": [
-        "Personnel and strategic interpretation are reported; OpenAI had not provided a complete official account in the indexed source."
+        "The personnel departure is confirmed; claims about why he left and the strategic effect of the reorganization are not established by a primary detailed statement.",
+        "A leadership change does not prove cancellation, delay, or change in delivered capacity."
       ],
       "fak_implications": [
         "Treat leadership and strategy reports as delivery-risk signals only until confirmed."
       ],
       "rumor": {
-        "is_rumor": true,
-        "origin": "Wall Street Journal reporting",
-        "corroboration": "No independent primary confirmation of the full strategic interpretation is recorded.",
-        "status": "open_unverified",
-        "last_checked_at": "2026-08-26",
-        "expires_at": "2026-11-30",
-        "resolution": "No primary confirmation or refutation recorded as of the last check."
+        "is_rumor": false,
+        "resolution_status": "partially_confirmed",
+        "resolved_at": "2026-08-26",
+        "confirmed_fragment": "Chris Malone left OpenAI.",
+        "unresolved_fragment": "Causal and strategic interpretations of the departure and team reorganization.",
+        "resolution_sources": [
+          "OpenAI spokesperson confirmation reported by The Next Web and subsequent outlets",
+          "Original Wall Street Journal report"
+        ]
       }
     },
     {
@@ -5688,6 +5693,108 @@
       "fak_implications": [
         "Separate public-model, fine-tuned, and customer-specialized traffic in workload generation.",
         "Require token accounting, cache, model, hardware, and revenue definitions before comparing inference platforms."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-malone-departure-confirmed-2026",
+      "category": "market_signal",
+      "entity": "OpenAI",
+      "topic": [
+        "leadership",
+        "datacenter_strategy",
+        "rumor_resolution"
+      ],
+      "published_at": "2026-08-25",
+      "event_at": "2026-08-24",
+      "source_title": "OpenAI confirms its data centre chief left as it pivots to leasing",
+      "source_url": "https://thenextweb.com/news/openai-head-of-data-centres-chris-malone-departure",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "An OpenAI spokesperson confirmed that data-center head Chris Malone was no longer with the company; reporting described the former role being split and some full-facility leasing work continuing under other leaders.",
+      "quantified": {},
+      "assumptions": [
+        "Personnel confirmation can resolve the departure fragment without proving the cause or capacity effect."
+      ],
+      "contradictions_or_limits": [
+        "The company did not provide a detailed primary statement on the cause, organizational rationale, or capacity impact.",
+        "Leasing activity and team changes do not establish delivered or canceled capacity."
+      ],
+      "fak_implications": [
+        "Resolve rumor fragments independently and preserve strategic interpretation as reported, not confirmed."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-decart-reuters-corroboration-2026",
+      "category": "market_signal",
+      "entity": "Anthropic / Decart",
+      "topic": [
+        "acquisition_talks",
+        "rumor_resolution",
+        "inference_optimization"
+      ],
+      "published_at": "2026-08-12",
+      "event_at": "2026-08-12",
+      "source_title": "Anthropic in talks to buy Decart AI, source says",
+      "source_url": "https://www.tradingview.com/news/reuters.com%2C2026%3Anewsml_L6N44A04I%3A0-anthropic-in-talks-to-buy-decart-ai-source-says/",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "Reuters independently reported that Anthropic was in early talks to acquire Decart for about $6B; no final agreement or company confirmation was reported.",
+      "quantified": {
+        "reported_transaction_value_usd_approx": 6000000000
+      },
+      "assumptions": [
+        "Independent reporting can corroborate that talks exist without confirming a transaction."
+      ],
+      "contradictions_or_limits": [
+        "The source relies on unnamed sourcing; both parties did not confirm a signed or closed deal.",
+        "Reported price, terms, staff/IP scope, and closing can change or fail."
+      ],
+      "fak_implications": [
+        "Keep acquisition talks out of capacity, ownership, and roadmap assumptions until signed/closed evidence exists."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-memory-price-direction-corroboration-2026",
+      "category": "market_signal",
+      "entity": "NVIDIA / HBM suppliers",
+      "topic": [
+        "memory_cost",
+        "pricing",
+        "rumor_resolution",
+        "gross_margin"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "Nvidia resets its expectations on a profit metric due to 'extreme' memory-chip crunch",
+      "source_url": "https://www.marketwatch.com/livecoverage/nvidia-earnings-stock-results-guidance-nvda-q2/card/nvidia-resets-its-expectations-on-a-profit-metric-due-to-extreme-memory-chip-crunch-KZTNMShlzs2dX78aZZTg",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "Live earnings-call coverage reported NVIDIA management describing extreme memory costs, lower future margin expectations, and planned product price increases early in the next fiscal year.",
+      "quantified": {
+        "reported_future_gross_margin_low_pct": 71,
+        "reported_future_gross_margin_high_pct": 73
+      },
+      "assumptions": [
+        "Memory inflation can pass through into system pricing and margins, but exact configuration-level increases remain contract- and BOM-specific."
+      ],
+      "contradictions_or_limits": [
+        "This corroborates the direction of price pressure, not the earlier reported >15% magnitude or exact customer/configuration notice.",
+        "Earnings-call reporting is not a published system price list."
+      ],
+      "fak_implications": [
+        "Model memory-price sensitivity and keep exact system-price changes as scenarios until customer/product terms are confirmed."
       ],
       "rumor": {
         "is_rumor": false

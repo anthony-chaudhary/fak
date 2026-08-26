@@ -108,3 +108,16 @@ and cooling startups, and generation/datacenter developers.
 Expiry means **remove from active architectural assumptions**, not delete history. A
 later check must mark each claim `confirmed`, `partially_confirmed`, `refuted`, or
 `expired_unresolved`, with exact claim fragments and sources.
+
+## Rumor resolution update — 2026-08-26
+
+| Claim | Resolution state | Confirmed or corroborated fragment | Still unverified |
+|---|---|---|---|
+| OpenAI data-center leader departure | **Partially confirmed; no longer classified as rumor** | OpenAI confirmed Chris Malone left. | Why he left and the causal/strategic meaning of the reorganization and leasing changes. |
+| Anthropic–Decart acquisition talks | **Independently corroborated, open** | Reuters independently reported talks after the Bloomberg-origin report. | Final $6B price, terms, closing, staff/IP transfer, and integration. |
+| NVIDIA >15% AI-server increase | **Partially corroborated, open** | NVIDIA earnings commentary corroborated extreme memory-cost pressure and planned product price increases. | Exact >15% magnitude, affected configurations/customers, and timing in the original report. |
+
+Resolution discipline: confirming one claim fragment does not confirm the rest. The
+OpenAI entry now records a reported observation for the confirmed departure and keeps
+strategic interpretation bounded. The other two remain rumors/watch items until their
+transaction or price terms are confirmed, refuted, or expire.
