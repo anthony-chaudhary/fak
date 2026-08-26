@@ -19,6 +19,7 @@
 // teardown via mg_q8_reset.
 
 #import <Metal/Metal.h>
+#include "q8_bridge.h"
 
 typedef struct {
     uintptr_t command_buffer;
