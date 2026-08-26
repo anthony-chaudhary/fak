@@ -461,12 +461,73 @@
       "status": "studied",
       "priority": 21,
       "why": "Compact modern LLM-serving control loop studied for the integration of radix-prefix reuse, page-aware KV allocation, bounded chunked prefill, continuous decode, stable tensor-parallel request order, CUDA-graph replay, and user-visible latency/throughput measurement. The resulting map reuses fak radixkv and grounds the missing Qwen3.8 serving spine in existing issue #8395.",
-      "last_checked": "2026-08-22",
+      "last_checked": "2026-08-25",
       "checked_revision": "9a91cfafe754aa85daee49998176275667eb58f2",
       "stars_at_check": 4794,
       "last_push_at_check": "2026-05-17T12:37:42Z",
       "study_note": "docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md",
-      "refresh_issue": "#9000"
+      "refresh_issue": "#9000",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/sgl-project-mini-sglang.json",
+        "indexed_revision": "9a91cfafe754aa85daee49998176275667eb58f2",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 6,
+        "candidate_count": 6,
+        "filed_issue_count": 0,
+        "completeness_critic": "The generator walked all 121 files and 32 directories at the exact revision. The refresh separately paged all forge issues and pull requests, all releases, and all 171 commits through the revision timestamp; confirmed discussions disabled; inspected every repository TODO; verified MIT provenance; ran three candidate-specific fak self-queries; adjudicated six candidates; and reconciled issue tracking to #9000 and #8395. Dependency/cache/control directory skipped: .git only.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate --slurp repos/sgl-project/mini-sglang/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo sgl-project/mini-sglang --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:sgl-project,name:mini-sglang) discussions(first:100)"
+            ],
+            "note": "Pinned-timestamp exhaustive read-back: 25 issues, 123 pull requests; discussions disabled."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"radix prefix cache page aware KV allocation chunked prefill continuous batching\"",
+              "fak capabilities \"tensor parallel stable request order CUDA graph replay serving scheduler\"",
+              "fak capabilities \"time to first token inter token latency throughput benchmark serving\""
+            ],
+            "note": "Candidate-specific queries found native cache/context, routing, benchmarking, and capability-floor surfaces; serving work remains in #8395."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/sgl-project-mini-sglang.json#candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9000",
+              "https://github.com/anthony-chaudhary/fak/issues/8395"
+            ],
+            "note": "No new borrow issue survived candidate adjudication."
+          }
+        ],
+        "issue_refs": [
+          "#9000",
+          "#8395"
+        ]
+      }
     },
     {
       "repository": "fla-org/flash-linear-attention",
