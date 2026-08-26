@@ -14,6 +14,7 @@ import (
 const ultracodeBenchUsage = `usage: fak ultracode bench --pair PAIR.json [--json]
        fak ultracode bench --selfcheck [--json]
   fak ultracode bench --scenario access-frontier [--scenario-input RUN.json] --widths 1,2,4,8 [--json]
+  fak ultracode bench --scenario fast-profile --pair BUNDLE.json --json
 
 Evaluate identical single-agent and ultracode-fleet runs as one paired artifact.
 The access-frontier scenario proves same-task micro-context and shared-prefix savings without
@@ -73,7 +74,7 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 	if selfcheck {
 		chosen++
 	}
-	if pairPath != "" {
+	if pairPath != "" && scenario == "" {
 		chosen++
 	}
 	if scenario != "" {
@@ -82,6 +83,30 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 	if chosen != 1 {
 		fmt.Fprintln(stderr, "fak ultracode bench: choose exactly one of --selfcheck, --pair PATH, or --scenario NAME")
 		return 2
+	}
+	if scenario == "fast-profile" {
+		if pairPath == "" {
+			fmt.Fprintln(stderr, "fak ultracode bench: --scenario fast-profile requires --pair PATH")
+			return 2
+		}
+		b, err := os.ReadFile(pairPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: read pair: %v\n", err)
+			return 1
+		}
+		var bundle ultracodebench.FastProfileBundle
+		if err := json.Unmarshal(b, &bundle); err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: decode fast-profile: %v\n", err)
+			return 1
+		}
+		report := ultracodebench.EvaluateFastProfile(bundle)
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: encode report: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	if scenario != "" {
 		if scenario != "access-frontier" {
