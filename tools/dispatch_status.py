@@ -4507,6 +4507,22 @@ def _git_block(merge: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _dispatcher_block(*, cap: int | None, live: int | None, host_safe: bool,
+                      pre_verdict: Any, limiter: dict[str, Any],
+                      acct: dict[str, Any], wd: dict[str, Any]) -> dict[str, Any]:
+    """The card's dispatcher block: capacity, gate, account, and watchdog state."""
+    return {
+        "cap": cap,
+        "live": live,
+        "headroom": (cap - live) if (cap is not None and live is not None) else None,
+        "host_safe": host_safe,
+        "preflight_verdict": pre_verdict,
+        "limiter": limiter,
+        "account": {k: acct.get(k) for k in ("tag", "tier", "model", "available")},
+        "watchdog": wd,
+    }
+
+
 # Preflight refusals the card has a SPECIFIC name for. Anything else still holds
 # (BLOCKED_ON_PREFLIGHT, with the raw token in the reason) — never READY_TO_GROW.
 _PREFLIGHT_HOLD_VERDICT = {
@@ -5134,16 +5150,9 @@ def build_payload(*, root: Path, pre: dict, sup: dict, wd: dict, backlog: dict,
         "accounts": _accounts_block(seat_inventory, acct, launch_admission),
         "workspace": str(root),
         "weekly_cap": weekly_cap,
-        "dispatcher": {
-            "cap": cap,
-            "live": live,
-            "headroom": (cap - live) if (cap is not None and live is not None) else None,
-            "host_safe": host_safe,
-            "preflight_verdict": pre_verdict,
-            "limiter": limiter,
-            "account": {k: acct.get(k) for k in ("tag", "tier", "model", "available")},
-            "watchdog": wd,
-        },
+        "dispatcher": _dispatcher_block(
+            cap=cap, live=live, host_safe=host_safe, pre_verdict=pre_verdict,
+            limiter=limiter, acct=acct, wd=wd),
         "supervisor": _supervisor_block(sup),
         "backlog": _backlog_block(backlog),
         "closure": _closure_block(closure),
@@ -6477,12 +6486,11 @@ def _dispatch_trend_line(tp: dict[str, Any]) -> str:
     return "trend: " + "; ".join(bits)
 
 
-def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
+def _dispatch_gate_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
     d = payload.get("dispatcher") or {}
     a = d.get("account") or {}
     wd = d.get("watchdog") or {}
     sup = payload.get("supervisor") or {}
-    tp = payload.get("throughput") or {}
     buckets = {"expected": [], "auto-solving": [], "action": []}
 
     verdict = str(payload.get("verdict") or "")
@@ -6571,6 +6579,13 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
     limiter = ((payload.get("dispatcher") or {}).get("limiter") or {})
     if limiter.get("primary") == "github_rate_limit":
         buckets["action"].append("GitHub rate limit is blocking the gh-backed status folds")
+
+    return buckets
+
+
+def _dispatch_health_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
+    tp = payload.get("throughput") or {}
+    buckets = {"expected": [], "auto-solving": [], "action": []}
 
     workers = payload.get("workers") or {}
     if workers.get("silent_count"):
@@ -6686,6 +6701,14 @@ def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
             buckets["action"].append(
                 f"utilization {state}: {slots.get('headroom')} free worker slot(s); {actions}")
 
+    return buckets
+
+
+def _dispatch_slack_buckets(payload: dict[str, Any]) -> dict[str, list[str]]:
+    buckets = _dispatch_gate_slack_buckets(payload)
+    health = _dispatch_health_slack_buckets(payload)
+    for name in buckets:
+        buckets[name].extend(health[name])
     return buckets
 
 
