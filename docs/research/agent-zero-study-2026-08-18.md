@@ -122,3 +122,28 @@ Agent Zero's README warns that the agent can execute commands and should run in 
 - [`agent.py`](https://github.com/agent0ai/agent-zero/blob/baadd0dd0b09fa769a1027c183b964be85d5c8cc/agent.py) and [`helpers/extension.py`](https://github.com/agent0ai/agent-zero/blob/baadd0dd0b09fa769a1027c183b964be85d5c8cc/helpers/extension.py).
 - [Time Travel plugin](https://github.com/agent0ai/agent-zero/tree/baadd0dd0b09fa769a1027c183b964be85d5c8cc/plugins/_time_travel).
 - [Issues](https://github.com/agent0ai/agent-zero/issues) and [pull requests](https://github.com/agent0ai/agent-zero/pulls), observed 2026-08-18.
+
+## Exhaustive inventory refresh (issue #8987, 2026-08-25)
+
+The study denominator is now pinned and machine-checkable at commit
+[`baadd0dd0b09fa769a1027c183b964be85d5c8cc`](https://github.com/agent0ai/agent-zero/commit/baadd0dd0b09fa769a1027c183b964be85d5c8cc),
+the `v2.9` tag tip. The committed map is
+[`inventory/agent0ai-agent-zero.json`](inventory/agent0ai-agent-zero.json): it walks all 2,292
+regular files (21 immediate subsystems; only `.git` and `webui/vendor` skipped), records 907
+runtime files, 160 test/fixture files, 837 documentation files, and captures the required
+non-tree classes.
+
+GitHub's paged read-back supplied the non-tree denominator: 834 issues (63 open, 771 closed),
+897 pull requests (82 open, 815 closed), all 94 discussions, and 72 observed releases. The
+map also records full pinned history/tag evidence, roadmap/TODO absence and distributed planning
+evidence, MIT and nested-license provenance, four candidate-specific `fak capabilities`
+self-queries, and the complete candidate matrix.
+
+The refreshed field-borrow verdict remains **stay minimal**. Five concrete candidates were
+compared with the real fak alternative: lifecycle hooks, subordinate-agent contexts, vector
+memory, time-travel snapshots, and scheduler/connector breadth. FAK already owns the applicable
+kernel seams through leaves/hooks, leased and independently witnessed workers, durable session
+state, receipts/rollback evidence, and typed integrations. Prompt-level hierarchy was rejected
+because it weakens lease and witness boundaries; integration and UI breadth stays modular. No
+candidate survived as a distinct dispatchable borrow, so #8987 is the sole issue-tracking
+reference and no follow-on issue was manufactured.
