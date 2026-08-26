@@ -1,3 +1,7 @@
+---
+title: "Live provider warmth-calibration witness — 2026-08-18"
+description: "Verdict: a real two-turn Codex session in a temporary non-FAK Git repository reported OpenAI cache reads,"
+---
 # Live provider warmth-calibration witness — 2026-08-18
 
 **Verdict:** a real two-turn Codex session in a temporary non-FAK Git repository reported OpenAI cache reads, and the new calibration ingest/status path persisted a dated `fresh` OpenAI/model row.

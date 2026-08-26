@@ -1,3 +1,7 @@
+---
+title: "Caveman native control benchmark"
+description: "This command reproduces JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4's audience benchmark without fak in either inference arm."
+---
 # Caveman native control benchmark
 
 This command reproduces `JuliusBrussee/caveman@c72984e4392c7a154e55c11dbf445f01ce5c35d4`'s audience benchmark without fak in either inference arm.

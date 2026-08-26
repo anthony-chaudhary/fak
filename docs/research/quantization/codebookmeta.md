@@ -1,3 +1,7 @@
+---
+title: "Quantization codebook metadata contract"
+description: "internal/codebookmeta is a versioned metadata/adjudication leaf for non-uniform quantization. It does not choose a universal format or kernel."
+---
 # Quantization codebook metadata contract
 
 Issue: [#6251](https://github.com/anthony-chaudhary/fak/issues/6251) · parent [#6221](https://github.com/anthony-chaudhary/fak/issues/6221)

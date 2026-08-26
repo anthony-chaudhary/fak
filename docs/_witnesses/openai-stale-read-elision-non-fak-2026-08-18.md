@@ -1,3 +1,7 @@
+---
+title: "Default OpenAI stale-read elision in a non-FAK repository — 2026-08-18"
+description: "Verdict: the default stale-read mechanism now reaches decoded OpenAI-compatible transcripts, not only Anthropic request bytes."
+---
 # Default OpenAI stale-read elision in a non-FAK repository — 2026-08-18
 
 **Verdict:** the default stale-read mechanism now reaches decoded OpenAI-compatible transcripts, not only Anthropic request bytes.

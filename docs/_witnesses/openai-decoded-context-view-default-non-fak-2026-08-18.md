@@ -1,3 +1,7 @@
+---
+title: "Default OpenAI decoded context view in a non-FAK repository — 2026-08-18"
+description: "Verdict: OpenAI/Codex launches already carry a default-on provider-neutral context planner;"
+---
 # Default OpenAI decoded context view in a non-FAK repository — 2026-08-18
 
 **Verdict:** OpenAI/Codex launches already carry a default-on provider-neutral context planner; launch posture now reports that real seam instead of implying all compaction is inert because the Anthropic byte transform cannot apply.

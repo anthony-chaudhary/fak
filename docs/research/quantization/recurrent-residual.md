@@ -1,3 +1,7 @@
+---
+title: "Recurrent Residual Quantization evaluation"
+description: "Named work: Recurrent Residual Quantization: A Progressive Multi-Precision Representation for LLMs Disposition:"
+---
 # Recurrent Residual Quantization evaluation
 
 **Named work:** *Recurrent Residual Quantization: A Progressive Multi-Precision Representation for LLMs*  

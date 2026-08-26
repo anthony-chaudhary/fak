@@ -1,3 +1,7 @@
+---
+title: "Move a managed context between homes"
+description: "fak profile continuity is the task-oriented personal-continuity front door. It discovers the managed skills, workflows,"
+---
 # Move a managed context between homes
 
 `fak profile continuity` is the task-oriented personal-continuity front door. It discovers the managed **skills**, **workflows**, and **policies** already present in one fak home, previews what is safe, exports a versioned portable package, restores it into another home, and switches or rolls back the active context. It uses `fak.portability/v1` from #6598; it does not invent another interchange schema or require a service.

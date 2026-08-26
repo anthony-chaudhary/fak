@@ -1,9 +1,15 @@
+---
+title: "Issue 9020 — owned Metal session profile"
+description: "Captured 2026-08-25 on an Apple M3 Pro with 18 GPU cores and 36 GiB unified memory."
+---
 # Issue 9020 — owned Metal session profile
 
 Captured 2026-08-25 on an Apple M3 Pro with 18 GPU cores and 36 GiB unified memory. The model was
 `unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe`, artifact size
 17,106,775,008 bytes, SHA-256 `7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169`.
 The private local artifact path is deliberately rendered as `<exact-gguf>`.
+
+## Capture summary
 
 The capture binary was built from clean detached source revision
 `4062891638e99bb6cc40a2328caa5265b0fb9ae2`. Its size was 8,522,050 bytes and SHA-256 was

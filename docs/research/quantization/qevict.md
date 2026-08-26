@@ -1,3 +1,7 @@
+---
+title: "QEvict recoverable quantized KV eviction evaluation"
+description: "Status: bounded contract and witness for issue 6258. This is not a model-quality or production-throughput claim."
+---
 # QEvict recoverable quantized KV eviction evaluation
 
 **Status:** bounded contract and witness for issue #6258. This is not a model-quality or

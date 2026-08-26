@@ -1,3 +1,7 @@
+---
+title: "Work delivery: recording is not readiness"
+description: "FAK tracks delivery as five independent facts: recorded, compile-admitted, verified, integrated, and release-ready."
+---
 # Work delivery: recording is not readiness
 
 FAK tracks delivery as five independent facts: **recorded**, **compile-admitted**, **verified**, **integrated**, and **release-ready**. A commit proves only that work was recorded. It does not silently add source to the compile stream, claim tests passed, prove a push, or authorize a release.

@@ -1,3 +1,7 @@
+---
+title: "Qwen3.8-27B"
+description: "Tracking epic: 8011"
+---
 # Qwen3.8-27B
 
 Tracking epic: [#8011](https://github.com/anthony-chaudhary/fak/issues/8011)

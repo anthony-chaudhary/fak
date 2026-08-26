@@ -1,3 +1,7 @@
+---
+title: "Quantization support and delegation matrix"
+description: "This page is fak's neutral, versioned quantization interoperability contract. It does not rank methods,"
+---
 # Quantization support and delegation matrix
 
 This page is fak's neutral, versioned quantization interoperability contract. It does **not** rank methods, promise that two similarly named encodings are interchangeable, or claim model quality or performance. A row applies only when its capability ID, artifact version, and runtime ID all match.

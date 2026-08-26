@@ -1,3 +1,8 @@
+---
+title: "Issue #9044 — exact Q8 Metal residency witness"
+description: "Reference documentation for Issue #9044 — exact Q8 Metal residency witness, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #9044 — exact Q8 Metal residency witness
 
 This directory preserves the scrubbed, validator-readable P=32/T=64 receipt for the

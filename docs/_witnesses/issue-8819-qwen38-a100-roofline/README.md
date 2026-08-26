@@ -1,3 +1,8 @@
+---
+title: "Issue #8819 — Qwen3.8 Q4_K_M A100 bottleneck checkpoint"
+description: "Reference documentation for Issue #8819 — Qwen3.8 Q4_K_M A100 bottleneck checkpoint, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8819 — Qwen3.8 Q4_K_M A100 bottleneck checkpoint
 
 This checkpoint ran the exact GGUF (`7e78da5d…`) through the fak-native CUDA

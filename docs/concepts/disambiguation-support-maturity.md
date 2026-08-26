@@ -1,3 +1,7 @@
+---
+title: "Support and maturity terms"
+description: "This map positions support-boundary names that otherwise look interchangeable. A support result describes one attempted outcome;"
+---
 # Support and maturity terms
 
 This map positions support-boundary names that otherwise look interchangeable. A **support result** describes one attempted outcome; a **support descriptor** describes a capability surface; a **maturity rung** summarizes accumulated evidence; and a **coverage control** selects or bounds the evidence collection itself.

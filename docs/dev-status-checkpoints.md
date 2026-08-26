@@ -1,3 +1,7 @@
+---
+title: "Developer status checkpoints"
+description: "fak dev checkpoint records implementation and repository-work milestones. It is deliberately under the dev namespace:"
+---
 # Developer status checkpoints
 
 `fak dev checkpoint` records implementation and repository-work milestones. It is deliberately under the `dev` namespace: it does **not** checkpoint an end-user agent runtime, conversation, tool state, or resumable inference session.

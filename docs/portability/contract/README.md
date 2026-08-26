@@ -1,3 +1,8 @@
+---
+title: "Managed-agent portability contract v1"
+description: "Reference documentation for Managed-agent portability contract v1, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Managed-agent portability contract v1
 
 `fak.portability/v1` is the minimal public interchange contract identified by inventory #6595. The executable reference is `internal/portabilitycontract`; the wire schema is `v1.schema.json`. It is a contract, not a registry or universal serializer.

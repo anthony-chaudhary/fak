@@ -75,6 +75,19 @@ Research often depends on a specific backend, model, release, hardware tier, dat
 
 The repository's studies and dated investigations currently live under [`docs/notes/`](../notes/); the curated [Notes & research index](../../INDEX.md#notes--research-docsnotes) is the human route. [`docs/sota/`](../sota/) tracks state-of-the-art comparisons. Use [`llms.txt`](../../llms.txt) for machine-oriented discovery.
 
+## Quantization and runtime evaluations
+
+- [CubicQuant bounded evaluation](quantization/cubicquant.md) — bounded scalar-reconstruction study for the CubicQuant format against tuned uniform and non-uniform baselines.
+- [Heterogeneity-aware microscaling](quantization/heterogeneous-microscaling.md) — bounded interoperability evaluation for mixed-shape microscaling groups.
+- [Output-aware INT2 KV-cache rotation](quantization/int2-kv-rotation.md) — bounded evaluation of low-bit KV rotation under output-aware reconstruction.
+- [LightRot bounded low-bit evaluation](quantization/lightrot.md) — bounded reproduction surface for the LightRot quantization proposal.
+- [QEvict recoverable quantized KV eviction](quantization/qevict.md) — bounded evaluation of quantized eviction with recovery semantics.
+- [Recurrent Residual Quantization evaluation](quantization/recurrent-residual.md) — bounded reconstruction study for recurrent residual quantization.
+- [ReQuant fixed-grid refinement evaluation](quantization/requant.md) — bounded evaluation of refinement over a fixed quantization grid.
+- [Qwen3.8 Metal OSS hot-path study](qwen38-metal-oss-hotpath-study.md) — captured hot-path observations for the open-source Metal route serving Qwen3.8.
+- [Frame loss between master agents and subagents](relativity-frame-loss.md) — study of context and control loss between coordinating and delegated agents.
+- [TTL-upgrade refusal corpus study](ttl-upgrade-refusal-corpus-2026-08-09.md) — dated refusal-corpus study for time-to-live upgrade behavior.
+
 - [Micro-context cache-value Track-1 fold](micro-context-cachevalue-track1.md) — controlled S2b reuse enters the witnessed P&L while synthetic and provider-dollar evidence remain fenced out.
 - [Micro-context S2b controlled in-kernel prefix-cache A/B](micro-context-s2b-kernel-cache-ab.md) — fresh-process arms reconcile response usage with RadixAttention counters and observe a fixture-scoped 2.16x shared-base service gain.
 - [Micro-context S3 hibernation/restart](micro-context-s3-hibernation-restart.md)

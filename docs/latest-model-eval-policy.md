@@ -1,3 +1,7 @@
+---
+title: "Latest-generation-only model evaluation"
+description: "fak model acceptance-run spends provider calls only on each declared model family's latest generation. Every model entry must declare:"
+---
 # Latest-generation-only model evaluation
 
 `fak model acceptance-run` spends provider calls only on each declared model family's

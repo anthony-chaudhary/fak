@@ -1,3 +1,7 @@
+---
+title: "Lock-driven external harness launch"
+description: "Generated fak harness init products accept the immutable product lock emitted by fak harness resolve:"
+---
 # Lock-driven external harness launch
 
 Generated `fak harness init` products accept the immutable product lock emitted by `fak harness resolve`:

@@ -1,3 +1,7 @@
+---
+title: "Study inventory: SemiAnalysisAI/InferenceX"
+description: "- Schema: fak-study-inventory-map/1 - Indexed revision: 0b0138fd7de0a6f927f9769b19d594d01f586107 - Source:"
+---
 # Study inventory: SemiAnalysisAI/InferenceX
 
 - **Schema:** `fak-study-inventory-map/1`

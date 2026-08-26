@@ -1,3 +1,7 @@
+---
+title: "Process-forest lifecycle adapters"
+description: "Schema fak-lifecycle-adapter/1 is an additive adapter contract for prepare, pause, checkpoint, restore, resume, and readiness."
+---
 # Process-forest lifecycle adapters
 
 Schema `fak-lifecycle-adapter/1` is an additive adapter contract for prepare, pause, checkpoint, restore, resume, and readiness. Negotiation records the transaction, forest/member, generation, complete capability document, requested operation, and typed supported/reason result so orchestration can store it beside the forest member and lifecycle transaction.

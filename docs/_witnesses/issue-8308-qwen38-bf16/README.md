@@ -1,3 +1,8 @@
+---
+title: "Qwen3.8-27B BF16 reference — issue #8308"
+description: "Reference documentation for Qwen3.8-27B BF16 reference — issue #8308, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Qwen3.8-27B BF16 reference — issue #8308
 
 **Verdict: PROMOTE as the quality oracle.** The pinned BF16 checkpoint passed all 18

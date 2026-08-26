@@ -1,3 +1,7 @@
+---
+title: "Scoped harness discovery"
+description: "fak harness discover turns the explicit selection manifest into a provenance-bearing candidate set before composition:"
+---
 # Scoped harness discovery
 
 

@@ -1,3 +1,7 @@
+---
+title: "FlashInfer study — reusable execution plans, workload tuning, and traceable kernels"
+description: "FlashInfer is not a serving system for FAK to embed. It is a broad, fast-moving GPU kernel library whose strongest transferable lesson is the control plane..."
+---
 # FlashInfer study — reusable execution plans, workload tuning, and traceable kernels
 
 **Studied:** 2026-08-22  

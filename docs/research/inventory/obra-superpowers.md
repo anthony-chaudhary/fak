@@ -1,3 +1,8 @@
+---
+title: "Study inventory: obra/superpowers"
+description: "Reference documentation for Study inventory: obra/superpowers, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Study inventory: obra/superpowers
 
 - **Schema:** `fak-study-inventory-map/1`

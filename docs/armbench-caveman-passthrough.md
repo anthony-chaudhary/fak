@@ -1,3 +1,7 @@
+---
+title: "Caveman × fak six-arm provider benchmark (#6682)"
+description: "Verdict: NOT-YET for provider-cache value. The live provider returned zero cache-read and cache-write tokens in every arm."
+---
 # Caveman × fak six-arm provider benchmark (#6682)
 
 **Verdict: NOT-YET for provider-cache value.** The live provider returned zero cache-read and cache-write tokens in every arm. Therefore this run makes no cache-hit or cost-saving claim. It does establish the six tuned controls, semantic parity, and the clean passthrough path.

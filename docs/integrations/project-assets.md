@@ -1,3 +1,7 @@
+---
+title: "Shared project assets"
+description: ".claude/project-assets.json is the canonical registry for portable project skills, project memories, and reusable goal prompts."
+---
 # Shared project assets
 
 `.claude/project-assets.json` is the canonical registry for portable project skills,

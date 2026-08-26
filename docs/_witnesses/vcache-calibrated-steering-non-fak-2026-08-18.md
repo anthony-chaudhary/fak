@@ -1,3 +1,7 @@
+---
+title: "Calibrated vCache steering in a non-FAK repository — 2026-08-18"
+description: "Verdict: fresh measured provider calibration now changes two runtime outcomes rather than only scoring them."
+---
 # Calibrated vCache steering in a non-FAK repository — 2026-08-18
 
 **Verdict:** fresh measured provider calibration now changes two runtime outcomes rather than only scoring them.

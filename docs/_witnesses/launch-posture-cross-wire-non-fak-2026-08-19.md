@@ -1,3 +1,7 @@
+---
+title: "Cross-wire launch posture in a non-FAK repository — 2026-08-19"
+description: "Verdict: launch posture now distinguishes provider-neutral runtime effects from Anthropic-only request shaping and explicitly names the passthrough ownership..."
+---
 # Cross-wire launch posture in a non-FAK repository — 2026-08-19
 
 **Verdict:** launch posture now distinguishes provider-neutral runtime effects from Anthropic-only request shaping and explicitly names the passthrough ownership boundary.

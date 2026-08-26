@@ -1,3 +1,7 @@
+---
+title: "Operate tool-result budgets safely"
+description: "The normative contract is tool-result-budget-policy-v1.md. Pin the policy artifact by immutable digest in the harness or deployment receipt;"
+---
 # Operate tool-result budgets safely
 
 The normative contract is [`tool-result-budget-policy-v1.md`](decisions/tool-result-budget-policy-v1.md). Pin the policy artifact by immutable digest in the harness or deployment receipt; a mutable path alone is not evidence of which policy ran.

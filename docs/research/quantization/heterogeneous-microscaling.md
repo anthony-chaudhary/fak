@@ -1,3 +1,7 @@
+---
+title: "Heterogeneity-aware microscaling: bounded interoperability evaluation"
+description: "Contract: internal/microscaleeval (fak.microscale-eval/v1)."
+---
 # Heterogeneity-aware microscaling: bounded interoperability evaluation
 
 Issue: [#6248](https://github.com/anthony-chaudhary/fak/issues/6248), child of #6221.  

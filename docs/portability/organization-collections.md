@@ -1,3 +1,7 @@
+---
+title: "Organization collections"
+description: "fak profile continuity org-selfcheck is the runnable, deterministic two-user journey for issue 6602. It runs without a network service;"
+---
 # Organization collections
 
 `fak profile continuity org-selfcheck` is the runnable, deterministic two-user journey for issue #6602. It runs without a network service; the organization state is a signed JSON control-plane object suitable for a repository, artifact store, removable media, or an optional self-hosted server.

@@ -1,3 +1,7 @@
+---
+title: "Mirage deep study — refreshed 2026-08-25"
+description: "Mirage is not a replacement for fak's model/tool-call kernel. It is a complementary resource substrate: one POSIX-like namespace over local files,"
+---
 # Mirage deep study — refreshed 2026-08-25
 
 **Source:** [`strukto-ai/mirage`](https://github.com/strukto-ai/mirage)  

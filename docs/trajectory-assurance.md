@@ -1,3 +1,7 @@
+---
+title: "Trajectory assurance receipt"
+description: "Trajectory assurance emits a deterministic, JSON-ready health receipt. Version 1 is shadow-only: every receipt has \"shadow\":true,"
+---
 # Trajectory assurance receipt
 
 Trajectory assurance emits a deterministic, JSON-ready health receipt. Version 1 is shadow-only: every receipt has `"shadow":true`, and the package exposes no stop, kill, mutation, or action callback. Consumers may display or store the receipt, but must not treat it as control authority.

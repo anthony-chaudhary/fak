@@ -1,3 +1,8 @@
+---
+title: "Issue #8544 open-witnessed reconciliation"
+description: "Reference documentation for Issue #8544 open-witnessed reconciliation, preserving the page's implementation details, evidence, and operating context."
+---
+
 # Issue #8544 open-witnessed reconciliation
 
 This directory preserves the failing-before receipt and final row-complete ledger for

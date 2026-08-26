@@ -1,3 +1,7 @@
+---
+title: "Issue #8624 — observed small-model Ultracode cache frontier"
+description: "Verdict: on qwen2.5:0.5b through the sanctioned fak-realmodel node, every bounded agentic cell at widths 1, 2, 4,"
+---
 # Issue #8624 — observed small-model Ultracode cache frontier
 
 **Verdict:** on `qwen2.5:0.5b` through the sanctioned `fak-realmodel` node, every bounded agentic cell at widths 1, 2, 4, and 8 retained the frozen accepted outcome while reducing scoped context and reusing a shared prefix. The evaluator therefore hill-climbed both multi-agent modes through width 8.

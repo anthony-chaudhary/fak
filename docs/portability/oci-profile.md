@@ -1,3 +1,7 @@
+---
+title: "fak OCI collection profile v1"
+description: "Status: minimal working profile for issue 6627. The profile carries a collection through OCI Distribution 1.1 while keeping import and pull inert."
+---
 # fak OCI collection profile v1
 
 Status: minimal working profile for issue #6627. The profile carries a collection through OCI Distribution 1.1 while keeping import and pull **inert**. Activation remains a separate, digest-pinned decision.

@@ -1,3 +1,7 @@
+---
+title: "Mix verified harnesses without plugin roulette"
+description: "fak harness mix combines independently resolved v1alpha2 product locks. It emits the same product-lock contract consumed by harness inspect, harness preview,"
+---
 # Mix verified harnesses without plugin roulette
 
 `fak harness mix` combines independently resolved `v1alpha2` product locks. It emits the same product-lock contract consumed by `harness inspect`, `harness preview`, `harness derive`, and generated product launch.

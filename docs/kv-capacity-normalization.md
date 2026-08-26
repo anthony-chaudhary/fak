@@ -1,3 +1,7 @@
+---
+title: "KV capacity normalization"
+description: "Provider and runtime KV-cache metrics use different native units. internal/modelperfobs.NormalizeKVCapacity converts explicit observations into a comparable..."
+---
 # KV capacity normalization
 
 Provider and runtime KV-cache metrics use different native units. `internal/modelperfobs.NormalizeKVCapacity` converts explicit observations into a comparable `fak-kv-capacity/1` snapshot without erasing the source values.

@@ -1,3 +1,7 @@
+---
+title: "Workflow concepts: the operator's middle layer"
+description: "fak traj concepts derives workflow concepts between fleet aggregates and individual tool calls."
+---
 # Workflow concepts: the operator's middle layer
 
 `fak traj concepts` derives **workflow concepts** between fleet aggregates and

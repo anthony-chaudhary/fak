@@ -1,3 +1,7 @@
+---
+title: "Micro-context S5: controlled CUDA-kernel 10k soak"
+description: "Status: PASS on August 9, 2026. The captured ledger s5-gcp-10k-controlled-soak-2026-08-09.json closes the remaining S5 controlled-kernel evidence gap in 5792."
+---
 # Micro-context S5: controlled CUDA-kernel 10k soak
 
 **Status:** PASS on August 9, 2026. The captured ledger

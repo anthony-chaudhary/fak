@@ -1,3 +1,7 @@
+---
+title: "Typed harness asset composition"
+description: "fak harness compose compiles the ordered layers emitted by contextual selection into one inert, provenance-bearing effective asset set:"
+---
 # Typed harness asset composition
 
 `fak harness compose` compiles the ordered layers emitted by contextual selection into one inert, provenance-bearing effective asset set:
