@@ -24,6 +24,9 @@ int  mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_exec
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff, mg_execution_event* event);
+int  mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_y, const int* q4_yoff,
+                           const int* q8_wids, int nq8, const signed char* xq, const float* xd,
+                           float* q8_y, const int* q8_yoff, mg_execution_event* event);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
 void mg_q6k_gemv(int wid, const float* x, float* y);
@@ -39,6 +42,7 @@ void mg_q4k_reset(void);
 import "C"
 
 import (
+	"errors"
 	"math"
 	"runtime"
 	"sync"
@@ -248,23 +252,98 @@ func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObs
 	return out
 }
 
-// FusedMLP runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) * (up·x) )
-// — in ONE Metal command buffer, keeping the intermediate-wide gate/up/inter resident on the GPU
-// (only x and y cross the boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==
-// down.In (=I); len(x)>=H, len(y)>=H. Returns false on a shape mismatch (caller uses the per-matmul
-// path). The activation is silu — the caller must gate on a non-GELU config.
-func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
-	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
-		return false
+const ExecutionMixedQ4KQ8QKV ExecutionOperation = "mixed-q4_k-q8-qkv"
+
+// MixedQ4KQ8PreflightError reports that mixed projection inputs were rejected before Metal
+// created a command buffer. The caller may safely choose another whole-operation route.
+type MixedQ4KQ8PreflightError struct{ Reason string }
+
+func (e *MixedQ4KQ8PreflightError) Error() string { return "mixed Q4_K/Q8 preflight: " + e.Reason }
+
+// MixedQ4KQ8PostSubmitError reports failure after the candidate command buffer was created.
+// Callers must fail closed: retrying either projection separately could expose partial work.
+type MixedQ4KQ8PostSubmitError struct{}
+
+func (*MixedQ4KQ8PostSubmitError) Error() string {
+	return "mixed Q4_K/Q8 Metal command buffer failed after creation"
+}
+
+// IsMixedQ4KQ8PostSubmit reports whether err requires fail-closed handling.
+func IsMixedQ4KQ8PostSubmit(err error) bool {
+	var target *MixedQ4KQ8PostSubmitError
+	return errors.As(err, &target)
+}
+
+func mixedQ4KQ8StatusError(status int) error {
+	if status < 0 {
+		return &MixedQ4KQ8PostSubmitError{}
 	}
-	if gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || down.Out != gate.In {
-		return false
+	if status == 0 {
+		return &MixedQ4KQ8PreflightError{Reason: "native resources unavailable"}
 	}
-	if len(x) < gate.In || len(y) < down.Out {
-		return false
+	return nil
+}
+
+// GEMVGroupMixedQ4KQ8 applies at least one Q4_K and one Q8 weight sharing one activation in
+// one caller-observed native command buffer. Every input is checked before native encoding.
+func GEMVGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []int8, xd []float32, observation *ExecutionObservation) (q4out, q8out [][]float32, err error) {
+	if len(q4ws) == 0 || len(q8ws) == 0 {
+		return nil, nil, &MixedQ4KQ8PreflightError{Reason: "both quantization groups are required"}
 	}
-	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
-	return true
+	if q4ws[0] == nil || q8ws[0] == nil {
+		return nil, nil, &MixedQ4KQ8PreflightError{Reason: "nil weight"}
+	}
+	in := q4ws[0].In
+	if in <= 0 || q8ws[0].In != in || len(x) < in || len(xq) < in || len(xd) < q8ws[0].Nblk {
+		return nil, nil, &MixedQ4KQ8PreflightError{Reason: "activation geometry mismatch"}
+	}
+	q4ids := make([]C.int, len(q4ws))
+	q4off := make([]C.int, len(q4ws)+1)
+	q4flatLen := 0
+	for i, w := range q4ws {
+		if w == nil || w.id < 0 || w.In != in || w.Out <= 0 {
+			return nil, nil, &MixedQ4KQ8PreflightError{Reason: "invalid Q4_K weight"}
+		}
+		q4ids[i] = C.int(w.id)
+		q4off[i] = C.int(q4flatLen)
+		q4flatLen += w.Out
+	}
+	q4off[len(q4ws)] = C.int(q4flatLen)
+	q8ids := make([]C.int, len(q8ws))
+	q8off := make([]C.int, len(q8ws)+1)
+	q8flatLen := 0
+	for i, w := range q8ws {
+		if w == nil || w.id < 0 || w.In != in || w.Nblk != q8ws[0].Nblk || w.Out <= 0 {
+			return nil, nil, &MixedQ4KQ8PreflightError{Reason: "invalid Q8 weight"}
+		}
+		q8ids[i] = C.int(w.id)
+		q8off[i] = C.int(q8flatLen)
+		q8flatLen += w.Out
+	}
+	q8off[len(q8ws)] = C.int(q8flatLen)
+
+	q4flat := make([]float32, q4flatLen)
+	q8flat := make([]float32, q8flatLen)
+	var event C.mg_execution_event
+	status := int(C.mg_q4k_q8_gemv_group(
+		(*C.int)(unsafe.Pointer(&q4ids[0])), C.int(len(q4ids)), (*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&q4flat[0])), (*C.int)(unsafe.Pointer(&q4off[0])),
+		(*C.int)(unsafe.Pointer(&q8ids[0])), C.int(len(q8ids)), (*C.schar)(unsafe.Pointer(&xq[0])),
+		(*C.float)(unsafe.Pointer(&xd[0])), (*C.float)(unsafe.Pointer(&q8flat[0])),
+		(*C.int)(unsafe.Pointer(&q8off[0])), &event))
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	if err := mixedQ4KQ8StatusError(status); err != nil {
+		return nil, nil, err
+	}
+	q4out = make([][]float32, len(q4ws))
+	for i := range q4ws {
+		q4out[i] = q4flat[int(q4off[i]):int(q4off[i+1])]
+	}
+	q8out = make([][]float32, len(q8ws))
+	for i := range q8ws {
+		q8out[i] = q8flat[int(q8off[i]):int(q8off[i+1])]
+	}
+	return q4out, q8out, nil
 }
 
 // Q6KWeight is a handle to a raw Q6_K weight matrix [Out, In] resident on the GPU (210-B
