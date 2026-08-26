@@ -176,3 +176,35 @@ There is no public upstream issue/PR filing path to use: repository Issues are d
 - [Architecture](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/architecture.md), [agent lifecycle](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/agent-lifecycle.md), [tool pipeline](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/tool-execution-pipeline.md), and [testing doctrine](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/docs/testing.md).
 - [Agent preset composition](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/preset/agent-presets/README.md), [settings](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/settings/settings/README.md), and [self-modifying Cordis tool trust stance](https://github.com/deepseek-ai/deepseek-harness/blob/141eb6fef83422698aef7a981029e843e8161534/packages/extensions/tool-cordis/README.md).
 - [Discussions](https://github.com/deepseek-ai/deepseek-harness/discussions), observed 2026-08-20; exact reports are linked beside each claim above.
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue [#8989](https://github.com/anthony-chaudhary/fak/issues/8989) closes the denominator gap without moving the original study cutoff. The machine-readable map is [`docs/research/inventory/deepseek-ai-deepseek-harness.json`](../research/inventory/deepseek-ai-deepseek-harness.json), generated from the detached checkout at commit `141eb6fef83422698aef7a981029e843e8161534` (`dsh-v0.1.0-rc.8`). It walks every regular file outside `.git` and vendored dependency trees and accounts for README/docs, architecture/design, runtime, tests/fixtures, changelog/history/releases, roadmap/TODO evidence, and license/provenance.
+
+The non-tree audit used the same commit timestamp as its cutoff. GitHub reports Issues and Pull Requests disabled for this repository, so those two classes are checked absent rather than inferred from an empty REST response. Discussions were paged to exhaustion and filtered by `createdAt`: 3,310 existed at the cutoff, comprising 3,226 open and 84 closed. The local history contains 12,940 commits reachable from the pin, two merged tags, and the pinned `dsh-v0.1.0-rc.8` release. Commands, counts, cutoff, and source URLs are recorded in the map's `non_tree_study` object and registry `source_evidence`.
+
+### Candidate-to-FAK decision matrix
+
+The exhaustive read-back did not add a fourteenth candidate. It did correct the old one-gap summary: thirteen leaf-grain candidates were filed, and the current disposition is independently readable from GitHub.
+
+| Borrowed pattern | FAK decision | Follow-on |
+|---|---|---|
+| Observed-version mutation guard | Implemented | #8222 closed |
+| Claim admitted input before prompt assembly | Implemented | #8260 closed |
+| Exact model-visible request reconstruction | Implemented | #8262 closed |
+| Persist interrupted assistant prefixes | Implemented | #8263 closed |
+| Scheduler-classified steer input | Retain as unfinished product gap | #8264 open |
+| Compaction replacement provenance | Retain as unfinished trust gap | #8265 open |
+| Effect-safe tool overlap with ordered commit | Implemented | #8266 closed |
+| Ordered skipped results after cancellation | Implemented | #8267 closed |
+| Durable incomplete-tool repair | Implemented | #8268 closed |
+| Owner-scoped extension effects | Implemented | #8269 closed |
+| Superseded generation reclamation | Implemented | #8270 closed |
+| Mounted-extension readiness audit | Implemented | #8271 closed |
+| Transactional extension-graph swap | Implemented | #8272 closed |
+
+Candidate-specific `fak capabilities` self-queries are pinned in the map. They preserve two product-boundary decisions from the original study: FAK keeps its static-binary and default-deny architecture rather than copying a general runtime plugin marketplace, and it borrows lifecycle/effect semantics only where they strengthen native FAK ownership. No new issue is warranted beyond the two already-open follow-ons, #8264 and #8265.
+
+### Completeness critic
+
+The critic found no unaccounted source class: local-tree classes have path evidence or checked-absent results; history, release, tag, and discussion evidence is pinned to the same revision timestamp; the forge compound class explicitly accounts for issues, pull requests, and discussions; self-query, candidate decisions, and issue tracking are traceable rather than asserted. The row-specific acceptance witness is `fak study-monitor --inventory-check --json`, whose `deepseek-ai/deepseek-harness` result must report `ready: true` at indexed revision `141eb6fef83422698aef7a981029e843e8161534`.
