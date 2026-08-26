@@ -5658,6 +5658,21 @@
           "category": "incidental",
           "reason": "Private constructor for issue #8833 selector state, not a distinct runtime session identity.",
           "token": "newMixedQKVSessionFromEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go constant name for the existing graceful-handoff session environment key, not a separate session-runtime concept.",
+          "token": "selfUpdateSessionEnv"
+        },
+        {
+          "category": "incidental",
+          "reason": "Environment variable carrying the positioned graceful-handoff session identity, not a separate runtime concept.",
+          "token": "FAK_HANDOFF_SESSION_ID"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function parameter carrying the existing graceful-handoff session identity, not a distinct runtime concept.",
+          "token": "handoffSession"
         }
       ],
       "id": "session-runtime",
@@ -5676,6 +5691,7 @@
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
         "EvaluateLifecycleSession",
+        "FAK_HANDOFF_SESSION_ID",
         "FAK_SESSION_CLIENT_TOKEN",
         "FAK_SESSION_STATE",
         "FinalizeSessionMoveCheckpoint",
@@ -5863,6 +5879,7 @@
         "handleSessionClientPage",
         "handleSessionDiscovery",
         "handleSessionMove",
+        "handoffSession",
         "handoff_session_give_up",
         "hashUnit",
         "hedge_loser_slot_released",
@@ -5960,6 +5977,7 @@
         "scheduler_weights",
         "schedulers",
         "scheduling",
+        "selfUpdateSessionEnv",
         "semantic-window",
         "serveSessionRegistryPath",
         "serveSessionRegistryScopeLabel",

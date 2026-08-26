@@ -41,6 +41,8 @@ func cmdSelfUpdate(argv []string) {
 	check := fs.Bool("check", false, "report whether this binary is stale vs HEAD and exit (no build)")
 	force := fs.Bool("force", false, "build+gate+install even if not provably stale (still runs the green gate)")
 	jsonMode := fs.Bool("json", false, "emit one versioned JSON receipt")
+	handoffSession := fs.String("handoff-session", "", "after installation, launch the successor with this stable session identity")
+	handoffTimeout := fs.Duration("handoff-timeout", 30*time.Second, "maximum time for graceful handoff (requires --handoff-session)")
 	root := fs.String("root", "", "repo root to build from (default: discover from cwd)")
 	target := fs.String("target", "", "binary path to replace (default: this binary's own path). Lets a scheduler update the FLEET binary regardless of which fak it invokes.")
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
@@ -149,7 +151,7 @@ func cmdSelfUpdate(argv []string) {
 		return
 	}
 
-	performSelfUpdate(repoRoot, headRev, target, companionPaths)
+	performSelfUpdate(repoRoot, headRev, target, companionPaths, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
 }
 
 // selfUpdateHost roots the hot-copy role table on this host: the checkout we build from, the
@@ -281,18 +283,19 @@ func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string,
 type selfUpdateOutcome string
 
 const (
-	outcomeInstalled      selfUpdateOutcome = "installed"       // target swapped to a fresh gated build
-	outcomeTargetCurrent  selfUpdateOutcome = "target-current"  // --target already at origin/main
-	outcomeSelfFresh      selfUpdateOutcome = "self-fresh"      // SELF mode, running binary is trunk tip
-	outcomeSelfAhead      selfUpdateOutcome = "self-ahead"      // SELF mode, local build newer than trunk
-	outcomeSelfLocal      selfUpdateOutcome = "self-local"      // SELF mode, dirty/unstamped/diverged
-	outcomeSelfUnknown    selfUpdateOutcome = "self-unknown"    // SELF mode, freshness unresolvable
-	outcomeBusy           selfUpdateOutcome = "busy"            // single-flight lock held by a live build
-	outcomeCheckOnly      selfUpdateOutcome = "check-only"      // --check reported and exited
-	outcomeGateFailed     selfUpdateOutcome = "gate-failed"     // build/vet/smoke refused the candidate
-	outcomePrepareFailed  selfUpdateOutcome = "prepare-failed"  // could not stage the origin/main worktree
-	outcomeRolledBack     selfUpdateOutcome = "rolled-back"     // activation failed and all changed targets were restored
-	outcomeRollbackFailed selfUpdateOutcome = "rollback-failed" // activation failed and at least one restore failed
+	outcomeInstalled      selfUpdateOutcome = "installed"      // target swapped to a fresh gated build
+	outcomeTargetCurrent  selfUpdateOutcome = "target-current" // --target already at origin/main
+	outcomeSelfFresh      selfUpdateOutcome = "self-fresh"     // SELF mode, running binary is trunk tip
+	outcomeSelfAhead      selfUpdateOutcome = "self-ahead"     // SELF mode, local build newer than trunk
+	outcomeSelfLocal      selfUpdateOutcome = "self-local"     // SELF mode, dirty/unstamped/diverged
+	outcomeSelfUnknown    selfUpdateOutcome = "self-unknown"   // SELF mode, freshness unresolvable
+	outcomeBusy           selfUpdateOutcome = "busy"           // single-flight lock held by a live build
+	outcomeCheckOnly      selfUpdateOutcome = "check-only"     // --check reported and exited
+	outcomeGateFailed     selfUpdateOutcome = "gate-failed"    // build/vet/smoke refused the candidate
+	outcomePrepareFailed  selfUpdateOutcome = "prepare-failed" // could not stage the origin/main worktree
+	outcomeRolledBack     selfUpdateOutcome = "rolled-back"    // activation failed and all changed targets were restored
+	outcomeRollbackFailed selfUpdateOutcome = "rollback-failed"
+	outcomeHandoffRefused selfUpdateOutcome = "handoff-refused" // activation failed and at least one restore failed
 	// outcomeHotCopyDivergent: everything this tick was allowed to swap landed, but the role
 	// census still shows a declared hot copy on another build (typically the audit-only repo-root
 	// gate binary). Distinct from sibling-stale, which is a FAILED swap (#6508).
@@ -357,6 +360,7 @@ type selfUpdateReceipt struct {
 	RollbackErrors  []string                  `json:"rollback_errors"`
 	RestartRequired bool                      `json:"restart_required"`
 	NextCommand     string                    `json:"next_command"`
+	Handoff         *selfUpdateHandoffReceipt `json:"handoff,omitempty"`
 }
 
 type selfUpdateReceiptTarget struct {
@@ -372,6 +376,7 @@ var selfUpdateReceiptNewRevision string
 var selfUpdateReceiptTargets []selfUpdateReceiptTarget
 var selfUpdateReceiptAttempted int
 var selfUpdateReceiptChanged int
+var selfUpdateReceiptHandoff *selfUpdateHandoffReceipt
 
 func beginSelfUpdateOutput(enabled bool) {
 	selfUpdateProgress = os.Stdout
@@ -381,6 +386,7 @@ func beginSelfUpdateOutput(enabled bool) {
 	selfUpdateReceiptTargets = nil
 	selfUpdateReceiptAttempted = 0
 	selfUpdateReceiptChanged = 0
+	selfUpdateReceiptHandoff = nil
 	if !enabled {
 		return
 	}
@@ -410,6 +416,8 @@ func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUp
 		status, rollbackStatus, nextCommand = "rollback_failed", "failed", "fak self-update --check"
 	case outcomeBusy:
 		status, nextCommand = "busy", "fak self-update"
+	case outcomeHandoffRefused:
+		status, nextCommand = "handoff_refused", "fak self-update --check"
 	case selfUpdateOutcome("restart_required"):
 		status, restartRequired, nextCommand = "restart_required", true, "fak self-update --check"
 	}
@@ -428,7 +436,7 @@ func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUp
 		Schema: selfUpdateReceiptSchema, SchemaVersion: 1, CorrelationID: selfUpdateCorrelationID(), Status: status,
 		OldRevision: optionalRevision(selfUpdateReceiptOldRevision), NewRevision: optionalRevision(selfUpdateReceiptNewRevision),
 		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
-		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand,
+		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand, Handoff: selfUpdateReceiptHandoff,
 	}
 }
 

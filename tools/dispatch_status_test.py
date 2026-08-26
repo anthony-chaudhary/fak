@@ -212,6 +212,35 @@ def build(mod, **over):
 
 
 class VerdictTest(unittest.TestCase):
+    def test_dispatcher_block_helper_pins_payload_schema_and_order(self) -> None:
+        mod = load()
+        preflight = pre("SPAWN_OK", cap=4, live=1)
+        watchdog = {"installed": True, "status": "Ready"}
+        limiter = mod._dispatch_limiter(preflight, backlog_ok(), closure_ok(), {})
+        expected = {
+            "cap": 4,
+            "live": 1,
+            "headroom": 3,
+            "host_safe": True,
+            "preflight_verdict": "SPAWN_OK",
+            "limiter": limiter,
+            "account": {
+                "tag": "worker-a",
+                "tier": 1,
+                "model": "claude",
+                "available": True,
+            },
+            "watchdog": watchdog,
+        }
+
+        self.assertEqual(
+            mod._dispatcher_block(
+                cap=4, live=1, host_safe=True, pre_verdict="SPAWN_OK",
+                limiter=limiter, acct=preflight["account"], wd=watchdog),
+            expected,
+        )
+        self.assertEqual(build(mod, pre=preflight, wd=watchdog)["dispatcher"], expected)
+
     def test_ready_to_grow_when_safe_to_spawn(self) -> None:
         mod = load()
         p = build(mod, pre=pre("SPAWN_OK"))
@@ -2716,6 +2745,54 @@ class SlackPostTest(unittest.TestCase):
         # The dead-backend line carries the stub evidence, so it must not also emit
         # a second majority-stub action for the same backend.
         self.assertNotIn("claude majority-stub", text)
+
+    def test_slack_bucket_helpers_preserve_category_and_message_order(self) -> None:
+        mod = load()
+        payload = {
+            "verdict": "AT_CAP",
+            "ok": True,
+            "weekly_cap": {"reset_text": "tomorrow"},
+            "dispatcher": {
+                "account": {"tag": "worker-a"},
+                "watchdog": {"installed": False},
+                "host_safe": True,
+                "preflight_verdict": "REFUSE_AT_CAP",
+                "limiter": {},
+            },
+            "supervisor": {"verdict": "READY"},
+            "workers": {"silent_count": 1, "silent": [{"issue": 7}]},
+            "low_yield": {"lanes": [{
+                "lane": "tools", "verdict": "LOW_YIELD", "turns": 9, "sessions": 2,
+            }]},
+            "backend_health": {
+                "dead": [{"product": "claude", "abandoned_lane": "docs"}],
+                "stub_rate": [],
+            },
+        }
+        gate = {
+            "expected": [
+                "worker-a weekly-capped until tomorrow; scheduler waits",
+                "at configured worker-slot cap",
+            ],
+            "auto-solving": [],
+            "action": ["always-on watchdog not installed; register FleetIssueDispatch"],
+        }
+        health = {
+            "expected": [],
+            "auto-solving": [
+                "1 no-output worker(s) skipped by cooldown (#7); inspect only if the same issue repeats",
+                "claude held dead; lane docs reallocated",
+            ],
+            "action": [
+                "lane tools low-yield: 9 turns / 2 session(s), 0 ancestry-closes; re-scope or exclude the lane",
+            ],
+        }
+
+        self.assertEqual(mod._dispatch_gate_slack_buckets(payload), gate)
+        self.assertEqual(mod._dispatch_health_slack_buckets(payload), health)
+        self.assertEqual(mod._dispatch_slack_buckets(payload), {
+            name: gate[name] + health[name] for name in gate
+        })
 
     def test_slack_text_explains_stalled_ok(self) -> None:
         mod = load()
