@@ -195,6 +195,15 @@ func runDispatchTick(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak dispatch tick: %v\n", err)
 		return 1
 	}
+	// The dispatch tick is the single automatic value-chain adoption seam. Record
+	// every completed decision without requiring an operator or worker prompt to
+	// remember the economics verb.
+	if receipt, err := recordDispatchValueChainUsage(opts.Workspace, payload, time.Now().UTC()); err != nil {
+		fmt.Fprintf(stderr, "fak dispatch tick: record value-chain usage: %v\n", err)
+		return 1
+	} else {
+		payload["value_chain_usage"] = receipt
+	}
 	if code := emitJSONOrRender(stdout, stderr, "fak dispatch tick", asJSON, payload, func(w io.Writer) {
 		fmt.Fprint(w, renderDispatchTick(payload))
 	}); code != 0 {

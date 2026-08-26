@@ -106,6 +106,26 @@ type valueChainUsageRow struct {
 	Outcome string    `json:"outcome"`
 }
 
+const dispatchValueChainUsageLedger = ".dispatch-runs/value-chain-usage.jsonl"
+
+func recordDispatchValueChainUsage(root string, payload map[string]any, at time.Time) (map[string]any, error) {
+	root = strings.TrimSpace(root)
+	if root == "" {
+		root = "."
+	}
+	outcome := strings.TrimSpace(dispatchMapString(payload, "action"))
+	if outcome == "" {
+		outcome = "unknown"
+	}
+	path := filepath.Join(root, filepath.FromSlash(dispatchValueChainUsageLedger))
+	if err := appendValueChainUsage(path, at, outcome); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"schema": valueChainUsageSchema, "ledger": path, "outcome": outcome, "automatic": true,
+	}, nil
+}
+
 func defaultValueChainLedger() string {
 	if path := os.Getenv("FAK_VALUE_CHAIN_LEDGER"); path != "" {
 		return path
