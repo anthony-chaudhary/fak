@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
@@ -22,17 +23,13 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 	return
 }
 
-func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
-	return p.generateReusedWithBiasObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, nil)
-}
-
 // generateReusedContextWithBias runs the decode loop, sampling each next token with
 // sampleLogitsWithPenalty. freqPenalty/presPenalty are the OpenAI repetition
 // penalties (#1705); both zero is a byte-for-byte no-op versus the pre-penalty
 // path, so every existing caller (which passes 0, 0) is unaffected. The per-token
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
-func (p *InKernelPlanner) generateReusedWithBiasObserved(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, observe func(int, float64)) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -248,6 +245,10 @@ func (p *InKernelPlanner) generateReusedWithBiasObserved(ctx context.Context, id
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
 	}
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
+	}
 	ln := &decodeLane{
 		s:           s,
 		logits:      logits,
@@ -255,7 +256,6 @@ func (p *InKernelPlanner) generateReusedWithBiasObserved(ctx context.Context, id
 		rng:         rng,
 		emit:        emit,
 		stops:       stops,
-		observe:     observe,
 		temp:        temp,
 		topP:        topP,
 		topK:        topK,
@@ -263,6 +263,7 @@ func (p *InKernelPlanner) generateReusedWithBiasObserved(ctx context.Context, id
 		freqPenalty: freqPenalty,
 		presPenalty: presPenalty,
 		maxNew:      maxNew,
+		measurement: measurement,
 	}
 	td := time.Now()
 	if p.batchDecode {
@@ -290,13 +291,12 @@ func (p *InKernelPlanner) generateReusedWithBiasObserved(ctx context.Context, id
 // opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
 // the property that makes the two paths bit-for-bit equivalent.
 type decodeLane struct {
-	s       *model.Session
-	logits  []float32
-	counts  []int32
-	rng     *rand.Rand
-	emit    func(int) bool
-	stops   map[int]bool
-	observe func(int, float64)
+	s      *model.Session
+	logits []float32
+	counts []int32
+	rng    *rand.Rand
+	emit   func(int) bool
+	stops  map[int]bool
 
 	temp        float64
 	topP        float64
@@ -305,11 +305,69 @@ type decodeLane struct {
 	freqPenalty float64
 	presPenalty float64
 	maxNew      int
+	measurement *nativeInferenceMeasurement
 
 	gen     int
 	stopped bool
 	done    bool
 	err     error
+}
+
+type nativeInferenceMeasurement struct {
+	startedAt time.Time
+	tokenIDs  []int
+	logprobs  []float64
+	ttftS     float64
+}
+
+func (m *nativeInferenceMeasurement) reset() {
+	if m == nil {
+		return
+	}
+	m.tokenIDs = m.tokenIDs[:0]
+	m.logprobs = m.logprobs[:0]
+	m.ttftS = 0
+}
+
+func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
+	if m == nil {
+		return nil
+	}
+	lp, err := chosenTokenLogprob(logits, token)
+	if err != nil {
+		return err
+	}
+	if len(m.tokenIDs) == 0 {
+		m.ttftS = time.Since(m.startedAt).Seconds()
+	}
+	m.tokenIDs = append(m.tokenIDs, token)
+	m.logprobs = append(m.logprobs, lp)
+	return nil
+}
+
+func chosenTokenLogprob(logits []float32, token int) (float64, error) {
+	if token < 0 || token >= len(logits) || len(logits) == 0 {
+		return 0, fmt.Errorf("chosen token %d outside logits size %d", token, len(logits))
+	}
+	maxLogit := math.Inf(-1)
+	for _, raw := range logits {
+		v := float64(raw)
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, fmt.Errorf("non-finite model logit")
+		}
+		if v > maxLogit {
+			maxLogit = v
+		}
+	}
+	var expSum float64
+	for _, raw := range logits {
+		expSum += math.Exp(float64(raw) - maxLogit)
+	}
+	lp := float64(logits[token]) - maxLogit - math.Log(expSum)
+	if math.IsNaN(lp) || math.IsInf(lp, 0) {
+		return 0, fmt.Errorf("non-finite chosen-token log probability")
+	}
+	return lp, nil
 }
 
 // decodeOne runs one decode iteration for a lane EXCEPT the forward step. It mirrors the body
@@ -330,8 +388,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 		ln.stopped, ln.done = true, true
 		return 0, false
 	}
-	if ln.observe != nil {
-		ln.observe(next, selectedTokenLogprob(ln.logits, next))
+	if err := ln.measurement.record(ln.logits, next); err != nil {
+		ln.err, ln.done = err, true
+		return 0, false
 	}
 	if ln.counts != nil && next < len(ln.counts) {
 		ln.counts[next]++
@@ -493,23 +552,4 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
-}
-
-// selectedTokenLogprob returns log_softmax(logits)[selected] without mutating
-// the model output that drove the choice.
-func selectedTokenLogprob(logits []float32, selected int) float64 {
-	if selected < 0 || selected >= len(logits) || len(logits) == 0 {
-		return math.NaN()
-	}
-	max := float64(logits[0])
-	for _, v := range logits[1:] {
-		if float64(v) > max {
-			max = float64(v)
-		}
-	}
-	sum := 0.0
-	for _, v := range logits {
-		sum += math.Exp(float64(v) - max)
-	}
-	return float64(logits[selected]) - max - math.Log(sum)
 }

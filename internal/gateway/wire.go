@@ -356,16 +356,23 @@ type ChatRequest struct {
 	// OpenAI-compatible ride engines. They are not part of the core OpenAI request,
 	// so the gateway collects only these known keys and threads them through the
 	// planner's guided-decode carrier instead of forwarding arbitrary unknown fields.
-	GuidedJSON             json.RawMessage `json:"guided_json,omitempty"`
-	GuidedRegex            json.RawMessage `json:"guided_regex,omitempty"`
-	GuidedChoice           json.RawMessage `json:"guided_choice,omitempty"`
-	GuidedGrammar          json.RawMessage `json:"guided_grammar,omitempty"`
-	GuidedDecodingBackend  json.RawMessage `json:"guided_decoding_backend,omitempty"`
-	JSONSchema             json.RawMessage `json:"json_schema,omitempty"`
-	Regex                  json.RawMessage `json:"regex,omitempty"`
-	EBNF                   json.RawMessage `json:"ebnf,omitempty"`
-	Stream                 bool            `json:"stream,omitempty"`
-	NativeInferenceReceipt bool            `json:"fak_native_receipt,omitempty"`
+	GuidedJSON            json.RawMessage `json:"guided_json,omitempty"`
+	GuidedRegex           json.RawMessage `json:"guided_regex,omitempty"`
+	GuidedChoice          json.RawMessage `json:"guided_choice,omitempty"`
+	GuidedGrammar         json.RawMessage `json:"guided_grammar,omitempty"`
+	GuidedDecodingBackend json.RawMessage `json:"guided_decoding_backend,omitempty"`
+	JSONSchema            json.RawMessage `json:"json_schema,omitempty"`
+	Regex                 json.RawMessage `json:"regex,omitempty"`
+	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
+	Stream                bool            `json:"stream,omitempty"`
+	// Fak carries explicit fak-only request extensions. nil keeps the OpenAI wire
+	// byte-compatible and does not enable any measurement work.
+	Fak *FakRequestExt `json:"fak,omitempty"`
+}
+
+// FakRequestExt is the opt-in request half of fak's response extension.
+type FakRequestExt struct {
+	NativeInferenceReceipt bool `json:"native_inference_receipt,omitempty"`
 }
 
 func (r ChatRequest) GuidedDecodeFields() map[string]json.RawMessage {
@@ -546,8 +553,7 @@ type FakExt struct {
 	// so a client/auditor can see what was rewritten AND reverse it: each carries the
 	// CAS handle to the byte-exact original. Present only on the non-passthrough
 	// re-marshal path (the OpenAI-compatible proxy) where redaction actually runs.
-	Redactions             []WireRedaction               `json:"redactions,omitempty"`
-	NativeInferenceReceipt *agent.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
+	Redactions []WireRedaction `json:"redactions,omitempty"`
 	// NativeArm is the per-turn ArmMetrics of fak's OWNED agent loop (agent.RunArm),
 	// present only on a `fak serve --native` response (#1316). It is the witness that the
 	// native loop — not an external harness — drove this turn: Turns is the model
@@ -560,6 +566,9 @@ type FakExt struct {
 	// It is the TYPED twin of the in-band `[fak]` note: the note tells the model what
 	// survived, this tells an orchestrator the same fact without parsing prose.
 	Compaction *CompactionContract `json:"compaction,omitempty"`
+	// NativeInferenceReceipt is emitted only for an explicitly requested,
+	// successfully measured in-kernel turn.
+	NativeInferenceReceipt *agent.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
 }
 
 // CompactionContract is what a compaction boundary PROMISES the turn that continues past

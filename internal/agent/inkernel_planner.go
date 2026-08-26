@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
@@ -625,11 +626,7 @@ type inKernelGenerateResult struct {
 	stopped           bool
 }
 
-func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
-	return p.generateReusedRecoveringObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, nil)
-}
-
-func (p *InKernelPlanner) generateReusedRecoveringObserved(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, observe func(int, float64)) (res inKernelGenerateResult, err error) {
+func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (res inKernelGenerateResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {
@@ -639,7 +636,7 @@ func (p *InKernelPlanner) generateReusedRecoveringObserved(ctx context.Context, 
 			panic(r)
 		}
 	}()
-	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedWithBiasObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe)
+	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	if err != nil {
 		return inKernelGenerateResult{}, err
 	}
@@ -655,8 +652,8 @@ func (p *InKernelPlanner) generateReusedRecoveringObserved(ctx context.Context, 
 	}, nil
 }
 
-func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, observe func(int, float64), onRetry func()) (inKernelGenerateResult, error) {
-	res, err := p.generateReusedRecoveringObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe)
+func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func(), measurementOpt ...*nativeInferenceMeasurement) (inKernelGenerateResult, error) {
+	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	if err == nil {
 		return res, nil
 	}
@@ -669,7 +666,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	if onRetry != nil {
 		onRetry()
 	}
-	retryRes, retryErr := p.generateReusedRecoveringObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe)
+	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, measurementOpt...)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
 	return retryRes, retryErr
 }
@@ -767,6 +764,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 	}()
 	sp := applySampleOpts(opts...)
+	var requestStarted time.Time
+	if sp.NativeInferenceReceipt {
+		requestStarted = time.Now()
+	}
 	maxNew := p.maxNew
 	if sp.MaxTokens != nil && *sp.MaxTokens > 0 {
 		maxNew = *sp.MaxTokens
@@ -800,17 +801,8 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.PresencePenalty != nil {
 		presPenalty = *sp.PresencePenalty
 	}
-	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK != 0 || len(logitBias) != 0 || freqPenalty != 0 || presPenalty != 0) {
-		return nil, fmt.Errorf("native inference receipt requires greedy unmodified sampling")
-	}
-	var receiptTokens []int
-	var receiptLogprobs []float64
-	var observe func(int, float64)
-	if sp.NativeInferenceReceipt {
-		observe = func(token int, score float64) {
-			receiptTokens = append(receiptTokens, token)
-			receiptLogprobs = append(receiptLogprobs, score)
-		}
+	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK > 0 || len(logitBias) > 0 || freqPenalty != 0 || presPenalty != 0) {
+		return nil, &NativeInferenceReceiptUnsupportedError{Reason: "requires greedy sampling over unmodified logits"}
 	}
 
 	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice)
@@ -850,11 +842,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, err
 		}
 	}
-	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe, func() {
+	var measurement *nativeInferenceMeasurement
+	if sp.NativeInferenceReceipt {
+		measurement = &nativeInferenceMeasurement{startedAt: requestStarted}
+	}
+	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 		sb.Reset()
-		receiptTokens = receiptTokens[:0]
-		receiptLogprobs = receiptLogprobs[:0]
-	})
+		measurement.reset()
+	}, measurement)
 	if err != nil {
 		return nil, err
 	}
@@ -934,12 +929,20 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		ProviderCache: &compReuseEntry,
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 	}
-	if sp.NativeInferenceReceipt {
+	if measurement != nil {
 		backend, forwardPath := p.executionIdentity()
-		comp.NativeInferenceReceipt = &NativeInferenceReceipt{
-			TokenIDs: receiptTokens, SelectedTokenLogprobs: receiptLogprobs,
-			PrefillSeconds: prefillS, DecodeSeconds: decodeS, Model: p.modelID,
-			Backend: backend, ForwardPath: forwardPath, Q4K: p.q4k,
+		comp.NativeInference = &NativeInferenceReceipt{
+			TokenIDs:       append([]int(nil), measurement.tokenIDs...),
+			TokenLogprobs:  append([]float64(nil), measurement.logprobs...),
+			PrefillSeconds: prefillS,
+			TTFTSeconds:    measurement.ttftS,
+			DecodeSeconds:  decodeS,
+			Model:          p.modelID,
+			Engine:         "inkernel",
+			Backend:        backend,
+			ForwardPath:    forwardPath,
+			Q4K:            p.q4k,
+			FallbackActive: false,
 		}
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
@@ -949,7 +952,13 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// gateway adjudicates nothing (it reads Message.ToolCalls) and the Anthropic wire never
 	// emits a tool_use block, so Claude Code's agent loop has nothing to execute.
 	comp = normalizeCompletionToolCalls(comp)
-	comp = enforceForcedToolChoice(comp, sp.ToolChoice, tools, messages)
+	// A length finish is a conformance failure only when the caller actually
+	// forced a named tool. Calling enforceForcedToolChoice for an omitted/auto
+	// choice marks every max_tokens completion as dropped before it even resolves
+	// the effective tool name, which would make an exact T64 receipt unreachable.
+	if inKernelEffectiveToolName(sp.ToolChoice, tools) != "" {
+		comp = enforceForcedToolChoice(comp, sp.ToolChoice, tools, messages)
+	}
 	// Fail closed on a TRUNCATED tool call: the in-kernel finishReason is "stop"/"length"
 	// (never "tool_calls"), so normalizeCompletionToolCalls cannot infer a drop from the
 	// finish reason. If decode emitted an unclosed <tool_call> opener that the lift could

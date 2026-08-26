@@ -141,6 +141,16 @@ func WithPresencePenalty(p *float64) SampleOpt {
 	}
 }
 
+// WithNativeInferenceReceipt asks the in-kernel planner to capture a guarded
+// per-token native execution receipt. Planners which do not own the model logits
+// leave the request unsupported; callers must not reconstruct this evidence from
+// response text or gateway wall time.
+func WithNativeInferenceReceipt(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.NativeInferenceReceipt = enabled
+	}
+}
+
 // WithGuidedDecode sets the per-request provider-native guided-decode carriers.
 // It is intentionally narrower than RawRequestBody/ExtraBody: callers pass only the
 // allowlisted structured-output fields parsed from the client request, and the

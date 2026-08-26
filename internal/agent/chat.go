@@ -411,6 +411,39 @@ type Completion struct {
 	// format it failed to parse. Set by normalizeCompletionToolCalls.
 	ToolCallsDropped bool
 	ServiceTier      modelroute.ServiceMode
+	// NativeInference is populated only when the caller explicitly requested a
+	// receipt and this planner executed the model math in-kernel. It is captured at
+	// the logits/decode seam, never reconstructed from text or gateway timing.
+	NativeInference *NativeInferenceReceipt
+}
+
+// NativeInferenceReceipt binds generated tokens and their normalized chosen-token
+// log probabilities to the native model execution which produced them. Logprobs
+// are log_softmax over the unmodified model logits, so receipt capture is supported
+// only for greedy sampling without bias or repetition penalties.
+type NativeInferenceReceipt struct {
+	TokenIDs       []int     `json:"token_ids"`
+	TokenLogprobs  []float64 `json:"token_logprobs"`
+	PrefillSeconds float64   `json:"prefill_seconds"`
+	TTFTSeconds    float64   `json:"ttft_seconds"`
+	DecodeSeconds  float64   `json:"decode_seconds"`
+	Model          string    `json:"model"`
+	Engine         string    `json:"engine"`
+	Backend        string    `json:"backend"`
+	ForwardPath    string    `json:"forward_path"`
+	Q4K            bool      `json:"q4k"`
+	FallbackActive bool      `json:"fallback_active"`
+}
+
+// NativeInferenceReceiptUnsupportedError is returned before model execution when
+// receipt semantics would be ambiguous. The receipt contract is intentionally
+// narrower than ordinary sampling rather than guessing what modified logits mean.
+type NativeInferenceReceiptUnsupportedError struct {
+	Reason string
+}
+
+func (e *NativeInferenceReceiptUnsupportedError) Error() string {
+	return "native inference receipt unsupported: " + e.Reason
 }
 
 // SampleParams are the per-request sampling overrides a CALLER may attach to one
@@ -462,6 +495,9 @@ type SampleParams struct {
 	// if that token has appeared at all this turn (count>0), independent of how many
 	// times — see sampleLogitsWithPenalty. nil is a no-op.
 	PresencePenalty *float64
+	// NativeInferenceReceipt requests the strict native measurement envelope. It is
+	// false by default, preserving both planner work and response bytes.
+	NativeInferenceReceipt bool
 	// GuidedDecode carries provider-native guided-decode fields that are not part of
 	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
 	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,
