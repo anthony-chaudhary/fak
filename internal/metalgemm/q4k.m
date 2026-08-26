@@ -854,7 +854,7 @@ void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event) {
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ6KGemv];
-        [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:W.offset atIndex:0];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
         [e setBuffer:xb offset:0 atIndex:1];
         [e setBuffer:yb offset:0 atIndex:2];
         [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
@@ -890,7 +890,7 @@ void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* e
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
         [e setComputePipelineState:psoQ6KGemm];
-        [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:W.offset atIndex:0];
+        [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
         [e setBuffer:xb offset:0 atIndex:1];
         [e setBuffer:yb offset:0 atIndex:2];
         [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
@@ -1013,7 +1013,7 @@ int mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int*
             Q6KW D = gQ6[down_wids[e] - MG_Q6_BASE];
             NSUInteger interOff = (NSUInteger)((long)e * I * 4);
             NSUInteger yOff = (NSUInteger)((long)e * Dout * 4);
-            [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:D.offset atIndex:0];
+            [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
             [e3 setBuffer:gMlpInterK offset:interOff atIndex:1];
             [e3 setBuffer:gQYBufK offset:yOff atIndex:2];
             [e3 setBytes:&D.nblk length:sizeof(int) atIndex:3];
@@ -1087,7 +1087,7 @@ void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, f
         mg_execution_event_encoder(event, e3);
         [e3 setComputePipelineState:psoQ6KGemv];
         [e3 setBuffer:gMlpInter offset:0 atIndex:1];
-        [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:D.offset atIndex:0];
+        [e3 setBuffer:(__bridge id<MTLBuffer>)D.buf offset:0 atIndex:0];
         [e3 setBuffer:yb offset:0 atIndex:2];
         [e3 setBytes:&D.nblk length:sizeof(int) atIndex:3];
         [e3 setBytes:&D.out  length:sizeof(int) atIndex:4];
