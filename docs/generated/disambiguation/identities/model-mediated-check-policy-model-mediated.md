@@ -1,3 +1,8 @@
+---
+title: "model-mediated check"
+description: "Canonical fak documentation for model-mediated check, including its scope, nearest contrasts, and operational use."
+---
+
 # model-mediated check
 
 **Meaning:** A semantic assessment whose result depends on a model interpreting content or intent; it is distinct from fak's deterministic structural preflight and is not part of the preflight command's local fold.

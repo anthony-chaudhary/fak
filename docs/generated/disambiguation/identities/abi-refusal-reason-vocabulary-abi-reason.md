@@ -1,3 +1,8 @@
+---
+title: "ABI refusal reason"
+description: "Canonical fak documentation for ABI refusal reason, including its scope, nearest contrasts, and operational use."
+---
+
 # ABI refusal reason
 
 **Meaning:** A closed trainable ReasonCode explaining why an adjudication refused a call; POLICY_BLOCK means an explicit policy rule denied it.

@@ -1,3 +1,8 @@
+---
+title: "tool-result cache"
+description: "Canonical fak documentation for tool-result cache, including its scope, nearest contrasts, and operational use."
+---
+
 # tool-result cache
 
 **Meaning:** A fak-owned cache of completed tool-call results keyed by tool, argument hash, principal when isolated, and world-version epochs.

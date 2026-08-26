@@ -1,3 +1,8 @@
+---
+title: "runtime"
+description: "Canonical fak documentation for runtime, including its scope, nearest contrasts, and operational use."
+---
+
 # runtime
 
 **Meaning:** The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability.

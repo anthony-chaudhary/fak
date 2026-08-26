@@ -1,3 +1,8 @@
+---
+title: "account seat"
+description: "Canonical fak documentation for account seat, including its scope, nearest contrasts, and operational use."
+---
+
 # account seat
 
 **Meaning:** A provider account-capacity slot with availability, session cap, leased slots, free slots, and bound worker IDs.

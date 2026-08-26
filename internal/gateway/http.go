@@ -541,6 +541,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
 	decodeTraceRequested := req.FakDecodeTrace
+	decodeTokenIDsRequested := req.Fak != nil && req.Fak.NativeDecodeTokenIDs
+	if decodeTokenIDsRequested && !decodeTraceRequested {
+		writeErr(w, http.StatusBadRequest, "native decode token IDs require fak_decode_trace")
+		return
+	}
 	if decodeTraceRequested && req.Stream {
 		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a buffered fak-native request")
 		return
@@ -649,6 +654,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithPresencePenalty(req.PresencePenalty),
 		agent.WithNativeInferenceReceipt(receiptRequested),
 		agent.WithDecodeTrace(decodeTraceRequested),
+		agent.WithNativeDecodeTokenIDs(decodeTokenIDsRequested),
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator
@@ -699,6 +705,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
 		return
 	}
+	if decodeTokenIDsRequested && comp.NativeDecodeTokenIDs == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce native decode token IDs")
+		return
+	}
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	finish := s.applyAdjudicatedTurn(&asst, adjs, kept, dropped, servedHits, servedText, bodyRefused, comp.FinishReason)
@@ -732,6 +742,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 			resp.Fak = &FakExt{}
 		}
 		resp.Fak.DecodeTrace = comp.DecodeTrace
+	}
+	if decodeTokenIDsRequested {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.NativeDecodeTokenIDs = comp.NativeDecodeTokenIDs
 	}
 	if stream != nil {
 		writeChatCompletionStream(stream, resp)

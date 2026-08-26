@@ -1,3 +1,8 @@
+---
+title: "index lifecycle class"
+description: "Canonical fak documentation for index lifecycle class, including its scope, nearest contrasts, and operational use."
+---
+
 # index lifecycle class
 
 **Meaning:** The authority status of a disambiguation entry: current, versioned, research, or archived; it says what role the source may play, not whether a feature is enabled.

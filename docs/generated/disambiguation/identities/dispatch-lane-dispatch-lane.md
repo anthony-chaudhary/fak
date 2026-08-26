@@ -1,3 +1,8 @@
+---
+title: "dispatch lane"
+description: "Canonical fak documentation for dispatch lane, including its scope, nearest contrasts, and operational use."
+---
+
 # dispatch lane
 
 **Meaning:** A named taxonomy partition that maps a work request to a canonical file-tree region and concurrency policy.

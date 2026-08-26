@@ -1,3 +1,8 @@
+---
+title: "compute fleet"
+description: "Canonical fak documentation for compute fleet, including its scope, nearest contrasts, and operational use."
+---
+
 # compute fleet
 
 **Meaning:** A transport-agnostic roster of uniquely identified controllable machines whose live reports are folded by the public fleet core.

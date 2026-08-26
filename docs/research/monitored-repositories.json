@@ -208,7 +208,7 @@
       "checked_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
       "stars_at_check": 0,
       "last_push_at_check": "",
-      "study_note": "docs/research/tensor-build-local-study-2026-08-15.md",
+      "study_note": "docs/notes/tensor-build-local-study-2026-08-15.md",
       "refresh_issue": "#8985",
       "inventory": {
         "mode": "exhaustive",
@@ -236,10 +236,10 @@
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
-              "docs/research/tensor-build-local-study-2026-08-15.md#exhaustive-inventory-refresh-2026-08-25",
+              "docs/notes/tensor-build-local-study-2026-08-15.md#exhaustive-inventory-refresh-2026-08-25",
               "C:/work/tb/tensor-build-main/.github/ISSUE_TEMPLATE/general-ticket.md",
               "C:/work/tb/tensor-build-main/.github/PULL_REQUEST_TEMPLATE.md",
-              "docs/research/tensor-build-local-study-2026-08-15.md#issues-prs-and-discussions"
+              "docs/notes/tensor-build-local-study-2026-08-15.md#issues-prs-and-discussions"
             ],
             "note": "Templates prove local workflow shape only. Issues, pull requests, discussions, and releases cannot be enumerated and are explicitly unavailable."
           },
@@ -256,7 +256,7 @@
             "class": "candidate_matrix",
             "evidence": [
               "docs/research/inventory/local-tensor-build.json#non_tree_study.candidate_matrix",
-              "docs/research/tensor-build-local-study-2026-08-15.md#candidate-matrix-and-current-fak-witnesses"
+              "docs/notes/tensor-build-local-study-2026-08-15.md#candidate-matrix-and-current-fak-witnesses"
             ],
             "note": "Eleven candidates were re-adjudicated; the refresh corrected the #6874-#6876 association and found no novel unowned borrow."
           },
@@ -289,7 +289,7 @@
       "checked_revision": "2ed4257af98fc1a206a5444057d1290892190e69",
       "stars_at_check": 3567,
       "last_push_at_check": "2026-08-25T22:18:51Z",
-      "study_note": "docs/research/mirage-study-2026-08-17.md",
+      "study_note": "docs/notes/mirage-study-2026-08-17.md",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/strukto-ai-mirage.json",
@@ -362,7 +362,7 @@
       "checked_revision": "baadd0dd0b09fa769a1027c183b964be85d5c8cc",
       "stars_at_check": 18903,
       "last_push_at_check": "2026-08-16T17:45:50Z",
-      "study_note": "docs/research/agent-zero-study-2026-08-18.md",
+      "study_note": "docs/notes/agent-zero-study-2026-08-18.md",
       "refresh_issue": "#8987",
       "inventory": {
         "mode": "exhaustive",
@@ -437,7 +437,7 @@
       "checked_revision": "3243fcf1191348b55c7811267a98117f8b7a6910",
       "stars_at_check": 4153,
       "last_push_at_check": "2026-08-26T02:04:17Z",
-      "study_note": "docs/research/llm-d-study-2026-08-18.md",
+      "study_note": "docs/notes/llm-d-study-2026-08-18.md",
       "refresh_issue": "#8988",
       "inventory": {
         "mode": "exhaustive",
@@ -487,7 +487,7 @@
             "class": "candidate_matrix",
             "evidence": [
               "docs/research/inventory/llm-d-llm-d.json#non_tree_study.candidate_matrix",
-              "docs/research/llm-d-study-2026-08-18.md#exhaustive-inventory-refresh-2026-08-25"
+              "docs/notes/llm-d-study-2026-08-18.md#exhaustive-inventory-refresh-2026-08-25"
             ]
           },
           {
@@ -1580,7 +1580,7 @@
       "checked_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
       "stars_at_check": 6209,
       "last_push_at_check": "2026-08-22T11:34:52Z",
-      "study_note": "docs/research/flashinfer-study-2026-08-22.md",
+      "study_note": "docs/notes/flashinfer-study-2026-08-22.md",
       "refresh_issue": "#9002",
       "inventory": {
         "mode": "exhaustive",

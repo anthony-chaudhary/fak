@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"math/rand"
+	"reflect"
 	"testing"
 	"time"
 
@@ -23,14 +24,24 @@ func decodeTraceClock(offsets ...time.Duration) func() time.Time {
 	}
 }
 
-func runDecodeTrace(t *testing.T, batched bool) ([]int, []NativeDecodeTraceEvent) {
+type decodeTraceRun struct {
+	emitted           []int
+	events            []NativeDecodeTraceEvent
+	decodeTokenIDs    []int
+	fullTokenIDs      []int
+	logprobs          []float64
+	inferenceDisabled bool
+}
+
+func runDecodeTrace(t *testing.T, batched, captureTokenIDs bool) decodeTraceRun {
 	t.Helper()
 	cfg := tinyCfg()
 	cfg.EOSTokenID = -1
 	p := &InKernelPlanner{m: model.NewSynthetic(cfg), modelID: "synthetic-trace", quant: false, batchDecode: batched}
 	ids := synthIDs(cfg.VocabSize, 12, 9071)
 	measurement := &nativeInferenceMeasurement{
-		inferenceDisabled: true,
+		inferenceDisabled:     true,
+		decodeTokenIDsEnabled: captureTokenIDs,
 		traceNow: decodeTraceClock(
 			0,
 			10*time.Nanosecond,
@@ -38,6 +49,9 @@ func runDecodeTrace(t *testing.T, batched bool) ([]int, []NativeDecodeTraceEvent
 			25*time.Nanosecond,
 			80*time.Nanosecond,
 		),
+	}
+	if captureTokenIDs {
+		measurement.decodeTokenIDs = make([]int, 0, 4)
 	}
 	var emitted []int
 	gen, _, _, _, _, _, _, _, err := p.generateReusedContextWithBias(
@@ -52,17 +66,29 @@ func runDecodeTrace(t *testing.T, batched bool) ([]int, []NativeDecodeTraceEvent
 	if gen != 4 || len(emitted) != gen {
 		t.Fatalf("generated/emitted = %d/%d, want 4/4", gen, len(emitted))
 	}
-	return emitted, append([]NativeDecodeTraceEvent(nil), measurement.traceEvents...)
+	if captureTokenIDs && cap(measurement.decodeTokenIDs) < 4 {
+		t.Fatalf("light token-ID capacity = %d, want at least maxNew=4", cap(measurement.decodeTokenIDs))
+	}
+	return decodeTraceRun{
+		emitted:           append([]int(nil), emitted...),
+		events:            append([]NativeDecodeTraceEvent(nil), measurement.traceEvents...),
+		decodeTokenIDs:    append([]int(nil), measurement.decodeTokenIDs...),
+		fullTokenIDs:      append([]int(nil), measurement.tokenIDs...),
+		logprobs:          append([]float64(nil), measurement.logprobs...),
+		inferenceDisabled: measurement.inferenceDisabled,
+	}
 }
 
 func TestInKernelDecodeTraceIndicesTimingAndBatchParity(t *testing.T) {
-	serialTokens, serialTrace := runDecodeTrace(t, false)
-	batchedTokens, batchedTrace := runDecodeTrace(t, true)
-	if !eqInts(batchedTokens, serialTokens) {
-		t.Fatalf("batched tokens = %v, serial = %v", batchedTokens, serialTokens)
+	serial := runDecodeTrace(t, false, false)
+	serialIDs := runDecodeTrace(t, false, true)
+	batched := runDecodeTrace(t, true, false)
+	batchedIDs := runDecodeTrace(t, true, true)
+	if !eqInts(batched.emitted, serial.emitted) || !eqInts(serialIDs.emitted, serial.emitted) || !eqInts(batchedIDs.emitted, serial.emitted) {
+		t.Fatalf("serial/batched token mismatch: %v/%v/%v/%v", serial.emitted, serialIDs.emitted, batched.emitted, batchedIDs.emitted)
 	}
 	wantElapsed := []int64{10, 25, 25, 80}
-	for name, trace := range map[string][]NativeDecodeTraceEvent{"serial": serialTrace, "batched": batchedTrace} {
+	for name, trace := range map[string][]NativeDecodeTraceEvent{"serial": serial.events, "serial-ids": serialIDs.events, "batched": batched.events, "batched-ids": batchedIDs.events} {
 		if len(trace) != len(wantElapsed) {
 			t.Fatalf("%s trace length = %d, want %d", name, len(trace), len(wantElapsed))
 		}
@@ -72,13 +98,27 @@ func TestInKernelDecodeTraceIndicesTimingAndBatchParity(t *testing.T) {
 			}
 		}
 	}
+	if !eqInts(serialIDs.decodeTokenIDs, serial.emitted) || !eqInts(batchedIDs.decodeTokenIDs, batched.emitted) {
+		t.Fatalf("light token IDs serial/batched = %v/%v, emitted = %v/%v", serialIDs.decodeTokenIDs, batchedIDs.decodeTokenIDs, serial.emitted, batched.emitted)
+	}
+	if len(serial.decodeTokenIDs) != 0 || len(batched.decodeTokenIDs) != 0 {
+		t.Fatalf("disabled light token IDs serial/batched = %v/%v, want empty", serial.decodeTokenIDs, batched.decodeTokenIDs)
+	}
+	for name, run := range map[string]decodeTraceRun{"serial-ids": serialIDs, "batched-ids": batchedIDs} {
+		if !run.inferenceDisabled || len(run.fullTokenIDs) != 0 || len(run.logprobs) != 0 {
+			t.Fatalf("%s inferenceDisabled/full token IDs/logprobs = %v/%v/%v, want true/empty/empty", name, run.inferenceDisabled, run.fullTokenIDs, run.logprobs)
+		}
+	}
+	if !reflect.DeepEqual(serial.events, serialIDs.events) || !reflect.DeepEqual(batched.events, batchedIDs.events) {
+		t.Fatalf("light token capture changed fake-clock timings: serial=%v/%v batched=%v/%v", serial.events, serialIDs.events, batched.events, batchedIDs.events)
+	}
 }
 
 func TestInKernelDecodeTraceRecordsAfterEmitAndCount(t *testing.T) {
 	base := time.Unix(1_000, 0)
 	clockCalls := 0
 	emitted := false
-	measurement := &nativeInferenceMeasurement{inferenceDisabled: true}
+	measurement := &nativeInferenceMeasurement{inferenceDisabled: true, decodeTokenIDsEnabled: true}
 	var lane *decodeLane
 	measurement.traceNow = func() time.Time {
 		clockCalls++
@@ -106,6 +146,9 @@ func TestInKernelDecodeTraceRecordsAfterEmitAndCount(t *testing.T) {
 	if len(measurement.traceEvents) != 1 || measurement.traceEvents[0] != (NativeDecodeTraceEvent{TokenIndex: 1, ElapsedNS: 9}) {
 		t.Fatalf("trace = %+v, want one post-commit event", measurement.traceEvents)
 	}
+	if !measurement.inferenceDisabled || !eqInts(measurement.decodeTokenIDs, []int{0}) || len(measurement.tokenIDs) != 0 || len(measurement.logprobs) != 0 {
+		t.Fatalf("inferenceDisabled/light/full IDs/logprobs = %v/%v/%v/%v, want true/[0]/empty/empty", measurement.inferenceDisabled, measurement.decodeTokenIDs, measurement.tokenIDs, measurement.logprobs)
+	}
 }
 
 func TestInKernelDecodeTraceDoesNotRecordStopToken(t *testing.T) {
@@ -129,8 +172,8 @@ func TestInKernelDecodeTraceDoesNotRecordStopToken(t *testing.T) {
 	if next, advance := lane.decodeOne(context.Background()); next != 0 || advance {
 		t.Fatalf("decodeOne = token %d advance=%v, want stop without advance", next, advance)
 	}
-	if lane.gen != 0 || !lane.stopped || len(measurement.traceEvents) != 0 || clockCalls != 1 {
-		t.Fatalf("stop state gen/stopped/events/clock = %d/%v/%d/%d, want 0/true/0/1", lane.gen, lane.stopped, len(measurement.traceEvents), clockCalls)
+	if lane.gen != 0 || !lane.stopped || len(measurement.traceEvents) != 0 || len(measurement.decodeTokenIDs) != 0 || clockCalls != 1 {
+		t.Fatalf("stop state gen/stopped/events/token_ids/clock = %d/%v/%d/%d/%d, want 0/true/0/0/1", lane.gen, lane.stopped, len(measurement.traceEvents), len(measurement.decodeTokenIDs), clockCalls)
 	}
 }
 
@@ -150,8 +193,8 @@ func TestInKernelDecodeTraceDefaultOffIsInert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if comp.DecodeTrace != nil || clockCalls != 0 {
-		t.Fatalf("default trace/clock calls = %#v/%d, want nil/0", comp.DecodeTrace, clockCalls)
+	if comp.DecodeTrace != nil || comp.NativeDecodeTokenIDs != nil || clockCalls != 0 {
+		t.Fatalf("default trace/token IDs/clock calls = %#v/%#v/%d, want nil/nil/0", comp.DecodeTrace, comp.NativeDecodeTokenIDs, clockCalls)
 	}
 }
 
@@ -178,7 +221,9 @@ func TestInKernelDecodeTraceOOMRetryDropsFirstAttempt(t *testing.T) {
 	cfg.EOSTokenID = -1
 	m := model.NewSynthetic(cfg)
 	measurement := &nativeInferenceMeasurement{
-		inferenceDisabled: true,
+		inferenceDisabled:     true,
+		decodeTokenIDsEnabled: true,
+		decodeTokenIDs:        make([]int, 0, 3),
 		traceNow: decodeTraceClock(
 			0, 10*time.Nanosecond,
 			100*time.Nanosecond, 110*time.Nanosecond, 120*time.Nanosecond, 130*time.Nanosecond,
@@ -205,5 +250,8 @@ func TestInKernelDecodeTraceOOMRetryDropsFirstAttempt(t *testing.T) {
 		if event.TokenIndex != i+1 || event.ElapsedNS != int64((i+1)*10) {
 			t.Fatalf("retry event[%d] = %+v, want clean second-attempt index/timing", i, event)
 		}
+	}
+	if !measurement.inferenceDisabled || cap(measurement.decodeTokenIDs) < 3 || !eqInts(measurement.decodeTokenIDs, emitted) || len(measurement.tokenIDs) != 0 || len(measurement.logprobs) != 0 {
+		t.Fatalf("retry inferenceDisabled/cap/light/full IDs/logprobs = %v/%d/%v/%v/%v, emitted=%v", measurement.inferenceDisabled, cap(measurement.decodeTokenIDs), measurement.decodeTokenIDs, measurement.tokenIDs, measurement.logprobs, emitted)
 	}
 }

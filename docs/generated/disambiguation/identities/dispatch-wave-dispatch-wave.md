@@ -1,3 +1,8 @@
+---
+title: "dispatch wave"
+description: "Canonical fak documentation for dispatch wave, including its scope, nearest contrasts, and operational use."
+---
+
 # dispatch wave
 
 **Meaning:** An indexed, bounded batch of dispatch members with a shared step budget and explicit lease regions or whole-lane claims.

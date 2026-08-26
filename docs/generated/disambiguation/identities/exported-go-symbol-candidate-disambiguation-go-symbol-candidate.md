@@ -1,3 +1,8 @@
+---
+title: "exported Go symbol candidate"
+description: "Canonical fak documentation for exported Go symbol candidate, including its scope, nearest contrasts, and operational use."
+---
+
 # exported Go symbol candidate
 
 **Meaning:** A reviewed exported type, function, variable, or constant from non-test, non-generated Go source that may warrant canonical or incidental terminology classification.

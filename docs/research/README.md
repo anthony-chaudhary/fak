@@ -17,7 +17,7 @@ description: "Index of fak research notes and captured stage witnesses, with the
 
 - [Related-system inventory maps](inventory/) — pinned local-checkout maps generated with `fak study-inventory` before deep `study-repo` borrowing, so broad source coverage has a concrete denominator.
 
-- [Structured session intent](structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
+- [Structured session intent](../notes/structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
 
 - [Micro-context fabrics for 100–10,000 parallel agents](micro-context-fabrics.md) — split one cached agent base into many bounded logical contexts; includes the runnable 10k synthetic spine and controlled-kernel/API-only research ladder.
 - [Micro-context operators for general large-input LLM work](micro-context-large-input-operators.md) — partition record/field/group inputs, adaptively select filters or tools, emit typed facts, fold with provenance, and stop only under an answer-safe contract.
@@ -86,7 +86,7 @@ The repository's studies and dated investigations currently live under [`docs/no
 - [ReQuant fixed-grid refinement evaluation](quantization/requant.md) — bounded evaluation of refinement over a fixed quantization grid.
 - [Qwen3.8 Metal OSS hot-path study](qwen38-metal-oss-hotpath-study.md) — captured hot-path observations for the open-source Metal route serving Qwen3.8.
 - [Frame loss between master agents and subagents](relativity-frame-loss.md) — study of context and control loss between coordinating and delegated agents.
-- [TTL-upgrade refusal corpus study](ttl-upgrade-refusal-corpus-2026-08-09.md) — dated refusal-corpus study for time-to-live upgrade behavior.
+- [TTL-upgrade refusal corpus study](../notes/ttl-upgrade-refusal-corpus-2026-08-09.md) — dated refusal-corpus study for time-to-live upgrade behavior.
 
 - [Micro-context cache-value Track-1 fold](micro-context-cachevalue-track1.md) — controlled S2b reuse enters the witnessed P&L while synthetic and provider-dollar evidence remain fenced out.
 - [Micro-context S2b controlled in-kernel prefix-cache A/B](micro-context-s2b-kernel-cache-ab.md) — fresh-process arms reconcile response usage with RadixAttention counters and observe a fixture-scoped 2.16x shared-base service gain.
@@ -119,4 +119,4 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
 
 - [S8s/S8t natural multi-tool decision surface](micro-context-s8st-natural-multitool-surface.md) — five evidence classes show fixed/adaptive/parallel crossover by tool cost, with quality gated first.
 
-- [`tensor-build-local-study-2026-08-15.md`](tensor-build-local-study-2026-08-15.md) — deep, snapshot-pinned study of local TensorBuild: typed engine identity, evidence tiers, artifact liveness, agent/human control parity, and work-cost attribution; dedupes current fak coverage and files #6874-#6876.
+- [`tensor-build-local-study-2026-08-15.md`](../notes/tensor-build-local-study-2026-08-15.md) — deep, snapshot-pinned study of local TensorBuild: typed engine identity, evidence tiers, artifact liveness, agent/human control parity, and work-cost attribution; dedupes current fak coverage and files #6874-#6876.

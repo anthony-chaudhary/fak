@@ -369,7 +369,7 @@ Reconcile the generations as follows:
   and replay from a logical event address. Refresh or a new client must not infer state from the
   current socket lifetime.
 - P1/P2 controls are capability-described typed session actions shared with `fak session open`, not
-  bespoke page endpoints or browser-owned pending state.
+  custom page endpoints or browser-owned pending state.
 - “Not a terminal emulator” remains a rendering rule, not a permission to expose a weaker session.
   Structured native events are preferred; a wrapped runtime may advertise a truthful lossless PTY
   capability where that is its only complete interface.

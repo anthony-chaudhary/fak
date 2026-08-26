@@ -154,6 +154,15 @@ func WithDecodeTrace(enabled bool) SampleOpt {
 	}
 }
 
+// WithNativeDecodeTokenIDs asks native decode to retain the already-selected
+// token ID at the same commit seam as DecodeTrace. It performs no logits scan
+// and is valid only alongside WithDecodeTrace(true).
+func WithNativeDecodeTokenIDs(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.NativeDecodeTokenIDs = enabled
+	}
+}
+
 // WithGuidedDecode sets the per-request provider-native guided-decode carriers.
 // It is intentionally narrower than RawRequestBody/ExtraBody: callers pass only the
 // allowlisted structured-output fields parsed from the client request, and the

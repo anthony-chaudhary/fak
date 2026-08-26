@@ -1,3 +1,8 @@
+---
+title: "leaf identity"
+description: "Canonical fak documentation for leaf identity, including its scope, nearest contrasts, and operational use."
+---
+
 # leaf identity
 
 **Meaning:** The semantic package or command unit that owns a change and supplies the attribution token in a valid fak commit stamp.

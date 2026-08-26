@@ -1,3 +1,8 @@
+---
+title: "agent session"
+description: "Canonical fak documentation for agent session, including its scope, nearest contrasts, and operational use."
+---
+
 # agent session
 
 **Meaning:** A durable, addressable agent execution record carrying drive state and pointers without storing the provider transcript.

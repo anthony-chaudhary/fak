@@ -1,3 +1,8 @@
+---
+title: "session resume"
+description: "Canonical fak documentation for session resume, including its scope, nearest contrasts, and operational use."
+---
+
 # session resume
 
 **Meaning:** The paused-to-running boundary that re-admits an existing session using warm KV when available or a safe cold re-prefill.

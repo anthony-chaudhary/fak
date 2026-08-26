@@ -190,6 +190,57 @@ type nativeHookInput struct {
 	HookEventName string `json:"hook_event_name"`
 }
 
+const malformedNativeHookReason = "fak rejected malformed native hook input"
+
+func writeManageNativeHookResponse(out io.Writer, harness, event string, valid bool) {
+	enc := json.NewEncoder(out)
+	switch harness {
+	case "codex":
+		switch event {
+		case "Stop", "PreToolUse", "PostToolUse":
+			if valid {
+				// Codex treats omitted fields as the successful defaults. In
+				// particular, Stop permits decision:"block" but not "allow".
+				_ = enc.Encode(struct{}{})
+				return
+			}
+			_ = enc.Encode(struct {
+				Decision string `json:"decision"`
+				Reason   string `json:"reason"`
+			}{Decision: "block", Reason: malformedNativeHookReason})
+		case "PreCompact":
+			if valid {
+				_ = enc.Encode(struct{}{})
+				return
+			}
+			_ = enc.Encode(struct {
+				Continue   bool   `json:"continue"`
+				StopReason string `json:"stopReason"`
+			}{Continue: false, StopReason: malformedNativeHookReason})
+		default:
+			// Do not guess an output ABI for Codex events this adapter does not
+			// install. Empty output makes the host reject the hook invocation.
+			return
+		}
+	case "gemini":
+		decision := "allow"
+		reason := ""
+		if !valid {
+			decision, reason = "deny", malformedNativeHookReason
+		}
+		response := struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason,omitempty"`
+		}{Decision: decision, Reason: reason}
+		_ = enc.Encode(response)
+	default:
+		_ = enc.Encode(struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason"`
+		}{Decision: "deny", Reason: malformedNativeHookReason})
+	}
+}
+
 func cmdManageNativeHook(args []string, in io.Reader, out io.Writer) {
 	harness, event := "", ""
 	for i := 0; i < len(args); i++ {
@@ -203,11 +254,8 @@ func cmdManageNativeHook(args []string, in io.Reader, out io.Writer) {
 	}
 	var input nativeHookInput
 	dec := json.NewDecoder(bufio.NewReader(in))
-	if harness == "" || event == "" || dec.Decode(&input) != nil || input.HookEventName != event {
-		_ = json.NewEncoder(out).Encode(map[string]any{"decision": "deny", "reason": "fak rejected malformed native hook input"})
-		return
-	}
-	_ = json.NewEncoder(out).Encode(map[string]any{"decision": "allow"})
+	valid := harness != "" && event != "" && dec.Decode(&input) == nil && input.HookEventName == event
+	writeManageNativeHookResponse(out, harness, event, valid)
 }
 
 func writeComparisonReport(packet comparisonReport, jsonOut bool) error {

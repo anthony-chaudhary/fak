@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
+	"github.com/anthony-chaudhary/fak/internal/systembaseline"
 )
 
 func cmdNativePerformance(args []string) {
@@ -29,6 +30,9 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	profilePath := fs.String("profile", "", "validate and classify native profile FILE")
 	profileNextPath := fs.String("profile-next", "", "select next lever from native profile FILE")
 	gatePath := fs.String("gate", "", "classify a candidate against the last accepted envelope receipt in FILE")
+	attachReceiptPath := fs.String("attach-receipt", "", "append --system-baseline attestation FILE to native receipt FILE")
+	attachBaselinePath := fs.String("system-baseline", "", "system-baseline attestation FILE used with --attach-receipt")
+	outPath := fs.String("out", "", "write attachment result privately to FILE instead of stdout")
 	capacityReceiptPath := fs.String("capacity-receipt", "", "validate the #8971 no-FAK_Q4K_FREE_CPU native Metal capacity receipt FILE")
 	capacityPlan := fs.Bool("capacity-plan", false, "emit the bounded #8971 no-FAK_Q4K_FREE_CPU capture contract without touching hardware")
 	if err := fs.Parse(args); err != nil {
@@ -54,18 +58,25 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if set["gate"] {
 		modeCount++
 	}
+	if set["attach-receipt"] || set["system-baseline"] {
+		modeCount++
+	}
 	if set["capacity-receipt"] {
 		modeCount++
 	}
 	if *capacityPlan {
 		modeCount++
 	}
-	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") || (set["capacity-receipt"] && *capacityReceiptPath == "") {
-		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --capacity-plan | --capacity-receipt FILE]")
+	attachMode := set["attach-receipt"] || set["system-baseline"]
+	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") || (set["capacity-receipt"] && *capacityReceiptPath == "") || (attachMode && (*attachReceiptPath == "" || *attachBaselinePath == "")) || (set["out"] && !attachMode) {
+		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --attach-receipt RECEIPT --system-baseline ATTESTATION [--out FILE] | --capacity-plan | --capacity-receipt FILE]")
 		return 2
 	}
 
 	graph := nativeperf.ActiveGraph()
+	if attachMode {
+		return attachNativePerformanceSystemBaseline(stdout, stderr, graph, *attachReceiptPath, *attachBaselinePath, *outPath)
+	}
 	if set["gate"] {
 		data, err := os.ReadFile(*gatePath)
 		if err != nil {
@@ -214,6 +225,53 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 		return 0
 	}
 	renderNativePerformance(stdout, graph)
+	return 0
+}
+
+func attachNativePerformanceSystemBaseline(stdout, stderr io.Writer, graph nativeperf.Graph, receiptPath, baselinePath, outPath string) int {
+	receiptData, err := os.ReadFile(receiptPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak native-performance: read receipt: %v\n", err)
+		return 1
+	}
+	receipt, err := nativeperf.DecodeReceipt(receiptData)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
+		return 1
+	}
+	baselineFile, err := os.Open(baselinePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak native-performance: read system baseline: %v\n", err)
+		return 1
+	}
+	attestation, decodeErr := systembaseline.Decode(baselineFile)
+	closeErr := baselineFile.Close()
+	if decodeErr != nil {
+		fmt.Fprintf(stderr, "fak native-performance: %v\n", decodeErr)
+		return 1
+	}
+	if closeErr != nil {
+		fmt.Fprintf(stderr, "fak native-performance: close system baseline: %v\n", closeErr)
+		return 1
+	}
+	upgraded, err := nativeperf.AttachSystemBaseline(graph, receipt, attestation)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak native-performance: attach system baseline: %v\n", err)
+		return 1
+	}
+	if outPath == "" {
+		return encodeNativePerformanceJSON(stdout, stderr, upgraded)
+	}
+	raw, err := json.MarshalIndent(upgraded, "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "fak native-performance: encode attachment result: %v\n", err)
+		return 1
+	}
+	raw = append(raw, '\n')
+	if err := writePrivateJSON(outPath, raw); err != nil {
+		fmt.Fprintf(stderr, "fak native-performance: write %s: %v\n", outPath, err)
+		return 1
+	}
 	return 0
 }
 

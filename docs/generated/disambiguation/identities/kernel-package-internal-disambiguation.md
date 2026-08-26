@@ -1,3 +1,8 @@
+---
+title: "kernel"
+description: "Canonical fak documentation for kernel, including its scope, nearest contrasts, and operational use."
+---
+
 # kernel
 
 **Meaning:** The internal/disambiguation Go package that validates and queries public terminology records.

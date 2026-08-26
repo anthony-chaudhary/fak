@@ -1,3 +1,8 @@
+---
+title: "module revision identity"
+description: "Canonical fak documentation for module revision identity, including its scope, nearest contrasts, and operational use."
+---
+
 # module revision identity
 
 **Meaning:** A history-derived identity rendered as module@r<touch-count>+g<commit>, naming which module moved and at what revision.

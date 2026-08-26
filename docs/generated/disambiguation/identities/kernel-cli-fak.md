@@ -1,3 +1,8 @@
+---
+title: "kernel"
+description: "Canonical fak documentation for kernel, including its scope, nearest contrasts, and operational use."
+---
+
 # kernel
 
 **Meaning:** The fak command-line product surface for operating the agent kernel.

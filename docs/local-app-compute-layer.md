@@ -1,3 +1,8 @@
+---
+title: "Ship local inference as an app capability, not a localhost server"
+description: "Architecture and operating contract for fak local applications, including browser, daemon, accelerator, security, and offline boundaries."
+---
+
 # Ship local inference as an app capability, not a localhost server
 
 **One-line product:** An app bundles fak once, declares the outcomes it needs, and gets measured local execution with explicit handoff when the Mac cannot meet the contract.

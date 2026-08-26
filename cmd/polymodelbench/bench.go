@@ -40,11 +40,12 @@ import (
 // field is MEASURED by driving the real polymodel primitives over deterministic
 // synthetic workloads; none is a target, an assumption, or a hardware tokens/sec.
 type BenchReport struct {
-	Issue       string         `json:"issue"`
-	Speculation SpecBench      `json:"speculation"`
-	DecodeLane  LaneBench      `json:"decode_lane"`
-	Residency   ResidencyBench `json:"residency"`
-	HonestFence string         `json:"honest_fence"`
+	Issue       string           `json:"issue"`
+	Speculation SpecBench        `json:"speculation"`
+	PEagle      PEagleShapeBench `json:"p_eagle_parallel_depth"`
+	DecodeLane  LaneBench        `json:"decode_lane"`
+	Residency   ResidencyBench   `json:"residency"`
+	HonestFence string           `json:"honest_fence"`
 }
 
 // SpecBench is the E-vs-draft-cost axis, reported as the MEASURED SPREAD of acceptance
@@ -104,11 +105,20 @@ type ResidencyBench struct {
 // good as the gate. quiet suppresses the per-axis log lines (used under -selfcheck).
 func benchHarness(quiet bool, ok *bool) BenchReport {
 	spec := measureSpec(quiet, ok)
+	peagle := measurePEagleShape(
+		model.NewSynthetic(cfg(64, 4, 4, 2, 16, 128)),
+		model.NewSynthetic(cfg(32, 2, 2, 1, 16, 64)),
+		bytesToIDs([]byte("parallel depth shape witness")), 24, 4,
+	)
+	if !peagle.TokenIdenticalToGreedy {
+		*ok = false
+	}
 	lane := measureLane(quiet, ok)
 	res := measureResidency(quiet, ok)
 	r := BenchReport{
 		Issue:       "bench(polymodel): measured numbers for the poly-model lane (#535)",
 		Speculation: spec,
+		PEagle:      peagle,
 		DecodeLane:  lane,
 		Residency:   res,
 		HonestFence: "Deterministic synthetic-workload measurements on the real polymodel " +

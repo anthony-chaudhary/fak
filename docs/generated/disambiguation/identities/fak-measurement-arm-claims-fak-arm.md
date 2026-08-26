@@ -1,3 +1,8 @@
+---
+title: "fak measurement arm"
+description: "Canonical fak documentation for fak measurement arm, including its scope, nearest contrasts, and operational use."
+---
+
 # fak measurement arm
 
 **Meaning:** The fak-enabled treatment measured against a declared alternative; calling it a baseline obscures which arm is the comparator.

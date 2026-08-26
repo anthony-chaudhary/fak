@@ -1,3 +1,8 @@
+---
+title: "activation posture"
+description: "Canonical fak documentation for activation posture, including its scope, nearest contrasts, and operational use."
+---
+
 # activation posture
 
 **Meaning:** The normalized behavior state off, shadow, or on; it is always interpreted within the owning domain and does not imply lifecycle authority or maturity.

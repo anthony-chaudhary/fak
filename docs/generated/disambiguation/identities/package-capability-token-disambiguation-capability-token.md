@@ -1,3 +1,8 @@
+---
+title: "package capability token"
+description: "Canonical fak documentation for package capability token, including its scope, nearest contrasts, and operational use."
+---
+
 # package capability token
 
 **Meaning:** A string explicitly registered by a public package as a negotiated ABI capability; it is inventory evidence, not automatically a canonical term or an authorization verdict.

@@ -1,0 +1,7 @@
+{
+  "schema": "fak.issue-8385-arm-swap-baseline/1",
+  "arm": "native",
+  "phase": "immediately-before-fresh-process-start",
+  "timestamp": "2026-08-26T16:26:26Z",
+  "swap_used_bytes": 2178018181
+}

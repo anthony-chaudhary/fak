@@ -215,6 +215,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 ## Additional documentation routes
 
 - **Session control and trajectory:** [Child-agent registration and lineage](session-child-registration.md), [Session lifecycle reconciliation](session-lifecycle-reconciliation.md), [Trajectory assurance receipt](trajectory-assurance.md), and [Workflow concepts: the operator's middle layer](workflow-concepts.md).
+- **Local application runtime:** [Local-app compute layer](local-app-compute-layer.md) explains the browser-to-daemon boundary, loopback security, offline behavior, and accelerator ownership.
 - **Tool-result and work accounting:** [Operate tool-result budgets safely](tool-result-budget-operations.md), [Work-accounting coverage](work-accounting-coverage.md), [Work delivery: recording is not readiness](work-delivery.md), [Work-done baselines](work-done-baselines.md), [Work-done history](work-done-history.md), [Work-done query contract](work-done-query.md), and [Work-done source provenance](work-done-sources.md).
 - **Captured read-backs and witnesses:** [Current task queue read-back](witnesses/task-queue-current.md) and [Issue 9020 — owned Metal session profile](_witnesses/issue-9020-metal-profile.md).
 
