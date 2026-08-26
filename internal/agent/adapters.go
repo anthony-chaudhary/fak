@@ -448,7 +448,7 @@ func (openAIResponsesAdapter) Headers(apiKey string) map[string]string {
 type openAIResponsesRequest struct {
 	Model           string                `json:"model"`
 	Input           []openAIResponsesItem `json:"input"`
-	Tools           []openAIResponsesTool `json:"tools,omitempty"`
+	Tools           []json.RawMessage     `json:"tools,omitempty"`
 	ToolChoice      string                `json:"tool_choice,omitempty"`
 	Temperature     *float64              `json:"temperature,omitempty"`
 	MaxOutputTokens *int                  `json:"max_output_tokens,omitempty"`
@@ -656,19 +656,20 @@ func openAIResponsesInput(messages []Message) []openAIResponsesItem {
 	return out
 }
 
-func openAIResponsesTools(tools []ToolDef) []openAIResponsesTool {
+func openAIResponsesTools(tools []ToolDef) []json.RawMessage {
 	if len(tools) == 0 {
 		return nil
 	}
-	out := make([]openAIResponsesTool, 0, len(tools))
+	out := make([]json.RawMessage, 0, len(tools))
 	for _, t := range tools {
-		out = append(out, openAIResponsesTool{
-			Type:        "function",
-			Name:        t.Function.Name,
-			Description: t.Function.Description,
-			Parameters:  t.Function.Parameters,
-			Strict:      false,
-		})
+		if len(t.ResponsesWire) > 0 {
+			out = append(out, append(json.RawMessage(nil), t.ResponsesWire...))
+			continue
+		}
+		w, err := json.Marshal(openAIResponsesTool{Type: "function", Name: t.Function.Name, Description: t.Function.Description, Parameters: t.Function.Parameters, Strict: false})
+		if err == nil {
+			out = append(out, w)
+		}
 	}
 	return out
 }
