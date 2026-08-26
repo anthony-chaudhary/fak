@@ -157,6 +157,7 @@ type serveFlags struct {
 	resetOnBudget                *bool
 	cpuOffloadExperts            *bool
 	nCPUMoE                      *string
+	nativeQwenQ4KPrefillChunk    *int
 	metal                        *bool
 	expertParallel               *int
 	tensorParallel               *int
@@ -208,6 +209,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.engineCacheRequireExactSpan = fs.Bool("engine-cache-require-exact-span", false, "require exact remote K/V/index span eviction; fail closed if the selected engine only supports whole-cache reset")
 	sf.engineID = fs.String("engine", "inkernel", "registered engine id that fak_syscall dispatches an allowed call to: inkernel, mock, vllm, sglang, llm-d, dynamo, or another registered driver (default: the fused in-kernel model)")
 	sf.backendName = fs.String("backend", "", "compute backend for the in-kernel chat decode (with --gguf, no --base-url): empty = the CPU reference path; a registered device name like 'cuda' runs prefill+decode through the GPU HAL. Requires a `-tags cuda` build AND a reachable GPU at runtime; fails loud if named but unavailable so a typo never silently runs on CPU.")
+	sf.nativeQwenQ4KPrefillChunk = fs.Int(serveNativeQwenQ4KPrefillChunkFlag, defaultNativeQwenQ4KPrefillChunk, "fak-native resident Qwen Q4_K prefill chunk ceiling in tokens (128..4096; default 512); validated before model load and stamped into native inference receipts; does not select another engine")
 	sf.qwen38Runtime = fs.String("qwen38-runtime", qwen38RuntimeNative, "Qwen3.8 GGUF execution: native (default) keeps fak in-kernel execution; llama-mtp explicitly delegates to a capability-proven llama-server for benchmark/reference interoperability. There is no external-runtime fallback, and the removed auto value is rejected.")
 	sf.llamaServer = fs.String("llama-server", "llama-server", "versioned llama-server binary used only by explicit --qwen38-runtime llama-mtp benchmark/reference interoperability")
 	sf.llamaStartupTimeout = fs.Duration("llama-startup-timeout", 2*time.Minute, "bounded readiness timeout for a fak-owned llama-server child")
@@ -323,6 +325,10 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	*sf.qwen38Runtime = qwen38Runtime
+	if err := applyServeNativeQwenQ4KPrefillChunk(*sf.nativeQwenQ4KPrefillChunk); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	if _, err := serveNativeAdmissionPolicy(sf); err != nil {
 		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
 		os.Exit(2)
