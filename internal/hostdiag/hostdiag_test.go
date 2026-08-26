@@ -76,6 +76,68 @@ func TestCorrelateRetainsPowerShellConsoleHostCrash(t *testing.T) {
 	}
 }
 
+func TestCorrelateRetainsBoundedGenericApplicationCrash(t *testing.T) {
+	event := ResourceEvent{
+		TimeMS: 1777214146000, Source: "Application Error", EventID: 1000, RecordID: "111576",
+		Name: "WINDOWS_APPLICATION_PROCESS_CRASH", ReportID: "3aa7443d-7c82-4099-88c8-823bd032a4ea", App: "msiexec.exe",
+		Fault: &ApplicationFault{AppVersion: "5.0.26100.8875", Module: "RPCRT4.dll", ModuleVersion: "10.0.26100.8875", ExceptionCode: "c0000005", FaultOffset: "0000000000016043"},
+	}
+	sample := ProcessSample{Schema: CensusSchema, PID: 7, ProcessStartMS: event.TimeMS - 1000, SampledAtMS: event.TimeMS + 1000, Executable: `C:\bin\fak.exe`}
+	launch := OwnedShellLaunch{TimestampUTCMS: event.TimeMS - 100, ChildPID: 42, ChildCreatedUTCMS: event.TimeMS - 1000, Outcome: "failed"}
+	got, ok := CorrelateWithOwnedLaunches(event, []ProcessSample{sample}, []OwnedShellLaunch{launch})
+	if !ok || got.Status != "historical_unresolved" || !got.Observational || len(got.Candidates) != 0 || got.OwnedLaunch != nil {
+		t.Fatalf("correlation = %+v, ok=%v", got, ok)
+	}
+	if got.EventName != event.Name || got.App != "msiexec.exe" || got.ReportID != event.ReportID || got.Fault == nil || *got.Fault != *event.Fault {
+		t.Fatalf("bounded application fault not retained: %+v", got)
+	}
+	if !strings.Contains(got.Reason, "not attributed to fak") {
+		t.Fatalf("reason = %q", got.Reason)
+	}
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"message", "command_line", "argv", "owned_shell_launch", "candidates"} {
+		if strings.Contains(string(payload), `"`+forbidden+`"`) {
+			t.Fatalf("generic application crash retained %q in %s", forbidden, payload)
+		}
+	}
+}
+
+func TestCorrelateRejectsMalformedGenericApplicationCrash(t *testing.T) {
+	valid := ResourceEvent{TimeMS: 1, Source: "Application Error", EventID: 1000, Name: "WINDOWS_APPLICATION_PROCESS_CRASH", App: "msiexec.exe", Fault: &ApplicationFault{Module: "RPCRT4.dll", ExceptionCode: "c0000005"}}
+	tests := map[string]ResourceEvent{
+		"missing time":   func() ResourceEvent { event := valid; event.TimeMS = 0; return event }(),
+		"wrong source":   func() ResourceEvent { event := valid; event.Source = "Other"; return event }(),
+		"wrong event ID": func() ResourceEvent { event := valid; event.EventID = 1001; return event }(),
+		"missing app":    func() ResourceEvent { event := valid; event.App = ""; return event }(),
+		"missing fault":  func() ResourceEvent { event := valid; event.Fault = nil; return event }(),
+		"missing module": func() ResourceEvent {
+			event := valid
+			fault := *event.Fault
+			fault.Module = ""
+			event.Fault = &fault
+			return event
+		}(),
+		"missing exception": func() ResourceEvent {
+			event := valid
+			fault := *event.Fault
+			fault.ExceptionCode = ""
+			event.Fault = &fault
+			return event
+		}(),
+		"specialized app label": func() ResourceEvent { event := valid; event.App = "pwsh.exe"; return event }(),
+	}
+	for name, event := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got, ok := Correlate(event, nil); ok {
+				t.Fatalf("accepted malformed generic application crash: %+v", got)
+			}
+		})
+	}
+}
+
 func TestCorrelateDoesNotAttributeOtherProcessEventsToFak(t *testing.T) {
 	sample := NewProcessSample(time.UnixMilli(2000), 42, time.UnixMilli(500), `C:\bin\fak.exe`, "sha", "rev", "guard", "g1", 10, 20, 3, 4)
 	for _, event := range []ResourceEvent{

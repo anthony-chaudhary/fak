@@ -50,3 +50,43 @@ func TestHostdiagWindowsCollectorBoundsHostLifecycleEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestHostdiagWindowsCollectorRetainsBoundedGenericApplicationCrashes(t *testing.T) {
+	genericBranch := "elseif(-not [string]::IsNullOrWhiteSpace($app) -and -not [string]::IsNullOrWhiteSpace($module) -and -not [string]::IsNullOrWhiteSpace($exception))"
+	if !strings.Contains(hostdiagEventPS, genericBranch) {
+		t.Fatal("collector does not require the generic application crash identity fields")
+	}
+	marker := "event_name='WINDOWS_APPLICATION_PROCESS_CRASH'"
+	if strings.Count(hostdiagEventPS, marker) != 1 {
+		t.Fatalf("generic application crash mapping count = %d, want 1", strings.Count(hostdiagEventPS, marker))
+	}
+	at := strings.Index(hostdiagEventPS, marker)
+	start := strings.LastIndex(hostdiagEventPS[:at], "[pscustomobject]")
+	end := strings.Index(hostdiagEventPS[at:], "}")
+	row := hostdiagEventPS[start : at+end+1]
+	for _, want := range []string{
+		"record_id=[string]$_.RecordId", "report_id=[string]$fields.IntegratorReportId", "app=$app", "application_fault=$fault",
+	} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("generic application crash row missing %q: %s", want, row)
+		}
+	}
+	for _, forbidden := range []string{"message=", "process_id=", "process_start_ms="} {
+		if strings.Contains(row, forbidden) {
+			t.Fatalf("generic application crash row retained %q: %s", forbidden, row)
+		}
+	}
+}
+
+func TestHostdiagWindowsCollectorKeepsSpecializedCrashesUnduplicated(t *testing.T) {
+	for _, name := range []string{"POWERSHELL_PROCESS_CRASH", "WINDOWS_SHELL_PROCESS_CRASH"} {
+		if count := strings.Count(hostdiagEventPS, "event_name='"+name+"'"); count != 1 {
+			t.Fatalf("%s mapping count = %d, want 1", name, count)
+		}
+	}
+	specialized := strings.Index(hostdiagEventPS, "if($app -ieq 'pwsh.exe'")
+	generic := strings.Index(hostdiagEventPS, "elseif(-not [string]::IsNullOrWhiteSpace($app)")
+	if specialized < 0 || generic < specialized {
+		t.Fatal("generic mapping does not follow the specialized mutually exclusive branch")
+	}
+}

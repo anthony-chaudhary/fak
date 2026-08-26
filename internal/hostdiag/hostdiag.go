@@ -150,13 +150,14 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	isLowVirtualMemory := name == "LOW_VIRTUAL_MEMORY" && event.EventID == 2004
 	isShellCrash := name == "POWERSHELL_PROCESS_CRASH" && event.EventID == 1000
 	isWindowsShellCrash := name == "WINDOWS_SHELL_PROCESS_CRASH" && event.EventID == 1000
+	isApplicationCrash := name == "WINDOWS_APPLICATION_PROCESS_CRASH" && event.EventID == 1000 && strings.EqualFold(strings.TrimSpace(event.Source), "Application Error")
 	isRadar := name == "RADAR_PRE_LEAK_64" && event.EventID == 1001
 	isRestartInitiated := name == "HOST_RESTART_INITIATED" && event.EventID == 1074 && strings.EqualFold(strings.TrimSpace(event.Source), "User32")
 	isUnexpectedShutdown := name == "HOST_UNEXPECTED_SHUTDOWN" && event.EventID == 6008 && strings.EqualFold(strings.TrimSpace(event.Source), "EventLog")
 	isUncleanRestart := name == "HOST_UNCLEAN_RESTART" && event.EventID == 41 && strings.EqualFold(strings.TrimSpace(event.Source), "Microsoft-Windows-Kernel-Power")
 	isHostLifecycle := isRestartInitiated || isUnexpectedShutdown || isUncleanRestart
 	isResolver := strings.HasPrefix(name, "RESOURCE_EXHAUSTION_") && (event.EventID == 1014 || event.EventID == 1015)
-	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isRadar && !isHostLifecycle && !isResolver) {
+	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isApplicationCrash && !isRadar && !isHostLifecycle && !isResolver) {
 		return Correlation{}, false
 	}
 	app := strings.TrimSpace(event.App)
@@ -164,6 +165,9 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		return Correlation{}, false
 	}
 	if isWindowsShellCrash && !strings.EqualFold(app, "explorer.exe") {
+		return Correlation{}, false
+	}
+	if isApplicationCrash && (app == "" || isSpecializedCrashApp(app) || event.Fault == nil || strings.TrimSpace(event.Fault.Module) == "" || strings.TrimSpace(event.Fault.ExceptionCode) == "") {
 		return Correlation{}, false
 	}
 	if isRadar && !strings.EqualFold(app, "fak.exe") {
@@ -180,7 +184,7 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		if isLowVirtualMemory && !eventNamesFakPID(event.Culprits, sample.PID) {
 			continue
 		}
-		if isShellCrash || isWindowsShellCrash || isHostLifecycle || isResolver {
+		if isShellCrash || isWindowsShellCrash || isApplicationCrash || isHostLifecycle || isResolver {
 			continue
 		}
 		candidates = append(candidates, sample)
@@ -205,6 +209,9 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	if isWindowsShellCrash {
 		reason = "Windows shell crash is retained as observational host evidence and is not attributed to fak"
 	}
+	if isApplicationCrash {
+		reason = "Windows application crash is retained as observational host evidence and is not attributed to fak"
+	}
 	if isHostLifecycle {
 		status, reason = "observed", "Windows host lifecycle evidence is retained without attributing cause to fak"
 	}
@@ -222,6 +229,10 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	}
 	key := strings.Join([]string{strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID), strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), name}, "|")
 	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, OwnedLaunch: owned, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+}
+
+func isSpecializedCrashApp(app string) bool {
+	return strings.EqualFold(app, "pwsh.exe") || strings.EqualFold(app, "powershell.exe") || strings.EqualFold(app, "explorer.exe")
 }
 
 func eventNamesFakPID(culprits []ResourceCulprit, pid int) bool {

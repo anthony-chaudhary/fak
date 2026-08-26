@@ -56,8 +56,10 @@ $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='W
 $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Application Error';Id=1000;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
   $xml=[xml]$_.ToXml(); $fields=@{}; foreach($d in $xml.Event.EventData.Data){ $fields[[string]$d.Name]=[string]$d.'#text' }
   $app=[string]$fields.AppName
+  $module=[string]$fields.ModuleName
+  $exception=[string]$fields.ExceptionCode
   if($app -ieq 'pwsh.exe' -or $app -ieq 'powershell.exe' -or $app -ieq 'explorer.exe'){
-    $fault=[pscustomobject]@{app_version=[string]$fields.AppVersion;module=[string]$fields.ModuleName;module_version=[string]$fields.ModuleVersion;exception_code=[string]$fields.ExceptionCode;fault_offset=[string]$fields.FaultingOffset}
+    $fault=[pscustomobject]@{app_version=[string]$fields.AppVersion;module=$module;module_version=[string]$fields.ModuleVersion;exception_code=$exception;fault_offset=[string]$fields.FaultingOffset}
     $processId=0; if([string]$fields.ProcessId -match '^0x([0-9a-f]+)$'){ $processId=[Convert]::ToInt32($Matches[1],16) }
     $created=0; if([string]$fields.ProcessCreationTime -match '^0x([0-9a-f]+)$'){ $created=[DateTimeOffset]::FromFileTime([Convert]::ToInt64($Matches[1],16)).ToUnixTimeMilliseconds() }
     if($app -ieq 'explorer.exe'){
@@ -65,6 +67,9 @@ $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='A
     } else {
       [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='POWERSHELL_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;process_id=$processId;process_start_ms=$created;application_fault=$fault;message=[string]$_.Message}
     }
+  } elseif(-not [string]::IsNullOrWhiteSpace($app) -and -not [string]::IsNullOrWhiteSpace($module) -and -not [string]::IsNullOrWhiteSpace($exception)) {
+    $fault=[pscustomobject]@{app_version=[string]$fields.AppVersion;module=$module;module_version=[string]$fields.ModuleVersion;exception_code=$exception;fault_offset=[string]$fields.FaultingOffset}
+    [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='WINDOWS_APPLICATION_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;application_fault=$fault}
   }
 })
 $rows += @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='User32';Id=1074;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
