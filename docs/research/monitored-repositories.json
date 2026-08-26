@@ -235,7 +235,69 @@
       "stars_at_check": 18903,
       "last_push_at_check": "2026-08-16T17:45:50Z",
       "study_note": "docs/research/agent-zero-study-2026-08-18.md",
-      "refresh_issue": "#8987"
+      "refresh_issue": "#8987",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/agent0ai-agent-zero.json",
+        "indexed_revision": "baadd0dd0b09fa769a1027c183b964be85d5c8cc",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 21,
+        "candidate_count": 5,
+        "filed_issue_count": 0,
+        "completeness_critic": "Exhaustive 2,292-file pinned tree walk grouped all 21 immediate subsystems and skipped only .git and vendored webui/vendor; GitHub issues and pull requests were paged to exhaustion, all 94 discussions and 72 observed releases were read back, history/roadmap/license provenance and four candidate-specific fak self-queries were audited, and every candidate was adjudicated with issue tracking.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate --slurp repos/agent0ai/agent-zero/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh api --paginate --slurp repos/agent0ai/agent-zero/pulls?state=all&per_page=100&sort=created&direction=asc",
+              "gh api graphql repository(owner:agent0ai,name:agent-zero) discussions(first:100)",
+              "gh api repos/agent0ai/agent-zero/releases?per_page=100"
+            ],
+            "note": "Pinned-denominator read-back: 834 issues (63 open, 771 closed), 897 pull requests (82 open, 815 closed), all 94 discussions, and 72 observed releases."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"hierarchical agent delegation subordinate contexts task scheduling\"",
+              "fak capabilities \"semantic memory vector retrieval knowledge recall\"",
+              "fak capabilities \"agent plugin extension lifecycle hooks tools\"",
+              "fak capabilities \"computer browser shell tool execution policy witness\""
+            ],
+            "note": "Four candidate-specific self-queries were recorded in the map and adjudicated against fak-native alternatives."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/agent0ai-agent-zero.json#candidate-matrix"
+            ],
+            "note": "Five candidates were compared to the real next-best fak alternative; none survived as a new dispatchable issue."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8987"
+            ],
+            "note": "No additional issue was filed because every candidate was reject or stay-minimal."
+          }
+        ],
+        "issue_refs": [
+          "#8987"
+        ]
+      }
     },
     {
       "repository": "llm-d/llm-d",

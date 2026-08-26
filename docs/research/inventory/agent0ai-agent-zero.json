@@ -1,0 +1,994 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "agent0ai/agent-zero",
+  "url": "https://github.com/agent0ai/agent-zero",
+  "indexed_revision": "baadd0dd0b09fa769a1027c183b964be85d5c8cc",
+  "observed_at": "2026-08-25T23:57:38Z",
+  "totals": {
+    "files": 2292,
+    "directories": 657,
+    "bytes": 32772188,
+    "runtime_files": 907,
+    "test_files": 160,
+    "docs_files": 837,
+    "text_lines": 289282
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "docs/AGENTS.md",
+        "docs/README.md",
+        "docs/developer/architecture.md",
+        "docs/developer/connectivity.md",
+        "docs/developer/contributing-skills.md",
+        "docs/developer/extensions.md",
+        "docs/developer/mcp-configuration.md",
+        "docs/developer/notifications.md",
+        "docs/developer/plugins.md",
+        "docs/developer/sharing-and-safety.md",
+        "docs/developer/websockets.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "api/rfc.py",
+        "api/rfc.py.dox.md",
+        "docs/developer/architecture.md",
+        "helpers/rfc.py",
+        "helpers/rfc.py.dox.md",
+        "helpers/rfc_exchange.py",
+        "helpers/rfc_exchange.py.dox.md",
+        "helpers/rfc_files.py",
+        "helpers/rfc_files.py.dox.md",
+        "knowledge/main/about/architecture.md",
+        "skills/a0-development/references/architecture-runtime.md",
+        "tests/test_responses_architecture.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".github/FUNDING.yml",
+        ".github/scripts/docker_release_plan.py",
+        ".github/workflows/close-inactive.yml",
+        ".github/workflows/docker-publish.yml",
+        ".vscode/extensions.json",
+        ".vscode/launch.json",
+        ".vscode/settings.json",
+        "agent.py",
+        "agents/_example/extensions/agent_init/_10_example_extension.py",
+        "agents/_example/tools/example_tool.py",
+        "agents/_example/tools/response.py",
+        "agents/agent0/agent.yaml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        "api/backup_test.py",
+        "api/backup_test.py.dox.md",
+        "api/ws_dev_test.py",
+        "api/ws_dev_test.py.dox.md",
+        "plugins/_chat_naming/tests/test_chat_naming.py",
+        "plugins/_commands/tests/conftest.py",
+        "plugins/_commands/tests/test_commands_plugin.py",
+        "plugins/_commands/tests/test_legacy_migration.py",
+        "plugins/_commands/tests/test_plugin_command_discovery.py",
+        "plugins/_email_integration/api/test_connection.py",
+        "plugins/_goal/tests/conftest.py",
+        "plugins/_goal/tests/test_goal_plugin.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".github/scripts/docker_release_plan.py",
+        "api/history_get.py",
+        "api/history_get.py.dox.md",
+        "api/notifications_history.py",
+        "api/notifications_history.py.dox.md",
+        "docs/res/usage/browser/browser-tool-history-expanded.png",
+        "docs/res/usage/ui-history1.png",
+        "extensions/python/message_loop_end/_10_organize_history.py",
+        "extensions/python/message_loop_prompts_before/_90_organize_history_wait.py",
+        "helpers/history.py",
+        "helpers/history.py.dox.md",
+        "plugins/_time_travel/api/history_diff.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "external_required",
+      "note": "requires forge API or exported issue/PR/discussion data; local tree scan cannot prove it"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "LICENSE",
+        "plugins/_commands/LICENSE",
+        "plugins/_orchestrator/LICENSE",
+        "plugins/_skills/LICENSE",
+        "plugins/_whatsapp_integration/whatsapp-bridge/package.json"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "plugins",
+      "files": 871,
+      "directories": 449,
+      "bytes": 5827144,
+      "runtime_files": 503,
+      "test_files": 15,
+      "docs_files": 198,
+      "text_lines": 101159,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 361
+        },
+        {
+          "language": "Docs",
+          "files": 198
+        },
+        {
+          "language": "Config",
+          "files": 91
+        },
+        {
+          "language": "JavaScript",
+          "files": 64
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "plugins/AGENTS.md",
+        "plugins/README.md",
+        "plugins/_a0_connector/AGENTS.md",
+        "plugins/_a0_connector/api/__init__.py",
+        "plugins/_a0_connector/api/v1/__init__.py",
+        "plugins/_a0_connector/api/v1/agent_editor.py",
+        "plugins/_a0_connector/api/v1/agent_profile_set.py",
+        "plugins/_a0_connector/api/v1/agents_list.py",
+        "plugins/_a0_connector/api/v1/base.py",
+        "plugins/_a0_connector/api/v1/browser_runtime.py",
+        "plugins/_a0_connector/api/v1/capabilities.py",
+        "plugins/_a0_connector/api/v1/chat_create.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "webui",
+      "files": 273,
+      "directories": 54,
+      "bytes": 2744946,
+      "runtime_files": 81,
+      "test_files": 0,
+      "docs_files": 22,
+      "text_lines": 29306,
+      "languages": [
+        {
+          "language": "JavaScript",
+          "files": 78
+        },
+        {
+          "language": "Docs",
+          "files": 22
+        },
+        {
+          "language": "Config",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "webui/AGENTS.md",
+        "webui/components/AGENTS.md",
+        "webui/components/_examples/AGENTS.md",
+        "webui/components/_examples/_example-store.js",
+        "webui/components/canvas/AGENTS.md",
+        "webui/components/canvas/right-canvas-store.js",
+        "webui/components/chat/AGENTS.md",
+        "webui/components/chat/attachments/attachmentsStore.js",
+        "webui/components/chat/input/composer-banner-store.js",
+        "webui/components/chat/input/input-store.js",
+        "webui/components/chat/message-queue/message-queue-store.js",
+        "webui/components/chat/model-gate-store.js"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 219,
+      "directories": 23,
+      "bytes": 20030065,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 219,
+      "text_lines": 47717,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 34
+        }
+      ],
+      "example_paths": [
+        "docs/AGENTS.md",
+        "docs/README.md",
+        "docs/developer/architecture.md",
+        "docs/developer/connectivity.md",
+        "docs/developer/contributing-skills.md",
+        "docs/developer/extensions.md",
+        "docs/developer/mcp-configuration.md",
+        "docs/developer/notifications.md",
+        "docs/developer/plugins.md",
+        "docs/developer/sharing-and-safety.md",
+        "docs/developer/websockets.md",
+        "docs/guides/a0-cli-connector.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "helpers",
+      "files": 212,
+      "directories": 0,
+      "bytes": 1547683,
+      "runtime_files": 105,
+      "test_files": 0,
+      "docs_files": 106,
+      "text_lines": 40859,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 106
+        },
+        {
+          "language": "Python",
+          "files": 105
+        }
+      ],
+      "example_paths": [
+        "helpers/AGENTS.md",
+        "helpers/api.py",
+        "helpers/api.py.dox.md",
+        "helpers/attachment_manager.py",
+        "helpers/attachment_manager.py.dox.md",
+        "helpers/backup.py",
+        "helpers/backup.py.dox.md",
+        "helpers/browser.py",
+        "helpers/browser.py.dox.md",
+        "helpers/cache.py",
+        "helpers/cache.py.dox.md",
+        "helpers/call_llm.py"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "api",
+      "files": 171,
+      "directories": 0,
+      "bytes": 379772,
+      "runtime_files": 83,
+      "test_files": 4,
+      "docs_files": 86,
+      "text_lines": 9207,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 86
+        },
+        {
+          "language": "Python",
+          "files": 85
+        }
+      ],
+      "example_paths": [
+        "api/AGENTS.md",
+        "api/agent_profile_set.py",
+        "api/agent_profile_set.py.dox.md",
+        "api/agents.py",
+        "api/agents.py.dox.md",
+        "api/api_files_get.py",
+        "api/api_files_get.py.dox.md",
+        "api/api_log_get.py",
+        "api/api_log_get.py.dox.md",
+        "api/api_message.py",
+        "api/api_message.py.dox.md",
+        "api/api_reset_chat.py"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "extensions",
+      "files": 141,
+      "directories": 54,
+      "bytes": 117680,
+      "runtime_files": 60,
+      "test_files": 0,
+      "docs_files": 44,
+      "text_lines": 3596,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 53
+        },
+        {
+          "language": "Docs",
+          "files": 44
+        },
+        {
+          "language": "JavaScript",
+          "files": 7
+        }
+      ],
+      "example_paths": [
+        "extensions/AGENTS.md",
+        "extensions/python/AGENTS.md",
+        "extensions/python/_functions/AGENTS.md",
+        "extensions/python/_functions/__main__/init_a0/end/_10_register_watchdogs.py",
+        "extensions/python/_functions/agent/Agent/handle_exception/end/_40_handle_intervention_exception.py",
+        "extensions/python/_functions/agent/Agent/handle_exception/end/_50_handle_repairable_exception.py",
+        "extensions/python/_functions/agent/Agent/handle_exception/end/_90_handle_critical_exception.py",
+        "extensions/python/_functions/agent/Agent/hist_add_ai_response/end/_10_log_plain_responses.py",
+        "extensions/python/_functions/agent/Agent/hist_add_warning/end/_90_stop_unusable_response_loop.py",
+        "extensions/python/agent_init/AGENTS.md",
+        "extensions/python/agent_init/_10_initial_message.py",
+        "extensions/python/agent_init/_15_load_profile_settings.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "tests",
+      "files": 141,
+      "directories": 0,
+      "bytes": 1482309,
+      "runtime_files": 0,
+      "test_files": 141,
+      "docs_files": 1,
+      "text_lines": 41758,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 140
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "tests/AGENTS.md",
+        "tests/chunk_parser_test.py",
+        "tests/email_parser_test.py",
+        "tests/rate_limiter_test.py",
+        "tests/test_a0_connector_attachment_metadata.py",
+        "tests/test_a0_connector_computer_use_metadata.py",
+        "tests/test_a0_connector_launcher_gateway.py",
+        "tests/test_a0_connector_prompt_gating.py",
+        "tests/test_agent_editor.py",
+        "tests/test_agent_editor_webui.py",
+        "tests/test_api_chat_lifetime.py",
+        "tests/test_backup_large_archives.py"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "prompts",
+      "files": 72,
+      "directories": 0,
+      "bytes": 29097,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 70,
+      "text_lines": 727,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 70
+        },
+        {
+          "language": "Python",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "prompts/AGENTS.md",
+        "prompts/agent.context.extras.md",
+        "prompts/agent.context.protocol.md",
+        "prompts/agent.extras.agent_info.md",
+        "prompts/agent.extras.workdir_structure.md",
+        "prompts/agent.protocol.projects.agents_md.md",
+        "prompts/agent.protocol.projects.instructions.md",
+        "prompts/agent.system.behaviour.md",
+        "prompts/agent.system.behaviour_default.md",
+        "prompts/agent.system.datetime.md",
+        "prompts/agent.system.main.communication.md",
+        "prompts/agent.system.main.communication_additions.md"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "docker",
+      "files": 42,
+      "directories": 16,
+      "bytes": 86919,
+      "runtime_files": 33,
+      "test_files": 0,
+      "docs_files": 5,
+      "text_lines": 2670,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 23
+        },
+        {
+          "language": "Config",
+          "files": 7
+        },
+        {
+          "language": "Docs",
+          "files": 5
+        },
+        {
+          "language": "Python",
+          "files": 2
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "docker/AGENTS.md",
+        "docker/base/AGENTS.md",
+        "docker/base/Dockerfile",
+        "docker/base/build.txt",
+        "docker/base/fs/etc/searxng/limiter.toml",
+        "docker/base/fs/etc/searxng/settings.yml",
+        "docker/base/fs/ins/after_install.sh",
+        "docker/base/fs/ins/configure_ssh.sh",
+        "docker/base/fs/ins/install_base_packages1.sh",
+        "docker/base/fs/ins/install_base_packages2.sh",
+        "docker/base/fs/ins/install_base_packages3.sh",
+        "docker/base/fs/ins/install_base_packages4.sh"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "agents",
+      "files": 36,
+      "directories": 17,
+      "bytes": 67980,
+      "runtime_files": 9,
+      "test_files": 0,
+      "docs_files": 27,
+      "text_lines": 1118,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 27
+        },
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Python",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "agents/AGENTS.md",
+        "agents/_example/AGENTS.md",
+        "agents/_example/extensions/agent_init/_10_example_extension.py",
+        "agents/_example/prompts/agent.system.main.specifics.md",
+        "agents/_example/prompts/agent.system.tool.example_tool.md",
+        "agents/_example/tools/example_tool.py",
+        "agents/_example/tools/response.py",
+        "agents/agent0/AGENTS.md",
+        "agents/agent0/agent.yaml",
+        "agents/agent0/prompts/agent.system.main.role.md",
+        "agents/agent0/prompts/agent.system.main.specifics.md",
+        "agents/agent0/prompts/agent.system.tool.response.md"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "skills",
+      "files": 30,
+      "directories": 11,
+      "bytes": 139387,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 30,
+      "text_lines": 3513,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 30
+        }
+      ],
+      "example_paths": [
+        "skills/AGENTS.md",
+        "skills/a0-contribute-plugin/AGENTS.md",
+        "skills/a0-contribute-plugin/SKILL.md",
+        "skills/a0-create-agent/AGENTS.md",
+        "skills/a0-create-agent/SKILL.md",
+        "skills/a0-create-plugin/AGENTS.md",
+        "skills/a0-create-plugin/SKILL.md",
+        "skills/a0-debug-plugin/AGENTS.md",
+        "skills/a0-debug-plugin/SKILL.md",
+        "skills/a0-development/AGENTS.md",
+        "skills/a0-development/SKILL.md",
+        "skills/a0-development/references/AGENTS.md"
+      ],
+      "source_classes": [
+        "architecture_design"
+      ]
+    },
+    {
+      "path": "tools",
+      "files": 29,
+      "directories": 0,
+      "bytes": 105421,
+      "runtime_files": 12,
+      "test_files": 0,
+      "docs_files": 13,
+      "text_lines": 2106,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 13
+        },
+        {
+          "language": "Python",
+          "files": 12
+        }
+      ],
+      "example_paths": [
+        "tools/AGENTS.md",
+        "tools/a2a_chat.py",
+        "tools/a2a_chat.py.dox.md",
+        "tools/call_subordinate.py",
+        "tools/call_subordinate.py.dox.md",
+        "tools/document_query.py",
+        "tools/document_query.py.dox.md",
+        "tools/notify_user.py",
+        "tools/notify_user.py.dox.md",
+        "tools/parallel.py",
+        "tools/parallel.py.dox.md",
+        "tools/response.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 19,
+      "directories": 20,
+      "bytes": 142839,
+      "runtime_files": 9,
+      "test_files": 0,
+      "docs_files": 5,
+      "text_lines": 3493,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 8
+        },
+        {
+          "language": "Docs",
+          "files": 5
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "AGENTS.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "README.md",
+        "agent.py",
+        "initialize.py",
+        "jsconfig.json",
+        "models.py",
+        "preload.py",
+        "prepare.py",
+        "requirements.dev.txt",
+        "requirements.txt"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "knowledge",
+      "files": 9,
+      "directories": 3,
+      "bytes": 5293,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 6,
+      "text_lines": 127,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        "knowledge/AGENTS.md",
+        "knowledge/main/about/architecture.md",
+        "knowledge/main/about/capabilities.md",
+        "knowledge/main/about/configuration.md",
+        "knowledge/main/about/identity.md",
+        "knowledge/main/about/setup-and-deployment.md"
+      ],
+      "source_classes": [
+        "architecture_design"
+      ]
+    },
+    {
+      "path": "usr",
+      "files": 8,
+      "directories": 7,
+      "bytes": 1,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": ".github",
+      "files": 5,
+      "directories": 2,
+      "bytes": 44913,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 1245,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 3
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".github/AGENTS.md",
+        ".github/FUNDING.yml",
+        ".github/scripts/docker_release_plan.py",
+        ".github/workflows/close-inactive.yml",
+        ".github/workflows/docker-publish.yml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "conf",
+      "files": 5,
+      "directories": 0,
+      "bytes": 11351,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 376,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "conf/AGENTS.md",
+        "conf/model_providers.yaml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".vscode",
+      "files": 3,
+      "directories": 0,
+      "bytes": 1373,
+      "runtime_files": 3,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 48,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        ".vscode/extensions.json",
+        ".vscode/launch.json",
+        ".vscode/settings.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "lib",
+      "files": 3,
+      "directories": 1,
+      "bytes": 5551,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 208,
+      "languages": [
+        {
+          "language": "JavaScript",
+          "files": 2
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "lib/AGENTS.md",
+        "lib/browser/click.js",
+        "lib/browser/extract_dom.js"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 2,
+      "directories": 0,
+      "bytes": 2464,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 49,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "scripts/AGENTS.md",
+        "scripts/openrouter_release_notes_system_prompt.md"
+      ],
+      "source_classes": [
+        "history_changelog_releases"
+      ]
+    },
+    {
+      "path": "tmp",
+      "files": 1,
+      "directories": 0,
+      "bytes": 0,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    }
+  ],
+  "skipped_dirs": [
+    ".git",
+    "webui/vendor"
+  ],
+  "completeness_critic": "Exhaustive 2,292-file pinned tree walk grouped all 21 immediate subsystems and skipped only .git and vendored webui/vendor; GitHub issues and pull requests were paged to exhaustion, all 94 discussions and 72 observed releases were read back, history/roadmap/license provenance and four candidate-specific fak self-queries were audited, and every candidate was adjudicated with issue tracking.",
+  "non_tree_study": {
+    "observed_at": "2026-08-25",
+    "source_cutoff": {
+      "revision": "baadd0dd0b09fa769a1027c183b964be85d5c8cc",
+      "commit_timestamp": "2026-08-12T12:51:19Z"
+    },
+    "github_surface": {
+      "issues": {
+        "total": 834,
+        "open": 63,
+        "closed": 771
+      },
+      "pull_requests": {
+        "total": 897,
+        "open": 82,
+        "closed": 815
+      },
+      "discussions": {
+        "total": 94,
+        "sampled": 94
+      },
+      "releases": {
+        "total_observed": 72,
+        "pinned_release": "v2.9",
+        "pinned_release_url": "https://github.com/agent0ai/agent-zero/releases/tag/v2.9"
+      },
+      "method": "GitHub REST issue and pull-request endpoints paged to exhaustion plus GraphQL discussions(first:100); records through the pinned commit timestamp form the source denominator. Open/closed state is the 2026-08-25 read-back."
+    },
+    "history_roadmap_license": {
+      "history": "Full local Git history through pinned tag v2.9 and the complete release ledger were inspected; the pinned commit is the v2.9 tag tip.",
+      "roadmap": "No dedicated roadmap file was found. The generated map checked roadmap_todos absent; repository TODO/FIXME markers plus the exhaustive issue, pull-request, and discussion ledgers were treated as distributed planning evidence, not promises.",
+      "license": "Root LICENSE is MIT and attributes Agent Zero, s.r.o.; nested plugin licenses were included by the exhaustive tree map. Borrow decisions are design-level unless a follow-on performs file-level provenance review."
+    },
+    "self_query_axes": [
+      {
+        "axis": "hierarchical delegation",
+        "query": "fak capabilities \"hierarchical agent delegation subordinate contexts task scheduling\"",
+        "result": "no matching capability",
+        "verdict": "already studied; project task/fleet delegation is owned through guarded orchestration rather than borrowing Agent Zero context prompts"
+      },
+      {
+        "axis": "semantic memory",
+        "query": "fak capabilities \"semantic memory vector retrieval knowledge recall\"",
+        "result": "Carry a session forward without transcript replay",
+        "verdict": "stay-minimal: fak owns durable session state; broad vector-memory UX remains modular"
+      },
+      {
+        "axis": "plugin lifecycle",
+        "query": "fak capabilities \"agent plugin extension lifecycle hooks tools\"",
+        "result": "no matching capability",
+        "verdict": "existing fak leaves, MCP, and skill/plugin lifecycle cover the applicable seam; no monolithic plugin framework borrow"
+      },
+      {
+        "axis": "computer tool safety",
+        "query": "fak capabilities \"computer browser shell tool execution policy witness\"",
+        "result": "Enforce the supporting capability floor; Compress tool output before it reaches the model",
+        "verdict": "owned: preserve fak default-deny adjudication and witnessed effects"
+      }
+    ],
+    "candidate_matrix": [
+      {
+        "candidate": "deterministic lifecycle hook composition",
+        "source": [
+          "python/helpers/extension.py",
+          "python/helpers/plugin.py",
+          "docs/developer/plugins.md"
+        ],
+        "alternative": "fak leaves, MCP adapters, and guarded hooks",
+        "disposition": "stay_minimal",
+        "reason": "The applicable composition seam is already owned without importing Agent Zero plugin breadth."
+      },
+      {
+        "candidate": "hierarchical subordinate-agent contexts",
+        "source": [
+          "python/helpers/subagents.py",
+          "prompts/agent.system.main.md"
+        ],
+        "alternative": "leased ultracode/task-fleet workers with independent read-back",
+        "disposition": "reject",
+        "reason": "Prompt-level hierarchy weakens fak lease and witness boundaries."
+      },
+      {
+        "candidate": "vector memory and knowledge UX",
+        "source": [
+          "python/helpers/memory.py",
+          "knowledge/README.md"
+        ],
+        "alternative": "durable session memory and modular retrieval integrations",
+        "disposition": "stay_minimal",
+        "reason": "Useful product breadth, but not a new kernel primitive."
+      },
+      {
+        "candidate": "effect snapshots and time-travel shadow repository",
+        "source": [
+          "python/helpers/snapshot.py",
+          "docs/guides/time-travel.md"
+        ],
+        "alternative": "fak receipts, git evidence, and witnessed rollback surfaces",
+        "disposition": "stay_minimal",
+        "reason": "Existing evidence and rollback mechanisms cover the kernel requirement; UI breadth is peripheral."
+      },
+      {
+        "candidate": "scheduler and connector breadth",
+        "source": [
+          "python/helpers/task_scheduler.py",
+          "plugins/_a0_connector"
+        ],
+        "alternative": "typed schedules and explicit MCP/tool integrations",
+        "disposition": "reject",
+        "reason": "Do not move integration breadth into the kernel; add leaves only when a concrete user workflow demands them."
+      }
+    ],
+    "issue_tracking": {
+      "study_issue": "https://github.com/anthony-chaudhary/fak/issues/8987",
+      "filed_borrows": [],
+      "reason": "Every candidate was rejected or stay-minimal against an existing fak alternative; no distinct dispatchable borrow survived."
+    }
+  }
+}
