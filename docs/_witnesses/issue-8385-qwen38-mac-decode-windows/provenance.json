@@ -1,0 +1,43 @@
+{
+  "schema": "fak.issue-8385-qwen38-mac-decode-windows-provenance/1",
+  "run_id": "live-20260826T162624Z",
+  "platform": "macOS-arm64",
+  "source": {
+    "head": "d306fa7e35c033943990a8241673470e115e9477",
+    "tree": "8b5fcc2eb091a383fd6ec50dc6ee9f983e9fee99",
+    "file_manifest_sha256": "ce73730d532d1ec71397765bb0434c5170ffd72fb9cb759a4ad4f0c9b05015f4"
+  },
+  "fixture": {
+    "prompt_sha256": "be8df1a00e25bfa887476a57168a080b86532ae06452643bcaba48c47b084700",
+    "requested_tokens": 2048,
+    "required_repetitions_per_arm": 3
+  },
+  "native": {
+    "engine": "fak-native",
+    "binary_sha256": "1d34b7ae92e4540c30bfac4a67465d6f73f6c29c288d326d9f011474e0272ffc",
+    "build_info_sha256": "6ca041662d3c7972bc83f28896bf1868fee90fda38f92a1b12161530a91fc0dd",
+    "model_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "responses_frozen": 1
+  },
+  "comparator": {
+    "engine": "llama.cpp",
+    "binary_sha256": "12df97ffa9d48545e96cd3237a71f78efd1cc0222f971cbd65f7ab57e793b128",
+    "started": false,
+    "responses_frozen": 0
+  },
+  "memory_observation": {
+    "peak_rss_bytes": 18246647808,
+    "minimum_free_percent": 16,
+    "minimum_memorystatus_percent": 16,
+    "maximum_swap_growth_bytes": 7582850744,
+    "safety_crossings": 0,
+    "post_arm_footprint_available": false
+  },
+  "scrubbing": [
+    "native response id replaced",
+    "native response text replaced",
+    "process PID column removed from memory samples",
+    "restored process PID removed",
+    "machine identity and private paths omitted"
+  ]
+}

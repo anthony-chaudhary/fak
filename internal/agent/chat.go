@@ -407,11 +407,16 @@ type Completion struct {
 	// Its events are authored at the native token-commit seam; proxy text and SSE
 	// fragments are never eligible sources.
 	DecodeTrace *NativeDecodeTrace
+	// NativeDecodeTokenIDs is the lightweight token-ID companion to DecodeTrace.
+	// It is captured at the same commit seam without inspecting logits.
+	NativeDecodeTokenIDs *NativeDecodeTokenIDs
 }
 
 const (
-	NativeDecodeTraceSchema = "fak.native-decode-trace/1"
-	NativeDecodeTraceEngine = "fak-native"
+	NativeDecodeTraceSchema    = "fak.native-decode-trace/1"
+	NativeDecodeTraceEngine    = "fak-native"
+	NativeDecodeTokenIDsSchema = "fak.native-decode-token-ids/1"
+	NativeDecodeTokenIDsEngine = "fak-native"
 )
 
 // NativeDecodeTrace is the versioned, engine-authored timeline of generated-token
@@ -427,6 +432,15 @@ type NativeDecodeTrace struct {
 type NativeDecodeTraceEvent struct {
 	TokenIndex int   `json:"token_index"`
 	ElapsedNS  int64 `json:"elapsed_ns"`
+}
+
+// NativeDecodeTokenIDs is a lightweight ordered receipt for tokens already
+// selected by native decode. It deliberately carries no timing or logprobs;
+// callers bind TokenIDs[i] to the trace event whose TokenIndex is i+1.
+type NativeDecodeTokenIDs struct {
+	Schema   string `json:"schema"`
+	Engine   string `json:"engine"`
+	TokenIDs []int  `json:"token_ids"`
 }
 
 // NativeInferenceReceipt binds generated tokens and their normalized chosen-token
@@ -525,6 +539,9 @@ type SampleParams struct {
 	// DecodeTrace requests native token-commit timestamps. It is false by default,
 	// so ordinary turns allocate no trace slice and perform no per-token clock read.
 	DecodeTrace bool
+	// NativeDecodeTokenIDs requests the lightweight token-ID companion to a decode
+	// trace. It is valid only when DecodeTrace is also requested.
+	NativeDecodeTokenIDs bool
 	// GuidedDecode carries provider-native guided-decode fields that are not part of
 	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
 	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,

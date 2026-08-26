@@ -393,14 +393,16 @@ type decodeLane struct {
 }
 
 type nativeInferenceMeasurement struct {
-	startedAt         time.Time
-	tokenIDs          []int
-	logprobs          []float64
-	ttftS             float64
-	inferenceDisabled bool
-	traceNow          func() time.Time
-	traceStartedAt    time.Time
-	traceEvents       []NativeDecodeTraceEvent
+	startedAt             time.Time
+	tokenIDs              []int
+	logprobs              []float64
+	ttftS                 float64
+	inferenceDisabled     bool
+	traceNow              func() time.Time
+	traceStartedAt        time.Time
+	traceEvents           []NativeDecodeTraceEvent
+	decodeTokenIDsEnabled bool
+	decodeTokenIDs        []int
 }
 
 func (m *nativeInferenceMeasurement) reset() {
@@ -412,6 +414,7 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.ttftS = 0
 	m.traceStartedAt = time.Time{}
 	m.traceEvents = m.traceEvents[:0]
+	m.decodeTokenIDs = m.decodeTokenIDs[:0]
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
@@ -438,19 +441,28 @@ func (m *nativeInferenceMeasurement) startDecodeTrace() {
 	m.traceEvents = m.traceEvents[:0]
 }
 
-func (m *nativeInferenceMeasurement) recordDecodeTrace(tokenIndex int) error {
-	if m == nil || m.traceNow == nil {
+func (m *nativeInferenceMeasurement) recordDecodeTrace(tokenIndex, tokenID int) error {
+	if m == nil || (m.traceNow == nil && !m.decodeTokenIDsEnabled) {
 		return nil
 	}
-	wantIndex := len(m.traceEvents) + 1
-	if tokenIndex != wantIndex {
-		return fmt.Errorf("native decode trace token index %d, want %d", tokenIndex, wantIndex)
+	if m.traceNow != nil {
+		wantIndex := len(m.traceEvents) + 1
+		if tokenIndex != wantIndex {
+			return fmt.Errorf("native decode trace token index %d, want %d", tokenIndex, wantIndex)
+		}
+		elapsed := m.traceNow().Sub(m.traceStartedAt).Nanoseconds()
+		if elapsed < 0 || (len(m.traceEvents) > 0 && elapsed < m.traceEvents[len(m.traceEvents)-1].ElapsedNS) {
+			return fmt.Errorf("native decode trace clock moved backwards at token %d", tokenIndex)
+		}
+		m.traceEvents = append(m.traceEvents, NativeDecodeTraceEvent{TokenIndex: tokenIndex, ElapsedNS: elapsed})
 	}
-	elapsed := m.traceNow().Sub(m.traceStartedAt).Nanoseconds()
-	if elapsed < 0 || (len(m.traceEvents) > 0 && elapsed < m.traceEvents[len(m.traceEvents)-1].ElapsedNS) {
-		return fmt.Errorf("native decode trace clock moved backwards at token %d", tokenIndex)
+	if m.decodeTokenIDsEnabled {
+		wantIndex := len(m.decodeTokenIDs) + 1
+		if tokenIndex != wantIndex {
+			return fmt.Errorf("native decode token ID index %d, want %d", tokenIndex, wantIndex)
+		}
+		m.decodeTokenIDs = append(m.decodeTokenIDs, tokenID)
 	}
-	m.traceEvents = append(m.traceEvents, NativeDecodeTraceEvent{TokenIndex: tokenIndex, ElapsedNS: elapsed})
 	return nil
 }
 
@@ -506,7 +518,7 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	}
 	emitStopped := ln.emit != nil && ln.emit(next)
 	ln.gen++ // this non-stop token was emitted/generated; trace only after this count.
-	if err := ln.measurement.recordDecodeTrace(ln.gen); err != nil {
+	if err := ln.measurement.recordDecodeTrace(ln.gen, next); err != nil {
 		ln.err, ln.done = err, true
 		return 0, false
 	}

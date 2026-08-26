@@ -814,6 +814,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		return nil, p.qwenQ4KPrefillChunkConfigErr
 	}
 	sp := applySampleOpts(opts...)
+	if sp.NativeDecodeTokenIDs && !sp.DecodeTrace {
+		return nil, fmt.Errorf("native decode token IDs require a decode trace")
+	}
 	var requestStarted time.Time
 	if sp.NativeInferenceReceipt {
 		requestStarted = time.Now()
@@ -898,10 +901,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 	}
 	var measurement *nativeInferenceMeasurement
-	if sp.NativeInferenceReceipt || sp.DecodeTrace {
+	if sp.NativeInferenceReceipt || sp.DecodeTrace || sp.NativeDecodeTokenIDs {
 		measurement = &nativeInferenceMeasurement{
-			startedAt:         requestStarted,
-			inferenceDisabled: !sp.NativeInferenceReceipt,
+			startedAt:             requestStarted,
+			inferenceDisabled:     !sp.NativeInferenceReceipt,
+			decodeTokenIDsEnabled: sp.NativeDecodeTokenIDs,
+		}
+		if sp.NativeDecodeTokenIDs {
+			measurement.decodeTokenIDs = make([]int, 0, maxNew)
 		}
 		if sp.DecodeTrace {
 			measurement.traceNow = p.decodeTraceNow
@@ -1011,6 +1018,13 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			Schema: NativeDecodeTraceSchema,
 			Engine: NativeDecodeTraceEngine,
 			Events: events,
+		}
+	}
+	if sp.NativeDecodeTokenIDs {
+		comp.NativeDecodeTokenIDs = &NativeDecodeTokenIDs{
+			Schema:   NativeDecodeTokenIDsSchema,
+			Engine:   NativeDecodeTokenIDsEngine,
+			TokenIDs: append([]int(nil), measurement.decodeTokenIDs...),
 		}
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
