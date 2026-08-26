@@ -74,3 +74,27 @@ For each hyperscaler/cloud, capture:
 - Hyperscaler purchase obligations, lease commitments, partner prepayments, and customer-supplied
   hardware reconciled to annual capex.
 - AI/non-AI allocation, installed capacity, health, utilization, and goodput conversion.
+
+## Additional issuer and contract-financing rows
+
+| Issuer / period | Reported evidence | Accounting and delivery boundary | Capacity inference allowed |
+|---|---|---|---|
+| CoreWeave Q1 2026 | $2.078B quarterly revenue; $99.4B revenue backlog; >1 GW active power; >3.5 GW contracted power; $8.5B non-recourse delayed-draw financing. CoreWeave defines backlog as RPO plus other estimated future revenue under committed contracts, subject to delivery and service availability. | Backlog is broader than GAAP RPO; recognition still depends on delivering available service. | None from backlog alone. Join contracts to financed, active-power, installed, accepted, and healthy capacity. |
+| Oracle FY2026 | $638B RPO; $75B of prepaid or customer-supplied hardware portions in large AI contracts; $18.1B FY cloud-infrastructure revenue; negative $23.7B FCF; $43B debt and $5B equity financing in FY2026. | Customer prepayment and customer-owned GPUs reduce Oracle-funded capex but do not erase delivery obligations. RPO is future contract value, not hardware. | Treat customer-owned hardware, prepaid purchases, Oracle-owned PP&E, and useful serving capacity as separate states. |
+| Alibaba quarter ended June 2026 | Nearly $10B quarterly capex, +75% YoY; $1.8B AI-related product revenue; $69.9B cash/liquid investments. | Aggregate AI-related capex spans stack layers and does not identify accelerator, datacenter, network, or other asset shares. | Market-spend signal only until physical units and asset split are disclosed. |
+| Nebius / Microsoft contract, September 2025 | Multi-year dedicated capacity from Vineland; associated capex expected to be funded by contract cash flow and contract-secured debt. | Contract value, MW, accelerator count, financing amount, and recognition schedule are undisclosed; dedicated capacity creates concentration risk. | Track contract-backed financing and customer concentration, not capacity from the announcement. |
+| Baidu Q2 2026 | RMB7.3B AI Cloud Infra revenue, +50% YoY; GPU Cloud revenue +283% YoY; RMB12.5B core AI-powered business revenue. | AI-powered business fields are unaudited internal management data; GPU Cloud absolute revenue and capex/accelerator mix are absent. | Demand signal only; no installed-capacity or goodput conversion. |
+
+## Cross-issuer financing patterns
+
+- **Owner-funded PP&E:** classic capex/cash-flow path; asset mix still needs disclosure.
+- **Finance leases and infrastructure obligations:** capacity may be controlled without
+  appearing in cash capex in the same period.
+- **Customer prepayment:** the customer advances funds for hardware; delivery and service
+  obligations remain with the provider.
+- **Customer-supplied hardware:** GPUs may be operated by the cloud but not purchased or
+  owned by it.
+- **Contract-secured project debt:** a committed customer improves financing terms but
+  can concentrate demand and strand dedicated capacity if terms change.
+- **Backlog/RPO:** contractual demand, not revenue, cash, installed hardware, availability,
+  or quality-constrained goodput.

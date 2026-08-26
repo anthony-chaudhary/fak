@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T16:58:00-07:00",
-  "issue": 9301,
+  "updated_at": "2026-08-26T17:12:00-07:00",
+  "issue": 9302,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 112,
+    "entry_count": 117,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -79,6 +79,7 @@
       "AWS / NVIDIA",
       "AWS Bedrock",
       "Ai2",
+      "Alibaba",
       "Alibaba Cloud / Aliyun",
       "Alibaba Cloud Tair",
       "Alibaba Qwen",
@@ -132,6 +133,7 @@
       "NVIDIA / Lumentum",
       "NVIDIA DSX",
       "NVIDIA Dynamo",
+      "Nebius Group",
       "OpenAI",
       "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
       "OpenAI / Georgia Power",
@@ -140,6 +142,7 @@
       "OpenAI / Oracle / Related Digital / DTE",
       "OpenAI / Oracle / SoftBank",
       "OpenAI / Stargate",
+      "Oracle",
       "Robust KV cache management study",
       "Sakana AI",
       "Sarvam AI",
@@ -4138,6 +4141,206 @@
       "fak_implications": [
         "Track composition/search/automated-research labs separately from scale-first pretraining labs.",
         "Require measured device and end-to-end energy envelopes before borrowing efficiency claims."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "coreweave-q1-2026-financials",
+      "category": "ai_cloud",
+      "entity": "CoreWeave",
+      "topic": [
+        "revenue",
+        "backlog",
+        "capacity",
+        "debt",
+        "customer_contracts"
+      ],
+      "published_at": "2026-05-07",
+      "event_at": "2026-03-31",
+      "source_title": "CoreWeave Reports Strong First Quarter 2026 Results",
+      "source_url": "https://investors.coreweave.com/news/news-details/2026/CoreWeave-Reports-Strong-First-Quarter-2026-Results/",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "CoreWeave reported Q1 2026 revenue of $2.078B, $99.4B of revenue backlog, more than 1 GW of active power, and more than 3.5 GW of contracted power; its backlog definition includes RPO plus estimated future revenue under committed contracts subject to delivery and service availability.",
+      "quantified": {
+        "quarter_revenue_usd": 2078000000,
+        "revenue_backlog_usd": 99400000000,
+        "active_power_gw_gt": 1,
+        "contracted_power_gw_gt": 3.5,
+        "new_meta_commitment_usd": 21000000000,
+        "nonrecourse_delayed_draw_term_loan_usd": 8500000000
+      },
+      "assumptions": [
+        "AI-cloud economics depend on financing and delivering capacity before backlog becomes revenue.",
+        "Active power, contracted power, and backlog are separate leading indicators with different delivery risk."
+      ],
+      "contradictions_or_limits": [
+        "Revenue backlog is broader than GAAP RPO and is subject to delivery and availability requirements.",
+        "Revenue, backlog, active MW, installed accelerators, and useful goodput are different denominators."
+      ],
+      "fak_implications": [
+        "Do not translate contract value directly into active serving capacity.",
+        "Track financing, active power, delivery conditions, revenue recognition, and goodput separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "oracle-fy2026-rpo-ai-financing",
+      "category": "hyperscaler",
+      "entity": "Oracle",
+      "topic": [
+        "rpo",
+        "ai_contracts",
+        "customer_prepayment",
+        "customer_supplied_hardware",
+        "capex",
+        "financing"
+      ],
+      "published_at": "2026-06-10",
+      "event_at": "2026-05-31",
+      "source_title": "Oracle Announces Record Q4 and FY 2026 Results Driven by Cloud Infrastructure & Cloud Applications",
+      "source_url": "https://investor.oracle.com/investor-news/news-details/2026/Oracle-Announces-Record-Q4-and-FY-2026-Results-Driven-by-Cloud-Infrastructure--Cloud-Applications/default.aspx",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Oracle ended FY2026 with $638B of RPO and said large AI contracts included $75B of prepaid or customer-supplied hardware; FY2026 free cash flow was negative $23.7B while it invested in cloud infrastructure.",
+      "quantified": {
+        "rpo_usd": 638000000000,
+        "rpo_yoy_growth_pct": 363,
+        "prepaid_or_customer_supplied_hardware_usd": 75000000000,
+        "fy2026_cloud_infrastructure_revenue_usd": 18100000000,
+        "fy2026_free_cash_flow_usd": -23700000000,
+        "fy2026_debt_financing_usd": 43000000000,
+        "fy2026_equity_financing_usd": 5000000000
+      },
+      "assumptions": [
+        "Customer prepayments and customer-supplied GPUs can shift capital requirements without removing delivery obligations."
+      ],
+      "contradictions_or_limits": [
+        "RPO includes future contractual revenue, not installed or accepted capacity.",
+        "Customer-supplied hardware complicates comparisons of Oracle capex with capacity controlled or served."
+      ],
+      "fak_implications": [
+        "Model customer-owned hardware and prepayments as separate accounting/ownership states.",
+        "Do not divide RPO by GPU price to infer fleet size."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "alibaba-q2-2026-ai-capex",
+      "category": "hyperscaler",
+      "entity": "Alibaba",
+      "topic": [
+        "capex",
+        "ai_cloud",
+        "revenue",
+        "cash"
+      ],
+      "published_at": "2026-08-20",
+      "event_at": "2026-06-30",
+      "source_title": "Alibaba’s Full-Stack AI Accelerates Monetization with 22-Quarter-High Cloud Growth",
+      "source_url": "https://www.alibabagroup.com/en-US/document-2027233133950140416",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Alibaba said it invested nearly $10B of capex in the quarter, up 75% year over year, and reported $1.8B of AI-related product revenue while retaining $69.9B in cash and liquid investments.",
+      "quantified": {
+        "quarter_capex_usd_approx": 10000000000,
+        "capex_yoy_growth_pct": 75,
+        "quarter_ai_related_product_revenue_usd": 1800000000,
+        "cash_and_liquid_investments_usd": 69900000000
+      },
+      "assumptions": [
+        "Alibaba is funding AI across multiple stack layers and business segments rather than a pure AI-cloud boundary."
+      ],
+      "contradictions_or_limits": [
+        "The capex figure is described as AI-related investment but is not split by accelerators, datacenters, network, or other assets.",
+        "AI-related product revenue and capex are not directly comparable capacity measures."
+      ],
+      "fak_implications": [
+        "Keep currency, segment, quarter, and asset split explicit for China-cloud comparisons.",
+        "Do not infer serving hardware from aggregate capex."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nebius-microsoft-contract-financing-2025",
+      "category": "ai_cloud",
+      "entity": "Nebius Group",
+      "topic": [
+        "customer_contract",
+        "capex",
+        "secured_debt",
+        "capacity",
+        "customer_concentration"
+      ],
+      "published_at": "2025-09-08",
+      "event_at": "2025-09-08",
+      "source_title": "Nebius announces multi-billion dollar agreement with Microsoft for AI infrastructure",
+      "source_url": "https://nebius.com/newsroom/nebius-announces-multi-billion-dollar-agreement-with-microsoft-for-ai-infrastructure",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Nebius announced a multi-year dedicated-capacity contract with Microsoft at its Vineland, New Jersey datacenter and expected to finance associated capex through contract cash flow and debt secured against the contract.",
+      "quantified": {},
+      "assumptions": [
+        "A high-credit counterparty contract can improve financing terms for purpose-built capacity."
+      ],
+      "contradictions_or_limits": [
+        "The release does not state contract value, MW, accelerator count, debt amount, utilization, or revenue-recognition schedule.",
+        "A signed contract is not delivered, accepted, or diversified revenue."
+      ],
+      "fak_implications": [
+        "Track contract-backed financing and customer concentration alongside capacity lifecycle.",
+        "Keep dedicated single-customer capacity distinct from fungible cloud supply."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "baidu-q2-2026-ai-cloud-revenue",
+      "category": "hyperscaler",
+      "entity": "Baidu",
+      "topic": [
+        "ai_cloud",
+        "gpu_cloud",
+        "revenue",
+        "segment_boundary"
+      ],
+      "published_at": "2026-08-18",
+      "event_at": "2026-06-30",
+      "source_title": "Baidu Announces Second Quarter 2026 Results",
+      "source_url": "https://ir.baidu.com/node/14731/pdf",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Baidu reported Q2 2026 AI Cloud Infra revenue of RMB7.3B, up 50% year over year, and GPU Cloud revenue growth of 283%; it notes the AI-powered business figures come from unaudited internal management records.",
+      "quantified": {
+        "quarter_ai_cloud_infra_revenue_rmb": 7300000000,
+        "ai_cloud_infra_yoy_growth_pct": 50,
+        "gpu_cloud_revenue_yoy_growth_pct": 283,
+        "core_ai_powered_business_revenue_rmb": 12500000000
+      },
+      "assumptions": [
+        "GPU-cloud revenue growth is demand evidence, but not a physical capacity or utilization disclosure."
+      ],
+      "contradictions_or_limits": [
+        "The AI-powered business data is unaudited management information and GPU Cloud revenue is not reported as an absolute amount.",
+        "Revenue does not disclose accelerator mix, capex, customer concentration, or useful goodput."
+      ],
+      "fak_implications": [
+        "Use China-cloud revenue as a market signal only; retain audit and segment-boundary labels.",
+        "Do not convert percentage growth into installed capacity."
       ],
       "rumor": {
         "is_rumor": false

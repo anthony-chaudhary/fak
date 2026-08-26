@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **112** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **107** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **87** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 3; `datacenter_physical` 15; `frontier_lab` 41; `hyperscaler` 13; `market_signal` 9; `serving_system` 11; `standard` 1; `supply_chain` 5; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 52; `vendor_claim` 15; `reported_observation` 9; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 77; `medium_high` 26; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **112/112 published; 112/112 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **117** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **112** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **90** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 15; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 9; `serving_system` 11; `standard` 1; `supply_chain` 5; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 57; `vendor_claim` 15; `reported_observation` 9; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 82; `medium_high` 26; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **117/117 published; 117/117 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 112 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 117 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -75,11 +75,11 @@ for launches, cancellations, partnerships, and regional constraints.
 ### 2. Hyperscalers, clouds, and AI clouds — **Partial**
 
 **Present:** AWS, Google/Alphabet, Microsoft/Azure, Meta, Alibaba Cloud, CoreWeave,
-Nebius, and selected partner/cloud deployments. Official filings for Alphabet,
-Microsoft, Meta, and Amazon are extracted in [`filings-ledger.md`](filings-ledger.md).
+Nebius, and selected partner/cloud deployments. Official filings and earnings evidence for Alphabet, Microsoft, Meta, Amazon, Oracle,
+CoreWeave, Alibaba, Nebius, and Baidu are extracted in [`filings-ledger.md`](filings-ledger.md).
 
-**Missing or shallow:** Oracle, IBM, CoreWeave, Nebius, Alibaba, Tencent, Baidu, and
-sovereign-cloud financial normalization; customer-supplied hardware; partner
+**Missing or shallow:** IBM, Tencent, and sovereign-cloud financial normalization;
+full annual-report normalization remains incomplete for Oracle, CoreWeave, Nebius, Alibaba, and Baidu; customer-supplied hardware; partner
 prepayments; finance and operating leases; purchase obligations; depreciation;
 backlog quality; customer concentration; AI versus non-AI capex.
 
@@ -271,7 +271,7 @@ dates, affected hardware/services, implementation status, and later amendments.
 |---|---|---|
 | Production measurement/observation | **16 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
 | Benchmark/synthetic | **11 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **52 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Official statements | **57 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
 | Vendor claims | **15 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **15 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
