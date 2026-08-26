@@ -19,26 +19,38 @@ MOD_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"   # fak/
 
 cmd="${1:-test}"
 ARCH_FILE="$SCRIPT_DIR/cuda_arch.txt"
+CUDA_ARCHES=()
+while IFS= read -r arch || [ -n "$arch" ]; do
+  arch="${arch%$'\r'}"
+  [ -n "$arch" ] || continue
+  CUDA_ARCHES+=("$arch")
+done < "$ARCH_FILE"
 ARCH="${FAK_CUDA_ARCH:-}"
 GENCODE=()
 if [ -n "$ARCH" ]; then
   case "$ARCH" in sm_*) ;; *) ARCH="sm_$ARCH";; esac
-  if ! grep -Fxq "$ARCH" "$ARCH_FILE"; then
-    echo "ERROR: unsupported CUDA arch '$ARCH'; choose one from $ARCH_FILE: $(tr '\n' ' ' < "$ARCH_FILE")" >&2
+  arch_supported=false
+  for supported_arch in "${CUDA_ARCHES[@]}"; do
+    if [ "$ARCH" = "$supported_arch" ]; then
+      arch_supported=true
+      break
+    fi
+  done
+  if [ "$arch_supported" != true ]; then
+    echo "ERROR: unsupported CUDA arch '$ARCH'; choose one from $ARCH_FILE: ${CUDA_ARCHES[*]}" >&2
     exit 2
   fi
   cc="${ARCH#sm_}"
   GENCODE=(-gencode "arch=compute_${cc},code=${ARCH}")
   BUILD_ARCHS="$ARCH (single-arch dev build)"
 else
-  while IFS= read -r arch; do
-    [ -n "$arch" ] || continue
+  for arch in "${CUDA_ARCHES[@]}"; do
     cc="${arch#sm_}"
     GENCODE+=(-gencode "arch=compute_${cc},code=${arch}")
     PTX_CC="$cc"
-  done < "$ARCH_FILE"
+  done
   GENCODE+=(-gencode "arch=compute_${PTX_CC},code=compute_${PTX_CC}")
-  BUILD_ARCHS="$(tr '\n' ' ' < "$ARCH_FILE")+ compute_${PTX_CC} PTX"
+  BUILD_ARCHS="${CUDA_ARCHES[*]} + compute_${PTX_CC} PTX"
 fi
 if [ "$cmd" = "check" ]; then
   PY="${PYTHON:-}"

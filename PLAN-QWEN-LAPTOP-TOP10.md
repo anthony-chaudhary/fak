@@ -11,7 +11,7 @@
 
 Ship `10 / 10` laptop-specific Qwen leaves with positive net-true end-to-end movement, preserved quality, and a receipt naming `engine=fak-native`. A HOLD, REVERT, or EXCLUDE result remains useful evidence but does not advance the numerator; replace it with the next profile-selected lever.
 
-Current result: `0 / 10 KEEP`.
+Current result: `1 / 10 KEEP`.
 
 ## For / Problem / Today / Better because / Witness
 
@@ -35,7 +35,7 @@ Current result: `0 / 10 KEEP`.
 - Current-HEAD header preflight: `READY`; architecture `qwen35`; 851 tensors; estimated load 16,536,406,016 bytes (15.4007 GiB); `FIT_UNKNOWN` because the Windows control build had no CUDA capacity backend.
 - Historical same-machine fak-native control: Qwen2.5-3B Q8 at 25.14 decode tok/s and about 25 tok/s prefill, from v0.21/CUDA 12.6; it is stale context, not current proof.
 - A live llama.cpp server currently holds the exact artifact with 20 GPU layers. It is an explicit reference-only confounder and cannot count as fak-native evidence.
-- WSL exposes the GPU, but the default Ubuntu image currently lacks the repository's build/runtime tools; `.wslconfig` limits it to four CPUs and 16 GiB.
+- WSL exposes the GPU and has the explicit Go 1.26.6/CUDA 12.6 toolchain needed by the canonical `sm_89` build; `.wslconfig` limits it to four CPUs and 16 GiB.
 - #8692 is assigned and active in a managed detached worker worktree. #8711 is closed as its duplicate.
 
 ## Ordered phases
@@ -44,29 +44,29 @@ Current result: `0 / 10 KEEP`.
 
 Record the current laptop and current-HEAD header witness. Add the representative three-trial baseline and catalog/ledger registration before crediting the phase. A fully resident smaller Qwen control may establish the current native toolchain while the exact 27B mixed path is unavailable.
 
-### 1. Bounded contiguous dense placement (#8692)
+### 1. Buffered GGUF metadata reads (#9107) — KEEP
+
+Buffer the parser's source reads while retaining exact consumed-byte accounting for header alignment and tensor offsets. The exact Qwen3.6-27B Q4_K_M preflight moved from a greater-than-180-second timeout to 991 ms, made one GGUF read, and preserved `qwen35`, 851 tensors, and `est_load_bytes=16536406016`.
+
+### 2. Bounded contiguous dense placement (#8692)
 
 Make the exact 27B model runnable without engine fallback by placing a bounded contiguous layer band on the GPU and the remainder on CPU. Account for both memory domains, perform explicit activation handoffs, identify placement in the receipt, and fail closed when the requested plan cannot be honored.
 
-### 2. Attribute the mixed path (#8393)
+### 3. Attribute and adapt the mixed path (#8393)
 
-Profile the landed path and name the dominant kernel, transfer, or CPU-resident cost. The output is a replayable profile and a justified next leaf, not a generic optimization list.
+Profile the landed path, name the dominant kernel, transfer, or CPU-resident cost, and ship one attributable adaptation. If the profile selects Q4 GEMV, the same implementation may close #8635, but it earns one KEEP rather than two.
 
-### 3. Conditional Q4 MMVQ (#8635)
+### 4. Direct dense Q5_K/Q6_K residency
 
-If P2 selects Q4 GEMV, advance the Q8_1/DP4A MMVQ arm and compare exact quality plus end-to-end movement. If another cost dominates, record EXCLUDE for this envelope and replace the phase candidate.
+Use the existing loader/HAL/kernel seams to keep supported dense K-quants resident in the Qwen CUDA path. Remove the serve-time disable only for proven types and shapes, with memory and parity witnesses.
 
-### 4. Graph-safe Qwen hybrid decode
+### 5. Graph-safe Qwen hybrid decode
 
 Create the smallest graph-replay leaf around the explicit Qwen disable in `internal/model/hal.go`. Patch mutable positions, pointers, KV and recurrent state; prove eager/graph parity and measure launch-overhead movement.
 
-### 5. Remaining GDN recurrence (#8820 re-scope)
+### 6. Remaining CUDA GDN recurrence (#8820/#3418 re-scope)
 
-Target only the sequential recurrence still inside the GDN kernels. The outer Qwen prompt loop is already panel-shaped and is outside this rewrite.
-
-### 6. Direct dense Q5_K/Q6_K residency
-
-Use the existing loader/HAL/kernel seams to keep supported dense K-quants resident in the Qwen CUDA path. Remove the serve-time disable only for proven types and shapes, with memory and parity witnesses.
+Target only the CUDA recurrence still inside the GDN kernels and dedupe the implementation between #8820 and #3418. The outer Qwen prompt loop is already panel-shaped and is outside this rewrite.
 
 ### 7. Real-weight CPU Q4 integer gate
 
@@ -80,11 +80,13 @@ Replace the amd64 extract-once prefill hook's always-false stub with the smalles
 
 Wire the tested affine-split Q4_K decode kernel into production selection. Retain it only when exact A/B and full decode receipts are positive.
 
-### 10. Bounded long-context KV arm
+### 10. Placement-aware device paging and prefix state
 
-Exercise one quality-gated KV precision/device-paging arm under #8321/#8395 only if the long-context profile selects memory pressure as binding. Otherwise substitute the next attributable Qwen lever and keep the hero metric at ten actual KEEP results.
+Add direct device pages plus snapshot identity for the CPU/GPU split. This is distinct from the host-only hybrid state serialization shipped by #9076 and must preserve explicit placement identity.
 
-Only P0 and P1 are armed initially. Before arming P2-P10, run self-query, raw repository grep, all-state issue deduplication, live attribution, and exact source/revision/license pinning. Each ship-alone phase receives its own issue or is reconciled to the named existing issue.
+Conditional reserve, unranked: exercise one quality-gated long-context KV precision arm under #8321/#8395 only if profiling displaces a ranked arm by selecting memory pressure as binding.
+
+P1 is retained from its exact receipt and P2 is the next armed phase. Before arming P3-P10, run self-query, raw repository grep, all-state issue deduplication, live attribution, and exact source/revision/license pinning. Each ship-alone phase receives its own issue or is reconciled to the named existing issue.
 
 ## Prior-art route
 
@@ -118,6 +120,12 @@ No new inference engine, silent fallback, whole-runtime port, multi-GPU schedule
 - 2026-08-25: searched all issue states, closed #8711 as a duplicate of #8692, assigned #8692, and opened umbrella #9050.
 - 2026-08-25: audited current Qwen source and revised P2-P10 to match actual gaps rather than speculative features.
 - 2026-08-25: acquired the `internal/model/**`, `cmd/fak/**`, `cmd/modelbench/**`, and issue-witness lane and launched #8692 in the sanctioned detached worker worktree.
+- 2026-08-26: pushed the durable plan in `a63defe174b4ec0e73aa26518e586846b8fe641b` and independently read it back from GitHub.
+- 2026-08-26: rejected the first #8692 worktree after 125 upstream commits changed eight overlapping Qwen paths; preserved its design evidence and restarted from `0f015ff57669a5668cbdd1f37ac215fa905e9745`.
+- 2026-08-26: reconciled the newer trunk. #9059 load workers and #9094 one-shot KV reserve remain measured rejects; conditional #8635 is folded into #8393 to prevent double credit; P10 now isolates device paging/placement identity from host-only #9076 state serialization.
+- 2026-08-26: proved the existing WSL Go 1.26.6/CUDA 12.6 toolchain can manually build a CUDA-tagged `modelbench`; opened enabling bug #9106 because the canonical build rejects the CRLF architecture manifest. The enabling repair does not earn KEEP credit.
+- 2026-08-26: shipped #9106 on `main` and independently read back the remote tip; the canonical `sm_89` CUDA build path is usable again. This remains enabling work and does not earn KEEP credit.
+- 2026-08-26: completed #9107's parser-buffering witness. The exact Qwen3.6-27B Q4_K_M header-only receipt moved from a greater-than-180-second timeout to 991 ms with one GGUF read and identical `qwen35`, 851-tensor, and 16,536,406,016-byte fields; this is the program's first KEEP.
 
 ## Completion audit
 
