@@ -1,0 +1,29 @@
+{
+  "schema": "fak-qwen4exp-support-watch/1",
+  "baseline": {
+    "upstream_model": "QwenLM/Qwen3.8-Flash-Next@513aa6e18a335296fc13e538232a8735b230877d+Qwen/Qwen3.8-Flash-Next@f5d08274bafd880402bd16f5e3e6c514136ec06c",
+    "transformers": "UNVERIFIED",
+    "vllm": "UNVERIFIED",
+    "sglang": "UNVERIFIED",
+    "llamacpp": "UNVERIFIED",
+    "mlx": "UNVERIFIED"
+  },
+  "observed": {
+    "upstream_model": "QwenLM/Qwen3.8-Flash-Next@simulated-new-pin+Qwen/Qwen3.8-Flash-Next@simulated-new-pin",
+    "transformers": "simulated-compatible-commit",
+    "vllm": "UNVERIFIED",
+    "sglang": "UNVERIFIED",
+    "llamacpp": "UNVERIFIED",
+    "mlx": "UNVERIFIED"
+  },
+  "dependencies": {
+    "upstream_model": ["architecture", "loading", "tokenizer_parity", "production_promotion"],
+    "transformers": ["tokenizer_parity", "transformers", "production_promotion"],
+    "vllm": ["vllm", "production_promotion"],
+    "sglang": ["sglang", "production_promotion"],
+    "llamacpp": ["llamacpp", "production_promotion"],
+    "mlx": ["mlx", "production_promotion"]
+  },
+  "want_changed": ["transformers", "upstream_model"],
+  "want_stale": ["architecture", "loading", "production_promotion", "tokenizer_parity", "transformers"]
+}
