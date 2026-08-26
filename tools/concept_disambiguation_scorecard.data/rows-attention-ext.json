@@ -309,7 +309,8 @@
       "definition": "attnPrefillInto \u2014 the batched causal GQA attention kernel that computes a P-token prefill panel's attention and writes it into attnOut with optional sliding-window and soft-cap.",
       "distinction": "It serves a prefill panel, NOT one batched decode step across users (attnDecodeBatch).",
       "distinct_from": [
-        "attended"
+        "attended",
+        "issue9256-attention-prepare-prefill"
       ],
       "aliases": [],
       "grounding": "attnprefillinto",
@@ -363,7 +364,8 @@
       "definition": "attnFdot3SIMD (with its attnFdot3SIMDMinBatch threshold) \u2014 the toggle enabling a 3-wide SIMD fused score dot-product (scoreDot3) for a GQA-3 group.",
       "distinction": "It vectorizes the QK score dot-product, NOT the value-accumulation saxpy path (attnSaxpy3SIMD).",
       "distinct_from": [
-        "attended"
+        "attended",
+        "issue9256-attention-fill-softmax-three"
       ],
       "aliases": [
         "attnfdot3simdminbatch"
@@ -574,7 +576,9 @@
       "definition": "m.softmaxAttentionScores \u2014 applies softmax to a head's attention scores, honoring per-head attention-sink logits (self_attn.sinks) when present.",
       "distinction": "It is the post-score normalization step, NOT the pre-softmax scale attnScale.",
       "distinct_from": [
-        "attnScale (SDPA denominator)"
+        "attnScale (SDPA denominator)",
+        "issue9256-attention-fill-scores",
+        "issue9256-attention-fill-softmax"
       ],
       "aliases": [],
       "grounding": "softmaxattentionscores",
