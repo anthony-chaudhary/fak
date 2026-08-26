@@ -1,0 +1,109 @@
+{
+  "schema": "fak.model-canary-run-darwin-capture/v1",
+  "capture_date": "2026-08-26",
+  "host_class": "Apple M3 class, Darwin/arm64",
+  "capture_kind": "scrubbed_reconstruction_from_committed_live_witness",
+  "fresh_live_capture": false,
+  "provenance_note": "Original per-command bytes were not retained by issue #9108. These parser shapes are explicitly reconstructed from the committed live receipt/log values; they are not represented as a fresh live capture.",
+  "provenance_sources": [
+    {
+      "path": "docs/_witnesses/issue-9108-qwen38-metal-gdn-panel-drain-canary/receipt.json",
+      "sha256": "4cdf791013514300f6f2dc7031a0c596e3721e242909802b23b4b0416c1e0398"
+    },
+    {
+      "path": "docs/_witnesses/issue-9108-qwen38-metal-gdn-panel-drain-canary/candidate.log",
+      "sha256": "0b195a3a988e15d4005300a36d3651dd91a690f370be6ca3255992ade496aee6"
+    }
+  ],
+  "hash_contract": {
+    "text_encoding": "UTF-8",
+    "command_sha256": "sha256(command UTF-8 bytes)",
+    "raw_sha256": "sha256(raw_text UTF-8 bytes)",
+    "scrubbed_sha256": "sha256(scrubbed_text UTF-8 bytes)",
+    "source_sha256": "sha256(name + LF + command_sha256 + LF + raw_sha256 + LF + scrubbed_sha256 + LF)",
+    "bundle_sha256": "sha256(schema + LF + capture_date + LF + host_class + LF + each source_sha256 + LF in listed order + each provenance path + LF + sha256 + LF in listed order)"
+  },
+  "sources": [
+    {
+      "name": "lsof_listener",
+      "command": "/usr/sbin/lsof -nP -iTCP:8090 -sTCP:LISTEN -Fpcftn",
+      "raw_text": "p50123\ncfak\nf17\ntIPv6\nn*:8090\n",
+      "scrubbed_text": "p<pid>\ncfak\nf17\ntIPv6\nn*:8090\n",
+      "command_sha256": "283be0b44e5d002b9cb03c74032534fc101aacd17528c8e48af4d40c1aef1bc0",
+      "raw_sha256": "077f476641d46a552a13d279e4587cdf8ce29876f3b22f8b4c3d739bbb81591b",
+      "scrubbed_sha256": "091564fce3a29f14cbb08c46d6216bcda9a05c88afcfa209108686688cb122c7",
+      "source_sha256": "c30234d3ccabe2edb45e31cda70349cd5af351b76df7120c3cf390a823009fcb"
+    },
+    {
+      "name": "launchctl_print",
+      "command": "/bin/launchctl print gui/501/com.fak.model",
+      "raw_text": "gui/501/com.fak.model = {\n\tpath = /Library/LaunchAgents/com.fak.model.plist\n\tpid = 50123\n}\n",
+      "scrubbed_text": "gui/<uid>/com.fak.model = {\n\tpath = /Library/LaunchAgents/com.fak.model.plist\n\tpid = <pid>\n}\n",
+      "command_sha256": "6d4f43e9122ed9043c6c82fb5ad3b0dd3d5184a3457a759b4ebd5bb32d402a83",
+      "raw_sha256": "7e362f523ea4be6f9c0f6478fc54df9502ce242b94e306a5827a69dc9d5f5ffb",
+      "scrubbed_sha256": "bcec09b59cd0009e00a39d6513a2b3a729dc5dc5a261b2763a01e98100ffdeed",
+      "source_sha256": "89a38442184765ee387456d52c2f80c39fd1f6cf40d6d745c0aadf2eba46c2f7"
+    },
+    {
+      "name": "ps_identity",
+      "command": "/bin/ps -ww -p 50123 -o pid=,lstart=,command=",
+      "raw_text": "50123 Wed Aug 26 07:52:02 2026 /opt/fak/bin/fak model serve --port 8090\n",
+      "scrubbed_text": "<pid> Wed Aug 26 <time> 2026 <candidate-binary> model serve --port <port>\n",
+      "command_sha256": "12d911587a94d8fbacbd3f85aef2ff8b5b219da9edb4281420a499195cf28aca",
+      "raw_sha256": "3823e600148b72f46dd5bb5b2f698ea46a3381790991f84b96e1d020b3b8b066",
+      "scrubbed_sha256": "190efefd2672b3aefdc185797380a6ab8a737002280b9ef729f3f8e200acfc18",
+      "source_sha256": "f0d4da17905c5db27f4cf833c26229c428e2dd15705dedbc45d6d944bd66e717"
+    },
+    {
+      "name": "ps_rss",
+      "command": "/bin/ps -p 50123 -o pid=,rss=",
+      "raw_text": "50123 18815696\n",
+      "scrubbed_text": "<pid> 18815696\n",
+      "command_sha256": "b3e5e6cef798b34a8bb78493558dd870a8b3d92b9e629044a476fc0bb1017753",
+      "raw_sha256": "8a6762977c74bd39764f31142e553e8046290d9038d5ac431d7ff182077ba636",
+      "scrubbed_sha256": "bef0c9b5feae603e6c1701e2b1ca726a0170570663969defa9f66735e2e04f64",
+      "source_sha256": "bd9a731cf22d1c031bb4158bdb7ac6e276577a81781054602c70160a16894b44"
+    },
+    {
+      "name": "footprint",
+      "command": "/usr/bin/footprint -p 50123",
+      "raw_text": "fak [50123]: 64-bit    Footprint: 33441 MB (16384 bytes per page)\n\nAuxiliary data:\n    phys_footprint:      33441 MB\n    phys_footprint_peak: 33441 MB\n",
+      "scrubbed_text": "fak [<pid>]: 64-bit    Footprint: 33441 MB (16384 bytes per page)\n\nAuxiliary data:\n    phys_footprint:      33441 MB\n    phys_footprint_peak: 33441 MB\n",
+      "command_sha256": "f6818cc40d07e856bf89b2c8527bb2bc2a632cb5ab9a8d2925fd0103f660cfa7",
+      "raw_sha256": "26aa6827ab092d424ae6893918dded1ed92325510fdf8a226bbda3711e07144f",
+      "scrubbed_sha256": "eccf8d9750c318313c8e0816a7e025709e38dc9ef8542d251d032c266b5f03fc",
+      "source_sha256": "8df5e23847c943843461747cd93e53487354d0495dd8530ec30871f9247a02d0"
+    },
+    {
+      "name": "swapusage",
+      "command": "/usr/sbin/sysctl vm.swapusage",
+      "raw_text": "vm.swapusage: total = 5120.00M  used = 2817.50M  free = 2302.50M  (encrypted)\n",
+      "scrubbed_text": "vm.swapusage: total = 5120.00M  used = 2817.50M  free = 2302.50M  (encrypted)\n",
+      "command_sha256": "c4224deb2e0cca201f8e5a9220104141bf9408cc2198439889cd37c273f0b4f2",
+      "raw_sha256": "8fdb38aea2d0e3212a3cf041d4b5cb78861a1bd5c21c145a94944900d94aee68",
+      "scrubbed_sha256": "8fdb38aea2d0e3212a3cf041d4b5cb78861a1bd5c21c145a94944900d94aee68",
+      "source_sha256": "531d3a35ee3d41af3937c749c1f8842182f9372f380b0670ee5174a1516613a9"
+    },
+    {
+      "name": "memory_pressure",
+      "command": "/usr/bin/memory_pressure -Q",
+      "raw_text": "System-wide memory free percentage: 42%\n",
+      "scrubbed_text": "System-wide memory free percentage: 42%\n",
+      "command_sha256": "8bff8d680c8984ddf4e22e566dd3293c15daa638836f51bfaf34c707408627a0",
+      "raw_sha256": "22a24264956b0fe3c10703c19a025ef76ddd381d53716ba99693df9d17c104e2",
+      "scrubbed_sha256": "22a24264956b0fe3c10703c19a025ef76ddd381d53716ba99693df9d17c104e2",
+      "source_sha256": "8817a2ae0389255a85303e449f94962c063847d0d8a802b00ddf899c0b0b08a3"
+    },
+    {
+      "name": "memorystatus",
+      "command": "/usr/sbin/sysctl -n kern.memorystatus_level",
+      "raw_text": "42\n",
+      "scrubbed_text": "42\n",
+      "command_sha256": "2024153f4e4f9b78908e16b6f6ec8f4e8bcdd0260092ef6d6e7565052250e032",
+      "raw_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0",
+      "scrubbed_sha256": "084c799cd551dd1d8d5c5f9a5d593b2e931f5e36122ee5c793c1d08a19839cc0",
+      "source_sha256": "79d12aab993ba7051f953b6a5335b1b7da7efc3cfc4ea2330a77ba1f6f63c203"
+    }
+  ],
+  "bundle_sha256": "548e222bf9ea2249bb2e70d2897d012ad8e95cfebe8e955939d04734f474c9c5"
+}
