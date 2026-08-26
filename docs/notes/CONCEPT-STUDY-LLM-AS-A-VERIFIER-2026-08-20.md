@@ -370,3 +370,53 @@ community channels were not accessed, and TurboAgent is a separate repository.
 No material technique remains unclassified. The one immediate gap is the
 offline selector replay; algorithm-specific work is deliberately gated on its
 measurement.
+
+## 2026-08-25 exhaustive inventory refresh (#8991)
+
+The denominator is now pinned by
+[`docs/research/inventory/llm-as-a-verifier-llm-as-a-verifier.json`](../research/inventory/llm-as-a-verifier-llm-as-a-verifier.json),
+generated with `fak study-inventory` from the detached checkout at
+`8db8a114355a9d7fdf9a8d1d5c87f6aeebd18770`. The map walks all 938 regular files
+and six top-level subsystems while skipping only `.git`. It records 916 runtime/data
+files, zero test files, eight documentation files, and 735,806 text lines. The large
+committed trajectory/result corpus is runtime evidence, not regression coverage.
+No standalone architecture/design path, test/fixture path, or roadmap file exists at
+the pin; those classes are checked absent rather than silently omitted.
+
+Non-tree read-back at `2026-08-25T00:00:00Z` covered all forge surfaces visible at
+the checked revision: 9 issues (5 open, 4 closed), 13 pull requests (9 open, 3
+merged, 1 closed), zero discussions, zero GitHub Releases, and zero tags. The latest
+commit remains the checked revision, so no newer source tree was mixed into the study.
+The post-study tracker activity reinforces, rather than changes, the earlier defect
+findings: upstream issues #14/#21 and PRs #8/#17 cover lost ring aggregation and weak
+cache identity; issues #5/#10 and PRs #7/#11 cover silent flat-score extraction;
+issue #9 and PR #18 document missing release artifacts. Issue #1/PR #19 propose
+criterion decomposition and weighting. These are upstream roadmap signals, not
+shipped behavior. `LICENSE` and `pyproject.toml` still identify MIT provenance; the
+repository has no release artifact whose source correspondence can be independently
+checked.
+
+FAK self-queries for provenance-bound offline selection, best-of-N evidence,
+content-addressed verifier caches, and pairwise ring/tournament selection found
+native cache/provenance, routing, trajectory-control, and evidence-hierarchy
+substrates, but no native pairwise tournament capability. That does not create a new
+implementation ticket: the candidate matrix above still routes the one useful spine
+to #8230 and keeps pairwise scoring/PPT behind its measured trigger. #4235 remains
+the deduplicated owner for tournament work. #8991 is the inventory/readiness owner;
+no additional FAK issue survives this refresh.
+
+### Refresh candidate and follow-on decisions
+
+| Observed source signal | FAK decision | Owner / follow-on |
+|---|---|---|
+| Ring scores are dropped without a cache path; duplicate-edge behavior remains ambiguous | Do not port. Require cached/uncached equivalence and fixed-score bias witnesses before reconsidering. | Existing optional tournament seam #4235; no new issue. |
+| Cache keys omit problem/candidate content | Borrow the provenance requirement, not the implementation: immutable inputs and content identity are acceptance criteria. | Existing offline replay spine #8230. |
+| Empty/reasoning-parser score extraction can silently become `0.5` | Keep visible errors/ties and immutable raw-result evidence; reject silent neutral fallback. | Acceptance criterion for #8230; no standalone issue. |
+| Weighted/decomposed criteria are proposed but unshipped | Stay minimal until the replay can ablate criteria and repeats against absolute `ScoreVotes`. | Dated review after #8230 evidence. |
+| No tests, tags, or GitHub Releases at the pin | Treat source and benchmark claims as study evidence only, never release-grade proof. | Recheck on a tagged release or material source revision through the monitored row. |
+
+Completeness critic: the tree walk, full history at the pin, changelog, README,
+runtime/data corpus, checked-absent classes, complete issue/PR/discussion counts,
+release/tag absence, license provenance, FAK self-query, candidate adjudication, and
+issue ownership are all explicit. The study does not claim that GitHub state after
+the observation timestamp or private/unpublished artifacts were inspected.
