@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **140** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **135** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **111** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 14; `policy_regulation` 5; `serving_system` 11; `standard` 2; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 74; `vendor_claim` 19; `reported_observation` 11; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 99; `medium_high` 32; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **140/140 published; 140/140 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **146** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **141** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **116** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 14; `policy_regulation` 5; `serving_system` 17; `standard` 2; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 75; `vendor_claim` 20; `reported_observation` 11; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 10; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 100; `medium_high` 37; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **146/146 published; 146/146 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 140 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 146 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -125,6 +125,8 @@ shipment evidence rather than only vendor roadmaps.
 batching assumptions, queueing, and several workload traces. The corpus recognizes that
 batch opportunities depend on arrival, lengths, SLOs, hardware, and tenant policy.
 
+**Present but incomplete:** phase/operator autoscaling, token-work signals, hybrid aggregated/disaggregated scheduling, and production-scale heterogeneous coordination now have explicit evidence envelopes.
+
 **Missing or shallow:** comparable production distributions for batch size, queue wait,
 SLO class, cancellation, priority, fairness, admission, and cross-tenant interference;
 policy prevalence by lab/cloud; scheduler behavior during failures and regional bursts.
@@ -136,6 +138,8 @@ queue fields, stratified by model, tenant, hardware, region, and SLO.
 
 **Present:** llm-d/Google, NVIDIA Dynamo, FineServe, and related system evidence make
 prefill/decode separation, topology, and KV transfer explicit product surfaces.
+
+**Present but incomplete:** Dynamo/llm-d product surfaces, TaiChi SLO-dependent architecture results, TokenScale burst response, and HeteroScale production-scale coordination.
 
 **Missing or shallow:** installed production share, transfer sizes, topology-specific
 break-even curves, failure domains, decode imbalance, WAN/regional use, and matched
@@ -278,10 +282,10 @@ dates, affected hardware/services, implementation status, and later amendments.
 
 | Evidence tier | Current condition | Consequence |
 |---|---|---|
-| Production measurement/observation | **16 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
-| Benchmark/synthetic | **11 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **74 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
-| Vendor claims | **19 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
+| Production measurement/observation | **17 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
+| Benchmark/synthetic | **14 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
+| Official statements | **75 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Vendor claims | **20 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **17 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
 

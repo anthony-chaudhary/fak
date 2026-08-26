@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T18:22:00-07:00",
-  "issue": 9300,
+  "updated_at": "2026-08-26T18:39:00-07:00",
+  "issue": 9317,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 140,
+    "entry_count": 146,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -119,6 +119,7 @@
       "Google DeepMind",
       "Google internal developer tools",
       "Groq",
+      "HeteroScale production study",
       "Huawei Cloud Pangu",
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
@@ -146,6 +147,7 @@
       "NVIDIA / SchedMD",
       "NVIDIA DSX",
       "NVIDIA Dynamo",
+      "NVIDIA Dynamo Planner",
       "Nebius Group",
       "OpenAI",
       "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
@@ -155,6 +157,7 @@
       "OpenAI / Oracle / Related Digital / DTE",
       "OpenAI / Oracle / SoftBank",
       "OpenAI / Stargate",
+      "Operator-level LLM autoscaling study",
       "Oracle",
       "Robust KV cache management study",
       "SK hynix",
@@ -167,8 +170,10 @@
       "Singapore IMDA",
       "TIE scheduling study",
       "TSMC",
+      "TaiChi serving study",
       "Technology Innovation Institute",
       "Tencent",
+      "TokenScale autoscaling study",
       "TraceLab coding-agent corpus",
       "U.S. AI datacenter pipeline",
       "U.S. Bureau of Industry and Security",
@@ -5250,6 +5255,235 @@
       "fak_implications": [
         "Track training provenance, openness, jurisdiction, and deployment location separately.",
         "Benchmark reasoning output tails and serving footprint rather than inferring efficiency from parameter count."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "dynamo-planner-autoscaling-2026",
+      "category": "serving_system",
+      "entity": "NVIDIA Dynamo Planner",
+      "topic": [
+        "autoscaling",
+        "prefill_decode",
+        "traffic_prediction",
+        "sla",
+        "performance_model"
+      ],
+      "published_at": "2026-07-20",
+      "event_at": "2026-07-20",
+      "source_title": "Dynamo Planner Guide",
+      "source_url": "https://docs.nvidia.com/dynamo/components/planner/planner-guide",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "NVIDIA documents Dynamo Planner as an autoscaling controller that separately adjusts prefill and decode replica counts using traffic signals or prediction and engine performance models to target TTFT and inter-token-latency SLAs.",
+      "quantified": {},
+      "assumptions": [
+        "Disaggregated serving requires coordinated phase-specific scaling rather than one monolithic replica count."
+      ],
+      "contradictions_or_limits": [
+        "Documentation describes controller behavior but does not prove general SLO attainment, forecast accuracy, cold-start cost, or optimality across workloads.",
+        "Performance-model error, provisioning delay, network bottlenecks, and failure handling remain envelope-specific."
+      ],
+      "fak_implications": [
+        "Represent prefill and decode pools, forecast horizon, provisioning latency, and TTFT/ITL targets explicitly.",
+        "Count controller and cold-start overhead in autoscaling evidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "llmd-autoscaling-guide-2026",
+      "category": "serving_system",
+      "entity": "llm-d / Google",
+      "topic": [
+        "autoscaling",
+        "prefix_cache",
+        "routing",
+        "kubernetes",
+        "hardware_heterogeneity"
+      ],
+      "published_at": "2026-08-06",
+      "event_at": "2026-08-06",
+      "source_title": "llm-d Well-Lit Path Guides",
+      "source_url": "https://github.com/llm-d/llm-d/blob/main/guides/README.md",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "llm-d documents benchmarked deployment recipes for prefix-cache-aware routing, disaggregation, KV offload, and proactive autoscaling, while warning that the manifests are starting points rather than configurations for every deployment.",
+      "quantified": {},
+      "assumptions": [
+        "Kubernetes-native serving composes router, model-service, cache, and autoscaling controllers rather than one engine process."
+      ],
+      "contradictions_or_limits": [
+        "Recipes and benchmarks do not establish production prevalence or universal gains.",
+        "Hardware, workload, SLO, cache state, and operational maturity must match before comparison."
+      ],
+      "fak_implications": [
+        "Treat serving features as composable but independently measurable controls.",
+        "Retain configuration, version, hardware, and workload receipts for every result."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "operator-autoscaling-unit-2026",
+      "category": "serving_system",
+      "entity": "Operator-level LLM autoscaling study",
+      "topic": [
+        "autoscaling",
+        "scaling_unit",
+        "prefill_decode",
+        "goodput",
+        "slo"
+      ],
+      "published_at": "2026-08-13",
+      "event_at": "2026-08-13",
+      "source_title": "Operator-level Provisioning and Autoscaling for LLM Serving",
+      "source_url": "https://arxiv.org/html/2608.13499v1",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "This study asks whether the scaling unit should be a monolithic model replica or finer-grained inference operators, arguing that phase/operator demand and SLOs can diverge enough to make monolithic scaling inefficient.",
+      "quantified": {},
+      "assumptions": [
+        "The correct autoscaling unit depends on model partition, phase demand, traffic composition, SLO, and provisioning overhead."
+      ],
+      "contradictions_or_limits": [
+        "Preprint evaluation is not neutral multi-provider production evidence.",
+        "Finer scaling adds orchestration, transfer, fragmentation, and model-state management overhead."
+      ],
+      "fak_implications": [
+        "Benchmark monolithic, phase-level, and operator-level scaling under the same trace and SLO.",
+        "Admit finer-grained scaling only after control/transfer overhead and recovery are net-positive."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "taichi-hybrid-pd-2025",
+      "category": "serving_system",
+      "entity": "TaiChi serving study",
+      "topic": [
+        "prefill_decode",
+        "aggregation",
+        "disaggregation",
+        "hybrid_scheduling",
+        "goodput",
+        "slo"
+      ],
+      "published_at": "2025-08-04",
+      "event_at": "2025-08-04",
+      "source_title": "Prefill-Decode Aggregation or Disaggregation? Unifying Both for Goodput-Optimized LLM Serving",
+      "source_url": "https://arxiv.org/abs/2508.01989",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "TaiChi reports that aggregation can favor tight TTFT/relaxed TPOT, disaggregation can favor strict TPOT/relaxed TTFT, and a hybrid can outperform both under balanced SLOs, with up to 77% reported goodput improvement.",
+      "quantified": {
+        "reported_goodput_improvement_pct_up_to": 77
+      },
+      "assumptions": [
+        "Prefill/decode architecture is an SLO- and workload-dependent control, not a universal binary choice."
+      ],
+      "contradictions_or_limits": [
+        "The maximum gain is benchmark-specific and depends on baselines, hardware, model, request lengths, and SLO mix.",
+        "Hybrid scheduling adds complexity and does not prove production prevalence."
+      ],
+      "fak_implications": [
+        "Sweep TTFT and TPOT jointly when selecting aggregated, disaggregated, or hybrid serving.",
+        "Reject architecture claims that report throughput without SLO-satisfied goodput."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tokenscale-autoscaling-2025",
+      "category": "serving_system",
+      "entity": "TokenScale autoscaling study",
+      "topic": [
+        "autoscaling",
+        "token_velocity",
+        "prefill_decode",
+        "bursts",
+        "convertible_decoders"
+      ],
+      "published_at": "2025-12-03",
+      "event_at": "2025-12-03",
+      "source_title": "TokenScale: Timely and Accurate Autoscaling for Disaggregated LLM Serving with Token Velocity",
+      "source_url": "https://arxiv.org/abs/2512.03416",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "TokenScale proposes token velocity as a cross-stage backpressure signal and convertible decoders as burst buffers; its production-trace experiments report SLO attainment rising from 50–88% to 80–96% and cost reductions of 4–14% against selected systems.",
+      "quantified": {
+        "baseline_slo_attainment_pct_range": [
+          50,
+          88
+        ],
+        "reported_slo_attainment_pct_range": [
+          80,
+          96
+        ],
+        "reported_cost_reduction_pct_range": [
+          4,
+          14
+        ]
+      },
+      "assumptions": [
+        "Request count and GPU utilization can lag token-level work and phase imbalance in disaggregated serving."
+      ],
+      "contradictions_or_limits": [
+        "Results are an experimental replay, not a production deployment measurement.",
+        "Token velocity and convertible decoders may behave differently under model churn, multimodality, failures, and heterogeneous interconnect."
+      ],
+      "fak_implications": [
+        "Evaluate token-work and queue/backpressure metrics alongside requests and utilization.",
+        "Measure decoder conversion delay and lost decode capacity during bursts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "heteroscale-production-2025",
+      "category": "serving_system",
+      "entity": "HeteroScale production study",
+      "topic": [
+        "autoscaling",
+        "heterogeneous_hardware",
+        "prefill_decode",
+        "topology",
+        "production_measurement"
+      ],
+      "published_at": "2025-08-27",
+      "event_at": "2025-08-27",
+      "source_title": "Taming the Chaos: Coordinated Autoscaling for Heterogeneous and Disaggregated LLM Inference",
+      "source_url": "https://arxiv.org/abs/2508.19559",
+      "source_kind": "preprint",
+      "evidence_class": "production_measurement",
+      "confidence": "medium_high",
+      "claim": "HeteroScale reports deployment across tens of thousands of production GPUs, coordinating heterogeneous topology and prefill/decode scaling; it reports a 26.6 percentage-point increase in average GPU utilization while maintaining SLOs.",
+      "quantified": {
+        "production_gpu_scale": "tens_of_thousands",
+        "reported_gpu_utilization_increase_percentage_points": 26.6
+      },
+      "assumptions": [
+        "Large production fleets need topology-aware placement and coordinated phase scaling across heterogeneous hardware."
+      ],
+      "contradictions_or_limits": [
+        "The paper does not make the underlying proprietary fleet trace and full economics independently reproducible.",
+        "Reported gains depend on baseline, fleet composition, workload, network, and operational policy."
+      ],
+      "fak_implications": [
+        "Treat hardware generation, network topology, and phase pool balance as autoscaler state.",
+        "Label this as reported production measurement and require matched local reproduction before claiming analogous gains."
       ],
       "rumor": {
         "is_rumor": false

@@ -85,3 +85,37 @@ Public sources still do not adequately reveal:
 
 Until these are measured, benchmark sweeps must expose the assumption ranges rather than
 present one guessed distribution as “the frontier workload.”
+
+## Serving and cluster mechanism envelope
+
+| Mechanism | Evidence now indexed | When it may help | Required counter-evidence before defaulting |
+|---|---|---|---|
+| Monolithic autoscaling | Simple model replicas remain the common baseline. | Stable model/workload mix; low control complexity; fast replica start. | Phase imbalance, long model load, heterogeneous hardware, or SLOs that require separate prefill/decode capacity. |
+| Phase-specific autoscaling | NVIDIA Dynamo Planner scales prefill/decode replicas; HeteroScale reports production coordination at tens-of-thousands-GPU scale. | Prefill and decode demand diverge and topology/forecast signals are accurate. | Forecast error, cold-start and model-load time, network bottlenecks, failure recovery, and pool fragmentation. |
+| Operator-level scaling | 2026 operator-level study questions model replica as the scaling unit. | Fine-grained operators have separable bottlenecks and low state/transfer overhead. | Orchestration, model-state duplication, transfer, recovery, and debugging cost exceed saved capacity. |
+| Aggregated prefill/decode | TaiChi reports an advantage under tight TTFT and relaxed TPOT regimes. | Interference is tolerable; first-token latency dominates; transfer overhead would be high. | Decode jitter, long outputs, strict TPOT, and queue interference. |
+| Disaggregated prefill/decode | Dynamo/llm-d/TaiChi/TokenScale expose separate pools and KV transfer. | Strict decode SLO, phase-specific hardware, reusable prefill, or scaling asymmetry beats transfer/control cost. | Short prompts/outputs, weak fabric, small batches, KV transfer, extra failure domains, and underfilled pools. |
+| Hybrid aggregation/disaggregation | TaiChi reports up to 77% benchmark goodput gain under balanced SLOs. | Traffic mixes contain both TTFT- and TPOT-sensitive requests and the scheduler can shift latency safely. | Maximum result is not universal; baseline, SLO mix, hardware, and scheduler overhead must match. |
+| Token-work autoscaling | TokenScale reports higher SLO attainment and 4–14% lower cost in production-trace experiments. | Request counts/GPU utilization lag token work and burst backpressure. | Metric robustness under model churn, multimodality, failures, speculative decoding, and heterogeneous accelerators. |
+| Prefix-aware routing and KV offload | llm-d, Dynamo, CacheRoute, Aliyun, Chutes, and Copilot evidence. | Prefix reuse is predictable enough to beat load imbalance and transfer/index overhead. | Cache staleness, privacy, fragmentation, routing skew, multi-tier latency, and policy-dependent realized hits. |
+| Topology-aware heterogeneous placement | Dynamo DSX, AWS topology scheduling, HeteroScale, and training reliability evidence. | Communication-heavy phases and mixed accelerators/network tiers dominate. | Placement delay, fragmentation, gang-size constraints, failure domain coupling, and cross-generation quality/performance differences. |
+| Tenant fairness/admission | Multi-tenant admission studies and token-pool research expose responsibility boundaries. | Shared fleets have priorities, quotas, budgets, or noisy-neighbor risk. | Per-tenant objectives, starvation, burst credits, cached-work ownership, cancellation, and auditability are still under-measured in production. |
+
+### Default decision record
+
+For every serving experiment, record:
+
+```text
+model + precision + quality
+hardware SKU/count + topology + fabric
+aggregated / disaggregated / hybrid phase layout
+replica/operator scaling unit
+arrival, prompt, output, prefix, tenant, and failure distributions
+batch/admission/fairness policy
+TTFT / TPOT(ITL) / E2E SLO and attainment
+KV transfer, cache indexing, control, startup, recovery, and verification overhead
+accepted goodput / cost / energy
+```
+
+The mechanism with the highest peak throughput is not necessarily the mechanism with the
+highest SLO-satisfied, quality-constrained goodput.
