@@ -346,6 +346,25 @@ func GEMVGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []
 	return q4out, q8out, nil
 }
 
+// FusedMLP runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) * (up·x) )
+// — in ONE Metal command buffer, keeping the intermediate-wide gate/up/inter resident on the GPU
+// (only x and y cross the boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==
+// down.In (=I); len(x)>=H, len(y)>=H. Returns false on a shape mismatch (caller uses the per-matmul
+// path). The activation is silu — the caller must gate on a non-GELU config.
+func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
+	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
+		return false
+	}
+	if gate.In != up.In || gate.Out != up.Out || down.In != gate.Out || down.Out != gate.In {
+		return false
+	}
+	if len(x) < gate.In || len(y) < down.Out {
+		return false
+	}
+	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+	return true
+}
+
 // Q6KWeight is a handle to a raw Q6_K weight matrix [Out, In] resident on the GPU (210-B
 // super-blocks). In must be a multiple of 256; the resident byte cost is Out*(In/256)*210. It
 // backs the fused MLP's down_proj when a q4_k_m GGUF quantizes down_proj to Q6_K. The id is offset
