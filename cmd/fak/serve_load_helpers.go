@@ -326,17 +326,16 @@ func resetOnBudgetHook(enabled bool, freshContextTokens int) gateway.ResetOnBudg
 const metalGGUFObservedPeakMultiplier = 3.5
 
 const (
-	// streamedQ4KMeasuredPeakBytes is the maximum sampled RSS from the current-head,
-	// exact-checkpoint native Metal control receipt at
-	// docs/_witnesses/issue-CHILD-qwen38-startup-bisect/bisect.json, committed as
-	// 4ffff11fc3cb4d363cb187fad364b7a575b967b5. The receipt records 17,895,520 KiB,
-	// engine=inkernel, backend=metal, no fallback, no llama.cpp, and no swap growth.
-	streamedQ4KMeasuredPeakBytes int64 = 17895520 * 1024
+	// streamedQ4KMeasuredPeakBytes is the /usr/bin/time maximum resident set from
+	// the canonical no-FAK_Q4K_FREE_CPU receipt. The 36 GiB control reached
+	// readiness but grew swap by 7,681,930,691 bytes, so it is a refusal witness,
+	// not an admission receipt.
+	streamedQ4KMeasuredPeakBytes int64 = 22754885632
 
-	// Round the measured high-water mark up to the next whole GiB. This reserves
-	// 1,002,340,352 bytes above the control without pretending macOS's larger
-	// /usr/bin/time footprint field is allocated physical memory.
-	streamedQ4KMetalCapacityBytes int64 = 18 << 30
+	// The receipt derives the fail-closed bound by adding the observed peak swap
+	// delta to the 36 GiB host and rounding up to the next whole GiB. See
+	// docs/_witnesses/issue-8971-streamed-q4k-capacity/canonical-no-free-cpu.json.
+	streamedQ4KMetalCapacityBytes int64 = 44 << 30
 )
 
 func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak int64, refuse bool) {
