@@ -1,0 +1,2 @@
+{"type":"attachment","attachment":{"type":"hook_codex","durationMs":10,"hook":"pretool","sessionId":"session-1","turnId":"turn-1","callId":"call-1"}}
+{"type":"attachment","attachment":{"type":"hook_codex","durationMs":30,"hook":"stop","sessionId":"session-1","turnId":"turn-1"}}
