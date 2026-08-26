@@ -79,3 +79,9 @@ Self-query and raw source read-back split the existing surface cleanly:
 ## Completion boundary
 
 This study does not claim DSpark, P-EAGLE, MTP, or alias-drift protection are implemented in FAK. It only converts current upstream practice into three exact FAK tickets with pinned sources and local seams. Any speedup claim still needs matched model, tokenizer, weights, target verifier, sampling policy, device, workload, and quality evidence.
+
+## Executable candidate frontier: P-EAGLE parallel-depth source (#8939)
+
+`cmd/polymodelbench -selfcheck` now includes the named `p-eagle-parallel-depth-shape` arm. It makes one logical draft-source call per speculative round, returns `num_depths` future positions together, and feeds that chain to the existing fak-native `polymodel.SpecDecode` + `model.Session.VerifyForward` verifier. The `-bench -out` receipt records the actual engine (`fak-native/internal/model`), target and draft-source provenance, target verify rounds, the current sequential co-resident drafter's target rounds and draft-step cost, sequential steps avoided by the parallel source shape, positional `AcceptanceProfile`, mean acceptance length, and greedy token identity.
+
+This is an **optional draft-source candidate under #3197**, not a shipped speedup. Its proposer is a deterministic synthetic oracle used only to isolate shape and cost accounting. It contains no trained P-EAGLE weights, COD trainer, Qwen3.8 checkpoint result, CUDA run, latency measurement, or GPU claim. A future live claim requires a real Qwen3.8 P-EAGLE checkpoint on a sanctioned node with the receipt still naming the fak-native engine and checkpoint provenance.

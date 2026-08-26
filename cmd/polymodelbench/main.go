@@ -71,7 +71,7 @@ func main() {
 		fmt.Println("polymodelbench: OK — correctness witnesses + #535 bench harness (E/draft-cost, decode-lane utilization, residency hit-rate) all measured")
 		return
 	}
-	fmt.Println("polymodelbench: OK — host-many, decode-one, lossless cache-led MTP all verified")
+	fmt.Println("polymodelbench: OK — host-many, decode-one, lossless cache-led MTP, P-EAGLE parallel-depth shape all verified")
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +211,22 @@ func cacheLedMTP(quiet bool) bool {
 	return ok
 }
 
+func peagleParallelDepth(quiet bool) bool {
+	logf(quiet, "== 4. P-EAGLE SHAPE (parallel-depth draft source) ==")
+	const N, depths = 24, 4
+	target := model.NewSynthetic(cfg(64, 4, 4, 2, 16, 128))
+	draft := model.NewSynthetic(cfg(32, 2, 2, 1, 16, 64))
+	r := measurePEagleShape(target, draft, bytesToIDs([]byte("parallel depth shape witness")), N, depths)
+	ok := r.TokenIdenticalToGreedy && r.LogicalDraftCalls == r.TargetVerifyRounds &&
+		r.SequentialDraftStepsAvoided == r.ProposedTokens && len(r.AcceptanceProfile) == depths
+	if !ok {
+		fmt.Fprintf(os.Stderr, "  P-EAGLE SHAPE FAILED: %+v\n", r)
+		return false
+	}
+	logf(quiet, "  %s: target-rounds=%d sequential-draft-steps-avoided=%d mean-acceptance=%.2f profile=%v engine=%s",
+		r.Name, r.TargetVerifyRounds, r.SequentialDraftStepsAvoided, r.MeanAcceptanceLength, r.AcceptanceProfile, r.Engine)
+	return true
+}
 func assertLossless(quiet bool, label string, got, want []int, n int) bool {
 	if len(got) < n || len(want) < n {
 		fmt.Fprintf(os.Stderr, "  %s: short decode got %d want %d\n", label, len(got), len(want))
@@ -291,7 +307,7 @@ func (v *targetVerify) rollback(evictKV int) {
 // the rejected draft positions from BOTH sessions with the bit-exact model.KVCache.Evict.
 // Greedy speculation is provably lossless, so the output must equal greedyDecode —
 // which only holds if Evict is bit-exact. Returns the output tokens plus counts.
-func specDecodeModel(target, draft *model.Model, prompt []int, n, k int) (out []int, drafted, accepted, evicted int) {
+func specDecodeModelRun(target, draft *model.Model, prompt []int, n, k int) polymodel.SpecDecodeRun {
 	tv := newTargetVerify(target, prompt)
 	ds := draft.NewSession()
 	dl := ds.Prefill(prompt) // draft's logits, threaded so it always reflects committed context
@@ -320,6 +336,11 @@ func specDecodeModel(target, draft *model.Model, prompt []int, n, k int) (out []
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  specDecodeModel: SpecDecode failed: %v\n", err)
 	}
+	return run
+}
+
+func specDecodeModel(target, draft *model.Model, prompt []int, n, k int) (out []int, drafted, accepted, evicted int) {
+	run := specDecodeModelRun(target, draft, prompt, n, k)
 	return run.Output, run.DraftedTokens, run.AcceptedDrafts, run.EvictKV
 }
 
