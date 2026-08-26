@@ -74,6 +74,29 @@ func TestCorrelateRetainsPowerShellConsoleHostCrash(t *testing.T) {
 	}
 }
 
+func TestCorrelateDoesNotAttributeOtherProcessEventsToFak(t *testing.T) {
+	sample := NewProcessSample(time.UnixMilli(2000), 42, time.UnixMilli(500), `C:\bin\fak.exe`, "sha", "rev", "guard", "g1", 10, 20, 3, 4)
+	for _, event := range []ResourceEvent{
+		{TimeMS: 1000, EventID: 1000, Name: "POWERSHELL_PROCESS_CRASH", App: "pwsh.exe"},
+		{TimeMS: 1000, EventID: 2004, Name: "LOW_VIRTUAL_MEMORY", Culprits: []ResourceCulprit{{Image: "pwsh.exe", PID: 42, Bytes: 100}}},
+		{TimeMS: 1000, EventID: 1014, Name: "RESOURCE_EXHAUSTION_1014"},
+	} {
+		got, ok := Correlate(event, []ProcessSample{sample})
+		if !ok || got.Status != "historical_unresolved" || len(got.Candidates) != 0 {
+			t.Fatalf("event=%+v got=%+v ok=%v", event, got, ok)
+		}
+	}
+}
+
+func TestCorrelateLowVirtualMemoryRequiresNamedFakPID(t *testing.T) {
+	sample := NewProcessSample(time.UnixMilli(2000), 42, time.UnixMilli(500), `C:\bin\fak.exe`, "sha", "rev", "guard", "g1", 10, 20, 3, 4)
+	event := ResourceEvent{TimeMS: 1000, EventID: 2004, Name: "LOW_VIRTUAL_MEMORY", Culprits: []ResourceCulprit{{Image: "fak.exe", PID: 42, Bytes: 100}}}
+	got, ok := Correlate(event, []ProcessSample{sample})
+	if !ok || got.Status != "identified" || len(got.Candidates) != 1 || got.Candidates[0].PID != 42 {
+		t.Fatalf("got=%+v ok=%v", got, ok)
+	}
+}
+
 func TestCorrelateRejectsUnrelated(t *testing.T) {
 	for _, event := range []ResourceEvent{{TimeMS: 1, EventID: 1000, Name: "POWERSHELL_PROCESS_CRASH", App: "other.exe"}, {TimeMS: 1, EventID: 1001, Name: "APPCRASH", App: "fak.exe"}, {TimeMS: 1, EventID: 1001, Name: "RADAR_PRE_LEAK_64", App: "other.exe"}, {Name: "RADAR_PRE_LEAK_64", App: "fak.exe"}} {
 		if _, ok := Correlate(event, nil); ok {

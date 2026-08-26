@@ -148,6 +148,12 @@ func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool)
 		if sample.Executable != "" && !strings.EqualFold(baseName(sample.Executable), "fak.exe") {
 			continue
 		}
+		if isLowVirtualMemory && !eventNamesFakPID(event.Culprits, sample.PID) {
+			continue
+		}
+		if isShellCrash || isResolver {
+			continue
+		}
 		candidates = append(candidates, sample)
 	}
 	sort.Slice(candidates, func(i, j int) bool {
@@ -164,6 +170,15 @@ func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool)
 	}
 	key := strings.Join([]string{strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID), strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), name}, "|")
 	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+}
+
+func eventNamesFakPID(culprits []ResourceCulprit, pid int) bool {
+	for _, culprit := range culprits {
+		if culprit.PID == pid && strings.EqualFold(culprit.Image, "fak.exe") {
+			return true
+		}
+	}
+	return false
 }
 
 func digest(value string) string {
