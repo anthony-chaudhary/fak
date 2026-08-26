@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessprotocol"
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
@@ -32,6 +33,9 @@ type Config struct {
 	ApprovalJournal func(ApprovalJournalEntry)
 	ApprovalTimeout time.Duration
 	Now             func() time.Time
+	Session         *sessionctl.CodexSession
+	StartMode       sessionctl.CodexStartMode
+	InputLease      string
 }
 
 type Adapter struct {
@@ -88,6 +92,19 @@ func New(cfg Config) (*Adapter, error) {
 }
 
 func (a *Adapter) Run(ctx context.Context, text string) error {
+	var execution sessionctl.CodexExecution
+	if a.cfg.Session != nil {
+		mode := a.cfg.StartMode
+		if mode == "" {
+			mode = sessionctl.CodexNew
+		}
+		var err error
+		execution, err = a.cfg.Session.Begin(mode, a.cfg.InputLease)
+		if err != nil {
+			return err
+		}
+		defer a.cfg.Session.Release(a.cfg.InputLease)
+	}
 	cmd := exec.CommandContext(ctx, a.cfg.Command, a.cfg.Args...)
 	cmd.Dir = a.cfg.Workspace
 	stdout, err := cmd.StdoutPipe()
@@ -119,6 +136,12 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 		e, err := p.Append(t, corr, cause, harnesskit.SensitivityPrivate, payload)
 		if err != nil {
 			return err
+		}
+		if a.cfg.Session != nil {
+			_, duplicate, err := a.cfg.Session.Append(execution.Epoch, fmt.Sprintf("%d:%s", execution.Epoch, e.EventID), t == harnesskit.EventMessageDelta, e)
+			if err != nil || duplicate {
+				return err
+			}
 		}
 		return a.cfg.Sink(e)
 	}
@@ -171,12 +194,28 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 	if err := json.NewEncoder(stdin).Encode(map[string]any{"jsonrpc": "2.0", "method": "initialized"}); err != nil {
 		return err
 	}
-	if err := write(2, "thread/start", map[string]any{"cwd": a.cfg.Workspace, "ephemeral": true, "approvalPolicy": "untrusted", "sandbox": "workspace-write"}); err != nil {
+	threadMethod := "thread/start"
+	threadParams := map[string]any{"cwd": a.cfg.Workspace, "ephemeral": a.cfg.Session == nil, "approvalPolicy": "untrusted", "sandbox": "workspace-write"}
+	if a.cfg.Session != nil && execution.Mode != sessionctl.CodexNew {
+		threadMethod = "thread/resume"
+		if execution.Mode == sessionctl.CodexFork {
+			threadMethod = "thread/fork"
+		}
+		threadParams["threadId"] = execution.ThreadID
+	}
+	if err := write(2, threadMethod, threadParams); err != nil {
 		return err
 	}
 	raw, err := wait(2)
 	if err != nil {
-		return fmt.Errorf("thread/start: %w", err)
+		if a.cfg.Session != nil && execution.Mode != sessionctl.CodexNew {
+			reason := sessionctl.CodexThreadIncompatible
+			if strings.Contains(strings.ToLower(err.Error()), "not found") || strings.Contains(strings.ToLower(err.Error()), "missing") {
+				reason = sessionctl.CodexThreadMissing
+			}
+			return &sessionctl.CodexRecoveryError{Reason: reason, Choices: []sessionctl.CodexStartMode{sessionctl.CodexNew, sessionctl.CodexFork}, Detail: err.Error()}
+		}
+		return fmt.Errorf("%s: %w", threadMethod, err)
 	}
 	var ts struct {
 		Thread struct {
@@ -189,6 +228,17 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 	a.mu.Lock()
 	a.threadID = ts.Thread.ID
 	a.mu.Unlock()
+	if a.cfg.Session != nil {
+		var err error
+		if execution.Mode == sessionctl.CodexFork {
+			err = a.cfg.Session.RecordFork(execution.Epoch, execution.ThreadID, ts.Thread.ID)
+		} else {
+			err = a.cfg.Session.RecordThread(execution.Epoch, ts.Thread.ID)
+		}
+		if err != nil {
+			return err
+		}
+	}
 	if err := write(3, "turn/start", map[string]any{"threadId": ts.Thread.ID, "cwd": a.cfg.Workspace, "input": []any{map[string]any{"type": "text", "text": text, "textElements": []any{}}}}); err != nil {
 		return err
 	}
