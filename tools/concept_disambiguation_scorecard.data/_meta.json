@@ -1374,24 +1374,11 @@
       "tokens": []
     },
     {
-      "classifications": [
-        {
-          "category": "incidental",
-          "reason": "Literal FAK_PREFILL_NO_ATTN environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new attention concept.",
-          "token": "fakprefillnoattn"
-        },
-        {
-          "category": "incidental",
-          "reason": "Literal FAK_QATTN_GQA environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new attention concept.",
-          "token": "fakqattngqa"
-        }
-      ],
+      "classifications": [],
       "id": "attention",
       "ignore": [
         "attentions",
         "attentive",
-        "fakprefillnoattn",
-        "fakqattngqa",
         "tattn"
       ],
       "known_tokens": [],
@@ -5574,18 +5561,18 @@
         },
         {
           "category": "incidental",
-          "reason": "Issue #8739 implementation symbol scoped to the established Codex logical-session continuity contract",
-          "token": "CodexSession"
+          "reason": "CLI adapter implementation symbol, not a distinct operator session-runtime concept",
+          "token": "runSessionJournalAudit"
         },
         {
           "category": "incidental",
-          "reason": "Issue #8739 persistence record scoped to the established Codex logical-session continuity contract",
-          "token": "CodexSessionState"
+          "reason": "test clock seam, not an operator-visible session-runtime concept",
+          "token": "sessionJournalAuditNow"
         },
         {
           "category": "incidental",
-          "reason": "Issue #8739 constructor scoped to the established Codex logical-session continuity contract",
-          "token": "OpenCodexSession"
+          "reason": "human-output renderer implementation symbol, not a session-runtime concept",
+          "token": "renderSessionJournalAudit"
         }
       ],
       "id": "session-runtime",
@@ -5598,8 +5585,6 @@
         "AttributeOutcomes",
         "BeginSessionEffect",
         "BytesPerSession",
-        "CodexSession",
-        "CodexSessionState",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "CoveredSessions",
@@ -5625,7 +5610,6 @@
         "NewSessionAffinityGateway",
         "NewSessionRow",
         "ObservedSessions",
-        "OpenCodexSession",
         "OutcomeEvidence",
         "OutcomeSession",
         "PROVIDER_SESSION_CLEAR",
@@ -5825,6 +5809,7 @@
         "recoveryInventory",
         "recoverySessionDiag",
         "refusalSafeSessionID",
+        "renderSessionJournalAudit",
         "renderSessionOpen",
         "repairMalformedLooseSessionRef",
         "reportFromSessions",
@@ -5846,6 +5831,7 @@
         "runSessionHistoryRefresh",
         "runSessionHistoryStatus",
         "runSessionIndexHealth",
+        "runSessionJournalAudit",
         "runSessionMine",
         "runSessionMove",
         "runSessionMoveAdmit",
@@ -5904,6 +5890,7 @@
         "sessionDiscoverySchema",
         "sessionEnvelopeRefusalReasonOrder",
         "sessionEnvelopeRefusalReasons",
+        "sessionJournalAuditNow",
         "sessionLocked",
         "sessionMemoryPattern",
         "sessionMoveDestination",
@@ -10412,6 +10399,11 @@
           "category": "incidental",
           "reason": "Decode sentinel for rejected extra JSON fields, not a reusable support-maturity concept",
           "token": "UnsupportedFields"
+        },
+        {
+          "category": "incidental",
+          "reason": "typed audit exclusion counter, not a provider support-maturity state",
+          "token": "ExcludedUnsupportedProvider"
         }
       ],
       "exclude": [
@@ -10443,6 +10435,7 @@
         "ErrUnsupported",
         "ErrUnsupportedColdStart",
         "ErrUnsupportedFormat",
+        "ExcludedUnsupportedProvider",
         "FormatUnsupported",
         "GuideCoverage",
         "INVALID_EVIDENCE",
@@ -11618,6 +11611,21 @@
           "category": "incidental",
           "reason": "Local CLI formatting helper for the #8777 safe-sync advisory, not a distinct render or materialization concept.",
           "token": "renderCommitSyncAdvisory"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private renderer helper; the documented concepts are the generated identity pages, not the helper name.",
+          "token": "rendercanonicalentry"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private renderer helper; the documented concepts are the generated identity pages, not the helper name.",
+          "token": "renderidentitypage"
+        },
+        {
+          "category": "incidental",
+          "reason": "specific CLI renderer, not a reusable render-materialization concept",
+          "token": "renderSessionJournalAudit"
         }
       ],
       "id": "render-materialize",
@@ -11691,6 +11699,7 @@
         "renderSchedLauncherTable",
         "renderSearchHuman",
         "renderSeatCells",
+        "renderSessionJournalAudit",
         "renderSessionOpen",
         "renderShellChoice",
         "renderSweepParkedText",
@@ -11698,7 +11707,9 @@
         "renderValidate",
         "renderVelocityLeg",
         "renderWorkpattern",
+        "rendercanonicalentry",
         "rendered",
+        "renderidentitypage",
         "rendering",
         "renderinkernelchatmlrequest",
         "renders",
@@ -12510,7 +12521,6 @@
         "BaselineDecodeMicroseconds",
         "BaselineTaskAccuracy",
         "BuildSweepPlan",
-        "CandidateAliases",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
         "CandidateMeanTokensPerS",
@@ -13463,11 +13473,6 @@
           "category": "incidental",
           "reason": "Server listener endpoint constrained to loopback networking, not an agent execution loop.",
           "token": "LoopbackEndpoint"
-        },
-        {
-          "category": "incidental",
-          "reason": "Literal FAK_QWEN35_PREFILL_TOKEN_LOOP environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new loop concept.",
-          "token": "fakqwen35prefilltokenloop"
         }
       ],
       "id": "loop",
@@ -13509,7 +13514,6 @@
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
-        "fakqwen35prefilltokenloop",
         "findcodexlooparchivemanifest",
         "isLoopbackFleetHost",
         "keepSuperloopAlive",
