@@ -228,3 +228,19 @@ Refresh this note when any pinned repository revision materially changes the cit
 when A2A publishes a stable generation/replay release, when the installed Claude Code
 version changes, or when #8488/#8490/#8334/#8168 land. The deterministic companion checker
 guards shape and privacy; it does not convert stale evidence into current evidence.
+## A2A exhaustive-inventory refresh — 2026-08-25
+
+Issue [#8997](https://github.com/anthony-chaudhary/fak/issues/8997) closes the denominator gap for the A2A row. The machine-readable map is [`docs/research/inventory/a2aproject-a2a.json`](../research/inventory/a2aproject-a2a.json), generated from the repository at pinned revision [`16ba52690519bf55b9388e34d4db356efa88aa51`](https://github.com/a2aproject/A2A/commit/16ba52690519bf55b9388e34d4db356efa88aa51) (commit time `2026-08-18T17:09:55Z`, tree `82b60edbf0f7887e8332bd45c91e1ac294f31d5e`).
+
+The refresh covered README/docs, architecture and binding governance, protobuf/JSON/OpenAPI runtime contracts, examples and generated conformance surfaces, all 613 commits reachable from the pin, 11 releases (latest at the cutoff: `v1.0.1`), the roadmap and source TODOs, and Apache-2.0 provenance. GitHub REST pagination filtered records by creation time at the commit cutoff: 756 issues (175 open, 581 closed) and 908 pull requests (46 open, 862 closed; 588 merged by the cutoff). Discussions cannot be historically snapshotted by GitHub; all 359 current discussions were denominator-checked on 2026-08-25 and candidate threads were bounded by creation date. The inventory records this limitation rather than presenting a current count as commit-time state. There is no dedicated in-tree tests/fixtures directory; examples, schemas, generated validators, and CI are the nearest executable conformance evidence. SDK implementations in linked repositories remain out of this repository row.
+
+Field-borrow self-query classified the candidates as follows:
+
+| Candidate | FAK decision | Follow-on |
+|---|---|---|
+| A2A v1 wire binding and Agent Card discovery | **DEFER**: FAK has no claimed public A2A binding; orchestration stays transport-neutral. | Scope a separate end-to-end binding spine with an external interoperability witness before implementation. |
+| Snapshot before streaming resubscribe | **ALREADY OWNED** by portable session/context continuity plus orchestration effect readback. | None. |
+| Task cancellation, authorization, and terminal-state discipline | **ALREADY OWNED ABOVE PROTOCOL** by session/task control, policy adjudication, leases, and witness gates. | Preserve these stronger semantics if a binding is added. |
+| JSON Schema fidelity, structured output, and extension governance | **CONDITIONAL** on an approved binding spine. | Treat as binding conformance work, not an independent capability. |
+
+No new borrow issue was filed: the distinct missing binding is a deferred product decision, while the other candidates are already owned or conditional on that decision. The durable follow-on is recorded in the map and registry instead of being promoted into an unsupported implementation claim.
