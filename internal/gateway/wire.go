@@ -365,6 +365,9 @@ type ChatRequest struct {
 	Regex                 json.RawMessage `json:"regex,omitempty"`
 	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
 	Stream                bool            `json:"stream,omitempty"`
+	// FakDecodeTrace opts into the fak-native token-commit trace. The gateway
+	// accepts it only for a buffered request routed to a capable native planner.
+	FakDecodeTrace bool `json:"fak_decode_trace,omitempty"`
 	// Fak carries explicit fak-only request extensions. nil keeps the OpenAI wire
 	// byte-compatible and does not enable any measurement work.
 	Fak *FakRequestExt `json:"fak,omitempty"`
@@ -569,6 +572,9 @@ type FakExt struct {
 	// NativeInferenceReceipt is emitted only for an explicitly requested,
 	// successfully measured in-kernel turn.
 	NativeInferenceReceipt *agent.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
+	// DecodeTrace is emitted only for an explicitly requested buffered fak-native
+	// turn. Its schema and engine fields make the provenance self-describing.
+	DecodeTrace *agent.NativeDecodeTrace `json:"decode_trace,omitempty"`
 }
 
 // CompactionContract is what a compaction boundary PROMISES the turn that continues past

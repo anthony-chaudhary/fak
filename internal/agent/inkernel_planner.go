@@ -56,6 +56,9 @@ type InKernelPlanner struct {
 	maxNew      int
 	temp        float64
 	seed        int64
+	// decodeTraceNow is an injectable monotonic clock used only by explicitly
+	// traced requests. nil selects time.Now; the default path never reads it.
+	decodeTraceNow func() time.Time
 
 	// qwenQ4KPrefillChunkTokens and its typed parse error are resolved once at
 	// construction. The error is request-gated to the exact resident hybrid path,
@@ -325,6 +328,10 @@ func inKernelRadixEvictionPolicyFromEnv() radixkv.EvictionPolicy {
 
 // Model reports the model id (for /v1/models provenance + the planner seam).
 func (p *InKernelPlanner) Model() string { return p.modelID }
+
+// NativeDecodeTraceSupported declares that this planner owns the token-commit
+// seam used by NativeDecodeTrace. It performs no model work.
+func (p *InKernelPlanner) NativeDecodeTraceSupported() bool { return true }
 
 // StreamingSupported enables the gateway's semantic SSE path for in-kernel runs.
 // The backend projects each completed turn as one content delta; tool lifecycle
@@ -874,8 +881,17 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		}
 	}
 	var measurement *nativeInferenceMeasurement
-	if sp.NativeInferenceReceipt {
-		measurement = &nativeInferenceMeasurement{startedAt: requestStarted}
+	if sp.NativeInferenceReceipt || sp.DecodeTrace {
+		measurement = &nativeInferenceMeasurement{
+			startedAt:         requestStarted,
+			inferenceDisabled: !sp.NativeInferenceReceipt,
+		}
+		if sp.DecodeTrace {
+			measurement.traceNow = p.decodeTraceNow
+			if measurement.traceNow == nil {
+				measurement.traceNow = time.Now
+			}
+		}
 	}
 	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
 		sb.Reset()
@@ -960,8 +976,17 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		ProviderCache: &compReuseEntry,
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 	}
-	if measurement != nil {
+	if sp.NativeInferenceReceipt {
 		comp.NativeInference = p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
+	}
+	if sp.DecodeTrace {
+		events := make([]NativeDecodeTraceEvent, len(measurement.traceEvents))
+		copy(events, measurement.traceEvents)
+		comp.DecodeTrace = &NativeDecodeTrace{
+			Schema: NativeDecodeTraceSchema,
+			Engine: NativeDecodeTraceEngine,
+			Events: events,
+		}
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a

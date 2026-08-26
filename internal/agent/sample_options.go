@@ -145,6 +145,15 @@ func WithNativeInferenceReceipt(enabled bool) SampleOpt {
 	}
 }
 
+// WithDecodeTrace asks a capable in-kernel planner to timestamp each committed
+// generated token. Unsupported planners must be rejected by the caller before
+// inference; they must not synthesize this evidence from response fragments.
+func WithDecodeTrace(enabled bool) SampleOpt {
+	return func(sp *SampleParams) {
+		sp.DecodeTrace = enabled
+	}
+}
+
 // WithGuidedDecode sets the per-request provider-native guided-decode carriers.
 // It is intentionally narrower than RawRequestBody/ExtraBody: callers pass only the
 // allowlisted structured-output fields parsed from the client request, and the
