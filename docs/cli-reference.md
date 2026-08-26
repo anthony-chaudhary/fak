@@ -33,6 +33,7 @@ fak native-performance --baseline metal.command-buffer-amortization > baseline.j
 fak native-performance --compare baseline.json --candidate candidate.json
 fak native-performance --profile profile.json
 fak native-performance --profile-next profile.json
+fak native-performance --gate gate-request.json
 fak native-performance --next
 fak native-performance --dot
 ```
@@ -1416,3 +1417,6 @@ fak server down --dir DIR --json
 ```
 
 `init` records immutable model and executable identity. `up` starts only the declared executable and waits within its readiness deadline; `status` reports the typed lifecycle state; `down` signals only the process proven by the instance receipt. Each subcommand emits JSON. Run `fak server` with no subcommand for the live usage text.
+
+
+--gate FILE strictly decodes an envelope-scoped gate request, compares the candidate to the last accepted witnessed receipt, and emits pass/investigate/regression plus suspect module revisions and a guarded bisect packet. Regression exits 3. Policy, cadence, override, and rollback evidence are defined in [the regression-gate contract](benchmarks/NATIVE-PERFORMANCE-REGRESSION-GATE.md).

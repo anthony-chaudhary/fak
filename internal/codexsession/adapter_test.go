@@ -9,8 +9,38 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/sessionctl"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
+
+func TestAdapterResumesPersistedThreadWithNewExecutionEpoch(t *testing.T) {
+	store := sessionctl.NewMemoryCodexStateStore()
+	session, err := sessionctl.OpenCodexSession(store, "logical-1", "codex-cli 1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := New(Config{Command: os.Args[0], Args: []string{"-test.run=TestFakeAppServer", "--"}, Workspace: t.TempDir(), Version: "codex-cli 1.2.3", RunID: "logical-1", Session: session, StartMode: sessionctl.CodexNew, InputLease: "browser-1", Sink: func(harnesskit.Envelope) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Run(context.Background(), "turn one"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := New(Config{Command: os.Args[0], Args: []string{"-test.run=TestFakeAppServer", "--"}, Workspace: t.TempDir(), Version: "codex-cli 1.2.3", RunID: "logical-1", Session: session, StartMode: sessionctl.CodexResume, InputLease: "browser-2", Sink: func(harnesskit.Envelope) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Run(context.Background(), "turn two"); err != nil {
+		t.Fatal(err)
+	}
+	state := session.State()
+	if state.SessionID != "logical-1" || state.Coordinates.ThreadID != "thread-raw-secret" || state.Epoch != 2 {
+		t.Fatalf("state = %+v", state)
+	}
+	if len(state.Events) != 18 {
+		t.Fatalf("events = %d, want two complete nine-event turns", len(state.Events))
+	}
+}
 
 func TestAdapterProjectsTypedAppServerStream(t *testing.T) {
 	helper := writeFakeServer(t, false)
@@ -98,7 +128,7 @@ func TestFakeAppServer(t *testing.T) {
 		case "initialize":
 			enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"userAgent": "codex-cli 1.2.3"}})
 		case "initialized":
-		case "thread/start":
+		case "thread/start", "thread/resume":
 			enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"thread": map[string]any{"id": "thread-raw-secret"}}})
 		case "turn/start":
 			enc.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": map[string]any{"turn": map[string]any{"id": "turn-raw-secret", "status": "inProgress", "items": []any{}}}})

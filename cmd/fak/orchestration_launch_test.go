@@ -104,6 +104,50 @@ func TestOrchestrationWorkerArgsPinResolvedSOLRoute(t *testing.T) {
 	}
 }
 
+func TestOrchestrationWorkerArgsUsePersistedHookTrust(t *testing.T) {
+	args := orchestrationWorkerArgs(orchestrationWorkerLaunchRequest{Model: "gpt-5.6-sol", Effort: "high"}, "audit.jsonl")
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "--dangerously-bypass-hook-trust") {
+		t.Fatalf("orchestration worker bypasses persisted project-hook trust: %q", joined)
+	}
+	for _, want := range []string{"--", "codex exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--json"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("worker args missing %q after narrowing hook trust: %q", want, joined)
+		}
+	}
+}
+
+func TestCodexOrchestrationHookTrustWitnessBlocksBothArms(t *testing.T) {
+	path := filepath.Join("..", "..", "experiments", "agent-live", "codex-orchestration-hook-trust-witness-2026-08-25.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var witness struct {
+		Status string `json:"status"`
+		Arms   []struct {
+			BypassFlag           bool   `json:"bypass_flag"`
+			ExitCode             int    `json:"exit_code"`
+			HookDispatchCount    int    `json:"hook_dispatch_count"`
+			HookDecision         string `json:"hook_decision"`
+			ProviderTrafficCount int    `json:"provider_traffic_count"`
+			ModelOutputCount     int    `json:"model_output_count"`
+			ToolCallCount        int    `json:"tool_call_count"`
+		} `json:"arms"`
+	}
+	if err := json.Unmarshal(data, &witness); err != nil {
+		t.Fatal(err)
+	}
+	if witness.Status != "passed" || len(witness.Arms) != 2 || witness.Arms[0].BypassFlag || !witness.Arms[1].BypassFlag {
+		t.Fatalf("witness does not contain matched persisted-trust and bypass arms: %+v", witness)
+	}
+	for _, arm := range witness.Arms {
+		if arm.ExitCode != 0 || arm.HookDispatchCount != 1 || arm.HookDecision != "block" || arm.ProviderTrafficCount != 0 || arm.ModelOutputCount != 0 || arm.ToolCallCount != 0 {
+			t.Fatalf("hook block did not stop arm before provider/model/tool traffic: %+v", arm)
+		}
+	}
+}
+
 func TestOrchestrationWorkerPromptIsBoundedReadOnly(t *testing.T) {
 	got := orchestrationWorkerPrompt(orchestrationWorkerLaunchRequest{Role: orchestration.Role{ID: "worker-1", Purpose: "inspect"}, TaskText: "find evidence"})
 	for _, want := range []string{"read-only", "Do not edit files", "find evidence"} {

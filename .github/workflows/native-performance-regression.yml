@@ -1,0 +1,37 @@
+name: native-performance-regression
+
+on:
+  schedule:
+    - cron: '17 9 * * 2'
+  workflow_dispatch:
+    inputs:
+      envelope:
+        description: Exact native-performance envelope ID
+        required: true
+        type: string
+      request_artifact:
+        description: Scrubbed gate-request artifact name produced by the sanctioned private campaign
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  request-sanctioned-campaign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: verify public/private boundary
+        shell: bash
+        run: |
+          test -n "${{ inputs.envelope || 'scheduled-envelope-roster' }}"
+          echo "Run the exact envelope through the sanctioned private bridge in docs/private-comms-channel.md."
+          echo "Raw hostnames, credentials, paths, and profiler logs remain private."
+      - name: consume scrubbed verdict when dispatched
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          echo "Expected private return artifact: ${{ inputs.request_artifact }}"
+          echo "Validate with: fak native-performance --gate <downloaded-request.json>"
+          echo "A regression exits 3 and publishes its guarded bisect packet."
