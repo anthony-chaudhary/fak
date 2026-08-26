@@ -154,6 +154,8 @@ func (p *PrefixSnapshot) Close() {
 }
 
 type Session struct {
+	qwen35GDNSequenceMu sync.Mutex
+	qwen35GDNSequence   *qwen35GDNSequenceOwner
 	cacheGeometryMu     sync.RWMutex
 	cacheGeometryFailed bool
 	cacheGeometryEpoch  uint64

@@ -33,7 +33,9 @@ After=local-fs.target network-online.target
 Wants=network-online.target
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=30s
 DynamicUser=yes
 RuntimeDirectory=fak
 RuntimeDirectoryMode=0700
@@ -62,6 +64,7 @@ MemoryMax=1G
 TasksMax=256
 CPUQuota=50%
 Environment=FAK_SERVICE_MANAGER=systemd-system
+Environment=FAK_SERVICE_NOTIFY=systemd
 Environment=FLEET_REG_DIR=` + state + `
 
 [Install]

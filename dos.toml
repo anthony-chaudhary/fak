@@ -76,7 +76,7 @@ concurrent = [
   "cachemeta", "ociartifact", "portabilityswitch",
   "cdb", "ctxmmu", "engine", "gateway", "ggufload", "grammar", "harvest", "ifc", "kernel",
   "kvmmu", "metrics", "model", "normgate", "plancfi", "policy", "preflight",
-  "provenance", "recall", "registrations", "shipgate", "steward", "studymonitor", "turnbench",
+  "provenance", "recall", "registrations", "shipgate", "steward", "studydrift", "studymonitor", "turnbench",
   "vdso", "witness",
   "cmd", "experiments", "docs", "tools", "visuals", "claude", "ci",
   "tokenizer",
@@ -599,6 +599,7 @@ recall = ["internal/recall/**"]
 registrations = ["internal/registrations/**"]
 shipgate = ["internal/shipgate/**"]
 steward = ["internal/steward/**"]
+studydrift = ["internal/studydrift/**"]
 studymonitor = ["internal/studymonitor/**"]
 turnbench = ["internal/turnbench/**"]
 vdso = ["internal/vdso/**"]
