@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 const RouterSchema = "fleet-issue-lane-router/1"
@@ -1334,11 +1336,7 @@ func labelNames(issue Issue) []string {
 			set[name] = true
 		}
 	}
-	out := make([]string, 0, len(set))
-	for name := range set {
-		out = append(out, name)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(set)
 	return out
 }
 
@@ -1380,11 +1378,7 @@ func routeSortLess(a, b IssueRoute) bool {
 // sortedKeys returns the keys of m in ascending order, for any map value type —
 // one generic helper the string-map and slice-map callers share.
 func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 

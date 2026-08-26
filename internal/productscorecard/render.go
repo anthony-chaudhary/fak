@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 var marks = map[string]string{
@@ -430,11 +432,7 @@ func formatValueFrom(value, legacyScore any) string {
 }
 
 func sortedMapKeys[T any](m map[string]T) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 

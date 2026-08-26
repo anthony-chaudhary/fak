@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 const DescriptorSchema = "fak-agents-schema/1"
@@ -170,10 +171,6 @@ func MarshalRowKeys() ([]string, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out, nil
 }

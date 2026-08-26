@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 )
 
@@ -521,11 +522,7 @@ func (s Store) GoalTopology(goalID string) ([][]Record, error) {
 			byRoot[row.RootRegistrationID] = append(byRoot[row.RootRegistrationID], row)
 		}
 	}
-	roots := make([]string, 0, len(byRoot))
-	for root := range byRoot {
-		roots = append(roots, root)
-	}
-	sort.Strings(roots)
+	roots := maputil.SortedKeys(byRoot)
 	out := make([][]Record, 0, len(roots))
 	for _, root := range roots {
 		group := byRoot[root]

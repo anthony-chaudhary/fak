@@ -1,8 +1,9 @@
 package hooks
 
 import (
-	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // claimreclass.go — the forward-only cure for an ALREADY-LANDED claim-honesty residual (#5434).
@@ -448,11 +449,7 @@ func reclassTypeUnwitnessed(typ string, paths []string) string {
 // here, a constant-to-token table (map[string]string) in the fail-closed ledger surfaces — and one
 // helper both can reach is what keeps the package from carrying two copies of the same four lines.
 func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 

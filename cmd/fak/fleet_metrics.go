@@ -14,6 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/fleetmetrics"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/providercost"
 	"github.com/anthony-chaudhary/fak/internal/session"
@@ -315,11 +316,7 @@ func renderFleetGoalExposition(w *promWriter, rows []sessionregistry.Record, usa
 		x.reused += row.ReusedTokens
 		cacheAttributed++
 	}
-	ids := make([]string, 0, len(goals))
-	for id := range goals {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := maputil.SortedKeys(goals)
 	states := []sessionregistry.State{sessionregistry.StateRegistered, sessionregistry.StateActive, sessionregistry.StateCompleted, sessionregistry.StateFailed, sessionregistry.StateCancelled, sessionregistry.StateLost, sessionregistry.StateReaped, sessionregistry.StateUnknown}
 	for _, id := range ids {
 		g := goals[id]
@@ -504,11 +501,7 @@ func renderFleetCanonicalGoalExposition(w *promWriter, rows []sessionregistry.Re
 		c.cachePrompt += row.PromptTokens
 		c.cacheReused += row.ReusedTokens
 	}
-	ids := make([]string, 0, len(canonical))
-	for id := range canonical {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := maputil.SortedKeys(canonical)
 	for _, id := range ids {
 		c, labels := canonical[id], []string{"goal_id", id}
 		w.gauge("fak_fleet_canonical_goal_info", "Canonical goal with at least one explicitly bound execution root.", 1, labels...)
@@ -1168,11 +1161,7 @@ func boundedDrop(n, max int) int {
 // non-generic sortedKeys over map[string]int in audit_diagnose.go; the fold indexes
 // aggregate pointers, so it needs its own).
 func fleetSortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 

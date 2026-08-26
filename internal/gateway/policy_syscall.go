@@ -36,6 +36,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // PolicyOpKind is the closed set of policy-mutation verbs carried as data over the
@@ -353,19 +354,11 @@ func allowWord(allow bool) string {
 }
 
 func policySortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 
 func policySortedTraces(m map[string]map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }

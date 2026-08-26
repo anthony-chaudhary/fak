@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // Schema is the stable schema tag stamped on the machine-readable result.
@@ -228,11 +228,7 @@ func NormalizeKind(kind string) (string, error) {
 // sortedKeys returns a map's keys sorted — a stable, deterministic ordering for the closed-set
 // error messages (Kinds, WorkflowKinds, Domains).
 func sortedKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 

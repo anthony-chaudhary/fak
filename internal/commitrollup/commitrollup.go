@@ -344,10 +344,6 @@ func difference(left, right map[string]bool) []string {
 }
 
 func sortedStringKeys(m map[string]string) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }

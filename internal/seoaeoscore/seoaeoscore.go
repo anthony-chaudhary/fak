@@ -30,6 +30,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
@@ -460,11 +461,7 @@ func ftoa(x float64) string {
 func itoa(n int) string { return strconv.Itoa(n) }
 
 func sortedStrings(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 

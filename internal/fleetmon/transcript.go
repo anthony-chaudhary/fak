@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // TranscriptSignal is the evidence a fleet monitor reads out of one worker's
@@ -357,10 +358,6 @@ func sortedKeys(m map[string]bool) []string {
 	if len(m) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }

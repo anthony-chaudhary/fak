@@ -41,6 +41,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 )
 
 // Schema is the payload contract version, following the repo's scorecard
@@ -289,11 +291,7 @@ func sortedKeys(m map[string]bool) []string {
 	if len(m) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/harnesscompose"
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/stackresolve"
 )
 
@@ -280,11 +281,7 @@ func checkCycles(components []Component) error {
 		state[id] = 2
 		return nil
 	}
-	keys := make([]string, 0, len(edges))
-	for id := range edges {
-		keys = append(keys, id)
-	}
-	sort.Strings(keys)
+	keys := maputil.SortedKeys(edges)
 	for _, id := range keys {
 		if err := visit(id); err != nil {
 			return err

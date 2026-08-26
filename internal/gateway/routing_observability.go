@@ -2,11 +2,11 @@ package gateway
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -169,11 +169,7 @@ func (m *gatewayMetrics) writeRoutingMetrics(b *strings.Builder) {
 // sortedKeys returns the keys of a string->int map in ascending order, for a stable
 // scrape over an open label set (rules use SortedRules' count order instead).
 func sortedKeys(m map[string]int) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
+	out := maputil.SortedKeys(m)
 	return out
 }
 
