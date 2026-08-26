@@ -39,6 +39,29 @@ func (f *recordingContextFallback) ApplyExistingContextPolicy(_ context.Context,
 	return ContextApplyResult{PlanID: plan.ID, Status: ContextApplyApplied}
 }
 
+func TestStableCoordinationIDContract(t *testing.T) {
+	for _, prefix := range []string{"ctx", "candidate"} {
+		want := prefix + "_689f6a627384c7dcb2dcc1487e540223"
+		if got := stableCoordinationID(prefix, []byte("identity")); got != want {
+			t.Fatalf("stableCoordinationID(%q) = %q, want %q", prefix, got, want)
+		}
+		if !validStableCoordinationID(want, prefix) {
+			t.Fatalf("validStableCoordinationID rejected %q", want)
+		}
+	}
+
+	for _, value := range []string{
+		"ctx_689f6a627384c7dcb2dcc1487e54022",
+		"ctx_689f6a627384c7dcb2dcc1487e5402230",
+		"ctx_689f6a627384c7dcb2dcc1487e54022z",
+		"candidate_689f6a627384c7dcb2dcc1487e540223",
+	} {
+		if validStableCoordinationID(value, "ctx") {
+			t.Fatalf("validStableCoordinationID accepted %q", value)
+		}
+	}
+}
+
 func TestContextAdapterWarmRemotePrefixWinsUntilShortHorizon(t *testing.T) {
 	now := time.Date(2026, time.August, 26, 12, 0, 0, 0, time.UTC)
 	snapshot := contextFixture(now)
