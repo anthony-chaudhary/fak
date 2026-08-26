@@ -55,6 +55,22 @@ func q4kQwen35HybridPrefillOK(cfg Config, promptLen int) bool {
 	return q8Qwen35HybridPrefillOK(cfg, promptLen)
 }
 
+// q4kQwen35HybridPrefillAtPositionOK preserves the established fresh-prefill
+// amortization threshold while admitting a smaller continuation chunk. Once a
+// session already owns prefix state, forcing a sub-threshold tail through decode
+// would abandon the resident panel path exactly where bounded chunking needs it.
+// Reusing the original gate at its threshold preserves every architecture and
+// diagnostic escape-hatch check before any cache or recurrent state is touched.
+func q4kQwen35HybridPrefillAtPositionOK(cfg Config, promptLen, base int) bool {
+	if promptLen <= 0 || base < 0 {
+		return false
+	}
+	if base == 0 {
+		return q4kQwen35HybridPrefillOK(cfg, promptLen)
+	}
+	return q4kQwen35HybridPrefillOK(cfg, qwen35HybridQBatchMinPrompt)
+}
+
 // hybridQ4KProj is the per-weight projection dispatch shared by every GEMM in the batched
 // resident-Q4_K hybrid prefill: q4kw-resident -> q4kGemm on the raw f32 activation Xf;
 // otherwise -> q8GemmDispatch on the pre-quantized Q8 panel Xq (CPU qGemm8 by default,
@@ -67,12 +83,18 @@ type hybridQ4KProj func(name string, Xf []float32, Xq *q8Panel) []float32
 // identical to calling proj per name — just fewer Metal command buffers (the prefill-wall lever).
 type hybridQ4KGroup func(names []string, Xf []float32, Xq *q8Panel) [][]float32
 
-func (s *Session) prefillQwen35HybridQ4K(ids []int) []float32 {
-	return s.headResident(s.prefillQwen35HybridQ4KHidden(ids))
-}
-
-func (s *Session) prefillQwen35HybridQ4KNoLogits(ids []int) {
-	_ = s.prefillQwen35HybridQ4KHidden(ids)
+// tryPrefillQwen35HybridQ4K is the production selection seam. A declined
+// geometry returns before the resident implementation can mutate KV, convolution,
+// or recurrent state; the caller retains the historical token-loop behavior.
+func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float32, bool) {
+	if !q4kQwen35HybridPrefillAtPositionOK(s.M.Cfg, len(ids), s.Cache.Len()) {
+		return nil, false
+	}
+	hidden := s.prefillQwen35HybridQ4KHidden(ids)
+	if !wantLogits {
+		return nil, true
+	}
+	return s.headResident(hidden), true
 }
 
 func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
@@ -239,6 +261,8 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 	if profile {
 		s.profileQwen35HybridQ4KPrefill(P, start, gemmTime, q4kTime, q8Time, q6kTime, q4kGPUCompute)
 	}
+	s.q4kHybridPrefillChunks++
+	s.q4kHybridPrefillLastBase = base
 	return xf
 }
 

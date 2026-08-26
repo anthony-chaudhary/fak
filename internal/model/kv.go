@@ -359,6 +359,14 @@ type Session struct {
 	// fused path. The counters are session-local; generation already owns a Session serially.
 	q4kExpertStats Q4KExpertStats
 
+	// q4kHybridPrefillChunks is an internal execution marker for the resident Qwen
+	// hybrid panel path. It advances only after a whole chunk has appended successfully;
+	// the paired base records the position that chunk actually started at. Keeping this
+	// separate from Cache.Len lets tests distinguish resident append from a numerically
+	// correct token-loop fallback without adding an operator-facing control.
+	q4kHybridPrefillChunks   int
+	q4kHybridPrefillLastBase int
+
 	// tap is an opt-in diagnostic dump hook for a single decode position. Nil on all
 	// normal sessions; tests and FAK_HIDDEN_TAP use it to capture hidden-state probes.
 	tap       *hiddenTap
@@ -800,8 +808,8 @@ func (s *Session) Prefill(ids []int) []float32 {
 		// refuses): batch each layer's projection/MLP GEMMs over the prompt panel while keeping
 		// the GDN recurrence, the resident-Q4K twin of the q8Qwen35HybridPrefillOK gate. Closes
 		// QWEN36-NATIVE-PERF-PLAN P3's per-token-fallback prefill wall.
-		if q4kQwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
-			return s.prefillQwen35HybridQ4K(ids)
+		if logits, used := s.tryPrefillQwen35HybridQ4K(ids, true); used {
+			return logits
 		}
 		return s.headResident(s.tokenLoopHidden(s.tokenHiddenQ, ids))
 	}
@@ -899,8 +907,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 			s.prefillBatchedQ4K(ids)
 			return
 		}
-		if q4kQwen35HybridPrefillOK(s.M.Cfg, len(ids)) && s.Cache.Len() == 0 {
-			s.prefillQwen35HybridQ4KNoLogits(ids)
+		if _, used := s.tryPrefillQwen35HybridQ4K(ids, false); used {
 			return
 		}
 		for _, id := range ids {
