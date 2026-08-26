@@ -1,6 +1,6 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T15:48:44-07:00",
+  "updated_at": "2026-08-26T16:27:00-07:00",
   "issue": 9269,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 96,
+    "entry_count": 112,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -71,12 +71,14 @@
     "entities": [
       "AI datacenter power architecture research",
       "AI optical interconnect sector",
+      "AI21 Labs",
       "AMD / Cerebras",
       "AWS",
       "AWS / Anthropic",
       "AWS / Cerebras",
       "AWS / NVIDIA",
       "AWS Bedrock",
+      "Ai2",
       "Alibaba Cloud / Aliyun",
       "Alibaba Cloud Tair",
       "Alibaba Qwen",
@@ -91,9 +93,13 @@
       "Anthropic / Microsoft / NVIDIA",
       "Anthropic / Mistral / Microsoft",
       "Anthropic / Nscale",
+      "Apple",
+      "Baidu",
       "BurstGPT v1.1",
+      "ByteDance Seed",
       "CacheRoute",
       "Chutes production trace study",
+      "Cohere",
       "CoreWeave",
       "CoreWeave / Nebius / Cerebras",
       "Data Center Watch",
@@ -103,6 +109,7 @@
       "Google",
       "Google / utility partners",
       "Google Cloud",
+      "Google DeepMind",
       "Google internal developer tools",
       "Groq",
       "IBM Cloud / Together AI",
@@ -117,6 +124,7 @@
       "Mistral AI",
       "Moonshot AI",
       "Multi-tenant prefix-cache admission study",
+      "NAVER Cloud",
       "NVIDIA",
       "NVIDIA / Coherent",
       "NVIDIA / Groq",
@@ -133,12 +141,18 @@
       "OpenAI / Oracle / SoftBank",
       "OpenAI / Stargate",
       "Robust KV cache management study",
+      "Sakana AI",
+      "Sarvam AI",
+      "Sea AI Lab",
       "SemiAnalysis",
       "ServeGen production study",
       "TIE scheduling study",
+      "Technology Innovation Institute",
+      "Tencent",
       "TraceLab coding-agent corpus",
       "U.S. AI datacenter pipeline",
       "U.S. datacenter sector",
+      "Z.ai / Zhipu AI",
       "llm-d / Google",
       "xAI",
       "xAI Grok 3"
@@ -3455,6 +3469,647 @@
       ],
       "fak_implications": [
         "Preserve claim and rebuttal; recompute only from project-level dates and state."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-gemini31-flash-lite-2026",
+      "category": "frontier_lab",
+      "entity": "Google DeepMind",
+      "topic": [
+        "model_release",
+        "serving_profile",
+        "long_context",
+        "accelerator",
+        "batching"
+      ],
+      "published_at": "2026-03-03",
+      "event_at": "2026-03-03",
+      "source_title": "Gemini 3.1 Flash-Lite - Model Card",
+      "source_url": "https://deepmind.google/models/model-cards/gemini-3-1-flash-lite/",
+      "source_kind": "official_model_card",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Google describes Gemini 3.1 Flash-Lite as a high-volume, latency-sensitive model with up to a 1M-token input context and 64K-token output, trained on TPU pods with JAX and ML Pathways and distributed through Vertex AI, AI Studio, the Gemini API, the Gemini app, and Search AI Overviews.",
+      "quantified": {
+        "input_context_tokens": 1000000,
+        "max_output_tokens": 64000,
+        "reported_output_tokens_per_second": 363,
+        "input_price_usd_per_million_tokens": 0.25,
+        "output_price_usd_per_million_tokens": 1.5
+      },
+      "assumptions": [
+        "Google operates differentiated frontier and throughput-oriented model tiers on a vertically integrated TPU/JAX serving stack.",
+        "High-volume product channels create demand for latency and cost optimization distinct from maximum-capability tiers."
+      ],
+      "contradictions_or_limits": [
+        "The model card does not disclose TPU generation, pod count, batch-size distribution, utilization, traffic share, or production concurrency.",
+        "Published speed and price values are vendor-reported and workload-specific; a 1M-token maximum does not establish production prevalence."
+      ],
+      "fak_implications": [
+        "Benchmark fast reasoning tiers separately from frontier tiers and include selectable reasoning/output budgets.",
+        "Keep TPU product claims separate from fak-native accelerator receipts and measure matched quality-constrained goodput."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meta-llama4-serving-envelope-2025",
+      "category": "frontier_lab",
+      "entity": "Meta",
+      "topic": [
+        "model_release",
+        "mixture_of_experts",
+        "serving_profile",
+        "quantization",
+        "long_context"
+      ],
+      "published_at": "2025-04-05",
+      "event_at": "2025-04-05",
+      "source_title": "The Llama 4 herd: The beginning of a new era of natively multimodal AI innovation",
+      "source_url": "https://ai.meta.com/blog/llama-4-multimodal-intelligence/",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Meta released Llama 4 Scout and Maverick as natively multimodal MoE models with 17B active parameters; Scout has 16 experts and was described as fitting on one H100 with Int4 quantization, while Maverick has 128 experts and fits on one H100 host.",
+      "quantified": {
+        "active_parameters": 17000000000,
+        "scout_experts": 16,
+        "maverick_experts": 128,
+        "scout_serving_h100_gpus_int4": 1
+      },
+      "assumptions": [
+        "MoE active-parameter count, expert routing, quantization, and host boundary materially change serving memory and throughput.",
+        "Open-weight models create a self-hosted serving envelope distinct from API-only frontier systems."
+      ],
+      "contradictions_or_limits": [
+        "Fit is not throughput, latency, quality, concurrency, or cost evidence.",
+        "The release does not provide production batch distributions, routing skew, expert-load imbalance, or fleet share."
+      ],
+      "fak_implications": [
+        "Record total and active parameters, expert count, quantization, and physical host boundary in model receipts.",
+        "Test expert routing and batching under realistic skew rather than treating active parameters as dense-model equivalence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "amazon-nova2-reasoning-context-2025",
+      "category": "frontier_lab",
+      "entity": "Amazon",
+      "topic": [
+        "model_release",
+        "reasoning_mode",
+        "long_context",
+        "multimodal",
+        "serving_profile"
+      ],
+      "published_at": "2025-12-02",
+      "event_at": "2025-12-02",
+      "source_title": "Amazon Nova 2: Multimodal reasoning and generation models",
+      "source_url": "https://www.amazon.science/publications/amazon-nova-2-multimodal-reasoning-and-generation-models",
+      "source_kind": "technical_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Amazon Nova 2 comprises Lite, Pro, Omni, and Sonic variants; Lite and Pro expose configurable extended-thinking controls, and the family supports multimodal workloads and contexts up to one million tokens.",
+      "quantified": {
+        "model_variants": 4,
+        "max_context_tokens": 1000000
+      },
+      "assumptions": [
+        "Reasoning-mode selection creates a workload mixture whose output length and latency cannot be inferred from the prompt alone.",
+        "A model family can route speech, unified multimodal, fast, and higher-capability work to distinct serving paths."
+      ],
+      "contradictions_or_limits": [
+        "The report does not publish production selection shares for each model or thinking level.",
+        "Maximum context and model-family breadth do not identify memory occupancy, batchability, or regional traffic."
+      ],
+      "fak_implications": [
+        "Represent reasoning control and modality as scheduler inputs, not static model metadata.",
+        "Benchmark context and output tails by selected mode and count dynamic-thinking overhead end to end."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "apple-foundation-models-2025",
+      "category": "frontier_lab",
+      "entity": "Apple",
+      "topic": [
+        "model_release",
+        "on_device",
+        "private_cloud",
+        "kv_cache",
+        "quantization",
+        "mixture_of_experts"
+      ],
+      "published_at": "2025-07-17",
+      "event_at": "2025-06-09",
+      "source_title": "Apple Intelligence Foundation Language Models Tech Report 2025",
+      "source_url": "https://machinelearning.apple.com/research/apple-foundation-models-tech-report-2025",
+      "source_kind": "technical_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Apple describes a roughly 3B-parameter on-device model using KV-cache sharing and 2-bit quantization-aware training, plus a server model using Parallel-Track MoE, track parallelism, sparse computation, and interleaved global-local attention on Private Cloud Compute.",
+      "quantified": {
+        "on_device_parameters_approx": 3000000000,
+        "quantization_bits": 2
+      },
+      "assumptions": [
+        "Frontier product workloads can be split between device-resident and private-cloud execution based on capability, privacy, and resource envelope.",
+        "KV-cache sharing and aggressive quantization are product-level design choices for constrained devices, not only datacenter optimizations."
+      ],
+      "contradictions_or_limits": [
+        "Apple does not disclose server parameter count, fleet size, request split, batch policy, or production latency distribution.",
+        "Benchmark comparisons in the report are vendor evaluations and do not establish neutral goodput."
+      ],
+      "fak_implications": [
+        "Model routing should represent device, private-cloud, and general-cloud trust/resource boundaries explicitly.",
+        "Include KV sharing and low-bit memory accounting in constrained-device experiments without projecting them onto server workloads."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "cohere-command-a-2025",
+      "category": "frontier_lab",
+      "entity": "Cohere",
+      "topic": [
+        "model_release",
+        "enterprise",
+        "long_context",
+        "serving_efficiency"
+      ],
+      "published_at": "2025-03-13",
+      "event_at": "2025-03-13",
+      "source_title": "Introducing Command A: Max performance, minimal compute",
+      "source_url": "https://cohere.com/blog/command-a",
+      "source_kind": "official_model_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Cohere positioned Command A as an enterprise agentic model with a 256K-token context and emphasized deployment efficiency relative to competing frontier APIs.",
+      "quantified": {
+        "context_tokens": 256000
+      },
+      "assumptions": [
+        "Enterprise traffic may emphasize retrieval, tool use, multilingual work, and long documents rather than consumer chat alone.",
+        "Private or sovereign deployment constraints can make hardware footprint and serving efficiency first-order selection criteria."
+      ],
+      "contradictions_or_limits": [
+        "Comparative performance and efficiency are vendor claims and require matched independent reproduction.",
+        "The release does not disclose production request, tenant, batching, or length distributions."
+      ],
+      "fak_implications": [
+        "Keep sovereign/private deployment as an explicit workload and trust boundary.",
+        "Test long-document agentic workloads with retrieval and tool calls instead of using context capacity alone."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "ai2-olmo2-32b-cluster-2025",
+      "category": "frontier_lab",
+      "entity": "Ai2",
+      "topic": [
+        "model_release",
+        "training_cluster",
+        "training_efficiency",
+        "open_model"
+      ],
+      "published_at": "2025-03-13",
+      "event_at": "2025-03-13",
+      "source_title": "OLMo 2 32B: First fully open model to outperform GPT 3.5 and GPT 4o mini",
+      "source_url": "https://allenai.org/blog/olmo2-32b",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Ai2 reports that OLMo 2 32B trained up to 6T tokens on Augusta, a 160-node Google Cloud AI Hypercomputer with eight H100 GPUs per node and GPUDirect-TCPXO, sustaining over 1,800 tokens/s/GPU at about 38% MFU.",
+      "quantified": {
+        "parameters": 32000000000,
+        "training_tokens": 6000000000000,
+        "cluster_nodes": 160,
+        "gpus_per_node": 8,
+        "physical_h100_gpus": 1280,
+        "tokens_per_second_per_gpu": 1800,
+        "model_flops_utilization": 0.38
+      },
+      "assumptions": [
+        "A 1,280-H100 cluster with disclosed network and utilization is a reproducible mid-scale frontier-training reference point.",
+        "Open data, code, checkpoints, and training stages permit stronger accounting than model-only releases."
+      ],
+      "contradictions_or_limits": [
+        "Reported throughput and MFU are training metrics, not inference goodput.",
+        "The post does not establish total downtime, net wall-clock cost, regional power, or serving demand."
+      ],
+      "fak_implications": [
+        "Use OLMo as a reference envelope for cluster receipts that include node count, topology, tokens/s/GPU, MFU, and training tokens.",
+        "Do not transfer training utilization directly into serving-capacity assumptions."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "bytedance-seed15-vl-2025",
+      "category": "frontier_lab",
+      "entity": "ByteDance Seed",
+      "topic": [
+        "model_release",
+        "multimodal",
+        "mixture_of_experts",
+        "agentic"
+      ],
+      "published_at": "2025-05-13",
+      "event_at": "2025-05-13",
+      "source_title": "Seed1.5-VL Technical Report",
+      "source_url": "https://seed.bytedance.com/en/public_papers/seed1-5-vl-technical-report",
+      "source_kind": "technical_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "ByteDance Seed reports Seed1.5-VL with a 532M-parameter vision encoder and a MoE language model using 20B active parameters, targeting multimodal reasoning and agent-centric GUI/game tasks and exposed through Volcano Engine.",
+      "quantified": {
+        "vision_encoder_parameters": 532000000,
+        "active_language_parameters": 20000000000,
+        "public_benchmarks_reported": 60,
+        "public_benchmarks_claimed_sota": 38
+      },
+      "assumptions": [
+        "Large consumer platforms can combine multimodal perception, reasoning, and GUI action in a single serving workload.",
+        "MoE and separate vision encoders create modality-dependent compute and memory paths."
+      ],
+      "contradictions_or_limits": [
+        "The report does not disclose total parameters, physical training cluster, production request mix, or Volcano Engine traffic.",
+        "Benchmark leadership is author-reported."
+      ],
+      "fak_implications": [
+        "Represent modality and agent action as workload dimensions and account for separate encoder/backbone costs.",
+        "Avoid inferring ByteDance production distributions from benchmark coverage."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "baidu-ernie5-infrastructure-2026",
+      "category": "frontier_lab",
+      "entity": "Baidu",
+      "topic": [
+        "model_release",
+        "training_infrastructure",
+        "mixture_of_experts",
+        "multimodal",
+        "parallelism"
+      ],
+      "published_at": "2026-02-04",
+      "event_at": "2026-02-04",
+      "source_title": "ERNIE 5.0 Technical Report",
+      "source_url": "https://arxiv.org/abs/2602.04705",
+      "source_kind": "technical_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Baidu describes ERNIE 5.0 training on PaddlePaddle with hybrid parallelism and fine-grained memory control for an ultra-sparse multimodal MoE, FP8 activation storage, adaptive activation offload, and modality tokenizers physically separated from the backbone onto different GPU nodes.",
+      "quantified": {
+        "precision_bits_for_activation_storage": 8
+      },
+      "assumptions": [
+        "Ultra-sparse MoE training is limited by inter-node communication and memory pressure, not only nominal FLOPS.",
+        "Multimodal tokenizers and the backbone can warrant separate placement and parallelization strategies."
+      ],
+      "contradictions_or_limits": [
+        "The report does not disclose cluster size, GPU SKU/count, net training duration, or production serving distribution.",
+        "Training topology does not establish inference topology or goodput."
+      ],
+      "fak_implications": [
+        "Model component placement and communication should be first-class in cluster models.",
+        "Treat FP8 storage and offload as envelope-specific choices with transfer overhead counted."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tencent-hunyuan-large-2024",
+      "category": "frontier_lab",
+      "entity": "Tencent",
+      "topic": [
+        "model_release",
+        "mixture_of_experts",
+        "long_context",
+        "kv_cache",
+        "routing"
+      ],
+      "published_at": "2024-11-04",
+      "event_at": "2024-11-04",
+      "source_title": "Hunyuan-Large: An Open-Source MoE Model with 52 Billion Activated Parameters by Tencent",
+      "source_url": "https://arxiv.org/abs/2411.02265",
+      "source_kind": "technical_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Tencent reports Hunyuan-Large as a 389B-total, 52B-active MoE with up to 256K context, mixed expert routing, KV-cache compression, and expert-specific learning rates.",
+      "quantified": {
+        "total_parameters": 389000000000,
+        "active_parameters": 52000000000,
+        "context_tokens": 256000
+      },
+      "assumptions": [
+        "MoE routing and KV compression are coupled model-system choices for long-context serving.",
+        "Expert popularity and routing balance may create topology and batching pressure not visible in active-parameter counts."
+      ],
+      "contradictions_or_limits": [
+        "The report does not provide production expert-load distributions or deployed fleet share.",
+        "Author benchmarks do not establish neutral service economics."
+      ],
+      "fak_implications": [
+        "Capture expert-routing skew and KV compression in serving receipts.",
+        "Do not equate 52B active parameters with a dense 52B memory or communication envelope."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "zai-glm45-2025",
+      "category": "frontier_lab",
+      "entity": "Z.ai / Zhipu AI",
+      "topic": [
+        "model_release",
+        "mixture_of_experts",
+        "reasoning_mode",
+        "agentic",
+        "training_tokens"
+      ],
+      "published_at": "2025-07-28",
+      "event_at": "2025-07-28",
+      "source_title": "GLM-4.5: Reasoning, Coding, and Agentic Abilities",
+      "source_url": "https://z.ai/blog/glm-4.5",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Z.ai released GLM-4.5 as a 355B-total, 32B-active MoE trained on 23T tokens with hybrid thinking and direct-response modes for agentic, reasoning, and coding workloads.",
+      "quantified": {
+        "total_parameters": 355000000000,
+        "active_parameters": 32000000000,
+        "training_tokens": 23000000000000
+      },
+      "assumptions": [
+        "Hybrid reasoning/direct modes produce distinct output-length and latency distributions within one model endpoint.",
+        "Agentic training increases tool-oriented and multi-turn workloads."
+      ],
+      "contradictions_or_limits": [
+        "The release does not disclose cluster hardware, production mode-selection rates, or tenant/request distributions.",
+        "Benchmark results are author-reported."
+      ],
+      "fak_implications": [
+        "Log requested and realized reasoning modes and stratify goodput by mode.",
+        "Treat tool-call expansion and long-horizon sessions as a separate replay population."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tii-falcon-h1-2025",
+      "category": "frontier_lab",
+      "entity": "Technology Innovation Institute",
+      "topic": [
+        "model_release",
+        "sovereign_ai",
+        "hybrid_architecture",
+        "long_context",
+        "deployment_efficiency"
+      ],
+      "published_at": "2025-05-21",
+      "event_at": "2025-05-21",
+      "source_title": "Middle East’s Leading AI Powerhouse TII Launches Two New AI Models: Falcon Arabic and Falcon-H1",
+      "source_url": "https://www.tii.ae/news/middle-easts-leading-ai-powerhouse-tii-launches-two-new-ai-models-falcon-arabic-first-arabic",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Abu Dhabi’s TII launched Falcon-H1 and Falcon Arabic, positioning the hybrid model family for efficient deployment from constrained devices through enterprise infrastructure and emphasizing native Arabic data rather than translated corpora.",
+      "quantified": {
+        "falcon_arabic_base_parameters": 7000000000
+      },
+      "assumptions": [
+        "Sovereign model programs optimize for regional language/data control and deployment flexibility, not only global benchmark rank.",
+        "Hybrid attention/state-space architectures target a different long-context memory and throughput envelope than pure Transformers."
+      ],
+      "contradictions_or_limits": [
+        "Performance comparisons in the launch are vendor claims.",
+        "The source does not disclose deployed request volume, compute allocation, or training cluster size."
+      ],
+      "fak_implications": [
+        "Include sovereign-data locality and hybrid-state memory behavior in architecture comparisons.",
+        "Separate portability claims from measured throughput on each hardware tier."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "sarvam-30b-105b-2026",
+      "category": "frontier_lab",
+      "entity": "Sarvam AI",
+      "topic": [
+        "model_release",
+        "sovereign_ai",
+        "training_tokens",
+        "agentic",
+        "tool_use"
+      ],
+      "published_at": "2026-03-06",
+      "event_at": "2026-03-06",
+      "source_title": "Open-Sourcing Sarvam 30B and 105B",
+      "source_url": "https://www.sarvam.ai/blogs/sarvam-30b-105b",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "India’s Sarvam open-sourced 30B and 105B MoE models trained entirely in India on IndiaAI Mission compute and on 16T and 12T tokens respectively; the company says both were already in production for conversational and complex agentic products.",
+      "quantified": {
+        "small_model_parameters": 30000000000,
+        "small_model_training_tokens": 16000000000000,
+        "large_model_parameters": 105000000000,
+        "large_model_training_tokens": 12000000000000,
+        "experts_per_model": 128
+      },
+      "assumptions": [
+        "Sovereign-language programs can prioritize multilingual and population-scale workloads while exposing open deployment options.",
+        "Tool use and reasoning create serving demand beyond single-turn generation."
+      ],
+      "contradictions_or_limits": [
+        "The release does not disclose physical cluster size, IndiaAI compute allocation, production request volume, or deployment goodput.",
+        "Benchmark and efficiency comparisons are vendor-reported; “in production” does not quantify traffic or health."
+      ],
+      "fak_implications": [
+        "Add Indic multilingual and tool-using workloads without inferring population-scale request volume from policy language.",
+        "Keep training-token totals separate from serving capacity and adoption."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "naver-hyperclovax-think-2025",
+      "category": "frontier_lab",
+      "entity": "NAVER Cloud",
+      "topic": [
+        "model_release",
+        "regional_language",
+        "reasoning_mode",
+        "agentic",
+        "open_model"
+      ],
+      "published_at": "2025-07-21",
+      "event_at": "2025-07-21",
+      "source_title": "HyperCLOVA X THINK: From seeds to forest",
+      "source_url": "https://clova.ai/en/tech-blog/6203-2",
+      "source_kind": "official_model_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "NAVER Cloud presented HyperCLOVA X THINK as a Korean-focused reasoning model trained on a 6T-token Korean/English corpus, with a 128K context window, length-control training, RLVR/RLHF stages, and multimodal and agentic/tool-oriented targets.",
+      "quantified": {
+        "training_tokens": 6000000000000,
+        "context_tokens": 128000,
+        "reported_korean_stem_accuracy": 0.464
+      },
+      "assumptions": [
+        "Regional-language frontier programs may have different tokenization, data, evaluation, and latency tradeoffs from English-heavy global models.",
+        "Reasoning and tool-use demand should be sampled by language and locale."
+      ],
+      "contradictions_or_limits": [
+        "Comparative accuracy and training-efficiency claims are vendor-reported and do not provide serving cost, cluster size, or production demand.",
+        "A regional benchmark score and training-token total do not identify national adoption or workload distribution."
+      ],
+      "fak_implications": [
+        "Include Korean-language tokenization and agentic workloads in multilingual evaluations.",
+        "Do not treat English-token counts as comparable cost units across languages without measuring tokenizer expansion."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "sea-ai-lab-sailor2-2024",
+      "category": "frontier_lab",
+      "entity": "Sea AI Lab",
+      "topic": [
+        "model_release",
+        "regional_language",
+        "production_demand",
+        "speculative_decoding",
+        "training_tokens"
+      ],
+      "published_at": "2024-12-03",
+      "event_at": "2024-12-03",
+      "source_title": "Sailor2: Sailing in South-East Asia with Inclusive Multilingual LLMs",
+      "source_url": "https://sail.sea.com/blog/articles/55",
+      "source_kind": "official_research",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Sea AI Lab’s Sailor2 release says its production demand favored 8B and 20B models, with a 1B model for specialized uses including speculative decoding; the family continued pretraining on about 500B tokens across 15 languages.",
+      "quantified": {
+        "model_sizes_parameters": [
+          1000000000,
+          8000000000,
+          20000000000
+        ],
+        "continued_pretraining_tokens_approx": 500000000000,
+        "supported_languages": 15
+      },
+      "assumptions": [
+        "Regional production users may prefer mid-sized deployment-efficient models over the largest available model.",
+        "A small draft model can be a first-class speculative-decoding component rather than a standalone quality tier."
+      ],
+      "contradictions_or_limits": [
+        "The source states strong production demand qualitatively but does not publish request counts, tenant shares, acceptance rates, or hardware.",
+        "The 500B-token figure is approximate and benchmark comparisons are author-reported."
+      ],
+      "fak_implications": [
+        "Add Southeast Asian language mixes and 1B/8B/20B deployment tiers to replay design.",
+        "Measure speculative acceptance and end-to-end goodput instead of assuming the draft model always helps."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "ai21-jamba15-2024",
+      "category": "frontier_lab",
+      "entity": "AI21 Labs",
+      "topic": [
+        "model_release",
+        "hybrid_architecture",
+        "mixture_of_experts",
+        "long_context",
+        "quantization"
+      ],
+      "published_at": "2024-08-22",
+      "event_at": "2024-08-22",
+      "source_title": "The Jamba 1.5 Open Model Family: The Most Powerful and Efficient Long Context Models",
+      "source_url": "https://www.ai21.com/blog/announcing-jamba-model-family/",
+      "source_kind": "official_model_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Israel-based AI21 released Jamba 1.5 Mini and Large using a hybrid SSM-Transformer MoE architecture with a 256K effective context; it reported that Mini could handle up to 140K tokens on one GPU and that ExpertsInt8 let Large fit its full 256K context on one eight-GPU node.",
+      "quantified": {
+        "effective_context_tokens": 256000,
+        "mini_single_gpu_context_tokens": 140000,
+        "large_full_context_gpu_count": 8,
+        "long_context_speedup_claim": 2.5
+      },
+      "assumptions": [
+        "Hybrid state-space/attention architectures target long-context memory and throughput limits differently from pure Transformers.",
+        "Quantization, context length, and node boundary jointly determine deployability."
+      ],
+      "contradictions_or_limits": [
+        "Speed and quality comparisons are vendor claims; the cited benchmark used batch size 1 and fixed 512-token outputs on A100 hardware.",
+        "Fit at one context length does not establish multi-tenant throughput, cache behavior, or production traffic."
+      ],
+      "fak_implications": [
+        "Benchmark hybrid-state models with explicit state/KV memory, context, batch, and output length.",
+        "Keep single-request fit claims separate from SLO-constrained service goodput."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "sakana-series-b-efficient-ai-2025",
+      "category": "frontier_lab",
+      "entity": "Sakana AI",
+      "topic": [
+        "regional_lab",
+        "efficient_models",
+        "edge_deployment",
+        "automated_research",
+        "enterprise_deployment"
+      ],
+      "published_at": "2025-11-10",
+      "event_at": "2025-11-10",
+      "source_title": "Announcing Our Series B",
+      "source_url": "https://sakana.ai/series-b/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Tokyo-based Sakana AI said its strategy emphasizes combining existing models, automated AI science, energy-efficient language models that run on edge devices, and enterprise deployments in Japan rather than training another monolithic foundation model from scratch.",
+      "quantified": {},
+      "assumptions": [
+        "A regional frontier lab may advance capability through model merging, search, agents, and edge efficiency rather than only larger pretraining clusters.",
+        "Enterprise deployment evidence can exist without public model-traffic or cluster disclosures."
+      ],
+      "contradictions_or_limits": [
+        "The financing announcement provides no model size, cluster size, production traffic, energy measurement, or independent deployment outcomes.",
+        "“Energy efficient” and enterprise growth are official claims, not neutral measurements."
+      ],
+      "fak_implications": [
+        "Track composition/search/automated-research labs separately from scale-first pretraining labs.",
+        "Require measured device and end-to-end energy envelopes before borrowing efficiency claims."
       ],
       "rumor": {
         "is_rumor": false

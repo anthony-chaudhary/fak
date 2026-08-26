@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **96** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **91** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **73** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 3; `datacenter_physical` 15; `frontier_lab` 25; `hyperscaler` 13; `market_signal` 9; `serving_system` 11; `standard` 1; `supply_chain` 5; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 39; `vendor_claim` 12; `reported_observation` 9; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 64; `medium_high` 23; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **96/96 published; 96/96 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **112** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **107** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **87** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 3; `datacenter_physical` 15; `frontier_lab` 41; `hyperscaler` 13; `market_signal` 9; `serving_system` 11; `standard` 1; `supply_chain` 5; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 52; `vendor_claim` 15; `reported_observation` 9; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 77; `medium_high` 26; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **112/112 published; 112/112 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 96 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 112 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -54,16 +54,19 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 ### 1. Frontier labs and regions — **Partial**
 
-**Present:** OpenAI, Anthropic, xAI, DeepSeek, Alibaba/Qwen, MiniMax, Moonshot,
-Mistral, and selected multi-party infrastructure announcements. The census records
-model/serving statements and keeps plans distinct from delivered capacity.
+**Present:** OpenAI, Anthropic, xAI, Google DeepMind, Meta, Amazon Nova, Apple,
+Cohere, Ai2, DeepSeek, Alibaba/Qwen, Moonshot, MiniMax, ByteDance Seed, Baidu,
+Tencent, Z.ai/Zhipu, Mistral, AI21, TII, Sarvam, Sakana, NAVER Cloud, and Sea AI Lab.
+The census now spans the U.S./Canada, China, Europe, Israel, the Middle East, India,
+Japan, Korea, and Southeast Asia and records model/serving statements without treating
+plans as delivered capacity.
 
-**Missing or shallow:** Google DeepMind, Meta model organization, Microsoft AI,
-Amazon Nova, Apple, Cohere, AI2, many private labs, and a comprehensive China census
-(ByteDance, Baidu, Tencent, Zhipu, Huawei/Pangu/Ascend and others). France is represented
-primarily through Mistral; Canada, Israel, the Middle East, India, Japan, Korea, and
-Southeast Asia are not systematically covered. Sovereign programs and export-control
-interactions are not complete.
+**Missing or shallow:** Microsoft AI/Phi, NVIDIA Nemotron, Huawei/Pangu/Ascend,
+01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime, G42/Inception/MBZUAI, Saudi
+programs, LG/Samsung/SKT/Kakao, NTT/Preferred Networks/Fujitsu/SoftBank, AI Singapore,
+Grab/GoTo/SCB10X/VinAI, Europe beyond Mistral/DeepMind, and many private labs. Most
+checked labs still lack physical serving fleets, traffic distributions, and lifecycle
+resolution. Sovereign programs and export-control interactions are not complete.
 
 **Proof needed for complete:** a declared entity/region universe, at least one current
 primary source per entity, model and infrastructure lifecycle fields, and dated checks
@@ -263,8 +266,8 @@ dates, affected hardware/services, implementation status, and later amendments.
 |---|---|---|
 | Production measurement/observation | **16 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
 | Benchmark/synthetic | **11 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **39 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
-| Vendor claims | **12 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
+| Official statements | **52 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Vendor claims | **15 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **15 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
 
