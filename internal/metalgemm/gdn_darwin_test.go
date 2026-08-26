@@ -129,6 +129,57 @@ func TestGDNSequenceMetalParityStateIdentityAndReset(t *testing.T) {
 	}
 }
 
+func TestGDNSequenceMetalSeedMatchesCPUOracleAndOwnsState(t *testing.T) {
+	corpus := makeOracleGDNCorpus(2, 1)
+	g := nativeGDNGeometry(corpus.Geometry)
+	seedSource, err := NewGDNState(g)
+	if err != nil {
+		t.Fatalf("NewGDNState(seed): %v", err)
+	}
+	first := nativeGDNPanel(corpus.Panels[0])
+	if _, _, accepted, err := seedSource.Run(first); err != nil || !accepted {
+		t.Fatalf("seed source run: accepted=%v err=%v", accepted, err)
+	}
+	seedConv, seedRecurrent, err := seedSource.Snapshot()
+	if err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	seedSource.Close()
+
+	want := newOracleGDNState(corpus.Geometry)
+	want.conv = append(want.conv[:0], seedConv...)
+	want.recurrent = append(want.recurrent[:0], seedRecurrent...)
+	wantOut := want.run(corpus.Panels[1])
+
+	state, err := NewGDNState(g)
+	if err != nil {
+		t.Fatalf("NewGDNState: %v", err)
+	}
+	defer state.Close()
+	beforeConv, beforeRecurrent, _ := state.Snapshot()
+	if err := state.Seed(seedConv[:len(seedConv)-1], seedRecurrent); err == nil {
+		t.Fatal("short seed accepted")
+	}
+	afterConv, afterRecurrent, _ := state.Snapshot()
+	requireGDNParity(t, "declined seed conv no-mutation", beforeConv, afterConv)
+	requireGDNParity(t, "declined seed recurrent no-mutation", beforeRecurrent, afterRecurrent)
+	if err := state.Seed(seedConv, seedRecurrent); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	gotOut, accounting, accepted, err := state.Run(nativeGDNPanel(corpus.Panels[1]))
+	if err != nil || !accepted {
+		t.Fatalf("seeded run: accepted=%v err=%v", accepted, err)
+	}
+	requireGDNAccounting(t, accounting, 1)
+	requireGDNParity(t, "seeded output", wantOut.Core, gotOut)
+	gotConv, gotRecurrent, err := state.Snapshot()
+	if err != nil {
+		t.Fatalf("seeded snapshot: %v", err)
+	}
+	requireGDNParity(t, "seeded convolution", want.conv, gotConv)
+	requireGDNParity(t, "seeded recurrent", want.recurrent, gotRecurrent)
+}
+
 func TestGDNSequenceMetalValidationBeforeMutationAndOwnerIsolation(t *testing.T) {
 	if !Available() {
 		t.Skip("Metal unavailable")

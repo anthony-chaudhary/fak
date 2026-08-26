@@ -139,11 +139,7 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 	_, nV, kHd, vHd, _, _, convDim := cfg.linearAttnDims()
 	convElems := (cfg.LinearConvKernelDim - 1) * convDim
 	recurrentElems := nV * kHd * vHd
-	type layerSnapshot struct {
-		layer           int
-		conv, recurrent []float32
-	}
-	snapshots := make([]layerSnapshot, 0, len(q.sequenceLayers))
+	snapshots := make([]qwen35GDNLayerSnapshot, 0, len(q.sequenceLayers))
 	for layer, state := range q.sequenceLayers {
 		if !state.valid() {
 			continue
@@ -155,8 +151,14 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 		if len(conv) != convElems || len(recurrent) != recurrentElems {
 			return true, s.failQwen35GDNSequence(layer, "final state shape", fmt.Errorf("conv/recurrent elements=%d/%d, want %d/%d", len(conv), len(recurrent), convElems, recurrentElems))
 		}
-		snapshots = append(snapshots, layerSnapshot{layer: layer, conv: conv, recurrent: recurrent})
+		snapshots = append(snapshots, qwen35GDNLayerSnapshot{layer: layer, conv: conv, recurrent: recurrent})
 	}
+	selected, err := s.promoteQwen35MetalGDNDecode(snapshots)
+	if err != nil || selected {
+		return len(snapshots) > 0, err
+	}
+	// A backend that cannot seed decode owners retains the historical one-time
+	// snapshot path. Seed failures return above before this host cache mutates.
 	if s.Cache.linear == nil {
 		s.Cache.linear = newLinearAttnCache(cfg)
 	}
@@ -172,8 +174,6 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 			copy(state.recurrent[head], snapshot.recurrent[start:start+kHd*vHd])
 		}
 	}
-	q.freeSequence()
-	q.sequenceAccepted = false
 	return len(snapshots) > 0, nil
 }
 

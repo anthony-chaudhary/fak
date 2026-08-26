@@ -30,6 +30,7 @@ int mg_gdn_state_run(int owner,
                      int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps,
                      float *core, int injectPostSubmitFailure, mg_gdn_event *event);
 int mg_gdn_state_reset(int owner);
+int mg_gdn_state_seed(int owner, const float *conv, int convElems, const float *recurrent, int recurrentElems);
 int mg_gdn_state_snapshot(int owner, float *conv, int convElems, float *recurrent, int recurrentElems);
 void mg_gdn_state_release(int owner);
 int mg_gdn_live_buffers(void);
@@ -260,6 +261,22 @@ func (s *GDNState) run(panel GDNPanel, injectPostSubmitFailure bool) ([]float32,
 }
 
 // Reset zeros both persistent buffers without changing their identities.
+// Seed replaces the resident convolution and recurrent state before a decode
+// operation is submitted. Shape validation happens before the native owner is
+// touched, so callers can decline unsupported geometry without mutation.
+func (s *GDNState) Seed(conv, recurrent []float32) error {
+	if s == nil || s.owner == 0 {
+		return fmt.Errorf("metalgemm: GDN state is closed")
+	}
+	if len(conv) != s.convElems || len(recurrent) != s.recurrentElems {
+		return fmt.Errorf("metalgemm: GDN seed shape conv/recurrent=%d/%d, want %d/%d", len(conv), len(recurrent), s.convElems, s.recurrentElems)
+	}
+	if C.mg_gdn_state_seed(s.owner, gdnF32(conv), C.int(len(conv)), gdnF32(recurrent), C.int(len(recurrent))) != 1 {
+		return fmt.Errorf("metalgemm: seed GDN state failed")
+	}
+	return nil
+}
+
 func (s *GDNState) Reset() error {
 	if s == nil {
 		return &GDNDeclinedError{Reason: "nil owner"}

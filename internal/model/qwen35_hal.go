@@ -34,6 +34,8 @@ type qwen35HALState struct {
 	sequenceLayers   []Qwen35GDNAuxState
 	sequenceAccepted bool
 	sequenceFailure  error
+	decodeAccepted   bool
+	decodePath       string
 }
 
 type qwen35HALLayerState struct {
@@ -250,6 +252,7 @@ func (s *Session) failQwen35GDNSequence(layer int, stage string, cause error) er
 	if s != nil && s.qwen35HAL != nil {
 		s.qwen35HAL.freeSequence()
 		s.qwen35HAL.sequenceAccepted = true
+		s.qwen35HAL.decodeAccepted = false
 		s.qwen35HAL.sequenceFailure = err
 	}
 	return err
