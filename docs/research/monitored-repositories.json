@@ -287,7 +287,72 @@
       "stars_at_check": 2438,
       "last_push_at_check": "2026-08-20T07:01:30Z",
       "study_note": "docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md",
-      "refresh_issue": "#8991"
+      "refresh_issue": "#8991",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/llm-as-a-verifier-llm-as-a-verifier.json",
+        "indexed_revision": "8db8a114355a9d7fdf9a8d1d5c87f6aeebd18770",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 6,
+        "candidate_count": 12,
+        "filed_issue_count": 1,
+        "completeness_critic": "Pinned local tree map walked all 938 regular files and skipped only .git; architecture/design, tests/fixtures, and roadmap paths were checked absent. Complete forge read-back at 2026-08-25T00:00:00Z covered 9 issues, 13 pull requests, zero discussions, zero releases, and zero tags; FAK self-query, candidate adjudication, and issue ownership are recorded in the refreshed note.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api graphql repository(owner:llm-as-a-verifier,name:llm-as-a-verifier) issues(first:100,states:[OPEN,CLOSED]) pullRequests(first:100,states:[OPEN,CLOSED,MERGED]) discussions(first:100)",
+              "gh api repos/llm-as-a-verifier/llm-as-a-verifier/releases --paginate",
+              "gh api repos/llm-as-a-verifier/llm-as-a-verifier/tags --paginate"
+            ],
+            "note": "Complete read-back at 2026-08-25T00:00:00Z: 9 issues, 13 pull requests, 0 discussions, 0 releases, 0 tags."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"offline provenance-bound trajectory selection verifier replay\"",
+              "fak capabilities \"best of N candidate selection evidence hierarchy uncertainty\"",
+              "fak capabilities \"verifier score cache content identity contamination\"",
+              "fak capabilities \"pairwise tournament ring selection candidate aggregation\""
+            ],
+            "note": "Queries found native provenance/cache/routing/evidence substrates but no pairwise tournament capability; the note records why that remains gated."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md#candidate-matrix",
+              "docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md#refresh-candidate-matrix-and-follow-on-decisions"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8230",
+              "https://github.com/anthony-chaudhary/fak/issues/4235",
+              "https://github.com/anthony-chaudhary/fak/issues/8991"
+            ],
+            "note": "#8230 owns the surviving replay spine, #4235 owns optional tournament work, and #8991 owns this exhaustive refresh; no new issue survived."
+          }
+        ],
+        "issue_refs": [
+          "#8230",
+          "#4235",
+          "#8991"
+        ]
+      }
     },
     {
       "repository": "hiraditya/hiraditya.github.io",
