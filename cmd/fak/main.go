@@ -165,6 +165,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdHostCrash(args)
 	case "hostdiag":
 		cmdHostdiag(args)
+	case "shellprov":
+		cmdShellprov(args)
 	case "host-relaunch-broker":
 		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, args))
 	case "watchdog-audit-run":
