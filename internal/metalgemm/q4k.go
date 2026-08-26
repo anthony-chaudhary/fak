@@ -50,6 +50,7 @@ import "C"
 import (
 	"errors"
 	"math"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -138,10 +139,10 @@ var (
 // UploadQ4KMappedSpan registers a Q4_K tensor inside a page-aligned, externally owned mapping.
 // raw must remain mapped until Reset. Metal releases only its buffer handle; it never unmaps raw.
 func UploadQ4KMappedSpan(raw []byte, offset, out, in int) *Q4KWeight {
-	if !Available() || in <= 0 || in%QK_K != 0 || out <= 0 || len(raw) == 0 || offset < 0 || offset%32 != 0 {
+	if !Available() || in <= 0 || in%256 != 0 || out <= 0 || len(raw) == 0 || offset < 0 || offset%32 != 0 {
 		return nil
 	}
-	need := (in / QK_K) * out * BlockQ4KBytes
+	need := (in / 256) * out * 144
 	if offset > len(raw) || need > len(raw)-offset {
 		return nil
 	}
@@ -150,7 +151,7 @@ func UploadQ4KMappedSpan(raw []byte, offset, out, in int) *Q4KWeight {
 	if uintptr(base)%uintptr(pageSize) != 0 || len(raw)%pageSize != 0 {
 		return nil
 	}
-	wid := int(C.mg_q4k_upload_span(base, C.size_t(len(raw)), C.size_t(offset), C.int(out), C.int(in)))
+	wid := int(C.mg_q4k_upload_span((*C.uchar)(base), C.size_t(len(raw)), C.size_t(offset), C.int(out), C.int(in)))
 	if wid < 0 {
 		return nil
 	}
