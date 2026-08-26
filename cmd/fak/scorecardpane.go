@@ -17,6 +17,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/scdiff"
 	"github.com/anthony-chaudhary/fak/internal/scorecardpane"
+	"github.com/anthony-chaudhary/fak/internal/scorecardportfolio"
 )
 
 // cmdScorecardPane dispatches `fak scorecard <sub>`. The control-pane fold is the
@@ -24,18 +25,47 @@ import (
 // grade_debt, and emits the ratchet verdict.
 func cmdScorecardPane(argv []string) {
 	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: fak scorecard control-pane [--json|--check|--pin] | qa-dogfood [--json|--existing-json PATH]")
+		fmt.Fprintln(os.Stderr, "usage: fak scorecard control-pane [--json|--check|--pin] | portfolio-discovery [--workspace PATH] | qa-dogfood [--json|--existing-json PATH]")
 		os.Exit(2)
 	}
 	switch argv[0] {
 	case "control-pane":
 		os.Exit(runScorecardControlPane(os.Stdout, os.Stderr, argv[1:]))
+	case "portfolio-discovery":
+		os.Exit(runScorecardPortfolioDiscovery(os.Stdout, os.Stderr, argv[1:]))
 	case "qa-dogfood":
 		os.Exit(runScorecardQADogfood(os.Stdout, os.Stderr, argv[1:]))
 	default:
 		fmt.Fprintf(os.Stderr, "fak scorecard: unknown subcommand %q\n", argv[0])
 		os.Exit(2)
 	}
+}
+
+func runScorecardPortfolioDiscovery(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak scorecard portfolio-discovery", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	workspace := fs.String("workspace", "", "workspace root (default: repo root)")
+	_ = fs.Bool("json", true, "emit schema-versioned JSON (always enabled)")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	root := *workspace
+	if root == "" {
+		root = repoRoot()
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	report, err := scorecardportfolio.Audit(scorecardportfolio.DefaultConfig(root))
+	if err != nil {
+		fmt.Fprintf(stderr, "fak scorecard portfolio-discovery: %v\n", err)
+		return 1
+	}
+	if err := scorecardportfolio.WriteJSON(stdout, report); err != nil {
+		fmt.Fprintf(stderr, "fak scorecard portfolio-discovery: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func runScorecardControlPane(stdout, stderr io.Writer, argv []string) int {
