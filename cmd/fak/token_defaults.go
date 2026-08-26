@@ -38,6 +38,47 @@ type lever struct {
 	gated, noted, locked bool
 }
 
+type tokenDefaultSources struct {
+	root                       string
+	serve, guard, gateway, tui string
+	messages, agentSeam        string
+}
+
+func loadTokenDefaultSources(root string) tokenDefaultSources {
+	s := tokenDefaultSources{root: root}
+	s.serve = s.read("cmd/fak/serve.go")
+	s.guard = s.read("cmd/fak/guard.go")
+	// The gateway's configuration and server-state declarations live in cohesive
+	// package modules. Inspect the complete split source surface so moving a default
+	// out of gateway.go cannot make the scorecard mistake an enabled lever for OFF.
+	s.gateway = strings.Join([]string{
+		s.read("internal/gateway/gateway.go"),
+		s.read("internal/gateway/config.go"),
+		s.read("internal/gateway/server_state.go"),
+	}, "\n")
+	s.tui = s.read("cmd/fak/tui.go")
+	s.messages = s.read("internal/gateway/messages.go")
+	s.agentSeam = s.read("internal/agent/ctxplan_seam.go")
+	return s
+}
+
+func (s tokenDefaultSources) read(rel string) string {
+	b, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(rel)))
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func (s tokenDefaultSources) exists(rel string) bool {
+	_, err := os.Stat(filepath.Join(s.root, filepath.FromSlash(rel)))
+	return err == nil
+}
+
+func (s tokenDefaultSources) bothWire(needle string) bool {
+	return strings.Contains(s.serve, needle) && strings.Contains(s.guard, needle)
+}
+
 func cmdTokenDefaultsScorecard(argv []string) {
 	os.Exit(runTokenDefaultsScorecard(os.Stdout, os.Stderr, argv))
 }
@@ -132,24 +173,10 @@ func anyIntTokenDefaults(v any) int {
 }
 
 func collectTokenDefaultsScorecard(root string) map[string]any {
-	read := func(rel string) string {
-		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-		if err != nil {
-			return ""
-		}
-		return string(b)
-	}
-	exists := func(rel string) bool {
-		_, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
-		return err == nil
-	}
-	serve := read("cmd/fak/serve.go")
-	guard := read("cmd/fak/guard.go")
-	gateway := read("internal/gateway/gateway.go")
-	tui := read("cmd/fak/tui.go")
-	messages := read("internal/gateway/messages.go")
-	agentSeam := read("internal/agent/ctxplan_seam.go")
-	bothWire := func(needle string) bool { return strings.Contains(serve, needle) && strings.Contains(guard, needle) }
+	sources := loadTokenDefaultSources(root)
+	serve, guard, gateway, tui := sources.serve, sources.guard, sources.gateway, sources.tui
+	messages, agentSeam := sources.messages, sources.agentSeam
+	read, exists, bothWire := sources.read, sources.exists, sources.bothWire
 
 	// ---- the regression locks: each failing check is one unit of token_defaults_debt ----
 	defects := []string{}

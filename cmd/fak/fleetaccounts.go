@@ -123,56 +123,13 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		return 0
 
 	case "status":
-		filter := fleetaccounts.StatusFilter{
-			Product: *product, Provider: *provider, Tier: statusTierFilter(*tier, *t1, *t2, *t3),
-			State: *state, Account: *account, Model: *modelFilter,
-		}
-		if len(statusSnapshots) > 0 {
-			window, err := time.ParseDuration(*freshWithin)
-			if err != nil || window <= 0 {
-				fmt.Fprintf(stderr, "fleet-accounts status: invalid --fresh-within %q\n", *freshWithin)
-				return 2
-			}
-			snaps, err := loadFleetAccountStatusSnapshots(statusSnapshots)
-			if err != nil {
-				fmt.Fprintf(stderr, "fleet-accounts status: %v\n", err)
-				return 1
-			}
-			report := fleetaccounts.BuildGlobalStatusReport(snaps, fleetaccounts.GlobalStatusOptions{
-				Filter:       filter,
-				GroupBy:      fleetAccountsSplitCSV(*groupBy),
-				FreshWithin:  window,
-				IncludeStale: *includeStale,
-				Now:          time.Now().UTC(),
-			})
-			if *asJSON {
-				out, err := json.MarshalIndent(report, "", " ")
-				if err != nil {
-					fmt.Fprintln(stderr, "fleet-accounts: marshal:", err)
-					return 1
-				}
-				fmt.Fprintln(stdout, string(out))
-				return 0
-			}
-			fmt.Fprint(stdout, fleetaccounts.RenderGlobalStatusReport(report, *showAccounts || statusFilterRequested(filter)))
-			return 0
-		}
-		report := fleetaccounts.BuildStatusReport(rows, fleetSeatLeases(repoRoot), fleetaccounts.StatusOptions{
-			Filter:  filter,
-			GroupBy: fleetAccountsSplitCSV(*groupBy),
+		return runFleetAccountsStatus(stdout, stderr, fleetAccountsStatusRequest{
+			paths: paths, rows: rows, repoRoot: repoRoot, product: product, provider: provider,
+			tier: tier, state: state, account: account, modelFilter: modelFilter,
+			t1: t1, t2: t2, t3: t3, snapshots: statusSnapshots, freshWithin: freshWithin,
+			groupBy: groupBy, includeStale: includeStale, asJSON: asJSON,
+			showAccounts: showAccounts, nodeLabel: nodeLabel,
 		})
-		fleetaccounts.StampStatusReport(&report, *nodeLabel, time.Now().UTC().Format(time.RFC3339))
-		if *asJSON {
-			out, err := json.MarshalIndent(report, "", " ")
-			if err != nil {
-				fmt.Fprintln(stderr, "fleet-accounts: marshal:", err)
-				return 1
-			}
-			fmt.Fprintln(stdout, string(out))
-			return 0
-		}
-		fmt.Fprint(stdout, fleetaccounts.RenderStatusReport(report, *showAccounts || statusFilterRequested(filter)))
-		return 0
 
 	case "json":
 		return emitRosterJSON(stdout, stderr, paths, rows)
