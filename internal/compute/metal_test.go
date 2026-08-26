@@ -3,6 +3,7 @@
 package compute
 
 import (
+	"errors"
 	"math"
 	"strconv"
 	"testing"
@@ -174,6 +175,73 @@ func TestMetalMatMulApproxMatchesRef(t *testing.T) {
 		}
 	}
 	t.Logf("MatMul: cosine=%.8f maxAbs=%.2e (device=%s tier=%s class=%s)", c, maxAbs, mb.Name(), mb.Tier(), mb.Class())
+}
+
+// TestMetalCommandOwnerBatchesTwoMatMuls proves the caller-owned seam can encode
+// independent operations and cross exactly one commit/wait boundary before readback.
+func TestMetalCommandOwnerBatchesTwoMatMuls(t *testing.T) {
+	mb := metalOrSkip(t)
+	ref := Default()
+	var seed lcg = 9259
+	g := &seed
+
+	const in = 64
+	type testCase struct {
+		out        int
+		w, x       []float32
+		wDev, xDev Tensor
+	}
+	cases := []testCase{
+		{out: 37, w: mtlRscale(g, 37*in, 0.2), x: mtlRscale(g, in, 1)},
+		{out: 53, w: mtlRscale(g, 53*in, 0.2), x: mtlRscale(g, in, 1)},
+	}
+	for i := range cases {
+		cases[i].wDev = mtlMkResident(mb, []int{cases[i].out, in}, cases[i].w)
+		cases[i].xDev = mtlMkResident(mb, []int{in}, cases[i].x)
+	}
+
+	var outputs []Tensor
+	var owner *metalCommandOwner
+	var receipt metalCommandReceipt
+	func() {
+		metalMu.Lock()
+		defer metalMu.Unlock()
+		var err error
+		owner, err = beginMetalCommand()
+		if err != nil {
+			t.Fatal(err)
+		}
+		outputs = make([]Tensor, len(cases))
+		for i, tc := range cases {
+			y, _ := mb.devTr([]int{tc.out}, F32)
+			outputs[i] = y
+			if err := owner.encodeMatMul(mb.mb(tc.wDev), mb.mb(tc.xDev), mb.mb(y), tc.out, in, 1); err != nil {
+				_ = owner.abort()
+				t.Fatal(err)
+			}
+		}
+		if owner.lifecycle.encoders != 2 {
+			_ = owner.abort()
+			t.Fatalf("encoded operations = %d, want 2 before the single submit", owner.lifecycle.encoders)
+		}
+		receipt, err = owner.finish()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+	if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 2 {
+		t.Fatalf("receipt = %+v, want one committed/completed submit containing 2 encoders", receipt)
+	}
+	for i, tc := range cases {
+		got := mb.Read(outputs[i])
+		want := ref.Read(ref.MatMul(mtlMkResident(ref, []int{tc.out, in}, tc.w), mtlMkResident(ref, []int{in}, tc.x)))
+		if c := cosine(want, got); c < 0.9999 {
+			t.Fatalf("matmul %d cosine %.6f < 0.9999", i, c)
+		}
+	}
+	if err := owner.encodeMatMul(nil, nil, nil, 1, 1, 1); !errors.Is(err, errMetalOwnerTerminal) {
+		t.Fatalf("post-finish encode = %v, want terminal", err)
+	}
 }
 
 func TestMetalDeviceMemoryInfoReportsWorkingSet(t *testing.T) {

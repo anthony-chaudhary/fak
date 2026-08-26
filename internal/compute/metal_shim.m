@@ -276,48 +276,95 @@ static void run_1d(id<MTLCommandBuffer> cb, id<MTLComputeCommandEncoder> enc,
 
 // ---- primitives -----------------------------------------------------------------
 
-void fmetal_matmul_f32(void *dW, void *dX, void *dY, int out, int in, int P) {
+typedef struct {
+    id<MTLCommandBuffer> command_buffer;
+    int encoders;
+    int terminal;
+} fmetal_command_owner;
+
+void *fmetal_command_begin(void) {
+    @autoreleasepool {
+        if (gQueue == nil) return NULL;
+        fmetal_command_owner *owner = calloc(1, sizeof(*owner));
+        if (owner == NULL) return NULL;
+        owner->command_buffer = [[gQueue commandBuffer] retain];
+        if (owner->command_buffer == nil) { free(owner); return NULL; }
+        return owner;
+    }
+}
+
+int fmetal_command_encode_matmul_f32(void *opaque, void *dW, void *dX, void *dY,
+                                    int out, int in, int P) {
+    fmetal_command_owner *owner = opaque;
+    if (owner == NULL || owner->terminal || owner->command_buffer == nil ||
+        dW == NULL || dX == NULL || dY == NULL || out <= 0 || in <= 0 || P <= 0) return 0;
     @autoreleasepool {
         id<MTLBuffer> bW = (id<MTLBuffer>)dW;
         id<MTLBuffer> bX = (id<MTLBuffer>)dX;
         id<MTLBuffer> bY = (id<MTLBuffer>)dY;
         NSUInteger es = sizeof(float);
-        MPSMatrixDescriptor *dA = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)P
-                                                                        columns:(NSUInteger)in
-                                                                       rowBytes:(NSUInteger)in * es
-                                                                       dataType:MPSDataTypeFloat32];
-        MPSMatrixDescriptor *dB = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)out
-                                                                        columns:(NSUInteger)in
-                                                                       rowBytes:(NSUInteger)in * es
-                                                                       dataType:MPSDataTypeFloat32];
-        MPSMatrixDescriptor *dC = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)P
-                                                                        columns:(NSUInteger)out
-                                                                       rowBytes:(NSUInteger)out * es
-                                                                       dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor *dA = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)P columns:(NSUInteger)in rowBytes:(NSUInteger)in*es dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor *dB = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)out columns:(NSUInteger)in rowBytes:(NSUInteger)in*es dataType:MPSDataTypeFloat32];
+        MPSMatrixDescriptor *dC = [MPSMatrixDescriptor matrixDescriptorWithRows:(NSUInteger)P columns:(NSUInteger)out rowBytes:(NSUInteger)out*es dataType:MPSDataTypeFloat32];
         MPSMatrix *mA = [[MPSMatrix alloc] initWithBuffer:bX descriptor:dA];
         MPSMatrix *mB = [[MPSMatrix alloc] initWithBuffer:bW descriptor:dB];
         MPSMatrix *mC = [[MPSMatrix alloc] initWithBuffer:bY descriptor:dC];
-        // C[P,out] = A[P,in] * B[out,in]^T  (transposeRight=YES, interiorColumns=in).
-        MPSMatrixMultiplication *mul =
-            [[MPSMatrixMultiplication alloc] initWithDevice:gDev
-                                              transposeLeft:NO
-                                             transposeRight:YES
-                                                 resultRows:(NSUInteger)P
-                                              resultColumns:(NSUInteger)out
-                                            interiorColumns:(NSUInteger)in
-                                                      alpha:1.0
-                                                       beta:0.0];
-        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
-        [mul encodeToCommandBuffer:cb leftMatrix:mA rightMatrix:mB resultMatrix:mC];
-        [cb commit];
-        [cb waitUntilCompleted];
-        [mA release];
-        [mB release];
-        [mC release];
-        [mul release];
+        MPSMatrixMultiplication *mul = [[MPSMatrixMultiplication alloc] initWithDevice:gDev transposeLeft:NO transposeRight:YES resultRows:(NSUInteger)P resultColumns:(NSUInteger)out interiorColumns:(NSUInteger)in alpha:1.0 beta:0.0];
+        if (mA == nil || mB == nil || mC == nil || mul == nil) {
+            [mA release]; [mB release]; [mC release]; [mul release];
+            return 0;
+        }
+        [mul encodeToCommandBuffer:owner->command_buffer leftMatrix:mA rightMatrix:mB resultMatrix:mC];
+        owner->encoders++;
+        [mA release]; [mB release]; [mC release]; [mul release];
+        return 1;
     }
 }
 
+int fmetal_command_finish(void *opaque, fmetal_command_receipt *receipt) {
+    fmetal_command_owner *owner = opaque;
+    if (receipt != NULL) memset(receipt, 0, sizeof(*receipt));
+    if (owner == NULL || owner->terminal || owner->command_buffer == nil || owner->encoders == 0) return 0;
+    owner->terminal = 1;
+    @autoreleasepool {
+        CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
+        [owner->command_buffer commit];
+        if (receipt != NULL) receipt->committed = 1;
+        [owner->command_buffer waitUntilCompleted];
+        if (receipt != NULL) {
+            receipt->completed_wait = 1;
+            receipt->encoders = owner->encoders;
+            receipt->wait_milliseconds = (CFAbsoluteTimeGetCurrent()-started)*1000.0;
+            if (@available(macOS 10.15, *)) {
+                double a=owner->command_buffer.GPUStartTime, b=owner->command_buffer.GPUEndTime;
+                if (b >= a && a > 0) { receipt->gpu_milliseconds=(b-a)*1000.0; receipt->timing_available=1; }
+            }
+        }
+        int ok = owner->command_buffer.status == MTLCommandBufferStatusCompleted;
+        [owner->command_buffer release]; owner->command_buffer=nil;
+        free(owner);
+        return ok;
+    }
+}
+
+void fmetal_command_abort(void *opaque) {
+    fmetal_command_owner *owner = opaque;
+    if (owner == NULL || owner->terminal) return;
+    owner->terminal = 1;
+    [owner->command_buffer release]; owner->command_buffer=nil;
+    free(owner);
+}
+
+void fmetal_matmul_f32(void *dW, void *dX, void *dY, int out, int in, int P) {
+    void *owner = fmetal_command_begin();
+    if (owner == NULL) return;
+    if (!fmetal_command_encode_matmul_f32(owner, dW, dX, dY, out, in, P)) {
+        fmetal_command_abort(owner);
+        return;
+    }
+    fmetal_command_receipt receipt;
+    (void)fmetal_command_finish(owner, &receipt);
+}
 void fmetal_rmsnorm_f32(void *dX, void *dW, void *dY, int rows, int n, float eps) {
     @autoreleasepool {
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];

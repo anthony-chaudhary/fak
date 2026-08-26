@@ -29,6 +29,8 @@ package compute
 import "C"
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -268,6 +270,79 @@ func (c *metalBackend) Free(t Tensor) {
 
 func (c *metalBackend) mb(t Tensor) unsafe.Pointer { return t.buf.(*metalBuf).ptr }
 
+type metalCommandReceipt struct {
+	Committed, CompletedWait, TimingAvailable bool
+	Encoders                                  int
+	GPUMilliseconds, WaitMilliseconds         float64
+}
+
+type metalCommandOwner struct {
+	ptr       unsafe.Pointer
+	lifecycle metalOwnerLifecycle
+}
+
+func beginMetalCommand() (*metalCommandOwner, error) {
+	ptr := C.fmetal_command_begin()
+	if ptr == nil {
+		return nil, errors.New("compute: Metal command begin failed")
+	}
+	return &metalCommandOwner{ptr: ptr}, nil
+}
+
+func (o *metalCommandOwner) encodeMatMul(w, x, y unsafe.Pointer, out, in, p int) error {
+	if o == nil || o.ptr == nil {
+		return errMetalOwnerTerminal
+	}
+	if o.lifecycle.state != metalOwnerOpen {
+		return errMetalOwnerTerminal
+	}
+	if C.fmetal_command_encode_matmul_f32(o.ptr, w, x, y, C.int(out), C.int(in), C.int(p)) == 0 {
+		return errors.New("compute: Metal matmul encode failed")
+	}
+	return o.lifecycle.encode()
+}
+
+func (o *metalCommandOwner) finish() (metalCommandReceipt, error) {
+	if o == nil || o.ptr == nil {
+		return metalCommandReceipt{}, errMetalOwnerTerminal
+	}
+	if err := o.lifecycle.finish(); err != nil {
+		return metalCommandReceipt{}, err
+	}
+	var native C.fmetal_command_receipt
+	ptr := o.ptr
+	o.ptr = nil
+	if C.fmetal_command_finish(ptr, &native) == 0 {
+		return metalCommandReceipt{}, errors.New("compute: Metal command failed after submission")
+	}
+	return metalCommandReceipt{Committed: native.committed != 0, CompletedWait: native.completed_wait != 0,
+		TimingAvailable: native.timing_available != 0, Encoders: int(native.encoders),
+		GPUMilliseconds: float64(native.gpu_milliseconds), WaitMilliseconds: float64(native.wait_milliseconds)}, nil
+}
+
+func (o *metalCommandOwner) abort() error {
+	if o == nil || o.ptr == nil {
+		return errMetalOwnerTerminal
+	}
+	if err := o.lifecycle.abort(); err != nil {
+		return err
+	}
+	C.fmetal_command_abort(o.ptr)
+	o.ptr = nil
+	return nil
+}
+
+func (o *metalCommandOwner) finishExactly(wantEncoders int) error {
+	receipt, err := o.finish()
+	if err != nil {
+		return err
+	}
+	if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != wantEncoders {
+		return fmt.Errorf("compute: invalid Metal command receipt: committed=%t completed_wait=%t encoders=%d want=%d", receipt.Committed, receipt.CompletedWait, receipt.Encoders, wantEncoders)
+	}
+	return nil
+}
+
 func (c *metalBackend) MatMul(w, x Tensor) Tensor {
 	metalMu.Lock()
 	defer metalMu.Unlock()
@@ -276,7 +351,17 @@ func (c *metalBackend) MatMul(w, x Tensor) Tensor {
 		panic("compute: metal MatMul supports only F32 weights today (got " + w.Dtype.String() + "); quantized device GEMM is a tracked follow-up")
 	}
 	y, _ := c.devTr([]int{out}, F32)
-	C.fmetal_matmul_f32(c.mb(w), c.mb(x), c.mb(y), C.int(out), C.int(in), 1)
+	owner, err := beginMetalCommand()
+	if err != nil {
+		panic(err)
+	}
+	if err := owner.encodeMatMul(c.mb(w), c.mb(x), c.mb(y), out, in, 1); err != nil {
+		_ = owner.abort()
+		panic(err)
+	}
+	if err := owner.finishExactly(1); err != nil {
+		panic(err)
+	}
 	return y
 }
 
@@ -290,7 +375,17 @@ func (c *metalBackend) BatchedMatMul(w, X Tensor, P int) Tensor {
 		panic("compute: metal BatchedMatMul supports only F32 weights today (got " + w.Dtype.String() + ")")
 	}
 	y, _ := c.devTr([]int{P, out}, F32)
-	C.fmetal_matmul_f32(c.mb(w), c.mb(X), c.mb(y), C.int(out), C.int(in), C.int(P))
+	owner, err := beginMetalCommand()
+	if err != nil {
+		panic(err)
+	}
+	if err := owner.encodeMatMul(c.mb(w), c.mb(X), c.mb(y), out, in, P); err != nil {
+		_ = owner.abort()
+		panic(err)
+	}
+	if err := owner.finishExactly(1); err != nil {
+		panic(err)
+	}
 	return y
 }
 

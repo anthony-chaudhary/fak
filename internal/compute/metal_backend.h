@@ -50,6 +50,23 @@ void fmetal_copy_at(void *dstBuf, size_t dstOff, void *srcBuf, size_t srcOff, si
 
 /* y[P,out] = x[P,in] @ W[out,in]^T  (all row-major f32) via MPSMatrixMultiplication
  * (transposeRight=YES, interiorColumns=in). */
+typedef struct {
+    int committed;
+    int completed_wait;
+    int encoders;
+    double gpu_milliseconds;
+    double wait_milliseconds;
+    int timing_available;
+} fmetal_command_receipt;
+
+/* Caller-owned command-buffer seam. begin returns an opaque retained owner. encode never commits,
+ * waits, or reads host memory. finish is the single terminal submit/wait; abort is pre-submit only. */
+void *fmetal_command_begin(void);
+int fmetal_command_encode_matmul_f32(void *owner, void *dW, void *dX, void *dY,
+                                    int out, int in, int P);
+int fmetal_command_finish(void *owner, fmetal_command_receipt *receipt);
+void fmetal_command_abort(void *owner);
+
 void fmetal_matmul_f32(void *dW, void *dX, void *dY, int out, int in, int P);
 
 /* per-row RMSNorm: y[r,:] = x[r,:] * rsqrt(mean(x[r,:]^2) + eps) * w[:]  (rows x n). */
