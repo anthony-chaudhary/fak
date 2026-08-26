@@ -50,10 +50,10 @@ const (
 
 // MixedQKVResult returns all host copies together after owner completion.
 type MixedQKVResult struct {
-	CallID       MixedQKVCallID
-	Q, K, V      []float32
-	Submitted    bool
-	Observation  ExecutionSnapshot
+	CallID      MixedQKVCallID
+	Q, K, V     []float32
+	Submitted   bool
+	Observation ExecutionSnapshot
 }
 
 // ScopedExecutionEvent is a #8844 event paired with its call identity. Events are delivered only
@@ -74,16 +74,16 @@ type ExecutionObserverFunc func(ScopedExecutionEvent)
 func (f ExecutionObserverFunc) ObserveExecution(e ScopedExecutionEvent) { f(e) }
 
 // MixedQKVWeight is the portable view of an already-resident native weight handle.
-type MixedQKVWeight interface { ID() int }
+type MixedQKVWeight interface{ ID() int }
 
 // MixedQKVInput contains the exact decode inputs and already-resident mixed-family weights.
 type MixedQKVInput struct {
-	Q, K       MixedQKVWeight
-	V          MixedQKVWeight
-	XQ         []int8
-	XD, XF     []float32
-	Hidden     int
-	Observer   ExecutionObserver
+	Q, K     MixedQKVWeight
+	V        MixedQKVWeight
+	XQ       []int8
+	XD, XF   []float32
+	Hidden   int
+	Observer ExecutionObserver
 	// Failure injection is intentionally available only to same-package Darwin tests.
 	injectSetup, injectPost bool
 }

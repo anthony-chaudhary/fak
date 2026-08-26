@@ -99,134 +99,16 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 		return 2
 	}
 	if scenario == "fast-profile" {
-		if pairPath == "" {
-			fmt.Fprintln(stderr, "fak ultracode bench: --scenario fast-profile requires --pair PATH")
-			return 2
-		}
-		b, err := os.ReadFile(pairPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak ultracode bench: read pair: %v\n", err)
-			return 1
-		}
-		var bundle ultracodebench.FastProfileBundle
-		if err := json.Unmarshal(b, &bundle); err != nil {
-			fmt.Fprintf(stderr, "fak ultracode bench: decode fast-profile: %v\n", err)
-			return 1
-		}
-		report := ultracodebench.EvaluateFastProfile(bundle)
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak ultracode bench: encode report: %v\n", err)
-			return 1
-		}
-		return 0
+		return runUltracodeFastProfile(stdout, stderr, pairPath)
 	}
 	if scenario != "" {
-		if scenario != "access-frontier" {
-			fmt.Fprintf(stderr, "fak ultracode bench: unknown scenario %q\n", scenario)
-			return 2
-		}
-		widths, err := parseUltracodeWidths(widthsText)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak ultracode bench: %v\n", err)
-			return 2
-		}
-		var report any
-		if scenarioInput == "" {
-			frontier := ultracodebench.AccessModeFrontierFixture()
-			evaluated, err := ultracodebench.EvaluateAccessModeFrontier(frontier, widths)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
-				return 1
-			}
-			report = evaluated
-		} else {
-			b, err := os.ReadFile(scenarioInput)
-			if err != nil {
-				fmt.Fprintf(stderr, "fak ultracode bench: read scenario input: %v\n", err)
-				return 1
-			}
-			var header struct {
-				Schema string `json:"schema"`
-			}
-			if err := json.Unmarshal(b, &header); err != nil {
-				fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
-				return 1
-			}
-			switch header.Schema {
-			case ultracodebench.AccessModeFrontierSchema:
-				var frontier ultracodebench.AccessModeFrontier
-				if err := json.Unmarshal(b, &frontier); err != nil {
-					fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
-					return 1
-				}
-				evaluated, err := ultracodebench.EvaluateAccessModeFrontier(frontier, widths)
-				if err != nil {
-					fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
-					return 1
-				}
-				report = evaluated
-			case ultracodebench.AccessFrontierSchema:
-				var frontier ultracodebench.AccessFrontier
-				if err := json.Unmarshal(b, &frontier); err != nil {
-					fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
-					return 1
-				}
-				evaluated, err := ultracodebench.EvaluateAccessFrontier(frontier, widths)
-				if err != nil {
-					fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
-					return 1
-				}
-				report = evaluated
-			default:
-				fmt.Fprintf(stderr, "fak ultracode bench: unsupported access-frontier schema %q\n", header.Schema)
-				return 1
-			}
-		}
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			fmt.Fprintf(stderr, "fak ultracode bench: encode access-frontier: %v\n", err)
-			return 1
-		}
-		return 0
+		return runUltracodeAccessFrontier(stdout, stderr, scenario, scenarioInput, widthsText)
 	}
 	if factorialPath != "" {
-		data, err := os.ReadFile(factorialPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "read factorial campaign: %v\n", err)
-			return 1
-		}
-		var campaign ultracodebench.FactorialCampaign
-		if err := json.Unmarshal(data, &campaign); err != nil {
-			fmt.Fprintf(stderr, "parse factorial campaign: %v\n", err)
-			return 1
-		}
-		report, err := ultracodebench.EvaluateFactorialCampaign(campaign, ultracodebench.FactorialWidths(campaign))
-		if err != nil {
-			fmt.Fprintf(stderr, "evaluate factorial campaign: %v\n", err)
-			return 1
-		}
-		return writeUltracodeBenchJSON(stdout, stderr, report)
+		return runUltracodeFactorial(stdout, stderr, factorialPath)
 	}
 	if netWorkPath != "" {
-		data, err := os.ReadFile(netWorkPath)
-		if err != nil {
-			fmt.Fprintf(stderr, "read net-work campaign: %v\n", err)
-			return 1
-		}
-		var campaign ultracodebench.NetWorkCampaign
-		if err := json.Unmarshal(data, &campaign); err != nil {
-			fmt.Fprintf(stderr, "parse net-work campaign: %v\n", err)
-			return 1
-		}
-		report, err := ultracodebench.EvaluateNetWorkCampaign(campaign)
-		if err != nil {
-			fmt.Fprintf(stderr, "evaluate net-work campaign: %v\n", err)
-			return 1
-		}
-		return writeUltracodeBenchJSON(stdout, stderr, report)
+		return runUltracodeNetWork(stdout, stderr, netWorkPath)
 	}
 
 	var pair ultracodebench.Pair

@@ -435,15 +435,9 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 	//    never fire (#1407). AnchorStarved flags exactly that: under_budget WITH a protected prefix
 	//    already past the budget. pfxEnd<0 (system-only anchor) makes the whole array compactible,
 	//    so prefixTokens is 0 and under_budget there is genuinely benign.
-	suffixTokens := 0
-	for i := pfxEnd + 1; i < len(elems); i++ {
-		suffixTokens += estimateElementTokens(elems[i])
-	}
+	suffixTokens := estimatedElementTokens(elems, pfxEnd+1, len(elems))
 	if suffixTokens <= budget {
-		prefixTokens := 0
-		for i := 0; i <= pfxEnd && i < len(elems); i++ {
-			prefixTokens += estimateElementTokens(elems[i])
-		}
+		prefixTokens := estimatedElementTokens(elems, 0, pfxEnd+1)
 		return raw, CompactOutcome{
 			Reason:                CompactReasonUnderBudget,
 			ProtectedPrefixTokens: prefixTokens,
@@ -610,6 +604,22 @@ func CompactAnthropicHistoryWithOptions(raw []byte, opts CompactOptions) ([]byte
 		PositiveAssertionsKept: positiveResidue.AssertionsKept,
 		SolvencyForced:         solvencyForced,
 	}
+}
+
+// estimatedElementTokens totals a bounded half-open message range. Keeping the
+// boundary normalization here makes protected-prefix and compactible-suffix
+// accounting use the same rules when the selected anchor precedes messages[].
+func estimatedElementTokens(elems []json.RawMessage, start, end int) int {
+	start = max(start, 0)
+	end = min(end, len(elems))
+	if start >= end {
+		return 0
+	}
+	total := 0
+	for _, elem := range elems[start:end] {
+		total += estimateElementTokens(elem)
+	}
+	return total
 }
 
 // headBurstVerdict is what the head-anchored cache-economics gate decided.
