@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/trajectoryassurance"
 )
@@ -66,5 +68,29 @@ func TestRunTrajectoryAssuranceRejectsRawPayloadFields(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "unknown field") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunTrajectoryAssuranceBuildsFromDeclaredReceipts(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().UTC()
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	curve := write("curve.json", fmt.Sprintf(`{"schema":"fak-trajctl-curve/1","objectives":[{"objective_id":"issue-8828","signal":"HEALTHY","methods":[{"points":[{"unix_millis":%d,"run_id":"run-1"}]}]}]}`, now.UnixMilli()))
+	audit := write("audit.jsonl", `{"schema":"fak-trajectory-audit/1","kind":"session","source":"codex","session_id":"run-1","usage_records":1}`+"\n")
+	dojo := write("dojo.json", `{"schema":"fak-dojo-rsi/1","kept":true,"reason":"gain","witness":{"ok":true,"outcome":true,"constraints_satisfied":true,"parent_units":10,"child_units":[4,5],"accounting_complete":true}}`)
+	effects := write("effects.json", fmt.Sprintf(`{"schema":"fak.orchestration_effect_receipt.v1","run_id":"run-1","child_id":"child","state":"VERIFIED","reconciliation":"RECONCILED","observed_at":%q,"witness":{"authority_id":"observer","author_child_id":"other"}}`, now.Format(time.RFC3339Nano)))
+	var stdout, stderr bytes.Buffer
+	args := []string{"--trajctl-curve", curve, "--trajectory-audit", audit, "--dojo-receipt", dojo, "--effect-receipts", effects, "--trajectory-id", "run-1"}
+	if code := runTrajectoryAssurance(strings.NewReader("ignored"), &stdout, &stderr, args); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "prompt") || !strings.Contains(stdout.String(), `"objective_id":"issue-8828"`) || !strings.Contains(stdout.String(), `"total_units":19`) {
+		t.Fatalf("receipt=%s", stdout.String())
 	}
 }
