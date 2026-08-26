@@ -189,7 +189,7 @@ var tier = map[string]int{
 	"modelinventory":       1,                // deterministic local/provider candidate evidence normalization; primitive over standard-library records.
 	"modelsrc":             3,                // model-source URL registry; transports stay behind ReaderAt openers.
 	"nativebench":          1,                // stdlib-only native benchmark comparison obligations and report generation.
-	"nativeperf":           1,                // stdlib-only native performance rung graph and evidence classification.
+	"nativeperf":           2,                // native performance evidence classification composes primitive attestations.
 	"skillenv":             5,                // skill virtual-env composer; imports ctxmmu(2)+ctxresidency(3)+kvmmu(3)+stdlib.
 	"guardroute":           5,                // guard RSI worst-bucket auto-router to a finding+gh issue; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
 	"guardcomplaint":       5,                // agent APPEAL channel (the subjective complement of guardroute): files a witnessed, deduping `fak complain` gh issue when the agent judges a guard DENY wrong; imports dogfoodissues(3)+guardrsi(1)+stdlib, off the hot path.
@@ -482,6 +482,7 @@ var tier = map[string]int{
 	"portability":         1, // personal-continuity discovery/export/apply/switch/rollback leaf; stdlib-only, imports nothing internal, off the hot path.
 	"ociartifact":         2, // activation-neutral OCI collection transport and MCP metadata bridge
 	"portabilityswitch":   2, // context-switch transaction coordinator; composes lifecycle/processforest authorities, off the hot path.
+	"fastintent":          3, // joins tier-2 orchestration, provider-tier, and benchmark receipts into one portable replay; off the serving hot path.
 	"orchestration":       2, // pure portable workflow-plan/profile resolution contract; stdlib-only, no provider adapters, off the hot path.
 	"ultracodebench":      2, // pure paired-run fold and verdict contract; stdlib-only, off the serving hot path.
 	"devexmeter":          1, // pure dev-ex friction meter + RSI close gate; stdlib-only, off the hot path.
@@ -692,6 +693,7 @@ var tier = map[string]int{
 	"modelloadplan":              3, // deterministic Qwen load planner over harnessresolve locks; off the hot path (#8134).
 	"geminicache":                2, // provider CachedContent lifecycle adapter over stdlib HTTP and immutable context identity (#8481).
 	"qwen38ladder":               1, // stdlib-only paired evidence gate from pinned Qwen3.5 proxies to exact Qwen3.8-27B (#8011).
+	"qwenflashnext":              1, // stdlib-only pinned Flash-Next chat/channel/tool/stop contract (#9124).
 	"scratchmark":                1, // #6616 stdlib-only bounded detector for source artifacts self-declared disposable in their leading comment block.
 	"fleetsearch":                3, // read-only join over lifecycle/sessionjournal/toolproc evidence; no runtime kernel.
 	"discoveryrouter":            3, // bounded read-only composition over existing discovery sources; no storage or runtime kernel.
@@ -710,7 +712,9 @@ var tier = map[string]int{
 	"ultracodenegcontrol":        1,
 	"computetune":                1, // stdlib-only offline tuning decision primitive over replayable compute traces (#8608).
 	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
+	"systembaseline":             1,
 	"ultracodedogfood":           1, // stdlib-only deterministic lifecycle-boundary witness evaluator (#8678).
+	"archrank":                   3, // deterministic research-ranking method; no runtime kernel (#9145).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
