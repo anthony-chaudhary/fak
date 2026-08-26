@@ -21,13 +21,23 @@ import (
 )
 
 const (
-	OracleConfigSchema      = "fak.qwen38-llamacpp-oracle-config/1"
-	OracleMeasurementSchema = "fak.qwen38-llamacpp-measurement/1"
-	OracleReportSchema      = "fak.qwen38-llamacpp-oracle/1"
-	OracleArchiveSchema     = "fak.qwen38-llamacpp-oracle-raw/1"
-	PinnedLlamaCPPBuild     = "9828"
-	PinnedLlamaCPPRevision  = "ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0"
-	PinnedLlamaCPPLicense   = "MIT"
+	OracleConfigSchema        = "fak.qwen38-llamacpp-oracle-config/1"
+	OracleMeasurementSchema   = "fak.qwen38-llamacpp-measurement/1"
+	OracleMeasurementV2Schema = "fak.qwen38-llamacpp-measurement/2"
+	OracleReportSchema        = "fak.qwen38-llamacpp-oracle/1"
+	OracleArchiveSchema       = "fak.qwen38-llamacpp-oracle-raw/1"
+	PinnedLlamaCPPBuild       = "9828"
+	PinnedLlamaCPPRevision    = "ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0"
+	PinnedLlamaCPPLicense     = "MIT"
+)
+
+const (
+	oracleRuntimeReference = "reference"
+	oracleRuntimeCandidate = "candidate"
+	oracleNativeEngine     = "inkernel"
+	oracleMetalBackend     = "metal"
+	oracleNativeForward    = "metal/qwen35-hybrid-session-v1"
+	oracleLlamaForward     = "llama.cpp/metal"
 )
 
 // OracleConfig composes two maintained AdapterConfig runs. Runtime lifecycle
@@ -54,15 +64,53 @@ type OracleRuntimeConfig struct {
 }
 
 type OracleMeasurementRun struct {
-	Schema         string              `json:"schema"`
-	Runtime        string              `json:"runtime"`
-	CorpusID       string              `json:"corpus_id"`
-	CorpusSHA256   string              `json:"corpus_sha256"`
-	ArtifactSHA256 string              `json:"artifact_sha256"`
-	Hardware       string              `json:"hardware"`
-	Software       string              `json:"software"`
-	Command        []string            `json:"command"`
-	Samples        []OracleMeasurement `json:"samples"`
+	Schema         string                   `json:"schema"`
+	Runtime        string                   `json:"runtime"`
+	CorpusID       string                   `json:"corpus_id"`
+	CorpusSHA256   string                   `json:"corpus_sha256"`
+	ArtifactSHA256 string                   `json:"artifact_sha256"`
+	Hardware       string                   `json:"hardware"`
+	Software       string                   `json:"software"`
+	Command        []string                 `json:"command"`
+	Samples        []OracleMeasurement      `json:"samples"`
+	Execution      *OracleExecutionIdentity `json:"execution,omitempty"`
+	Matched        *OracleMatchedEnvelope   `json:"matched,omitempty"`
+}
+
+// OracleExecutionIdentity names the runtime that performed model math. It is
+// separate from transport and endpoint identity so a comparator cannot be
+// mistaken for a fak-native recovery arm.
+type OracleExecutionIdentity struct {
+	Engine         string `json:"engine"`
+	Backend        string `json:"backend"`
+	ForwardPath    string `json:"forward_path"`
+	Q4K            bool   `json:"q4k"`
+	FallbackActive *bool  `json:"fallback_active"`
+	ComparatorOnly *bool  `json:"comparator_only"`
+}
+
+// OracleMatchedEnvelope carries the fixed-shape performance receipt alongside
+// the frozen-corpus samples. Keeping the two separate preserves the existing
+// quality corpus while making the exact P32/T64 repetitions explicit.
+type OracleMatchedEnvelope struct {
+	PromptSHA256  string                    `json:"prompt_sha256"`
+	Temperature   float64                   `json:"temperature"`
+	PrefillTokens int                       `json:"prefill_tokens"`
+	DecodeTokens  int                       `json:"decode_tokens"`
+	Repetitions   []OracleMatchedRepetition `json:"repetitions"`
+}
+
+type OracleMatchedRepetition struct {
+	Repetition             int       `json:"repetition"`
+	Tokens                 []string  `json:"tokens"`
+	Logits                 []float64 `json:"logits"`
+	TTFTMS                 float64   `json:"ttft_ms"`
+	PrefillSeconds         float64   `json:"prefill_seconds"`
+	PrefillTokensPerSecond float64   `json:"prefill_tokens_per_second"`
+	DecodeSeconds          float64   `json:"decode_seconds"`
+	DecodeTokensPerSecond  float64   `json:"decode_tokens_per_second"`
+	RSSBytes               uint64    `json:"rss_bytes"`
+	OSFootprintBytes       uint64    `json:"os_footprint_bytes"`
 }
 
 type OracleMeasurement struct {
@@ -179,11 +227,11 @@ func RunOracle(ctx context.Context, configPath, corpusPath, reportPath, archiveP
 	if !matchesPinnedLlamaCPPRevision(revision) {
 		return OracleReport{}, fmt.Errorf("llama.cpp revision drift: got %q want build %s at %s", strings.TrimSpace(string(revision)), PinnedLlamaCPPBuild, PinnedLlamaCPPRevision)
 	}
-	reference, err := loadOracleRuntime(ctx, cfg.Reference, corpus)
+	reference, err := loadOracleRuntime(ctx, cfg.Reference, corpus, oracleRuntimeReference)
 	if err != nil {
 		return OracleReport{}, fmt.Errorf("reference: %w", err)
 	}
-	candidate, err := loadOracleRuntime(ctx, cfg.Candidate, corpus)
+	candidate, err := loadOracleRuntime(ctx, cfg.Candidate, corpus, oracleRuntimeCandidate)
 	if err != nil {
 		return OracleReport{}, fmt.Errorf("candidate: %w", err)
 	}
@@ -272,7 +320,7 @@ func validateRuntimeConfig(label string, cfg OracleRuntimeConfig) error {
 	return nil
 }
 
-func loadOracleRuntime(ctx context.Context, cfg OracleRuntimeConfig, corpus qwen38quant.Corpus) (OracleRuntimeArchive, error) {
+func loadOracleRuntime(ctx context.Context, cfg OracleRuntimeConfig, corpus qwen38quant.Corpus, role string) (OracleRuntimeArchive, error) {
 	adapterBytes, err := os.ReadFile(cfg.AdapterConfig)
 	if err != nil {
 		return OracleRuntimeArchive{}, fmt.Errorf("adapter_config: %w", err)
@@ -306,7 +354,7 @@ func loadOracleRuntime(ctx context.Context, cfg OracleRuntimeConfig, corpus qwen
 		Name: cfg.Name, AdapterConfigSHA256: hex.EncodeToString(sum[:]), Campaign: campaign,
 		CampaignArchive: json.RawMessage(bytes.TrimSpace(campaignRaw)), Measurement: measurement,
 	}
-	if err := validateRuntimeArchive(runtime, corpus); err != nil {
+	if err := validateRuntimeArchive(runtime, corpus, role); err != nil {
 		return OracleRuntimeArchive{}, err
 	}
 	return runtime, nil
@@ -322,7 +370,7 @@ func validateAdapterBinding(adapter AdapterConfig, report qwen38quant.Report) er
 	return nil
 }
 
-func validateRuntimeArchive(runtime OracleRuntimeArchive, corpus qwen38quant.Corpus) error {
+func validateRuntimeArchive(runtime OracleRuntimeArchive, corpus qwen38quant.Corpus, role string) error {
 	if runtime.Name == "" || !validOracleSHA256(runtime.AdapterConfigSHA256) {
 		return errors.New("runtime name and adapter config hash are required")
 	}
@@ -335,7 +383,13 @@ func validateRuntimeArchive(runtime OracleRuntimeArchive, corpus qwen38quant.Cor
 	if runtime.Measurement.Runtime != runtime.Name || runtime.Measurement.ArtifactSHA256 != runtime.Campaign.Identity.ArtifactSHA256 {
 		return errors.New("measurement runtime or artifact does not match campaign")
 	}
-	return validateMeasurement(runtime.Measurement, corpus)
+	if err := validateMeasurement(runtime.Measurement, corpus); err != nil {
+		return err
+	}
+	if runtime.Measurement.Schema == OracleMeasurementV2Schema {
+		return validateExecutionIdentity(runtime.Measurement.Execution, runtime.Campaign.ExecutionEngine, role)
+	}
+	return nil
 }
 
 func validateCampaignBinding(report qwen38quant.Report, raw []byte, corpus qwen38quant.Corpus) error {
@@ -364,8 +418,11 @@ func validateCampaignBinding(report qwen38quant.Report, raw []byte, corpus qwen3
 }
 
 func validateMeasurement(run OracleMeasurementRun, corpus qwen38quant.Corpus) error {
-	if run.Schema != OracleMeasurementSchema || run.Runtime == "" || run.CorpusID != corpus.ID || run.CorpusSHA256 != qwen38quant.CorpusDigest(corpus) || !validOracleSHA256(run.ArtifactSHA256) {
+	if (run.Schema != OracleMeasurementSchema && run.Schema != OracleMeasurementV2Schema) || run.Runtime == "" || run.CorpusID != corpus.ID || run.CorpusSHA256 != qwen38quant.CorpusDigest(corpus) || !validOracleSHA256(run.ArtifactSHA256) {
 		return errors.New("measurement identity or corpus mismatch")
+	}
+	if run.Schema == OracleMeasurementSchema && (run.Execution != nil || run.Matched != nil) {
+		return errors.New("v1 measurement cannot carry v2 execution or matched-envelope fields")
 	}
 	if run.Hardware == "" || run.Software == "" || len(run.Command) == 0 {
 		return errors.New("measurement hardware, software, and argv command are required")
@@ -397,6 +454,86 @@ func validateMeasurement(run OracleMeasurementRun, corpus qwen38quant.Corpus) er
 			if !seen[fixture+"/"+state] {
 				return fmt.Errorf("measurement missing %s/%s", fixture, state)
 			}
+		}
+	}
+	if run.Schema == OracleMeasurementV2Schema {
+		return validateMatchedEnvelope(run.Matched)
+	}
+	return nil
+}
+
+func validateExecutionIdentity(identity *OracleExecutionIdentity, campaignEngine, role string) error {
+	if identity == nil || identity.Backend != oracleMetalBackend || !identity.Q4K || identity.FallbackActive == nil || *identity.FallbackActive || identity.ComparatorOnly == nil {
+		return fmt.Errorf("%s execution identity is incomplete or unsafe", role)
+	}
+	switch role {
+	case oracleRuntimeReference:
+		if campaignEngine != qwen38quant.EngineLlamaCpp || identity.Engine != qwen38quant.EngineLlamaCpp || identity.ForwardPath != oracleLlamaForward || !*identity.ComparatorOnly {
+			return errors.New("reference execution identity must be pinned llama.cpp Metal and comparator-only")
+		}
+	case oracleRuntimeCandidate:
+		if campaignEngine != qwen38quant.EngineFakNative || identity.Engine != oracleNativeEngine || identity.ForwardPath != oracleNativeForward || *identity.ComparatorOnly {
+			return errors.New("candidate execution identity must be fak-native in-kernel Metal with no comparator role")
+		}
+	default:
+		return fmt.Errorf("unknown oracle runtime role %q", role)
+	}
+	return nil
+}
+
+func validateMatchedEnvelope(matched *OracleMatchedEnvelope) error {
+	if matched == nil || !validOracleSHA256(matched.PromptSHA256) || matched.Temperature != 0 || matched.PrefillTokens != 32 || matched.DecodeTokens != 64 || len(matched.Repetitions) != 3 {
+		return errors.New("matched envelope requires one prompt hash and exactly three temperature-zero P32/T64 repetitions")
+	}
+	seen := map[int]bool{}
+	var deterministicTokens []string
+	for _, repetition := range matched.Repetitions {
+		if repetition.Repetition < 1 || repetition.Repetition > 3 || seen[repetition.Repetition] {
+			return errors.New("matched envelope has a missing, duplicate, or out-of-range repetition")
+		}
+		seen[repetition.Repetition] = true
+		if len(repetition.Tokens) != matched.DecodeTokens || len(repetition.Logits) == 0 || repetition.RSSBytes == 0 || repetition.OSFootprintBytes == 0 ||
+			!finitePositive(repetition.TTFTMS) || !finitePositive(repetition.PrefillSeconds) || !finitePositive(repetition.PrefillTokensPerSecond) || !finitePositive(repetition.DecodeSeconds) || !finitePositive(repetition.DecodeTokensPerSecond) {
+			return fmt.Errorf("matched repetition %d lacks generated tokens, timing, RSS, or OS footprint evidence", repetition.Repetition)
+		}
+		for _, logit := range repetition.Logits {
+			if math.IsNaN(logit) || math.IsInf(logit, 0) {
+				return fmt.Errorf("matched repetition %d has non-finite logits", repetition.Repetition)
+			}
+		}
+		for _, token := range repetition.Tokens {
+			if token == "" {
+				return fmt.Errorf("matched repetition %d has an empty generated token", repetition.Repetition)
+			}
+		}
+		if deterministicTokens == nil {
+			deterministicTokens = slices.Clone(repetition.Tokens)
+		} else if !slices.Equal(deterministicTokens, repetition.Tokens) {
+			return errors.New("matched repetitions have nondeterministic generated tokens")
+		}
+	}
+	return nil
+}
+
+func validateMatchedPair(reference, candidate OracleMeasurementRun, tolerance float64) error {
+	if reference.Schema == OracleMeasurementSchema && candidate.Schema == OracleMeasurementSchema {
+		return nil
+	}
+	if reference.Schema != OracleMeasurementV2Schema || candidate.Schema != OracleMeasurementV2Schema {
+		return errors.New("reference and candidate measurement schema versions must match")
+	}
+	ref, got := reference.Matched, candidate.Matched
+	if ref == nil || got == nil || ref.PromptSHA256 != got.PromptSHA256 || ref.Temperature != got.Temperature || ref.PrefillTokens != got.PrefillTokens || ref.DecodeTokens != got.DecodeTokens {
+		return errors.New("reference and candidate matched envelopes differ")
+	}
+	candidates := make(map[int]OracleMatchedRepetition, len(got.Repetitions))
+	for _, repetition := range got.Repetitions {
+		candidates[repetition.Repetition] = repetition
+	}
+	for _, want := range ref.Repetitions {
+		candidateRepetition, ok := candidates[want.Repetition]
+		if !ok || !slices.Equal(want.Tokens, candidateRepetition.Tokens) || maxAbsDiff(want.Logits, candidateRepetition.Logits) > tolerance {
+			return fmt.Errorf("matched repetition %d failed generated-token or logit parity", want.Repetition)
 		}
 	}
 	return nil
@@ -441,10 +578,10 @@ func oracleReportFromArchive(archive OracleArchive, corpus qwen38quant.Corpus) (
 	if archive.Schema != OracleArchiveSchema || archive.LlamaCPPRevision != PinnedLlamaCPPRevision || archive.LlamaCPPLicense != PinnedLlamaCPPLicense || len(archive.BuildFlags) == 0 || !finitePositive(archive.LogitTolerance) {
 		return OracleReport{}, errors.New("invalid oracle archive policy")
 	}
-	if err := validateRuntimeArchive(archive.Reference, corpus); err != nil {
+	if err := validateRuntimeArchive(archive.Reference, corpus, oracleRuntimeReference); err != nil {
 		return OracleReport{}, fmt.Errorf("reference: %w", err)
 	}
-	if err := validateRuntimeArchive(archive.Candidate, corpus); err != nil {
+	if err := validateRuntimeArchive(archive.Candidate, corpus, oracleRuntimeCandidate); err != nil {
 		return OracleReport{}, fmt.Errorf("candidate: %w", err)
 	}
 	wantQuality, err := compareOracleRuns(archive.Reference.Measurement, archive.Candidate.Measurement, archive.LogitTolerance)
@@ -453,6 +590,9 @@ func oracleReportFromArchive(archive OracleArchive, corpus qwen38quant.Corpus) (
 	}
 	if !reflect.DeepEqual(wantQuality, archive.Quality) {
 		return OracleReport{}, errors.New("quality results do not match raw measurements")
+	}
+	if err := validateMatchedPair(archive.Reference.Measurement, archive.Candidate.Measurement, archive.LogitTolerance); err != nil {
+		return OracleReport{}, err
 	}
 	promote := archive.Reference.Campaign.Verdict == "PROMOTE" && archive.Candidate.Campaign.Verdict == "PROMOTE"
 	numeric := make([]OracleNumericSummary, 0, len(archive.Quality))
