@@ -155,3 +155,18 @@ tool success, side effect, freshness, retry, and idempotency
 policy/admission/fairness outcome
 accepted task outcome, wall time, cost, and resource-time
 ```
+
+## Geography and session locality
+
+- **Regional arrivals are phase-shifted, not one global stationary process.** SkyWalker
+  observes distinct diurnal peaks across six country groups. Use region/timezone-specific
+  curves and sensitivity ranges; WildChat is not a provider production distribution.
+- **Cross-region pooling is constrained.** WAN latency, residency/export policy, carbon,
+  failure domains, data movement, and session/KV locality can dominate spare capacity.
+- **Agent sessions create hotspots.** Cache-affinity routing can strand idle replicas while
+  a few session-owning replicas queue. Balance projected session work against reuse.
+- **Idle KV needs a lifetime policy.** Tool gaps make uniform pinning waste memory and
+  uniform eviction waste prefill. Compare TTL, offload, migration, and eviction with
+  reload, queue, fairness, and abandonment included.
+- **SLO class and geography interact.** Latency-sensitive and elastic/batch work can use
+  different regions and provisioning types only when data, quality, and deadlines allow.

@@ -1,7 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T19:38:00-07:00",
-  "issue": 9320,
+  "updated_at": "2026-08-26T19:55:00-07:00",
+  "issue": 9269,
+  "root_issue": 9269,
+  "latest_slice_issue": 9323,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 158,
+    "entry_count": 162,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -107,6 +109,7 @@
       "Chutes production trace study",
       "Cloudflare / Replicate",
       "Cohere",
+      "Continuum multi-turn agent study",
       "CoreWeave",
       "CoreWeave / Nebius / Cerebras",
       "Data Center Watch",
@@ -169,6 +172,8 @@
       "Parrot serving study",
       "Robust KV cache management study",
       "SK hynix",
+      "SMetric agent scheduling study",
+      "SageServe production-trace study",
       "Sakana AI",
       "Sarvam AI",
       "Sea AI Lab",
@@ -176,6 +181,7 @@
       "ServeGen production study",
       "Siemens Energy / Start Campus",
       "Singapore IMDA",
+      "SkyWalker cross-region study",
       "TIE scheduling study",
       "TSMC",
       "TaiChi serving study",
@@ -5939,6 +5945,157 @@
       "fak_implications": [
         "Measure task completion, critical-path delay, useful tool outcomes, retries, and resource occupancy together.",
         "Do not optimize model-request latency while tool queues dominate the workflow."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "skywalker-cross-region-2025",
+      "category": "serving_system",
+      "entity": "SkyWalker cross-region study",
+      "topic": [
+        "multi_region",
+        "diurnal",
+        "prefix_locality",
+        "routing",
+        "geography"
+      ],
+      "published_at": "2025-05-30",
+      "event_at": "2025-05-30",
+      "source_title": "SkyWalker: A Locality-Aware Cross-Region Load Balancer for LLM Inference",
+      "source_url": "https://arxiv.org/abs/2505.24095",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "SkyWalker analyzes six-country WildChat demand and reports region-specific diurnal peaks, then evaluates cross-region routing that aggregates complementary demand while preserving session/user prefix locality through consistent hashing or a prefix trie.",
+      "quantified": {
+        "countries_analyzed": 6
+      },
+      "assumptions": [
+        "Geographic demand can shift by local time, creating temporal capacity complementarity across regions.",
+        "Cross-region balancing must trade WAN latency and policy constraints against utilization and prefix reuse."
+      ],
+      "contradictions_or_limits": [
+        "WildChat geography is not a provider production trace and may not represent paid/API/enterprise traffic.",
+        "Benchmark gains depend on region mix, network latency, residency rules, reserved capacity, and cache state."
+      ],
+      "fak_implications": [
+        "Add region, timezone, session/user affinity, WAN latency, and data-locality constraints to replay.",
+        "Compare local peak provisioning with cross-region pooled capacity under the same SLO and policy envelope."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "smetric-agent-scheduling-2026",
+      "category": "serving_system",
+      "entity": "SMetric agent scheduling study",
+      "topic": [
+        "agentic_workload",
+        "session_locality",
+        "kv_cache",
+        "load_balance",
+        "scheduling_metric"
+      ],
+      "published_at": "2026-07-09",
+      "event_at": "2026-07-09",
+      "source_title": "SMetric: Rethink LLM Scheduling for Serving Agents with Session Metrics",
+      "source_url": "https://arxiv.org/abs/2607.08565",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "SMetric studies two real-world agent traces and finds that cache-affinity schedulers can overload a few instances while others remain idle; it proposes session-aware metrics that balance KV reuse against load.",
+      "quantified": {
+        "real_world_agent_traces": 2
+      },
+      "assumptions": [
+        "Session locality and cache affinity create correlated, long-lived load that request-level queue length can misrepresent."
+      ],
+      "contradictions_or_limits": [
+        "The traces and benchmark configurations do not establish universal production gains or tenant fairness.",
+        "A different model, cache size, tool latency, session length, or hardware topology can change the reuse/load balance."
+      ],
+      "fak_implications": [
+        "Schedule with session-level cached state and projected work, not cache hit alone.",
+        "Measure idle replicas, hotspot queues, KV hit, throughput, and task completion together."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "continuum-cachettl-2026",
+      "category": "serving_system",
+      "entity": "Continuum multi-turn agent study",
+      "topic": [
+        "agentic_workload",
+        "kv_cache_ttl",
+        "tool_idle",
+        "offload",
+        "job_completion_time"
+      ],
+      "published_at": "2026-05-11",
+      "event_at": "2026-05-11",
+      "source_title": "Efficient and Robust Multi-Turn LLM Agent Scheduling with KV-Cache Retention",
+      "source_url": "https://arxiv.org/abs/2511.02230",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "Continuum targets multi-turn agent job completion by assigning KV-cache TTLs during tool-call gaps based on reload cost and eviction-induced queueing, rather than pinning or evicting every session uniformly.",
+      "quantified": {},
+      "assumptions": [
+        "Tool execution creates idle windows during which retained KV competes with active-request concurrency."
+      ],
+      "contradictions_or_limits": [
+        "TTL benefits depend on tool-gap distribution, reload substrate, cache size, queue state, and session return probability.",
+        "Benchmark evidence does not provide cross-product production tool-gap and memory-size distributions."
+      ],
+      "fak_implications": [
+        "Replay tool-gap and session-return distributions; charge retained-memory time and reload cost.",
+        "Compare pin, offload, evict, and TTL policies under task completion and fairness objectives."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "sageserve-multiregion-2025",
+      "category": "serving_system",
+      "entity": "SageServe production-trace study",
+      "topic": [
+        "multi_region",
+        "mixed_sla",
+        "autoscaling",
+        "model_placement",
+        "spot_capacity"
+      ],
+      "published_at": "2025-02-20",
+      "event_at": "2025-02-20",
+      "source_title": "Serving Models, Fast and Slow: Optimizing Heterogeneous LLM Inferencing Workloads at Scale",
+      "source_url": "https://arxiv.org/abs/2502.14617",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "SageServe evaluates mixed latency-sensitive and insensitive inference workloads using production traces with more than 8M requests, four open models, and three regions; it reports up to 25% GPU-hour savings while maintaining evaluated SLOs.",
+      "quantified": {
+        "production_trace_requests_gt": 8000000,
+        "models": 4,
+        "regions": 3,
+        "reported_gpu_hour_savings_pct_up_to": 25,
+        "reported_scaling_overhead_reduction_pct_up_to": 80
+      },
+      "assumptions": [
+        "Global serving mixes SLO classes, models, regions, and spot/on-demand capacity at different timescales."
+      ],
+      "contradictions_or_limits": [
+        "The optimization evaluation combines empirical and simulated components and does not disclose a universal geography or tenant distribution.",
+        "Reported savings depend on cost model, spot availability, model placement time, forecast, and SLO mix."
+      ],
+      "fak_implications": [
+        "Model latency-sensitive and batch/elastic classes separately across regions and provisioning types.",
+        "Include model redeployment and VM scaling overhead before accepting capacity savings."
       ],
       "rumor": {
         "is_rumor": false

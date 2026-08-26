@@ -158,3 +158,12 @@ production papers. It does not turn reported observations into universal fitted 
 | Tool failure and retry | Copilot: 9% of turns with tool failure; retry amplification up to 4× compute. | Replay failure type, retry budget, idempotency, partial side effects, and abandonment. | Production distributions outside coding agents. |
 | Tool-result reuse | Systems work motivates semantic tool caching. | Treat tool result as a separate object with tenant, freshness, and side-effect policy. | Direct production redundancy/hit distributions. |
 | Workflow critical path | Systems studies expose DAG-aware scheduling. | Optimize accepted task completion and critical-path delay, not isolated request latency. | Public production DAG shapes and stage-time shares. |
+
+## Geographic and session-locality additions
+
+| Variable | Evidence | Modeling rule | Missing |
+|---|---|---|---|
+| Regional diurnal demand | SkyWalker uses six-country WildChat demand with distinct local-time peaks. | Sample region/timezone first; preserve local peak phase and WAN/residency constraints. | Provider production country weights, enterprise/API segmentation, holidays, launches, and exact amplitude. |
+| Multi-region mixed SLOs | SageServe evaluates >8M production-trace requests, 4 models, and 3 regions with latency-sensitive/insensitive classes. | Jointly sample region, model, SLO class, and provisioning type; include placement/scale overhead. | Public raw trace, tenant weights, region matrix, and real spot interruptions. |
+| Agent session hotspot | SMetric studies 2 real-world agent traces and finds cache-affinity routing can overload a few instances. | Track per-session cached state and projected remaining work, not only queue or hit. | Production session share, cache size, hardware, tool-gap, and fairness distributions across products. |
+| Tool-gap KV lifetime | Continuum assigns cache TTL from reload cost and eviction-induced queueing during tool calls. | Draw tool-gap and return probability; charge retained-memory time versus offload/reload. | Cross-product tool-gap quantiles, KV sizes, abandonment, and storage bandwidth. |

@@ -130,8 +130,8 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **158 dated entries**, **153 unique source URLs**, and
-**125 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
+The current spine contains **162 dated entries**, **157 unique source URLs**, and
+**129 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
 and **2 explicit rumors**. It is broad, but it is not entity-complete. The
 requirement-level verdict is in [`coverage-audit.md`](coverage-audit.md); the detailed
