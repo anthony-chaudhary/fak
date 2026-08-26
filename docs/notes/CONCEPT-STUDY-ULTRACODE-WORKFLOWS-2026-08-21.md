@@ -228,3 +228,40 @@ Refresh this note when any pinned repository revision materially changes the cit
 when A2A publishes a stable generation/replay release, when the installed Claude Code
 version changes, or when #8488/#8490/#8334/#8168 land. The deterministic companion checker
 guards shape and privacy; it does not convert stale evidence into current evidence.
+
+### LangGraph exhaustive inventory refresh (2026-08-25)
+
+The LangGraph denominator is now explicit and reproducible at the original pin
+`f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f` (2026-08-20T07:02:48Z). The generated
+map at [`docs/research/inventory/langchain-ai-langgraph.json`](../research/inventory/langchain-ai-langgraph.json)
+walks all 672 regular files (13,719,867 bytes; 318 runtime, 237 test, and 33 docs
+files) across five top-level subsystems, skipping only `.git`. Architecture and
+roadmap were not separate tree classes at this revision, so those claims are
+bounded to README/docs, runtime, tests, commit history, releases, and public
+tracker evidence rather than inferred from absent documents.
+
+The non-tree audit exhaustively paged the public GitHub surfaces observed on
+2026-08-25: 1,534 issues (480 open), 5,642 pull requests (242 open), zero
+Discussions, 560 releases, 731 tags, and eight branches. The pinned clone contains
+7,045 commits through the checked revision and confirms the repository-level MIT
+license. These live counts establish the audited denominator; source conclusions
+remain tied to the checked revision rather than silently advancing to the later
+upstream head.
+
+Candidate adjudication did not change the portfolio:
+
+- **Already owned:** deterministic Pregel task preparation/write ordering maps to
+  fak's typed DAG, exact leases, and effect-successor receipts.
+- **Already shipped:** checkpoint pending writes inspired selective recovery, but
+  fak keeps independent effect proof; witnessed graph resume shipped in #8490.
+- **Still tracked:** checkpoint lineage strengthens the case for per-node context,
+  lease, effect, and witness visibility already owned by #8334.
+- **No new issue:** #8168 already supplies the paired value witness, and no
+  source-validated candidate survived dedupe as an unowned borrow.
+
+Fak self-queries for deterministic writes/checkpoint lineage, durable resume, and
+graph orchestration returned native carry-forward, live-control, context-reuse,
+attribution, fleet-monitoring, and capability-floor surfaces. The refreshed
+candidate matrix therefore keeps LangGraph as implementation evidence for
+selective recovery, not as a graph runtime to port and not as evidence that a
+persisted pending write independently proves an external effect.
