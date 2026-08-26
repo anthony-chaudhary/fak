@@ -21,7 +21,7 @@ func gateRequest(t *testing.T) GateRequest {
 	for i := range c.Repetitions {
 		c.Repetitions[i].TokensPerSecond = 100 + float64(i%2)
 	}
-	return GateRequest{GateRequestSchema, GatePolicy{"fak-native-performance-gate-policy/v1", a.EnvelopeID, a.ChangedLeverID, a.Revision, 3, 2, 2, 5, 90, 1200, "exact_match", 1, true, "fak-native", a.Execution.ForwardPath}, a, c}
+	return GateRequest{GateRequestSchema, GatePolicy{"fak-native-performance-gate-policy/v1", a.EnvelopeID, a.ChangedLeverID, a.Revision, 3, 2, 2, 5, 90, 1200, "exact_match", 1, true, "fak-native", a.Execution.ForwardPath, false}, a, c}
 }
 func TestGateNoiseBands(t *testing.T) {
 	r := gateRequest(t)
@@ -81,5 +81,34 @@ func TestGateSuspectRangeIsSortedAndBounded(t *testing.T) {
 	}
 	if len(v.SuspectModules) != 2 || v.SuspectModules[0].Module != "cmd/fak" || v.Bisect.GoodRevision != "goodsha" || v.Bisect.BadRevision != "badsha" {
 		t.Fatalf("%+v", v)
+	}
+}
+
+func TestGateAmbientEvidencePolicy(t *testing.T) {
+	clean := gateRequest(t)
+	clean.Policy.RequireAmbientEvidence = true
+	addAmbient(t, &clean.LastAccepted, AmbientClean)
+	addAmbient(t, &clean.Candidate, AmbientClean)
+	verdict, err := Gate(clean)
+	if err != nil || verdict.Classification != GatePass {
+		t.Fatalf("clean: %+v %v", verdict, err)
+	}
+
+	contaminated := clean
+	addAmbient(t, &contaminated.Candidate, AmbientInvestigate)
+	verdict, err = Gate(contaminated)
+	if err != nil || verdict.Classification != GateInvestigate {
+		t.Fatalf("contaminated: %+v %v", verdict, err)
+	}
+
+	unmeasured := clean
+	unmeasured.Candidate.AmbientEvidence = nil
+	if _, err = Gate(unmeasured); err == nil || !strings.Contains(err.Error(), "align 1:1") {
+		t.Fatalf("unmeasured err=%v", err)
+	}
+
+	legacy := gateRequest(t)
+	if verdict, err = Gate(legacy); err != nil || verdict.Classification != GatePass {
+		t.Fatalf("legacy v1 compatibility: %+v %v", verdict, err)
 	}
 }

@@ -29,6 +29,7 @@ type ExperimentReceipt struct {
 	UnchangedControls []string           `json:"unchanged_controls"`
 	ChangedAxes       []string           `json:"changed_axes"`
 	Repetitions       []Repetition       `json:"repetitions"`
+	AmbientEvidence   []AmbientEvidence  `json:"ambient_evidence,omitempty"`
 	Memory            MemoryMetrics      `json:"memory"`
 	Execution         ExecutionIdentity  `json:"execution"`
 	Quality           QualityMetric      `json:"quality"`
@@ -180,6 +181,17 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	for i, rep := range r.Repetitions {
 		if !positive(rep.EndToEndMilliseconds) || !positive(rep.TokensPerSecond) {
 			f = append(f, fmt.Sprintf("repetition %d lacks positive end-to-end latency/tok/s", i))
+		}
+	}
+	if len(r.AmbientEvidence) > 0 {
+		if len(r.AmbientEvidence) != len(r.Repetitions) {
+			f = append(f, fmt.Sprintf("ambient evidence count %d must align 1:1 with %d repetitions", len(r.AmbientEvidence), len(r.Repetitions)))
+		} else {
+			for i, evidence := range r.AmbientEvidence {
+				if err := ValidateAmbientEvidence(evidence); err != nil {
+					f = append(f, fmt.Sprintf("ambient evidence %d: %v", i, err))
+				}
+			}
 		}
 	}
 	if r.Memory.PeakBytes == 0 || r.Memory.ResidentBytes == 0 {

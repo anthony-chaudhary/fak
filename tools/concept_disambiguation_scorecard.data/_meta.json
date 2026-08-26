@@ -3284,6 +3284,11 @@
           "category": "incidental",
           "reason": "Implementation receipt identifier for #8699, not a distinct guard or gate.",
           "token": "qwenEmptyUsageGuardReceipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Typed ambient-baseline verdict used by the native performance gate; it applies the existing investigate outcome rather than introducing a new guard or gate concept.",
+          "token": "AmbientInvestigate"
         }
       ],
       "exclude": [
@@ -3298,7 +3303,8 @@
         "mitigat",
         "navigat",
         "negat",
-        "propagat"
+        "propagat",
+        "AmbientInvestigate"
       ],
       "id": "guard-gate",
       "ignore": [

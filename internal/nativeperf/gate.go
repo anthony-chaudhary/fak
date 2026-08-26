@@ -46,6 +46,7 @@ type GatePolicy struct {
 	QualityHigherIsBetter  bool    `json:"quality_higher_is_better"`
 	RequiredEngine         string  `json:"required_engine"`
 	RequiredForwardPath    string  `json:"required_forward_path"`
+	RequireAmbientEvidence bool    `json:"require_ambient_evidence,omitempty"`
 }
 
 // GateRequest compares one candidate with the envelope's last accepted witness.
@@ -130,6 +131,24 @@ func Gate(r GateRequest) (GateVerdict, error) {
 	}
 	if len(a.Repetitions) < p.MinimumRepetitions || len(c.Repetitions) < p.MinimumRepetitions {
 		return GateVerdict{}, fmt.Errorf("policy requires at least %d repetitions", p.MinimumRepetitions)
+	}
+	if p.RequireAmbientEvidence {
+		for _, pair := range []struct {
+			name    string
+			receipt ExperimentReceipt
+		}{{"last accepted", a}, {"candidate", c}} {
+			if len(pair.receipt.AmbientEvidence) != len(pair.receipt.Repetitions) {
+				return GateVerdict{}, fmt.Errorf("%s ambient evidence must align 1:1 with repetitions", pair.name)
+			}
+			for i, evidence := range pair.receipt.AmbientEvidence {
+				if err := ValidateAmbientEvidence(evidence); err != nil {
+					return GateVerdict{}, fmt.Errorf("%s ambient evidence %d: %w", pair.name, i, err)
+				}
+				if evidence.Verdict != AmbientClean {
+					return GateVerdict{Schema: GateVerdictSchema, Classification: GateInvestigate, EnvelopeID: c.EnvelopeID, AcceptedRevision: a.Revision, CandidateRevision: c.Revision, Checks: []GateCheck{{Name: "ambient_evidence", Status: "fail", Detail: fmt.Sprintf("%s repetition %d verdict=%s", pair.name, i, evidence.Verdict)}}}, nil
+				}
+			}
+		}
 	}
 	am, cm := meanTPS(a.Repetitions), meanTPS(c.Repetitions)
 	an, cn := noisePercent(a.Repetitions), noisePercent(c.Repetitions)
