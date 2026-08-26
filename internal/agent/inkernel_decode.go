@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -27,7 +29,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // path, so every existing caller (which passes 0, 0) is unaffected. The per-token
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
-func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -243,6 +245,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
 	}
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
+	}
 	ln := &decodeLane{
 		s:           s,
 		logits:      logits,
@@ -257,6 +263,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		freqPenalty: freqPenalty,
 		presPenalty: presPenalty,
 		maxNew:      maxNew,
+		measurement: measurement,
 	}
 	td := time.Now()
 	if p.batchDecode {
@@ -298,11 +305,69 @@ type decodeLane struct {
 	freqPenalty float64
 	presPenalty float64
 	maxNew      int
+	measurement *nativeInferenceMeasurement
 
 	gen     int
 	stopped bool
 	done    bool
 	err     error
+}
+
+type nativeInferenceMeasurement struct {
+	startedAt time.Time
+	tokenIDs  []int
+	logprobs  []float64
+	ttftS     float64
+}
+
+func (m *nativeInferenceMeasurement) reset() {
+	if m == nil {
+		return
+	}
+	m.tokenIDs = m.tokenIDs[:0]
+	m.logprobs = m.logprobs[:0]
+	m.ttftS = 0
+}
+
+func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
+	if m == nil {
+		return nil
+	}
+	lp, err := chosenTokenLogprob(logits, token)
+	if err != nil {
+		return err
+	}
+	if len(m.tokenIDs) == 0 {
+		m.ttftS = time.Since(m.startedAt).Seconds()
+	}
+	m.tokenIDs = append(m.tokenIDs, token)
+	m.logprobs = append(m.logprobs, lp)
+	return nil
+}
+
+func chosenTokenLogprob(logits []float32, token int) (float64, error) {
+	if token < 0 || token >= len(logits) || len(logits) == 0 {
+		return 0, fmt.Errorf("chosen token %d outside logits size %d", token, len(logits))
+	}
+	maxLogit := math.Inf(-1)
+	for _, raw := range logits {
+		v := float64(raw)
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return 0, fmt.Errorf("non-finite model logit")
+		}
+		if v > maxLogit {
+			maxLogit = v
+		}
+	}
+	var expSum float64
+	for _, raw := range logits {
+		expSum += math.Exp(float64(raw) - maxLogit)
+	}
+	lp := float64(logits[token]) - maxLogit - math.Log(expSum)
+	if math.IsNaN(lp) || math.IsInf(lp, 0) {
+		return 0, fmt.Errorf("non-finite chosen-token log probability")
+	}
+	return lp, nil
 }
 
 // decodeOne runs one decode iteration for a lane EXCEPT the forward step. It mirrors the body
@@ -321,6 +386,10 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	next = sampleLogitsWithPenalty(ln.logits, ln.temp, ln.topP, ln.topK, ln.logitBias, ln.freqPenalty, ln.presPenalty, ln.counts, ln.rng)
 	if next < 0 || ln.stops[next] {
 		ln.stopped, ln.done = true, true
+		return 0, false
+	}
+	if err := ln.measurement.record(ln.logits, next); err != nil {
+		ln.err, ln.done = err, true
 		return 0, false
 	}
 	if ln.counts != nil && next < len(ln.counts) {

@@ -539,6 +539,15 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateSampling(req)) {
 		return
 	}
+	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
+	if receiptRequested && req.Stream {
+		writeErr(w, http.StatusBadRequest, "native inference receipts require a buffered request")
+		return
+	}
+	if receiptRequested && ((req.Temperature != nil && *req.Temperature != 0) || (req.TopP != nil && *req.TopP != 0) || len(req.LogitBias) > 0 || (req.FrequencyPenalty != nil && *req.FrequencyPenalty != 0) || (req.PresencePenalty != nil && *req.PresencePenalty != 0)) {
+		writeErr(w, http.StatusBadRequest, "native inference receipts require greedy sampling over unmodified logits")
+		return
+	}
 	// Request-model pass-through (#82): forward the client's requested model to the
 	// upstream verbatim, falling back to the gateway's configured model only when the
 	// client omitted one. This stops the gateway silently serving a DIFFERENT model
@@ -629,6 +638,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		// could. No-op when the client omitted them (nil pointer).
 		agent.WithFrequencyPenalty(req.FrequencyPenalty),
 		agent.WithPresencePenalty(req.PresencePenalty),
+		agent.WithNativeInferenceReceipt(receiptRequested),
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator
@@ -671,6 +681,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, conformanceMsg)
 		return
 	}
+	if receiptRequested && comp.NativeInference == nil {
+		writeErr(w, http.StatusBadGateway, "configured planner cannot produce a native inference receipt")
+		return
+	}
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	finish := s.applyAdjudicatedTurn(&asst, adjs, kept, dropped, servedHits, servedText, bodyRefused, comp.FinishReason)
@@ -692,6 +706,12 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	redactions := wireRedactionsFrom(comp.PreSendRedactionRecords)
 	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 {
 		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, Redactions: redactions}
+	}
+	if comp.NativeInference != nil {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.NativeInferenceReceipt = comp.NativeInference
 	}
 	if stream != nil {
 		writeChatCompletionStream(stream, resp)

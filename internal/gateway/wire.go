@@ -365,6 +365,14 @@ type ChatRequest struct {
 	Regex                 json.RawMessage `json:"regex,omitempty"`
 	EBNF                  json.RawMessage `json:"ebnf,omitempty"`
 	Stream                bool            `json:"stream,omitempty"`
+	// Fak carries explicit fak-only request extensions. nil keeps the OpenAI wire
+	// byte-compatible and does not enable any measurement work.
+	Fak *FakRequestExt `json:"fak,omitempty"`
+}
+
+// FakRequestExt is the opt-in request half of fak's response extension.
+type FakRequestExt struct {
+	NativeInferenceReceipt bool `json:"native_inference_receipt,omitempty"`
 }
 
 func (r ChatRequest) GuidedDecodeFields() map[string]json.RawMessage {
@@ -558,6 +566,9 @@ type FakExt struct {
 	// It is the TYPED twin of the in-band `[fak]` note: the note tells the model what
 	// survived, this tells an orchestrator the same fact without parsing prose.
 	Compaction *CompactionContract `json:"compaction,omitempty"`
+	// NativeInferenceReceipt is emitted only for an explicitly requested,
+	// successfully measured in-kernel turn.
+	NativeInferenceReceipt *agent.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
 }
 
 // CompactionContract is what a compaction boundary PROMISES the turn that continues past
