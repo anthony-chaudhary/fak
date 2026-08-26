@@ -1,0 +1,7 @@
+{
+  "campaign": "issue-8675-v1",
+  "task": "bounded-package-fix",
+  "full_messages": [{"role":"system","content":"You are a repository coding agent. Preserve shared-tree safety and report only witnessed outcomes."},{"role":"user","content":"Inspect the scoped package, run its focused tests, and return the smallest correct patch."},{"role":"assistant","content":"I will inspect the package and its tests before editing."},{"role":"user","content":"Unrelated history: release notes, fleet status, and archived benchmark commentary are available but not needed for this package fix."}],
+  "scoped_messages": [{"role":"system","content":"You are a repository coding agent. Preserve shared-tree safety and report only witnessed outcomes."},{"role":"user","content":"Inspect the scoped package, run its focused tests, and return the smallest correct patch."}],
+  "accepted_outcome": "patch-accepted"
+}

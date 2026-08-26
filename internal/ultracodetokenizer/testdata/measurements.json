@@ -1,0 +1,5 @@
+[
+  {"tokenizer":{"family":"qwen","model":"Qwen/Qwen2.5-0.5B-Instruct","revision":"7ae557604adf67be50417f59c2c2f167def9a775","source":"https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct"},"accepted_outcome":"patch-accepted","full_input_tokens":99,"scoped_input_tokens":50,"runtime_prefix_read_tokens":30},
+  {"tokenizer":{"family":"llama","model":"hf-internal-testing/llama-tokenizer","revision":"d02ad6cb9dd2c2296a6332199fa2fdca5938fef0","source":"https://huggingface.co/hf-internal-testing/llama-tokenizer"},"accepted_outcome":"patch-accepted","full_input_tokens":111,"scoped_input_tokens":57,"runtime_prefix_read_tokens":30},
+  {"tokenizer":{"family":"gpt2-bpe","model":"openai-community/gpt2","revision":"607a30d783dfa663caf39e06633721c8d4cfcd7e","source":"https://huggingface.co/openai-community/gpt2"},"accepted_outcome":"patch-accepted","full_input_tokens":105,"scoped_input_tokens":55,"runtime_prefix_read_tokens":30}
+]
