@@ -1,0 +1,70 @@
+{
+  "schema": "fak.issue-9094-arm/1",
+  "arm": "control",
+  "base_revision": "36d56da5a70075c90013c930be0f12545f328713",
+  "binary": {
+    "sha256": "90331a95b38306bf6d56a09a24e638babe9f71bf457a918258630d7ed6de4f7d",
+    "label": "fak-control-36d56"
+  },
+  "source_and_diff": {
+    "base_revision": "36d56da5a70075c90013c930be0f12545f328713",
+    "diff": null
+  },
+  "model": {
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "label": "Qwen3.8-27B-Q4_K_M.gguf"
+  },
+  "prompt": {
+    "corpus_sha256": "91a85ef82edaeaedace31f9b091b0f0c9af1897ba0b4f32b1c241d72d6408e0f",
+    "sha256": "eafba2115b741f1beae1a131eb11859f72c4e543d6144dd1d76e9b18a3a1fa51",
+    "prompt_tokens": 32800,
+    "corpus": "docs/benchmarks/qwen38-quant/corpus.json"
+  },
+  "displacement": [
+    {
+      "sha256": "33c45709dc2638426f1b86abc71a4dc4ecf6aae94fea583308b38459d99fee71",
+      "bytes": 29811762848,
+      "label": "Qwen2.5-72B-Instruct-Q2_K.gguf"
+    },
+    {
+      "sha256": "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5",
+      "bytes": 18556685824,
+      "label": "Qwen3-30B-A3B-Q4_K_M.gguf"
+    }
+  ],
+  "private_gpu_lease": {
+    "state_at_readiness": "free",
+    "state_after_exit": "free",
+    "path": "<run-dir>/control/private-fak-gpu.lease"
+  },
+  "started_at": "2026-08-26T13:25:52Z",
+  "completed_at": "2026-08-26T13:29:31Z",
+  "complete": false,
+  "request_exit_status": 1,
+  "server_exit_status": 1,
+  "safety_trip": "swap",
+  "safety_limits": {
+    "max_footprint_bytes": 61162389504,
+    "min_free_percent": 10,
+    "max_compressor_delta_pages": 1000000,
+    "max_swap_delta_bytes": 12884901888
+  },
+  "teardown_clean": true,
+  "memory": {
+    "peak_rss_bytes": 18144788480,
+    "peak_footprint_bytes": 44023414784,
+    "min_free_percent": 27,
+    "baseline_compressor_pages": 11417,
+    "max_compressor_pages": 1281685,
+    "compressor_delta_pages": 1270268,
+    "baseline_swap_bytes": 3040083968,
+    "max_swap_bytes": 16327576125,
+    "swap_delta_bytes": 13287492157
+  },
+  "response": {
+    "schema": "fak.issue-9094-response/1",
+    "valid": false,
+    "error": "Post \"http://127.0.0.1:19094/v1/chat/completions\": EOF",
+    "request_exit_status": 1
+  }
+}

@@ -10647,6 +10647,11 @@
           "category": "incidental",
           "reason": "Typed API error, not a support-level taxonomy term.",
           "token": "ErrQwen35GDNSequenceUnsupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "This token is the local typed application of the existing support/refusal concept for the bounded GDN preprojected-sequence adapter; it introduces no reusable support-maturity state.",
+          "token": "unsupportedgdnpreprojectedsequenceerror"
         }
       ],
       "exclude": [
@@ -10869,6 +10874,7 @@
         "unsupported_runtime_fusion",
         "unsupported_scale",
         "unsupported_version",
+        "unsupportedgdnpreprojectedsequenceerror",
         "windowsFaultDomain",
         "workCoverage",
         "workCoverageUnavailableSources",
