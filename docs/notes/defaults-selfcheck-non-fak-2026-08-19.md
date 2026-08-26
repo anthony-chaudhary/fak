@@ -22,6 +22,6 @@ The packet proves:
 - five launch postures are captured for `agent`, guarded Claude, guarded Codex, native serve, and passthrough serve;
 - OpenAI cold-tool deferral is explicitly `unsupported`, not promoted to a false pass, because no witnessed OpenAI-compatible discovery mechanism exists.
 
-Structured packet: [`defaults-selfcheck-non-fak-2026-08-19.json`](defaults-selfcheck-non-fak-2026-08-19.json).
+Structured packet: [`defaults-selfcheck-non-fak-2026-08-19.json`](../_witnesses/defaults-selfcheck-non-fak-2026-08-19.json).
 
 Paid-provider augmentation remains separately labeled: this deterministic acceptance command does not claim a live provider call or GPU execution.

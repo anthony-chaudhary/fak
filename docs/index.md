@@ -216,6 +216,8 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 
 ## Additional documentation routes
 
+- **Documentation maintenance:** [Indexed document sets](document-sets.md) defines the bounded-page and reciprocal-index contract for maintained long-form Markdown.
+
 - **Session control and trajectory:** [Child-agent registration and lineage](session-child-registration.md), [Session lifecycle reconciliation](session-lifecycle-reconciliation.md), [Trajectory assurance receipt](trajectory-assurance.md), and [Workflow concepts: the operator's middle layer](workflow-concepts.md).
 - **Local application runtime:** [Local-app compute layer](local-app-compute-layer.md) explains the browser-to-daemon boundary, loopback security, offline behavior, and accelerator ownership; [job-apply migration runbook](local-app-job-apply-runbook.md) gives the shortest supported signed-desktop-app integration path.
 - **Tool-result and work accounting:** [Operate tool-result budgets safely](tool-result-budget-operations.md), [Work-accounting coverage](work-accounting-coverage.md), [Work delivery: recording is not readiness](work-delivery.md), [Work-done baselines](work-done-baselines.md), [Work-done history](work-done-history.md), [Work-done query contract](work-done-query.md), and [Work-done source provenance](work-done-sources.md).

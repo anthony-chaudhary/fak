@@ -11,6 +11,6 @@ description: "Verdict: fresh measured provider retention now changes the real An
 - `TestUntrustedTTLCalibrationPreservesStaticTierDecision` proves missing, unmeasured, invalid, and model-mismatched evidence cannot suppress the existing 1h behavior.
 - The runtime loader already rejects stale and provider/model-mismatched ledger rows before they reach this request seam.
 
-Structured artifact: [`vcache-calibrated-ttl-tier-non-fak-2026-08-18.json`](vcache-calibrated-ttl-tier-non-fak-2026-08-18.json).
+Structured artifact: [`vcache-calibrated-ttl-tier-non-fak-2026-08-18.json`](../_witnesses/vcache-calibrated-ttl-tier-non-fak-2026-08-18.json).
 
 This is request-byte steering, not a claim of a new live Anthropic measurement or provider-billing savings. Cache-write calibration, heartbeat execution, real-session prediction-error metrics, and provider-wide live probes remain open in #1497.

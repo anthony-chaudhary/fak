@@ -12,4 +12,4 @@ description: "Verdict: launch posture now distinguishes provider-neutral runtime
 - Passthrough `fak serve` reports bounded code tools inert because the client owns tool execution; native serve and `fak agent` own and arm the bounded catalog.
 - Stable JSON now includes the `vcache-signals` mechanism, separating observed feedback from `vcache-anchor` request shaping and calibration freshness.
 
-Structured artifact: [`launch-posture-cross-wire-non-fak-2026-08-19.json`](launch-posture-cross-wire-non-fak-2026-08-19.json).
+Structured artifact: [`launch-posture-cross-wire-non-fak-2026-08-19.json`](../_witnesses/launch-posture-cross-wire-non-fak-2026-08-19.json).

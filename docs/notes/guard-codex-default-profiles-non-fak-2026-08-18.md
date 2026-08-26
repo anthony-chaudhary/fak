@@ -12,6 +12,6 @@ description: "Verdict: guarded Codex now receives Caveman medium and Ponytail me
 - The local executable was $((& codex --version) -join ' ').
 - Existing independent opt-outs remain: --output-profile full and --work-profile standard; unknown harnesses remain byte-identical by default and fail on explicit unsupported profile requests.
 
-Structured artifact: [guard-codex-default-profiles-non-fak-2026-08-18.json](guard-codex-default-profiles-non-fak-2026-08-18.json).
+Structured artifact: [guard-codex-default-profiles-non-fak-2026-08-18.json](../_witnesses/guard-codex-default-profiles-non-fak-2026-08-18.json).
 
 The doctor still exits non-zero for guarded Codex/OpenAI because Anthropic request-body compaction/elision/deferral/anchoring are inert and provider calibration may be missing. This witness claims only the two profile adapters.
