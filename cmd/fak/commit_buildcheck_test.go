@@ -226,7 +226,13 @@ import "C"
 func Value() int { return int(C.native_value()) }
 `)
 	writeBuildCheckFile(t, repo, "p/native.c", "int native_value(void) { return 1; }\n")
-	commitBuildCheckPlumbing(t, repo, git, "seed green native package", "go.mod", "p/p.go", "p/native.c")
+	writeBuildCheckFile(t, repo, "cmd/fak/main.go", `package main
+
+import "buildcheck.test/p"
+
+func main() { _ = p.Value() }
+`)
+	commitBuildCheckPlumbing(t, repo, git, "seed green native package", "go.mod", "p/p.go", "p/native.c", "cmd/fak/main.go")
 	t.Setenv("GOCACHE", t.TempDir())
 	head, index := buildCheckGitState(t, git)
 
