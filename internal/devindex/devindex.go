@@ -417,11 +417,11 @@ func (c *Catalog) parseDocs(text string) {
 func (c *Catalog) parseDocsFrom(source, text string) {
 	seen := map[string]bool{}
 	for _, raw := range strings.Split(text, "\n") {
-		for _, linked := range markdownLinkedDocs(raw, source) {
-			c.mergeDoc(linked)
-		}
 		m := docLineRE.FindStringSubmatch(raw)
 		if m == nil {
+			for _, linked := range markdownLinkedDocs(raw, source) {
+				c.mergeDoc(linked)
+			}
 			continue
 		}
 		// Titles carry markdown backticks (often around one word, e.g. "`fleet`
