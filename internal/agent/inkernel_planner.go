@@ -65,6 +65,8 @@ type InKernelPlanner struct {
 	// so an unrelated model remains byte-for-byte on its historical forward.
 	qwenQ4KPrefillChunkTokens    int
 	qwenQ4KPrefillChunkConfigErr *InKernelQwenQ4KPrefillChunkConfigError
+	qwen35MetalGDNSequence       bool
+	qwen35MetalGDNExecuted       atomic.Bool
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
@@ -206,6 +208,10 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
 		qwenQ4KPrefillChunkTokens:    prefillChunkTokens,
 		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE"))) {
+	case "on", "1", "true", "yes":
+		p.qwen35MetalGDNSequence = true
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -1066,6 +1072,8 @@ func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
 			// Model.NewBackendSession has already validated the structural GDN
 			// contract before this request can complete. Name its stable path here.
 			forwardPath = model.Qwen35GDNCUDAPath
+		} else if p.metal && p.qwen35MetalGDNExecuted.Load() {
+			forwardPath = model.Qwen35MetalGDNSequenceForwardPath
 		} else if p.metal {
 			// Qwen3.5-family Metal uses the native Session forward with Metal projection/MLP
 			// dispatch; q4k= in the same summary records the selected weight format.

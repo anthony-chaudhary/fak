@@ -52,6 +52,25 @@ func TestInKernelExecutionIdentityQwen35Metal(t *testing.T) {
 	}
 }
 
+func TestInKernelExecutionIdentityQwen35MetalGDNRequiresExecutedOperation(t *testing.T) {
+	m := model.NewSynthetic(model.Config{LayerTypes: []string{"linear_attention"}})
+	p := &InKernelPlanner{m: m, metal: true, q4k: true, qwen35MetalGDNSequence: true}
+	backend, path := p.executionIdentity()
+	if backend != "metal" || path != "metal/qwen35-hybrid-session-v1" {
+		t.Fatalf("intent-only identity = backend=%q path=%q", backend, path)
+	}
+	p.qwen35MetalGDNExecuted.Store(true)
+	backend, path = p.executionIdentity()
+	if backend != "metal" || path != model.Qwen35MetalGDNSequenceForwardPath {
+		t.Fatalf("executed identity = backend=%q path=%q, want metal/%q", backend, path, model.Qwen35MetalGDNSequenceForwardPath)
+	}
+	p.qwen35MetalGDNExecuted.Store(false)
+	_, path = p.executionIdentity()
+	if path == model.Qwen35MetalGDNSequenceForwardPath {
+		t.Fatal("candidate identity survived request reset")
+	}
+}
+
 func TestInKernelExecutionIdentityGenericDevice(t *testing.T) {
 	p := &InKernelPlanner{m: model.NewSynthetic(model.Config{}), backend: compute.Default()}
 	backend, path := p.executionIdentity()

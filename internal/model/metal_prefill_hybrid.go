@@ -21,6 +21,7 @@ package model
 // layers), dispatched by isLinearAttnLayer — the same split the core's mm calls walk.
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
@@ -30,6 +31,99 @@ var (
 	metalHybridMu sync.Mutex
 	metalHybridWt = map[*Model]map[string]*metalgemm.Weight{} // per-Model name -> GPU f16 weight
 )
+
+type metalQwen35GDNSequenceBackend struct {
+	mu     sync.Mutex
+	states map[Qwen35GDNAuxState]*metalgemm.GDNState
+}
+
+func init() {
+	newQwen35MetalGDNSequenceBackend = func() Qwen35GDNPreprojectedSequenceBackend {
+		return &metalQwen35GDNSequenceBackend{states: make(map[Qwen35GDNAuxState]*metalgemm.GDNState)}
+	}
+}
+
+func (*metalQwen35GDNSequenceBackend) Qwen35GDNPreprojectedSequencePath() string {
+	return Qwen35GDNPreprojectedSequencePath
+}
+
+func metalQwen35GDNGeometry(g Qwen35GDNSequenceGeometry) metalgemm.GDNGeometry {
+	return metalgemm.GDNGeometry{
+		NumKeyHeads: g.NumKeyHeads, NumValueHeads: g.NumValueHeads,
+		KeyHeadDim: g.KeyHeadDim, ValueHeadDim: g.ValueHeadDim, ConvKernel: g.ConvKernel,
+	}
+}
+
+func (b *metalQwen35GDNSequenceBackend) NewQwen35GDNAuxState(_ int, geometry Qwen35GDNSequenceGeometry) (Qwen35GDNAuxState, error) {
+	state, err := metalgemm.NewGDNState(metalQwen35GDNGeometry(geometry))
+	if err != nil {
+		return Qwen35GDNAuxState{}, err
+	}
+	conv, recurrent := state.Handles()
+	handles := Qwen35GDNAuxState{Convolution: Qwen35GDNAuxHandle(conv), Recurrent: Qwen35GDNAuxHandle(recurrent)}
+	b.mu.Lock()
+	b.states[handles] = state
+	b.mu.Unlock()
+	return handles, nil
+}
+
+func (b *metalQwen35GDNSequenceBackend) state(handles Qwen35GDNAuxState) *metalgemm.GDNState {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.states[handles]
+}
+
+func (b *metalQwen35GDNSequenceBackend) Qwen35GDNPreprojectedSequence(req Qwen35GDNPreprojectedSequenceRequest) (Qwen35GDNPreprojectedSequenceResult, error) {
+	state := b.state(req.State)
+	if state == nil {
+		return Qwen35GDNPreprojectedSequenceResult{}, &metalgemm.GDNDeclinedError{Reason: "unknown auxiliary-state owner"}
+	}
+	g := metalQwen35GDNGeometry(req.Geometry)
+	keyDim := g.NumKeyHeads * g.KeyHeadDim
+	valueDim := g.NumValueHeads * g.ValueHeadDim
+	convDim := 2*keyDim + valueDim
+	core := make([]float32, 0, req.Tokens*valueDim)
+	for start := 0; start < req.Tokens; start += metalgemm.GDNMaxPanelTokens {
+		end := min(start+metalgemm.GDNMaxPanelTokens, req.Tokens)
+		panel := metalgemm.GDNPanel{
+			Tokens: end - start,
+			Mixed:  req.Mixed[start*convDim : end*convDim], Z: req.Z[start*valueDim : end*valueDim],
+			B: req.B[start*g.NumValueHeads : end*g.NumValueHeads], A: req.A[start*g.NumValueHeads : end*g.NumValueHeads],
+			Conv1D: req.Conv1D, ALog: req.ALog, DTBias: req.DTBias, Norm: req.Norm,
+			RMSNormEpsilon: req.RMSNormEpsilon,
+		}
+		panelCore, accounting, accepted, err := state.Run(panel)
+		if err != nil {
+			return Qwen35GDNPreprojectedSequenceResult{}, err
+		}
+		if !accepted || !accounting.Committed || !accounting.CompletedWait || accounting.Encoders != 1 ||
+			accounting.StateH2DTransfers != 0 || accounting.StateD2HTransfers != 0 || accounting.HostRecurrenceSteps != 0 ||
+			accounting.OwnedBuffers != 2 || accounting.PrivateStateBuffers != 2 {
+			return Qwen35GDNPreprojectedSequenceResult{}, fmt.Errorf("metalgemm: incomplete resident GDN observation: %+v", accounting)
+		}
+		core = append(core, panelCore...)
+	}
+	return Qwen35GDNPreprojectedSequenceResult{Core: core, State: req.State}, nil
+}
+
+func (b *metalQwen35GDNSequenceBackend) SnapshotQwen35GDNAuxState(handles Qwen35GDNAuxState) ([]float32, []float32, error) {
+	state := b.state(handles)
+	if state == nil {
+		return nil, nil, fmt.Errorf("metalgemm: unknown GDN auxiliary-state owner")
+	}
+	return state.Snapshot()
+}
+
+func (b *metalQwen35GDNSequenceBackend) FreeQwen35GDNAuxState(handles Qwen35GDNAuxState) error {
+	b.mu.Lock()
+	state := b.states[handles]
+	delete(b.states, handles)
+	b.mu.Unlock()
+	if state != nil {
+		state.Close()
+	}
+	return nil
+}
 
 // metalWeightsQwen35Hybrid returns this model's GPU projection table for the hybrid prefill,
 // uploading it once. It mirrors metalWeights() (same dequantQ8 -> f16 Upload, big f32 buffer

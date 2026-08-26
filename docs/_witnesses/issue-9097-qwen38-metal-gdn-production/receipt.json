@@ -1,0 +1,109 @@
+{
+  "schema": "fak.issue-9097-qwen38-metal-gdn-production/1",
+  "issue": 9097,
+  "verdict": "REJECT",
+  "reason": "three consecutive swap-growth samples crossed the 12 GiB safety ceiling before response headers",
+  "source": {
+    "base_revision": "1292441de633214253e79f6d3353c630ea1c9fdf",
+    "candidate_commit": "87b92938232ccf24d290d4c2ef08e16cf55cc0d3",
+    "candidate_tree": "60a6c1f5f3de7687fc39d95093451dcb1b54ce83",
+    "binary_sha256": "81749488237578d87e60bce82d6967e37f5200eb07eb256f64bcba3ad8355340",
+    "build_vcs_modified": false
+  },
+  "artifact": {
+    "model": "qwen38:27b",
+    "revision": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+  },
+  "request": {
+    "fixture": "long-context-needle-v1",
+    "prompt_bytes": 88127,
+    "prompt_sha256": "eafba2115b741f1beae1a131eb11859f72c4e543d6144dd1d76e9b18a3a1fa51",
+    "body_bytes": 90320,
+    "body_sha256": "5097d7d92e795b0f940ec0f2c3f380213ad8d0e8ef23a6e52e986d63614dc974",
+    "prompt_tokens": 32800,
+    "output_tokens": 8,
+    "temperature": 0,
+    "expected_answer": "ORCHID-7319"
+  },
+  "execution": {
+    "engine": "inkernel",
+    "backend": "metal",
+    "forward_path": "metal/qwen35-gdn-preprojected-sequence-v1",
+    "q4k": true,
+    "fallback_active": false,
+    "llama_cpp_used": false,
+    "identity_scope": "same frozen candidate process; the long request produced no terminal receipt"
+  },
+  "selector": {
+    "environment": "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE=1",
+    "default_enabled": false,
+    "production_promoted": false
+  },
+  "environment": {
+    "present": [
+      "FAK_METAL_STREAM_Q4K=1",
+      "FAK_Q4K=1",
+      "FAK_Q4K_FREE_CPU=1",
+      "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE=1",
+      "FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS=512",
+      "FAK_INKERNEL_MAX_TOKENS=8",
+      "FAK_INKERNEL_TEMP=0",
+      "FAK_INKERNEL_SEED=0",
+      "FAK_INKERNEL_RADIX=off",
+      "FAK_GGUF_LOAD_WORKERS=12"
+    ],
+    "load_workers_are_default": true,
+    "gomaxprocs": 12
+  },
+  "timeline": {
+    "launched_at": "2026-08-26T13:49:11Z",
+    "ready_at": "2026-08-26T13:49:29Z",
+    "request_started_at": "2026-08-26T13:49:29Z",
+    "safety_trip_at": "2026-08-26T13:51:23Z",
+    "request_finished_at": "2026-08-26T13:51:29Z",
+    "restoration_finished_at": "2026-08-26T13:53:20Z",
+    "response_complete": false,
+    "response_headers_received": false,
+    "rerun_count": 0
+  },
+  "safety": {
+    "maximum_footprint_bytes": 61162389504,
+    "minimum_free_memory_percent": 10,
+    "minimum_memorystatus_percent": 10,
+    "memorystatus_percent_observed": null,
+    "memorystatus_source": "unbound; memory_pressure -Q system-free percentage is not memorystatus",
+    "maximum_swap_growth_bytes": 12884901888,
+    "required_consecutive_crossings": 3,
+    "kernel_pressure_events": 0,
+    "sample_count": 26,
+    "baseline_swap_bytes": 2583429120,
+    "peak_sampled_rss_bytes": 18377261056,
+    "time_l_maximum_rss_bytes": 19071762432,
+    "peak_sampled_footprint_bytes": 47244640256,
+    "time_l_peak_footprint_bytes": 47053850128,
+    "minimum_free_memory_percent_observed": 28,
+    "peak_swap_growth_bytes": 14780664381,
+    "trip_sample": {
+      "rss_bytes": 7071285248,
+      "footprint_bytes": 47244640256,
+      "free_memory_percent": 36,
+      "swap_bytes": 17364093501,
+      "swap_growth_bytes": 14780664381
+    }
+  },
+  "isolation": {
+    "gpu_lease_held": true,
+    "candidate_pid_scoped": true,
+    "teardown_signal": "TERM",
+    "watcher_matched_terms": 0,
+    "watcher_unmatched_workloads": 0,
+    "service_command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "restored": true,
+    "restored_health_status": 200,
+    "restored_models_status": 200,
+    "restored_stable_seconds": 90
+  },
+  "conclusion": "Do not enable the selector by default or claim production acceptance. Re-measure only after a bounded change can complete the same request below the paging ceiling."
+}

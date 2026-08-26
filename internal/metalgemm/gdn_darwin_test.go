@@ -223,3 +223,117 @@ func TestGDNSequenceMetalInjectedPostSubmitFailureCleansOwner(t *testing.T) {
 		t.Fatalf("injected failure leaked buffers=%d, want %d", got, start)
 	}
 }
+
+func gdnPanelTransientBytes(g GDNGeometry, tokens int) uint64 {
+	keyDim, valueDim, convDim := g.keyDim(), g.valueDim(), g.convDim()
+	f32 := func(elements int) uint64 { return uint64(elements) * 4 }
+	return f32(tokens*convDim) + // mixed input
+		f32(tokens*valueDim) + // z input
+		2*f32(tokens*g.NumValueHeads) + // b and a inputs
+		f32(convDim*g.ConvKernel) + // convolution weights
+		2*f32(g.NumValueHeads) + // A_log and dt_bias
+		f32(g.ValueHeadDim) + // normalization weights
+		f32(tokens*convDim) + // private convolution output
+		2*f32(tokens*keyDim) + // private q/k normalized panels
+		f32(tokens*valueDim) // shared core output
+}
+
+func TestGDNPanelResourcesDrainPerCall(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	const (
+		stateCount    = 48
+		panelsPer512  = 8
+		productionRun = 4
+	)
+	g := oracleGDNGeometry{nK: 16, nV: 48, kHd: 128, vHd: 128, kernel: 4}
+	geometry := nativeGDNGeometry(g)
+	perPanel := gdnPanelTransientBytes(geometry, GDNMaxPanelTokens)
+	if perPanel != 9_626_496 {
+		t.Fatalf("derived panel transient bytes=%d, want 9626496", perPanel)
+	}
+	perChunk := perPanel * panelsPer512 * stateCount
+	fourChunks := perChunk * productionRun
+	if perChunk != 3_696_574_464 || fourChunks != 14_786_297_856 {
+		t.Fatalf("production derivation panel=%d chunk=%d four_chunks=%d", perPanel, perChunk, fourChunks)
+	}
+
+	startBuffers := GDNLiveBufferCount()
+	startAllocated := gdnCurrentAllocatedBytes()
+	states := make([]*GDNState, 0, stateCount)
+	for i := 0; i < stateCount; i++ {
+		state, err := NewGDNState(geometry)
+		if err != nil {
+			for _, opened := range states {
+				opened.Close()
+			}
+			t.Fatalf("allocate state %d: %v", i, err)
+		}
+		states = append(states, state)
+	}
+	defer func() {
+		for _, state := range states {
+			state.Close()
+		}
+		if got := GDNLiveBufferCount(); got != startBuffers {
+			t.Errorf("live buffers after close=%d, want %d", got, startBuffers)
+		}
+	}()
+
+	panel := oracleGDNFixture(g, GDNMaxPanelTokens, .125)
+	oracleState := newOracleGDNState(g)
+	var lastOutput []float32
+	runWave := func(wave int) uint64 {
+		t.Helper()
+		want := oracleGDNRun(g, panel, oracleState)
+		for i, state := range states {
+			got, accounting, accepted, err := state.Run(nativeGDNPanel(panel))
+			if !accepted || err != nil {
+				t.Fatalf("wave %d state %d: accepted=%v err=%v", wave, i, accepted, err)
+			}
+			if i == 0 {
+				requireGDNAccounting(t, accounting, 1)
+				requireGDNParity(t, "exact-geometry output", want, got)
+				lastOutput = got
+			}
+		}
+		allocated := gdnCurrentAllocatedBytes()
+		t.Logf("allocation wave=%d metal_allocated_bytes=%d per_panel_bytes=%d state_count=%d output_elements=%d", wave, allocated, perPanel, stateCount, len(lastOutput))
+		return allocated
+	}
+
+	// The first wave warms pipelines and driver caches. Two subsequent identical
+	// waves must return to the same completed-call allocation band.
+	warm := runWave(0)
+	second := runWave(1)
+	third := runWave(2)
+	limit := 2 * perPanel
+	delta := func(after, before uint64) uint64 {
+		if after <= before {
+			return 0
+		}
+		return after - before
+	}
+	secondGrowth, thirdGrowth := delta(second, warm), delta(third, second)
+	t.Logf("allocation plateau warm=%d second=%d third=%d growth=%d/%d limit=%d production_four_chunk_bytes=%d", warm, second, third, secondGrowth, thirdGrowth, limit, fourChunks)
+	if secondGrowth > limit || thirdGrowth > limit {
+		t.Fatalf("completed GDN panels retained Metal allocation: growth=%d/%d, want each <=%d", secondGrowth, thirdGrowth, limit)
+	}
+
+	conv, recurrent, err := states[0].Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireGDNParity(t, "exact-geometry convolution state", oracleState.conv, conv)
+	requireGDNParity(t, "exact-geometry recurrent state", oracleState.recurrent, recurrent)
+
+	for _, state := range states {
+		state.Close()
+	}
+	states = nil
+	if got := GDNLiveBufferCount(); got != startBuffers {
+		t.Fatalf("live buffers after close=%d, want %d", got, startBuffers)
+	}
+	t.Logf("allocation cleanup before=%d after=%d live_buffers=%d", startAllocated, gdnCurrentAllocatedBytes(), GDNLiveBufferCount())
+}
