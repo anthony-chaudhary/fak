@@ -67,38 +67,3 @@ func TestQ8UploadFits(t *testing.T) {
 		})
 	}
 }
-
-func TestQ8SingleResidencyAllowed(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		device int64
-		env    string
-		want   bool
-	}{
-		{"known budget", 36 << 30, "", true},
-		{"unknown fails closed", 0, "", false},
-		{"explicit off", 36 << 30, "off", false},
-		{"force cannot invent backend", 0, "1", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := q8SingleResidencyAllowed(tc.device, tc.env); got != tc.want {
-				t.Fatalf("q8SingleResidencyAllowed(%d, %q)=%v want %v", tc.device, tc.env, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestQwen38RuntimeQ8ProjectionInventory(t *testing.T) {
-	layers := make([]string, 64)
-	for i := range layers {
-		if i < 48 {
-			layers[i] = "linear_attention"
-		} else {
-			layers[i] = "full_attention"
-		}
-	}
-	cfg := Config{NumLayers: 64, LayerTypes: layers}
-	if got := qwen35RuntimeQ8ProjectionCount(cfg); got != 272 {
-		t.Fatalf("runtime Q8 projection count=%d want 48*5+16*2=272", got)
-	}
-}

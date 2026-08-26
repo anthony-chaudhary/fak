@@ -1,0 +1,33 @@
+{
+  "schema": "fak.issue-9044-q8-metal-residency-capture/1",
+  "profile_sha256": "d948c17836343b061e97722b0b74137a677cfaa082aeeea4afe0eb7968e3d68b",
+  "receipt_sha256": "4a8f3863570ab941857911c1cd2b581438f978e4ae7094722c22cfd845ea07b2",
+  "receipt_binding_sha256": "f2a4669cd875451807c5d21b6e7e1d02ade3f26847c60b74e0321a5b03e2bcab",
+  "finite_logits": true,
+  "q8_runtime": {
+    "promised_projections_per_forward": 272,
+    "prefill_gemm_events": 272,
+    "decode_single_gemv_events": 5120,
+    "decode_group_gemv_events": 3072,
+    "decode_group_width": 4,
+    "total_projection_executions": 17680,
+    "promised_cpu_fallbacks": 0
+  },
+  "memory": {
+    "os_peak_footprint_bytes": 18132647936,
+    "os_peak_footprint_source": "getrusage(RUSAGE_SELF).ru_maxrss",
+    "model_resident_bytes": 24595492864,
+    "physical_memory_bytes": 38654705664,
+    "metal_working_set_bytes": 30150672384,
+    "swap_before_mib": 2458.44,
+    "swap_after_mib": 4232.31,
+    "swap_delta_mib": 1773.87,
+    "forced_q8_override": false,
+    "interpretation": "material whole-window paging with peak process footprint below physical and Metal limits; not a zero-swap claim"
+  },
+  "restoration": {
+    "exact_owner_restored": true,
+    "health_http_status": 200,
+    "models_http_status": 200
+  }
+}

@@ -20,8 +20,6 @@
 
 #import <Metal/Metal.h>
 #include "q8_bridge.h"
-#include <stdlib.h>
-#include <unistd.h>
 
 typedef struct {
     uintptr_t command_buffer;
@@ -47,6 +45,7 @@ static inline void mg_execution_event_finish(mg_execution_event* event, id<MTLCo
 }
 #include <CoreFoundation/CoreFoundation.h>
 #include <string.h>
+#include <unistd.h>
 
 // Device + queue are owned by metal.m (mg_init); we reuse them.
 extern id<MTLDevice>       gDev;
@@ -179,13 +178,22 @@ typedef struct {
     CFTypeRef codes;  // retained id<MTLBuffer>, int8 [out*in]
     CFTypeRef scales; // retained id<MTLBuffer>, f32  [out*nblk]
     int out, in, nblk;
-    void* owned_codes;
-    void* owned_scales;
+	int nocopy;
 } Q8W;
 
 #define MG_MAX_Q8 8192
 static Q8W gQ8[MG_MAX_Q8];
 static int gNQ8 = 0;
+
+static int q8_valid(int wid) {
+	return wid >= 0 && wid < gNQ8 && gQ8[wid].codes != NULL && gQ8[wid].scales != NULL;
+}
+
+static int q8_slot(void) {
+	for (int i = 0; i < gNQ8; i++) if (!q8_valid(i)) return i;
+	if (gNQ8 >= MG_MAX_Q8) return -1;
+	return gNQ8++;
+}
 
 // Reused per-call scratch: the activation codes/scales and the result. Weights are persistent;
 // only the per-call X/Y move (same discipline as q4k.m's gQXBuf/gQYBuf).
@@ -208,52 +216,14 @@ static void q8_grow_scratch(long inBytes, long nblkElems, long yElems) {
     }
 }
 
-static size_t q8_page_round(size_t n) {
-    size_t page = (size_t)getpagesize();
-    return (n + page - 1) & ~(page - 1);
-}
-
-// mg_q8_upload_nocopy_owned creates one page-aligned native owner per payload and exposes it to
-// both Metal and the CPU oracle. Publication is atomic: every allocation/view succeeds or none is
-// installed in the global table and the copied CPU input remains authoritative.
-int mg_q8_upload_nocopy_owned(const signed char* codes, const float* scales, int out, int in,
-                              signed char** owned_codes, float** owned_scales) {
-    if (owned_codes) *owned_codes = NULL;
-    if (owned_scales) *owned_scales = NULL;
-    if (gDev == nil || codes == NULL || scales == NULL || owned_codes == NULL || owned_scales == NULL) return -1;
-    if (!q8_init() || in % 32 != 0 || out <= 0 || gNQ8 >= MG_MAX_Q8) return -1;
-    int nblk = in / 32;
-    size_t codeBytes = (size_t)out * (size_t)in;
-    size_t scaleBytes = (size_t)out * (size_t)nblk * sizeof(float);
-    size_t codeAlloc = q8_page_round(codeBytes);
-    size_t scaleAlloc = q8_page_round(scaleBytes);
-    void* cq = NULL;
-    void* sd = NULL;
-    size_t page = (size_t)getpagesize();
-    if (posix_memalign(&cq, page, codeAlloc) != 0 || posix_memalign(&sd, page, scaleAlloc) != 0) {
-        free(cq); free(sd); return -1;
-    }
-    memcpy(cq, codes, codeBytes);
-    memcpy(sd, scales, scaleBytes);
-    id<MTLBuffer> cb = [gDev newBufferWithBytesNoCopy:cq length:codeAlloc options:MTLResourceStorageModeShared deallocator:nil];
-    id<MTLBuffer> sb = [gDev newBufferWithBytesNoCopy:sd length:scaleAlloc options:MTLResourceStorageModeShared deallocator:nil];
-    if (cb == nil || sb == nil) { free(cq); free(sd); return -1; }
-    int id = gNQ8++;
-    gQ8[id].codes = CFBridgingRetain(cb);
-    gQ8[id].scales = CFBridgingRetain(sb);
-    gQ8[id].out = out; gQ8[id].in = in; gQ8[id].nblk = nblk;
-    gQ8[id].owned_codes = cq; gQ8[id].owned_scales = sd;
-    *owned_codes = (signed char*)cq;
-    *owned_scales = (float*)sd;
-    return id;
-}
 // mg_q8_upload copies a Q8_0 weight (out*in int8 codes + out*nblk f32 block scales, nblk=in/32)
 // resident onto the GPU and returns an integer handle (>=0), or -1 on failure.
 int mg_q8_upload(const signed char* codes, const float* scales, int out, int in) {
     if (gDev == nil) return -1;
     if (!q8_init()) return -1;
     if (in % 32 != 0 || out <= 0) return -1;
-    if (gNQ8 >= MG_MAX_Q8) {
+	int slot = q8_slot();
+	if (slot < 0) {
         static int capWarned = 0;
         if (!capWarned) { capWarned = 1; NSLog(@"mg_q8_upload: q8 weight table full (%d)", MG_MAX_Q8); }
         return -1;
@@ -269,13 +239,57 @@ int mg_q8_upload(const signed char* codes, const float* scales, int out, int in)
     }
     memcpy(cb.contents, codes,  (size_t)codeBytes);
     memcpy(sb.contents, scales, (size_t)scaleBytes);
-    int id = gNQ8++;
-    gQ8[id].codes  = CFBridgingRetain(cb);
-    gQ8[id].scales = CFBridgingRetain(sb);
-    gQ8[id].out  = out;
-    gQ8[id].in   = in;
-    gQ8[id].nblk = nblk;
-    return id;
+	gQ8[slot].codes  = CFBridgingRetain(cb);
+	gQ8[slot].scales = CFBridgingRetain(sb);
+	gQ8[slot].out  = out;
+	gQ8[slot].in   = in;
+	gQ8[slot].nblk = nblk;
+	gQ8[slot].nocopy = 0;
+	return slot;
+}
+
+static long q8_page_round(long n) {
+	long page = (long)getpagesize();
+	if (page <= 1) return n;
+	return ((n + page - 1) / page) * page;
+}
+
+// mg_q8_alias creates shared Metal views over caller-owned, page-aligned storage. It never falls
+// back to a copy; the Go owner pins the regions until mg_q8_release has dropped both views.
+int mg_q8_alias(const signed char* codes, const float* scales, int out, int in) {
+	if (gDev == nil || !q8_init() || codes == NULL || scales == NULL || in <= 0 || in % 32 != 0 || out <= 0) return -1;
+	long page = (long)getpagesize();
+	if (page > 1 && (((uintptr_t)codes % (uintptr_t)page) != 0 || ((uintptr_t)scales % (uintptr_t)page) != 0)) return -1;
+	int nblk = in / 32;
+	long codeBytes = (long)out * in;
+	long scaleBytes = (long)out * nblk * 4;
+	id<MTLBuffer> cb = [gDev newBufferWithBytesNoCopy:(void*)codes length:(NSUInteger)q8_page_round(codeBytes)
+		options:MTLResourceStorageModeShared deallocator:nil];
+	id<MTLBuffer> sb = [gDev newBufferWithBytesNoCopy:(void*)scales length:(NSUInteger)q8_page_round(scaleBytes)
+		options:MTLResourceStorageModeShared deallocator:nil];
+	if (cb == nil || sb == nil) return -1;
+	int id = q8_slot();
+	if (id < 0) return -1;
+	gQ8[id].codes = CFBridgingRetain(cb);
+	gQ8[id].scales = CFBridgingRetain(sb);
+	gQ8[id].out = out;
+	gQ8[id].in = in;
+	gQ8[id].nblk = nblk;
+	gQ8[id].nocopy = 1;
+	return id;
+}
+
+void mg_q8_release(int wid) {
+	if (!q8_valid(wid)) return;
+	CFBridgingRelease(gQ8[wid].codes);
+	CFBridgingRelease(gQ8[wid].scales);
+	memset(&gQ8[wid], 0, sizeof(Q8W));
+}
+
+int mg_q8_live_count(void) {
+	int n = 0;
+	for (int i = 0; i < gNQ8; i++) if (q8_valid(i)) n++;
+	return n;
 }
 
 // Prepare and encode are split so q4k.m can own one command buffer for a mixed Q8/Q4_K group.
@@ -284,10 +298,10 @@ int mg_q8_upload(const signed char* codes, const float* scales, int out, int in)
 int mg_q8_prepare_gemv_group(const int* wids, int n, const signed char* xq, const float* xd,
                              const int* yoff) {
     if (n <= 0 || wids == NULL || xq == NULL || xd == NULL || yoff == NULL || !q8_init()) return 0;
-    if (wids[0] < 0 || wids[0] >= gNQ8) return 0;
+    if (!q8_valid(wids[0])) return 0;
     Q8W W0 = gQ8[wids[0]];
     for (int i = 1; i < n; i++) {
-        if (wids[i] < 0 || wids[i] >= gNQ8) return 0;
+        if (!q8_valid(wids[i])) return 0;
         Q8W W = gQ8[wids[i]];
         if (W.in != W0.in || W.nblk != W0.nblk) return 0;
     }
@@ -330,7 +344,7 @@ void mg_q8_read_gemv_group(float* y, int ytot) {
 // xd block scales [nblk]). f32 result.
 void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < 0 || wid >= gNQ8) return;
+    if (!q8_valid(wid)) return;
     @autoreleasepool {
         Q8W W = gQ8[wid];
         q8_grow_scratch((long)W.in, (long)W.nblk, (long)W.out);
@@ -365,6 +379,7 @@ void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_ex
 void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event) {
     mg_execution_event_reset(event);
     if (n <= 0) return;
+	for (int i = 0; i < n; i++) if (!q8_valid(wids[i])) return;
     @autoreleasepool {
         int in   = gQ8[wids[0]].in;
         int nblk = gQ8[wids[0]].nblk;
@@ -402,7 +417,7 @@ void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float
 // lane (#1087): full-attn q/k and Qwen3.6 linear_attn.* no longer have to fall back to CPU qGemm8.
 void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < 0 || wid >= gNQ8 || P <= 0) return;
+    if (!q8_valid(wid) || P <= 0) return;
     @autoreleasepool {
         Q8W W = gQ8[wid];
         q8_grow_scratch((long)P * W.in, (long)P * W.nblk, (long)P * W.out);
@@ -449,6 +464,7 @@ void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y
 void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event) {
     mg_execution_event_reset(event);
     if (n <= 0 || P <= 0) return;
+	for (int i = 0; i < n; i++) if (!q8_valid(wids[i])) return;
     @autoreleasepool {
         Q8W W0 = gQ8[wids[0]];
         long ytot = (long)yoff[n];
@@ -497,31 +513,17 @@ void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float
 // own encoder rather than go through mg_q8_gemv's standalone commit. These expose the persistent
 // device buffers + dims for a wid without copying. id<MTLBuffer> crosses the .m boundary fine
 // (same ObjC compile unit set, one binary). nil/zero for an out-of-range wid.
-id<MTLBuffer> mg_q8_codes_buf(int wid)  { return (wid >= 0 && wid < gNQ8) ? (__bridge id<MTLBuffer>)gQ8[wid].codes  : nil; }
-id<MTLBuffer> mg_q8_scales_buf(int wid) { return (wid >= 0 && wid < gNQ8) ? (__bridge id<MTLBuffer>)gQ8[wid].scales : nil; }
+id<MTLBuffer> mg_q8_codes_buf(int wid)  { return q8_valid(wid) ? (__bridge id<MTLBuffer>)gQ8[wid].codes  : nil; }
+id<MTLBuffer> mg_q8_scales_buf(int wid) { return q8_valid(wid) ? (__bridge id<MTLBuffer>)gQ8[wid].scales : nil; }
 void mg_q8_dims(int wid, int* out, int* in, int* nblk) {
-    if (wid < 0 || wid >= gNQ8) { *out = *in = *nblk = 0; return; }
+    if (!q8_valid(wid)) { *out = *in = *nblk = 0; return; }
     *out = gQ8[wid].out; *in = gQ8[wid].in; *nblk = gQ8[wid].nblk;
 }
 
-void mg_q8_release(int wid) {
-    if (wid < 0 || wid >= gNQ8) return;
-    if (gQ8[wid].codes != NULL) { CFBridgingRelease(gQ8[wid].codes); gQ8[wid].codes = NULL; }
-    if (gQ8[wid].scales != NULL) { CFBridgingRelease(gQ8[wid].scales); gQ8[wid].scales = NULL; }
-    free(gQ8[wid].owned_codes); free(gQ8[wid].owned_scales);
-    gQ8[wid].owned_codes = NULL; gQ8[wid].owned_scales = NULL;
-    gQ8[wid].out = gQ8[wid].in = gQ8[wid].nblk = 0;
-    while (gNQ8 > 0 && gQ8[gNQ8 - 1].codes == NULL && gQ8[gNQ8 - 1].scales == NULL &&
-           gQ8[gNQ8 - 1].owned_codes == NULL && gQ8[gNQ8 - 1].owned_scales == NULL) {
-        gNQ8--;
-    }
-}
 // mg_q8_reset releases every resident Q8 weight buffer and the reused scratch, returning the Q8
 // table to empty. Mirrors mg_q4k_reset. Call only when no Q8Weight handle is still in use.
 void mg_q8_reset(void) {
-    for (int i = 0; i < gNQ8; i++) {
-        mg_q8_release(i);
-    }
+	for (int i = 0; i < gNQ8; i++) mg_q8_release(i);
     gNQ8 = 0;
     gQ8XBuf  = nil; gQ8XCap  = 0;
     gQ8XDBuf = nil; gQ8XDCap = 0;

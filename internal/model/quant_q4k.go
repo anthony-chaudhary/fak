@@ -575,29 +575,108 @@ func (m *Model) q4k(name string) *q4kTensor {
 }
 
 type weightCloserState struct {
-	once sync.Once
-	c    io.Closer
-	err  error
+	mu       sync.Mutex
+	once     sync.Once
+	c        io.Closer
+	err      error
+	sessions int
+	closing  bool
+	closed   bool
+}
+
+var weightCloserInitMu sync.Mutex
+
+// WeightSessionsActiveError reports a deferred model-weight close. The last live session
+// completes teardown; new sessions are refused from the first close request.
+type WeightSessionsActiveError struct{ Count int }
+
+func (e *WeightSessionsActiveError) Error() string {
+	return fmt.Sprintf("model: cannot close weights while %d session(s) remain", e.Count)
+}
+
+func (m *Model) ensureWeightCloser() *weightCloserState {
+	weightCloserInitMu.Lock()
+	defer weightCloserInitMu.Unlock()
+	if m.weightCloser == nil {
+		m.weightCloser = &weightCloserState{}
+	}
+	return m.weightCloser
+}
+
+func (m *Model) holdModelWeights() bool {
+	if m == nil {
+		return false
+	}
+	s := m.ensureWeightCloser()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closing || s.closed {
+		return false
+	}
+	s.sessions++
+	return true
+}
+
+func (m *Model) finishWeightClose(s *weightCloserState) {
+	s.once.Do(func() {
+		// Native buffers stop borrowing Q8 backing before the checkpoint owner can unmap it.
+		m.releaseMetalQ8Residency()
+		if s.c != nil {
+			s.err = s.c.Close()
+		}
+	})
+}
+
+func (m *Model) releaseWeightSession() {
+	if m == nil || m.weightCloser == nil {
+		return
+	}
+	s := m.weightCloser
+	s.mu.Lock()
+	if s.sessions > 0 {
+		s.sessions--
+	}
+	finish := s.sessions == 0 && s.closing && !s.closed
+	if finish {
+		s.closed = true
+	}
+	s.mu.Unlock()
+	if finish {
+		m.finishWeightClose(s)
+	}
 }
 
 // SetWeightCloser binds a retained checkpoint lifetime to this model. CloseWeights releases it.
 func (m *Model) SetWeightCloser(c io.Closer) {
 	if m != nil {
-		m.weightCloser = &weightCloserState{c: c}
+		s := m.ensureWeightCloser()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.closing || s.closed {
+			panic("model: cannot bind a checkpoint owner after weight close has started")
+		}
+		s.c = c
 	}
 }
 
-// CloseWeights releases a retained lazy-weight checkpoint source once.
+// CloseWeights starts model-weight teardown. Active sessions defer the release and are reported;
+// the last Session.Close completes it. NewSession is refused once teardown starts.
 func (m *Model) CloseWeights() error {
 	if m == nil {
 		return nil
 	}
-	m.releaseMetalQ8()
-	if m.weightCloser == nil {
-		return nil
+	s := m.ensureWeightCloser()
+	s.mu.Lock()
+	s.closing = true
+	if s.sessions > 0 {
+		n := s.sessions
+		s.mu.Unlock()
+		return &WeightSessionsActiveError{Count: n}
 	}
-	s := m.weightCloser
-	s.once.Do(func() { s.err = s.c.Close() })
+	s.closed = true
+	s.mu.Unlock()
+	// All zero-session callers enter Once: followers wait for the winner before reading s.err.
+	m.finishWeightClose(s)
 	return s.err
 }
 

@@ -1,5 +1,7 @@
 package model
 
+import "fmt"
+
 // metal_q8_budget.go — the host-independent budget predicate that decides whether the
 // Q8-minority projections may be uploaded to the GPU during resident-Q4_K prefill. It is split
 // out of metal_q4k_on.go (which is darwin+arm64+cgo only) so the arithmetic is testable on every
@@ -39,28 +41,72 @@ func q8UploadFits(residentBytes, q8Bytes, deviceTotal int64, forceEnv string) bo
 	return float64(projected) <= metalQ8UploadFraction*float64(deviceTotal)
 }
 
-// q8SingleResidencyAllowed gates the no-copy Q8 publication path. Since publication aliases one
-// owner rather than adding q8Bytes to the Metal working set, only backend capacity and an explicit
-// operator disable are admission inputs. A forced enable cannot manufacture an unknown capacity.
-func q8SingleResidencyAllowed(deviceTotal int64, forceEnv string) bool {
-	switch forceEnv {
-	case "0", "off", "OFF", "false", "FALSE":
-		return false
-	}
-	return deviceTotal > 0
+// MetalQ8ResidencyUnavailableError is the fail-closed reason an exact promised-Metal model could
+// not publish its complete no-copy Q8 band. Ordinary execution may stay CPU-safe; profile evidence
+// must refuse rather than relabel that work as Metal.
+type MetalQ8ResidencyUnavailableError struct{ Reason string }
+
+func (e *MetalQ8ResidencyUnavailableError) Error() string {
+	return "model: exact Metal Q8 residency unavailable: " + e.Reason
 }
 
-// qwen35RuntimeQ8ProjectionCount returns the promised runtime Q8 band and ignores checkpoint-only
-// trailing tensors. Each linear-attention layer contributes five projections; each full-attention
-// layer contributes q/k. The Qwen3.8 64-layer graph is therefore 48*5 + 16*2 = 272.
-func qwen35RuntimeQ8ProjectionCount(cfg Config) int {
-	count := 0
-	for l := 0; l < cfg.NumLayers; l++ {
-		if cfg.isLinearAttnLayer(l) {
-			count += 5
-		} else {
-			count += 2
+func q8AliasFits(residentBytes, deviceTotal int64, override string) error {
+	if override != "" {
+		return &MetalQ8ResidencyUnavailableError{Reason: "FAK_METAL_Q8_UPLOAD override is not admissible for no-copy evidence"}
+	}
+	if deviceTotal <= 0 {
+		return &MetalQ8ResidencyUnavailableError{Reason: "device working-set budget is unknown"}
+	}
+	if residentBytes < 0 || float64(residentBytes) > metalQ8UploadFraction*float64(deviceTotal) {
+		return &MetalQ8ResidencyUnavailableError{Reason: "model owner leaves insufficient activation/KV headroom"}
+	}
+	return nil
+}
+
+func qwen38MetalQ8RuntimeNames(cfg Config) ([]string, error) {
+	if cfg.NumLayers != 64 || len(cfg.LayerTypes) != 64 || !cfg.IsQwen35Hybrid() {
+		return nil, &MetalQ8ResidencyUnavailableError{Reason: "runtime is not the exact 64-layer Qwen3.8 hybrid"}
+	}
+	names := make([]string, 0, 272)
+	linear, full := 0, 0
+	for l, kind := range cfg.LayerTypes {
+		lp := func(s string) string { return layerName(l, s) }
+		switch kind {
+		case "linear_attention":
+			linear++
+			for _, suffix := range []string{
+				"linear_attn.in_proj_qkv.weight", "linear_attn.in_proj_z.weight",
+				"linear_attn.in_proj_b.weight", "linear_attn.in_proj_a.weight",
+				"linear_attn.out_proj.weight",
+			} {
+				names = append(names, lp(suffix))
+			}
+		case "full_attention":
+			full++
+			names = append(names, lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"))
+		default:
+			return nil, &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf("layer %d has unexpected type %q", l, kind)}
 		}
 	}
-	return count
+	if linear != 48 || full != 16 || len(names) != 272 {
+		return nil, &MetalQ8ResidencyUnavailableError{Reason: fmt.Sprintf("runtime Q8 topology is %d linear/%d full/%d projections, want 48/16/272", linear, full, len(names))}
+	}
+	return names, nil
+}
+
+// buildAllOrNothing creates every requested owner or releases successful predecessors in reverse.
+// Publication is deliberately the caller's next step, after this transaction has fully succeeded.
+func buildAllOrNothing[T any](names []string, build func(string) (T, error), release func(T)) ([]T, error) {
+	items := make([]T, 0, len(names))
+	for _, name := range names {
+		item, err := build(name)
+		if err != nil {
+			for i := len(items) - 1; i >= 0; i-- {
+				release(items[i])
+			}
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }

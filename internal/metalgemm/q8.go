@@ -20,25 +20,32 @@ typedef struct {
     int host_readback;
 } mg_execution_event;
 int  mg_q8_upload(const signed char* codes, const float* scales, int out, int in);
-int  mg_q8_upload_nocopy_owned(const signed char* codes, const float* scales, int out, int in,
-                               signed char** owned_codes, float** owned_scales);
+int  mg_q8_alias(const signed char* codes, const float* scales, int out, int in);
+void mg_q8_release(int wid);
+int  mg_q8_live_count(void);
 void mg_q8_gemv(int wid, const signed char* xq, const float* xd, float* y, mg_execution_event* event);
 void mg_q8_gemv_group(const int* wids, int n, const signed char* xq, const float* xd, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q8_gemm(int wid, const signed char* Xq, const float* Xd, int P, float* Y, mg_execution_event* event);
 void mg_q8_gemm_group(const int* wids, int n, const signed char* Xq, const float* Xd, int P, float* Ycat, const int* yoff, mg_execution_event* event);
 void mg_q8_reset(void);
-void mg_q8_release(int wid);
 */
 import "C"
 
-import "unsafe"
+import (
+	"runtime"
+	"sync"
+	"unsafe"
+)
 
 // Q8Weight is a handle to a Q8_0 weight matrix [Out, In] resident on the GPU (int8 codes + per-32
 // f32 block scales). In must be a multiple of 32 (the Q8_0 block size); Nblk = In/32.
 type Q8Weight struct {
+	mu      sync.RWMutex
 	id      C.int
 	Out, In int
 	Nblk    int
+	pins    runtime.Pinner
+	aliased bool
 }
 
 // UploadQ8 copies a Q8_0 payload — codes (out*in int8, row-major) and block scales (out*nblk f32)
@@ -61,42 +68,67 @@ func UploadQ8(codes []int8, scales []float32, out, in int) *Q8Weight {
 	return &Q8Weight{id: id, Out: out, In: in, Nblk: nblk}
 }
 
-// UploadQ8NoCopyOwned publishes one immutable Q8 payload from a page-aligned native owner and
-// returns CPU slices aliasing that same owner. Metal and the CPU oracle therefore share one copy.
-// The aliases remain valid until ResetQ8; callers must release Metal state before discarding them.
-func UploadQ8NoCopyOwned(codes []int8, scales []float32, out, in int) (*Q8Weight, []int8, []float32) {
+// AliasQ8 exposes page-aligned, model-owned Q8 storage to Metal without copying it. Failure is
+// fail-closed: unlike UploadQ8 it never substitutes a copied buffer. The returned handle pins both
+// owners until Release has first released the native views.
+func AliasQ8(codes []int8, scales []float32, out, in int) *Q8Weight {
 	if !Available() || in <= 0 || in%32 != 0 || out <= 0 {
-		return nil, nil, nil
+		return nil
 	}
 	nblk := in / 32
-	codeLen, scaleLen := out*in, out*nblk
-	if len(codes) < codeLen || len(scales) < scaleLen {
-		return nil, nil, nil
+	if len(codes) < out*in || len(scales) < out*nblk {
+		return nil
 	}
-	var ownedCodes *C.schar
-	var ownedScales *C.float
-	id := C.mg_q8_upload_nocopy_owned((*C.schar)(unsafe.Pointer(&codes[0])), (*C.float)(unsafe.Pointer(&scales[0])),
-		C.int(out), C.int(in), &ownedCodes, &ownedScales)
-	if id < 0 || ownedCodes == nil || ownedScales == nil {
-		return nil, nil, nil
+	w := &Q8Weight{id: -1, Out: out, In: in, Nblk: nblk, aliased: true}
+	w.pins.Pin(&codes[0])
+	w.pins.Pin(&scales[0])
+	id := C.mg_q8_alias((*C.schar)(unsafe.Pointer(&codes[0])), (*C.float)(unsafe.Pointer(&scales[0])),
+		C.int(out), C.int(in))
+	if id < 0 {
+		w.pins.Unpin()
+		return nil
 	}
-	q := unsafe.Slice((*int8)(unsafe.Pointer(ownedCodes)), codeLen)
-	d := unsafe.Slice((*float32)(unsafe.Pointer(ownedScales)), scaleLen)
-	return &Q8Weight{id: id, Out: out, In: in, Nblk: nblk}, q, d
+	w.id = id
+	return w
 }
 
-// Release drops Metal views before freeing the no-copy native owner. It is idempotent.
+// Release drops native buffers before unpinning aliased Go backing. It is idempotent and waits for
+// any synchronous GEMV/GEMM call already using this handle.
 func (w *Q8Weight) Release() {
-	if w == nil || w.id < 0 {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.id < 0 {
 		return
 	}
 	C.mg_q8_release(w.id)
 	w.id = -1
+	if w.aliased {
+		w.pins.Unpin()
+		w.aliased = false
+	}
+}
+
+// NoCopy reports whether this live handle aliases its caller-owned payload.
+func (w *Q8Weight) NoCopy() bool {
+	if w == nil {
+		return false
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.id >= 0 && w.aliased
 }
 
 // GEMV computes y[Out] = W · x for one Q8_0-quantized activation: xq are the in int8 codes, xd the
 // nblk per-block f32 scales. y must have length >= Out. All slices are accessed only during the call.
 func (w *Q8Weight) GEMVWithEvents(xq []int8, xd []float32, y []float32, observation *ExecutionObservation) {
+	if w == nil {
+		return
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	if w == nil || w.id < 0 || len(xq) < w.In || len(xd) < w.Nblk || len(y) < w.Out {
 		return
 	}
@@ -113,7 +145,14 @@ func (w *Q8Weight) GEMVWithEvents(xq []int8, xd []float32, y []float32, observat
 // whole group and pipelines the dispatches. Returns nil on a shape mismatch or empty input.
 func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation *ExecutionObservation) [][]float32 {
 	n := len(ws)
-	if n == 0 || ws[0] == nil || len(xq) < ws[0].In || len(xd) < ws[0].Nblk {
+	if n == 0 {
+		return nil
+	}
+	if !lockQ8Group(ws) {
+		return nil
+	}
+	defer unlockQ8Group(ws)
+	if len(xq) < ws[0].In || len(xd) < ws[0].Nblk {
 		return nil
 	}
 	in := ws[0].In
@@ -147,6 +186,11 @@ func GEMVGroupQ8WithEvents(ws []*Q8Weight, xq []int8, xd []float32, observation 
 // P*In int8 codes, Xd are P*Nblk per-block f32 scales. Y must have length >= P*Out. The
 // call is the prefill twin of GEMV and runs the whole panel in one Metal command buffer.
 func (w *Q8Weight) GEMMWithEvents(Xq []int8, Xd []float32, P int, Y []float32, observation *ExecutionObservation) {
+	if w == nil {
+		return
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
 	if w == nil || w.id < 0 || P <= 0 || len(Xq) < P*w.In || len(Xd) < P*w.Nblk || len(Y) < P*w.Out {
 		return
 	}
@@ -162,7 +206,14 @@ func (w *Q8Weight) GEMMWithEvents(Xq []int8, Xd []float32, P int, Y []float32, o
 // covers several Q8-minority projections.
 func GEMMGroupQ8WithEvents(ws []*Q8Weight, Xq []int8, Xd []float32, P int, observation *ExecutionObservation) [][]float32 {
 	n := len(ws)
-	if n == 0 || P <= 0 || ws[0] == nil || len(Xq) < P*ws[0].In || len(Xd) < P*ws[0].Nblk {
+	if n == 0 || P <= 0 {
+		return nil
+	}
+	if !lockQ8Group(ws) {
+		return nil
+	}
+	defer unlockQ8Group(ws)
+	if len(Xq) < P*ws[0].In || len(Xd) < P*ws[0].Nblk {
 		return nil
 	}
 	in, nblk := ws[0].In, ws[0].Nblk
@@ -193,8 +244,45 @@ func GEMMGroupQ8WithEvents(ws []*Q8Weight, Xq []int8, Xd []float32, P int, obser
 	return out
 }
 
+func lockQ8Group(ws []*Q8Weight) bool {
+	seen := make(map[*Q8Weight]struct{}, len(ws))
+	for _, w := range ws {
+		if w == nil {
+			for held := range seen {
+				held.mu.RUnlock()
+			}
+			return false
+		}
+		if _, duplicate := seen[w]; duplicate {
+			for held := range seen {
+				held.mu.RUnlock()
+			}
+			return false
+		}
+		w.mu.RLock()
+		seen[w] = struct{}{}
+	}
+	return true
+}
+
+func unlockQ8Group(ws []*Q8Weight) {
+	for i := len(ws) - 1; i >= 0; i-- {
+		ws[i].mu.RUnlock()
+	}
+}
+
 // ID returns the backend handle for this matrix.
-func (w *Q8Weight) ID() int { return int(w.id) }
+func (w *Q8Weight) ID() int {
+	if w == nil {
+		return -1
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return int(w.id)
+}
+
+// LiveQ8Weights returns the native table's occupied-slot count for lifecycle tests.
+func LiveQ8Weights() int { return int(C.mg_q8_live_count()) }
 
 // ResetQ8 releases every resident Q8 weight buffer and the reused scratch (the Q8 twin of
 // ResetQ4K). Call only when no Q8Weight handle is still in use — every prior handle is invalidated.
