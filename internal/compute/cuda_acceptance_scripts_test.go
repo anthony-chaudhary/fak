@@ -2,10 +2,63 @@ package compute_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is required to exercise build_cuda.sh")
+	}
+	script, err := os.ReadFile("build_cuda.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	computeDir := filepath.Join(t.TempDir(), "internal", "compute")
+	if err := os.MkdirAll(computeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	scriptPath := filepath.Join(computeDir, "build_cuda.sh")
+	if err := os.WriteFile(scriptPath, script, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := "sm_80\r\nsm_89\r\nsm_90\r\nsm_100\r\n"
+	if err := os.WriteFile(filepath.Join(computeDir, "cuda_arch.txt"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bashScriptPath := filepath.ToSlash(scriptPath)
+	if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(bash), `\windows\system32\bash.exe`) {
+		volume := filepath.VolumeName(scriptPath)
+		bashScriptPath = "/mnt/" + strings.ToLower(strings.TrimSuffix(volume, ":")) + filepath.ToSlash(strings.TrimPrefix(scriptPath, volume))
+	}
+	quotedScriptPath := "'" + strings.ReplaceAll(bashScriptPath, "'", `'"'"'`) + "'"
+	run := func(arch string) (string, error) {
+		command := "FAK_CUDA_ARCH=" + arch + " PYTHON=/bin/true CC=/bin/true bash " + quotedScriptPath + " check"
+		cmd := exec.Command(bash, "-c", command)
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := run("sm_89"); err != nil {
+		t.Fatalf("supported CRLF architecture refused: %v\n%s", err, out)
+	} else if !strings.Contains(out, "[cuda] OK check") {
+		t.Fatalf("supported CRLF architecture did not complete validation:\n%s", out)
+	}
+	out, err := run("sm_999")
+	if err == nil {
+		t.Fatalf("unknown architecture accepted:\n%s", out)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok || exitErr.ExitCode() != 2 {
+		t.Fatalf("unknown architecture exit = %v, want status 2:\n%s", err, out)
+	}
+	if !strings.Contains(out, "unsupported CUDA arch 'sm_999'") {
+		t.Fatalf("unknown architecture did not fail at the exact membership check:\n%s", out)
+	}
+}
 
 func TestBuildCUDAScriptRejectsIncompleteGoToolchainBeforeNVCC(t *testing.T) {
 	data, err := os.ReadFile("build_cuda.sh")
