@@ -307,13 +307,79 @@
       "url": "https://github.com/ai-dynamo/nixl",
       "status": "studied",
       "priority": 14,
-      "why": "NIXL was deeply studied at its descriptor, registration, remote-metadata, backend-selection, lifecycle, telemetry, and release seams. It is the transfer adapter beneath the essay, not an address-free universal memory model; FAK should govern consumer-ready route admission and receipts above it.",
-      "last_checked": "2026-08-20",
-      "checked_revision": "aecbc3846d92c34c7507a58d776e1fda50ff4fba",
-      "stars_at_check": 1203,
-      "last_push_at_check": "2026-08-20T19:14:30Z",
+      "why": "NIXL was exhaustively studied at its descriptor, registration, remote-metadata, backend-selection, lifecycle, live-activation, telemetry, and release seams. It is the transfer adapter beneath the essay, not an address-free universal memory model; FAK should govern consumer-ready route admission, pricing, and receipts above it.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "b0cbb237354d72b83500d5214d2b4484f9866fa3",
+      "stars_at_check": 1216,
+      "last_push_at_check": "2026-08-25T23:47:18Z",
       "study_note": "docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md",
-      "refresh_issue": "#8993"
+      "refresh_issue": "#8993",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/ai-dynamo-nixl.json",
+        "indexed_revision": "b0cbb237354d72b83500d5214d2b4484f9866fa3",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 14,
+        "candidate_count": 5,
+        "filed_issue_count": 0,
+        "completeness_critic": "Exhaustive 776-file local map at the pinned revision plus paged GitHub issue/PR history through the commit cutoff, zero-discussion read-back, releases/tags, TODO and unsupported signals, provenance, FAK self-query, candidate adjudication, and issue routing; generated classifications were manually corrected with representative source reads.",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate --slurp repos/ai-dynamo/nixl/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo ai-dynamo/nixl --state all --limit 1000 --json number,title,state,createdAt,updatedAt,mergedAt,url",
+              "gh api graphql repository(owner:ai-dynamo,name:nixl) discussions totalCount"
+            ],
+            "note": "At the commit cutoff: 250 issues (67 open, 183 closed), 1,904 PRs (198 open, 1,706 closed), and zero discussions."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"transfer fabric descriptors registration remote metadata backend route admission receipts\"",
+              "fak capabilities \"GPU memory registration lifecycle transfer telemetry tracing\"",
+              "fak capabilities \"async agent metadata exchange topology capability negotiation\"",
+              "fak capabilities \"NIXL backend plugin data movement connector\""
+            ],
+            "note": "Queries confirmed native FAK routing and capability-floor ownership while preserving NIXL as an optional transfer substrate."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/ai-dynamo-nixl.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8993",
+              "https://github.com/anthony-chaudhary/fak/issues/8259",
+              "https://github.com/anthony-chaudhary/fak/issues/8261"
+            ],
+            "note": "No new borrow issue: candidates map to #8259/#8261, deduplicate to #3310/#6409, or watch upstream PR #2137."
+          }
+        ],
+        "issue_refs": [
+          "#8993",
+          "#8259",
+          "#8261",
+          "#3310",
+          "#6409"
+        ]
+      }
     },
     {
       "repository": "z-lab/dflash",
