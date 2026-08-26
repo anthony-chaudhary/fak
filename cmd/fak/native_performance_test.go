@@ -107,6 +107,7 @@ func TestNativePerformanceRejectsInvalidArguments(t *testing.T) {
 		{"--next", "--dot"},
 		{"--profile="},
 		{"--profile-next="},
+		{"--capacity-receipt="},
 		{"--profile", "profile.json", "--json"},
 		{"--profile", "profile.json", "--profile-next", "profile.json"},
 	} {
@@ -114,7 +115,7 @@ func TestNativePerformanceRejectsInvalidArguments(t *testing.T) {
 		if code := runNativePerformance(&stdout, &stderr, args); code != 2 {
 			t.Fatalf("args=%v exit=%d, want 2", args, code)
 		}
-		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE]") {
+		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --capacity-plan | --capacity-receipt FILE]") {
 			t.Fatalf("args=%v stderr=%q", args, stderr.String())
 		}
 	}

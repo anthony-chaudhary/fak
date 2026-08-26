@@ -101,3 +101,62 @@ func TestMixedQ4KQ8ObservationTypedFailure(t *testing.T) {
 		t.Fatalf("post-submit error = %T %v", err, err)
 	}
 }
+
+func TestMixedQ4KQ8ObservationInjectedPostSubmitFailure(t *testing.T) {
+	if !Available() {
+		t.Skip("no Metal device available")
+	}
+	defer ResetQ4K()
+	defer ResetQ8()
+
+	const in = 256
+	q4 := UploadQ4K(q4kTestRaw(64, in, 0x8973), 64, in)
+	if q4 == nil {
+		t.Fatal("UploadQ4K returned nil")
+	}
+	defer q4.Release()
+	codes := make([]int8, 64*in)
+	scales := make([]float32, 64*(in/32))
+	for i := range codes {
+		codes[i] = int8(i%7) - 3
+	}
+	for i := range scales {
+		scales[i] = 0.01
+	}
+	q8 := UploadQ8(codes, scales, 64, in)
+	if q8 == nil {
+		t.Fatal("UploadQ8 returned nil")
+	}
+
+	x := make([]float32, in)
+	xq := make([]int8, in)
+	xd := make([]float32, in/32)
+	for i := range x {
+		x[i] = float32(i%11-5) * 0.02
+		xq[i] = int8(i%9) - 4
+	}
+	for i := range xd {
+		xd[i] = 0.02
+	}
+
+	observation := NewExecutionObservation(ExecutionMixedQ4KQ8QKV)
+	q4out, q8out, err := gemvGroupMixedQ4KQ8([]*Q4KWeight{q4}, []*Q8Weight{q8}, x, xq, xd, observation, true)
+	if !IsMixedQ4KQ8PostSubmit(err) {
+		t.Fatalf("injected call error=%T %v, want typed post-submit failure", err, err)
+	}
+	if q4out != nil || q8out != nil {
+		t.Fatalf("injected call returned outputs: q4=%v q8=%v", q4out, q8out)
+	}
+	snapshot, snapshotErr := observation.Snapshot()
+	if snapshotErr != nil {
+		t.Fatal(snapshotErr)
+	}
+	if len(snapshot.Events) != 1 {
+		t.Fatalf("events=%+v, want one submitted native event", snapshot.Events)
+	}
+	event := snapshot.Events[0]
+	if !event.Committed || !event.CompletedWait || event.HostReadback || event.Encoders != 2 {
+		t.Fatalf("injected post-submit lifecycle=%+v, want committed+waited, no readback, two encoders", event)
+	}
+	t.Logf("captured injected native failure: typed=%T committed=%t waited=%t readback=%t encoders=%d", err, event.Committed, event.CompletedWait, event.HostReadback, event.Encoders)
+}

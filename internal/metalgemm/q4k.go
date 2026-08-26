@@ -30,7 +30,8 @@ void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff, mg_execution_event* event);
 int  mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_y, const int* q4_yoff,
                            const int* q8_wids, int nq8, const signed char* xq, const float* xd,
-                           float* q8_y, const int* q8_yoff, mg_execution_event* event);
+                           float* q8_y, const int* q8_yoff, int inject_post_submit_failure,
+                           mg_execution_event* event);
 void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
 void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
@@ -300,6 +301,13 @@ func mixedQ4KQ8StatusError(status int) error {
 // GEMVGroupMixedQ4KQ8 applies at least one Q4_K and one Q8 weight sharing one activation in
 // one caller-observed native command buffer. Every input is checked before native encoding.
 func GEMVGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []int8, xd []float32, observation *ExecutionObservation) (q4out, q8out [][]float32, err error) {
+	return gemvGroupMixedQ4KQ8(q4ws, q8ws, x, xq, xd, observation, false)
+}
+
+// gemvGroupMixedQ4KQ8 is the single production/native call path. The final flag exists only so
+// the Darwin test can make the native boundary fail after a real commit and completed wait; the
+// exported operation always passes false, and no package-global fault state can leak across calls.
+func gemvGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []int8, xd []float32, observation *ExecutionObservation, injectPostSubmitFailure bool) (q4out, q8out [][]float32, err error) {
 	if len(q4ws) == 0 || len(q8ws) == 0 {
 		return nil, nil, &MixedQ4KQ8PreflightError{Reason: "both quantization groups are required"}
 	}
@@ -338,12 +346,16 @@ func GEMVGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []
 	q4flat := make([]float32, q4flatLen)
 	q8flat := make([]float32, q8flatLen)
 	var event C.mg_execution_event
+	injectFailure := C.int(0)
+	if injectPostSubmitFailure {
+		injectFailure = 1
+	}
 	status := int(C.mg_q4k_q8_gemv_group(
 		(*C.int)(unsafe.Pointer(&q4ids[0])), C.int(len(q4ids)), (*C.float)(unsafe.Pointer(&x[0])),
 		(*C.float)(unsafe.Pointer(&q4flat[0])), (*C.int)(unsafe.Pointer(&q4off[0])),
 		(*C.int)(unsafe.Pointer(&q8ids[0])), C.int(len(q8ids)), (*C.schar)(unsafe.Pointer(&xq[0])),
 		(*C.float)(unsafe.Pointer(&xd[0])), (*C.float)(unsafe.Pointer(&q8flat[0])),
-		(*C.int)(unsafe.Pointer(&q8off[0])), &event))
+		(*C.int)(unsafe.Pointer(&q8off[0])), injectFailure, &event))
 	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0,
 		event.host_readback != 0, int(event.encoders), float64(event.gpu_milliseconds),
 		float64(event.wait_milliseconds), event.timing_available != 0)

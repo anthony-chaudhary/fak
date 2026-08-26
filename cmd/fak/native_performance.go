@@ -29,6 +29,8 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	profilePath := fs.String("profile", "", "validate and classify native profile FILE")
 	profileNextPath := fs.String("profile-next", "", "select next lever from native profile FILE")
 	gatePath := fs.String("gate", "", "classify a candidate against the last accepted envelope receipt in FILE")
+	capacityReceiptPath := fs.String("capacity-receipt", "", "validate the #8971 no-FAK_Q4K_FREE_CPU native Metal capacity receipt FILE")
+	capacityPlan := fs.Bool("capacity-plan", false, "emit the bounded #8971 no-FAK_Q4K_FREE_CPU capture contract without touching hardware")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -52,8 +54,14 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if set["gate"] {
 		modeCount++
 	}
-	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") {
-		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE]")
+	if set["capacity-receipt"] {
+		modeCount++
+	}
+	if *capacityPlan {
+		modeCount++
+	}
+	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") || (set["capacity-receipt"] && *capacityReceiptPath == "") {
+		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --capacity-plan | --capacity-receipt FILE]")
 		return 2
 	}
 
@@ -87,6 +95,22 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if err := nativeperf.Validate(graph); err != nil {
 		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
 		return 1
+	}
+	if set["capacity-receipt"] {
+		data, err := os.ReadFile(*capacityReceiptPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: read capacity receipt: %v\n", err)
+			return 1
+		}
+		receipt, err := decodeNativeCapacityReceipt(data)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
+			return 1
+		}
+		return encodeNativePerformanceJSON(stdout, stderr, nativeCapacityReadbackFor(receipt))
+	}
+	if *capacityPlan {
+		return encodeNativePerformanceJSON(stdout, stderr, nativeCapacityCapturePlan())
 	}
 	if set["profile"] || set["profile-next"] {
 		path := *profilePath

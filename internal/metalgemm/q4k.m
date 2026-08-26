@@ -1338,7 +1338,8 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
 // completed submission, and -1 after a submitted command buffer fails.
 int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_y, const int* q4_yoff,
                          const int* q8_wids, int nq8, const signed char* xq, const float* xd,
-                         float* q8_y, const int* q8_yoff, mg_execution_event* event) {
+                         float* q8_y, const int* q8_yoff, int inject_post_submit_failure,
+                         mg_execution_event* event) {
     mg_execution_event_reset(event);
     if (nq4 <= 0 || nq8 <= 0 || q4_wids == NULL || q8_wids == NULL ||
         x == NULL || xq == NULL || xd == NULL || q4_y == NULL || q8_y == NULL ||
@@ -1387,6 +1388,10 @@ int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_
         [cb waitUntilCompleted];
         mg_execution_event_waited(event, cb, wait_started);
         if (cb.status != MTLCommandBufferStatusCompleted) return -1;
+        // The caller-scoped test injection is checked only after a real native submit and wait.
+        // It proves that this function's post-submit return travels through the exported Go call
+        // path as MixedQ4KQ8PostSubmitError without corrupting process-global Metal state.
+        if (inject_post_submit_failure != 0) return -1;
 
         memcpy(q4_y, gQYBuf.contents, (size_t)q4total * 4);
         mg_q8_read_gemv_group(q8_y, q8_yoff[nq8]);

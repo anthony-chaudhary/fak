@@ -51,6 +51,7 @@ func TestMixedQ4KQ8ObservationSourceIsCallerOwned(t *testing.T) {
 	for _, want := range []string{
 		"mg_q4k_q8_gemv_group(", "mg_execution_event* event",
 		"event->command_buffer", "event->host_readback = 1",
+		"inject_post_submit_failure", "[cb waitUntilCompleted]",
 	} {
 		if !strings.Contains(string(nativeSource), want) {
 			t.Fatalf("mixed native source missing %q", want)
@@ -64,6 +65,31 @@ func TestMixedQ4KQ8ObservationSourceIsCallerOwned(t *testing.T) {
 	for _, forbidden := range []string{"gQuantCommandBuffers", "mg_quant_event_snapshot", "ResetMixed"} {
 		if strings.Contains(string(goSource), forbidden) || strings.Contains(string(nativeSource), forbidden) || strings.Contains(string(q8Source), forbidden) {
 			t.Fatalf("mixed implementation reintroduced package-global attribution %q", forbidden)
+		}
+	}
+}
+
+func TestMixedQ4KQ8MetalWitnessReadback(t *testing.T) {
+	stdout, err := os.ReadFile("../../docs/_witnesses/issue-8973-mixed-q4k-q8/metal-test.stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(stdout)
+	for _, want := range []string{
+		"control_events=2 candidate_events=1",
+		"Operation:mixed-q4_k-q8-qkv",
+		"Q4_K parity: outputs=64 cosine=1.000000 max_rel=0.000000",
+		"Q8 parity: groups=2 exact=true",
+		"typed=*metalgemm.MixedQ4KQ8PostSubmitError committed=true waited=true readback=false encoders=2",
+		"PASS",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("mixed Metal witness missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"/Users/", "credential", "token="} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("mixed Metal witness contains private marker %q", forbidden)
 		}
 	}
 }
