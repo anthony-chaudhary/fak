@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -21,13 +22,17 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 	return
 }
 
+func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
+	return p.generateReusedWithBiasObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, nil)
+}
+
 // generateReusedContextWithBias runs the decode loop, sampling each next token with
 // sampleLogitsWithPenalty. freqPenalty/presPenalty are the OpenAI repetition
 // penalties (#1705); both zero is a byte-for-byte no-op versus the pre-penalty
 // path, so every existing caller (which passes 0, 0) is unaffected. The per-token
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
-func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
+func (p *InKernelPlanner) generateReusedWithBiasObserved(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, observe func(int, float64)) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -250,6 +255,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		rng:         rng,
 		emit:        emit,
 		stops:       stops,
+		observe:     observe,
 		temp:        temp,
 		topP:        topP,
 		topK:        topK,
@@ -284,12 +290,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 // opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
 // the property that makes the two paths bit-for-bit equivalent.
 type decodeLane struct {
-	s      *model.Session
-	logits []float32
-	counts []int32
-	rng    *rand.Rand
-	emit   func(int) bool
-	stops  map[int]bool
+	s       *model.Session
+	logits  []float32
+	counts  []int32
+	rng     *rand.Rand
+	emit    func(int) bool
+	stops   map[int]bool
+	observe func(int, float64)
 
 	temp        float64
 	topP        float64
@@ -322,6 +329,9 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	if next < 0 || ln.stops[next] {
 		ln.stopped, ln.done = true, true
 		return 0, false
+	}
+	if ln.observe != nil {
+		ln.observe(next, selectedTokenLogprob(ln.logits, next))
 	}
 	if ln.counts != nil && next < len(ln.counts) {
 		ln.counts[next]++
@@ -483,4 +493,23 @@ func envFloat(key string, def float64) float64 {
 		}
 	}
 	return def
+}
+
+// selectedTokenLogprob returns log_softmax(logits)[selected] without mutating
+// the model output that drove the choice.
+func selectedTokenLogprob(logits []float32, selected int) float64 {
+	if selected < 0 || selected >= len(logits) || len(logits) == 0 {
+		return math.NaN()
+	}
+	max := float64(logits[0])
+	for _, v := range logits[1:] {
+		if float64(v) > max {
+			max = float64(v)
+		}
+	}
+	sum := 0.0
+	for _, v := range logits {
+		sum += math.Exp(float64(v) - max)
+	}
+	return float64(logits[selected]) - max - math.Log(sum)
 }

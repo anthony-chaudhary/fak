@@ -13,6 +13,12 @@ import (
 // the gateway (which actually has a client request to forward) passes options.
 type SampleOpt func(*SampleParams)
 
+// WithNativeInferenceReceipt asks the fak-native planner to attach token-level
+// decode evidence to Completion. Other planners leave the receipt nil.
+func WithNativeInferenceReceipt(enabled bool) SampleOpt {
+	return func(sp *SampleParams) { sp.NativeInferenceReceipt = enabled }
+}
+
 // WithModel overrides the planner's configured model id for this one request — the
 // gateway's request-model pass-through (#82). An empty string is a NO-OP, so a
 // caller can forward a client's raw `model` field unconditionally: an omitted model

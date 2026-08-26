@@ -626,6 +626,10 @@ type inKernelGenerateResult struct {
 }
 
 func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool) (res inKernelGenerateResult, err error) {
+	return p.generateReusedRecoveringObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, nil)
+}
+
+func (p *InKernelPlanner) generateReusedRecoveringObserved(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, observe func(int, float64)) (res inKernelGenerateResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := recoverDevicePanic(r); ok {
@@ -635,7 +639,7 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 			panic(r)
 		}
 	}()
-	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedContextWithBias(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+	gen, promptTok, cacheable, matched, sourceTier, prefillS, decodeS, stopped, err := p.generateReusedWithBiasObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe)
 	if err != nil {
 		return inKernelGenerateResult{}, err
 	}
@@ -651,8 +655,8 @@ func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []in
 	}, nil
 }
 
-func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, onRetry func()) (inKernelGenerateResult, error) {
-	res, err := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, observe func(int, float64), onRetry func()) (inKernelGenerateResult, error) {
+	res, err := p.generateReusedRecoveringObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe)
 	if err == nil {
 		return res, nil
 	}
@@ -665,7 +669,7 @@ func (p *InKernelPlanner) generateReusedWithOOMRetry(ctx context.Context, ids []
 	if onRetry != nil {
 		onRetry()
 	}
-	retryRes, retryErr := p.generateReusedRecovering(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit)
+	retryRes, retryErr := p.generateReusedRecoveringObserved(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe)
 	p.recordInKernelOOMRetry(err, retryErr == nil)
 	return retryRes, retryErr
 }
@@ -796,6 +800,18 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	if sp.PresencePenalty != nil {
 		presPenalty = *sp.PresencePenalty
 	}
+	if sp.NativeInferenceReceipt && (temp != 0 || topP != 0 || topK != 0 || len(logitBias) != 0 || freqPenalty != 0 || presPenalty != 0) {
+		return nil, fmt.Errorf("native inference receipt requires greedy unmodified sampling")
+	}
+	var receiptTokens []int
+	var receiptLogprobs []float64
+	var observe func(int, float64)
+	if sp.NativeInferenceReceipt {
+		observe = func(token int, score float64) {
+			receiptTokens = append(receiptTokens, token)
+			receiptLogprobs = append(receiptLogprobs, score)
+		}
+	}
 
 	chat := renderInKernelChatMLRequest(messages, tools, p.m.Cfg, sp.ResponseFormat, sp.ToolChoice)
 	ids, err := p.tok.Encode(chat)
@@ -834,8 +850,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			return nil, err
 		}
 	}
-	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
+	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, observe, func() {
 		sb.Reset()
+		receiptTokens = receiptTokens[:0]
+		receiptLogprobs = receiptLogprobs[:0]
 	})
 	if err != nil {
 		return nil, err
@@ -915,6 +933,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		FinishReason:  finishReason,
 		ProviderCache: &compReuseEntry,
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
+	}
+	if sp.NativeInferenceReceipt {
+		backend, forwardPath := p.executionIdentity()
+		comp.NativeInferenceReceipt = &NativeInferenceReceipt{
+			TokenIDs: receiptTokens, SelectedTokenLogprobs: receiptLogprobs,
+			PrefillSeconds: prefillS, DecodeSeconds: decodeS, Model: p.modelID,
+			Backend: backend, ForwardPath: forwardPath, Q4K: p.q4k,
+		}
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
