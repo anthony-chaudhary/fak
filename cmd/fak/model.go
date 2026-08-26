@@ -12,7 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelreg"
 )
 
-const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen38-ladder|canary-gate|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
+const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen38-ladder|canary-gate|canary-run|acceptance-gate|acceptance-run|acceptance-refold|readiness-inventory> ...\n" +
 	"  fak model plan         choose a Qwen3.8-27B load from goals and declared capacity without downloading\n" +
 	"  fak model load <ref>   resolve a model ref (alias | hf://… | path) to a cached file path\n" +
 	"  fak model pull <ref>   download a model ref into the local cache (alias-aware)\n" +
@@ -20,6 +20,7 @@ const modelUsage = "usage: fak model <plan|load|pull|ls|provider-contracts|qwen3
 	"  fak model provider-contracts inspect canonical provider behavior and provenance (--json for complete records)\n" +
 	"  fak model qwen38-ladder prove concepts cheaply, then promote to exact Qwen3.8-27B evidence\n" +
 	"  " + modelCanaryGateSynopsis + "  fold exact-model observations into PROMOTE/ROLLBACK/HOLD\n" +
+	"  fak model canary-run  own one guarded Darwin local-model canary transaction\n" +
 	"  fak model acceptance-gate evaluate a versioned exact-model capability report\n" +
 	"  fak model acceptance-run execute a latest-generation exact-model campaign (older generations require a named exception)\n" +
 	"  fak model acceptance-refold replay immutable raw streams with the current parser\n" +
@@ -51,6 +52,8 @@ func cmdModel(args []string) {
 		os.Exit(runModelQwen38Ladder(os.Stdout, os.Stderr, args[1:]))
 	case "canary-gate":
 		os.Exit(runModelCanaryGate(os.Stdout, os.Stderr, args[1:]))
+	case "canary-run":
+		os.Exit(runModelCanaryRun(os.Stdout, os.Stderr, args[1:]))
 	case "acceptance-gate":
 		os.Exit(runModelAcceptanceGate(os.Stdout, os.Stderr, args[1:]))
 	case "acceptance-run":

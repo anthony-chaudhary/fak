@@ -2,12 +2,56 @@
   "schema": "fak-ultracode-negative-control-report/1",
   "campaign": "internal/ultracodenegcontrol/testdata/campaign.json",
   "results": [
-    {"name":"duplicated-context","expected_verdict":"NO_GAIN","verdict":"NO_GAIN","credited_savings":0,"reason":"placebo produced no token reduction under an equal accepted outcome","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/duplicated-context.json"],"publish_contradiction":false},
-    {"name":"omitted-required-context","expected_verdict":"ABSTAIN","verdict":"ABSTAIN","credited_savings":0,"reason":"accepted outcomes diverged; harmful omission is not savings","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/omitted-required-context.json"],"publish_contradiction":false},
-    {"name":"random-truncation","expected_verdict":"ABSTAIN","verdict":"ABSTAIN","credited_savings":0,"reason":"accepted outcomes diverged; harmful omission is not savings","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/random-truncation.json"],"publish_contradiction":false},
-    {"name":"shuffled-role","expected_verdict":"NO_GAIN","verdict":"NO_GAIN","credited_savings":0,"reason":"placebo produced no token reduction under an equal accepted outcome","source_receipts":["issue-8624/source-artifact.json#baseline","negative-controls/shuffled-role.json"],"publish_contradiction":false}
+    {
+      "name": "duplicated-context",
+      "expected_verdict": "NO_GAIN",
+      "verdict": "NO_GAIN",
+      "credited_savings": 0,
+      "reason": "placebo produced no token reduction under an equal accepted outcome",
+      "source_receipts": [
+        "testdata/source-artifact.json#duplicated-context/baseline",
+        "testdata/source-artifact.json#duplicated-context/observed"
+      ],
+      "publish_contradiction": false
+    },
+    {
+      "name": "omitted-required-context",
+      "expected_verdict": "ABSTAIN",
+      "verdict": "ABSTAIN",
+      "credited_savings": 0,
+      "reason": "accepted outcomes diverged; harmful omission is not savings",
+      "source_receipts": [
+        "testdata/source-artifact.json#omitted-required-context/baseline",
+        "testdata/source-artifact.json#omitted-required-context/observed"
+      ],
+      "publish_contradiction": false
+    },
+    {
+      "name": "random-truncation",
+      "expected_verdict": "ABSTAIN",
+      "verdict": "ABSTAIN",
+      "credited_savings": 0,
+      "reason": "accepted outcomes diverged; harmful omission is not savings",
+      "source_receipts": [
+        "testdata/source-artifact.json#random-truncation/baseline",
+        "testdata/source-artifact.json#random-truncation/observed"
+      ],
+      "publish_contradiction": false
+    },
+    {
+      "name": "shuffled-role",
+      "expected_verdict": "NO_GAIN",
+      "verdict": "CONTRADICTORY",
+      "credited_savings": 0,
+      "reason": "placebo unexpectedly produced a shorter accepted prompt",
+      "source_receipts": [
+        "testdata/source-artifact.json#shuffled-role/baseline",
+        "testdata/source-artifact.json#shuffled-role/observed"
+      ],
+      "publish_contradiction": true
+    }
   ],
-  "promotion_evidence": "All four predeclared controls replay to their expected NO_GAIN or ABSTAIN verdict with zero credited savings.",
-  "demotion_or_retirement_evidence": "Any contradictory result is published with publish_contradiction=true and retires the causal interpretation until explained.",
-  "invalidating_assumption": "The frozen control observations are fixtures, not fresh provider runs; a changed model, runtime, tokenizer, task, cache posture, campaign version, accepted outcome, or authoritative usage receipt invalidates this report."
+  "promotion_evidence": "Duplicated context produced NO_GAIN; omitted required context and random truncation produced ABSTAIN with zero credited savings.",
+  "demotion_or_retirement_evidence": "Shuffled-role unexpectedly preserved the accepted outcome with 2 fewer input tokens, so it is published as CONTRADICTORY and the general micro-context causal interpretation is not promoted.",
+  "invalidating_assumption": "The result is bounded to qwen2.5:0.5b, Ollama 0.30.10/llama.cpp, qwen2.5 tokenizer, issue-8624-v1 frozen task, warm-prefix posture, and campaign issue-8624-v1-negative-controls-v1; changing any envelope field or losing authoritative usage invalidates it."
 }

@@ -1,0 +1,123 @@
+{
+  "schema": "fak-ultracode-negative-control-source/1",
+  "captured_at": "2026-08-26T13:25:31.177744+00:00",
+  "node": "fak-realmodel",
+  "runtime": "ollama 0.30.10/llama.cpp",
+  "model": "qwen2.5:0.5b",
+  "tokenizer": "qwen2.5",
+  "task_sha256": "6d71a6923be0ac5a73627a08ed3841d8041656735563fa61df59a3ff9a86f7c4",
+  "cache_posture": "warm-prefix",
+  "campaign_version": "issue-8624-v1-negative-controls-v1",
+  "predeclaration": {
+    "shuffled-role": {
+      "expected": "NO_GAIN",
+      "attribution": "none"
+    },
+    "duplicated-context": {
+      "expected": "NO_GAIN",
+      "attribution": "none"
+    },
+    "omitted-required-context": {
+      "expected": "ABSTAIN",
+      "attribution": "none"
+    },
+    "random-truncation": {
+      "expected": "ABSTAIN",
+      "attribution": "none"
+    }
+  },
+  "runs": [
+    {
+      "name": "shuffled-role",
+      "baseline": {
+        "started_ns": 1787750694158165115,
+        "prompt_sha256": "541363308a058503c372762fa4ce84b5890f6c5aafafd8ecc32bd660ceb1f099",
+        "response": "ACCEPTED.",
+        "prompt_eval_count": 1641,
+        "prompt_eval_duration": 8282013000,
+        "eval_count": 4,
+        "total_duration": 9060188766
+      },
+      "observed": {
+        "started_ns": 1787750703232994493,
+        "prompt_sha256": "843435672790cf600348cd55e2479396dc919a790873cd1cee28322c81116c5d",
+        "response": "ACCEPTED",
+        "prompt_eval_count": 1639,
+        "prompt_eval_duration": 392288000,
+        "eval_count": 3,
+        "total_duration": 985727769
+      },
+      "baseline_accepted": true,
+      "observed_accepted": true
+    },
+    {
+      "name": "duplicated-context",
+      "baseline": {
+        "started_ns": 1787750704227611129,
+        "prompt_sha256": "541363308a058503c372762fa4ce84b5890f6c5aafafd8ecc32bd660ceb1f099",
+        "response": "ACCEPTED.",
+        "prompt_eval_count": 1641,
+        "prompt_eval_duration": 8378544000,
+        "eval_count": 4,
+        "total_duration": 11757901850
+      },
+      "observed": {
+        "started_ns": 1787750715995241561,
+        "prompt_sha256": "ff64538e1510afed881b0a7c78cc5a8a2017893215a7fc4b19c9af1b8f1cc1b3",
+        "response": "ACCEPTED.",
+        "prompt_eval_count": 3216,
+        "prompt_eval_duration": 10333979000,
+        "eval_count": 4,
+        "total_duration": 10963118342
+      },
+      "baseline_accepted": true,
+      "observed_accepted": true
+    },
+    {
+      "name": "omitted-required-context",
+      "baseline": {
+        "started_ns": 1787750726976537956,
+        "prompt_sha256": "541363308a058503c372762fa4ce84b5890f6c5aafafd8ecc32bd660ceb1f099",
+        "response": "ACCEPTED.",
+        "prompt_eval_count": 1641,
+        "prompt_eval_duration": 549689000,
+        "eval_count": 4,
+        "total_duration": 1146898078
+      },
+      "observed": {
+        "started_ns": 1787750728136179795,
+        "prompt_sha256": "7a754655f1b74f6dc64f90e56867c7bb864c62e50c9939ebbd96625aaf167cd6",
+        "response": "Repository contracts are a type of agreement between two parties that defines",
+        "prompt_eval_count": 1605,
+        "prompt_eval_duration": 150307000,
+        "eval_count": 12,
+        "total_duration": 1161819105
+      },
+      "baseline_accepted": true,
+      "observed_accepted": false
+    },
+    {
+      "name": "random-truncation",
+      "baseline": {
+        "started_ns": 1787750729306146640,
+        "prompt_sha256": "541363308a058503c372762fa4ce84b5890f6c5aafafd8ecc32bd660ceb1f099",
+        "response": "ACCEPTED.",
+        "prompt_eval_count": 1641,
+        "prompt_eval_duration": 56633000,
+        "eval_count": 4,
+        "total_duration": 687069081
+      },
+      "observed": {
+        "started_ns": 1787750730001591272,
+        "prompt_sha256": "6e172259b0c1da4c2bafd72239127f7bcc94f337d111d1e888526a869c276788",
+        "response": "Repository contracts are a type of distributed ledger technology designed to ensure",
+        "prompt_eval_count": 835,
+        "prompt_eval_duration": 125457000,
+        "eval_count": 12,
+        "total_duration": 1167970304
+      },
+      "baseline_accepted": true,
+      "observed_accepted": false
+    }
+  ]
+}

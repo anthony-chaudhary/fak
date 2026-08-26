@@ -1,0 +1,996 @@
+[GIN] 2026/08/26 - 13:21:00 | 200 |  540.404368ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:00 | 200 |  571.568081ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:01 | 200 |  551.656403ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:01 | 200 |  570.632064ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:02 | 200 |  549.067875ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:02 | 200 |  575.525561ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:03 | 200 |  548.896113ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:50 | 200 |  505.705799ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:50 | 200 |   427.50007ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:51 | 200 |  425.786275ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:51 | 200 |  424.039595ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:52 | 200 |  418.392191ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:52 | 200 |    412.6075ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:52 | 200 |  419.917851ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:53 | 200 |  417.310437ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:53 | 200 |  419.479052ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:54 | 200 |  416.189101ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:54 | 200 |  425.366792ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:55 | 200 |  413.531239ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:55 | 200 |  417.559871ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:55 | 200 |  423.118287ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:56 | 200 |  419.413112ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:56 | 200 |  415.974703ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:57 | 200 |  490.313122ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:57 | 200 |  424.157422ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:58 | 200 |  420.372332ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:58 | 200 |  417.402783ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:58 | 200 |  414.810848ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:59 | 200 |  411.582809ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:21:59 | 200 |  409.899514ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:00 | 200 |  420.616314ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:00 | 200 |    425.3606ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:00 | 200 |  416.279069ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:01 | 200 |  414.064032ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:01 | 200 |  418.069875ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:02 | 200 |  425.537273ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:02 | 200 |  417.336456ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:03 | 200 |  417.520813ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:03 | 200 |  412.205992ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:35 | 200 |  694.740113ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:35 | 200 |  582.714691ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:36 | 200 |  570.014411ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:36 | 200 |  586.709312ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:37 | 200 |  581.534962ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:37 | 200 |  577.971968ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:38 | 200 |  592.853975ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:39 | 200 |    589.4236ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:39 | 200 |   602.78676ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:40 | 200 |  580.017886ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:40 | 200 |  580.960782ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:41 | 200 |  583.325554ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:42 | 200 |  572.405532ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:42 | 200 |  579.905313ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:43 | 200 |  593.964083ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:43 | 200 |  596.722467ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:44 | 200 |  660.758893ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:45 | 200 |  597.492556ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:45 | 200 |  596.606876ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:46 | 200 |  622.236504ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:46 | 200 |   594.61075ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:47 | 200 |  599.348426ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:48 | 200 |  604.190958ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:48 | 200 |  595.285561ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:49 | 200 |  620.098723ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:49 | 200 |  601.804346ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:50 | 200 |  622.790263ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:51 | 200 |  617.287948ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:51 | 200 |  606.992211ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:52 | 200 |  595.639779ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:52 | 200 |   601.36653ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:53 | 200 |  601.428058ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:54 | 200 |  660.641389ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:54 | 200 |  615.965704ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:55 | 200 |  674.875721ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:56 | 200 |  633.163062ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:56 | 200 |  670.848243ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:57 | 200 |   619.88215ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:58 | 200 |  671.420743ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:58 | 200 |  625.130828ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:22:59 | 200 |  674.561106ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:00 | 200 |  613.931584ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:00 | 200 |  670.736428ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:01 | 200 |  624.364003ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:02 | 200 |  691.376942ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:02 | 200 |  630.757819ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:03 | 200 |  657.960393ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:03 | 200 |  603.008275ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:04 | 200 |  764.743952ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:05 | 200 |  782.288117ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:06 | 200 |  758.590651ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:07 | 200 |  788.944848ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:07 | 200 |  750.272386ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:08 | 200 |   814.33689ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:09 | 200 |  751.374607ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:10 | 200 |  787.854827ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:10 | 200 |  763.800868ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:11 | 200 |  795.208159ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:12 | 200 |  765.527763ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:13 | 200 |  780.255952ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:14 | 200 |  786.423272ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:14 | 200 |  788.475768ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:15 | 200 |  782.651448ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:16 | 200 |  782.942492ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:41 | 200 |   43.718921ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:23:44 | 200 |  2.667250308s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:44 | 200 |   45.380825ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:23:52 | 200 |  7.796189151s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:23:52 | 200 |   49.304881ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:01 | 200 |  8.389943838s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:01 | 200 |  4.688205371s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 14 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:01 | 200 |  512.445623ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:01 | 200 |   73.824675ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:04 | 200 |  2.312190143s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:04 | 200 |  3.276566365s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:05 | 200 |  449.996563ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:05 | 200 |   53.000021ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:13 | 200 |  7.588298974s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:13 | 200 |  8.458733201s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:13 | 200 |  528.902282ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 27 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:14 | 200 |  836.364436ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:14 | 200 |  512.062009ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:14 | 200 |   46.399393ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:22 | 200 |   7.69609607s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:22 | 200 |  8.356280836s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:22 | 200 |  480.404318ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:22 | 200 |   46.807516ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:23 | 200 |   674.09747ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:26 | 200 |  3.049872244s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:26 | 200 |  3.336099442s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:26 | 200 |  435.260232ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 27 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:27 | 200 |  753.655741ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:27 | 200 |  544.100244ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:27 | 200 |   61.041232ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:30 | 200 |  2.611036873s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:30 | 200 |   3.30322113s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:30 | 200 |  447.862894ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:30 | 200 |   46.585503ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:33 | 200 |  2.301396799s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:33 | 200 |  3.200044379s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:33 | 200 |  445.759439ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 21 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:34 | 200 |  555.974138ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:34 | 200 |  941.764816ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 30 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:34 | 200 |   456.17721ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 45 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:24:35 | 200 |   740.18856ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:35 | 200 |  481.686946ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:35 | 200 |    48.72913ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:43 | 200 |  7.728613655s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:43 | 200 |  8.403560114s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:44 | 200 |  499.087667ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 27 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:44 | 200 |  770.246436ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:44 | 200 |  478.104174ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 33 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:45 | 200 |  703.138508ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:45 | 200 |   59.616838ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:45 | 200 |  930.611168ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:24:53 | 200 |  7.834310373s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:24:53 | 200 |  8.276365891s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:54 | 200 |  487.960367ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 22 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:24:54 | 200 |  670.949148ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:03 | 200 |  9.384112973s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:03 | 200 |  9.070917433s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 33 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:03 | 200 |  8.577954751s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:04 | 200 |  992.467775ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 44 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:04 | 200 |  1.061190861s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:04 | 200 |   76.194695ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:04 | 200 |   1.35775344s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:25:07 | 200 |  2.538801994s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:15 | 200 | 11.765212637s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 14 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:16 | 200 | 11.551292785s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:16 | 200 |   8.70165281s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:26 | 200 | 10.976473978s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 26 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:27 | 200 | 11.003103584s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:27 | 200 | 11.179932159s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 36 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:28 | 200 |  962.924033ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:28 | 200 |  1.157462976s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:28 | 200 |   63.533547ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:28 | 200 |  1.684424167s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 55 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:29 | 200 |  585.863669ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:29 | 200 |  1.168457361s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 70 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:29 | 200 |  606.786634ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:29 | 200 |  909.592597ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:30 | 200 |  693.948792ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 80 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:30 | 200 |  531.237891ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:31 | 200 |  1.259975843s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 98 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:31 | 200 |  1.174385275s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:31 | 200 |  950.518411ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 107 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:31 | 200 |   482.37963ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:31 | 200 |  789.578211ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 117 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:32 | 200 |  465.169469ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 127 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:32 | 200 |  556.865494ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:32 | 200 |  959.010286ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 135 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:33 | 200 |  437.375695ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:33 | 200 |   46.346299ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:33 | 200 |  688.113699ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:25:41 | 200 |  8.301943144s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:42 | 200 |  8.596319575s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 14 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:42 | 200 |  491.168753ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 27 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:42 | 200 |   534.34172ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:43 | 200 |  849.998467ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 32 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:43 | 200 |  675.945461ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:43 | 200 |  934.793386ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 47 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:44 | 200 |  552.513988ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 63 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:44 | 200 |  735.502096ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:44 | 200 |  542.619547ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 69 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:45 | 200 |  639.708787ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:45 | 200 |  943.885823ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 81 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:45 | 200 |  476.342342ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 92 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:25:46 | 200 |  489.131872ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:46 | 200 |   55.792166ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:46 | 200 |  821.506856ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:25:49 | 200 |  2.736296535s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:49 | 200 |  3.338889959s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 14 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:50 | 200 |   490.96331ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 25 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:50 | 200 |  503.236624ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:50 | 200 |  822.337392ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 31 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:51 | 200 |  642.893503ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 47 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:51 | 200 |  935.278023ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:51 | 200 |  432.314975ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 57 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:52 | 200 |  503.039028ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:52 | 200 |  673.601897ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 64 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:52 | 200 |  677.170373ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:53 | 200 |  936.914894ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 80 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:53 | 200 |  468.116524ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 90 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:25:53 | 200 |  532.543818ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:53 | 200 |   48.781593ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:25:53 | 200 |  742.173613ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:02 | 200 |  7.829346752s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:02 | 200 |  8.388135489s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 14 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:02 | 200 |  531.334877ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 28 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:03 | 200 |  853.590564ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:03 | 200 |  556.781705ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 34 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:03 | 200 |  735.760091ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:04 | 200 |  1.008367248s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 46 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:04 | 200 |  462.007824ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 58 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:04 | 200 |   536.07538ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:04 | 200 |  798.289808ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 65 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:05 | 200 |  745.087178ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:05 | 200 |  946.334753ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 77 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:06 | 200 |  492.608111ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:06 | 200 |   54.054163ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:14 | 200 |  7.438701627s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:14 | 200 |  8.323946434s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:14 | 200 |  490.660484ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:14 | 200 |   63.951109ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:15 | 200 |  926.588519ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:18 | 200 |  3.011885684s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:18 | 200 |    3.0758082s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:26:18 | 200 |  447.581444ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:18 | 200 |   43.455642ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:21 | 200 |  2.424045884s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:21 | 200 |   44.662448ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:21 | 200 |   3.32470605s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:29 | 200 |   7.89066709s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:29 | 200 |    45.38568ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:29 | 200 |  8.282863085s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:38 | 200 |  7.926586821s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:38 | 200 |  8.394415882s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:38 | 200 |  486.530913ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 26 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:39 | 200 |  510.344206ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:39 | 200 |   52.843559ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:39 | 200 |  1.009046547s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:42 | 200 |  2.930140673s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:42 | 200 |  3.420156614s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:26:43 | 200 |  547.566538ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:43 | 200 |   55.534899ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:43 | 200 |  872.610833ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:46 | 200 |  3.211175026s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:46 | 200 |  3.333568938s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:26:47 | 200 |  430.955089ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 22 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:26:47 | 200 |  498.331286ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:47 | 200 |    51.13739ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:47 | 200 |  1.000147959s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:26:56 | 200 |  8.075689108s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:56 | 200 |  8.424962065s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:26:56 | 200 |  526.694744ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:56 | 200 |   61.389213ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:26:57 | 200 |  891.853733ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:27:05 | 200 |  8.488695633s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:06 | 200 |  9.439215472s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 15 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:06 | 200 |  1.223918567s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:06 | 200 |   2.58828259s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:07 | 200 |  885.469045ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:07 | 200 |  1.166689927s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 41 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:07 | 200 |  1.094897444s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:08 | 200 |  1.059881289s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:08 | 200 |  1.123985288s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 59 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:09 | 200 |  1.087279123s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:09 | 200 |  858.581548ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 78 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:09 | 200 |  946.541213ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:10 | 200 |  1.158820097s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:10 | 200 |   71.830691ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:27:13 | 200 |  2.972051352s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:13 | 200 |  3.263623571s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:14 | 200 |  3.787952832s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:14 | 200 |  1.696542978s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 30 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:27:14 | 200 |  657.902004ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:15 | 200 |  2.049832062s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 41 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:27:16 | 200 |  1.134671325s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:16 | 200 |  1.912799918s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 54 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:27:16 | 200 |  786.392802ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:16 | 200 |  1.802148793s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:16 | 200 |   50.586921ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 1 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:27:19 | 200 |  2.538336765s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:20 | 200 |  3.032364601s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:21 | 200 |  4.296221321s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 23 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:27:21 | 200 |  999.721957ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:21 | 200 |  2.271402916s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 32 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:27:21 | 200 |  470.644879ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:22 | 200 |  706.755321ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 48 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:27:22 | 200 |  480.999199ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 54 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:27:23 | 200 |  1.010858923s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:23 | 200 |   64.073655ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:23 | 200 |   1.30882683s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:27:31 | 200 |  8.058349017s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:31 | 200 |  8.482691142s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:32 | 200 |  516.150591ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 19 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:33 | 200 |  914.784559ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:33 | 200 |  1.478220129s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 30 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:33 | 200 |  511.718212ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:33 | 200 |   61.534559ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:34 | 200 |  684.267224ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:27:42 | 200 |  8.566137954s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:42 | 200 |  8.815429519s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:43 | 200 |  553.001905ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 29 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:43 | 200 |  778.758407ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:43 | 200 |  496.843795ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 35 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:44 | 200 |  1.093920409s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:45 | 200 |  1.440109382s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 47 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:45 | 200 |  522.231573ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 61 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:45 | 200 |  809.157908ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:45 | 200 |   515.81772ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 67 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:47 | 200 |  1.082403889s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:47 | 200 |  1.323143601s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 79 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:47 | 200 |  480.452365ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:47 | 200 |   70.277926ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:27:55 | 200 |  7.399021686s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:55 | 200 |  8.311693778s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 14 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:55 | 200 |  506.724242ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 20 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:56 | 200 |  938.920412ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:57 | 200 |  1.478761363s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 32 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:57 | 200 |   451.64935ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 44 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:57 | 200 |  485.441474ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:57 | 200 |  759.074877ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 50 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:58 | 200 |  1.126208957s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:27:59 | 200 |  1.367320688s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 65 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:59 | 200 |  478.181271ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 76 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:27:59 | 200 |  513.400482ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:00 | 200 |  789.878771ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 83 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:28:01 | 200 |  1.066975113s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:01 | 200 |    42.74478ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:01 | 200 |  1.306275123s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  0 | task 2 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:04 | 200 |  2.910316629s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:04 | 200 |  3.262978718s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 14 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:04 | 200 |   434.25724ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 20 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:05 | 200 |  976.900741ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:06 | 200 |  1.408088638s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 32 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:06 | 200 |  431.513237ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 45 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:06 | 200 |  514.632256ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:06 | 200 |  751.210879ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 50 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:07 | 200 |  1.055435569s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:08 | 200 |  1.324850395s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 65 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:08 | 200 |  445.389588ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 73 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:08 | 200 |   476.38194ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:08 | 200 |  792.448857ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 83 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:09 | 200 |  418.902385ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:09 | 200 |   52.625628ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  0 | task 1 | cached n_tokens = 0, memory_seq_rm [0, end)
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:12 | 200 |  2.825396077s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:12 | 200 |  3.793997484s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 14 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:12 | 200 |  444.899832ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 22 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:13 | 200 |  439.242539ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:13 | 200 |   791.64894ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 32 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:13 | 200 |   400.70071ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 36 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:14 | 200 |  380.586981ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 40 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:14 | 200 |  371.731397ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 44 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:14 | 200 |  374.298472ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 48 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:15 | 200 |  377.417398ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:15 | 200 |   42.849932ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:18 | 200 |  2.669997093s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:18 | 200 |  391.333506ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:18 | 200 |   44.846879ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:26 | 200 |  7.788798619s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:28:27 | 200 |   417.77742ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:27 | 200 |   42.391159ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:35 | 200 |  7.700636341s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:35 | 200 |   50.846886ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:38 | 200 |  2.669099331s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:38 | 200 |   46.549774ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:46 | 200 |  7.753595786s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:28:47 | 200 |  424.715655ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:47 | 200 |   42.814605ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:50 | 200 |  2.673155692s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:28:50 | 200 |  383.095243ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:50 | 200 |   42.347322ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:28:58 | 200 |  7.718310753s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:28:59 | 200 |  414.958211ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:28:59 | 200 |  398.178606ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:28:59 | 200 |   43.114356ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:02 | 200 |  2.668041577s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:03 | 200 |  385.152339ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:03 | 200 |  381.614784ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:03 | 200 |   42.511589ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:11 | 200 |  7.730119708s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:12 | 200 |  418.350308ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:12 | 200 |  412.396072ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:13 | 200 |  404.361562ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:13 | 200 |    44.86046ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:21 | 200 |  7.813229853s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:21 | 200 |  419.837573ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:22 | 200 |  398.353939ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:22 | 200 |  411.643515ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:22 | 200 |  431.148459ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:23 | 200 |   43.656293ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:26 | 200 |  2.673788452s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:26 | 200 |  393.339476ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:26 | 200 |  460.843639ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:27 | 200 |  372.908797ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:27 | 200 |   42.741918ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:30 | 200 |  2.666425463s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:30 | 200 |  376.257088ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:31 | 200 |   370.95674ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:31 | 200 |  376.294938ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:31 | 200 |   381.63831ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:32 | 200 |   43.122512ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:40 | 200 |  7.680119852s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:40 | 200 |  394.885355ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:40 | 200 |  409.212442ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:41 | 200 |  416.106104ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:41 | 200 |  416.947909ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 21 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:42 | 200 |  421.656286ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 25 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:42 | 200 |  422.326744ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 29 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:29:42 | 200 |  426.094425ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:43 | 200 |   45.447814ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:46 | 200 |  2.676938507s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:46 | 200 |  387.095828ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:46 | 200 |  376.189028ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:47 | 200 |  374.397423ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:47 | 200 |  376.286859ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 20 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:48 | 200 |  384.057607ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 24 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:48 | 200 |  376.067417ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 28 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:48 | 200 |   373.46792ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:48 | 200 |   44.087192ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:29:51 | 200 |  2.653839602s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:52 | 200 |  388.239594ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:52 | 200 |  376.991885ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:53 | 200 |  379.462185ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:53 | 200 |  369.346001ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 20 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:53 | 200 |   380.18987ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 24 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:54 | 200 |  374.665054ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 28 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:54 | 200 |  380.714015ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 32 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:29:54 | 200 |  373.302636ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:29:54 | 200 |   42.681237ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:03 | 200 |  7.705840227s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:03 | 200 |   397.56928ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:03 | 200 |  404.683515ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:04 | 200 |  416.307075ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:04 | 200 |  417.469091ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 21 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:05 | 200 |  423.006567ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 25 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:05 | 200 |  409.922549ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 29 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:05 | 200 |  396.643501ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 33 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:06 | 200 |  424.305755ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:06 | 200 |   43.100595ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:14 | 200 |  7.745376847s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:14 | 200 |  418.096887ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:15 | 200 |   43.615665ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:23 | 200 |  7.697861406s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:23 | 200 |   50.352274ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:26 | 200 |  2.668050565s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:26 | 200 |   50.270234ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:29 | 200 |  2.673211463s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:29 | 200 |  387.994823ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:29 | 200 |   42.061878ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:37 | 200 |    7.7048798s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:38 | 200 |  413.132317ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:38 | 200 |   42.348761ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:46 | 200 |  7.752384653s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:46 | 200 |  407.379929ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:30:47 | 200 |  396.829579ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:47 | 200 |   43.025399ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:50 | 200 |  2.668171879s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:50 | 200 |  395.835381ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:50 | 200 |   43.456041ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:53 | 200 |  2.666107574s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:54 | 200 |  389.726493ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:54 | 200 |  378.651094ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:54 | 200 |   44.296367ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:30:57 | 200 |  2.660770419s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:58 | 200 |  368.160396ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:58 | 200 |  375.948801ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:58 | 200 |  380.050128ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:30:59 | 200 |  368.251983ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:30:59 | 200 |   43.078512ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:31:07 | 200 |  7.709373795s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:07 | 200 |  396.634806ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:08 | 200 |  426.009902ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:08 | 200 |  409.430774ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:31:08 | 200 |   42.408328ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:31:11 | 200 |   2.66156354s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:12 | 200 |  387.463493ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:12 | 200 |  372.309766ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:12 | 200 |  377.974483ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:31:13 | 200 |   42.446855ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:31:21 | 200 |  7.966257702s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:21 | 200 |  412.062518ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:22 | 200 |  406.265696ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:22 | 200 |  398.249487ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:22 | 200 |  392.543698ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:31:23 | 200 |   41.978509ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:31:31 | 200 |  7.704663888s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:31 | 200 |  415.397003ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:31 | 200 |  419.656783ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:32 | 200 |  427.390725ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:32 | 200 |  400.392179ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 21 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:33 | 200 |  404.945679ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 25 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:33 | 200 |  417.935725ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 29 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:34 | 200 |  406.703643ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 33 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:34 | 200 |  400.519037ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:31:34 | 200 |   42.191187ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:31:37 | 200 |  2.671293978s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:37 | 200 |  382.229575ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:38 | 200 |  376.441677ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:38 | 200 |  373.862963ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:39 | 200 |    372.8406ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 20 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:39 | 200 |   371.70194ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 24 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:39 | 200 |  381.949707ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 28 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:40 | 200 |  375.126939ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:31:40 | 200 |   44.184146ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:31:48 | 200 |   7.73079791s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:48 | 200 |  413.743804ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:49 | 200 |  395.766975ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:49 | 200 |  414.919266ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:50 | 200 |  420.731639ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 21 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:50 | 200 |  416.897425ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 25 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:50 | 200 |  425.445499ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 29 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:31:51 | 200 |  416.241543ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:31:51 | 200 |   43.457342ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:31:54 | 200 |  2.673922399s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:54 | 200 |  375.127307ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:55 | 200 |  374.164414ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:55 | 200 |  379.341871ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:55 | 200 |  381.738848ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 20 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:56 | 200 |  370.171267ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 24 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:56 | 200 |  384.014344ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 28 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:57 | 200 |  372.493141ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 32 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:31:57 | 200 |  369.677182ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:31:57 | 200 |   42.194395ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:00 | 200 |  2.663556926s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:32:00 | 200 |  390.191726ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:00 | 200 |   43.095662ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:09 | 200 |  7.689294211s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:09 | 200 |   50.529305ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:12 | 200 |  2.675064777s |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:12 | 200 |   42.754415ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:20 | 200 |  7.720413561s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:32:20 | 200 |  410.479731ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:20 | 200 |   42.948454ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:23 | 200 |   2.66639288s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:32:24 | 200 |  385.960744ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:24 | 200 |   42.460299ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:32 | 200 |  7.723621199s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:32:32 | 200 |  393.610038ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:32 | 200 |   43.540618ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:35 | 200 |  2.649973243s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:32:36 | 200 |  375.861114ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:32:36 | 200 |  368.241804ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:36 | 200 |   42.116081ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:44 | 200 |  7.696196011s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:32:45 | 200 |  406.916604ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:32:45 | 200 |  405.794489ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:45 | 200 |   42.986389ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:32:53 | 200 |  7.680808548s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:32:54 | 200 |  421.194438ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:32:54 | 200 |  393.324476ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:32:54 | 200 |  403.657855ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:32:55 | 200 |   43.091256ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:33:03 | 200 |  7.770913147s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:03 | 200 |  412.330212ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:04 | 200 |  418.815517ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:04 | 200 |  422.398033ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:04 | 200 |  401.013547ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:33:04 | 200 |   43.855597ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:33:07 | 200 |   2.67877272s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:08 | 200 |  386.388675ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:08 | 200 |  377.159834ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:09 | 200 |  380.267459ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:09 | 200 |  372.038549ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:33:09 | 200 |   43.771397ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:33:12 | 200 |  2.668716655s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:13 | 200 |  399.241966ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:13 | 200 |  380.970118ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:13 | 200 |  378.403668ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:33:13 | 200 |   42.264089ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:33:22 | 200 |  7.981598787s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:22 | 200 |   413.98213ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:23 | 200 |  422.145298ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:23 | 200 |     415.453ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:23 | 200 |  423.225072ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 21 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:24 | 200 |  410.708316ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 25 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:24 | 200 |  396.201742ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 29 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:25 | 200 |  411.438427ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 33 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:25 | 200 |  417.001932ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:33:25 | 200 |   42.882124ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:33:33 | 200 |  7.723112819s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 5 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:34 | 200 |   413.37179ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 9 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:34 | 200 |  422.327303ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 13 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:34 | 200 |  410.100624ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 17 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:35 | 200 |  401.693452ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 21 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:35 | 200 |  402.588148ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 25 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:36 | 200 |  422.806125ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 29 | cached n_tokens = 1238, memory_seq_rm [1238, end)
+[GIN] 2026/08/26 - 13:33:36 | 200 |  409.535288ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:33:36 | 200 |   44.400883ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:33:39 | 200 |  2.683246998s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:40 | 200 |  394.000552ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:40 | 200 |  380.434606ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:40 | 200 |  367.065352ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:41 | 200 |  377.338627ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 20 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:41 | 200 |  378.164474ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 24 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:42 | 200 |  378.050269ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 28 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:42 | 200 |  383.192099ms |      172.17.0.1 | POST     "/api/generate"
+[GIN] 2026/08/26 - 13:33:42 | 200 |   43.383741ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 0 | cached n_tokens = 0, memory_seq_rm [0, end)
+[GIN] 2026/08/26 - 13:33:45 | 200 |  2.658791335s |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 4 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:45 | 200 |  373.375856ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 8 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:46 | 200 |  375.388338ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 12 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:46 | 200 |  375.290748ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 16 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:46 | 200 |  368.812895ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 20 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:47 | 200 |  374.244169ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 24 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:47 | 200 |  369.559956ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 28 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:48 | 200 |  373.124851ms |      172.17.0.1 | POST     "/api/generate"
+slot update_slots: id  1 | task 32 | cached n_tokens = 219, memory_seq_rm [219, end)
+[GIN] 2026/08/26 - 13:33:48 | 200 |  371.353426ms |      172.17.0.1 | POST     "/api/generate"

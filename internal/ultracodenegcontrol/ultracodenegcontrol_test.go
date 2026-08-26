@@ -21,7 +21,7 @@ func TestReplayArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]Verdict{
-		"shuffled-role":            NoGain,
+		"shuffled-role":            Contradictory,
 		"duplicated-context":       NoGain,
 		"omitted-required-context": Abstain,
 		"random-truncation":        Abstain,
