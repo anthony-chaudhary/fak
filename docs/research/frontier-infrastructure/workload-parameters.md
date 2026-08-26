@@ -105,3 +105,45 @@ geography/diurnal seasonality, first-party frontier prompt popularity, exact cac
 product, reasoning-mode selection, speculative acceptance, retries outside coding agents,
 and installed-to-goodput conversion. Those must remain benchmark sweeps or explicitly
 synthetic priors rather than asserted production facts.
+
+## Production-trace parameter addendum
+
+This addendum records exact population and shape facts extracted from the primary
+production papers. It does not turn reported observations into universal fitted laws.
+
+| Trace | Exact population/window | Concentration, burst, drift, or cache parameter | Safe replay rule | Missing parameter |
+|---|---|---|---|---|
+| ServeGen | Four months; 3.54B requests; 12 model groups; dozens of regions; O(10K) GPUs; 2,412 profiled clients | A small set of 29 top clients drives much of the dynamic aggregate behavior. One multimodal workload's input length rose 13% on average while output length fell 18%, shifting prefill and decode load differently. | Draw client first, then model/workload class; vary request rate, input, and output independently over time. | Per-client weights, geography/timezone distribution, exact arrival fit, and public tenant identifiers. |
+| FineServe | Four months; 1.48B requests; 57 models; 10 model families | Even the least burst-dominant architecture group has its top 5% of seconds carry about 9.5% of hourly traffic. Long-term shifts vary by architecture/scale, and new releases or availability changes can abruptly change arrival/token distributions. | Combine second-scale extreme bursts with slower release-driven drift; condition token shapes on task and model class. | Raw quantiles/fitted family per model/region, tenant concentration, and geographic/diurnal coefficients. |
+| Chutes year trace | One year; 6.12B unsampled requests; 9,174 models; user and serving-instance IDs; cache logging for final two months | Dominant models turn over; user-model affinity changes; most models remain bursty; request-level cached fractions are strongly bimodal and differ by model/user. | Re-rank model popularity and user affinity over time; use model/user-conditioned bimodal cacheability rather than one hit rate. | Public rank-frequency exponent, region, customer tier, request-length raw quantiles, and policy-independent reuse opportunity. |
+| Aliyun KVCache | Two production workloads | Single-turn requests account for 97% of reuses in one trace. Reuse probability is well modeled by exponential distributions after conditioning on request category; global behavior is heterogeneous. | Include repeated single-turn prefixes and fit category-specific reuse/lifetime parameters. | Published universal parameter table, raw tenant weights, and transfer/admission overhead by category. |
+| GitHub Copilot coding agent | First week of June 2026; 3.2M users; 13.5M sessions; 95.1M turns; 760.5M LLM calls; 774.7M tool calls | Average session prefix-cached share 90%; only 7.8% of sessions compacted but those held 44% of tokens; 9% of turns had a tool failure; retries can amplify compute up to 4×; five archetypes span about 23K–1.1M tokens/turn. | Replay session structure, model switches, compaction, tool failure, and retries; sample archetype before token volume. | Tenant/company concentration, geography, weekday/hour curve, reasoning-mode choice, and speculative acceptance. |
+| TraceLab coding agents | About eight months; 43 developers; ~4,300 sessions; ~350K LLM steps; ~430K tool calls | Mean 8.8 LLM calls and 10.8 tool calls per request; mean completion 4.3 minutes and P90 above 6.4 minutes; tool-call counts are heavy-tailed. | Preserve long-lived alternating tool/model loops and idle KV/container windows. | Population representativeness, per-developer shares, geography, exact tail fit, and production failure/retry rates. |
+| Output-length uncertainty experiment | 1,000 LMSYS prompts × 100 generations each | Average skewness 3.10; mean CV 1.09; CV >1 for 78.6%; top decile 35.7% of generated length; P90/P50 4.62; P99/P50 10.77. | Use prompt-conditioned stochastic output length and reserve for tail token-time, not only request count. | Production sampling policy, user/tenant population, arrival process, and cross-model drift. |
+
+### What the corpus can and cannot say about Zipf
+
+- **Supported:** popularity, load, token lengths, tool counts, and reuse can be skewed,
+  heavy-tailed, bursty, bimodal, and time-varying.
+- **Unsupported:** one global Zipf exponent for users, tenants, models, prefixes,
+  sessions, or token volume.
+- **Required before using Zipf:** name the random variable and population; fit the
+  exponent and cutoff; report estimator, goodness of fit, confidence interval, time
+  window, and drift; compare against lognormal, Pareto, and alternatives.
+- **Benchmark fallback:** if those fields are absent, label Zipf/Pareto/lognormal/MMPP
+  inputs as synthetic sensitivity scenarios rather than production measurements.
+
+### Directly observed versus still missing
+
+| Variable | Current evidence | Status |
+|---|---|---|
+| Request arrival and burst | Billions of requests across ServeGen, FineServe, and Chutes; second-scale extremes and release-driven drift are observed. | Partial: raw regional/tenant fits are not public. |
+| Model popularity | One-year Chutes evolution and broad long-tail model coverage. | Partial: no stable universal rank exponent. |
+| Tenant/client concentration | ServeGen identifies 29 dynamic top clients among 2,412 profiled clients. | Partial: exact traffic shares and identities are unavailable. |
+| Prefix popularity/reuse | Aliyun category-conditioned reuse, Chutes bimodal realized cache fractions, Copilot session reuse. | Partial: policy-independent opportunity and cross-tenant fits are missing. |
+| Prompt/output length | FineServe task/model modes, Copilot archetypes, TraceLab agent sessions, output-length uncertainty quantiles. | Partial: no cross-provider production family/parameter table. |
+| Geography and seasonality | ServeGen has dozens of regions; global traces expose temporal change. | Missing parameters: timezone, country, diurnal amplitude, weekday/weekend, holiday/event coefficients. |
+| Failure and retry | Copilot tool failure and retry amplification; Anthropic multicloud postmortem elsewhere in the corpus. | Partial and coding-agent-heavy. |
+| Reasoning-mode selection | Model releases expose configurable reasoning, but production selection shares are not public. | Missing. |
+| Speculative acceptance | Sailor2 names a 1B speculative tier, but no acceptance distribution is present. | Missing. |
+| Installed-to-goodput conversion | Physical/capacity evidence exists in other slices. | Missing a joined production distribution from installed → healthy → schedulable → active → useful goodput. |

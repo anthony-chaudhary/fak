@@ -180,11 +180,16 @@ sessions**, **95.1M turns**, **760.5M LLM calls**, **774.7M tool calls**, **44.9
 tokens**, **39.3B completion tokens**, five user archetypes, and compaction/failure
 statistics. Other trace papers provide request/length/burst observations.
 
-**Missing:** tenant concentration and dominant-tenant shares; geography; timezone;
-diurnal and weekly coefficients; launch/event bursts; paid/API/consumer segmentation;
+**Present but incomplete:** ServeGen identifies 29 dynamic top clients among 2,412
+profiled clients; FineServe quantifies second-scale burst concentration; Chutes tracks
+one-year model/user evolution; Aliyun, Chutes, and Copilot expose distinct cache-reuse
+shapes. These are provider-specific observations, not universal tenant laws.
+
+**Missing:** exact tenant traffic shares; geography; timezone; diurnal and weekly
+coefficients; launch/event burst parameters; paid/API/consumer segmentation;
 reasoning-mode selection; retry distributions beyond coding agents; speculative-token
-acceptance; cancellation; cache opportunity by user cohort. User/adoption totals from
-labs do not fill these gaps.
+acceptance; cancellation; and cache opportunity by user cohort. User/adoption totals
+from labs do not fill these gaps.
 
 **Proof needed for complete:** anonymized multi-product production traces with explicit
 population, interval, geography, tenant weighting, concurrency, and token accounting.

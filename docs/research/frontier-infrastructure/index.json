@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T16:27:00-07:00",
-  "issue": 9269,
+  "updated_at": "2026-08-26T16:58:00-07:00",
+  "issue": 9301,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -774,17 +774,23 @@
         "requests": 3540000000,
         "model_groups": 12,
         "gpu_scale": "O(10K)",
-        "regions": "dozens"
+        "regions": "dozens",
+        "top_clients_driving_dynamic_behavior": 29,
+        "profiled_clients": 2412,
+        "multimodal_input_length_change_pct_avg": 13,
+        "multimodal_output_length_change_pct_avg": -18
       },
       "assumptions": [
         "Client mixture is a primary driver of aggregate workload shape.",
         "Stationary Poisson arrivals and one token histogram are often inadequate."
       ],
       "contradictions_or_limits": [
-        "Provider identity and raw trace detail are constrained; results may not cover every frontier API."
+        "The traces come from one global provider and expose service metadata, not full tenant business context.",
+        "Aggregate behavior is driven disproportionately by a small set of clients; a single pooled distribution loses that structure."
       ],
       "fak_implications": [
-        "Generate workload per tenant/client with modality and reasoning mixtures, not one aggregate profile."
+        "Generate workloads hierarchically by client and model class, then aggregate.",
+        "Vary prefill and decode load independently as request rate and modality mix shift."
       ],
       "rumor": {
         "is_rumor": false
@@ -807,23 +813,32 @@
       "source_kind": "preprint",
       "evidence_class": "production_measurement",
       "confidence": "medium_high",
-      "claim": "A global commercial marketplace trace reports distinct fluctuation regimes across model architecture, scale, and task intent, plus sharp traffic shifts after model releases or availability changes.",
+      "claim": "A four-month global commercial marketplace trace contains 1.48B requests across 57 models from 10 model families. It reports architecture/scale-dependent distribution shifts, second-scale bursts, task-specific token shapes, and sharp traffic changes after releases or availability changes.",
       "quantified": {
         "task_sample_requests": 100000,
         "silver_labeled_requests": 20000,
         "task_classes": 10,
         "dense_output_peak_input_tokens_low": 1500,
         "dense_output_peak_input_tokens_high": 2000,
-        "dense_output_drop_long_input_pct_gt": 60
+        "dense_output_drop_long_input_pct_gt": 60,
+        "duration_months": 4,
+        "requests": 1480000000,
+        "models": 57,
+        "model_families": 10,
+        "top_seconds_fraction": 0.05,
+        "least_burst_dominant_top_seconds_traffic_share_approx": 0.095
       },
       "assumptions": [
-        "Model choice and market events make workload mixes nonstationary."
+        "Model architecture and scale correlate with adoption and workload evolution, but do not directly determine arrivals.",
+        "Capacity replay needs second-scale bursts, task intent, token-shape modes, and release-driven distribution shifts."
       ],
       "contradictions_or_limits": [
-        "A marketplace can differ from first-party frontier applications and the paper is a preprint."
+        "The marketplace population is not a universal cloud or first-party lab workload.",
+        "The paper reports grouped observations rather than one fitted distribution suitable for every model, region, or tenant."
       ],
       "fak_implications": [
-        "Benchmarks should include model-turnover shocks and model/task-specific workload mixtures."
+        "Replay both long-term drift and second-scale extremes; hourly averages hide burst demand.",
+        "Condition prompt/output distributions on model architecture, scale, and task intent rather than pooling them."
       ],
       "rumor": {
         "is_rumor": false
@@ -846,16 +861,24 @@
       "source_kind": "preprint",
       "evidence_class": "production_measurement",
       "confidence": "medium_high",
-      "claim": "A one-year Chutes trace studies popular and long-tail models plus user-model structure, showing why short aggregate traces miss workload evolution.",
-      "quantified": {},
+      "claim": "A one-year Chutes trace contains 6.12B unsampled requests across 9,174 models with anonymized user and serving-instance IDs, TTFT, and cache signals. It finds durable burstiness, turnover in dominant models, changing user-model affinity, and bimodal request-level cached fractions.",
+      "quantified": {
+        "duration_months": 12,
+        "requests": 6120000000,
+        "models": 9174,
+        "cached_token_logging_months": 2
+      },
       "assumptions": [
-        "Popularity is heavy-tailed and changes over time; user-model affinity matters for cache and routing."
+        "Model popularity and user-model affinity drift over months; short traces miss turnover.",
+        "Request-level prefix reuse can be strongly bimodal and differs by model and user."
       ],
       "contradictions_or_limits": [
-        "Chutes is an open multi-model platform, not a complete proxy for closed frontier APIs."
+        "The dataset represents one serving marketplace and does not disclose universal tenant or geography distributions.",
+        "Cached-token logging covers only the final two months, and observed cache hits depend on the deployed policy."
       ],
       "fak_implications": [
-        "Use longitudinal heavy-tail and churn models; record whether Zipf-like behavior was measured or merely assumed."
+        "Replay model turnover and time-varying user affinity, not a static popularity rank.",
+        "Benchmark cache routing with bimodal reuse and per-model/per-user heterogeneity."
       ],
       "rumor": {
         "is_rumor": false
@@ -1552,17 +1575,22 @@
       "source_kind": "research_paper",
       "evidence_class": "production_measurement",
       "confidence": "high",
-      "claim": "Two Aliyun production workloads show skewed KV reuse; single-turn reuse can matter as much as multi-turn reuse, while reuse time and probability are diverse globally but more predictable within request categories.",
-      "quantified": {},
+      "claim": "Two Aliyun production workloads show skewed, category-dependent KV reuse. Contrary to assuming multi-turn chat dominates reuse, single-turn requests account for 97% of reuses in one trace; reuse probability within request categories is modeled well by exponential distributions.",
+      "quantified": {
+        "single_turn_share_of_reuses_pct_in_one_trace": 97,
+        "production_workloads": 2
+      },
       "assumptions": [
-        "Prefix popularity and reuse are skewed but category-dependent; one global Zipf parameter is inadequate.",
-        "Consumer chat and developer API workloads should be modeled separately."
+        "Prefix reuse depends on request category and workload; single-turn repeated prefixes can dominate.",
+        "Global reuse distributions are less predictable than category-conditioned distributions."
       ],
       "contradictions_or_limits": [
-        "The public paper does not expose all raw business-sensitive population details and studies one provider."
+        "The 97% result is trace-specific and must not be projected to every cloud or application.",
+        "The paper does not establish a universal Zipf exponent or one cache TTL across workloads."
       ],
       "fak_implications": [
-        "Measure reuse by request class, user/channel, and time; compare learned eviction against LRU/LFU using the real mix."
+        "Classify request category before cache admission and routing.",
+        "Include single-turn shared-prefix reuse in addition to conversational multi-turn reuse."
       ],
       "rumor": {
         "is_rumor": false
