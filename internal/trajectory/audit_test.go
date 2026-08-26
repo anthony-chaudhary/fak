@@ -75,6 +75,18 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	if result.Summary.RepeatedFailures != 1 || result.Summary.MutationChurn != 2 {
 		t.Fatalf("behavior = repeats:%d churn:%d, want 1/2", result.Summary.RepeatedFailures, result.Summary.MutationChurn)
 	}
+	claudeChurn := auditSession(t, result, AuditSourceClaude).MutationChurnEvents
+	if len(claudeChurn) != 1 || claudeChurn[0].Target != "fixture.go" || claudeChurn[0].Count != 2 || claudeChurn[0].Intervention != QwenMutationObserveReproFirst {
+		t.Fatalf("Claude churn events = %+v, want one attributed observe-only fixture.go run", claudeChurn)
+	}
+	var rendered bytes.Buffer
+	if err := WriteAuditMarkdown(&rendered, result); err != nil {
+		t.Fatal(err)
+	}
+	wantChurnRow := "| claude-session | fixture.go | 2 | "
+	if !strings.Contains(rendered.String(), wantChurnRow) {
+		t.Fatalf("audit markdown missing captured churn intervention row %q", wantChurnRow)
+	}
 	if result.Summary.HookP95MS == nil || *result.Summary.HookP95MS != 120 {
 		t.Fatalf("hook p95 = %v, want 120", result.Summary.HookP95MS)
 	}

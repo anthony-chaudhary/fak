@@ -44,6 +44,19 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		fmt.Fprintf(&out, "\n%s token semantics: %s.\n", denominator.Source, denominator.TokenSemantics)
 	}
 
+	out.WriteString("\n## Mutation churn interventions\n\n")
+	out.WriteString("| Transcript | Target | Writes | Accounted tokens | Intervention |\n")
+	out.WriteString("|---|---|---:|---:|---|\n")
+	churnRows := 0
+	for _, transcript := range result.Transcripts {
+		for _, churn := range transcript.MutationChurnEvents {
+			fmt.Fprintf(&out, "| %s | %s | %d | %d | %s |\n", escapeAuditMarkdown(churn.TranscriptID), escapeAuditMarkdown(churn.Target), churn.Count, churn.AccountedTokens, escapeAuditMarkdown(string(churn.Intervention)))
+			churnRows++
+		}
+	}
+	if churnRows == 0 {
+		out.WriteString("| none | none | 0 | 0 | observe-only |\n")
+	}
 	out.WriteString("\n## Token-weighted bottlenecks\n\n")
 	if len(result.Bottlenecks) == 0 {
 		out.WriteString("No sessions were in the selected window.\n")

@@ -91,21 +91,22 @@ type AuditDenominatorRow struct {
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
 type AuditTranscriptRow struct {
-	Schema           string      `json:"schema"`
-	Kind             string      `json:"kind"`
-	Source           string      `json:"source"`
-	TranscriptID     string      `json:"session_id"`
-	SourcePath       string      `json:"source_path"`
-	Models           []string    `json:"models"`
-	Tokens           AuditTokens `json:"tokens"`
-	ToolCalls        int         `json:"tool_calls"`
-	ToolErrors       int         `json:"tool_errors"`
-	RepeatedFailures int         `json:"repeated_failures"`
-	MutationChurn    int         `json:"mutation_churn"`
-	HookP95MS        *int64      `json:"hook_p95_ms"`
-	UsageRecords     int         `json:"usage_records"`
-	SourcePaths      []string    `json:"source_paths,omitempty"`
-	usageByID        map[string]AuditTokens
+	Schema              string              `json:"schema"`
+	Kind                string              `json:"kind"`
+	Source              string              `json:"source"`
+	TranscriptID        string              `json:"session_id"`
+	SourcePath          string              `json:"source_path"`
+	Models              []string            `json:"models"`
+	Tokens              AuditTokens         `json:"tokens"`
+	ToolCalls           int                 `json:"tool_calls"`
+	ToolErrors          int                 `json:"tool_errors"`
+	RepeatedFailures    int                 `json:"repeated_failures"`
+	MutationChurn       int                 `json:"mutation_churn"`
+	MutationChurnEvents []QwenMutationChurn `json:"mutation_churn_events,omitempty"`
+	HookP95MS           *int64              `json:"hook_p95_ms"`
+	UsageRecords        int                 `json:"usage_records"`
+	SourcePaths         []string            `json:"source_paths,omitempty"`
+	usageByID           map[string]AuditTokens
 }
 
 // AuditBottleneckRow ranks sessions by exact accounted tokens. DominantBucket
