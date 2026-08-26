@@ -83,7 +83,7 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	if err := WriteAuditJSONL(&jsonl, result); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(jsonl.String(), "\"kind\":\"mutation_churn\"") || !strings.Contains(jsonl.String(), "\"Target\":\"fixture.go\"") {
+	if !strings.Contains(jsonl.String(), "\"kind\":\"mutation_churn\"") || !strings.Contains(jsonl.String(), "\"target\":\"fixture.go\"") {
 		t.Fatalf("audit JSONL missing queryable attributed churn row: %s", jsonl.String())
 	}
 	var rendered bytes.Buffer
