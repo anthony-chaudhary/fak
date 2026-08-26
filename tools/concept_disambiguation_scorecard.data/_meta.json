@@ -5558,6 +5558,21 @@
           "category": "incidental",
           "reason": "Issue #8754 wire-contract identifier for existing session lifecycle recovery, not a distinct runtime concept.",
           "token": "start_new_session"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8739 implementation symbol scoped to the established Codex logical-session continuity contract",
+          "token": "CodexSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8739 persistence record scoped to the established Codex logical-session continuity contract",
+          "token": "CodexSessionState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8739 constructor scoped to the established Codex logical-session continuity contract",
+          "token": "OpenCodexSession"
         }
       ],
       "id": "session-runtime",
@@ -5570,6 +5585,8 @@
         "AttributeOutcomes",
         "BeginSessionEffect",
         "BytesPerSession",
+        "CodexSession",
+        "CodexSessionState",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "CoveredSessions",
@@ -5595,6 +5612,7 @@
         "NewSessionAffinityGateway",
         "NewSessionRow",
         "ObservedSessions",
+        "OpenCodexSession",
         "OutcomeEvidence",
         "OutcomeSession",
         "PROVIDER_SESSION_CLEAR",

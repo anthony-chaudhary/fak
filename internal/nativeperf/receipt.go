@@ -31,6 +31,8 @@ type ExperimentReceipt struct {
 	Repetitions       []Repetition       `json:"repetitions"`
 	Memory            MemoryMetrics      `json:"memory"`
 	Execution         ExecutionIdentity  `json:"execution"`
+	Quality           QualityMetric      `json:"quality"`
+	ModuleVersions    []ModuleRevision   `json:"module_versions"`
 	Commands          []string           `json:"commands"`
 	ProfilerArtifacts []ArtifactRef      `json:"profiler_artifacts"`
 }
@@ -105,8 +107,10 @@ func BaselineTemplate(graph Graph, leverID string) (ExperimentReceipt, error) {
 		Machine:           MachineIdentity{ScrubbedID: "FILL_SCRUBBED_MACHINE_ID", Platform: lever.Applicability.Platform, Backend: envelope.Backend},
 		Controls:          ExperimentControls{PromptTokens: envelope.PromptTokens, DecodeTokens: envelope.DecodeTokens, Batch: 1, ContextTokens: envelope.PromptTokens + envelope.DecodeTokens, Temperature: float64(envelope.Temperature), Sampling: "greedy", CacheState: "cold", Warmups: 1, Repetitions: envelope.Repetitions},
 		UnchangedControls: append([]string(nil), requiredControlNames...), ChangedAxes: []string{}, Repetitions: reps,
-		Execution: ExecutionIdentity{Engine: "fak-native", ForwardPath: envelope.ForwardPath},
-		Commands:  []string{"FILL_SCRUBBED_CAPTURE_COMMAND"}, ProfilerArtifacts: []ArtifactRef{{Path: "FILL_RELATIVE_PROFILE_PATH", SHA256: strings.Repeat("0", 64)}},
+		Execution:      ExecutionIdentity{Engine: "fak-native", ForwardPath: envelope.ForwardPath},
+		Quality:        QualityMetric{Name: "FILL_QUALITY_METRIC", Score: 0, HigherIsBetter: true},
+		ModuleVersions: []ModuleRevision{{Module: "FILL_MODULE", Revision: "FILL_MODULE_REVISION"}},
+		Commands:       []string{"FILL_SCRUBBED_CAPTURE_COMMAND"}, ProfilerArtifacts: []ArtifactRef{{Path: "FILL_RELATIVE_PROFILE_PATH", SHA256: strings.Repeat("0", 64)}},
 	}, nil
 }
 
@@ -148,11 +152,24 @@ func ValidateReceipt(graph Graph, r ExperimentReceipt) error {
 	if !scrubbed(r.Machine.ScrubbedID) {
 		f = append(f, "machine identity is empty or contains private path/host syntax")
 	}
-	if r.Execution.Engine != "fak-native" || strings.TrimSpace(r.Execution.ForwardPath) == "" {
-		f = append(f, "execution identity must name fak-native and a forward path")
+	if strings.TrimSpace(r.Execution.Engine) == "" || strings.TrimSpace(r.Execution.ForwardPath) == "" {
+		f = append(f, "execution identity must name an engine and a forward path")
 	}
-	if r.Execution.FallbackCount != 0 {
-		f = append(f, "fallback count must be zero")
+	if r.Execution.FallbackCount < 0 {
+		f = append(f, "fallback count must be non-negative")
+	}
+	if strings.TrimSpace(r.Quality.Name) == "" || strings.HasPrefix(r.Quality.Name, "FILL_") || math.IsNaN(r.Quality.Score) || math.IsInf(r.Quality.Score, 0) {
+		f = append(f, "quality metric must be captured and finite")
+	}
+	if len(r.ModuleVersions) == 0 {
+		f = append(f, "at least one module revision is required")
+	}
+	seenModules := map[string]bool{}
+	for _, m := range r.ModuleVersions {
+		if strings.TrimSpace(m.Module) == "" || strings.HasPrefix(m.Module, "FILL_") || strings.TrimSpace(m.Revision) == "" || strings.HasPrefix(m.Revision, "FILL_") || seenModules[m.Module] {
+			f = append(f, "module revisions must be unique captured module@rev identities")
+		}
+		seenModules[m.Module] = true
 	}
 	if r.Controls.PromptTokens <= 0 || r.Controls.DecodeTokens <= 0 || r.Controls.Batch <= 0 || r.Controls.ContextTokens <= 0 || r.Controls.Warmups < 0 || r.Controls.Repetitions <= 0 {
 		f = append(f, "controls contain invalid dimensions")
@@ -214,7 +231,7 @@ func CompareReceipts(graph Graph, baseline, candidate ExperimentReceipt) (Compar
 	if baseline.EnvelopeID != candidate.EnvelopeID || baseline.ChangedLeverID != candidate.ChangedLeverID {
 		return Comparison{}, fmt.Errorf("receipts target different envelope or lever")
 	}
-	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution != candidate.Execution || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
+	if baseline.ArtifactSHA256 != candidate.ArtifactSHA256 || baseline.Machine != candidate.Machine || baseline.Controls != candidate.Controls || baseline.Execution.Engine != candidate.Execution.Engine || baseline.Execution.ForwardPath != candidate.Execution.ForwardPath || !sameStrings(baseline.UnchangedControls, candidate.UnchangedControls) {
 		return Comparison{}, fmt.Errorf("receipts are incomparable: an undeclared control axis drifted")
 	}
 	b, c := meanTPS(baseline.Repetitions), meanTPS(candidate.Repetitions)
