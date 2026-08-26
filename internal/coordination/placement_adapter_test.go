@@ -175,19 +175,19 @@ func TestPlacementAdapterFiltersHardConstraintsBeforeScoring(t *testing.T) {
 	}
 	request := placementRequestFixture()
 	plan := adapter.Plan(observation, request)
-	if plan.UnavailableReason != "" || plan.Selection.CandidateID != stablePlacementID("candidate", good.Identity) {
+	if plan.UnavailableReason != "" || plan.Selection.CandidateID != stableCoordinationID("candidate", good.Identity) {
 		t.Fatalf("eligible candidate was not selected: %+v", plan)
 	}
 
 	want := map[string]PlacementConstraint{
-		stablePlacementID("candidate", wrongRegion.Identity):      PlacementConstraintRegion,
-		stablePlacementID("candidate", wrongTenant.Identity):      PlacementConstraintTenant,
-		stablePlacementID("candidate", wrongAccelerator.Identity): PlacementConstraintAccelerator,
-		stablePlacementID("candidate", wrongModel.Identity):       PlacementConstraintModel,
-		stablePlacementID("candidate", wrongBoundary.Identity):    PlacementConstraintDataBoundary,
-		stablePlacementID("candidate", unavailable.Identity):      PlacementConstraintUnavailable,
-		stablePlacementID("candidate", stale.Identity):            PlacementConstraintStale,
-		stablePlacementID("candidate", noCapacity.Identity):       PlacementConstraintCapacity,
+		stableCoordinationID("candidate", wrongRegion.Identity):      PlacementConstraintRegion,
+		stableCoordinationID("candidate", wrongTenant.Identity):      PlacementConstraintTenant,
+		stableCoordinationID("candidate", wrongAccelerator.Identity): PlacementConstraintAccelerator,
+		stableCoordinationID("candidate", wrongModel.Identity):       PlacementConstraintModel,
+		stableCoordinationID("candidate", wrongBoundary.Identity):    PlacementConstraintDataBoundary,
+		stableCoordinationID("candidate", unavailable.Identity):      PlacementConstraintUnavailable,
+		stableCoordinationID("candidate", stale.Identity):            PlacementConstraintStale,
+		stableCoordinationID("candidate", noCapacity.Identity):       PlacementConstraintCapacity,
 	}
 	for _, verdict := range plan.Candidates {
 		constraint, constrained := want[verdict.CandidateID]
@@ -249,7 +249,7 @@ func TestPlacementAdapterCapacityQueuePriceAndCarbonPolicyCanChangeRanking(t *te
 			request := placementRequestFixture()
 			request.RankingPolicy = tt.policy
 			plan := adapter.Plan(observation, request)
-			preferredID := stablePlacementID("candidate", preferred.Identity)
+			preferredID := stableCoordinationID("candidate", preferred.Identity)
 			if plan.Selection.CandidateID != preferredID {
 				t.Fatalf("selection = %+v, want preferred candidate", plan.Selection)
 			}
@@ -288,7 +288,7 @@ func TestPlacementAdapterRanksLocalityAndPressureDeterministically(t *testing.T)
 		CarbonScale:    1,
 	}
 	plan := adapter.Plan(observation, request)
-	if plan.Selection.CandidateID != stablePlacementID("candidate", local.Identity) {
+	if plan.Selection.CandidateID != stableCoordinationID("candidate", local.Identity) {
 		t.Fatalf("local low-pressure candidate not selected: %+v", plan.Selection)
 	}
 
@@ -300,7 +300,7 @@ func TestPlacementAdapterRanksLocalityAndPressureDeterministically(t *testing.T)
 		t.Fatal(err)
 	}
 	tiePlan := tieAdapter.Plan(tieObservation, request)
-	if tiePlan.Selection.CandidateID != stablePlacementID("candidate", tieDevice.Identity) {
+	if tiePlan.Selection.CandidateID != stableCoordinationID("candidate", tieDevice.Identity) {
 		t.Fatalf("kind tie-break is not deterministic: %+v", tiePlan.Selection)
 	}
 }
@@ -321,7 +321,7 @@ func TestPlacementAdapterPinOverridesSoftScoreButNotHardConstraints(t *testing.T
 	request := placementRequestFixture()
 	request.OperatorPin = append([]byte(nil), pinned.Identity...)
 	plan := adapter.Plan(observation, request)
-	if plan.Selection.CandidateID != stablePlacementID("candidate", pinned.Identity) || !plan.Selection.OperatorPinned {
+	if plan.Selection.CandidateID != stableCoordinationID("candidate", pinned.Identity) || !plan.Selection.OperatorPinned {
 		t.Fatalf("eligible pin did not override score: %+v", plan)
 	}
 
@@ -337,7 +337,7 @@ func TestPlacementAdapterPinOverridesSoftScoreButNotHardConstraints(t *testing.T
 	if constrainedPlan.UnavailableReason != PlacementUnavailablePinConstrained || constrainedPlan.Selection.CandidateID != "" {
 		t.Fatalf("hard-constrained pin bypassed policy: %+v", constrainedPlan)
 	}
-	pinnedID := stablePlacementID("candidate", pinned.Identity)
+	pinnedID := stableCoordinationID("candidate", pinned.Identity)
 	for _, verdict := range constrainedPlan.Candidates {
 		if verdict.CandidateID == pinnedID && (!verdict.Pinned || verdict.Eligible || verdict.Ranking != nil) {
 			t.Fatalf("constrained pin was scored: %+v", verdict)
