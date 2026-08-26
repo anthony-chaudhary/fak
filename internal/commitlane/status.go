@@ -718,22 +718,6 @@ func unixProcessList(ctx context.Context) ([]Process, error) {
 	return procs, nil
 }
 
-func runProcessJSON(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		detail := strings.TrimSpace(stderr.String())
-		if detail == "" {
-			detail = err.Error()
-		}
-		return nil, fmt.Errorf("%s: %s", name, detail)
-	}
-	return out, nil
-}
-
 func decodeProcessJSON(data []byte) ([]Process, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
