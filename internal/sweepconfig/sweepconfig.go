@@ -217,21 +217,17 @@ func parseYAMLProfile(text string) (SweepProfile, error) {
 			section = key
 			switch key {
 			case "name", "description", "output_dir":
-				parsed, err := yamlString(value)
-				if err != nil {
-					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				if err := setYAMLScalar(raw, key, value, yamlString); err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, err)
 				}
-				if key == "name" && parsed == "" {
+				if key == "name" && str(raw[key]) == "" {
 					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("profile name is required"))
 				}
-				raw[key] = parsed
 				section = ""
 			case "skip_api", "skip_offline", "skip_local_shim", "fail_fast", "public":
-				parsed, err := yamlBool(value)
-				if err != nil {
-					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				if err := setYAMLScalar(raw, key, value, yamlBool); err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, err)
 				}
-				raw[key] = parsed
 				section = ""
 			case "workload":
 				if value != "" {
@@ -267,17 +263,13 @@ func parseYAMLProfile(text string) (SweepProfile, error) {
 			}
 			switch key {
 			case "max_turns", "trials", "timeout_s":
-				parsed, err := yamlInt(value)
-				if err != nil {
-					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				if err := setYAMLScalar(workload, key, value, yamlInt); err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, err)
 				}
-				workload[key] = parsed
 			case "transcript_path":
-				parsed, err := yamlString(value)
-				if err != nil {
-					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+				if err := setYAMLScalar(workload, key, value, yamlString); err != nil {
+					return SweepProfile{}, yamlLineError(lineNumber, err)
 				}
-				workload[key] = parsed
 			default:
 				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("unsupported workload key %q", key))
 			}
@@ -298,11 +290,7 @@ func parseYAMLProfile(text string) (SweepProfile, error) {
 				if rest == "" {
 					continue
 				}
-				key, value, err := cutYAML(rest)
-				if err != nil {
-					return SweepProfile{}, yamlLineError(lineNumber, err)
-				}
-				if err := setYAMLModelField(current, &priceHint, key, value); err != nil {
+				if err := parseYAMLModelField(current, &priceHint, rest); err != nil {
 					return SweepProfile{}, yamlLineError(lineNumber, err)
 				}
 				continue
@@ -310,16 +298,16 @@ func parseYAMLProfile(text string) (SweepProfile, error) {
 			if current == nil {
 				return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("model fields require a preceding sequence item"))
 			}
-			key, value, err := cutYAML(trimmed)
-			if err != nil {
-				return SweepProfile{}, yamlLineError(lineNumber, err)
-			}
 			if indent == 4 {
 				priceHint = nil
-				if err := setYAMLModelField(current, &priceHint, key, value); err != nil {
+				if err := parseYAMLModelField(current, &priceHint, trimmed); err != nil {
 					return SweepProfile{}, yamlLineError(lineNumber, err)
 				}
 				continue
+			}
+			key, value, err := cutYAML(trimmed)
+			if err != nil {
+				return SweepProfile{}, yamlLineError(lineNumber, err)
 			}
 			if indent == 6 && priceHint != nil {
 				if _, exists := priceHint[key]; exists {
@@ -327,17 +315,13 @@ func parseYAMLProfile(text string) (SweepProfile, error) {
 				}
 				switch key {
 				case "input", "output":
-					parsed, err := yamlFloat(value)
-					if err != nil {
-						return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("%s: %w", key, err))
+					if err := setYAMLScalar(priceHint, key, value, yamlFloat); err != nil {
+						return SweepProfile{}, yamlLineError(lineNumber, err)
 					}
-					priceHint[key] = parsed
 				case "source":
-					parsed, err := yamlString(value)
-					if err != nil {
-						return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("source: %w", err))
+					if err := setYAMLScalar(priceHint, key, value, yamlString); err != nil {
+						return SweepProfile{}, yamlLineError(lineNumber, err)
 					}
-					priceHint[key] = parsed
 				default:
 					return SweepProfile{}, yamlLineError(lineNumber, fmt.Errorf("unsupported price_hint key %q", key))
 				}
@@ -613,23 +597,32 @@ func yamlFloat(value string) (float64, error) {
 	}
 }
 
+func setYAMLScalar[T any](target map[string]any, key, value string, parse func(string) (T, error)) error {
+	parsed, err := parse(value)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	target[key] = parsed
+	return nil
+}
+
+func parseYAMLModelField(current map[string]any, priceHint *map[string]any, text string) error {
+	key, value, err := cutYAML(text)
+	if err != nil {
+		return err
+	}
+	return setYAMLModelField(current, priceHint, key, value)
+}
+
 func setYAMLModelField(current map[string]any, priceHint *map[string]any, key, value string) error {
 	if _, exists := current[key]; exists {
 		return fmt.Errorf("duplicate model key %q", key)
 	}
 	switch key {
 	case "name", "provider", "base_url", "api_key_env", "local_shim":
-		parsed, err := yamlString(value)
-		if err != nil {
-			return fmt.Errorf("%s: %w", key, err)
-		}
-		current[key] = parsed
+		return setYAMLScalar(current, key, value, yamlString)
 	case "enabled":
-		parsed, err := yamlBool(value)
-		if err != nil {
-			return fmt.Errorf("enabled: %w", err)
-		}
-		current[key] = parsed
+		return setYAMLScalar(current, key, value, yamlBool)
 	case "price_hint":
 		if value != "" {
 			return fmt.Errorf("price_hint must use an indented mapping")

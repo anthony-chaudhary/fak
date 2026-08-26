@@ -99,45 +99,52 @@ func (g Gap) ToActionItem(evidencePath string) dogfoodissues.ActionItem {
 	}
 }
 
+type gapInstructions struct {
+	nextAction   string
+	workingSpine string
+	inScope      string
+}
+
+// instructions keeps the three operator-facing fields aligned on one KPI decision. A
+// new debt class cannot accidentally update the action while leaving its working spine
+// or scope on the generic fallback.
+func (g Gap) instructions(host string) gapInstructions {
+	switch g.KPI {
+	case RegressionCatchKey:
+		return gapInstructions{
+			nextAction:   "Add a regression test in " + host + " that reproduces the bug the revert named.",
+			workingSpine: "Write a failing test in " + host + " that reproduces the reverted bug, confirm it fails on the reverted code, then land it alongside (or ahead of) the re-land.",
+			inScope:      "Add a regression test in " + host + " covering the reverted behavior.",
+		}
+	case CoverageDisciplineKey:
+		return gapInstructions{
+			nextAction:   "Raise " + host + " back over its coverage ratchet with tests for the uncovered statements.",
+			workingSpine: "Identify the uncovered statements in " + host + " (go tool cover -func), add tests that exercise them, and confirm coverage clears the ratchet.",
+			inScope:      "Add tests raising " + host + " over its coverage floor/ratchet.",
+		}
+	case FlakeQuarantineKey:
+		return gapInstructions{
+			nextAction:   "Make the quarantined test in " + host + " deterministic (or skip it behind a tracking ticket); do not raise the rerun budget.",
+			workingSpine: "Reproduce the non-determinism in " + host + " (run the test in a loop / under -race), fix the shared state, ordering, timing or seed that causes it, then confirm it holds green without --rerun-fail.",
+			inScope:      "De-flake the one named test identity in " + host + " so it passes deterministically without a rerun.",
+		}
+	}
+	return gapInstructions{
+		nextAction:   "Close the qa-process gap in " + host + ".",
+		workingSpine: "Fix the underlying qa-process gap in " + host + " and re-run the card.",
+		inScope:      "Close the named qa-process gap in " + host + ".",
+	}
+}
+
 // NextAction / WorkingSpine / InScope are per-KPI so the generated issue tells its worker the
 // concrete fix (add a regression test vs raise coverage), not a generic "close the defect".
-func (g Gap) NextAction(host string) string {
-	switch g.KPI {
-	case RegressionCatchKey:
-		return "Add a regression test in " + host + " that reproduces the bug the revert named."
-	case CoverageDisciplineKey:
-		return "Raise " + host + " back over its coverage ratchet with tests for the uncovered statements."
-	case FlakeQuarantineKey:
-		return "Make the quarantined test in " + host + " deterministic (or skip it behind a tracking ticket); do not raise the rerun budget."
-	}
-	return "Close the qa-process gap in " + host + "."
-}
+func (g Gap) NextAction(host string) string { return g.instructions(host).nextAction }
 
 // WorkingSpine describes the shape of the fix for the issue body.
-func (g Gap) WorkingSpine(host string) string {
-	switch g.KPI {
-	case RegressionCatchKey:
-		return "Write a failing test in " + host + " that reproduces the reverted bug, confirm it fails on the reverted code, then land it alongside (or ahead of) the re-land."
-	case CoverageDisciplineKey:
-		return "Identify the uncovered statements in " + host + " (go tool cover -func), add tests that exercise them, and confirm coverage clears the ratchet."
-	case FlakeQuarantineKey:
-		return "Reproduce the non-determinism in " + host + " (run the test in a loop / under -race), fix the shared state, ordering, timing or seed that causes it, then confirm it holds green without --rerun-fail."
-	}
-	return "Fix the underlying qa-process gap in " + host + " and re-run the card."
-}
+func (g Gap) WorkingSpine(host string) string { return g.instructions(host).workingSpine }
 
 // InScope is the one-package fix boundary for the issue body.
-func (g Gap) InScope(host string) string {
-	switch g.KPI {
-	case RegressionCatchKey:
-		return "Add a regression test in " + host + " covering the reverted behavior."
-	case CoverageDisciplineKey:
-		return "Add tests raising " + host + " over its coverage floor/ratchet."
-	case FlakeQuarantineKey:
-		return "De-flake the one named test identity in " + host + " so it passes deterministically without a rerun."
-	}
-	return "Close the named qa-process gap in " + host + "."
-}
+func (g Gap) InScope(host string) string { return g.instructions(host).inScope }
 
 // Gaps collects every HARD qa_process_debt gap worst-first: regression gaps first (a bug reached
 // the trunk -- the loudest process leak), then coverage gaps (below-floor before regressed). cov

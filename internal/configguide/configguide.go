@@ -69,14 +69,8 @@ var postures = []posture{
 		name:    "team-gateway",
 		summary: "Run a shared authenticated gateway while keeping secrets out of the manifest.",
 		changes: func(o Options) []Change {
-			keyEnv := o.KeyEnv
-			if keyEnv == "" {
-				keyEnv = "FAK_GATEWAY_KEY"
-			}
-			bind := o.Bind
-			if bind == "" {
-				bind = "0.0.0.0:8080"
-			}
+			keyEnv := configuredOr(o.KeyEnv, "FAK_GATEWAY_KEY")
+			bind := configuredOr(o.Bind, "0.0.0.0:8080")
 			return []Change{
 				{Field: "auth.require_key_env", Value: keyEnv, Why: "Require every remote caller to present the team gateway token; only the variable name is reviewable here.", EquivalentFlag: "--require-key-env " + keyEnv},
 				{Field: "observability.bind", Value: bind, Why: "Listen beyond loopback so approved teammates can reach the authenticated gateway.", EquivalentFlag: "--addr " + bind},
@@ -87,18 +81,9 @@ var postures = []posture{
 		name:    "hardened",
 		summary: "Require both an explicit capability floor and authenticated ingress.",
 		changes: func(o Options) []Change {
-			policy := o.PolicyPath
-			if policy == "" {
-				policy = "policy.json"
-			}
-			keyEnv := o.KeyEnv
-			if keyEnv == "" {
-				keyEnv = "FAK_GATEWAY_KEY"
-			}
-			bind := o.Bind
-			if bind == "" {
-				bind = "127.0.0.1:8080"
-			}
+			policy := configuredOr(o.PolicyPath, "policy.json")
+			keyEnv := configuredOr(o.KeyEnv, "FAK_GATEWAY_KEY")
+			bind := configuredOr(o.Bind, "127.0.0.1:8080")
 			return []Change{
 				{Field: "policy.floor", Value: policy, Why: "Pin the capability floor to a reviewed policy instead of accepting a remembered launch convention.", EquivalentFlag: "--policy " + policy},
 				{Field: "auth.require_key_env", Value: keyEnv, Why: "Require authenticated ingress while leaving the secret itself in the environment.", EquivalentFlag: "--require-key-env " + keyEnv},
@@ -106,6 +91,13 @@ var postures = []posture{
 			}
 		},
 	},
+}
+
+func configuredOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func Names() []string {

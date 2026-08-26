@@ -1,6 +1,7 @@
 package generationctl
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/streamrules"
@@ -64,5 +65,42 @@ func TestDirectiveVocabularyCreatesSteeringPoints(t *testing.T) {
 		if err != nil || tr.Checkpoint == nil {
 			t.Fatalf("%s: %#v %v", kind, tr, err)
 		}
+	}
+}
+
+func TestStreamBridgeTextAndThinkingKeepDistinctPrefixSemantics(t *testing.T) {
+	rules := []streamrules.Rule{{
+		Name: "redirect-text", Scope: streamrules.ScopeText, Pattern: "redirect-now",
+		Interrupt: true, SubstituteAction: "continue elsewhere",
+	}}
+	bridge, err := Open(Adapter{Name: "test", Wire: "test", Streaming: true, Declared: ResolutionDelta}, "traj", "owner", Compute{}, rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr, err := bridge.Text(""); err != nil || tr.Directive.Kind != Continue {
+		t.Fatalf("empty text = %#v, %v", tr, err)
+	}
+	if tr, err := bridge.Thinking(""); err != nil || tr.Directive.Kind != Continue {
+		t.Fatalf("empty thinking = %#v, %v", tr, err)
+	}
+	if _, err := bridge.Text("visible "); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bridge.Thinking("private reasoning"); err != nil {
+		t.Fatal(err)
+	}
+	report := bridge.Report()
+	if report.TextDeltas != 1 || report.ThinkingDeltas != 1 {
+		t.Fatalf("delta counts = text:%d thinking:%d, want 1/1", report.TextDeltas, report.ThinkingDeltas)
+	}
+	if got := report.Checkpoint.Accepted; got != "visible " {
+		t.Fatalf("accepted prefix = %q, want only visible text", got)
+	}
+
+	if tr, err := bridge.Text("redirect-now"); err != nil || tr.Directive.Kind != Redirect {
+		t.Fatalf("redirecting text = %#v, %v", tr, err)
+	}
+	if _, err := bridge.Thinking(""); !errors.Is(err, ErrEpochClosed) {
+		t.Fatalf("empty delta after redirect error = %v, want %v", err, ErrEpochClosed)
 	}
 }
