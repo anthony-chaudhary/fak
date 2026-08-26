@@ -234,6 +234,26 @@ type ReportDiff struct {
 
 func Diff(before, after Report) ReportDiff {
 	out := ReportDiff{Schema: DiffSchema, Verdict: "clean"}
+	beforeLeaves, afterLeaves := diffLeaves(&out, before, after)
+	diffEdges(&out, before, after)
+	diffTypedEdges(&out, before, after)
+	diffRootwardLayerSkips(&out, before, after)
+	diffLateralCouplings(&out, before, after)
+	diffLateralBridges(&out, before, after)
+	diffLateralArticulationPoints(&out, before, after)
+	diffLateralResilientPairs(&out, before, after)
+	diffLateralBlocks(&out, before, after)
+	diffLateralPairCuts(&out, before, after)
+	diffLeafMetrics(&out, before, after, beforeLeaves, afterLeaves)
+	diffDiagnostics(&out, before, after)
+	diffViolations(&out, before, after)
+	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || len(out.IntroducedRootwardLayerSkips) > 0 || hasIncreasedRootwardLayerSkip(out.RootwardLayerSkipChanges) || hasIncreasedFanOut(out.FanOutChanges) || hasIncreasedDependencyReach(out.DependencyReachChanges) || hasIncreasedDependencyDepth(out.DependencyDepthChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
+		out.Verdict = "regression"
+	}
+	return out
+}
+
+func diffLeaves(out *ReportDiff, before, after Report) (map[string]Leaf, map[string]Leaf) {
 	beforeLeaves, afterLeaves := leafIndex(before), leafIndex(after)
 	for name, a := range afterLeaves {
 		b, ok := beforeLeaves[name]
@@ -253,6 +273,10 @@ func Diff(before, after Report) ReportDiff {
 			out.RemovedLeaves = append(out.RemovedLeaves, name)
 		}
 	}
+	return beforeLeaves, afterLeaves
+}
+
+func diffEdges(out *ReportDiff, before, after Report) {
 	beforeEdges, afterEdges := edgeSet(before), edgeSet(after)
 	for key, edge := range afterEdges {
 		if _, ok := beforeEdges[key]; !ok {
@@ -264,6 +288,9 @@ func Diff(before, after Report) ReportDiff {
 			out.RemovedEdges = append(out.RemovedEdges, edge)
 		}
 	}
+}
+
+func diffTypedEdges(out *ReportDiff, before, after Report) {
 	beforeTypedEdges, afterTypedEdges := typedEdgeSet(before), typedEdgeSet(after)
 	for key, edge := range afterTypedEdges {
 		if _, ok := beforeTypedEdges[key]; !ok {
@@ -275,6 +302,9 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedTypedEdges = append(out.ResolvedTypedEdges, edge)
 		}
 	}
+}
+
+func diffRootwardLayerSkips(out *ReportDiff, before, after Report) {
 	beforeSkips, afterSkips := rootwardLayerSkipSet(before), rootwardLayerSkipSet(after)
 	for key, skip := range afterSkips {
 		if beforeSkip, ok := beforeSkips[key]; !ok {
@@ -288,6 +318,9 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedRootwardLayerSkips = append(out.ResolvedRootwardLayerSkips, skip)
 		}
 	}
+}
+
+func diffLateralCouplings(out *ReportDiff, before, after Report) {
 	beforeCouplings, afterCouplings := lateralCouplingSet(before), lateralCouplingSet(after)
 	for key, coupling := range afterCouplings {
 		if _, ok := beforeCouplings[key]; !ok {
@@ -299,6 +332,9 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedLateralCouplings = append(out.ResolvedLateralCouplings, coupling)
 		}
 	}
+}
+
+func diffLateralBridges(out *ReportDiff, before, after Report) {
 	beforeBridges, afterBridges := lateralBridgeSet(before), lateralBridgeSet(after)
 	for key, bridge := range afterBridges {
 		if beforeBridge, ok := beforeBridges[key]; !ok {
@@ -312,6 +348,9 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedLateralBridges = append(out.ResolvedLateralBridges, bridge)
 		}
 	}
+}
+
+func diffLateralArticulationPoints(out *ReportDiff, before, after Report) {
 	beforePoints, afterPoints := lateralArticulationPointSet(before), lateralArticulationPointSet(after)
 	for key, point := range afterPoints {
 		if beforePoint, ok := beforePoints[key]; !ok {
@@ -325,6 +364,9 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedLateralArticulationPoints = append(out.ResolvedLateralArticulationPoints, point)
 		}
 	}
+}
+
+func diffLateralResilientPairs(out *ReportDiff, before, after Report) {
 	beforeResilience, afterResilience := lateralResilientPairSet(before), lateralResilientPairSet(after)
 	for key, pair := range afterResilience {
 		if _, ok := beforeResilience[key]; !ok {
@@ -336,6 +378,9 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedLateralResilientPairs = append(out.ResolvedLateralResilientPairs, pair)
 		}
 	}
+}
+
+func diffLateralBlocks(out *ReportDiff, before, after Report) {
 	beforeBlocks, afterBlocks := lateralBlockSet(before), lateralBlockSet(after)
 	for key, afterBlock := range afterBlocks {
 		beforeBlock, stable := beforeBlocks[key]
@@ -363,6 +408,9 @@ func Diff(before, after Report) ReportDiff {
 			}
 		}
 	}
+}
+
+func diffLateralPairCuts(out *ReportDiff, before, after Report) {
 	beforeCuts, afterCuts := lateralPairCutSet(before), lateralPairCutSet(after)
 	for key, afterCut := range afterCuts {
 		if beforeCut, ok := beforeCuts[key]; ok && beforeCut.Cut != afterCut.Cut {
@@ -378,6 +426,9 @@ func Diff(before, after Report) ReportDiff {
 			})
 		}
 	}
+}
+
+func diffLeafMetrics(out *ReportDiff, before, after Report, beforeLeaves, afterLeaves map[string]Leaf) {
 	for name, a := range afterLeaves {
 		beforeFanIn := 0
 		if b, ok := beforeLeaves[name]; ok {
@@ -424,6 +475,9 @@ func Diff(before, after Report) ReportDiff {
 			out.FanInChanges = append(out.FanInChanges, FanInChange{Leaf: name, Before: len(b.Dependents), After: 0, Delta: -len(b.Dependents)})
 		}
 	}
+}
+
+func diffDiagnostics(out *ReportDiff, before, after Report) {
 	beforeDiagnostics, afterDiagnostics := diagnosticSet(before), diagnosticSet(after)
 	for key, diagnostic := range afterDiagnostics {
 		if _, ok := beforeDiagnostics[key]; !ok {
@@ -435,6 +489,9 @@ func Diff(before, after Report) ReportDiff {
 			out.ResolvedDiagnostics = append(out.ResolvedDiagnostics, diagnostic)
 		}
 	}
+}
+
+func diffViolations(out *ReportDiff, before, after Report) {
 	beforeViolations, afterViolations := violationEdgeSet(before), violationEdgeSet(after)
 	for key, edge := range afterViolations {
 		if _, ok := beforeViolations[key]; !ok {
@@ -490,10 +547,6 @@ func Diff(before, after Report) ReportDiff {
 	sortTierGapChanges(out.TierGapChanges)
 	sortDiagnostics(out.IntroducedDiagnostics)
 	sortDiagnostics(out.ResolvedDiagnostics)
-	if len(out.IntroducedViolationEdges) > 0 || len(out.IntroducedDiagnostics) > 0 || hasIncreasedTierGap(out.TierGapChanges) || hasIncreasedViolationDistance(out.ViolationDistanceChanges) || len(out.IntroducedRootwardLayerSkips) > 0 || hasIncreasedRootwardLayerSkip(out.RootwardLayerSkipChanges) || hasIncreasedFanOut(out.FanOutChanges) || hasIncreasedDependencyReach(out.DependencyReachChanges) || hasIncreasedDependencyDepth(out.DependencyDepthChanges) || hasIncreasedBlastRadius(out.BlastRadiusChanges) || len(out.IntroducedBlastImpacts) > 0 || hasIncreasedBlastPathLength(out.BlastPathChanges) || len(out.IntroducedLateralCouplings) > 0 || len(out.IntroducedLateralBridges) > 0 || hasIncreasedLateralBridgeImpact(out.LateralBridgeChanges) || len(out.IntroducedLateralArticulationPoints) > 0 || hasIncreasedLateralArticulationPointImpact(out.LateralArticulationPointChanges) || len(out.ResolvedLateralResilientPairs) > 0 || hasDecreasedLateralEdgeConnectivity(out.LateralEdgeConnectivityChanges) || hasDecreasedLateralVertexConnectivity(out.LateralVertexConnectivityChanges) || hasDecreasedLateralVertexPairCuts(out.LateralVertexPairCutChanges) {
-		out.Verdict = "regression"
-	}
-	return out
 }
 
 func (d ReportDiff) Changes() int {
