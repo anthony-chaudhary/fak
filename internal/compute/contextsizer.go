@@ -11,9 +11,10 @@ package compute
 // MaxPositionEmbeddings while the per-request path sized from prompt+new, so boot could
 // refuse at full ctx where a request would have fit; now both build the plan here.
 type ContextSizeConfig struct {
-	KV         KVConfig
-	Scratch    TransformerScratchConfig
-	MaxContext int // model's declared full window (MaxPositionEmbeddings); <=0 = unknown
+	KV           KVConfig
+	SessionState MemoryPlan // fixed context-independent state (for example a recurrent mixer)
+	Scratch      TransformerScratchConfig
+	MaxContext   int // model's declared full window (MaxPositionEmbeddings); <=0 = unknown
 }
 
 // PerContextMemoryPlan builds the per-context memory demands — the KV store sized to
@@ -27,6 +28,7 @@ func (c ContextSizeConfig) PerContextMemoryPlan(tokens int) MemoryPlan {
 	if tokens > 0 {
 		plan = append(plan, EstimateKVStoreMemoryPlan(c.KV, tokens)...)
 	}
+	plan = append(plan, c.SessionState...)
 	return append(plan, EstimateHALTransientMemoryPlan(c.Scratch)...)
 }
 
@@ -90,7 +92,8 @@ func (c ContextSizeConfig) largestFittingContext(weights MemoryPlan, avail int64
 		return c.MaxContext // cannot size KV → fail open to the full window
 	}
 	scratch := EstimateHALTransientMemoryPlan(c.Scratch).Total()
-	fit := (avail - weights.DeviceTotal() - scratch) / perToken
+	fixed := c.SessionState.DeviceTotal()
+	fit := (avail - weights.DeviceTotal() - fixed - scratch) / perToken
 	floor := int64(MinAutoContextTokens)
 	if floor > int64(c.MaxContext) {
 		floor = int64(c.MaxContext) // a model whose full window is below the floor cannot exceed it
