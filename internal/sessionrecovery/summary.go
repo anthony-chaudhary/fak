@@ -47,6 +47,8 @@ type Result struct {
 	CWD                 string   `json:"cwd,omitempty"`
 	Source              string   `json:"source,omitempty"`
 	Provider            string   `json:"provider,omitempty"`
+	Harness             string   `json:"harness,omitempty"`
+	HarnessSource       string   `json:"harness_source,omitempty"`
 	Category            string   `json:"category,omitempty"`
 	Action              string   `json:"action,omitempty"`
 	Status              string   `json:"status"`
@@ -76,7 +78,7 @@ func NewSummary(mode string, report InventoryReport, requests []Request, now tim
 		}
 		result := Result{
 			ThreadID: req.ThreadID, CWD: req.CWD, Source: req.Source,
-			Provider: req.Provider, Category: req.Category, Action: req.Action,
+			Provider: req.Provider, Harness: req.Harness, HarnessSource: req.HarnessSource, Category: req.Category, Action: req.Action,
 			Status: req.Status, Reason: req.Reason, ReceiptPath: req.ReceiptPath,
 			Argv: append([]string(nil), req.Argv...), HostHandles: append([]string(nil), req.HostHandles...), IdentityProvenance: req.IdentityProvenance,
 		}

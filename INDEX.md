@@ -986,3 +986,5 @@ These reader-facing references complement the curated paths above. They are grou
 - [openrouter study 2026 08 18](docs/research/openrouter-study-2026-08-18.md)
 - [attention vq](docs/research/quantization/attention-vq.md)
 - [codebookmeta](docs/research/quantization/codebookmeta.md)
+
+- [`docs/notes/PROVIDER-CACHE-HINT-LIVE-WITNESS-2026-08-25.md`](docs/notes/PROVIDER-CACHE-HINT-LIVE-WITNESS-2026-08-25.md) — live provider cache-hint negotiation witness.
