@@ -39,9 +39,8 @@ void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
 void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event);
 void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat, mg_execution_event* event);
-void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, mg_execution_event* event);
-void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff, double* out_gpu_ms, mg_execution_event* event);
-void mg_q4k_set_use_mm(int on);
+int  mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* out_gpu_ms, mg_execution_event* event);
+int  mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff, int mm_mode, double* out_gpu_ms, mg_execution_event* event);
 void mg_q4k_release(int wid);
 void mg_q4k_reset(void);
 */
@@ -111,6 +110,70 @@ const (
 	// mutating the process-global Metal pipeline table. Production selection never emits it.
 	q4kGEMVModeVectorizedUnavailable = -1
 )
+
+// Q4KGEMMExecution identifies the exact Q4_K prefill kernel that reached Metal dispatch.
+// NotExecuted means selection declined before a command buffer was created or output was touched.
+type Q4KGEMMExecution int
+
+const (
+	Q4KGEMMNotExecuted Q4KGEMMExecution = iota
+	Q4KGEMMExecutedScalar
+	Q4KGEMMExecutedMM32
+)
+
+// Q4KGEMMIdentity binds the candidate selected for this shape to the kernel that actually
+// reached Metal dispatch. Credit MM32 only when both fields are Q4KGEMMExecutedMM32; an
+// unavailable optional pipeline is reported as requested MM32 / executed none.
+type Q4KGEMMIdentity struct {
+	Requested Q4KGEMMExecution
+	Executed  Q4KGEMMExecution
+}
+
+// Q4KGEMMMode selects a Q4_K prefill kernel candidate. MM32 is shape-bounded: only exact P=32
+// dispatches may execute it; every other prompt length executes the scalar kernel. The unavailable
+// mode is a deterministic fail-closed witness and is never selected by production.
+type Q4KGEMMMode int
+
+const (
+	Q4KGEMMModeScalar Q4KGEMMMode = iota
+	Q4KGEMMModeMM32
+	Q4KGEMMModeMM32Unavailable = -1
+)
+
+var q4kUseMM atomic.Bool
+
+func q4kGEMMModeForPrompt(P int) Q4KGEMMMode {
+	if P == 32 && q4kUseMM.Load() {
+		return Q4KGEMMModeMM32
+	}
+	return Q4KGEMMModeScalar
+}
+
+func q4kGEMMRequestedExecution(P int, mode Q4KGEMMMode) Q4KGEMMExecution {
+	if P == 32 && mode != Q4KGEMMModeScalar {
+		return Q4KGEMMExecutedMM32
+	}
+	return Q4KGEMMExecutedScalar
+}
+
+func q4kGEMMIdentity(P int, mode Q4KGEMMMode, executed Q4KGEMMExecution) Q4KGEMMIdentity {
+	return Q4KGEMMIdentity{
+		Requested: q4kGEMMRequestedExecution(P, mode),
+		Executed:  executed,
+	}
+}
+
+// Q4KGEMMIdentityForMode returns the typed requested/executed identity for an explicit candidate.
+// It is deterministic and does not inspect pipeline availability or create Metal work.
+func Q4KGEMMIdentityForMode(P int, mode Q4KGEMMMode, executed Q4KGEMMExecution) Q4KGEMMIdentity {
+	return q4kGEMMIdentity(P, mode, executed)
+}
+
+// Q4KGEMMRequestedExecution returns the shape-bounded kernel selected by the current opt-in.
+// It is deterministic and does not inspect pipeline availability or create Metal work.
+func Q4KGEMMRequestedExecution(P int) Q4KGEMMExecution {
+	return q4kGEMMRequestedExecution(P, q4kGEMMModeForPrompt(P))
+}
 
 // Q4KWeight is a handle to a raw q4_k weight matrix [Out, In] resident on the GPU. In must be
 // a multiple of 256 (the q4_k super-block size); the resident byte cost is Out*(In/256)*144.
@@ -551,32 +614,43 @@ func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []flo
 	return FusedMLPQ6DownBatchWithEvents(gate, up, down, x, Ycat, nil)
 }
 
-// GEMM computes Y[P, Out] = X[P, In] · Wᵀ (batched prefill GEMM). X and Y are f32 row-major;
-// Y must have length >= P*Out. Both slices are accessed only during the call. It also records the
-// dispatch's on-GPU execute window into the package-level LastGEMMGPUMs (readable immediately after
-// the call) so the model side can, under FAK_QPROFILE, split its wall time into compute vs
-// roundtrip. The recorded time is instrumentation only — it does not change the GEMM numerics.
-func (w *Q4KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation *ExecutionObservation) {
+// GEMMWithEventsMode computes Y[P, Out] = X[P, In] · Wᵀ with an explicit kernel selection and
+// returns the typed requested/executed identity. MM32 applies only to exact P=32; P31/P33 and
+// every other prompt length execute the scalar kernel. An unavailable requested candidate returns
+// requested MM32 / executed none without a command buffer, execution event, timing update, or
+// output mutation.
+func (w *Q4KWeight) GEMMWithEventsMode(X []float32, P int, Y []float32, observation *ExecutionObservation, mode Q4KGEMMMode) Q4KGEMMIdentity {
 	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
-		return
+		return Q4KGEMMIdentity{}
 	}
 	var gpuMs C.double
 	var event C.mg_execution_event
-	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &gpuMs, &event)
+	executed := Q4KGEMMExecution(C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
+		(*C.float)(unsafe.Pointer(&Y[0])), C.int(mode), &gpuMs, &event))
 	recordQ4KEvent(observation, &event)
-	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
+	if executed != Q4KGEMMNotExecuted {
+		lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
+	}
+	return q4kGEMMIdentity(P, mode, executed)
 }
 
-// GEMMGroupIntoWithEvents runs one batched prefill GEMM per weight in ws — all reading the SAME
+// GEMMWithEvents uses the process opt-in selected by SetGEMMUseMM. The default remains scalar and
+// the returned identity reports the requested/executed pair for that shape.
+func (w *Q4KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation *ExecutionObservation) Q4KGEMMIdentity {
+	return w.GEMMWithEventsMode(X, P, Y, observation, q4kGEMMModeForPrompt(P))
+}
+
+// GEMMGroupIntoWithEventsMode runs one batched prefill GEMM per weight in ws — all reading the SAME
 // activation panel X[P, In] — and places the concatenated results in ycat. Returned slices alias
 // ycat and stay valid only until its owner reuses that backing. The Metal command buffer is
 // committed and synchronously completed before any aliases are returned. It returns nil without
-// dispatching when shapes are invalid or ycat is too small.
-func GEMMGroupIntoWithEvents(ws []*Q4KWeight, X []float32, P int, ycat []float32, observation *ExecutionObservation) [][]float32 {
+// dispatching when shapes are invalid, ycat is too small, or the requested candidate is unavailable.
+// The second return binds the group to the exact kernel identity shared by every encoded weight.
+func GEMMGroupIntoWithEventsMode(ws []*Q4KWeight, X []float32, P int, ycat []float32, observation *ExecutionObservation, mode Q4KGEMMMode) ([][]float32, Q4KGEMMIdentity) {
 	n := len(ws)
 	const maxCInt = int(^uint32(0) >> 1)
 	if n == 0 || P <= 0 || P > maxCInt || ws[0] == nil || ws[0].In <= 0 || len(X)/P < ws[0].In {
-		return nil
+		return nil, Q4KGEMMIdentity{}
 	}
 	in := ws[0].In
 	wids := make([]C.int, n)
@@ -584,22 +658,27 @@ func GEMMGroupIntoWithEvents(ws []*Q4KWeight, X []float32, P int, ycat []float32
 	off := 0
 	for i, w := range ws {
 		if w == nil || w.id < 0 || w.In != in || w.Out <= 0 || w.Out > (maxCInt-off)/P {
-			return nil
+			return nil, Q4KGEMMIdentity{}
 		}
 		wids[i] = w.id
 		yoff[i] = C.int(off)
 		off += P * w.Out
 	}
 	if len(ycat) < off {
-		return nil
+		return nil, Q4KGEMMIdentity{}
 	}
 	ycat = ycat[:off]
 	yoff[n] = C.int(off)
 	var gpuMs C.double
 	var event C.mg_execution_event
-	C.mg_q4k_gemm_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
-		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &gpuMs, &event)
+	executed := Q4KGEMMExecution(C.mg_q4k_gemm_group(&wids[0], C.int(n),
+		(*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&ycat[0])),
+		&yoff[0], C.int(mode), &gpuMs, &event))
 	recordQ4KEvent(observation, &event)
+	identity := q4kGEMMIdentity(P, mode, executed)
+	if executed == Q4KGEMMNotExecuted {
+		return nil, identity
+	}
 	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 
 	// Publish aliases only after the synchronous native call above has completed successfully.
@@ -607,32 +686,56 @@ func GEMMGroupIntoWithEvents(ws []*Q4KWeight, X []float32, P int, ycat []float32
 	for i := range ws {
 		out[i] = ycat[int(yoff[i]):int(yoff[i+1]):int(yoff[i+1])]
 	}
+	return out, identity
+}
+
+// GEMMGroupIntoWithEventsIdentity uses the process opt-in selected by SetGEMMUseMM and returns
+// both the aliases and their typed requested/executed kernel identity.
+func GEMMGroupIntoWithEventsIdentity(ws []*Q4KWeight, X []float32, P int, ycat []float32, observation *ExecutionObservation) ([][]float32, Q4KGEMMIdentity) {
+	return GEMMGroupIntoWithEventsMode(ws, X, P, ycat, observation, q4kGEMMModeForPrompt(P))
+}
+
+// GEMMGroupIntoWithEvents preserves the original aliases-only API.
+func GEMMGroupIntoWithEvents(ws []*Q4KWeight, X []float32, P int, ycat []float32, observation *ExecutionObservation) [][]float32 {
+	out, _ := GEMMGroupIntoWithEventsIdentity(ws, X, P, ycat, observation)
 	return out
 }
 
-// GEMMGroup runs one batched prefill GEMM per weight in ws — all reading the SAME activation panel
+// GEMMGroupWithEventsMode runs one batched prefill GEMM per weight in ws — all reading the SAME
 // X[P, In] (shared) — in a SINGLE Metal command buffer, returning one [P*Out_i] result slice per
 // weight (token-major, Y[t*Out_i + o]). Every weight must share X's In. It is the prefill twin of
 // GEMVGroup: the live prefill group pattern (a layer's q/k/v, gate/up, or the GDN in_proj quad all
 // read the same post-norm panel), paying the per-command-buffer submit/sync once for the whole
 // group instead of once per weight — the fix for the ~7-submits-per-layer prefill wall. Returns nil
 // on a shape mismatch or empty input, so the caller falls back to per-weight GEMM.
-func GEMMGroupWithEvents(ws []*Q4KWeight, X []float32, P int, observation *ExecutionObservation) [][]float32 {
+func GEMMGroupWithEventsMode(ws []*Q4KWeight, X []float32, P int, observation *ExecutionObservation, mode Q4KGEMMMode) ([][]float32, Q4KGEMMIdentity) {
 	n := len(ws)
 	const maxCInt = int(^uint32(0) >> 1)
 	if n == 0 || P <= 0 || P > maxCInt || ws[0] == nil || ws[0].In <= 0 || len(X)/P < ws[0].In {
-		return nil
+		return nil, Q4KGEMMIdentity{}
 	}
 	in := ws[0].In
 	off := 0
 	for _, w := range ws {
 		if w == nil || w.id < 0 || w.In != in || w.Out <= 0 || w.Out > (maxCInt-off)/P {
-			return nil
+			return nil, Q4KGEMMIdentity{}
 		}
 		off += P * w.Out
 	}
 	ycat := make([]float32, off)
-	return GEMMGroupIntoWithEvents(ws, X, P, ycat, observation)
+	return GEMMGroupIntoWithEventsMode(ws, X, P, ycat, observation, mode)
+}
+
+// GEMMGroupWithEventsIdentity uses the process opt-in selected by SetGEMMUseMM and returns the
+// typed requested/executed kernel identity shared by the group.
+func GEMMGroupWithEventsIdentity(ws []*Q4KWeight, X []float32, P int, observation *ExecutionObservation) ([][]float32, Q4KGEMMIdentity) {
+	return GEMMGroupWithEventsMode(ws, X, P, observation, q4kGEMMModeForPrompt(P))
+}
+
+// GEMMGroupWithEvents preserves the original results-only API.
+func GEMMGroupWithEvents(ws []*Q4KWeight, X []float32, P int, observation *ExecutionObservation) [][]float32 {
+	out, _ := GEMMGroupWithEventsIdentity(ws, X, P, observation)
+	return out
 }
 
 // ID returns the backend handle for this matrix.
@@ -658,16 +761,11 @@ func (w *Q4KWeight) Release() {
 // newBufferWithBytesNoCopy instead of owning a copied Metal buffer.
 func (w *Q4KWeight) NoCopy() bool { return w != nil && w.noCopy }
 
-// SetGEMMUseMM selects the batched-GEMM kernel: true prefers the simdgroup-matrix (hardware MMA)
-// q4k_gemm_mm when its pipeline compiled, false (default) uses the proven scalar register-tile
-// q4k_gemm. Gated so the scalar kernel stays default until the MMA variant is A/B-proven faster on
-// the target device; the model layer flips it from FAK_Q4K_MM. No-op if no Metal device.
+// SetGEMMUseMM selects the exact-P32 batched-GEMM candidate: true requests q4k_gemm_mm32 only
+// when P==32, while P31/P33 and every other prompt length retain q4k_gemm. False is the default.
+// The model layer flips this process-local opt-in from FAK_Q4K_MM.
 func SetGEMMUseMM(on bool) {
-	v := C.int(0)
-	if on {
-		v = 1
-	}
-	C.mg_q4k_set_use_mm(v)
+	q4kUseMM.Store(on)
 }
 
 // ResetQ4K releases every resident q4_k weight buffer and the reused scratch (the q4_k twin of
@@ -686,8 +784,10 @@ func (w *Q4KWeight) GEMV(x, y []float32) { w.GEMVWithEvents(x, y, nil) }
 func (w *Q4KWeight) GEMVBatch(Xcat []float32, n int, Ycat []float32) {
 	w.GEMVBatchWithEvents(Xcat, n, Ycat, nil)
 }
-func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32  { return GEMVGroupWithEvents(ws, x, nil) }
-func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) { w.GEMMWithEvents(X, P, Y, nil) }
+func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32 { return GEMVGroupWithEvents(ws, x, nil) }
+func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) Q4KGEMMIdentity {
+	return w.GEMMWithEvents(X, P, Y, nil)
+}
 func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
 	return GEMMGroupWithEvents(ws, X, P, nil)
 }
