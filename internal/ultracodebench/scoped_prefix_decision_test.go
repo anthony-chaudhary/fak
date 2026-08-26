@@ -19,6 +19,7 @@ func TestEvaluateScopedPrefixEvidenceVerdicts(t *testing.T) {
 		{"positive", func(*ScopedPrefixEvidence) {}, ScopedPrefixEnable},
 		{"negative control failure", func(e *ScopedPrefixEvidence) { e.Rows[0].NegativeControlPass = false }, ScopedPrefixDisable},
 		{"missing telemetry", func(e *ScopedPrefixEvidence) { e.Rows[0].AuthoritativeMetric = false }, ScopedPrefixAbstain},
+		{"outcome mismatch", func(e *ScopedPrefixEvidence) { e.Rows[0].AcceptedOutcomeEqual = false }, ScopedPrefixAbstain},
 		{"expired evidence", func(e *ScopedPrefixEvidence) { e.ExpiresAt = now }, ScopedPrefixAbstain},
 		{"uncertain net gain", func(e *ScopedPrefixEvidence) { e.Rows[0].Uncertainty = 30 }, ScopedPrefixHold},
 	}
