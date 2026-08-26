@@ -7,8 +7,12 @@ import (
 
 func TestIssue8833PortableTypedUnavailable(t *testing.T) {
 	err := MixedQKVUnavailable("native owner unavailable")
-	if !IsMixedQKVDecline(err) { t.Fatalf("not typed decline: %v", err) }
-	if e := err.(*MixedQKVError); e.CallID == 0 || e.Stage != MixedQKVDeclined { t.Fatalf("bad decline: %+v", e) }
+	if !IsMixedQKVDecline(err) {
+		t.Fatalf("not typed decline: %v", err)
+	}
+	if e := err.(*MixedQKVError); e.CallID == 0 || e.Stage != MixedQKVDeclined {
+		t.Fatalf("bad decline: %+v", e)
+	}
 }
 
 func TestIssue8833ConcurrentCallIDsUnique(t *testing.T) {
@@ -19,11 +23,16 @@ func TestIssue8833ConcurrentCallIDsUnique(t *testing.T) {
 		wg.Add(1)
 		go func() { defer wg.Done(); ids <- MixedQKVUnavailable("test").(*MixedQKVError).CallID }()
 	}
-	wg.Wait(); close(ids)
+	wg.Wait()
+	close(ids)
 	seen := make(map[MixedQKVCallID]bool, n)
 	for id := range ids {
-		if id == 0 || seen[id] { t.Fatalf("non-unique call id %d", id) }
+		if id == 0 || seen[id] {
+			t.Fatalf("non-unique call id %d", id)
+		}
 		seen[id] = true
 	}
-	if len(seen) != n { t.Fatalf("got %d IDs", len(seen)) }
+	if len(seen) != n {
+		t.Fatalf("got %d IDs", len(seen))
+	}
 }

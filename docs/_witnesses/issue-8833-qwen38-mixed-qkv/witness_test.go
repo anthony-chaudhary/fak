@@ -10,16 +10,16 @@ import (
 )
 
 type packet struct {
-	Decision               string            `json:"decision"`
-	Files                  map[string]string `json:"files_sha256"`
-	Quality                 bool              `json:"quality"`
-	Lifecycle               bool              `json:"lifecycle"`
-	Identity                bool              `json:"identity"`
-	ControlMedianNetDecode  float64           `json:"control_median_net_decode"`
-	CandidateMedianNetDecode float64          `json:"candidate_median_net_decode"`
-	ControlEvents           int               `json:"control_events"`
-	CandidateEvents         int               `json:"candidate_events"`
-	CatastrophicRegression  bool              `json:"catastrophic_regression"`
+	Decision                 string            `json:"decision"`
+	Files                    map[string]string `json:"files_sha256"`
+	Quality                  bool              `json:"quality"`
+	Lifecycle                bool              `json:"lifecycle"`
+	Identity                 bool              `json:"identity"`
+	ControlMedianNetDecode   float64           `json:"control_median_net_decode"`
+	CandidateMedianNetDecode float64           `json:"candidate_median_net_decode"`
+	ControlEvents            int               `json:"control_events"`
+	CandidateEvents          int               `json:"candidate_events"`
+	CatastrophicRegression   bool              `json:"catastrophic_regression"`
 }
 
 func TestImmutableWitnessPacket(t *testing.T) {
