@@ -1,0 +1,74 @@
+{
+  "schema": "fak.issue-9238-ordering-guard/v1",
+  "issue": 9238,
+  "adjudication": "SUPERSEDE_WITHOUT_CODE",
+  "centrality": "Core",
+  "source": {
+    "path": "docs/_witnesses/issue-8968-qwen38-metal-control/profile.receipt.json",
+    "sha256": "6ef2454f956cae42baefbcdea733a3f2e28c5085866b50835b9dbded561359c8",
+    "profile_path": "docs/_witnesses/issue-8968-qwen38-metal-control/profile.json",
+    "profile_sha256": "2c20871e18bba94de44274a6f5803ace9eab109f082985db857624d4d5fea9f1",
+    "engine": null,
+    "fallback_count": null,
+    "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "event_slice": {
+      "first_index": 0,
+      "last_index": 431,
+      "count": 432
+    }
+  },
+  "grouped_operations": [
+    {
+      "operation": "q4_k-gemm",
+      "command_buffers": 56,
+      "encoders": 56,
+      "gpu_execute_milliseconds": 419.836833,
+      "wait_milliseconds": 2930.996895
+    },
+    {
+      "operation": "q4_k-gemm-group",
+      "command_buffers": 64,
+      "encoders": 64,
+      "gpu_execute_milliseconds": 1302.723958,
+      "wait_milliseconds": 9834.761024
+    },
+    {
+      "operation": "q6_k-gemm",
+      "command_buffers": 40,
+      "encoders": 40,
+      "gpu_execute_milliseconds": 1269.618042,
+      "wait_milliseconds": 1338.312387
+    },
+    {
+      "operation": "q8-gemm",
+      "command_buffers": 272,
+      "encoders": 272,
+      "gpu_execute_milliseconds": 888.462167,
+      "wait_milliseconds": 9637.725472
+    }
+  ],
+  "totals": {
+    "gpu_execute_milliseconds": 3880.641,
+    "wait_milliseconds": 23741.795778,
+    "non_execute_remainder_milliseconds": 19861.154778,
+    "prefill_wall_milliseconds": 32971.988708,
+    "gpu_execute_wall_fraction": 0.117695,
+    "non_execute_wall_fraction": 0.602364,
+    "q6_gpu_milliseconds": 1269.618042,
+    "q6_gpu_share": 0.327167,
+    "ideal_delete_all_q6_wall_speedup": 1.040048
+  },
+  "ordering_guard": {
+    "dominant_bucket": "host/queue synchronization and materialization",
+    "q6_is_largest_removable_bucket": false,
+    "reason": "Measured serial completion/readback beyond GPU execution is 19.861 s while all measured GPU execution is 3.881 s; Q6_K is 1.270 s of a 32.972 s prefill wall, so deleting all Q6_K compute has only a 1.040x ideal wall-speedup ceiling.",
+    "next_work": "graph/session-owned P32 projection phase with shared device buffers, multiple encoders per command buffer, and one terminal wait/readback",
+    "hardware_rerun": "not-run: immutable sanctioned M3 Pro exact-artifact receipt already resolves the issue ordering guard; a new tiled-kernel benchmark would implement work the guard says to supersede"
+  },
+  "implementation": {
+    "code_changed": false,
+    "borrowed_pipeline_added": false,
+    "runtime_llama_cpp": false
+  },
+  "prior_art": "llama.cpp@ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0"
+}
