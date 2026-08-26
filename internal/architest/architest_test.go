@@ -702,6 +702,8 @@ var tier = map[string]int{
 	"qwenworkbudget":             5, // campaign-boundary adapter over canonical trajectory audit rollups and typed Qwen amplification policy; imports trajectory(4).
 	"ultracodetokenizer":         1,
 	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
+	"studydrift":                 1, // stdlib-only source refresh and supersession receipt primitive (#8611).
+	"servicewatchdog":            2, // systemd lifecycle read-back and watchdog progress integration (#8654).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
