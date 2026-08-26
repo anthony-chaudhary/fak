@@ -603,14 +603,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// the tool-call conformance fail-closed) has to report in-band now, as an SSE error
 	// event + [DONE]; see chatStreamWriter.fail.
 	var stream *chatStreamWriter
-	if req.Stream && req.NativeInferenceReceipt {
-		writeErr(w, http.StatusBadRequest, "native inference receipts require a buffered response")
-		return
-	}
-	if req.NativeInferenceReceipt && (req.Temperature != nil && *req.Temperature != 0 || req.TopP != nil || len(req.LogitBias) != 0 || req.FrequencyPenalty != nil && *req.FrequencyPenalty != 0 || req.PresencePenalty != nil && *req.PresencePenalty != 0) {
-		writeErr(w, http.StatusBadRequest, "native inference receipts require greedy unmodified sampling")
-		return
-	}
 	if req.Stream {
 		stream = newChatStreamWriter(w, reqModel)
 		if err := stream.open(); err != nil {
@@ -628,7 +620,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	began := time.Now()
 	comp, err := s.completeServed(ctx, sessionTurn, req.Messages, req.Tools,
 		agent.WithModel(req.Model), // no-op when the client omitted model
-		agent.WithNativeInferenceReceipt(req.NativeInferenceReceipt),
 		agent.WithMaxTokens(sessionTurn.maxTokensFor(req.MaxTokens)),
 		agent.WithTemperature(req.Temperature),
 		agent.WithTopP(req.TopP),
@@ -713,8 +704,8 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Usage:   comp.Usage,
 	}
 	redactions := wireRedactionsFrom(comp.PreSendRedactionRecords)
-	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 || comp.NativeInferenceReceipt != nil {
-		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, Redactions: redactions, NativeInferenceReceipt: comp.NativeInferenceReceipt}
+	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 {
+		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, Redactions: redactions}
 	}
 	if comp.NativeInference != nil {
 		if resp.Fak == nil {

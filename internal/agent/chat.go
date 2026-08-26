@@ -356,29 +356,14 @@ func (u Usage) ReasoningTokens() int {
 }
 
 // Completion is a planner's response for one turn.
-// NativeInferenceReceipt binds a buffered completion to the exact fak-native
-// decode that produced it. Scores are log_softmax values from the unmodified
-// logits used for each selected token in the supported greedy envelope.
-type NativeInferenceReceipt struct {
-	TokenIDs              []int     `json:"token_ids"`
-	SelectedTokenLogprobs []float64 `json:"selected_token_logprobs"`
-	PrefillSeconds        float64   `json:"prefill_seconds"`
-	DecodeSeconds         float64   `json:"decode_seconds"`
-	Model                 string    `json:"model"`
-	Backend               string    `json:"backend"`
-	ForwardPath           string    `json:"forward_path"`
-	Q4K                   bool      `json:"q4k"`
-}
-
 type Completion struct {
-	Message                Message
-	NativeInferenceReceipt *NativeInferenceReceipt
-	FinishReason           string
-	Usage                  Usage
-	ProviderCache          *cachemeta.Entry
-	CacheHint              *CacheHintResult // requested/emitted/effective provider-cache receipt
-	Raw                    []byte           // the raw response body (transcript witness for the live seam)
-	PreSendQuarantines     int              // tool-result payloads held out before provider serialization
+	Message            Message
+	FinishReason       string
+	Usage              Usage
+	ProviderCache      *cachemeta.Entry
+	CacheHint          *CacheHintResult // requested/emitted/effective provider-cache receipt
+	Raw                []byte           // the raw response body (transcript witness for the live seam)
+	PreSendQuarantines int              // tool-result payloads held out before provider serialization
 	// PreSendRedactions counts the outbound messages whose content was span-redacted
 	// (rung 5, #572) before provider serialization on the re-marshal path. It mirrors
 	// PreSendQuarantines so a caller can observe that something was redacted, not only
@@ -454,8 +439,7 @@ func (e *NativeInferenceReceiptUnsupportedError) Error() string {
 // planner like HTTPPlanner already runs temperature 0, so the two only differ when
 // the caller also wants top_p/stop, and a bare float64 could not carry that intent.
 type SampleParams struct {
-	NativeInferenceReceipt bool
-	ServiceTier            modelroute.ServiceMode
+	ServiceTier modelroute.ServiceMode
 	// Model, when non-empty, overrides the planner's configured ModelID for THIS
 	// request — the gateway's request-model pass-through (#82). It is the model id
 	// that reaches the upstream request body (and, for a path-templated provider
