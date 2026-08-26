@@ -108,6 +108,17 @@ The repository's studies and dated investigations currently live under [`docs/no
 
 - [S8p live scheduler disagreement audit](micro-context-s8p-disagreement-audit.md) — blinded error atlas finds disputed gold and no stable pre-answer admission signal; records `not-yet`.
 
+## Frontier infrastructure and workload expectations
+
+- Human overview and field assumptions: [`frontier-infrastructure/README.md`](frontier-infrastructure/README.md)
+- Machine-readable dated evidence ledger: [`frontier-infrastructure/index.json`](frontier-infrastructure/index.json)
+- Benchmark assumption registry (batching, clusters, heavy tails/Zipf, user and agent workloads): [`frontier-infrastructure/workload-assumptions.md`](frontier-infrastructure/workload-assumptions.md)
+- Offline structural validation commands are embedded in the corpus README.
+
+This corpus separates production measurements, official statements, vendor claims,
+reported estimates, analysis, and rumors. Its explicit coverage gaps are part of the
+evidence contract; the index must not imply that the open web is finite or fully observed.
+
 ## Named coding-workload patterns
 
 - [`coding-workload-vocabulary.md`](coding-workload-vocabulary.md) — cited proposal separating workload shape, orchestration topology, verification strategy, and failure mode; names reusable patterns/subpatterns and rejects common conflations.

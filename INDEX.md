@@ -306,6 +306,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [DFlash 2: parallel path selection, suffix decay, and the FAK measurement seam](docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md) -- auto-indexed dated note.
 - [Claude Code Concise study: result-first parity and persistent-selection gap (2026-08-20)](docs/notes/CONCEPT-STUDY-CLAUDE-CODE-CONCISE-2026-08-20.md) -- pinned v2.1.237 release/settings evidence; FAK response shaping is already default and independently implemented, while persistent config remains filed as #8288.
 - [Native Ultracode runtime audit — 2026-08-20](docs/notes/ULTRACODE-NATIVE-RUNTIME-AUDIT-2026-08-20.md) -- auto-indexed dated note.
+- [llama.cpp exhaustive upstream index and FAK ticket priority](docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md) -- pinned open-forge/tree denominator, local issue join, and ranked #9204/#9292-#9294 queue.
 - [llama.cpp study: the Metal residency pattern behind native Qwen3.8](docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-20.md) -- pinned llama.cpp study; records the Metal residency borrow, native FAK boundary, and #8324-#8326 follow-ons.
 - [There Is No Address study: consumer-owned locality and the FAK ready-endpoint seam (2026-08-20)](docs/notes/CONCEPT-STUDY-THERE-IS-NO-ADDRESS-2026-08-20.md) -- pinned essay/NIXL audit with a 776-file exhaustive inventory and complete GitHub/release/provenance denominator; FAK reuses `fabricmap` to govern consumer-ready KV routes and routes follow-ons to #8259/#8261/#3310/#6409.
 - [LLM-as-a-Verifier study: same-model selection, evidence gaps, and the FAK replay seam (2026-08-20)](docs/notes/CONCEPT-STUDY-LLM-AS-A-VERIFIER-2026-08-20.md) -- pinned implementation, paper, history, and 445-trajectory label audit; Pass@1/oracle reproduce, verifier means/error bars do not, and one provenance-bound selector-replay spine survived as #8230.
@@ -993,6 +994,7 @@ These reader-facing references complement the curated paths above. They are grou
 - [microcontext natural traffic 2026 08 16](docs/notes/microcontext-natural-traffic-2026-08-16.md)
 - [mirage study 2026 08 17](docs/notes/mirage-study-2026-08-17.md)
 - [monitored repositories](docs/research/monitored-repositories.md)
+- [llama.cpp exhaustive inventory](docs/research/inventory/ggml-org-llama-cpp.json) -- pinned 3,871-entry tree, 2,226-record open issue/PR corpus, and deduplicated FAK priority join at `925e1179947ea0c0ebfb0032df18af3a729822be`.
 - [mini-sglang exhaustive inventory](docs/research/inventory/sgl-project-mini-sglang.json) -- pinned 121-file denominator and non-tree source audit at `9a91cfafe754aa85daee49998176275667eb58f2`.
 - [native harness dependency management 2026 08 15](docs/notes/native-harness-dependency-management-2026-08-15.md)
 - [openrouter study 2026 08 18](docs/notes/openrouter-study-2026-08-18.md)
