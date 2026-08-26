@@ -131,10 +131,18 @@ type PlanPayload struct {
 	Steps []PlanStep `json:"steps"`
 }
 type ApprovalPayload struct {
-	ApprovalID string `json:"approval_id"`
-	Prompt     string `json:"prompt,omitempty"`
-	Status     string `json:"status"`
-	Scope      string `json:"scope,omitempty"`
+	ApprovalID         string `json:"approval_id"`
+	Prompt             string `json:"prompt,omitempty"`
+	Status             string `json:"status"`
+	Scope              string `json:"scope,omitempty"`
+	Kind               string `json:"kind,omitempty"`
+	Summary            string `json:"summary,omitempty"`
+	Workspace          string `json:"workspace,omitempty"`
+	Risk               string `json:"risk,omitempty"`
+	Consequence        string `json:"consequence,omitempty"`
+	PolicyReason       string `json:"policy_reason,omitempty"`
+	FakCapabilityFloor string `json:"fak_capability_floor,omitempty"`
+	CodexSandboxPolicy string `json:"codex_sandbox_policy,omitempty"`
 }
 type ArtifactPayload struct {
 	ArtifactID string `json:"artifact_id"`
