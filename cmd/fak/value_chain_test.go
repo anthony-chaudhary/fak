@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,36 @@ func TestValueChainAgenticPacketAdapter(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("missing %q in %s", want, out.String())
 		}
+	}
+}
+
+func TestValueChainUsageLedgerAndWeeklyFold(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "usage.jsonl")
+	root := repoRoot()
+	args := []string{"audit", "--manifest", filepath.Join(root, "examples", "value-chain", "support-manifest.json"), "--observations", filepath.Join(root, "examples", "value-chain", "support-observations.json"), "--ledger", ledger}
+	for range 2 {
+		var out, errOut bytes.Buffer
+		if code := runValueChain(&out, &errOut, args); code != 0 {
+			t.Fatalf("audit code=%d stderr=%s", code, errOut.String())
+		}
+	}
+	rows, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(rows, []byte("\n")); got != 2 {
+		t.Fatalf("ledger rows=%d, want 2; ledger=%s", got, rows)
+	}
+	if bytes.Contains(rows, []byte(root)) {
+		t.Fatalf("ledger leaks repository path: %s", rows)
+	}
+	var out, errOut bytes.Buffer
+	if code := runValueChain(&out, &errOut, []string{"usage", "--ledger", ledger}); code != 0 {
+		t.Fatalf("usage code=%d stderr=%s", code, errOut.String())
+	}
+	if got := out.String(); !regexp.MustCompile(`^week=\d{4}-W\d{2} invocations=2\n$`).MatchString(got) {
+		t.Fatalf("usage fold=%q", got)
 	}
 }
 
