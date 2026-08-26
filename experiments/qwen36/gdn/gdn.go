@@ -19,6 +19,7 @@ package gdn
 import (
 	"encoding/json"
 	"io"
+	"strings"
 )
 
 // Qwen3.6-27B Gated-DeltaNet layer dims (the 48 linear_attn layers), sourced from the
@@ -46,4 +47,10 @@ func EmitJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// Verdict joins complete verdict clauses with spaces. Experiment reports use this to keep
+// long evidence statements readable without duplicating string-concatenation scaffolding.
+func Verdict(clauses ...string) string {
+	return strings.Join(clauses, " ")
 }
