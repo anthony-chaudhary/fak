@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -32,30 +34,31 @@ import (
 //   - Never block a PRE-EXISTING trunk red: when the prospective tree is red, the SAME packages
 //     are built at HEAD too; if HEAD is also red the red was not introduced by this commit, so
 //     the gate warns and admits (differential attribution, one extra build on the rare red path).
-//   - The common green path costs ONE build of only the touched packages (plus ./cmd/fak, the
-//     buildwitness target) against an archive of the prospective tree — the shared repo's real
-//     index and working tree are never touched (throwaway GIT_INDEX_FILE).
+//   - The common green path first preserves the differential build witness, then delegates to
+//     validate for owned gofmt, importer build/vet, and uncached changed-package tests. Both read
+//     private materializations; the shared repo's real index and HEAD are never touched.
 
 // commitBuildCheckPackages maps the commit's repo-relative pathspecs to the sorted, de-duplicated
 // `go build` package patterns the gate must compile: always the buildwitness target ./cmd/fak,
-// plus ./<dir> for every changed .go file ("." for a root-level file). A commit with NO .go path
-// returns nil — a non-Go commit cannot red the build, so the caller skips the gate entirely.
+// plus ./<dir> for every changed Go or native package source file ("." for a root-level file).
+// The extensions mirror the source families indexed by validate's go-list graph; this keeps an
+// Objective-C/header/assembly-only commit from bypassing the prospective native build.
 func commitBuildCheckPackages(changedPaths []string) []string {
 	set := make(map[string]struct{})
-	sawGo := false
+	sawSource := false
 	for _, p := range changedPaths {
 		slash := filepath.ToSlash(strings.TrimSpace(p))
-		if !strings.HasSuffix(slash, ".go") {
+		if !commitValidationSourcePath(slash) {
 			continue
 		}
-		sawGo = true
+		sawSource = true
 		if dir := path.Dir(slash); dir == "." {
 			set["."] = struct{}{}
 		} else {
 			set["./"+dir] = struct{}{}
 		}
 	}
-	if !sawGo {
+	if !sawSource {
 		return nil
 	}
 	set[buildwitness.TargetPackage] = struct{}{}
@@ -65,6 +68,16 @@ func commitBuildCheckPackages(changedPaths []string) []string {
 	}
 	sort.Strings(pkgs)
 	return pkgs
+}
+
+func commitValidationSourcePath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".go", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".h", ".hh", ".hpp", ".hxx",
+		".f", ".for", ".f90", ".f95", ".f03", ".f08", ".s", ".sx", ".swig", ".swigcxx", ".syso":
+		return true
+	default:
+		return false
+	}
 }
 
 // extractUndefinedSymbol scans compiler output for the first `undefined: <symbol>` occurrence and
@@ -134,7 +147,7 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 	}
 	buildDetail, buildOK := goBuildPackages(propDir, propPkgs)
 	if buildOK || commitBuildCheckOnlyUnbuildable(buildDetail) {
-		return safecommit.BuildCheckPassed, "" // the common fast path: ONE build, green
+		return commitValidateOwnedPaths(stderr, root, paths)
 	}
 
 	// The prospective tree is RED. Differential attribution: build the SAME packages at HEAD's
@@ -159,7 +172,75 @@ var commitBuildCheckGate = func(stderr io.Writer, root string, paths []string) (
 	if sym := extractUndefinedSymbol(buildDetail); sym != "" {
 		buildDetail = "undefined: " + sym + "\n" + buildDetail
 	}
+	buildDetail += "\n" + commitValidateCommand(paths)
 	return safecommit.BuildCheckFailed, buildDetail
+}
+
+// commitValidateOwnedPaths lifts the existing isolated validator into the commit admission
+// gate. runValidate materializes HEAD plus only paths in a private checkout, so this runs before
+// safecommit can stage anything in the caller's real index. Its JSON result gives this older
+// build-check wire vocabulary a typed failed/timeout/infra outcome without inventing a second
+// refusal protocol.
+func commitValidateOwnedPaths(stderr io.Writer, root string, paths []string) (safecommit.BuildCheckOutcome, string) {
+	args := []string{"--root", root, "--ref", "HEAD", "--json", "--progress=false"}
+	for _, path := range paths {
+		args = append(args, "--mine", path)
+	}
+	var stdout, diagnostics bytes.Buffer
+	code := runValidate(&stdout, &diagnostics, args)
+	var res validateResult
+	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
+		detail := strings.TrimSpace(diagnostics.String())
+		if detail == "" {
+			detail = fmt.Sprintf("decode prospective validation result: %v", err)
+		}
+		fmt.Fprintf(stderr, "fak commit: prospective validation could not run: %s\n", detail)
+		return safecommit.BuildCheckSkippedInfra, detail
+	}
+	if code == 0 && res.OK {
+		return safecommit.BuildCheckPassed, ""
+	}
+	detail := formatCommitValidationFailure(res, paths)
+	if res.TimedOut || res.Reason == "TIMEOUT" {
+		return safecommit.BuildCheckSkippedTimeout, detail
+	}
+	if code == 1 {
+		return safecommit.BuildCheckFailed, detail
+	}
+	if diag := strings.TrimSpace(diagnostics.String()); diag != "" {
+		detail += "\nvalidator: " + diag
+	}
+	return safecommit.BuildCheckSkippedInfra, detail
+}
+
+func formatCommitValidationFailure(res validateResult, paths []string) string {
+	var b strings.Builder
+	b.WriteString("prospective validation failed")
+	for _, failure := range res.Failures {
+		b.WriteString("\n  ")
+		b.WriteString(failure.Step)
+		if failure.Detail != "" {
+			b.WriteString(": ")
+			b.WriteString(failure.Detail)
+		}
+		if len(failure.Files) > 0 {
+			b.WriteString(": ")
+			b.WriteString(strings.Join(failure.Files, ", "))
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(commitValidateCommand(paths))
+	return b.String()
+}
+
+func commitValidateCommand(paths []string) string {
+	var b strings.Builder
+	b.WriteString("next: fak validate --ref HEAD")
+	for _, path := range paths {
+		b.WriteString(" --mine ")
+		b.WriteString(path)
+	}
+	return b.String()
 }
 
 // refuseCommitBuildCheck renders a build-gate refusal on both channels and returns the process
@@ -190,9 +271,9 @@ func refuseCommitBuildCheck(stdout, stderr io.Writer, paths []string, bc safecom
 func commitBuildCheckAdvice(reason string) string {
 	switch reason {
 	case safecommit.ReasonBuildCheckTimeout:
-		return "fak commit: the prospective committed tree was NEVER compiled — the build gate timed out, so nothing here says this commit is green. This is retryable (exit 3): re-run it, or pass --allow-build-check-timeout (env FAK_COMMIT_BUILD_CHECK=allow-timeout) to land it UNCHECKED on purpose, or --no-build-check to skip the gate outright. --allow-build-check-timeout is recorded in --json as build_check.failed_open and docked in the commit's score; --no-build-check reports build_check.outcome=disabled."
+		return "fak commit: prospective validation did not finish, so nothing here says this commit is green. This is retryable (exit 3): run the `fak validate --mine ...` command above, or pass --allow-build-check-timeout (env FAK_COMMIT_BUILD_CHECK=allow-timeout) to land it UNCHECKED on purpose. --allow-build-check-timeout is recorded in --json as build_check.failed_open; --no-build-check disables the admission gate."
 	default:
-		return "fak commit: the prospective committed tree does not compile under default tags — commit refused so the committed trunk stays green. Commit the missing definition too, or fence not-yet-compiling WIP behind //go:build wip_<feature> (see `fak wip fence`), or pass --no-build-check for an intentional multi-commit landing."
+		return "fak commit: the exact owned delta failed prospective build, vet, formatting, or affected tests before the real index changed. Run the `fak validate --mine ...` command above and fix the named phase; use --no-build-check only for an intentional unchecked landing."
 	}
 }
 

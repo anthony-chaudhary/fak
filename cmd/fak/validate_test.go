@@ -195,6 +195,14 @@ func TestValidateTestRunnerSelectsWSLOnWindows(t *testing.T) {
 	}
 }
 
+func TestValidateTestArgsDisableCacheAndKeepRunBeforeTargets(t *testing.T) {
+	got := validateTestArgs("^TestOwned$", []string{"./internal/owned"})
+	want := []string{"test", "-count=1", "-run", "^TestOwned$", "./internal/owned"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("validate test args = %v, want %v", got, want)
+	}
+}
+
 func TestRenderValidateReportsRunnerOnFailure(t *testing.T) {
 	var out bytes.Buffer
 	renderValidate(&out, validateResult{
@@ -430,6 +438,7 @@ func Check(root string) error {
 		"--root", repo,
 		"--ref", strings.TrimSpace(wantHEAD),
 		"--mine", "common/id.go",
+		"--mine", "p1/identity_test.go",
 		"--test-only",
 		"--wsl-tests",
 		"--json",
@@ -437,8 +446,13 @@ func Check(root string) error {
 	if code != 0 || !res.OK {
 		t.Fatalf("code=%d stderr=%q result=%+v", code, stderr, res)
 	}
-	if len(res.Tested) < 6 {
-		t.Fatalf("tested=%v; want at least six Git-aware affected packages", res.Tested)
+	for _, want := range []string{"validate.test/common", "validate.test/p1"} {
+		if !validateContains(res.Tested, want) {
+			t.Fatalf("tested=%v; want changed package %s", res.Tested, want)
+		}
+	}
+	if validateContains(res.Tested, "validate.test/p2") {
+		t.Fatalf("tested=%v; unchanged importer must remain build/vet-only", res.Tested)
 	}
 }
 
@@ -484,7 +498,7 @@ func TestValidateReportsMineFailure(t *testing.T) {
 	}
 }
 
-func TestValidateIncludesReverseDependencyTests(t *testing.T) {
+func TestValidateBuildsButDoesNotTestReverseDependencies(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; skipped under -short")
 	}
@@ -499,20 +513,16 @@ func TestValidateIncludesReverseDependencyTests(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, code, _ := runValidateJSON(t, []string{"--root", repo, "--mine", "lib/lib.go", "--json"})
-	if code != 1 || res.OK {
+	if code != 0 || !res.OK {
 		t.Fatalf("code=%d result=%+v", code, res)
 	}
-	if !validateContains(res.Tested, "validate.test/consumer") {
-		t.Fatalf("tested=%v; reverse dependency absent", res.Tested)
+	if !validateContains(res.Tested, "validate.test/lib") || validateContains(res.Tested, "validate.test/consumer") {
+		t.Fatalf("tested=%v; want changed package only", res.Tested)
 	}
-	found := false
-	for _, failure := range res.Failures {
-		if failure.Step == "test" {
-			found = true
+	for _, phase := range res.Phases {
+		if (phase.Name == "build" || phase.Name == "vet") && phase.Status != "ok" {
+			t.Fatalf("phase=%+v; importer closure must remain build/vet clean", phase)
 		}
-	}
-	if !found {
-		t.Fatalf("failures=%+v; want affected test failure", res.Failures)
 	}
 }
 

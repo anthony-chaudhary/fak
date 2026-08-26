@@ -149,12 +149,10 @@ func PreCommitGates() []Gate {
 		// COMMENT_QUALITY reviews only changed implementation comments and stays advisory because
 		// comment value depends on context; it must never turn a prose preference into a commit blockade.
 		{Name: "COMMENT_QUALITY", ModeEnv: "FLEET_COMMENT_QUALITY_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_VERBOSE_COMMENTS", Check: gateCommentQuality},
-		// GOFMT is ADVISORY (DefaultMode "warn"): the commit-boundary sibling of make ci's
-		// gofmt-check. It fires when a staged .go file is not gofmt-clean, before the drift reds
-		// every peer's `make ci` at the trunk — a recurring red the release notes keep clearing
-		// ("clear the CI gofmt gate", v0.32.0 x4 / v0.34.0). Set FLEET_GOFMT_GUARD=block to
-		// hard-enforce it, ALLOW_GOFMT_DRIFT=1 to skip it once.
-		{Name: "GOFMT", ModeEnv: "FLEET_GOFMT_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_GOFMT_DRIFT", Check: gateGofmt},
+		// GOFMT blocks by default: a staged .go file that is not gofmt-clean would red make ci
+		// immediately after landing. Set FLEET_GOFMT_GUARD=warn for an explicit advisory mode,
+		// or ALLOW_GOFMT_DRIFT=1 for the existing one-shot escape.
+		{Name: "GOFMT", ModeEnv: "FLEET_GOFMT_GUARD", EscapeEnv: "ALLOW_GOFMT_DRIFT", Check: gateGofmt},
 		// DUPLICATION is ADVISORY (DefaultMode "warn"): the commit-boundary, in-process twin of
 		// `fak dup guard --staged`. It brings the clonescan clone engine (the same normalized-token
 		// definition the code-slop scorecard grades the whole tree with, a cycle later) to the commit

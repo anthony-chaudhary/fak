@@ -215,12 +215,11 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 		return safecommit.ExitLockBusy
 	}
 
-	// COMMITTED_RED gate (#4152): compile the PROSPECTIVE committed tree — HEAD's committed
-	// bytes + exactly this commit's paths, all other working-tree noise masked — and refuse the
-	// commit when it would red the committed trunk under default tags. Promotes the
-	// internal/buildwitness CI invariant to the commit boundary. It never blocks a red this
-	// commit did not introduce (a pre-existing HEAD red admits), and it never claims to have
-	// checked what it did not: the outcome rides on Result.BuildCheck all the way into --json,
+	// COMMITTED_RED gate (#4152/#9266): validate the PROSPECTIVE committed tree — HEAD's
+	// committed bytes + exactly this commit's paths, all other working-tree noise masked — before
+	// safecommit can mutate the real index or HEAD. The differential build still admits a red that
+	// predates this commit; a green build continues through owned gofmt, importer build/vet, and
+	// uncached changed-package tests. The typed outcome rides on Result.BuildCheck into --json,
 	// and a gate that could not FINISH refuses unless the caller opted into fail-open (#6006).
 	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
 	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {

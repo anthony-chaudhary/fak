@@ -1,3 +1,5 @@
+//go:build !arm64 || (fakaccel && darwin && cgo)
+
 package model
 
 import "os"

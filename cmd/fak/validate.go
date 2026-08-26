@@ -213,7 +213,7 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 	dir, wslWorkspace := prep.dir, prep.wslWorkspace
 	defer prep.cleanup()
 	// Keep the base graph as well as the overlaid graph: a deleted file/package no longer
-	// appears in `go list`, but its importers are still affected and must be tested.
+	// appears in `go list`, but its importers are still affected and must be built and vetted.
 	baseFileToPkg := map[string]string{}
 	baseEdges := map[string][]string{}
 	if hasDeletedMinePath(r, paths) {
@@ -286,27 +286,37 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		for _, pkg := range fileToPkg {
 			livePkgs[pkg] = true
 		}
+		var liveChangedPkgs []string
+		for _, pkg := range changedPkgs {
+			if livePkgs[pkg] { // omit a package deleted by this delta
+				liveChangedPkgs = append(liveChangedPkgs, pkg)
+			}
+		}
+		for _, pkg := range liveChangedPkgs {
+			res.Tested = append(res.Tested, pkg)
+		}
+		var buildPkgs []string
 		for _, pkg := range selected {
 			if livePkgs[pkg] { // omit a package deleted by this delta
-				res.Tested = append(res.Tested, pkg)
+				buildPkgs = append(buildPkgs, pkg)
 			}
 		}
 		phase.finish(nil)
-		testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
-		if !*testOnly && len(testTargets) > 0 {
+		buildTargets := packagePatternsForRoot(dir, buildPkgs, fileToPkg)
+		if !*testOnly && len(buildTargets) > 0 {
 			// The base is a committed tip; only changed packages and their importer closure
 			// can become newly red. Rebuilding ./... made two-file checks scale with the
 			// entire repository and was the dominant #6568 timeout signature.
 			phase = recorder.start("build")
 			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "build", errors.New("affected package build failed"), *asJSON, func() (string, bool) {
-				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"build"}, testTargets...)...)
+				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"build"}, buildTargets...)...)
 			}); timedOut {
 				return code
 			}
 
 			phase = recorder.start("vet")
 			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "vet", errors.New("affected package vet failed"), *asJSON, func() (string, bool) {
-				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"vet"}, testTargets...)...)
+				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"vet"}, buildTargets...)...)
 			}); timedOut {
 				return code
 			}
@@ -316,11 +326,8 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		}
 		if len(res.Tested) > 0 {
 			res.Runner = validateTestRunner(runtime.GOOS, *wslTests)
-			args := []string{"test"}
-			if effectiveTestRun != "" {
-				args = append(args, "-run", effectiveTestRun)
-			}
-			args = append(args, testTargets...)
+			testTargets := packagePatternsForRoot(dir, res.Tested, fileToPkg)
+			args := validateTestArgs(effectiveTestRun, testTargets)
 			phase = recorder.start("test")
 			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "test", errors.New("affected tests failed"), *asJSON, func() (string, bool) {
 				if wslWorkspace {
@@ -607,6 +614,14 @@ func validateTestRunner(goos string, wsl bool) string {
 		return "wsl.exe bash -lc go test"
 	}
 	return "go test"
+}
+
+func validateTestArgs(testRun string, targets []string) []string {
+	args := []string{"test", "-count=1"}
+	if testRun != "" {
+		args = append(args, "-run", testRun)
+	}
+	return append(args, targets...)
 }
 
 func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []string, wsl bool) (string, bool) {
@@ -1073,9 +1088,9 @@ func renderValidate(w io.Writer, res validateResult) {
 	if res.OK {
 		writeValidateTestContext(w, res)
 		if res.Mode == "test-only" {
-			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) affected-test clean (isolated test-only mode)\n", short(res.Tip), len(res.Mine))
+			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) changed-package tests clean (isolated test-only mode)\n", short(res.Tip), len(res.Mine))
 		} else {
-			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) build, vet, and affected-test clean\n", short(res.Tip), len(res.Mine))
+			fmt.Fprintf(w, "OK: committed tip %s + %d owned path(s) importer build/vet and changed-package tests clean\n", short(res.Tip), len(res.Mine))
 		}
 		return
 	}
