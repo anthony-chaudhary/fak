@@ -147,3 +147,14 @@ production papers. It does not turn reported observations into universal fitted 
 | Reasoning-mode selection | Model releases expose configurable reasoning, but production selection shares are not public. | Missing. |
 | Speculative acceptance | Sailor2 names a 1B speculative tier, but no acceptance distribution is present. | Missing. |
 | Installed-to-goodput conversion | Physical/capacity evidence exists in other slices. | Missing a joined production distribution from installed → healthy → schedulable → active → useful goodput. |
+
+## Agentic accounting additions
+
+| Variable | Production evidence | Modeling rule | Missing |
+|---|---|---|---|
+| Calls per user task | Copilot: 760.5M LLM calls and 774.7M tool calls over 95.1M turns; TraceLab: mean 8.8 LLM and 10.8 tool calls per request. | Draw workflow fan-out and alternating model/tool phases before token lengths. | Product/generalization beyond coding, tenant/geography, and per-tool breakdown. |
+| Workflow wall time | TraceLab mean 4.3 minutes; P90 above 6.4 minutes. | Model multi-minute state occupancy and tool/runtime queues. | Cross-product wall-time and critical-path distributions. |
+| Idle retained state | Copilot average container idle 4.1 minutes and KV idle 2.9 minutes. | Charge resource-time across idle gaps and compare keepalive versus rehydrate. | Tail quantiles, memory/container sizes, and user think time. |
+| Tool failure and retry | Copilot: 9% of turns with tool failure; retry amplification up to 4× compute. | Replay failure type, retry budget, idempotency, partial side effects, and abandonment. | Production distributions outside coding agents. |
+| Tool-result reuse | Systems work motivates semantic tool caching. | Treat tool result as a separate object with tenant, freshness, and side-effect policy. | Direct production redundancy/hit distributions. |
+| Workflow critical path | Systems studies expose DAG-aware scheduling. | Optimize accepted task completion and critical-path delay, not isolated request latency. | Public production DAG shapes and stage-time shares. |

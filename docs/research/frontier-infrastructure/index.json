@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T19:22:00-07:00",
-  "issue": 9305,
+  "updated_at": "2026-08-26T19:38:00-07:00",
+  "issue": 9320,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 154,
+    "entry_count": 158,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -80,6 +80,8 @@
       "AWS / Cerebras",
       "AWS / NVIDIA",
       "AWS Bedrock",
+      "Agent workflow scheduling study",
+      "Agentic OS research study",
       "Ai2",
       "Alibaba",
       "Alibaba Cloud / Aliyun",
@@ -164,6 +166,7 @@
       "OpenAI / Stargate",
       "Operator-level LLM autoscaling study",
       "Oracle",
+      "Parrot serving study",
       "Robust KV cache management study",
       "SK hynix",
       "Sakana AI",
@@ -179,6 +182,7 @@
       "Technology Innovation Institute",
       "Tencent",
       "TokenScale autoscaling study",
+      "Tool-result caching research",
       "TraceLab coding-agent corpus",
       "U.S. AI datacenter pipeline",
       "U.S. Bureau of Industry and Security",
@@ -5795,6 +5799,146 @@
       ],
       "fak_implications": [
         "Model memory-price sensitivity and keep exact system-price changes as scenarios until customer/product terms are confirmed."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "agentic-os-kernel-context-2025",
+      "category": "serving_system",
+      "entity": "Agentic OS research study",
+      "topic": [
+        "agentic_workload",
+        "os_state",
+        "kernel_context",
+        "scheduling",
+        "system_architecture"
+      ],
+      "published_at": "2025-04-11",
+      "event_at": "2025-04-11",
+      "source_title": "An Operating System for AI Agents",
+      "source_url": "https://arxiv.org/abs/2504.06692",
+      "source_kind": "preprint",
+      "evidence_class": "synthetic_experiment",
+      "confidence": "medium",
+      "claim": "This systems proposal argues that agent workloads need OS-like management for model calls, context/memory, tools, storage, access control, and multiple concurrent agents rather than treating each LLM request as an isolated stateless job.",
+      "quantified": {},
+      "assumptions": [
+        "Agent execution composes model, tool, memory, storage, and policy state over long-lived workflows."
+      ],
+      "contradictions_or_limits": [
+        "The proposal is not a production workload trace and does not quantify universal scheduler gains or user distributions.",
+        "OS abstractions can add control overhead and must be justified against simpler runtimes."
+      ],
+      "fak_implications": [
+        "Benchmark workflow state, tool/runtime latency, and policy checks end to end, not only token generation.",
+        "Treat agent/session identity and durable context as scheduler state."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "parrot-serve-llm-programs-2024",
+      "category": "serving_system",
+      "entity": "Parrot serving study",
+      "topic": [
+        "llm_programs",
+        "semantic_variables",
+        "request_graph",
+        "scheduling",
+        "prefix_reuse"
+      ],
+      "published_at": "2024-05-21",
+      "event_at": "2024-05-21",
+      "source_title": "Parrot: Efficient Serving of LLM-based Applications with Semantic Variable",
+      "source_url": "https://arxiv.org/abs/2405.19888",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "Parrot models an LLM application as a graph of semantic variables and dependent calls, enabling cross-request prefix sharing and graph-aware scheduling rather than optimizing independent requests only.",
+      "quantified": {},
+      "assumptions": [
+        "Agentic and compound applications expose dependency graphs, shared prefixes, and critical paths that request-level queues hide."
+      ],
+      "contradictions_or_limits": [
+        "Benchmarks are not broad production-agent traces and depend on application graph visibility and runtime integration.",
+        "Graph construction and cross-request sharing add orchestration, privacy, and invalidation costs."
+      ],
+      "fak_implications": [
+        "Represent workflow DAG, critical path, semantic prefix ownership, and tool dependencies in replay.",
+        "Compare request-level and workflow-level scheduling under the same end-to-end objective."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "semantic-tool-result-caching-2025",
+      "category": "serving_system",
+      "entity": "Tool-result caching research",
+      "topic": [
+        "agentic_workload",
+        "tool_calls",
+        "semantic_cache",
+        "redundancy",
+        "workflow_latency"
+      ],
+      "published_at": "2025-10-17",
+      "event_at": "2025-10-17",
+      "source_title": "Semantic Caching for Tool-Augmented Language Model Agents",
+      "source_url": "https://arxiv.org/abs/2510.15980",
+      "source_kind": "preprint",
+      "evidence_class": "synthetic_experiment",
+      "confidence": "medium",
+      "claim": "This study evaluates semantic reuse of tool results for tool-augmented agents, motivated by repeated or near-duplicate tool invocations that request-level LLM caches do not capture.",
+      "quantified": {},
+      "assumptions": [
+        "Tool results can be a separate reuse distribution from prompt/KV prefixes, with freshness and side-effect constraints."
+      ],
+      "contradictions_or_limits": [
+        "Experimental tasks do not establish production redundancy rates, freshness tolerances, or safe reuse across tenants.",
+        "Caching mutating, personalized, or time-sensitive tools can be incorrect or unsafe."
+      ],
+      "fak_implications": [
+        "Track tool identity, arguments, result digest, freshness, side effects, tenant, and authorization before reuse.",
+        "Measure end-to-end saved latency/cost after semantic lookup and verification overhead."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "agentic-workflow-scheduling-2026",
+      "category": "serving_system",
+      "entity": "Agent workflow scheduling study",
+      "topic": [
+        "agentic_workload",
+        "workflow_scheduling",
+        "critical_path",
+        "tool_latency",
+        "goodput"
+      ],
+      "published_at": "2026-06-12",
+      "event_at": "2026-06-12",
+      "source_title": "Workflow-Aware Scheduling for LLM Agents",
+      "source_url": "https://arxiv.org/abs/2606.11266",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "This study treats agent jobs as multi-stage workflows containing LLM and tool operations and optimizes workflow completion rather than per-request model latency.",
+      "quantified": {},
+      "assumptions": [
+        "Agent throughput and latency depend on workflow critical paths, tool/runtime queues, fan-out, retries, and shared resources."
+      ],
+      "contradictions_or_limits": [
+        "Benchmark workflows and schedulers may not represent production tool diversity, failures, user think time, or security policy.",
+        "Improving workflow completion can trade off per-stage fairness or interactive latency."
+      ],
+      "fak_implications": [
+        "Measure task completion, critical-path delay, useful tool outcomes, retries, and resource occupancy together.",
+        "Do not optimize model-request latency while tool queues dominate the workflow."
       ],
       "rumor": {
         "is_rumor": false

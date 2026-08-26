@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **154** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **149** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **121** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 18; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 18; `policy_regulation` 5; `serving_system` 17; `standard` 2; `supply_chain` 10; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 79; `vendor_claim` 21; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 10; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 104; `medium_high` 42; `medium` 6; `low` 2. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **154/154 published; 154/154 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **158** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **153** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **125** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 18; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 18; `policy_regulation` 5; `serving_system` 21; `standard` 2; `supply_chain` 10; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 79; `vendor_claim` 21; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 12; `analyst_estimate` 5; `synthetic_experiment` 6; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 104; `medium_high` 44; `medium` 8; `low` 2. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **158/158 published; 158/158 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 154 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 158 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -174,8 +174,9 @@ regional failover, heterogeneous accelerator placement, maintenance/health attri
 preemption, tenant fairness, quota enforcement, noisy-neighbor distributions, and
 installed-to-schedulable-to-goodput conversion.
 
-**Proof needed for complete:** operator traces linking demand, scaling decisions, health,
-placement, retries, SLOs, and per-tenant outcomes over failures and seasonal peaks.
+**Present but incomplete:** workflow-DAG, agentic-OS, and tool-result-cache research now bounds request-level assumptions; Copilot/TraceLab supply production session, idle, tool, and retry evidence.
+
+**Proof needed for complete:** operator traces linking demand, workflow DAGs, scaling decisions, health, placement, sandbox/tool queues, retries, SLOs, and per-tenant outcomes over failures and seasonal peaks.
 
 ### 9. User, tenant, geography, and seasonality distributions — **Partial to missing**
 
@@ -282,7 +283,7 @@ dates, affected hardware/services, implementation status, and later amendments.
 | Evidence tier | Current condition | Consequence |
 |---|---|---|
 | Production measurement/observation | **17 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
-| Benchmark/synthetic | **14 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
+| Benchmark/synthetic | **18 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
 | Official statements | **79 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
 | Vendor claims | **21 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **21 entries** | Useful for market/site visibility; denominators and original datasets require checking. |

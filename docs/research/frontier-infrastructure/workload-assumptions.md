@@ -119,3 +119,39 @@ accepted goodput / cost / energy
 
 The mechanism with the highest peak throughput is not necessarily the mechanism with the
 highest SLO-satisfied, quality-constrained goodput.
+
+## Agentic workflow boundary
+
+A model request is often the wrong scheduling/accounting unit for an agent. The current
+production traces and systems work support a wider envelope:
+
+```text
+user task
+  -> session / turn
+  -> workflow DAG
+  -> model call(s) + tool call(s) + sandbox/runtime work
+  -> retries / compaction / cache lookup / policy checks
+  -> accepted task outcome
+```
+
+| Agent assumption | Evidence | Benchmark consequence |
+|---|---|---|
+| Workflow DAGs matter | Parrot and workflow-aware scheduling treat dependent model/tool stages and critical paths explicitly. | Replay fan-out/fan-in, sequential dependencies, shared prefixes, and tool queues; report task completion, not only model latency. |
+| Runtime and OS state matter | Agentic-OS research makes context, memory, tools, storage, policy, and concurrent agents first-class. | Include sandbox/container start, idle retention, filesystem/process state, authorization, and recovery overhead. |
+| Tool reuse differs from KV reuse | Semantic tool-result caching targets repeated or near-duplicate tool calls with freshness and side-effect constraints. | Record tool/args/result/freshness/tenant/side effects; never reuse mutating results by semantic similarity alone. |
+| Model speed can be non-critical-path | Copilot and TraceLab expose long alternating model/tool loops, idle state, failures, and retries. | Measure critical-path share and optimize the dominant stage; a faster decoder may not reduce task time. |
+| Failures amplify whole workflows | Copilot reports 9% of turns with tool failure and retry loops up to 4× compute. | Replay partial failure, compensation, idempotency, retry budgets, and abandoned work. |
+| Session state consumes capacity while idle | Copilot reports multi-minute average container/KV idle windows. | Account for retained KV, containers, files, and leases across idle gaps; request-only utilization is incomplete. |
+
+### Required agent receipt
+
+```text
+session / turn / workflow identifiers
+DAG stages and critical path
+model + tool + sandbox + storage + network time
+input/output/cached/compacted tokens
+container/KV/filesystem state and idle lifetime
+tool success, side effect, freshness, retry, and idempotency
+policy/admission/fairness outcome
+accepted task outcome, wall time, cost, and resource-time
+```
