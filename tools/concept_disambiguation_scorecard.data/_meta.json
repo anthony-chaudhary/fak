@@ -5604,6 +5604,31 @@
           "category": "incidental",
           "reason": "human-output renderer implementation symbol, not a session-runtime concept",
           "token": "renderSessionJournalAudit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Versioned JSON schema constant local to the issue 8678 experiment evaluator.",
+          "token": "LifecycleSessionSchema"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 8678 experiment ledger decode type, not a new runtime session concept.",
+          "token": "LifecycleSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "One row in the issue 8678 experiment ledger.",
+          "token": "LifecycleCell"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue 8678 evaluator output type, not runtime lifecycle state.",
+          "token": "LifecycleReport"
+        },
+        {
+          "category": "incidental",
+          "reason": "One evaluated issue 8678 lifecycle boundary row.",
+          "token": "LifecycleReportCell"
         }
       ],
       "id": "session-runtime",
@@ -5633,6 +5658,11 @@
         "ITERM_SESSION_ID",
         "IndexHealth",
         "InspectIndexHealth",
+        "LifecycleCell",
+        "LifecycleReport",
+        "LifecycleReportCell",
+        "LifecycleSession",
+        "LifecycleSessionSchema",
         "LogicalSessionID",
         "MalformedSessionRef",
         "ModelSlotsDuringToolWait",
@@ -9253,6 +9283,11 @@
           "category": "incidental",
           "reason": "Access-frontier metric field, not a new context mechanism",
           "token": "ScopedContextInputTokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "A fixture-local measurement label for the repository-side context arm, not a new context mechanism or product concept.",
+          "token": "repository_context"
         }
       ],
       "id": "context-ctx",
@@ -9350,6 +9385,7 @@
         "recalls",
         "recordCompactionThrash",
         "recordGuardCompactionWitness",
+        "repository_context",
         "requestContext",
         "sessionClientDescriptorForContext",
         "session_compaction_thrash",
@@ -12678,6 +12714,16 @@
           "category": "incidental",
           "reason": "Local per-candidate measurement record, not a plan result concept.",
           "token": "CandidateResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Local adapter type for a measured MatMul implementation, not a planning candidate concept.",
+          "token": "MatMulCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Enum label for deterministic study-import ledger disposition; it is not a planning concept.",
+          "token": "ImportCandidate"
         }
       ],
       "exclude": [
@@ -12717,11 +12763,13 @@
         "GroupLaneStatePlan",
         "GroupedPlan",
         "HeldCandidates",
+        "ImportCandidate",
         "KVPrefixPressureCandidate",
         "KVPrefixPressuredCandidates",
         "KindCandidate",
         "ListPlanSchema",
         "MaintenanceSeconds",
+        "MatMulCandidate",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
         "NativeDecodeTracePlanner",

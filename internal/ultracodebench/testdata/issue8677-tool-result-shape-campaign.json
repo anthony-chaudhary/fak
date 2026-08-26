@@ -1,0 +1,89 @@
+{
+  "schema": "fak-ultracode-tool-result-shape-campaign/1",
+  "evidence_kind": "synthetic_fixture",
+  "source_artifact": "internal/ultracodebench/testdata/issue8677-tool-result-shape-campaign.json",
+  "model": "qwen2.5:0.5b",
+  "runtime": "ollama 0.30.10 llama-server",
+  "tokenizer": "whitespace-v1",
+  "task_digest": "sha256:91679c58801b1b4ce5029377c16d3e528012b3ee7e1c92138fbbbb8110879887",
+  "cache_posture": "cold-model-unload-between-cells",
+  "campaign_version": "issue8677-v1",
+  "accepted_effect_digest": "sha256:equal-accepted-booking-effect",
+  "required_facts_digest": "sha256:required-fact-retained",
+  "role_tokens": 96,
+  "repository_tokens": 256,
+  "history_tokens": 64,
+  "promotion_evidence": "promote toward gen/now after a second runtime reproduces both relevance crossovers with equal accepted effects and exact required-fact retention",
+  "demotion_evidence": "demote or retire if authoritative token telemetry, equal accepted effects, or required-fact retention fails in any cell",
+  "invalidating_assumption": "whitespace-v1 token counts approximate the named model tokenizer closely enough to locate the crossover",
+  "cells": [
+    {
+      "size": "small",
+      "relevance": "relevant",
+      "tool_result": "required fact retained noise-003 noise-004 noise-005 noise-006 noise-007 noise-008 noise-009 noise-010 noise-011 noise-012 noise-013 noise-014 noise-015 noise-016 noise-017 noise-018 noise-019 noise-020 noise-021 noise-022 noise-023",
+      "tool_result_tokens": 24,
+      "accepted": true,
+      "effect_digest": "sha256:equal-accepted-booking-effect",
+      "retained_facts_digest": "sha256:required-fact-retained",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 6,
+        "history": 0
+      },
+      "scoping_overhead_tokens": 12,
+      "source_receipt": "sha256:96f1d8849bf5d70991e5d3196acc993a762806b63d885bd7780648e2747d55b8"
+    },
+    {
+      "size": "large",
+      "relevance": "relevant",
+      "tool_result": "required fact retained noise-003 noise-004 noise-005 noise-006 noise-007 noise-008 noise-009 noise-010 noise-011 noise-012 noise-013 noise-014 noise-015 noise-016 noise-017 noise-018 noise-019 noise-020 noise-021 noise-022 noise-023 noise-024 noise-025 noise-026 noise-027 noise-028 noise-029 noise-030 noise-031 noise-032 noise-033 noise-034 noise-035 noise-036 noise-037 noise-038 noise-039 noise-040 noise-041 noise-042 noise-043 noise-044 noise-045 noise-046 noise-047 noise-048 noise-049 noise-050 noise-051 noise-052 noise-053 noise-054 noise-055 noise-056 noise-057 noise-058 noise-059 noise-060 noise-061 noise-062 noise-063 noise-064 noise-065 noise-066 noise-067 noise-068 noise-069 noise-070 noise-071 noise-072 noise-073 noise-074 noise-075 noise-076 noise-077 noise-078 noise-079 noise-080 noise-081 noise-082 noise-083 noise-084 noise-085 noise-086 noise-087 noise-088 noise-089 noise-090 noise-091 noise-092 noise-093 noise-094 noise-095 noise-096 noise-097 noise-098 noise-099 noise-100 noise-101 noise-102 noise-103 noise-104 noise-105 noise-106 noise-107 noise-108 noise-109 noise-110 noise-111 noise-112 noise-113 noise-114 noise-115 noise-116 noise-117 noise-118 noise-119 noise-120 noise-121 noise-122 noise-123 noise-124 noise-125 noise-126 noise-127 noise-128 noise-129 noise-130 noise-131 noise-132 noise-133 noise-134 noise-135 noise-136 noise-137 noise-138 noise-139 noise-140 noise-141 noise-142 noise-143 noise-144 noise-145 noise-146 noise-147 noise-148 noise-149 noise-150 noise-151 noise-152 noise-153 noise-154 noise-155 noise-156 noise-157 noise-158 noise-159 noise-160 noise-161 noise-162 noise-163 noise-164 noise-165 noise-166 noise-167 noise-168 noise-169 noise-170 noise-171 noise-172 noise-173 noise-174 noise-175 noise-176 noise-177 noise-178 noise-179 noise-180 noise-181 noise-182 noise-183 noise-184 noise-185 noise-186 noise-187 noise-188 noise-189 noise-190 noise-191",
+      "tool_result_tokens": 192,
+      "accepted": true,
+      "effect_digest": "sha256:equal-accepted-booking-effect",
+      "retained_facts_digest": "sha256:required-fact-retained",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 48,
+        "history": 0
+      },
+      "scoping_overhead_tokens": 12,
+      "source_receipt": "sha256:00a731653b1ded17293e6e8b1a1e830f7ddd30a9cbf16a646439e25bece84eaf"
+    },
+    {
+      "size": "small",
+      "relevance": "irrelevant",
+      "tool_result": "noise-000 noise-001 noise-002 noise-003 noise-004 noise-005 noise-006 noise-007 noise-008 noise-009 noise-010 noise-011 noise-012 noise-013 noise-014 noise-015 noise-016 noise-017 noise-018 noise-019 noise-020 noise-021 noise-022 noise-023",
+      "tool_result_tokens": 24,
+      "accepted": true,
+      "effect_digest": "sha256:equal-accepted-booking-effect",
+      "retained_facts_digest": "sha256:required-fact-retained",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 18,
+        "history": 0
+      },
+      "scoping_overhead_tokens": 12,
+      "source_receipt": "sha256:7d30dc5ecaed4fd1c9ad18498cde67da889d0a588cb9236e89662305a4ebdb58"
+    },
+    {
+      "size": "large",
+      "relevance": "irrelevant",
+      "tool_result": "noise-000 noise-001 noise-002 noise-003 noise-004 noise-005 noise-006 noise-007 noise-008 noise-009 noise-010 noise-011 noise-012 noise-013 noise-014 noise-015 noise-016 noise-017 noise-018 noise-019 noise-020 noise-021 noise-022 noise-023 noise-024 noise-025 noise-026 noise-027 noise-028 noise-029 noise-030 noise-031 noise-032 noise-033 noise-034 noise-035 noise-036 noise-037 noise-038 noise-039 noise-040 noise-041 noise-042 noise-043 noise-044 noise-045 noise-046 noise-047 noise-048 noise-049 noise-050 noise-051 noise-052 noise-053 noise-054 noise-055 noise-056 noise-057 noise-058 noise-059 noise-060 noise-061 noise-062 noise-063 noise-064 noise-065 noise-066 noise-067 noise-068 noise-069 noise-070 noise-071 noise-072 noise-073 noise-074 noise-075 noise-076 noise-077 noise-078 noise-079 noise-080 noise-081 noise-082 noise-083 noise-084 noise-085 noise-086 noise-087 noise-088 noise-089 noise-090 noise-091 noise-092 noise-093 noise-094 noise-095 noise-096 noise-097 noise-098 noise-099 noise-100 noise-101 noise-102 noise-103 noise-104 noise-105 noise-106 noise-107 noise-108 noise-109 noise-110 noise-111 noise-112 noise-113 noise-114 noise-115 noise-116 noise-117 noise-118 noise-119 noise-120 noise-121 noise-122 noise-123 noise-124 noise-125 noise-126 noise-127 noise-128 noise-129 noise-130 noise-131 noise-132 noise-133 noise-134 noise-135 noise-136 noise-137 noise-138 noise-139 noise-140 noise-141 noise-142 noise-143 noise-144 noise-145 noise-146 noise-147 noise-148 noise-149 noise-150 noise-151 noise-152 noise-153 noise-154 noise-155 noise-156 noise-157 noise-158 noise-159 noise-160 noise-161 noise-162 noise-163 noise-164 noise-165 noise-166 noise-167 noise-168 noise-169 noise-170 noise-171 noise-172 noise-173 noise-174 noise-175 noise-176 noise-177 noise-178 noise-179 noise-180 noise-181 noise-182 noise-183 noise-184 noise-185 noise-186 noise-187 noise-188 noise-189 noise-190 noise-191",
+      "tool_result_tokens": 192,
+      "accepted": true,
+      "effect_digest": "sha256:equal-accepted-booking-effect",
+      "retained_facts_digest": "sha256:required-fact-retained",
+      "omitted_tokens": {
+        "role_setup": 0,
+        "repository_context": 0,
+        "tool_results": 180,
+        "history": 0
+      },
+      "scoping_overhead_tokens": 12,
+      "source_receipt": "sha256:5df7690a6b7f7603ed1da00bcafceff154ec2edff0a9a48d0a77eb359dd050a3"
+    }
+  ]
+}
