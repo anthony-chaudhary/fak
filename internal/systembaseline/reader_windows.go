@@ -87,9 +87,11 @@ func readWindowsHost() HostSample {
 	var h HostSample
 	var idle, kernel, user filetime
 	if ok, _, _ := getSystemTimes.Call(uintptr(unsafe.Pointer(&idle)), uintptr(unsafe.Pointer(&kernel)), uintptr(unsafe.Pointer(&user))); ok != 0 {
-		h.CPUAvailable = true
-		h.TotalCPUNS = (kernel.uint64() + user.uint64()) * 100
-		h.BusyCPUNS = (kernel.uint64() + user.uint64() - idle.uint64()) * 100
+		if total, busy, valid := canonicalWindowsHostCPUNS(idle.uint64(), kernel.uint64(), user.uint64()); valid {
+			h.CPUAvailable = true
+			h.TotalCPUNS = total
+			h.BusyCPUNS = busy
+		}
 	}
 	m := memoryStatus{Length: uint32(unsafe.Sizeof(memoryStatus{}))}
 	if ok, _, _ := globalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&m))); ok != 0 {
@@ -117,8 +119,10 @@ func readWindowsProcess(pid, ppid int, image string) ProcessSample {
 	var create, exit, kernel, user filetime
 	if ok, _, _ := getProcessTimes.Call(h, uintptr(unsafe.Pointer(&create)), uintptr(unsafe.Pointer(&exit)), uintptr(unsafe.Pointer(&kernel)), uintptr(unsafe.Pointer(&user))); ok != 0 {
 		p.StartID = create.uint64()
-		p.CPUAvailable = true
-		p.CPUNS = (kernel.uint64() + user.uint64()) * 100
+		if cpuNS, valid := canonicalWindowsProcessCPUNS(kernel.uint64(), user.uint64()); valid {
+			p.CPUAvailable = true
+			p.CPUNS = cpuNS
+		}
 	}
 	m := processMemory{CB: uint32(unsafe.Sizeof(processMemory{}))}
 	if ok, _, _ := getProcessMemoryInfo.Call(h, uintptr(unsafe.Pointer(&m)), uintptr(m.CB)); ok != 0 {
