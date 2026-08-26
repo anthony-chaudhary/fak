@@ -37,6 +37,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
 func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
+	p.qwen35MetalGDNExecuted.Store(false)
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -162,6 +163,21 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		s.Metal = true
 		s.MetalQ4K = p.q4k
 	}
+	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() && cachedLogits == nil {
+		if matched != 0 {
+			err = &model.UnsupportedGDNPreprojectedSequenceError{
+				Path:   model.Qwen35MetalGDNSequenceForwardPath,
+				Reason: "native sequence requires a fresh prompt; restored host prefix state cannot initialize resident owners",
+			}
+			return
+		}
+		if err = s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+			return
+		}
+		// The historical CPU-session path otherwise has no close requirement. The
+		// candidate owns native state, so bind cleanup even when prefill panics.
+		defer s.Close()
+	}
 
 	// 1b) RECORD this turn's cache decision (#1538, inkernel_turntax.go). This is the seam the
 	// turn-tax planner is defined on: the lookup has run and every servability/trust gate above
@@ -205,6 +221,14 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	if err = ctx.Err(); err != nil {
 		return
+	}
+	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
+		var executed bool
+		executed, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
+		if err != nil {
+			return
+		}
+		p.qwen35MetalGDNExecuted.Store(executed)
 	}
 
 	// 3) Snapshot the full-prompt KV (before decode mutates s.Cache) and cache it under a
@@ -277,10 +301,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	measurement.startDecodeTrace()
 	td := time.Now()
-	if p.batchDecode {
+	if coordinated, coordinateErr := coalescedDecode(ctx, ln); coordinated {
+		err = coordinateErr
+	} else if p.batchDecode {
 		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
-		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged; this is
-		// the wiring a cross-request coalescer builds on (aggregate throughput is box-gated).
+		// StepBatchActive is exactly Seqs[0].Step, so the served tokens are unchanged.
 		inKernelDecodeLanesBatched(ctx, []*decodeLane{ln}, p.m, p.quant)
 	} else {
 		inKernelDecodeSerial(ctx, ln)
@@ -344,6 +369,7 @@ func (p *InKernelPlanner) nativeInferencePrefillChunkTokens() int {
 // opt-in batched driver (BatchSession.StepBatchActive) share identical per-token semantics —
 // the property that makes the two paths bit-for-bit equivalent.
 type decodeLane struct {
+	ctx    context.Context
 	s      *model.Session
 	logits []float32
 	counts []int32
@@ -506,7 +532,11 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 // no-token contract). It is the path an unset FAK_INKERNEL_BATCH takes.
 func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 	for ln.gen < ln.maxNew {
-		next, advance := ln.decodeOne(ctx)
+		laneCtx := ctx
+		if ln.ctx != nil {
+			laneCtx = ln.ctx
+		}
+		next, advance := ln.decodeOne(laneCtx)
 		if !advance {
 			return
 		}
@@ -541,7 +571,11 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 			if ln.done || ln.gen >= ln.maxNew {
 				continue // finished lane: dropped from the active set, never re-stepped.
 			}
-			next, advance := ln.decodeOne(ctx)
+			laneCtx := ctx
+			if ln.ctx != nil {
+				laneCtx = ln.ctx
+			}
+			next, advance := ln.decodeOne(laneCtx)
 			if !advance {
 				continue
 			}

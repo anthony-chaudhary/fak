@@ -7574,6 +7574,31 @@
           "category": "incidental",
           "reason": "Field name for an opaque revision compatibility value, not the gateway or engine concept.",
           "token": "KernelRevision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal constant bounding one coordinator cohort; not a separate gateway or engine concept.",
+          "token": "inKernelDecodeCohortMax"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal result carrier for one coordinator call; not a separate gateway or engine concept.",
+          "token": "inKernelCoalesceResult"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private context key type used by the coordinator; not a separate gateway or engine concept.",
+          "token": "inKernelCoalesceContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal request carrier for one coordinator call; not a separate gateway or engine concept.",
+          "token": "inKernelCoalesceRequest"
+        },
+        {
+          "category": "incidental",
+          "reason": "Legacy environment selector removed while rebasing the coordinator onto current native GDN execution; not a gateway or engine concept.",
+          "token": "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE"
         }
       ],
       "id": "gateway-engine",
@@ -7590,6 +7615,7 @@
         "EngineRead",
         "EngineReductionPct",
         "EngineWrite",
+        "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE",
         "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
         "GatewaySeat",
         "InKernelKVPrefixPressureSource",
@@ -7640,6 +7666,10 @@
         "gateways",
         "globEngine",
         "grepEngine",
+        "inKernelCoalesceContextKey",
+        "inKernelCoalesceRequest",
+        "inKernelCoalesceResult",
+        "inKernelDecodeCohortMax",
         "inKernelPlannerEPCoordinated",
         "inKernelPrefixPressureBridge",
         "inkernelforcedtoolinstruction",
@@ -9305,6 +9335,16 @@
           "category": "incidental",
           "reason": "Fixture outcome flag for whether context survived compaction; it is not a new context mechanism.",
           "token": "compaction_recovered"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private Go context key type used to transport one coordinator; not a reusable context mechanism.",
+          "token": "inKernelCoalesceContextKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "Function-local context selected for one decode lane; not a reusable context mechanism.",
+          "token": "laneCtx"
         }
       ],
       "id": "context-ctx",
@@ -9384,7 +9424,9 @@
         "guardReadPath",
         "guardSourceReadRecovery",
         "guardSourceReadRecoverySchema",
+        "inKernelCoalesceContextKey",
         "inspectCodexHookProfileContext",
+        "laneCtx",
         "latestGuardCompactionWitness",
         "newGuardCompactionWitness",
         "newTraceContext",

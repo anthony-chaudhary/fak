@@ -65,6 +65,8 @@ type InKernelPlanner struct {
 	// so an unrelated model remains byte-for-byte on its historical forward.
 	qwenQ4KPrefillChunkTokens    int
 	qwenQ4KPrefillChunkConfigErr *InKernelQwenQ4KPrefillChunkConfigError
+	qwen35MetalGDNSequence       bool
+	qwen35MetalGDNExecuted       atomic.Bool
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
@@ -101,6 +103,12 @@ type InKernelPlanner struct {
 	// device — instead of crashing; batched multi-user device decode is the separate throughput
 	// follow-up (internal/model/batch.go), not a correctness fix.
 	devMu sync.Mutex
+
+	coalesceMu        sync.Mutex
+	coalesceReady     []*inKernelCoalesceRequest
+	coalesceRunning   bool
+	coalesceReadyHook func()
+	coalesceBatchHook func(int)
 
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
@@ -206,6 +214,10 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
 		qwenQ4KPrefillChunkTokens:    prefillChunkTokens,
 		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE"))) {
+	case "on", "1", "true", "yes":
+		p.qwen35MetalGDNSequence = true
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -873,9 +885,14 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	// forwards at once without the concurrent op-streams corrupting shared device buffers
 	// (see devMu). The plain CPU path owns a per-turn session and guards the shared radix tree
 	// with p.mu itself, so it remains concurrent. Held across Prefill + decode.
-	if p.requiresDeviceSerialization() {
+	if p.requiresDeviceSerialization() && !p.coalescesQwenDecode() {
 		p.devMu.Lock()
 		defer p.devMu.Unlock()
+		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
+			return nil, err
+		}
+	}
+	if p.coalescesQwenDecode() {
 		if err := p.refuseOversizeRequest(len(ids), maxNew); err != nil {
 			return nil, err
 		}
@@ -893,10 +910,18 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			}
 		}
 	}
-	genRes, err := p.generateReusedWithOOMRetry(ctx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
-		sb.Reset()
-		measurement.reset()
-	}, measurement)
+	generate := func(runCtx context.Context) (inKernelGenerateResult, error) {
+		return p.generateReusedWithOOMRetry(runCtx, ids, maxNew, temp, topP, topK, logitBias, freqPenalty, presPenalty, stops, emit, func() {
+			sb.Reset()
+			measurement.reset()
+		}, measurement)
+	}
+	var genRes inKernelGenerateResult
+	if p.coalescesQwenDecode() {
+		genRes, err = p.runCoalescedGenerate(ctx, generate)
+	} else {
+		genRes, err = generate(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1066,6 +1091,8 @@ func (p *InKernelPlanner) executionIdentity() (backend, forwardPath string) {
 			// Model.NewBackendSession has already validated the structural GDN
 			// contract before this request can complete. Name its stable path here.
 			forwardPath = model.Qwen35GDNCUDAPath
+		} else if p.metal && p.qwen35MetalGDNExecuted.Load() {
+			forwardPath = model.Qwen35MetalGDNSequenceForwardPath
 		} else if p.metal {
 			// Qwen3.5-family Metal uses the native Session forward with Metal projection/MLP
 			// dispatch; q4k= in the same summary records the selected weight format.
