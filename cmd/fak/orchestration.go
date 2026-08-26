@@ -112,6 +112,9 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		req.Attended = &attended.value
 	}
 	resolved, err := orchestration.Resolve(req, task, caps)
+	if err == nil {
+		bindFastClaudeSpeed(&resolved)
+	}
 	if err == nil && taskText != nil && *taskText != "" {
 		orchestration.RouteResolution(&resolved, *taskText, guardCodexDefaultModelID)
 	}
@@ -252,6 +255,24 @@ func readCodexOrchestrationInvocationReceipt(codexHome, sessionID string) (codex
 	return receipt, ok
 }
 
+// bindFastClaudeSpeed compiles the portable fast control through the shipped
+// Claude auto|fast|standard resolver rather than maintaining a second router.
+// Realized remains unknown until the launch sidecar is read back.
+func bindFastClaudeSpeed(resolution *orchestration.Resolution) {
+	if resolution == nil || resolution.Resolved.Fast == nil {
+		return
+	}
+	fast := resolution.Resolved.Fast
+	for _, outcome := range fast.Outcomes {
+		if outcome.Mechanism == "claude_speed" && outcome.Outcome == orchestration.SupportNative {
+			if speed := resolveClaudeSpeed("claude", "latency", fast.Resolved.Speed, false); speed != "" {
+				fast.Launched.Speed = speed
+			}
+			return
+		}
+	}
+}
+
 func orchestrationCapabilities(name string) (orchestration.HarnessCapabilities, error) {
 	switch strings.ToLower(name) {
 	case "native":
@@ -261,6 +282,7 @@ func orchestrationCapabilities(name string) (orchestration.HarnessCapabilities, 
 			Cancellation:       orchestration.SupportNative,
 			Leases:             orchestration.SupportNative,
 			IndependentWitness: orchestration.SupportNative,
+			ClaudeSpeed:        orchestration.SupportNative,
 		}, nil
 	case "unsupported":
 		return orchestration.HarnessCapabilities{}, nil
