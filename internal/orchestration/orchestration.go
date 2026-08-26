@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/supervisionpolicy"
 	"github.com/anthony-chaudhary/fak/internal/witnessprocess"
 )
 
@@ -124,10 +125,11 @@ type ChildAccess struct {
 }
 
 type Role struct {
-	ID      string      `json:"id"`
-	Purpose string      `json:"purpose"`
-	TaskID  string      `json:"task_id"`
-	Access  ChildAccess `json:"access"`
+	ID          string                      `json:"id"`
+	Purpose     string                      `json:"purpose"`
+	TaskID      string                      `json:"task_id"`
+	Access      ChildAccess                 `json:"access"`
+	Supervision supervisionpolicy.ChildSpec `json:"supervision"`
 }
 
 var (
@@ -502,12 +504,12 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	if req.Strict && len(deg) > 0 {
 		return Resolution{}, fmt.Errorf("%w: %s", ErrStrictDegradation, deg[0].Reason)
 	}
-	roles := []Role{{ID: "lead", Purpose: "decompose and reconcile", TaskID: task.ID, Access: ChildAccess{Mode: ChildAccessObserve}}}
+	roles := []Role{{ID: "lead", Purpose: "decompose and reconcile", TaskID: task.ID, Access: ChildAccess{Mode: ChildAccessObserve}, Supervision: supervisionpolicy.IndependentChildSpec("orchestration", supervisionpolicy.DomainID(task.ID))}}
 	var dag []Edge
 	if multi {
 		for i := 1; i < workers; i++ {
 			id := fmt.Sprintf("worker-%d", i)
-			roles = append(roles, Role{ID: id, Purpose: "execute leased task", TaskID: task.ID, Access: ChildAccess{Mode: ChildAccessObserve}})
+			roles = append(roles, Role{ID: id, Purpose: "execute leased task", TaskID: task.ID, Access: ChildAccess{Mode: ChildAccessObserve}, Supervision: supervisionpolicy.IndependentChildSpec("orchestration", supervisionpolicy.DomainID(task.ID))})
 			dag = append(dag, Edge{id, "lead"})
 		}
 	}
