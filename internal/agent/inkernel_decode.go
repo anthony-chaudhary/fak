@@ -13,6 +13,13 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
+const inKernelQwenQ4KPrefillChunkTokens = 512
+
+type inKernelPrefillSession interface {
+	PrefillNoLogits([]int)
+	Prefill([]int) []float32
+}
+
 func (p *InKernelPlanner) generateReused(ids []int, maxNew int, temp, topP float64, topK int, stops map[int]bool, emit func(int) bool) (gen, promptTok, matched int, prefillS, decodeS float64, stopped bool) {
 	gen, promptTok, matched, prefillS, decodeS, stopped, _ = p.generateReusedContext(context.Background(), ids, maxNew, temp, topP, topK, stops, emit)
 	return
@@ -189,7 +196,10 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			prefillAt = checkpoint
 		}
 		if prefillAt < len(ids) {
-			logits = s.Prefill(ids[prefillAt:])
+			logits, err = p.prefillDivergentSuffix(ctx, s, ids[prefillAt:])
+			if err != nil {
+				return
+			}
 		}
 		prefillS = time.Since(tp).Seconds()
 	}
@@ -284,6 +294,29 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// bytes-per-token read cheaper than it is. Inert on a session with no ring, which is the default.
 	p.noteMoEResidency(s, int64(len(ids)-matched+gen))
 	return
+}
+
+// prefillDivergentSuffix bounds the temporary prompt panels used by the resident
+// Qwen hybrid Q4_K path. #9066 proves that PrefillNoLogits and Prefill append the
+// same KV, convolution, recurrent, and position state at nonzero cache positions;
+// only the last chunk needs the distribution consumed by decode. Other forward
+// paths keep the historical single Prefill call because they do not share that
+// append proof.
+func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernelPrefillSession, ids []int) ([]float32, error) {
+	if p.m == nil || p.backend != nil || !p.q4k || !p.m.Cfg.IsQwen35Hybrid() || len(ids) <= inKernelQwenQ4KPrefillChunkTokens {
+		return s.Prefill(ids), nil
+	}
+	for len(ids) > inKernelQwenQ4KPrefillChunkTokens {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		s.PrefillNoLogits(ids[:inKernelQwenQ4KPrefillChunkTokens])
+		ids = ids[inKernelQwenQ4KPrefillChunkTokens:]
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.Prefill(ids), nil
 }
 
 // decodeLane is one request's live decode state. decodeOne runs one token's worth of the
