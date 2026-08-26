@@ -9,7 +9,7 @@ import (
 )
 
 func TestQwen38UpstreamSupportMapContract(t *testing.T) {
-	path := filepath.Join("..", "..", "research", "qwen38-upstream-support-map-2026-08-26.md")
+	path := filepath.Join("..", "..", "notes", "qwen38-upstream-support-map-2026-08-26.md")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
