@@ -353,6 +353,21 @@ int mg_gdn_state_run(int owner,
     }
 }
 
+int mg_gdn_state_seed(int owner, const float *conv, int convElems, const float *recurrent, int recurrentElems) {
+    @autoreleasepool {
+        MGGDNState *state = mg_gdn_state_get(owner);
+        if (!state || !conv || !recurrent ||
+            convElems != state.convElems || recurrentElems != state.recurrentElems) return 0;
+        memcpy(state.convState.contents, conv, (size_t)convElems * sizeof(float));
+        memcpy(state.recurrentState.contents, recurrent, (size_t)recurrentElems * sizeof(float));
+#if TARGET_OS_OSX
+        [state.convState didModifyRange:NSMakeRange(0, (NSUInteger)convElems * sizeof(float))];
+        [state.recurrentState didModifyRange:NSMakeRange(0, (NSUInteger)recurrentElems * sizeof(float))];
+#endif
+        return 1;
+    }
+}
+
 int mg_gdn_state_reset(int owner) {
     if (owner < 0 || owner >= MG_GDN_MAX_OWNERS) return 0;
     MGGDNOwner slot;

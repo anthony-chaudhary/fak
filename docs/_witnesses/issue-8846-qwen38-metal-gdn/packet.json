@@ -1,0 +1,18 @@
+{
+  "schema": "fak-qwen38-metal-gdn-resident-witness/v1",
+  "issue": 8846,
+  "verdict": "REJECT",
+  "reason": "M3 Pro P=32/T=64 three-repetition A/B has not yet been captured from this exact source tree; resident decode stays opt-in and no throughput gain is claimed.",
+  "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+  "prompt_tokens": 32,
+  "decode_tokens": 64,
+  "repetitions_per_arm": 3,
+  "machine": "sanctioned M3 Pro",
+  "engine": "fak-native",
+  "backend": "metal",
+  "forward_path": "fak-native/metal/qwen35-gdn-resident-decode-v1",
+  "fallback": false,
+  "control_decode_tokens_per_second": [],
+  "candidate_decode_tokens_per_second": [],
+  "next_command": "go test ./docs/_witnesses/issue-8846-qwen38-metal-gdn -run '^TestQwen38MetalGDNWitness$' -count=1 -v"
+}

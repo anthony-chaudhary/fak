@@ -1,29 +1,15 @@
 {
   "rows": [
     {
-      "id": "nativeperf-render-checklist",
-      "canonical": "renderChecklist",
-      "family": "render-materialize",
-      "kind": "symbol",
-      "definition": "Serializes the validated native-performance rung graph as the human checklist/table.",
-      "distinction": "Renders committed metadata only; it does not execute, measure, or materialize model work.",
-      "distinct_from": [],
-      "aliases": [],
-      "grounding": "renderChecklist",
-      "grounding_kind": "symbol",
-      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
-      "parent": "",
-      "verdict": "crystal",
-      "gaps": []
-    },
-    {
       "id": "nativeperf-class-witnessed",
       "canonical": "ClassWitnessed",
       "family": "witness-proof",
       "kind": "symbol",
       "definition": "Evidence classification for observed throughput backed by named benchmark or issue evidence.",
-      "distinction": "Projected floors and roofs use ClassHypothesis and cannot use this witnessed class.",
-      "distinct_from": [],
+      "distinction": "ClassWitnessed classifies measured native-performance throughput backed by named evidence; projected floors and roofs use ClassHypothesis. It is not dispatchtick.ClaimWitnessed, the closure-audit verdict for a worker commit.",
+      "distinct_from": [
+        "drive-witness-proof-claimwitnessed"
+      ],
       "aliases": [],
       "grounding": "ClassWitnessed",
       "grounding_kind": "symbol",
@@ -37,10 +23,10 @@
       "canonical": "renderNativePerformance",
       "family": "render-materialize",
       "kind": "symbol",
-      "definition": "Renders the validated native-performance graph to the selected CLI output format.",
-      "distinction": "Selects JSON or checklist serialization only; it does not execute or materialize inference.",
+      "definition": "cmd/fak.renderNativePerformance projects a validated nativeperf.Graph into the human hill-climb report: envelope and comparison headers, the enabled/status/rung checklist, expected-versus-witnessed throughput, feature stack, gaps, and independent envelopes.",
+      "distinction": "It renders an already-built native-performance graph and performs no model execution or measurement. Unlike the agentdemo RenderText transcript, its rows expose performance evidence classes and next-witness obligations.",
       "distinct_from": [
-        "nativeperf-render-checklist"
+        "x2-render-materialize-rendertext"
       ],
       "aliases": [],
       "grounding": "renderNativePerformance",
