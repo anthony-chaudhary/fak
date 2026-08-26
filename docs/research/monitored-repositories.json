@@ -242,13 +242,84 @@
       "url": "https://github.com/llm-d/llm-d",
       "status": "studied",
       "priority": 9,
-      "why": "Kubernetes-native distributed-inference assembly deeply studied for pluginized endpoint routing, exact KV-event locality, flow control, P/D topology, workload-variant autoscaling, and executable guide contracts. FAK should interoperate rather than duplicate its control plane; the surviving gaps are an ownership-explicit v0.9 integration refresh and a live compatibility witness.",
-      "last_checked": "2026-08-18",
-      "checked_revision": "48fa8c0a76012038c76f30936fff9727c2e6909d",
-      "stars_at_check": 4051,
-      "last_push_at_check": "2026-08-18T18:05:57Z",
+      "why": "Kubernetes-native distributed-inference assembly deeply studied and exhaustively re-inventoried at v0.9-era main for pluginized endpoint routing, exact KV-event locality, flow control, P/D topology, workload-variant autoscaling, and executable guide contracts. FAK keeps policy/model/cache ownership and interoperates rather than duplicating the Kubernetes control plane; the live-cluster compatibility witness remains open.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "3243fcf1191348b55c7811267a98117f8b7a6910",
+      "stars_at_check": 4153,
+      "last_push_at_check": "2026-08-26T02:04:17Z",
       "study_note": "docs/research/llm-d-study-2026-08-18.md",
-      "refresh_issue": "#8988"
+      "refresh_issue": "#8988",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/llm-d-llm-d.json",
+        "indexed_revision": "3243fcf1191348b55c7811267a98117f8b7a6910",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 11,
+        "candidate_count": 4,
+        "filed_issue_count": 0,
+        "completeness_critic": "exhaustive pinned 1,129-file tree map plus GitHub aggregate and paginated issue, pull-request, discussion, release, tag, branch, milestone, project, roadmap, and history read-back; Apache-2.0 provenance, fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped control directory: .git",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api graphql -f query=<repository issue/PR/discussion/release/tag/branch aggregate query for llm-d/llm-d>",
+              "gh api --paginate --slurp repos/llm-d/llm-d/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo llm-d/llm-d --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:llm-d,name:llm-d) discussions(first:100)",
+              "gh api --paginate --slurp repos/llm-d/llm-d/releases?per_page=100",
+              "gh api --paginate --slurp repos/llm-d/llm-d/tags?per_page=100"
+            ],
+            "note": "Exact aggregates at observation: 533 issues (124 open), 1,841 PRs (100 open), zero discussions, 11 releases, and 66 tags."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"Kubernetes distributed inference endpoint routing KV cache locality flow control prefill decode disaggregation autoscaling\"",
+              "fak capabilities \"llm-d inference scheduler endpoint picker KV events prefix cache compatibility\"",
+              "fak capabilities \"vLLM Kubernetes gateway inference extension workload variant autoscaling\""
+            ],
+            "note": "FAK owns policy/model choice, context reuse, live control, and evidence; it does not duplicate llm-d Kubernetes endpoint selection, autoscaling, or deployment assembly."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/llm-d-llm-d.json#non_tree_study.candidate_matrix",
+              "docs/research/llm-d-study-2026-08-18.md#exhaustive-inventory-refresh-2026-08-25"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8988",
+              "https://github.com/anthony-chaudhary/fak/issues/8016",
+              "https://github.com/anthony-chaudhary/fak/issues/8017",
+              "https://github.com/anthony-chaudhary/fak/issues/6082",
+              "https://github.com/anthony-chaudhary/fak/issues/3888"
+            ],
+            "note": "Ownership contract #8016 shipped; compatibility, benchmark, and cache-warm follow-ons remain #8017, #6082, and #3888. No duplicate issue was filed."
+          }
+        ],
+        "issue_refs": [
+          "#8988",
+          "#8016",
+          "#8017",
+          "#6082",
+          "#3888"
+        ]
+      }
     },
     {
       "repository": "deepseek-ai/deepseek-harness",

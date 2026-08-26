@@ -210,3 +210,55 @@ measured FAK-specific demand changes the boundary.
 - [FAK serving SOTA note](../serving/pd-disaggregation-kv-routing-sota.md)
 
 
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue [#8988](https://github.com/anthony-chaudhary/fak/issues/8988) refreshes the
+study denominator without replacing the mechanism analysis above. The exhaustive map
+is [`inventory/llm-d-llm-d.json`](inventory/llm-d-llm-d.json), generated from
+`llm-d/llm-d@3243fcf1191348b55c7811267a98117f8b7a6910`. It indexes 1,129 files,
+593 directories, 30,601,578 bytes, and 11 top-level subsystems. The revision is 17
+commits after the prior checked revision; the intervening changes are predominantly
+v0.9 guide, artifact, CI, template, and platform corrections, not a reversal of the
+ownership decisions above.
+
+### Complete source-class read-back
+
+- **Tree:** README/docs, architecture/design, runtime/configuration, tests/fixtures,
+  history/release machinery, roadmap markers, and `LICENSE` were walked at the pinned
+  revision. `.git` is the only skipped control directory.
+- **Forge:** GitHub GraphQL exact aggregates and paginated REST/CLI read-back covered
+  all 533 issues (124 open), 1,841 pull requests (100 open), zero discussions, 11
+  releases, 66 tags, 11 branches, 11 milestones, and one project as observed on
+  2026-08-25. `v0.9.0` is the latest release; the `v0.10.0` and `v1.0.0` milestones
+  are directional signals, not shipped contracts.
+- **History and provenance:** the local clone supplied refs and the full revision
+  delta. Both the pinned `LICENSE` and repository API identify Apache-2.0. FAK may
+  adapt ideas with attribution, but copied implementation must retain applicable
+  license and notice provenance.
+- **FAK self-query:** three `fak capabilities` queries covered Kubernetes routing,
+  KV-event locality, flow control, P/D disaggregation, autoscaling, Gateway API,
+  and vLLM integration terms. They found FAK-native model choice, context reuse,
+  live control, and evidence surfaces, but no Kubernetes inference control-plane
+  equivalent. That confirms interoperation rather than duplication.
+
+The pinned map's `non_tree_study` block records the commands, aggregate counts,
+roadmap treatment, license decision, self-query results, and candidate matrix. This
+keeps mutable forge observations separate from claims about the immutable tree.
+
+### Refreshed FAK decisions and follow-ons
+
+| Candidate | Decision | Durable owner |
+|---|---|---|
+| v0.9 ownership and double-routing contract | **Already shipped.** FAK owns policy/model/cache decisions; llm-d owns cluster endpoint selection and Kubernetes assembly. | [#8016](https://github.com/anthony-chaudhary/fak/issues/8016), `docs/integrations/llm-d.md` |
+| Pinned live-cluster compatibility receipt | **Keep open.** Static inventory evidence cannot replace a live cluster witness. | [#8017](https://github.com/anthony-chaudhary/fak/issues/8017) |
+| KV-event locality, speculative cache-warm metadata, and matched prefix-reuse measurement | **Borrow as bounded inspiration, preserving fak-native cache ownership.** | [#3888](https://github.com/anthony-chaudhary/fak/issues/3888), [#6082](https://github.com/anthony-chaudhary/fak/issues/6082) |
+| Endpoint-scoring plugins, flow control, P/D topology, workload-variant autoscaling, Gateway API, and deployment guides | **Do not port.** These are llm-d control-plane responsibilities; FAK should expose signals and compatibility seams instead of building a second Kubernetes inference platform. | Interoperation boundary above |
+
+Every surviving action is shipped or already tracked, so this refresh files no duplicate
+follow-on. The row-specific completion witness is:
+
+```text
+fak study-monitor --registry docs/research/monitored-repositories.json --inventory-check --json
+repository=llm-d/llm-d mode=exhaustive ready=true indexed_revision=3243fcf1191348b55c7811267a98117f8b7a6910
+```
