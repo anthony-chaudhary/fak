@@ -7,6 +7,16 @@ description: "An exhaustive fak-native research map for reducing, reusing, hidin
 
 > **Thesis:** “Bandwidth-bound” describes one measured envelope. It does not mean the bottleneck is immutable.
 
+## Hardware economics companion
+
+Issue #9172 adds a reproducible [primary-source ledger and deterministic net accepted-token-value
+model](../_witnesses/issue-9172-hardware-net-token-value/README.md). It spans representative GPU,
+CPU, unified-memory, HBM/cache, CXL/link, storage/topology, and software byte-reduction scenarios,
+then charges capex amortization, energy, utilization, quality rejection, discarded work, migration,
+availability, and reliability. Sourced specifications remain separate from explicitly illustrative
+operator assumptions; generated results are a sensitivity model, not benchmark or procurement
+claims. The witness also pre-registers a falsifiable fak-native byte-reduction experiment.
+
 Attack every term in accepted-token time rather than accepting the measured envelope:
 
 ```text
