@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **134** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **129** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **105** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 14; `policy_regulation` 5; `serving_system` 11; `standard` 2; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 70; `vendor_claim` 17; `reported_observation` 11; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 95; `medium_high` 30; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **134/134 published; 134/134 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **140** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **135** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **111** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 14; `policy_regulation` 5; `serving_system` 11; `standard` 2; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 74; `vendor_claim` 19; `reported_observation` 11; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 99; `medium_high` 32; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **140/140 published; 140/140 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 134 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 140 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -55,13 +55,13 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 ### 1. Frontier labs and regions — **Partial**
 
 **Present:** OpenAI, Anthropic, xAI, Google DeepMind, Meta, Amazon Nova, Apple,
-Cohere, Ai2, DeepSeek, Alibaba/Qwen, Moonshot, MiniMax, ByteDance Seed, Baidu,
-Tencent, Z.ai/Zhipu, Mistral, AI21, TII, Sarvam, Sakana, NAVER Cloud, and Sea AI Lab.
+Cohere, Ai2, Microsoft Phi, DeepSeek, Alibaba/Qwen, Moonshot, MiniMax, ByteDance Seed, Baidu,
+Tencent, Z.ai/Zhipu, Huawei Pangu, Mistral, AI21, TII, MBZUAI/G42 IFM, Sarvam, Sakana, NTT, LG AI Research, NAVER Cloud, AI Singapore, and Sea AI Lab.
 The census now spans the U.S./Canada, China, Europe, Israel, the Middle East, India,
 Japan, Korea, and Southeast Asia and records model/serving statements without treating
 plans as delivered capacity.
 
-**Missing or shallow:** Microsoft AI/Phi, NVIDIA Nemotron, Huawei/Pangu/Ascend,
+**Missing or shallow:** NVIDIA Nemotron, Microsoft first-party traffic, Huawei Ascend physical evidence,
 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime, G42/Inception/MBZUAI, Saudi
 programs, LG/Samsung/SKT/Kakao, NTT/Preferred Networks/Fujitsu/SoftBank, AI Singapore,
 Grab/GoTo/SCB10X/VinAI, Europe beyond Mistral/DeepMind, and many private labs. Most
@@ -280,8 +280,8 @@ dates, affected hardware/services, implementation status, and later amendments.
 |---|---|---|
 | Production measurement/observation | **16 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
 | Benchmark/synthetic | **11 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **70 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
-| Vendor claims | **17 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
+| Official statements | **74 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Vendor claims | **19 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **17 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
 

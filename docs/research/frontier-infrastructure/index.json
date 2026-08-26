@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T18:03:00-07:00",
-  "issue": 9315,
+  "updated_at": "2026-08-26T18:22:00-07:00",
+  "issue": 9300,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 134,
+    "entry_count": 140,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -70,6 +70,7 @@
       "workload_trace"
     ],
     "entities": [
+      "AI Singapore SEA-LION",
       "AI datacenter power architecture research",
       "AI optical interconnect sector",
       "AI21 Labs",
@@ -118,20 +119,25 @@
       "Google DeepMind",
       "Google internal developer tools",
       "Groq",
+      "Huawei Cloud Pangu",
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
       "IndiaAI Mission",
       "International Energy Agency",
+      "LG AI Research",
       "Large-scale training reliability study",
       "Leyline",
+      "MBZUAI / G42 Institute of Foundation Models",
       "Meta",
       "Microsoft",
       "Microsoft Research Mnemosyne",
+      "Microsoft Research Phi",
       "MiniMax",
       "Mistral AI",
       "Moonshot AI",
       "Multi-tenant prefix-cache admission study",
       "NAVER Cloud",
+      "NTT tsuzumi",
       "NVIDIA",
       "NVIDIA / Coherent",
       "NVIDIA / Groq",
@@ -5009,6 +5015,241 @@
       "fak_implications": [
         "Record network specification/version and compliance evidence in cluster receipts.",
         "Benchmark the deployed implementation rather than assuming specification conformance implies performance."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "microsoft-phi4-reasoning-2025",
+      "category": "frontier_lab",
+      "entity": "Microsoft Research Phi",
+      "topic": [
+        "small_language_model",
+        "reasoning_mode",
+        "inference_time_compute",
+        "open_weights"
+      ],
+      "published_at": "2025-04-30",
+      "event_at": "2025-04-30",
+      "source_title": "Phi-4-reasoning Technical Report",
+      "source_url": "https://www.microsoft.com/en-us/research/publication/phi-4-reasoning-technical-report/",
+      "source_kind": "technical_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Microsoft Research introduced Phi-4-reasoning as a 14B-parameter reasoning model fine-tuned from Phi-4 with curated prompts and o3-mini reasoning demonstrations, using detailed reasoning chains and inference-time compute.",
+      "quantified": {
+        "parameters": 14000000000
+      },
+      "assumptions": [
+        "Compact open-weight reasoning models create a different memory and deployment envelope while retaining long, variable reasoning outputs."
+      ],
+      "contradictions_or_limits": [
+        "Author benchmark results do not establish neutral production goodput, user demand, or reasoning-length distribution.",
+        "The report does not disclose production fleet, request share, cluster scale, or per-query inference-time-compute distribution."
+      ],
+      "fak_implications": [
+        "Separate model parameter footprint from output-token and reasoning-time cost.",
+        "Benchmark compact reasoning models under mode- and quality-matched output distributions."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "huawei-pangu5-industrial-scale-2025",
+      "category": "frontier_lab",
+      "entity": "Huawei Cloud Pangu",
+      "topic": [
+        "model_family",
+        "industry_models",
+        "parameter_scale",
+        "regional_hardware",
+        "production_adoption"
+      ],
+      "published_at": "2025-03-26",
+      "event_at": "2024-12-31",
+      "source_title": "Huawei 2024 Annual Report",
+      "source_url": "https://www.huawei.com/en/annual-report/2024",
+      "source_kind": "official_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Huawei reported Pangu 5.0 models spanning more than 1B, 10B, 100B, and 1T parameters and deployment across more than 400 scenarios in over 30 industries.",
+      "quantified": {
+        "parameter_tiers": [
+          1000000000,
+          10000000000,
+          100000000000,
+          1000000000000
+        ],
+        "deployed_scenarios_gt": 400,
+        "industries_gt": 30
+      },
+      "assumptions": [
+        "Regional labs may operate tiered industry-specific model families on domestic cloud and accelerator stacks rather than one general-purpose endpoint."
+      ],
+      "contradictions_or_limits": [
+        "Scenario count is vendor-reported adoption, not requests, users, revenue, accelerator inventory, or goodput.",
+        "The annual report does not disclose training cluster, serving hardware mix, batch/cache policy, or model-tier traffic shares."
+      ],
+      "fak_implications": [
+        "Track model tier, industry scenario, region, and accelerator stack as separate routing dimensions.",
+        "Do not infer production load from scenario counts or parameter ceilings."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "lg-exaone4-hybrid-2025",
+      "category": "frontier_lab",
+      "entity": "LG AI Research",
+      "topic": [
+        "reasoning_mode",
+        "on_device",
+        "enterprise",
+        "tool_use",
+        "regional_language"
+      ],
+      "published_at": "2025-07-15",
+      "event_at": "2025-07-15",
+      "source_title": "Unveiling EXAONE 4.0, the next generation of hybrid AI",
+      "source_url": "https://www.lgresearch.ai/blog/view?seq=576",
+      "source_kind": "official_model_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "LG AI Research released EXAONE 4.0 as a hybrid reasoning/non-reasoning family with a 32B professional model and 1.2B on-device model, supporting Korean, English, Spanish, function calling, and MCP-oriented agent use.",
+      "quantified": {
+        "professional_parameters": 32000000000,
+        "on_device_parameters": 1200000000,
+        "supported_languages": 3
+      },
+      "assumptions": [
+        "One family may route between server and device tiers and between direct and reasoning modes.",
+        "Regional-language and enterprise tool workloads can have distinct tokenization and privacy constraints."
+      ],
+      "contradictions_or_limits": [
+        "Performance and efficiency claims are vendor-reported; no physical cluster, production traffic, mode share, or device latency distribution is disclosed.",
+        "Model downloads or derivative models do not establish active production use."
+      ],
+      "fak_implications": [
+        "Represent device/server and reasoning/direct mode as explicit scheduler inputs.",
+        "Measure Korean/Spanish tokenizer expansion and tool-call behavior separately from English."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aisingapore-sealion45-2026",
+      "category": "frontier_lab",
+      "entity": "AI Singapore SEA-LION",
+      "topic": [
+        "regional_language",
+        "multimodal",
+        "agentic",
+        "speculative_decoding",
+        "open_model"
+      ],
+      "published_at": "2026-05-20",
+      "event_at": "2026-05-20",
+      "source_title": "SEA-LION: Empowering Open Multilingual AI for Southeast Asia",
+      "source_url": "https://aisingapore.org/aiproducts/sea-lion/",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "AI Singapore describes SEA-LION v4.5 as an open multilingual, multimodal, agentic model family for more than 11 Southeast Asian languages, with a custom speculative decoder claimed to deliver up to 6x inference efficiency.",
+      "quantified": {
+        "languages_gt": 11,
+        "speculative_efficiency_claim_up_to": 6
+      },
+      "assumptions": [
+        "Regional-language models require locale-specific token, safety, and cultural workload distributions.",
+        "A custom draft/speculative path can be part of a sovereign open-model stack."
+      ],
+      "contradictions_or_limits": [
+        "The 6x figure is an official project claim without a matched production envelope in this corpus.",
+        "The page does not disclose acceptance distribution, model size, hardware, traffic, or user shares by language."
+      ],
+      "fak_implications": [
+        "Benchmark speculative acceptance and verifier cost by language and prompt class.",
+        "Include Southeast Asian multilingual and multimodal agent workloads in regional replay."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "ntt-tsuzumi-lightweight-2024",
+      "category": "frontier_lab",
+      "entity": "NTT tsuzumi",
+      "topic": [
+        "regional_language",
+        "small_language_model",
+        "cpu_inference",
+        "single_gpu",
+        "enterprise_deployment"
+      ],
+      "published_at": "2024-03-26",
+      "event_at": "2024-03-25",
+      "source_title": "NTT large language model tsuzumi characteristics and deployment",
+      "source_url": "https://www.ntt.com/bizon/tsuzumi.html",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "NTT describes tsuzumi service tiers at 0.6B and 7B parameters, with the ultra-light model intended for CPU inference and the 7B tier intended to run on one GPU for Japanese enterprise workloads.",
+      "quantified": {
+        "ultralight_parameters": 600000000,
+        "light_parameters": 7000000000,
+        "light_gpu_count": 1
+      },
+      "assumptions": [
+        "Small regional-language models can target CPU/single-GPU private deployment and industry tuning rather than datacenter-scale general inference."
+      ],
+      "contradictions_or_limits": [
+        "Size and fit claims do not establish latency, concurrency, quality, power, or production demand.",
+        "The source does not disclose hardware SKU, quantization, context length, request distribution, or observed cost."
+      ],
+      "fak_implications": [
+        "Include CPU and single-GPU Japanese enterprise tiers in deployment matrices.",
+        "Measure private-deployment cost and tokenizer behavior rather than assuming parameter count determines efficiency."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "mbzuai-k2think-v2-2026",
+      "category": "frontier_lab",
+      "entity": "MBZUAI / G42 Institute of Foundation Models",
+      "topic": [
+        "sovereign_ai",
+        "reasoning_mode",
+        "open_model",
+        "training_transparency",
+        "regional_lab"
+      ],
+      "published_at": "2026-01-27",
+      "event_at": "2026-01-27",
+      "source_title": "K2 Think V2: a fully sovereign reasoning model",
+      "source_url": "https://mbzuai.ac.ae/news/k2-think-v2-a-fully-sovereign-reasoning-model/",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "MBZUAI released K2 Think V2 as a 70B-parameter open general reasoning model described as fully sovereign and open from pretraining through post-training using Institute-curated data.",
+      "quantified": {
+        "parameters": 70000000000
+      },
+      "assumptions": [
+        "Sovereign model programs can treat training-data provenance, code, checkpoints, and regional control as first-class product requirements."
+      ],
+      "contradictions_or_limits": [
+        "Benchmark leadership is author-reported and does not disclose physical training cluster, production traffic, reasoning-token distribution, or serving cost.",
+        "“Sovereign” is a governance/provenance claim, not capacity or locality evidence by itself."
+      ],
+      "fak_implications": [
+        "Track training provenance, openness, jurisdiction, and deployment location separately.",
+        "Benchmark reasoning output tails and serving footprint rather than inferring efficiency from parameter count."
       ],
       "rumor": {
         "is_rumor": false

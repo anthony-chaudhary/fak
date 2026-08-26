@@ -6,7 +6,7 @@
 
 ## Result first
 
-The current index now contains **41 frontier-lab entries** within a **112-entry**
+The current index now contains **47 frontier-lab entries** within a **140-entry**
 corpus. This pass adds primary-source coverage for major U.S./Canadian labs and for
 China, Israel, the Middle East, India, Japan, Korea, and Southeast Asia. It reduces a
 strong OpenAI/Anthropic bias, but it does **not** make the global census complete.
@@ -56,7 +56,7 @@ It does not mean complete organizational coverage.
 | Checked | Apple | Roughly 3B on-device model, 2-bit QAT, KV sharing, server Parallel-Track MoE, and Private Cloud Compute split. | Server size/fleet, request routing share, concurrency, and production latency. |
 | Checked | Cohere | Command A enterprise/agentic and 256K-context positioning. | Neutral efficiency reproduction, private-deployment fleet, customer/tenant traffic, and regional demand. |
 | Checked | Ai2 | OLMo 2 32B trained to 6T tokens on 160 × 8 H100 nodes; >1,800 tokens/s/GPU and ~38% MFU. | Net wall-clock availability/cost and inference demand; training throughput is not serving goodput. |
-| Unchecked | Microsoft AI / Phi | No dedicated model-lab entry; Microsoft appears in cloud, filings, research, and partnerships. | Current model/training envelope, first-party product traffic, and physical cluster attribution. |
+| Checked | Microsoft Research Phi | Phi-4-reasoning 14B inference-time-compute model; compact open-weight reasoning envelope. | Physical training/serving cluster, first-party traffic, reasoning-length distribution, and neutral goodput. |
 | Unchecked | NVIDIA model research | NVIDIA appears as platform/partner, not as a separately audited model lab. | Nemotron model training and deployed inference envelope. |
 | Unchecked | Databricks/MosaicML, Essential AI, Reflection AI, Safe Superintelligence, Thinking Machines, World Labs | No dedicated primary-source entries. | Model status, cluster/funding-to-capacity conversion, product workload, and deployment state. |
 
@@ -72,7 +72,7 @@ It does not mean complete organizational coverage.
 | Checked | Baidu | ERNIE 5.0 PaddlePaddle hybrid parallelism, FP8 activation storage, adaptive offload, and separated tokenizer/backbone nodes. | Cluster size/SKU, net training efficiency, serving topology, and ERNIE traffic. |
 | Checked | Tencent | Hunyuan-Large 389B total/52B active, 256K context, mixed routing, and KV compression. | Expert-load distribution, cluster, deployed fleet, and service economics. |
 | Checked | Z.ai / Zhipu AI | GLM-4.5 355B total/32B active, 23T training tokens, and hybrid thinking/direct modes. | Cluster hardware, mode-selection rates, API traffic, and independent benchmark reproduction. |
-| Unchecked | Huawei Pangu / Ascend | No dedicated entry. | Ascend training/serving hardware, cluster topology, software stack, supply constraints, and production workloads. |
+| Checked | Huawei Cloud Pangu | Pangu 5.0 tiers above 1B/10B/100B/1T parameters and >400 scenarios across >30 industries. | Ascend cluster topology, model-tier traffic, requests/users, batch/cache behavior, and neutral deployment evidence. |
 | Unchecked | 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime, iFlytek, Meituan, Xiaomi | No dedicated current entries. | Model releases, physical compute, adoption, deployment, and lifecycle evidence. |
 
 ### Europe
@@ -110,21 +110,24 @@ It does not mean complete organizational coverage.
 | Status | Lab | Evidence now indexed | What remains unknown |
 |---|---|---|---|
 | Checked | Sakana AI | Composition/model-merging, automated AI science, edge-efficient model strategy, and enterprise deployment claims. | Model and cluster scale, measured energy, customer traffic, and repeatable production outcomes. |
-| Unchecked | NTT, Preferred Networks, Fujitsu, SoftBank/SAKURA, AIST and university programs | No dedicated model-lab entries. | Domestic accelerator/cloud use, training runs, sovereign programs, and service traffic. |
+| Checked | NTT tsuzumi | 0.6B CPU and 7B single-GPU Japanese enterprise deployment tiers. | Hardware SKU, quantization, context, production latency/concurrency, and demand. |
+| Unchecked | Preferred Networks, Fujitsu, SoftBank/SAKURA, AIST and university programs | No dedicated model-lab entries. | Domestic accelerator/cloud use, training runs, sovereign programs, and service traffic. |
 
 ### Korea
 
 | Status | Lab | Evidence now indexed | What remains unknown |
 |---|---|---|---|
 | Checked | NAVER Cloud | HyperCLOVA X THINK: 6T Korean/English tokens, 128K context, reasoning/length-control training, and multimodal/agentic targets. | Parameter/cluster size, production demand, language mix, and serving economics. |
-| Unchecked | LG AI Research, Samsung, SK Telecom, Kakao Brain/related programs | No dedicated entries. | EXAONE/Gauss/A.X/Kakao model and cluster envelopes, product traffic, and lifecycle. |
+| Checked | LG AI Research | EXAONE 4.0 32B professional + 1.2B on-device hybrid reasoning/direct family with tool use. | Cluster, traffic, mode selection, device latency, and neutral efficiency. |
+| Unchecked | Samsung, SK Telecom, Kakao Brain/related programs | No dedicated entries. | Gauss/A.X/Kakao model and cluster envelopes, product traffic, and lifecycle. |
 
 ### Southeast Asia
 
 | Status | Lab | Evidence now indexed | What remains unknown |
 |---|---|---|---|
 | Checked | Sea AI Lab | Sailor2: stated production preference for 8B/20B tiers, 1B speculative-decoding/research tier, ~500B continued-pretraining tokens, and 15 languages. | Request counts, tenant/language shares, speculative acceptance, hardware, and deployed goodput. |
-| Unchecked | Singapore AI Singapore, Grab, GoTo, SCB10X, VinAI, regional sovereign programs | SCB10X appears only as a Sailor2 collaborator; no dedicated lab entries. | Model programs, compute, product demand, and country/language distributions. |
+| Checked | AI Singapore SEA-LION | v4.5 multilingual/multimodal/agentic family for >11 SEA languages with custom speculative decoder. | Model size, hardware, acceptance distribution, traffic, and language/user shares. |
+| Unchecked | Grab, GoTo, SCB10X, VinAI, regional sovereign programs | SCB10X appears only as a Sailor2 collaborator; no dedicated lab entries. | Model programs, compute, product demand, and country/language distributions. |
 
 ## Cross-lab parameter observations
 
@@ -140,13 +143,13 @@ It does not mean complete organizational coverage.
 
 ## Remaining priority queue
 
-1. Microsoft AI/Phi and NVIDIA Nemotron model-lab envelopes.
-2. Huawei Pangu/Ascend, 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime,
+1. NVIDIA Nemotron plus Microsoft first-party deployment/traffic evidence.
+2. Huawei Ascend physical envelope, 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime,
    iFlytek, Meituan, and Xiaomi.
-3. G42/Inception/MBZUAI and Saudi ALLaM/SDAIA sovereign programs.
-4. LG EXAONE, Samsung Gauss, SKT A.X, and Kakao-related Korean programs.
-5. NTT, Preferred Networks, Fujitsu, SoftBank/SAKURA, and Japanese public compute.
-6. AI Singapore, Grab/GoTo, SCB10X, VinAI, and regional sovereign initiatives.
+3. G42/Inception Jais/Nanda deployment evidence and Saudi ALLaM/SDAIA sovereign programs.
+4. Samsung Gauss, SKT A.X, and Kakao-related Korean programs.
+5. Preferred Networks, Fujitsu, SoftBank/SAKURA, and Japanese public compute.
+6. Grab/GoTo, SCB10X, VinAI, and regional sovereign initiatives.
 7. Europe beyond Mistral and DeepMind, plus private U.S./Canadian labs.
 8. For every checked lab: a second pass on failures, cancellations, users/requests,
    physical serving hardware, geography, and lifecycle from release to active goodput.
