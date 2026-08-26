@@ -642,7 +642,28 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 		return refuse(ReapCodeProofRefused,
 			"untracked work cannot be proven byte-equivalent to a supersession commit", "")
 	}
-	rc, detail = run(git, wtPath, []string{"diff", "--no-ext-diff", "--quiet", resolved, "--"})
+	// Compare only paths changed from this worker's pinned HEAD. The rest of its
+	// checkout is intentionally stale and may differ from newer, unrelated trunk
+	// commits. Keep rename detection off so a rename contributes both its deletion
+	// and addition to the proof instead of hiding one side behind a similarity guess.
+	rc, dirtyOutput := run(git, wtPath, []string{
+		"diff", "--no-ext-diff", "--no-renames", "--name-only", "-z", "HEAD", "--",
+	})
+	if rc != 0 {
+		return gitFailure("cannot identify tracked dirty worktree paths", rc, dirtyOutput)
+	}
+	dirtyPaths := splitNULPaths(dirtyOutput)
+	if len(dirtyPaths) == 0 {
+		return refuse(ReapCodeProofRefused,
+			"dirty worktree has no provable tracked path set", "")
+	}
+	compareArgs := []string{"diff", "--no-ext-diff", "--quiet", resolved, "--"}
+	for _, path := range dirtyPaths {
+		// Git still interprets pathspec magic after `--`; force every status-derived
+		// name literal so a hostile filename cannot exclude another dirty path.
+		compareArgs = append(compareArgs, ":(literal)"+path)
+	}
+	rc, detail = run(git, wtPath, compareArgs)
 	if rc != 0 {
 		if rc == ReapTimeoutExitCode {
 			return gitFailure("supersession content check timed out", rc, detail)
@@ -666,6 +687,17 @@ func ReapChecked(root, wtPath, supersededBy string, git GitRunner) Result {
 	res.Code = ReapCodeVerifiedWorktreeReaped
 	res.SupersededBy = resolved
 	return res
+}
+
+func splitNULPaths(output string) []string {
+	fields := strings.Split(output, "\x00")
+	paths := make([]string, 0, len(fields))
+	for _, path := range fields {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 // ReapWithBackend is the injectable form of Reap.

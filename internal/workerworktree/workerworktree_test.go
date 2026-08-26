@@ -2,6 +2,7 @@ package workerworktree
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -322,6 +323,156 @@ func TestReapRefusesNonWorkerWorktree(t *testing.T) {
 	if len(g.calls) != 0 {
 		t.Fatalf("must never touch git for a non-worker path, got %v", g.calls)
 	}
+}
+
+type reapProofFixture struct {
+	repo string
+	wt   string
+	base string
+}
+
+func newReapProofFixture(t *testing.T) reapProofFixture {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	reapProofGit(t, repo, "init", "-q", "-b", "main")
+	reapProofGit(t, repo, "config", "user.email", "reap-proof@test")
+	reapProofGit(t, repo, "config", "user.name", "reap proof")
+	reapProofGit(t, repo, "config", "commit.gpgsign", "false")
+	reapProofGit(t, repo, "config", "core.filemode", "true")
+	if err := os.WriteFile(filepath.Join(repo, "target.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "peer.txt"), []byte("peer base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reapProofGit(t, repo, "add", "target.txt", "peer.txt")
+	reapProofGit(t, repo, "commit", "-q", "-m", "base")
+	base := strings.TrimSpace(reapProofGit(t, repo, "rev-parse", "HEAD"))
+	prepared := Prepare(repo, "workerworktree", "9244", base, t.TempDir(), nil)
+	if !prepared.OK {
+		t.Fatalf("prepare fixture worktree: %+v", prepared)
+	}
+	return reapProofFixture{repo: repo, wt: prepared.Path, base: base}
+}
+
+func reapProofGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func writeReapProofFile(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func commitReapProofTrunk(t *testing.T, f reapProofFixture) string {
+	t.Helper()
+	reapProofGit(t, f.repo, "add", "-A")
+	reapProofGit(t, f.repo, "commit", "-q", "-m", "supersession")
+	return strings.TrimSpace(reapProofGit(t, f.repo, "rev-parse", "HEAD"))
+}
+
+func assertReapProofRefused(t *testing.T, f reapProofFixture, supersededBy string) {
+	t.Helper()
+	res := ReapChecked(f.repo, f.wt, supersededBy, nil)
+	if res.OK || res.Code != ReapCodeProofRefused || !res.Preserved {
+		t.Fatalf("unsafe reap proof must be refused and preserved: %+v", res)
+	}
+	if _, err := os.Stat(f.wt); err != nil {
+		t.Fatalf("refused worktree was not preserved: %v", err)
+	}
+}
+
+func TestReapCheckedAcceptsOnlyByteEquivalentDirtyPaths(t *testing.T) {
+	t.Run("matching dirty paths ignore unrelated trunk changes", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		writeReapProofFile(t, f.wt, "target.txt", "landed\n")
+		writeReapProofFile(t, f.repo, "target.txt", "landed\n")
+		writeReapProofFile(t, f.repo, "peer.txt", "peer advanced on trunk\n")
+		supersededBy := commitReapProofTrunk(t, f)
+
+		res := ReapChecked(f.repo, f.wt, supersededBy, nil)
+		if !res.OK || !res.Removed || res.Code != ReapCodeVerifiedWorktreeReaped {
+			t.Fatalf("byte-equivalent dirty paths should reap: %+v", res)
+		}
+		if res.SupersededBy != supersededBy {
+			t.Fatalf("supersession = %q, want %q", res.SupersededBy, supersededBy)
+		}
+	})
+
+	t.Run("content mismatch", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		writeReapProofFile(t, f.wt, "target.txt", "worker bytes\n")
+		writeReapProofFile(t, f.repo, "target.txt", "landed bytes\n")
+		assertReapProofRefused(t, f, commitReapProofTrunk(t, f))
+	})
+
+	t.Run("mode mismatch", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		writeReapProofFile(t, f.wt, "target.txt", "landed\n")
+		writeReapProofFile(t, f.repo, "target.txt", "landed\n")
+		reapProofGit(t, f.repo, "add", "target.txt")
+		reapProofGit(t, f.repo, "update-index", "--chmod=+x", "target.txt")
+		reapProofGit(t, f.repo, "commit", "-q", "-m", "supersession")
+		supersededBy := strings.TrimSpace(reapProofGit(t, f.repo, "rev-parse", "HEAD"))
+		assertReapProofRefused(t, f, supersededBy)
+	})
+
+	t.Run("symlink mismatch", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		writeReapProofFile(t, f.wt, "target.txt", "destination")
+		if err := os.Remove(filepath.Join(f.repo, "target.txt")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("destination", filepath.Join(f.repo, "target.txt")); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		assertReapProofRefused(t, f, commitReapProofTrunk(t, f))
+	})
+
+	t.Run("missing tracked file", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		if err := os.Remove(filepath.Join(f.wt, "target.txt")); err != nil {
+			t.Fatal(err)
+		}
+		writeReapProofFile(t, f.repo, "target.txt", "landed\n")
+		assertReapProofRefused(t, f, commitReapProofTrunk(t, f))
+	})
+
+	t.Run("untracked path", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		writeReapProofFile(t, f.wt, "new.txt", "landed\n")
+		writeReapProofFile(t, f.repo, "new.txt", "landed\n")
+		assertReapProofRefused(t, f, commitReapProofTrunk(t, f))
+	})
+
+	t.Run("missing commit", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		writeReapProofFile(t, f.wt, "target.txt", "landed\n")
+		assertReapProofRefused(t, f, "0000000000000000000000000000000000000000")
+	})
+
+	t.Run("commit outside trunk ancestry", func(t *testing.T) {
+		f := newReapProofFixture(t)
+		writeReapProofFile(t, f.wt, "target.txt", "side bytes\n")
+		writeReapProofFile(t, f.repo, "target.txt", "side bytes\n")
+		reapProofGit(t, f.repo, "add", "target.txt")
+		tree := strings.TrimSpace(reapProofGit(t, f.repo, "write-tree"))
+		side := strings.TrimSpace(reapProofGit(t, f.repo, "commit-tree", tree, "-p", f.base, "-m", "side"))
+		reapProofGit(t, f.repo, "reset", "--hard", "-q", f.base)
+		assertReapProofRefused(t, f, side)
+	})
 }
 
 // ---- Land ----------------------------------------------------------------- //
