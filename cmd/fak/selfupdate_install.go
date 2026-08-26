@@ -12,7 +12,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 )
 
-func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths []string) {
+func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths []string, handoffSession string, handoffTimeout time.Duration, successorArgs []string) {
 	installTarget := strings.TrimSpace(*target)
 	if installTarget == "" {
 		exe, err := os.Executable()
@@ -200,6 +200,17 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		emitSelfUpdateOutcome(outcomeHotCopyDivergent, installTarget,
 			"target installed; hot copies still divergent: "+strings.Join(audit.Lines(), " | "))
 		return
+	}
+	if handoffSession != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), handoffTimeout)
+		defer cancel()
+		handoff := runSelfUpdateHandoff(ctx, installTarget, handoffSession, headRev, successorArgs)
+		selfUpdateReceiptHandoff = &handoff
+		if handoff.State == selfinstall.HandoffRefused {
+			emitSelfUpdateOutcome(outcomeHandoffRefused, installTarget, handoff.Detail)
+			return
+		}
+		res.Detail = strings.TrimSpace(res.Detail + "; session " + handoffSession + " handed off to " + headRev)
 	}
 	emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
 

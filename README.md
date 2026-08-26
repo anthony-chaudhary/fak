@@ -4,18 +4,27 @@
 
 # fak — configure your agents for the task at hand
 
-> **Native inference goal:** [fak-native is the product and performance path, intended to beat
-> llama.cpp in matched, quality-constrained envelopes](docs/native-inference-goal.md).
-> llama.cpp is an explicit benchmark, diagnosis, interoperability, or borrowing reference,
-> never a silent fallback.
+> Try the [native inference goal](docs/native-inference-goal.md): fak-native is the product and performance path.
+> It is intended to beat llama.cpp in matched, quality-constrained envelopes. llama.cpp remains
+> an explicit reference for benchmarks and diagnosis. It also supports interoperability and
+> borrowing, but never acts as a silent fallback.
 
-AI agents can do more work than one fixed pile of prompts, tools, permissions, and model
-settings can handle well. fak lets you run your agents with a small configuration chosen for
-this task, while one boundary manages their context, models, tools, and record of what happened.
+AI agents can do more work than one fixed set of prompts, tools, permissions, and model settings
+can handle well. fak gives each task a small configuration. One boundary then manages context,
+models, tools, and the record of what happened.
 
-**Start here:** if you want the quickest proof, run the offline demo below; if you need
-security, inspect the default-deny policy; if you need performance, follow the witnessed
-native-model results. Claims and limitations link to the evidence behind them.
+## Start here
+
+Wrap the agent you already use with one command. fak forwards your existing subscription
+credential and applies a default-deny policy floor, with no separate API key:
+
+```bash
+fak guard -- codex  # -> launches Codex behind the policy floor
+```
+
+For the quickest proof, run the offline demo below. For security details, inspect the
+default-deny policy. For performance, follow the witnessed native-model results.
+Claims and limitations link to the evidence behind them.
 
 <!-- native-status: 2026-08-25 -->
 ### Native-model status — 2026-08-25
@@ -24,49 +33,44 @@ This compact readout is designed for frequent refreshes; every row links its aut
 
 | Lane | Latest witnessed result | Current hold |
 |---|---|---|
-| **[Qwen3.8-27B](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md)** | Exact BF16 target: 3/3 correct with thinking on and off; disabling thinking cut p95 time to first correct arithmetic answer from 3,378 ms to 376 ms in the frozen two-GPU envelope. The fak-native CUDA Q4_K_M path separately passed 5/5 cold exact-answer checks. ([BF16 ladder](docs/_witnesses/issue-8623-qwen38-27b/README.md) · [native campaign](docs/_witnesses/issue-8848-qwen38-overnight/README.md)) | **Below parity, not production-ready:** cached fak-native decode collapsed to 0.3 tok/s median versus 36.55 tok/s for the pinned matched-artifact llama.cpp reference; cache-identical quality was 0/5. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md)) |
-| **Ultracode / microagents** | A `qwen2.5:0.5b` small-model scout/writer campaign preserved the accepted output through width 8 while reading 13,126 scoped tokens vs 32,760 in the full-context counterfactual. This is a context-access result, **not Qwen3.8** and not a billed-cost claim. ([access frontier](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md)) | **ABSTAIN** on the GPT-5.6 Ultracode pair: activation and billed-token/spend accounting were not independently verified, and the observed fleet run was slower (0.47× concurrency speedup). ([paired witness](docs/_witnesses/issue-8168-ultracode-live/README.md)) |
+| [Qwen3.8-27B](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | Exact BF16 target: 3/3 correct with thinking on and off; disabling thinking cut p95 time to first correct arithmetic answer from 3,378 ms to 376 ms in the frozen two-GPU envelope. The fak-native CUDA Q4_K_M path separately passed 5/5 cold exact-answer checks. ([BF16 ladder](docs/_witnesses/issue-8623-qwen38-27b/README.md) · [native campaign](docs/_witnesses/issue-8848-qwen38-overnight/README.md)) | Below parity and not production-ready: cached fak-native decode collapsed to 0.3 tok/s median versus 36.55 tok/s for the pinned matched-artifact llama.cpp reference; cache-identical quality was 0/5. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md)) |
+| Ultracode / microagents | A `qwen2.5:0.5b` small-model scout/writer campaign preserved the accepted output through width 8 while reading 13,126 scoped tokens vs 32,760 in the full-context counterfactual. This is a context-access result, not a Qwen3.8 or billed-cost claim. ([access frontier](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md)) | ABSTAIN on the GPT-5.6 Ultracode pair: activation and billed-token/spend accounting were not independently verified, and the observed fleet run was slower (0.47× concurrency speedup). ([paired witness](docs/_witnesses/issue-8168-ultracode-live/README.md)) |
 
 Refresh contract: update the dated marker, both rows, linked committed witnesses, and each row's explicit hold; then run `python tools/readme_freshness_audit.py --json`.
 
 <!-- project-status: 2026-08-25 -->
 ### Project status — 2026-08-25
 
-For an outside reader, these labels are strict: **Shipped** means merged and checkable;
-**In flight** links to open work; **Goal** is direction, not a promise; and **Limitation**
-names what the current evidence does not support.
+These labels are strict for outside readers. Shipped means merged and checkable. In flight
+links to open work. Goal describes direction, not a promise. Limitation names what the
+current evidence does not support.
 
-- **Shipped:** agent queues now have a crash-safe desired-state reconciliation spine
+- Shipped: agent queues now have a crash-safe desired-state reconciliation spine
   ([#8875](https://github.com/anthony-chaudhary/fak/issues/8875),
   [#8876](https://github.com/anthony-chaudhary/fak/issues/8876)); self-update now avoids
   partial in-place binary replacement ([#8865](https://github.com/anthony-chaudhary/fak/issues/8865));
   and installed launch paths are visible through one command-front-door matrix
   ([#5808](https://github.com/anthony-chaudhary/fak/issues/5808)).
-- **In flight:** the queue is being extended with guarded worker launch and landing
+- In flight: the queue is being extended with guarded worker launch and landing
   ([#8889](https://github.com/anthony-chaudhary/fak/issues/8889)), status and saturation
   metrics ([#8890](https://github.com/anthony-chaudhary/fak/issues/8890)), and operator
   controls ([#8899](https://github.com/anthony-chaudhary/fak/issues/8899)). Native Qwen3.8
   performance work continues in [#8923](https://github.com/anthony-chaudhary/fak/issues/8923).
-- **Goal:** make fak the simplest boundary for running long-lived agent work: configure
-  the job once, let the kernel manage context, models, tools, queues, and evidence, and
-  improve fak-native inference toward matched quality and speed. See
+- Goal: make fak the simplest boundary for long-lived agent work. Configure the job once.
+  Then let the kernel manage context, models, and tools. It also manages queues and evidence.
+  Improve fak-native inference toward matched quality and speed. See
   [the problems fak solves](docs/problems-we-solve.md) and
   [the native-inference goal](docs/native-inference-goal.md).
-- **Limitation:** the queue work above is not yet the complete operator product, and the
+- Limitation: the queue work above is not yet the complete operator product, and the
   native Qwen3.8 and Ultracode results remain inside the holds in the table above. For a
   subsystem-by-subsystem account of real, simulated, and planned behavior, use
   [STATUS.md](STATUS.md) and [the feature matrix](docs/supported/features.md).
 
-Refresh contract: reconcile shipped entries with merged commits or closed issues, confirm
-in-flight links are still open, keep goals non-promissory, state current limitations, update
-the marker, then run `python tools/readme_freshness_audit.py --json`.
+Refresh contract: reconcile shipped entries with merged commits or closed issues. Confirm
+that in-flight links are still open, keep goals non-promissory, and state current limitations.
+Update the marker, then run `python tools/readme_freshness_audit.py --json`.
+
 ## Run your agents
-
-Wrap the agent you already use with one command; fak forwards your existing subscription credential and applies a default-deny policy floor (no separate API key):
-
-```bash
-fak guard -- codex  # -> launches Codex behind the policy floor
-```
 
 Install fak, then keep using the Codex login and models you already have:
 
@@ -97,9 +101,9 @@ fak manage --output-profile caveman:low --work-profile ponytail:low -- codex \
   "Trace the intermittent checkout failure and explain the evidence."
 ```
 
-That is the idea: **your agent, configured for this task**. Ponytail controls how strongly the
-agent resists avoidable code and machinery. Caveman controls how compactly it reports back. The
-profiles never remove explicit requirements, safety checks, tests, diagnostics, or evidence.
+That is the idea: your agent, configured for this task. Ponytail controls how strongly the
+agent resists avoidable code and machinery. Caveman controls how compactly it reports back. Neither profile removes explicit requirements or safety checks. Tests, diagnostics, and
+evidence also remain in place.
 
 `fak manage -- codex` uses the balanced `ponytail:medium` + `caveman:medium` defaults. Change
 either axis per run, or use `standard` / `full` to turn that axis off. `fak guard` remains the
@@ -135,4 +139,4 @@ scratch. Start with the [harness guide](docs/harness-init.md) when you are ready
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-08-25 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · process: tools/readme_freshness_audit.py + /refresh-readme -->
+<!-- readme-verified: 2026-08-26 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-26 99.2/100 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
