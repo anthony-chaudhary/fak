@@ -884,7 +884,7 @@ universal workload claim.
 |---|---|---|
 | Stable-prefix reuse (vDSO) | Keeps shared setup/provider-cache-compatible prefixes reusable across turns. | [vDSO cache quickstart](https://github.com/anthony-chaudhary/fak/blob/main/docs/explainers/cache.md) |
 | Managed context (ctxmmu) | Sheds stale turns while preserving a stable prefix and the information needed to continue. | [managed context](https://github.com/anthony-chaudhary/fak/blob/main/docs/managed-context-continuous-usage.md) |
-| Tool-output compression | Compresses large tool results before they consume model-window tokens; benchmark the built-in corpus or your own captured outputs. | `fak headroom bench --json`; `fak headroom bench --dir <captures> --json`; [live witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/benchmarks/CONTEXT-COMPRESSION-LIVE-2026-08-09.md) |
+| Tool-output compression | Compresses large tool results before they consume model-window tokens; benchmark the built-in corpus or your own captured outputs. | `fak headroom bench --json`; `fak headroom bench --dir <captures> --json`; [live witness](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CONTEXT-COMPRESSION-LIVE-2026-08-09.md) |
 | Resume pricing | Prices full replay versus cut/reset after cache TTL expiry instead of blindly replaying a large session. | `fak resume plan --resident-tokens 250000 --idle-seconds 7200 --json` |
 | Portable session state | Persists, moves, and demand-pages a long-running session instead of forcing a restart or full transcript replay. | `fak snapshot demo`; `fak snapshot query --file <image.faksession> --query <question>`; [session image](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/PORTABLE-SESSION-IMAGE-AND-SNAPSHOT-2026-06-24.md) |
 | Cache-value accounting | Reports reused tokens, effective cost, and attributable savings in operator terms. | `fak info --once`; [cache-value rollup](https://github.com/anthony-chaudhary/fak/blob/main/docs/cache-value-rollup.md) |
@@ -2927,7 +2927,7 @@ description: "Index of fak research notes and captured stage witnesses, with the
 
 ## Active focus
 
-- [Structured session intent](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
+- [Structured session intent](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
 
 - [Micro-context fabrics for 100–10,000 parallel agents](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-fabrics.md) — split one cached agent base into many bounded logical contexts; includes the runnable 10k synthetic spine and controlled-kernel/API-only research ladder.
 - [Micro-context operators for general large-input LLM work](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-large-input-operators.md) — partition record/field/group inputs, adaptively select filters or tools, emit typed facts, fold with provenance, and stop only under an answer-safe contract.
@@ -3016,7 +3016,7 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
 
 - [S8s/S8t natural multi-tool decision surface](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/micro-context-s8st-natural-multitool-surface.md) — five evidence classes show fixed/adaptive/parallel crossover by tool cost, with quality gated first.
 
-- [`tensor-build-local-study-2026-08-15.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/research/tensor-build-local-study-2026-08-15.md) — deep, snapshot-pinned study of local TensorBuild: typed engine identity, evidence tiers, artifact liveness, agent/human control parity, and work-cost attribution; dedupes current fak coverage and files #6874-#6876.
+- [`tensor-build-local-study-2026-08-15.md`](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/tensor-build-local-study-2026-08-15.md) — deep, snapshot-pinned study of local TensorBuild: typed engine identity, evidence tiers, artifact liveness, agent/human control parity, and work-cost attribution; dedupes current fak coverage and files #6874-#6876.
 
 ---
 
@@ -3498,7 +3498,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 **Slack channels** — [#blockers](https://github.com/anthony-chaudhary/fak/blob/main/docs/blockers-channel.md) · [#releases](https://github.com/anthony-chaudhary/fak/blob/main/docs/releases-channel.md).
 
-**Dated baselines & drills** — [systems baseline (2026-06-26)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SYSTEMS-BASELINE-2026-06-26.md) · [anchor-strategy net-dollar verdict (2026-07-11)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/ANCHOR-STRATEGY-NET-DOLLAR-VERDICT-2026-07-11.md) · [cache-value score regression (2026-07-04)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CACHE-VALUE-SCORE-REGRESSION-2026-07-04.md) · [logvault restore drill (2026-07-09)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/logvault-restore-drill-2026-07-09.md) · [archived pre-fresh-start README (2026-06-25)](https://github.com/anthony-chaudhary/fak/blob/main/docs/archive/README-2026-06-25-before-fresh-start.md) · [DeepSeek-V4 pure-fak native-GPU witness status (2026-07-16)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEEPSEEK-V4-PURE-FAK-NATIVE-GPU-WITNESS-STATUS-2026-07-16.md).
+**Dated baselines & drills** — [systems baseline (2026-06-26)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/SYSTEMS-BASELINE-2026-06-26.md) · [anchor-strategy net-dollar verdict (2026-07-11)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/ANCHOR-STRATEGY-NET-DOLLAR-VERDICT-2026-07-11.md) · [cache-value score regression (2026-07-04)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CACHE-VALUE-SCORE-REGRESSION-2026-07-04.md) · [logvault restore drill (2026-07-09)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/logvault-restore-drill-2026-07-09.md) · [archived pre-fresh-start README (2026-06-25)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/README-2026-06-25-before-fresh-start.md) · [DeepSeek-V4 pure-fak native-GPU witness status (2026-07-16)](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/DEEPSEEK-V4-PURE-FAK-NATIVE-GPU-WITNESS-STATUS-2026-07-16.md).
 
 **Vendor & agent-tool front doors** — [neo-silicon internal pilot pitch](https://github.com/anthony-chaudhary/fak/blob/main/docs/vendor/neo-silicon-internal-pitch.md) (fak for accelerator vendors) · [AGENT.md](https://github.com/anthony-chaudhary/fak/blob/main/AGENT.md) · [GEMINI.md](https://github.com/anthony-chaudhary/fak/blob/main/GEMINI.md).
 

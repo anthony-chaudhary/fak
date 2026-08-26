@@ -72,6 +72,17 @@ $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='A
     [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='WINDOWS_APPLICATION_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;application_fault=$fault}
   }
 })
+$rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Application Hang';Id=1002;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
+  $xml=[xml]$_.ToXml(); $fields=@{}; foreach($d in $xml.Event.EventData.Data){ $fields[[string]$d.Name]=[string]$d.'#text' }
+  $app=[string]$fields.AppName
+  $version=[string]$fields.AppVersion
+  $report=[string]$fields.ReportId
+  $hangClass=switch -Regex ([string]$fields.HangType) { '^Unknown$' {'Unknown';break} '^Cross-process$' {'Cross-process';break} default {''} }
+  if(-not [string]::IsNullOrWhiteSpace($app) -and -not [string]::IsNullOrWhiteSpace($version) -and -not [string]::IsNullOrWhiteSpace($report) -and -not [string]::IsNullOrWhiteSpace($hangClass)) {
+    $hang=[pscustomobject]@{app_version=$version;class=$hangClass}
+    [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='WINDOWS_APPLICATION_HANG';report_id=$report;app=$app;application_hang=$hang}
+  }
+})
 $rows += @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='User32';Id=1074;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
   [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='HOST_RESTART_INITIATED';report_id='';app=''}
 })

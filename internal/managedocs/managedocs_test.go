@@ -37,7 +37,7 @@ func TestCurrentGuardPosturesAreClassified(t *testing.T) {
 		"docs/cli-reference.md": "also append automatically",
 		"docs/generated/disambiguation-index.json": "optionally wraps it with fak guard",
 		"docs/integrations/session-new.md":         "always starts behind `fak guard`",
-		"docs/research/graft-study-2026-08-18.md":  "`fak guard` registers capability",
+		"docs/notes/graft-study-2026-08-18.md":     "`fak guard` registers capability",
 		"docs/response-profiles.md":                "external harness through `fak guard`",
 	}
 	for path, fragment := range want {

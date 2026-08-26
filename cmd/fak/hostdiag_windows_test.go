@@ -90,3 +90,45 @@ func TestHostdiagWindowsCollectorKeepsSpecializedCrashesUnduplicated(t *testing.
 		t.Fatal("generic mapping does not follow the specialized mutually exclusive branch")
 	}
 }
+
+func TestHostdiagWindowsCollectorRetainsBoundedApplicationHangs(t *testing.T) {
+	if count := strings.Count(hostdiagEventPS, "ProviderName='Application Hang';Id=1002"); count != 1 {
+		t.Fatalf("Application Hang/1002 query count = %d, want 1", count)
+	}
+	marker := "event_name='WINDOWS_APPLICATION_HANG'"
+	if count := strings.Count(hostdiagEventPS, marker); count != 1 {
+		t.Fatalf("application hang mapping count = %d, want 1", count)
+	}
+	at := strings.Index(hostdiagEventPS, marker)
+	start := strings.LastIndex(hostdiagEventPS[:at], "[pscustomobject]")
+	end := strings.Index(hostdiagEventPS[at:], "}")
+	row := hostdiagEventPS[start : at+end+1]
+	for _, want := range []string{
+		"record_id=[string]$_.RecordId", "report_id=$report", "app=$app", "application_hang=$hang",
+	} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("application hang row missing %q: %s", want, row)
+		}
+	}
+	for _, forbidden := range []string{"message=", "process_id=", "process_start_ms=", "command", "path="} {
+		if strings.Contains(strings.ToLower(row), forbidden) {
+			t.Fatalf("application hang row retained %q: %s", forbidden, row)
+		}
+	}
+	for _, class := range []string{"Unknown", "Cross-process"} {
+		if !strings.Contains(hostdiagEventPS, "'"+class+"'") {
+			t.Fatalf("collector does not retain bounded hang class %q", class)
+		}
+	}
+}
+
+func TestHostdiagWindowsCollectorRejectsMalformedApplicationHangs(t *testing.T) {
+	for _, required := range []string{"$app", "$version", "$report", "$hangClass"} {
+		if !strings.Contains(hostdiagEventPS, "-not [string]::IsNullOrWhiteSpace("+required+")") {
+			t.Fatalf("collector does not require application hang field %s", required)
+		}
+	}
+	if !strings.Contains(hostdiagEventPS, "default {''}") {
+		t.Fatal("collector does not reject unrecognized hang classifications")
+	}
+}

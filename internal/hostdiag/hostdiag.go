@@ -54,6 +54,11 @@ type OwnedShellLaunch struct {
 	ErrorClass        string `json:"error_class"`
 }
 
+type ApplicationHang struct {
+	AppVersion string `json:"app_version"`
+	Class      string `json:"class"`
+}
+
 type ApplicationFault struct {
 	AppVersion    string `json:"app_version,omitempty"`
 	Module        string `json:"module,omitempty"`
@@ -92,6 +97,7 @@ type ResourceEvent struct {
 	Message        string            `json:"message,omitempty"`
 	Culprits       []ResourceCulprit `json:"culprits,omitempty"`
 	Fault          *ApplicationFault `json:"application_fault,omitempty"`
+	Hang           *ApplicationHang  `json:"application_hang,omitempty"`
 	ProcessID      int               `json:"process_id,omitempty"`
 	ProcessStartMS int64             `json:"process_start_ms,omitempty"`
 }
@@ -108,6 +114,7 @@ type Correlation struct {
 	App           string            `json:"app,omitempty"`
 	Culprits      []ResourceCulprit `json:"culprits,omitempty"`
 	Fault         *ApplicationFault `json:"application_fault,omitempty"`
+	Hang          *ApplicationHang  `json:"application_hang,omitempty"`
 	OwnedLaunch   *OwnedShellLaunch `json:"owned_shell_launch,omitempty"`
 	Status        string            `json:"status"`
 	Reason        string            `json:"reason"`
@@ -151,13 +158,14 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	isShellCrash := name == "POWERSHELL_PROCESS_CRASH" && event.EventID == 1000
 	isWindowsShellCrash := name == "WINDOWS_SHELL_PROCESS_CRASH" && event.EventID == 1000
 	isApplicationCrash := name == "WINDOWS_APPLICATION_PROCESS_CRASH" && event.EventID == 1000 && strings.EqualFold(strings.TrimSpace(event.Source), "Application Error")
+	isApplicationHang := name == "WINDOWS_APPLICATION_HANG" && event.EventID == 1002 && strings.EqualFold(strings.TrimSpace(event.Source), "Application Hang")
 	isRadar := name == "RADAR_PRE_LEAK_64" && event.EventID == 1001
 	isRestartInitiated := name == "HOST_RESTART_INITIATED" && event.EventID == 1074 && strings.EqualFold(strings.TrimSpace(event.Source), "User32")
 	isUnexpectedShutdown := name == "HOST_UNEXPECTED_SHUTDOWN" && event.EventID == 6008 && strings.EqualFold(strings.TrimSpace(event.Source), "EventLog")
 	isUncleanRestart := name == "HOST_UNCLEAN_RESTART" && event.EventID == 41 && strings.EqualFold(strings.TrimSpace(event.Source), "Microsoft-Windows-Kernel-Power")
 	isHostLifecycle := isRestartInitiated || isUnexpectedShutdown || isUncleanRestart
 	isResolver := strings.HasPrefix(name, "RESOURCE_EXHAUSTION_") && (event.EventID == 1014 || event.EventID == 1015)
-	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isApplicationCrash && !isRadar && !isHostLifecycle && !isResolver) {
+	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isApplicationCrash && !isApplicationHang && !isRadar && !isHostLifecycle && !isResolver) {
 		return Correlation{}, false
 	}
 	app := strings.TrimSpace(event.App)
@@ -168,6 +176,9 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		return Correlation{}, false
 	}
 	if isApplicationCrash && (app == "" || isSpecializedCrashApp(app) || event.Fault == nil || strings.TrimSpace(event.Fault.Module) == "" || strings.TrimSpace(event.Fault.ExceptionCode) == "") {
+		return Correlation{}, false
+	}
+	if isApplicationHang && (app == "" || strings.TrimSpace(event.ReportID) == "" || event.Hang == nil || strings.TrimSpace(event.Hang.AppVersion) == "" || !validApplicationHangClass(event.Hang.Class)) {
 		return Correlation{}, false
 	}
 	if isRadar && !strings.EqualFold(app, "fak.exe") {
@@ -184,7 +195,7 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		if isLowVirtualMemory && !eventNamesFakPID(event.Culprits, sample.PID) {
 			continue
 		}
-		if isShellCrash || isWindowsShellCrash || isApplicationCrash || isHostLifecycle || isResolver {
+		if isShellCrash || isWindowsShellCrash || isApplicationCrash || isApplicationHang || isHostLifecycle || isResolver {
 			continue
 		}
 		candidates = append(candidates, sample)
@@ -212,6 +223,9 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	if isApplicationCrash {
 		reason = "Windows application crash is retained as observational host evidence and is not attributed to fak"
 	}
+	if isApplicationHang {
+		reason = "Windows application hang is retained as observational host evidence and is not attributed to fak"
+	}
 	if isHostLifecycle {
 		status, reason = "observed", "Windows host lifecycle evidence is retained without attributing cause to fak"
 	}
@@ -228,7 +242,16 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		status, reason = "ambiguous", "multiple durable fak process census rows span the event time"
 	}
 	key := strings.Join([]string{strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID), strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), name}, "|")
-	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, OwnedLaunch: owned, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Fault: event.Fault, Hang: event.Hang, OwnedLaunch: owned, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+}
+
+func validApplicationHangClass(class string) bool {
+	switch strings.ToLower(strings.TrimSpace(class)) {
+	case "unknown", "cross-process":
+		return true
+	default:
+		return false
+	}
 }
 
 func isSpecializedCrashApp(app string) bool {

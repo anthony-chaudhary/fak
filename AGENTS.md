@@ -53,6 +53,9 @@ an `auto`, recovery, or convenience path that silently changes native/performanc
 llama.cpp. Before accepting evidence, ask whether the model executed inside fak and whether
 the receipt names that engine. Canonical definitions, matched-envelope rules, and the
 deterministic docs guard: [`docs/native-inference-goal.md`](docs/native-inference-goal.md).
+New native-performance work prefers Qwen3.8.
+Qwen3.6 is allowed only when the task states an explicit task-specific exception, such as regression, compatibility, historical comparison, or a hardware/artifact constraint.
+Preserve historical Qwen3.6 artifacts; do not rename or rewrite them as Qwen3.8 evidence.
 
 ## What this project is
 

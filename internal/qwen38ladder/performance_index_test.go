@@ -3,6 +3,7 @@ package qwen38ladder
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -19,13 +20,15 @@ func TestQwenPerformanceIndexRoutesCurrentResults(t *testing.T) {
 	page := string(body)
 	required := []string{
 		"This is the one current index for Qwen performance updates",
+		"rows are envelopes, not a timeline",
 		"docs/_witnesses/",
-		"Qwen3.8-27B BF16",
-		"Qwen3.8-27B Q4_K_M, A100-class CUDA, fak-native",
-		"Qwen3.8-27B Q4_K_M, Apple M3 Pro Metal, fak-native",
-		"Qwen3.6-27B Q4_K_M, Apple M3 Pro",
+		"q38-bf16-tp2-arithmetic-ttfc",
+		"q38-q4km-native-cuda-a100-cold-decode",
+		"q38-q4km-native-metal-m3pro-fullrun",
+		"q36-q4km-metal-m3pro-parity-bar",
 		"AMD/Vulkan or CPU-only",
-		"Update this index in the same landing",
+		"Newer code awaiting comparable remeasurement",
+		"Replace atomically",
 		"Native/performance rows must name the fak-native engine",
 	}
 	for _, want := range required {
@@ -42,5 +45,34 @@ func TestQwenPerformanceIndexRoutesCurrentResults(t *testing.T) {
 		if !strings.Contains(string(content), "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md") {
 			t.Errorf("%s does not route readers to the Qwen performance index", frontDoor)
 		}
+	}
+}
+
+func TestQwenPerformanceIndexCurrentRowsHaveUniqueEnvelopeAndFreshness(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "docs", "benchmarks", "QWEN-PERFORMANCE-INDEX.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	date := regexp.MustCompile(`observed \*\*\d{4}-\d{2}-\d{2}\*\*; review by \*\*\d{4}-\d{2}-\d{2}\*\*`)
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(body), "\n") {
+		if !strings.HasPrefix(line, "| **CURRENT** | `") {
+			continue
+		}
+		fields := strings.Split(line, "|")
+		if len(fields) < 6 {
+			t.Fatalf("malformed CURRENT row: %s", line)
+		}
+		key := strings.Trim(strings.TrimSpace(fields[2]), "`")
+		if seen[key] {
+			t.Errorf("duplicate CURRENT envelope key %q", key)
+		}
+		seen[key] = true
+		if !date.MatchString(line) {
+			t.Errorf("CURRENT row %q lacks observed and review-by dates", key)
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("no CURRENT Qwen performance rows found")
 	}
 }

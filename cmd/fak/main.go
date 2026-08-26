@@ -171,6 +171,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		os.Exit(runHostRelaunchBroker(os.Stdout, os.Stderr, args))
 	case "watchdog-audit-run":
 		os.Exit(runWatchdogAuditRunner(os.Stdout, os.Stderr, args))
+	case "watchdog-audit-health":
+		os.Exit(runWatchdogAuditHealth(os.Stdout, os.Stderr, args, time.Now))
 	case "schedscan":
 		cmdSchedScan(args)
 	case "growthgate":
@@ -1010,6 +1012,8 @@ func cmdBench(argv []string) {
 		case "gitspawn":
 			// #5620: git process spawns per unit of work on the three hot paths.
 			os.Exit(runGitSpawnBench(os.Stdout, os.Stderr, argv[1:]))
+		case "system-baseline":
+			os.Exit(runBenchSystemBaseline(os.Stdout, os.Stderr, argv[1:]))
 		}
 	}
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)

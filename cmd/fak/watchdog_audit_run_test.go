@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWatchdogAuditRunnerPropagatesTypedVerdict(t *testing.T) {
@@ -103,4 +104,40 @@ func mustRead(t *testing.T, p string) []byte {
 		t.Fatal(e)
 	}
 	return b
+}
+
+func TestWatchdogAuditHealthRequiresFreshReceipt(t *testing.T) {
+	now := time.Date(2026, 8, 26, 16, 0, 0, 0, time.UTC)
+	write := func(t *testing.T, recorded time.Time, verdict string, status int) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "audit.jsonl")
+		receipt := watchdogAuditReceipt{Schema: "fak.watchdog-audit-receipt.v1", RecordedAt: recorded, Verdict: verdict, ExitStatus: status, Audit: json.RawMessage(`{"productivity":{"status_verdict":"green"},"tower_down":1}`)}
+		body, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("fresh preserves typed verdict and fields", func(t *testing.T) {
+		path := write(t, now.Add(-15*time.Minute), "RED", 3)
+		var out, stderr bytes.Buffer
+		if got := runWatchdogAuditHealth(&out, &stderr, []string{"--log", path, "--max-age", "30m"}, func() time.Time { return now }); got != 3 {
+			t.Fatalf("status=%d stderr=%s", got, stderr.String())
+		}
+		if !strings.Contains(out.String(), `"status_verdict":"green"`) || !strings.Contains(out.String(), `"tower_down":1`) {
+			t.Fatalf("output lost audit fields: %s", out.String())
+		}
+	})
+
+	t.Run("stale fails closed", func(t *testing.T) {
+		path := write(t, now.Add(-31*time.Minute), "GREEN", 0)
+		var stderr bytes.Buffer
+		if got := runWatchdogAuditHealth(&bytes.Buffer{}, &stderr, []string{"--log", path, "--max-age", "30m"}, func() time.Time { return now }); got != 1 || !strings.Contains(stderr.String(), "stale") {
+			t.Fatalf("status=%d stderr=%s", got, stderr.String())
+		}
+	})
 }

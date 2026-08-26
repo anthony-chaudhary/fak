@@ -49,7 +49,7 @@ universal workload claim.
 |---|---|---|
 | Stable-prefix reuse (vDSO) | Keeps shared setup/provider-cache-compatible prefixes reusable across turns. | [vDSO cache quickstart](explainers/cache.md) |
 | Managed context (ctxmmu) | Sheds stale turns while preserving a stable prefix and the information needed to continue. | [managed context](managed-context-continuous-usage.md) |
-| Tool-output compression | Compresses large tool results before they consume model-window tokens; benchmark the built-in corpus or your own captured outputs. | `fak headroom bench --json`; `fak headroom bench --dir <captures> --json`; [live witness](benchmarks/CONTEXT-COMPRESSION-LIVE-2026-08-09.md) |
+| Tool-output compression | Compresses large tool results before they consume model-window tokens; benchmark the built-in corpus or your own captured outputs. | `fak headroom bench --json`; `fak headroom bench --dir <captures> --json`; [live witness](notes/CONTEXT-COMPRESSION-LIVE-2026-08-09.md) |
 | Resume pricing | Prices full replay versus cut/reset after cache TTL expiry instead of blindly replaying a large session. | `fak resume plan --resident-tokens 250000 --idle-seconds 7200 --json` |
 | Portable session state | Persists, moves, and demand-pages a long-running session instead of forcing a restart or full transcript replay. | `fak snapshot demo`; `fak snapshot query --file <image.faksession> --query <question>`; [session image](notes/PORTABLE-SESSION-IMAGE-AND-SNAPSHOT-2026-06-24.md) |
 | Cache-value accounting | Reports reused tokens, effective cost, and attributable savings in operator terms. | `fak info --once`; [cache-value rollup](cache-value-rollup.md) |
