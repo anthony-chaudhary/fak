@@ -704,6 +704,10 @@ var tier = map[string]int{
 	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
 	"studydrift":                 1, // stdlib-only source refresh and supersession receipt primitive (#8611).
 	"servicewatchdog":            2, // systemd lifecycle read-back and watchdog progress integration (#8654).
+	"computetrace":               1, // stdlib-only bounded compute-event artifact schema and recorder.
+	"ultracodenegcontrol":        1,
+	"computetune":                1, // stdlib-only offline tuning decision primitive over replayable compute traces (#8608).
+	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

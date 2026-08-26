@@ -34,7 +34,10 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
+
+	"github.com/anthony-chaudhary/fak/internal/computetrace"
 )
 
 // cudaMu serializes all device ops: the cuBLAS handle and the single default stream are
@@ -812,7 +815,18 @@ func colMajorFlag(w Tensor) C.int {
 // SGEMM (F32), tensor-core HGEMM (F16), or native Q8_0/Q4_K device GEMV; output is F32-resident.
 func (c *cudaBackend) MatMul(w, x Tensor) Tensor {
 	cudaMu.Lock()
-	defer cudaMu.Unlock()
+	trace := computetrace.Enabled()
+	started := time.Now()
+	if trace {
+		C.fcuda_event_elapsed_ms_start()
+	}
+	defer func() {
+		if trace {
+			ms := float64(C.fcuda_event_elapsed_ms_end())
+			computetrace.Record(computetrace.Event{Operation: "matmul", Phase: "kernel", Backend: c.Name(), Device: "cuda:0", Kernel: w.Dtype.String() + "_matmul", StartedAt: started.UTC(), DurationNS: int64(ms * 1e6), TimerDomain: "cuda_event", Bytes: int64((w.Numel() + x.Numel()) * w.Dtype.Bytes()), Shapes: [][]int{w.Shape, x.Shape}, ProvenanceDigest: computetrace.Digest(c.Name(), w.Dtype.String(), "matmul")})
+		}
+		cudaMu.Unlock()
+	}()
 	out, in := w.Shape[0], w.Shape[1]
 	var y Tensor
 	switch w.Dtype {

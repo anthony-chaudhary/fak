@@ -233,6 +233,24 @@ extern "C" void fcuda_d2h(void *h, const void *d, size_t n) {
 extern "C" void fcuda_d2d(void *dst, const void *src, size_t n) { CK(cudaMemcpyAsync(dst, src, n, cudaMemcpyDeviceToDevice, g_stream)); }
 extern "C" void fcuda_sync(void) { CK(cudaDeviceSynchronize()); }
 
+static cudaEvent_t g_trace_start;
+extern "C" double fcuda_event_elapsed_ms_start(void) {
+    CK(cudaEventCreate(&g_trace_start));
+    CK(cudaEventRecord(g_trace_start, g_stream));
+    return 0.0;
+}
+extern "C" double fcuda_event_elapsed_ms_end(void) {
+    cudaEvent_t end;
+    CK(cudaEventCreate(&end));
+    CK(cudaEventRecord(end, g_stream));
+    CK(cudaEventSynchronize(end));
+    float ms = 0;
+    CK(cudaEventElapsedTime(&ms, g_trace_start, end));
+    CK(cudaEventDestroy(end));
+    CK(cudaEventDestroy(g_trace_start));
+    return (double)ms;
+}
+
 extern "C" int fcuda_set_device(int device) {
   cudaError_t e = cudaSetDevice(device);
   if (e != cudaSuccess) {

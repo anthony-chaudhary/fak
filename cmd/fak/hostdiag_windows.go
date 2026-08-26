@@ -58,7 +58,9 @@ $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='A
   $app=[string]$fields.AppName
   if($app -ieq 'pwsh.exe' -or $app -ieq 'powershell.exe'){
     $fault=[pscustomobject]@{app_version=[string]$fields.AppVersion;module=[string]$fields.ModuleName;module_version=[string]$fields.ModuleVersion;exception_code=[string]$fields.ExceptionCode;fault_offset=[string]$fields.FaultingOffset}
-    [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='POWERSHELL_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;application_fault=$fault;message=[string]$_.Message}
+    $pid=0; if([string]$fields.ProcessId -match '^0x([0-9a-f]+)$'){ $pid=[Convert]::ToInt32($Matches[1],16) }
+    $created=0; if([string]$fields.ProcessCreationTime -match '^0x([0-9a-f]+)$'){ $created=[DateTimeOffset]::FromFileTime([Convert]::ToInt64($Matches[1],16)).ToUnixTimeMilliseconds() }
+    [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='POWERSHELL_PROCESS_CRASH';report_id=[string]$fields.IntegratorReportId;app=$app;process_id=$pid;process_start_ms=$created;application_fault=$fault;message=[string]$_.Message}
   }
 })
 $rows += @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Resource-Exhaustion-Detector';Id=2004;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {

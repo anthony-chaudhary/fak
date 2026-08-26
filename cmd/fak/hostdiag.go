@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/harnessres"
 	"github.com/anthony-chaudhary/fak/internal/hostdiag"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
+	"github.com/anthony-chaudhary/fak/internal/shellprov"
 )
 
 const hostdiagDefaultMaxBytes int64 = 16 << 20
@@ -74,6 +76,7 @@ func runHostdiagCorrelate(stdout, stderr io.Writer, args []string) int {
 	fixture := fs.String("fixture", "", "normalized resource-event fixture JSON")
 	since := fs.Duration("since", 30*24*time.Hour, "Windows event lookback")
 	maxBytes := fs.Int64("max-bytes", hostdiagDefaultMaxBytes, "maximum ledger bytes")
+	shellProvenance := fs.String("shell-provenance", "", "privacy-safe fak-owned shell launch receipt JSONL")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *since <= 0 || *maxBytes <= 0 {
 		return 2
 	}
@@ -93,7 +96,18 @@ func runHostdiagCorrelate(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "fak hostdiag correlate: census: %v\n", err)
 		return 1
 	}
-	for _, correlation := range hostdiag.CorrelateAll(events, samples) {
+	launches, err := loadOwnedShellLaunches(*shellProvenance)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak hostdiag correlate: shell provenance: %v\n", err)
+		return 1
+	}
+	correlations := make([]hostdiag.Correlation, 0, len(events))
+	for _, event := range events {
+		if correlation, ok := hostdiag.CorrelateWithOwnedLaunches(event, samples, launches); ok {
+			correlations = append(correlations, correlation)
+		}
+	}
+	for _, correlation := range correlations {
 		if err := appendHostdiagRow(*ledger, correlation, *maxBytes); err != nil {
 			fmt.Fprintf(stderr, "fak hostdiag correlate: %v\n", err)
 			return 1
@@ -104,6 +118,43 @@ func runHostdiagCorrelate(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
+func loadOwnedShellLaunches(path string) ([]hostdiag.OwnedShellLaunch, error) {
+	if strings.TrimSpace(path) == "" {
+		return nil, nil
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+
+	launches := make([]hostdiag.OwnedShellLaunch, 0)
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, shellprov.MaxReceiptLineBytes), shellprov.MaxReceiptLineBytes+1)
+	for scanner.Scan() {
+		var receipt shellprov.Receipt
+		if err := json.Unmarshal(scanner.Bytes(), &receipt); err != nil {
+			return nil, fmt.Errorf("decode receipt: %w", err)
+		}
+		if err := receipt.Validate(); err != nil {
+			return nil, fmt.Errorf("validate receipt: %w", err)
+		}
+		launches = append(launches, hostdiag.OwnedShellLaunch{
+			TimestampUTCMS: receipt.TimestampUTCMS, ParentPID: receipt.ParentPID, ChildPID: receipt.ChildPID,
+			ChildCreatedUTCMS: receipt.ChildCreatedUTCMS, LaunchID: receipt.LaunchID,
+			LaunchClass: string(receipt.LaunchClass), ShellImage: string(receipt.ShellImage),
+			ShellEdition: string(receipt.ShellEdition), ShellVersion: receipt.ShellVersion,
+			Outcome: string(receipt.Outcome), ErrorClass: string(receipt.ErrorClass),
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return launches, nil
+}
 func defaultHostdiagLedger() string {
 	base := os.Getenv("LOCALAPPDATA")
 	if base == "" {
