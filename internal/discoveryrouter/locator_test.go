@@ -3,7 +3,10 @@ package discoveryrouter
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 )
@@ -106,4 +109,26 @@ func TestResolveReportsRevokedExpiredNotFoundAndUnreachable(t *testing.T) {
 	}
 	_, err = r.Resolve(ctx, "logical-7")
 	requireCode(t, err, Expired)
+}
+
+func TestLocatorPublicArtifactContainsOnlyDiscoveryMetadata(t *testing.T) {
+	_, private, _ := ed25519.GenerateKey(nil)
+	record := signedRecord(t, private, 1, "https://relay.example/session")
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"endpoints", "epoch", "expires_at", "generation", "logical_id", "revoked", "signature"}
+	got := make([]string, 0, len(fields))
+	for field := range fields {
+		got = append(got, field)
+	}
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("public locator fields=%v, want only %v", got, want)
+	}
 }
