@@ -115,6 +115,37 @@ func TestClassifyCommandDoesNotRetainArguments(t *testing.T) {
 	}
 }
 
+func TestHostLifecycleSignalsRemainObservedAndUnattributed(t *testing.T) {
+	tests := []ResourceEvent{
+		{TimeMS: 1000, Source: "User32", EventID: 1074, RecordID: "135959", Name: "HOST_RESTART_INITIATED"},
+		{TimeMS: 2000, Source: "EventLog", EventID: 6008, RecordID: "135960", Name: "HOST_UNEXPECTED_SHUTDOWN"},
+		{TimeMS: 3000, Source: "Microsoft-Windows-Kernel-Power", EventID: 41, RecordID: "135961", Name: "HOST_UNCLEAN_RESTART"},
+	}
+	sample := ProcessSample{Schema: CensusSchema, PID: 7, ProcessStartMS: 500, SampledAtMS: 4000, Executable: `C:\bin\fak.exe`}
+	launch := OwnedShellLaunch{TimestampUTCMS: 900, ParentPID: 7, ChildPID: 42, ChildCreatedUTCMS: 800, Outcome: "failed"}
+	for _, event := range tests {
+		got, ok := CorrelateWithOwnedLaunches(event, []ProcessSample{sample}, []OwnedShellLaunch{launch})
+		if !ok || got.Status != "observed" || got.OwnedLaunch != nil || len(got.Candidates) != 0 {
+			t.Fatalf("%s correlation = %+v, ok=%v", event.Name, got, ok)
+		}
+		if !got.Observational || !strings.Contains(got.Reason, "without attributing cause") {
+			t.Fatalf("%s reason = %q observational=%v", event.Name, got.Reason, got.Observational)
+		}
+	}
+}
+
+func TestHostLifecycleRejectsProviderAndIDLookalikes(t *testing.T) {
+	tests := []ResourceEvent{
+		{TimeMS: 1, Source: "Other", EventID: 1074, Name: "HOST_RESTART_INITIATED"},
+		{TimeMS: 1, Source: "User32", EventID: 6008, Name: "HOST_UNEXPECTED_SHUTDOWN"},
+		{TimeMS: 1, Source: "Microsoft-Windows-Kernel-Power", EventID: 42, Name: "HOST_UNCLEAN_RESTART"},
+	}
+	for _, event := range tests {
+		if _, ok := Correlate(event, nil); ok {
+			t.Fatalf("accepted lifecycle lookalike: %+v", event)
+		}
+	}
+}
 func TestWindowsShellCrashRemainsUnattributed(t *testing.T) {
 	event := ResourceEvent{
 		TimeMS: 2000, Source: "Application Error", EventID: 1000, RecordID: "111218",

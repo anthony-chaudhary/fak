@@ -151,8 +151,12 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	isShellCrash := name == "POWERSHELL_PROCESS_CRASH" && event.EventID == 1000
 	isWindowsShellCrash := name == "WINDOWS_SHELL_PROCESS_CRASH" && event.EventID == 1000
 	isRadar := name == "RADAR_PRE_LEAK_64" && event.EventID == 1001
+	isRestartInitiated := name == "HOST_RESTART_INITIATED" && event.EventID == 1074 && strings.EqualFold(strings.TrimSpace(event.Source), "User32")
+	isUnexpectedShutdown := name == "HOST_UNEXPECTED_SHUTDOWN" && event.EventID == 6008 && strings.EqualFold(strings.TrimSpace(event.Source), "EventLog")
+	isUncleanRestart := name == "HOST_UNCLEAN_RESTART" && event.EventID == 41 && strings.EqualFold(strings.TrimSpace(event.Source), "Microsoft-Windows-Kernel-Power")
+	isHostLifecycle := isRestartInitiated || isUnexpectedShutdown || isUncleanRestart
 	isResolver := strings.HasPrefix(name, "RESOURCE_EXHAUSTION_") && (event.EventID == 1014 || event.EventID == 1015)
-	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isRadar && !isResolver) {
+	if event.TimeMS <= 0 || (!isLowVirtualMemory && !isShellCrash && !isWindowsShellCrash && !isRadar && !isHostLifecycle && !isResolver) {
 		return Correlation{}, false
 	}
 	app := strings.TrimSpace(event.App)
@@ -176,7 +180,7 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 		if isLowVirtualMemory && !eventNamesFakPID(event.Culprits, sample.PID) {
 			continue
 		}
-		if isShellCrash || isWindowsShellCrash || isResolver {
+		if isShellCrash || isWindowsShellCrash || isHostLifecycle || isResolver {
 			continue
 		}
 		candidates = append(candidates, sample)
@@ -200,6 +204,9 @@ func CorrelateWithOwnedLaunches(event ResourceEvent, samples []ProcessSample, la
 	status, reason := "historical_unresolved", "no durable fak process census spans the event time"
 	if isWindowsShellCrash {
 		reason = "Windows shell crash is retained as observational host evidence and is not attributed to fak"
+	}
+	if isHostLifecycle {
+		status, reason = "observed", "Windows host lifecycle evidence is retained without attributing cause to fak"
 	}
 	if isShellCrash {
 		if owned != nil {

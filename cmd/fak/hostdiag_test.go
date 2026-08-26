@@ -118,6 +118,29 @@ func TestAppendHostdiagRowConcurrentComplete(t *testing.T) {
 
 func timeUnixMilli(ms int64) time.Time { return time.UnixMilli(ms) }
 
+func TestHostdiagLifecycleFixtureIsObservedWithoutRawMessage(t *testing.T) {
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "events.json")
+	ledger := filepath.Join(dir, "hostdiag.jsonl")
+	event := hostdiag.ResourceEvent{TimeMS: 2000, Source: "User32", EventID: 1074, RecordID: "135959", Name: "HOST_RESTART_INITIATED", Message: "private user and process details"}
+	data, err := json.Marshal([]hostdiag.ResourceEvent{event})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixture, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runHostdiag(&stdout, &stderr, []string{"correlate", "--fixture", fixture, "--ledger", ledger}); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"event_name":"HOST_RESTART_INITIATED"`) || !strings.Contains(stdout.String(), `"status":"observed"`) {
+		t.Fatalf("missing lifecycle observation: %s", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "private user and process details") || strings.Contains(stdout.String(), "owned_shell_launch") || strings.Contains(stdout.String(), `"candidates"`) {
+		t.Fatalf("lifecycle row leaked raw text or attribution: %s", stdout.String())
+	}
+}
 func TestHostdiagWindowsShellFixtureOmitsRawMessageAndAttribution(t *testing.T) {
 	dir := t.TempDir()
 	fixture := filepath.Join(dir, "events.json")
