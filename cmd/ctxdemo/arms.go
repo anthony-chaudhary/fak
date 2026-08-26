@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/modelladder"
 )
 
@@ -127,10 +128,7 @@ func liveArmTuned(l *modelladder.Loaded, w Workload, emit emitter) armResult {
 		tok := ids0[c]
 		for t := 0; t < T; t++ {
 			td := time.Now()
-			for d := 0; d < D; d++ {
-				s.Step(tok)
-				tok = (tok*48271 + 1) % vocab
-			}
+			tok = benchcli.DecodeLCG(s, tok, D, vocab)
 			decodeMS += ms(time.Since(td))
 			if t < len(w.Results[c]) {
 				tp := time.Now()
