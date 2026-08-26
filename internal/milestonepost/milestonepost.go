@@ -32,9 +32,6 @@
 package milestonepost
 
 import (
-	"os"
-	"strings"
-
 	"github.com/anthony-chaudhary/fak/internal/milestonereport"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
@@ -80,15 +77,7 @@ func Fold(report milestonereport.Report) Card {
 // SLACK_BOT_TOKEN (scoreboard.ResolveToken already refuses that cross-workspace
 // fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_MILESTONE_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the milestones channel id from FAK_MILESTONE_CHANNEL, then a
@@ -97,13 +86,5 @@ func ResolveToken() string {
 // scoreboard CLI's default target (#scoreboard), so reusing it here would misroute a
 // milestone card whenever an operator sources .env.slack.local.
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_MILESTONE_CHANNEL"); v != "" {
-		return v
-	}
-	return ChannelDefault
+	return slackenv.Resolve(channelEnvs[0], func() string { return ChannelDefault })
 }

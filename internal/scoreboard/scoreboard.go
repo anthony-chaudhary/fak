@@ -102,24 +102,14 @@ func NewClient(token string, opts ...Option) (*Client, error) {
 
 // ResolveToken applies the documented resolution order and returns "" if none found.
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	return slackenv.FileValue("FAK_SCOREBOARD_TOKEN")
+	return slackenv.Lookup(tokenEnvs[0]).Value
 }
 
 // ResolveChannel returns the scoreboard channel id from FAK_SCOREBOARD_CHANNEL, then a
 // FAK_SCOREBOARD_CHANNEL= line in .env.slack.local. Returns "" if none found so a caller
 // can require an explicit --channel.
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	return slackenv.FileValue("FAK_SCOREBOARD_CHANNEL")
+	return slackenv.Lookup(channelEnvs[0]).Value
 }
 
 // ResolveProductChannel returns the #product channel id from FAK_PRODUCT_CHANNEL, then a

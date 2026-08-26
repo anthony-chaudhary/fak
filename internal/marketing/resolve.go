@@ -1,9 +1,6 @@
 package marketing
 
 import (
-	"os"
-	"strings"
-
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
@@ -26,25 +23,12 @@ var (
 // back only to the scoreboard token, never to the lab SLACK_BOT_TOKEN (scoreboard.ResolveToken
 // already refuses that fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_MARKETING_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the marketing channel id from FAK_MARKETING_CHANNEL, then a
 // FAK_MARKETING_CHANNEL= line in .env.slack.local. Returns "" if none found so a caller can
 // require an explicit --channel (the real id is never a tracked default).
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	return slackenv.FileValue("FAK_MARKETING_CHANNEL")
+	return slackenv.Lookup(channelEnvs[0]).Value
 }

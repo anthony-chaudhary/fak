@@ -37,9 +37,6 @@
 package dispatchpost
 
 import (
-	"os"
-	"strings"
-
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
@@ -61,15 +58,7 @@ var (
 // falls back ONLY to the scoreboard token, never to the lab SLACK_BOT_TOKEN
 // (scoreboard.ResolveToken already refuses that fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_DISPATCH_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the dispatch channel id from FAK_DISPATCH_CHANNEL, then a
@@ -77,10 +66,5 @@ func ResolveToken() string {
 // can SKIP the post (the real id is never a tracked default) rather than hard-fail —
 // a background dispatch must not error just because no channel is wired.
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	return slackenv.FileValue("FAK_DISPATCH_CHANNEL")
+	return slackenv.Lookup(channelEnvs[0]).Value
 }
