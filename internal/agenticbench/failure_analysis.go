@@ -168,6 +168,14 @@ func ValidateFailureAnalysisCard(runRoot string, card *FailureAnalysisCard) erro
 	validateClaim := func(name string, claim FailureAnalysisClaim, expected FailureAnalysisClaimKind) error {
 		return validateFailureAnalysisClaim(runRoot, manifest, name, claim, expected)
 	}
+	validateClaims := func(name string, claims []FailureAnalysisClaim, expected FailureAnalysisClaimKind) error {
+		for i, claim := range claims {
+			if err := validateClaim(fmt.Sprintf("%s %d", name, i+1), claim, expected); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 
 	switch card.Verdict.Outcome {
 	case "success", "partial_success", "failure":
@@ -186,31 +194,23 @@ func ValidateFailureAnalysisCard(runRoot string, card *FailureAnalysisCard) erro
 	if len(card.Task.Constraints) == 0 {
 		return fmt.Errorf("task section requires at least one evidence-cited constraint")
 	}
-	for i, claim := range card.Task.Constraints {
-		if err := validateClaim(fmt.Sprintf("task constraint %d", i+1), claim, FailureAnalysisObservation); err != nil {
-			return err
-		}
+	if err := validateClaims("task constraint", card.Task.Constraints, FailureAnalysisObservation); err != nil {
+		return err
 	}
 	if len(card.Strengths) == 0 {
 		return fmt.Errorf("strengths section requires at least one evidence-cited claim")
 	}
-	for i, claim := range card.Strengths {
-		if err := validateClaim(fmt.Sprintf("strength %d", i+1), claim, FailureAnalysisObservation); err != nil {
-			return err
-		}
+	if err := validateClaims("strength", card.Strengths, FailureAnalysisObservation); err != nil {
+		return err
 	}
 	if len(card.Failures.Observations) == 0 {
 		return fmt.Errorf("failures section requires at least one observation")
 	}
-	for i, claim := range card.Failures.Observations {
-		if err := validateClaim(fmt.Sprintf("failure observation %d", i+1), claim, FailureAnalysisObservation); err != nil {
-			return err
-		}
+	if err := validateClaims("failure observation", card.Failures.Observations, FailureAnalysisObservation); err != nil {
+		return err
 	}
-	for i, claim := range card.Failures.Inferences {
-		if err := validateClaim(fmt.Sprintf("failure inference %d", i+1), claim, FailureAnalysisInference); err != nil {
-			return err
-		}
+	if err := validateClaims("failure inference", card.Failures.Inferences, FailureAnalysisInference); err != nil {
+		return err
 	}
 	if err := validateClaim("final score", card.Scoring.FinalScore, FailureAnalysisObservation); err != nil {
 		return err
@@ -218,10 +218,8 @@ func ValidateFailureAnalysisCard(runRoot string, card *FailureAnalysisCard) erro
 	if len(card.Scoring.Breakdown) == 0 {
 		return fmt.Errorf("scoring section requires at least one evidence-cited breakdown claim")
 	}
-	for i, claim := range card.Scoring.Breakdown {
-		if err := validateClaim(fmt.Sprintf("score breakdown %d", i+1), claim, FailureAnalysisObservation); err != nil {
-			return err
-		}
+	if err := validateClaims("score breakdown", card.Scoring.Breakdown, FailureAnalysisObservation); err != nil {
+		return err
 	}
 	if err := validateConfidence("scoring", card.Scoring.Confidence, card.Scoring.Uncertainty); err != nil {
 		return err
@@ -584,34 +582,30 @@ func RenderFailureAnalysisMarkdown(runRoot string, card *FailureAnalysisCard) (s
 	fmt.Fprintln(&b, "\n## 2. Task and constraints")
 	fmt.Fprintln(&b)
 	writeFailureAnalysisClaim(&b, "Task", card.Task.Summary)
-	for _, claim := range card.Task.Constraints {
-		writeFailureAnalysisClaim(&b, "Constraint", claim)
-	}
+	writeFailureAnalysisClaims(&b, "Constraint", card.Task.Constraints)
 
 	fmt.Fprintln(&b, "\n## 3. What the agent did right")
 	fmt.Fprintln(&b)
-	for _, claim := range card.Strengths {
-		writeFailureAnalysisClaim(&b, "Strength", claim)
-	}
+	writeFailureAnalysisClaims(&b, "Strength", card.Strengths)
 
 	fmt.Fprintln(&b, "\n## 4. What the agent did wrong")
 	fmt.Fprintln(&b)
-	for _, claim := range card.Failures.Observations {
-		writeFailureAnalysisClaim(&b, "Observed", claim)
-	}
-	for _, claim := range card.Failures.Inferences {
-		writeFailureAnalysisClaim(&b, "Inferred", claim)
-	}
+	writeFailureAnalysisClaims(&b, "Observed", card.Failures.Observations)
+	writeFailureAnalysisClaims(&b, "Inferred", card.Failures.Inferences)
 
 	fmt.Fprintln(&b, "\n## 5. Scoring")
 	fmt.Fprintln(&b)
 	writeFailureAnalysisClaim(&b, "Final score", card.Scoring.FinalScore)
-	for _, claim := range card.Scoring.Breakdown {
-		writeFailureAnalysisClaim(&b, "Breakdown", claim)
-	}
+	writeFailureAnalysisClaims(&b, "Breakdown", card.Scoring.Breakdown)
 	fmt.Fprintf(&b, "- Confidence: `%.2f`\n", card.Scoring.Confidence)
 	fmt.Fprintf(&b, "- Uncertainty: %s\n", analysisMarkdownText(card.Scoring.Uncertainty))
 	return b.String(), nil
+}
+
+func writeFailureAnalysisClaims(b *strings.Builder, label string, claims []FailureAnalysisClaim) {
+	for _, claim := range claims {
+		writeFailureAnalysisClaim(b, label, claim)
+	}
 }
 
 func writeFailureAnalysisClaim(b *strings.Builder, label string, claim FailureAnalysisClaim) {
