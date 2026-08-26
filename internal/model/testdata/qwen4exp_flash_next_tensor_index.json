@@ -1,0 +1,117 @@
+{
+  "source": "Qwen/Qwen3.8-Flash-Next@f5d08274bafd880402bd16f5e3e6c514136ec06c",
+  "tensors": {
+    "model.language_model.embed_tokens.weight": {
+      "shape": [
+        248320,
+        2560
+      ],
+      "shard": "model-00130-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "lm_head.weight": {
+      "shape": [
+        248320,
+        2560
+      ],
+      "shard": "model-00131-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.0.linear_attn.A_log": {
+      "shape": [
+        48
+      ],
+      "shard": "model-00001-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.0.linear_attn.in_proj_qkv.weight": {
+      "shape": [
+        10240,
+        2560
+      ],
+      "shard": "model-00001-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.0.mlp.gate.weight": {
+      "shape": [
+        512,
+        2560
+      ],
+      "shard": "model-00003-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.0.mlp.shared_expert.up_proj.weight": {
+      "shape": [
+        640,
+        2560
+      ],
+      "shard": "model-00003-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.3.self_attn.q_proj.weight": {
+      "shape": [
+        12288,
+        2560
+      ],
+      "shard": "model-00082-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.3.self_attn.indexer.index_qk_proj.weight": {
+      "shape": [
+        640,
+        2560
+      ],
+      "shard": "model-00082-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.47.self_attn.indexer.index_qk_proj.weight": {
+      "shape": [
+        640,
+        2560
+      ],
+      "shard": "model-00120-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.47.mlp.experts.gate_up_proj": {
+      "shape": [
+        512,
+        1280,
+        2560
+      ],
+      "shard": "model-00119-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "model.language_model.layers.47.mlp.shared_expert.up_proj.weight": {
+      "shape": [
+        640,
+        2560
+      ],
+      "shard": "model-00120-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "mtp.layers.0.self_attn.q_proj.weight": {
+      "shape": [
+        12288,
+        2560
+      ],
+      "shard": "model-00108-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "mtp.layers.0.mlp.experts.gate_up_proj": {
+      "shape": [
+        512,
+        1280,
+        2560
+      ],
+      "shard": "model-00060-of-00131.safetensors",
+      "dtype": "BF16"
+    },
+    "mtp.pre_fc_norm_hidden.weight": {
+      "shape": [
+        10240
+      ],
+      "shard": "model-00118-of-00131.safetensors",
+      "dtype": "BF16"
+    }
+  }
+}

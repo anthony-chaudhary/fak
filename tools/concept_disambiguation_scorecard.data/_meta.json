@@ -10897,6 +10897,7 @@
         "unsupportedFaultDomain",
         "UnsupportedFields",
         "unsupportedgdnpreprojectedsequenceerror",
+        "unsupportedqwen4expexecutionerror",
         "VerdictParityOK",
         "VerdictPartialCoverage",
         "VerdictSetupParityClean",
