@@ -1,0 +1,3171 @@
+{
+  "schema": "fak-frontier-infrastructure-index/1",
+  "updated_at": "2026-08-26T23:59:00-07:00",
+  "issue": 9269,
+  "status": "initial_spine_incomplete",
+  "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
+  "methodology": {
+    "source_priority": [
+      "primary official sources",
+      "peer-reviewed or original research",
+      "credible reporting",
+      "analyst datasets",
+      "rumor only with explicit provenance"
+    ],
+    "rule": "A plan is not delivered capacity; peak hardware is not goodput; users are not requests; synthetic distributions are not production measurements; copied rumors are not corroboration.",
+    "exhaustiveness": "Exhaustive is operationalized as an explicit taxonomy, dated source ledger, and visible coverage gaps. The open web is not finite and this spine remains incomplete until each declared slice is researched and refreshed."
+  },
+  "evidence_classes": [
+    "production_measurement",
+    "production_observation",
+    "benchmark_measurement",
+    "synthetic_experiment",
+    "official_statement",
+    "vendor_claim",
+    "analyst_estimate",
+    "reported_estimate",
+    "reported_observation",
+    "inference",
+    "rumor"
+  ],
+  "confidence_levels": [
+    "high",
+    "medium_high",
+    "medium",
+    "low"
+  ],
+  "required_entry_fields": [
+    "id",
+    "category",
+    "entity",
+    "topic",
+    "published_at",
+    "event_at",
+    "source_title",
+    "source_url",
+    "source_kind",
+    "evidence_class",
+    "confidence",
+    "claim",
+    "quantified",
+    "assumptions",
+    "contradictions_or_limits",
+    "fak_implications",
+    "rumor"
+  ],
+  "coverage": {
+    "entry_count": 89,
+    "categories": [
+      "accelerator_platform",
+      "ai_cloud",
+      "datacenter_physical",
+      "frontier_lab",
+      "hyperscaler",
+      "market_signal",
+      "serving_system",
+      "standard",
+      "supply_chain",
+      "workload_model",
+      "workload_trace"
+    ],
+    "entities": [
+      "AI datacenter power architecture research",
+      "AI optical interconnect sector",
+      "AMD / Cerebras",
+      "AWS",
+      "AWS / Anthropic",
+      "AWS / Cerebras",
+      "AWS / NVIDIA",
+      "AWS Bedrock",
+      "Alibaba Cloud / Aliyun",
+      "Alibaba Cloud Tair",
+      "Alibaba Qwen",
+      "Anthropic",
+      "Anthropic / AWS",
+      "Anthropic / Decart",
+      "Anthropic / Fluidstack",
+      "Anthropic / Google / Broadcom",
+      "Anthropic / Google Cloud",
+      "Anthropic / Microsoft / NVIDIA",
+      "Anthropic / Mistral / Microsoft",
+      "Anthropic / Nscale",
+      "BurstGPT v1.1",
+      "CacheRoute",
+      "Chutes production trace study",
+      "CoreWeave",
+      "CoreWeave / Nebius / Cerebras",
+      "Data Center Watch",
+      "DeepSeek",
+      "FineServe",
+      "Google",
+      "Google Cloud",
+      "Google internal developer tools",
+      "Groq",
+      "IBM Cloud / Together AI",
+      "IETF Internet-Draft authors",
+      "International Energy Agency",
+      "Large-scale training reliability study",
+      "Leyline",
+      "Meta",
+      "Microsoft Research Mnemosyne",
+      "MiniMax",
+      "Mistral AI",
+      "Moonshot AI",
+      "Multi-tenant prefix-cache admission study",
+      "NVIDIA",
+      "NVIDIA / Coherent",
+      "NVIDIA / Groq",
+      "NVIDIA / HBM suppliers",
+      "NVIDIA / Lumentum",
+      "NVIDIA DSX",
+      "NVIDIA Dynamo",
+      "OpenAI",
+      "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
+      "OpenAI / Georgia Power",
+      "OpenAI / NVIDIA",
+      "OpenAI / Oracle",
+      "OpenAI / Oracle / Related Digital / DTE",
+      "OpenAI / Oracle / SoftBank",
+      "OpenAI / Stargate",
+      "Robust KV cache management study",
+      "SemiAnalysis",
+      "ServeGen production study",
+      "TIE scheduling study",
+      "TraceLab coding-agent corpus",
+      "U.S. AI datacenter pipeline",
+      "U.S. datacenter sector",
+      "llm-d / Google",
+      "xAI",
+      "xAI Grok 3"
+    ],
+    "explicit_gaps": [
+      "Entity-complete frontier-lab coverage, especially China, France, Canada, the Middle East, and private labs beyond OpenAI and Anthropic.",
+      "Direct production distributions for prompt/prefix popularity, tenant concentration, geography, seasonality, retries, sessions, tool calls, and cache-hit opportunity.",
+      "A parameter table extracting exact fitted distributions, quantiles, coefficients of variation, time windows, and sample populations from every workload paper.",
+      "Complete hyperscaler filings normalized for AI versus non-AI capex, leases, purchase obligations, depreciation, backlog, and customer concentration.",
+      "Colocation/operator, utility/grid queue, cooling/water, construction, HBM, advanced packaging, optics, storage, and electrical-equipment company ledgers.",
+      "Full startup census across inference engines, neoclouds, model routers, KV-cache systems, power, cooling, networking, and modular datacenters, including failures and acquisitions.",
+      "China and export-control coverage, sovereign AI programs, standards, regulatory changes, and regional supply chains.",
+      "A systematic rumor chronology with original source, independent corroboration graph, later confirmation/refutation, and expiry.",
+      "Automated link checking, schema validation as a committed Go leaf, contradiction clustering, and scheduled refresh."
+    ]
+  },
+  "entries": [
+    {
+      "id": "openai-stargate-launch-2025",
+      "category": "frontier_lab",
+      "entity": "OpenAI / Oracle / SoftBank",
+      "topic": [
+        "capex",
+        "capacity",
+        "cluster_scale"
+      ],
+      "published_at": "2025-01-21",
+      "event_at": "2025-01-21",
+      "source_title": "Announcing The Stargate Project",
+      "source_url": "https://openai.com/index/announcing-the-stargate-project/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Stargate said it intended to invest $500B over four years in U.S. AI infrastructure, beginning with $100B immediately.",
+      "quantified": {
+        "planned_capex_usd": 500000000000,
+        "initial_capex_usd": 100000000000,
+        "period_years": 4
+      },
+      "assumptions": [
+        "Frontier model supply and product demand justify sovereign-scale, multi-year infrastructure commitments."
+      ],
+      "contradictions_or_limits": [
+        "An announced intention is not completed spend, installed hardware, or serving capacity."
+      ],
+      "fak_implications": [
+        "Track announced, contracted, built, accepted, and serving capacity separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-stargate-oracle-2025",
+      "category": "frontier_lab",
+      "entity": "OpenAI / Oracle",
+      "topic": [
+        "power",
+        "chips",
+        "capacity"
+      ],
+      "published_at": "2025-07-22",
+      "event_at": "2025-07-22",
+      "source_title": "Stargate advances with 4.5 GW partnership with Oracle",
+      "source_url": "https://openai.com/index/stargate-advances-with-partnership-with-oracle/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "OpenAI said 4.5 GW of additional Oracle capacity would bring U.S. Stargate capacity under development above 5 GW and run more than two million chips.",
+      "quantified": {
+        "additional_power_gw": 4.5,
+        "capacity_under_development_gw_gt": 5,
+        "chip_count_gt": 2000000
+      },
+      "assumptions": [
+        "The relevant operating unit is a multi-gigawatt fleet rather than one conventional cluster."
+      ],
+      "contradictions_or_limits": [
+        "Under development is not online; chip count does not reveal accelerator mix, yield, utilization, or goodput."
+      ],
+      "fak_implications": [
+        "Receipts should distinguish nameplate chips, healthy schedulable chips, and delivered token goodput."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-stargate-sites-2025",
+      "category": "frontier_lab",
+      "entity": "OpenAI / Oracle / SoftBank",
+      "topic": [
+        "sites",
+        "geography",
+        "capex"
+      ],
+      "published_at": "2025-09-23",
+      "event_at": "2025-09-23",
+      "source_title": "OpenAI, Oracle, and SoftBank expand Stargate with five new AI data center sites",
+      "source_url": "https://openai.com/index/five-new-stargate-sites/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Five new U.S. sites brought stated planned capacity near 7 GW and investment above $400B over three years, against a 10 GW/$500B commitment.",
+      "quantified": {
+        "new_sites": 5,
+        "planned_power_gw_approx": 7,
+        "investment_usd_gt": 400000000000
+      },
+      "assumptions": [
+        "Frontier capacity is geographically distributed and secured before it is operational."
+      ],
+      "contradictions_or_limits": [
+        "Planned capacity, secured capacity, and online capacity are different states."
+      ],
+      "fak_implications": [
+        "Use lifecycle and site-level ledgers instead of one fleet total."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-stargate-uae-2025",
+      "category": "frontier_lab",
+      "entity": "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
+      "topic": [
+        "sovereign_cloud",
+        "geography",
+        "power"
+      ],
+      "published_at": "2025-05-22",
+      "event_at": "2025-05-22",
+      "source_title": "Introducing Stargate UAE",
+      "source_url": "https://openai.com/index/introducing-stargate-uae/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Stargate UAE announced a 1 GW Abu Dhabi cluster with 200 MW expected online in 2026.",
+      "quantified": {
+        "cluster_power_gw": 1,
+        "initial_online_mw": 200,
+        "initial_online_year": 2026
+      },
+      "assumptions": [
+        "Jurisdictional and sovereign capacity will coexist with centralized global fleets."
+      ],
+      "contradictions_or_limits": [
+        "The cluster is prospective and lacks public utilization or workload-mix evidence."
+      ],
+      "fak_implications": [
+        "Region, jurisdiction, residency, and availability date must be first-class routing constraints."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-nvidia-10gw-2025",
+      "category": "frontier_lab",
+      "entity": "OpenAI / NVIDIA",
+      "topic": [
+        "roadmap",
+        "power",
+        "co_design"
+      ],
+      "published_at": "2025-09-22",
+      "event_at": "2025-09-22",
+      "source_title": "OpenAI and NVIDIA announce strategic partnership to deploy 10 gigawatts of NVIDIA systems",
+      "source_url": "https://openai.com/index/openai-nvidia-systems-partnership/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "A letter of intent targeted at least 10 GW of NVIDIA systems and millions of GPUs, with the first gigawatt on Vera Rubin in the second half of 2026.",
+      "quantified": {
+        "target_power_gw": 10,
+        "nvidia_investment_usd_up_to": 100000000000,
+        "first_phase_gw": 1
+      },
+      "assumptions": [
+        "Lab and hardware roadmaps will be co-optimized across several platform generations."
+      ],
+      "contradictions_or_limits": [
+        "A letter of intent is weaker than deployed capacity; the source gives no net-goodput envelope."
+      ],
+      "fak_implications": [
+        "Separate contracted future envelopes from present capability and record silicon generation."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-user-scale-2025",
+      "category": "frontier_lab",
+      "entity": "OpenAI",
+      "topic": [
+        "userbase",
+        "demand"
+      ],
+      "published_at": "2025-09-22",
+      "event_at": "2025-09-22",
+      "source_title": "OpenAI and NVIDIA announce strategic partnership to deploy 10 gigawatts of NVIDIA systems",
+      "source_url": "https://openai.com/index/openai-nvidia-systems-partnership/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "medium_high",
+      "claim": "OpenAI reported more than 700 million weekly active users while announcing the infrastructure partnership.",
+      "quantified": {
+        "weekly_active_users_gt": 700000000
+      },
+      "assumptions": [
+        "Consumer and enterprise traffic can justify hyperscale inference fleets."
+      ],
+      "contradictions_or_limits": [
+        "Weekly-active-user totals reveal neither tenant concentration nor request/token distributions."
+      ],
+      "fak_implications": [
+        "Do not substitute registered or active users for demand-shape measurements."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-google-tpu-2025",
+      "category": "frontier_lab",
+      "entity": "Anthropic / Google Cloud",
+      "topic": [
+        "tpu",
+        "power",
+        "capacity"
+      ],
+      "published_at": "2025-10-23",
+      "event_at": "2025-10-23",
+      "source_title": "Expanding our use of Google Cloud TPUs and Services",
+      "source_url": "https://www.anthropic.com/news/expanding-our-use-of-google-cloud-tpus-and-services",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Anthropic planned access to up to one million TPUs, worth tens of billions of dollars, with well over 1 GW expected online in 2026.",
+      "quantified": {
+        "tpu_count_up_to": 1000000,
+        "capacity_gw_gt": 1,
+        "online_year": 2026
+      },
+      "assumptions": [
+        "Demand growth warrants million-accelerator commitments and hardware diversity."
+      ],
+      "contradictions_or_limits": [
+        "Access, installed capacity, and sustained utilization are not equivalent."
+      ],
+      "fak_implications": [
+        "Preserve accelerator backend identity in receipts and comparisons."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-aws-5gw-2026",
+      "category": "frontier_lab",
+      "entity": "Anthropic / AWS",
+      "topic": [
+        "trainium",
+        "capacity",
+        "custom_silicon"
+      ],
+      "published_at": "2026-04-20",
+      "event_at": "2026-04-20",
+      "source_title": "Anthropic and Amazon expand collaboration for up to 5 GW of new capacity",
+      "source_url": "https://www.anthropic.com/news/anthropic-amazon-compute",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Anthropic said it was using over one million Trainium2 chips and committed more than $100B over ten years for up to 5 GW spanning Trainium2 through Trainium4 and Graviton.",
+      "quantified": {
+        "trainium2_in_use_gt": 1000000,
+        "commitment_usd_gt": 100000000000,
+        "capacity_gw_up_to": 5,
+        "period_years": 10
+      },
+      "assumptions": [
+        "Long-term frontier procurement spans multiple silicon generations and host CPUs."
+      ],
+      "contradictions_or_limits": [
+        "Up-to capacity and decade commitments do not equal current serving capacity."
+      ],
+      "fak_implications": [
+        "Model platform transitions and mixed generations explicitly."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-google-broadcom-2026",
+      "category": "frontier_lab",
+      "entity": "Anthropic / Google / Broadcom",
+      "topic": [
+        "tpu",
+        "roadmap",
+        "capacity"
+      ],
+      "published_at": "2026-04-06",
+      "event_at": "2026-04-06",
+      "source_title": "Anthropic expands partnership with Google and Broadcom for multiple gigawatts of next-generation compute",
+      "source_url": "https://www.anthropic.com/news/google-broadcom-partnership-compute",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Anthropic signed for multiple gigawatts of next-generation TPU capacity expected online starting in 2027.",
+      "quantified": {
+        "capacity": "multiple_gigawatts",
+        "start_year": 2027
+      },
+      "assumptions": [
+        "Capacity planning horizons exceed one year and depend on co-designed future silicon."
+      ],
+      "contradictions_or_limits": [
+        "No precise chip count, completion state, or utilization is disclosed."
+      ],
+      "fak_implications": [
+        "Keep 2027 capacity out of present benchmark claims."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-multicloud-2025",
+      "category": "frontier_lab",
+      "entity": "Anthropic",
+      "topic": [
+        "heterogeneity",
+        "reliability",
+        "geography"
+      ],
+      "published_at": "2025-09-17",
+      "event_at": "2025-09-17",
+      "source_title": "A postmortem of three recent issues",
+      "source_url": "https://www.anthropic.com/engineering/a-postmortem-of-three-recent-issues",
+      "source_kind": "engineering_postmortem",
+      "evidence_class": "production_observation",
+      "confidence": "high",
+      "claim": "Anthropic described serving Claude across AWS Trainium, NVIDIA GPUs, and Google TPUs to obtain capacity and geographic distribution for millions of users and multiple cloud channels.",
+      "quantified": {
+        "user_scale": "millions"
+      },
+      "assumptions": [
+        "Frontier production serving is heterogeneous across hardware, geography, and distribution channel."
+      ],
+      "contradictions_or_limits": [
+        "Traffic split, per-platform SLO, batching, and utilization are undisclosed."
+      ],
+      "fak_implications": [
+        "Incident and execution receipts must retain platform, region, and hardware identity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-azure-2025",
+      "category": "frontier_lab",
+      "entity": "Anthropic / Microsoft / NVIDIA",
+      "topic": [
+        "cloud_diversity",
+        "capacity",
+        "co_design"
+      ],
+      "published_at": "2025-11-18",
+      "event_at": "2025-11-18",
+      "source_title": "Microsoft, NVIDIA and Anthropic announce strategic partnerships",
+      "source_url": "https://www.anthropic.com/news/microsoft-nvidia-anthropic-announce-strategic-partnerships",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Anthropic committed to purchase $30B of Azure capacity and contract up to 1 GW using Grace Blackwell and Vera Rubin, while co-optimizing models and hardware with NVIDIA.",
+      "quantified": {
+        "azure_commitment_usd": 30000000000,
+        "capacity_gw_up_to": 1
+      },
+      "assumptions": [
+        "Frontier providers will keep several clouds and architectures in parallel."
+      ],
+      "contradictions_or_limits": [
+        "Contracted capacity is prospective and lacks measured workload allocation."
+      ],
+      "fak_implications": [
+        "Cross-cloud routing should price migration, cache locality, and platform-specific quality/performance."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-ironwood-2025",
+      "category": "hyperscaler",
+      "entity": "Google Cloud",
+      "topic": [
+        "inference",
+        "pod_scale",
+        "cooling",
+        "networking"
+      ],
+      "published_at": "2025-04-09",
+      "event_at": "2025-04-09",
+      "source_title": "Ironwood: The first Google TPU for the age of inference",
+      "source_url": "https://blog.google/innovation-and-ai/infrastructure-and-cloud/google-cloud/ironwood-tpu-age-of-inference/",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "Ironwood was presented as an inference-focused TPU scaling to 9,216 liquid-cooled chips over nearly 10 MW.",
+      "quantified": {
+        "chips_per_pod": 9216,
+        "pod_power_mw_approx": 10
+      },
+      "assumptions": [
+        "Reasoning and MoE inference require pod-scale, high-bandwidth, liquid-cooled systems."
+      ],
+      "contradictions_or_limits": [
+        "Peak specifications are not application goodput, cost per accepted token, or SLO attainment."
+      ],
+      "fak_implications": [
+        "Measure sustained end-to-end goodput and quality rather than peak FLOPS."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-tpu8-specialization-2026",
+      "category": "hyperscaler",
+      "entity": "Google Cloud",
+      "topic": [
+        "training",
+        "inference",
+        "specialization"
+      ],
+      "published_at": "2026-04-01",
+      "event_at": "2026-04-01",
+      "source_title": "Our eighth generation TPUs: two chips for the agentic era",
+      "source_url": "https://blog.google/innovation-and-ai/infrastructure-and-cloud/google-cloud/eighth-generation-tpu-agentic-era/",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "Google split TPU 8 into training-oriented 8t and latency-oriented 8i, arguing that small inefficiencies compound across agent interactions.",
+      "quantified": {},
+      "assumptions": [
+        "Agentic demand creates enough divergent workload shape to justify specialized inference silicon."
+      ],
+      "contradictions_or_limits": [
+        "Vendor claims do not disclose the production traffic share matching each chip."
+      ],
+      "fak_implications": [
+        "Route using observed workload shape; do not optimize all requests for one fashionable profile."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-rubin-nvl72-2026",
+      "category": "accelerator_platform",
+      "entity": "NVIDIA",
+      "topic": [
+        "rack_scale",
+        "moe",
+        "networking",
+        "ras"
+      ],
+      "published_at": "2026-01-05",
+      "event_at": "2026-01-05",
+      "source_title": "NVIDIA Kicks Off the Next Generation of AI With Rubin",
+      "source_url": "https://nvidianews.nvidia.com/news/rubin-platform-ai-supercomputer",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "Rubin NVL72 makes a 72-GPU rack the integration unit, claiming 3.6 TB/s NVLink bandwidth per GPU and 260 TB/s per rack with added serviceability and resiliency.",
+      "quantified": {
+        "gpus_per_rack": 72,
+        "nvlink_tbps_per_gpu": 3.6,
+        "rack_bandwidth_tbps": 260
+      },
+      "assumptions": [
+        "Large MoE and reasoning workloads need tightly coupled rack-scale fabrics and system-level RAS."
+      ],
+      "contradictions_or_limits": [
+        "Peak bandwidth and vendor comparisons do not prove sustained application goodput."
+      ],
+      "fak_implications": [
+        "Matched envelopes must record rack topology, failures, and sustained collective bandwidth."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-rubin-cpx-2025",
+      "category": "accelerator_platform",
+      "entity": "NVIDIA",
+      "topic": [
+        "long_context",
+        "prefill",
+        "specialization"
+      ],
+      "published_at": "2025-09-09",
+      "event_at": "2025-09-09",
+      "source_title": "NVIDIA Unveils Rubin CPX for Massive-Context Inference",
+      "source_url": "https://nvidianews.nvidia.com/news/nvidia-unveils-rubin-cpx-a-new-class-of-gpu-designed-for-massive-context-inference",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "NVIDIA announced specialized massive-context inference silicon expected at the end of 2026.",
+      "quantified": {
+        "expected_availability": "2026-12-31"
+      },
+      "assumptions": [
+        "Massive-context prefill will be common enough to justify specialized hardware."
+      ],
+      "contradictions_or_limits": [
+        "Availability and prevalence are prospective; no production context-length share is provided."
+      ],
+      "fak_implications": [
+        "Measure context-length prevalence before generalizing massive-context optimizations."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-dynamo-2025",
+      "category": "serving_system",
+      "entity": "NVIDIA Dynamo",
+      "topic": [
+        "batching",
+        "disaggregation",
+        "kv_cache",
+        "routing",
+        "autoscaling"
+      ],
+      "published_at": "2025-03-18",
+      "event_at": "2025-03-18",
+      "source_title": "Introducing NVIDIA Dynamo",
+      "source_url": "https://developer.nvidia.com/blog/introducing-nvidia-dynamo-a-low-latency-distributed-inference-framework-for-scaling-reasoning-ai-models/",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "Dynamo treats prefill/decode disaggregation, dynamic GPU scheduling, KV-aware routing, asynchronous transfer, and multi-tier cache offload as datacenter-scale inference primitives.",
+      "quantified": {
+        "throughput_gain_up_to": 30
+      },
+      "assumptions": [
+        "Reasoning traffic creates differing prefill/decode bottlenecks and reusable KV state."
+      ],
+      "contradictions_or_limits": [
+        "Benefits depend on topology, workload mix, cache locality, and SLO; up-to 30x is a vendor envelope."
+      ],
+      "fak_implications": [
+        "Ablate reuse-aware routing and disaggregation net of transfer, coordination, and failure cost."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-dynamo-topology-2026",
+      "category": "serving_system",
+      "entity": "NVIDIA Dynamo",
+      "topic": [
+        "topology",
+        "disaggregation",
+        "latency"
+      ],
+      "published_at": "2026-03-16",
+      "event_at": "2026-03-16",
+      "source_title": "How NVIDIA Dynamo 1.0 Powers Multi-Node Inference at Scale",
+      "source_url": "https://developer.nvidia.com/blog/nvidia-dynamo-1-production-ready/",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "Dynamo 1.0 added topology APIs to colocate prefill and decode within NVL72 racks, confine stacks to a datacenter, and place CPU frontends nearby.",
+      "quantified": {},
+      "assumptions": [
+        "Physical topology materially changes KV-transfer latency and service placement."
+      ],
+      "contradictions_or_limits": [
+        "Reference placement guidance is not proof that disaggregation wins every workload."
+      ],
+      "fak_implications": [
+        "Topology must be explicit in scheduling receipts and comparative tests."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "servegen-2026",
+      "category": "workload_trace",
+      "entity": "ServeGen production study",
+      "topic": [
+        "arrival_distribution",
+        "token_distribution",
+        "tenant_decomposition",
+        "multimodal",
+        "reasoning"
+      ],
+      "published_at": "2026-05-11",
+      "event_at": "2026-05-11",
+      "source_title": "ServeGen: Workload Characterization and Generation of Large Language Model Serving in Production",
+      "source_url": "https://arxiv.org/html/2505.09999v3",
+      "source_kind": "peer_reviewed_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "A worldwide cloud study found bursty arrivals and differing token behavior across language, multimodal, and reasoning workloads; per-client composition explains aggregate patterns better than one global distribution.",
+      "quantified": {},
+      "assumptions": [
+        "Client mixture is a primary driver of aggregate workload shape.",
+        "Stationary Poisson arrivals and one token histogram are often inadequate."
+      ],
+      "contradictions_or_limits": [
+        "Provider identity and raw trace detail are constrained; results may not cover every frontier API."
+      ],
+      "fak_implications": [
+        "Generate workload per tenant/client with modality and reasoning mixtures, not one aggregate profile."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "fineserve-2026",
+      "category": "workload_trace",
+      "entity": "FineServe",
+      "topic": [
+        "multi_model",
+        "task_mix",
+        "arrival_distribution",
+        "token_geometry"
+      ],
+      "published_at": "2026-07-25",
+      "event_at": "2026-07-25",
+      "source_title": "FineServe: A Fine-Grained Dataset and Characterization of Global LLM Serving Workloads",
+      "source_url": "https://arxiv.org/html/2607.19349v1",
+      "source_kind": "preprint",
+      "evidence_class": "production_measurement",
+      "confidence": "medium_high",
+      "claim": "A global commercial marketplace trace reports distinct fluctuation regimes across model architecture, scale, and task intent, plus sharp traffic shifts after model releases or availability changes.",
+      "quantified": {},
+      "assumptions": [
+        "Model choice and market events make workload mixes nonstationary."
+      ],
+      "contradictions_or_limits": [
+        "A marketplace can differ from first-party frontier applications and the paper is a preprint."
+      ],
+      "fak_implications": [
+        "Benchmarks should include model-turnover shocks and model/task-specific workload mixtures."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "year-in-serving-2026",
+      "category": "workload_trace",
+      "entity": "Chutes production trace study",
+      "topic": [
+        "heavy_tail",
+        "model_popularity",
+        "user_model_structure",
+        "longitudinal"
+      ],
+      "published_at": "2026-07-03",
+      "event_at": "2026-07-03",
+      "source_title": "A Year in LLM Serving: Workload Evolution, Caching and Load-Balancing",
+      "source_url": "https://arxiv.org/abs/2608.13573",
+      "source_kind": "preprint",
+      "evidence_class": "production_measurement",
+      "confidence": "medium_high",
+      "claim": "A one-year Chutes trace studies popular and long-tail models plus user-model structure, showing why short aggregate traces miss workload evolution.",
+      "quantified": {},
+      "assumptions": [
+        "Popularity is heavy-tailed and changes over time; user-model affinity matters for cache and routing."
+      ],
+      "contradictions_or_limits": [
+        "Chutes is an open multi-model platform, not a complete proxy for closed frontier APIs."
+      ],
+      "fak_implications": [
+        "Use longitudinal heavy-tail and churn models; record whether Zipf-like behavior was measured or merely assumed."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "burstgpt-2026",
+      "category": "workload_trace",
+      "entity": "BurstGPT v1.1",
+      "topic": [
+        "burstiness",
+        "capacity_planning",
+        "token_volume"
+      ],
+      "published_at": "2026-08-03",
+      "event_at": "2026-08-03",
+      "source_title": "Token-Burst-Aware Capacity Planning for LLM Inference Services",
+      "source_url": "https://jtie.stekom.ac.id/index.php/jtie/article/view/565",
+      "source_kind": "research_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "medium",
+      "claim": "The study used 5.29M requests over 121 days and argues capacity planning must use coupled input/output token bursts, queueing, service mix, and reliability rather than request counts alone.",
+      "quantified": {
+        "raw_requests": 5288173,
+        "trace_days": 121,
+        "completed_requests": 5188507
+      },
+      "assumptions": [
+        "Token volume and bursts are more predictive of compute load than raw request rate."
+      ],
+      "contradictions_or_limits": [
+        "The paper's planning method and venue need independent replication; trace population limits apply."
+      ],
+      "fak_implications": [
+        "Capacity ledgers should operate in token-phase work and SLOs, not requests per second alone."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "mnemosyne-2024",
+      "category": "serving_system",
+      "entity": "Microsoft Research Mnemosyne",
+      "topic": [
+        "long_context",
+        "batching",
+        "parallelism",
+        "slo"
+      ],
+      "published_at": "2024-09-25",
+      "event_at": "2024-09-25",
+      "source_title": "Mnemosyne: Parallelization Strategies for Multi-Million Context LLM Inference",
+      "source_url": "https://arxiv.org/abs/2409.17264",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "Mnemosyne combines adaptive chunking, sequence pipeline parallelism, and KV-cache parallelism for interactive requests up to 10M-token contexts while targeting 30 ms between tokens.",
+      "quantified": {
+        "context_tokens_up_to": 10000000,
+        "target_time_between_tokens_ms": 30
+      },
+      "assumptions": [
+        "Extreme long context requires different prefill and decode parallelism."
+      ],
+      "contradictions_or_limits": [
+        "Benchmark capability does not establish the prevalence of 10M-token production requests."
+      ],
+      "fak_implications": [
+        "Gate specialized long-context paths on measured distribution and net SLO benefit."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "iea-energy-ai-2025",
+      "category": "datacenter_physical",
+      "entity": "International Energy Agency",
+      "topic": [
+        "power",
+        "cooling",
+        "capacity_planning"
+      ],
+      "published_at": "2025-04-10",
+      "event_at": "2025-04-10",
+      "source_title": "Energy and AI",
+      "source_url": "https://www.iea.org/reports/energy-and-ai/energy-demand-from-ai",
+      "source_kind": "intergovernmental_report",
+      "evidence_class": "analyst_estimate",
+      "confidence": "high",
+      "claim": "The IEA identifies electricity as a determinant of AI scale and estimates cooling at about 7% of efficient hyperscale consumption but over 30% for less-efficient enterprise facilities.",
+      "quantified": {
+        "cooling_share_pct_hyperscale_approx": 7,
+        "cooling_share_pct_enterprise_gt": 30
+      },
+      "assumptions": [
+        "Facility overhead varies materially with datacenter design and climate."
+      ],
+      "contradictions_or_limits": [
+        "Forecasts depend on uncertain model efficiency, utilization, and buildout."
+      ],
+      "fak_implications": [
+        "Report IT and facility power separately and carry cooling/PUE uncertainty."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meta-ai-datacenter-2023",
+      "category": "hyperscaler",
+      "entity": "Meta",
+      "topic": [
+        "datacenter_design",
+        "liquid_cooling",
+        "networking"
+      ],
+      "published_at": "2023-05-18",
+      "event_at": "2023-05-18",
+      "source_title": "Reimagining Our Infrastructure for the AI Age",
+      "source_url": "https://about.fb.com/news/2023/05/metas-infrastructure-for-ai/",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Meta described a next-generation datacenter design supporting liquid-cooled AI hardware and high-performance networks connecting thousands of chips.",
+      "quantified": {
+        "cluster_scale": "thousands_of_chips"
+      },
+      "assumptions": [
+        "The datacenter rather than the server is the design boundary for large training and inference systems."
+      ],
+      "contradictions_or_limits": [
+        "No delivered utilization or failure-domain distribution is disclosed."
+      ],
+      "fak_implications": [
+        "Topology, cooling, and failure domains belong in cluster operating envelopes."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meta-nuclear-2026",
+      "category": "datacenter_physical",
+      "entity": "Meta",
+      "topic": [
+        "power",
+        "nuclear",
+        "capacity"
+      ],
+      "published_at": "2026-01-09",
+      "event_at": "2026-01-09",
+      "source_title": "Meta Announces Nuclear Energy Projects, Unlocking Up to 6.6 GW",
+      "source_url": "https://about.fb.com/news/2026/01/meta-nuclear-energy-projects-power-american-ai-leadership/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Meta announced agreements associated with up to 6.6 GW of nuclear energy for AI and datacenter growth.",
+      "quantified": {
+        "power_gw_up_to": 6.6
+      },
+      "assumptions": [
+        "Firm long-duration power procurement is strategic infrastructure rather than a passive utility input."
+      ],
+      "contradictions_or_limits": [
+        "Project timelines, delivered output, and attribution to sites vary."
+      ],
+      "fak_implications": [
+        "Capacity forecasts need power-delivery dates and firmness."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-stargate-michigan-2025",
+      "category": "datacenter_physical",
+      "entity": "OpenAI / Oracle / Related Digital / DTE",
+      "topic": [
+        "water",
+        "grid",
+        "community",
+        "power"
+      ],
+      "published_at": "2025-10-30",
+      "event_at": "2025-10-30",
+      "source_title": "Expanding Stargate to Michigan",
+      "source_url": "https://openai.com/index/expanding-stargate-to-michigan/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "A greater-than-1-GW Michigan campus proposed closed-loop cooling, use of excess transmission capacity, and project-funded grid upgrades.",
+      "quantified": {
+        "campus_power_gw_gt": 1
+      },
+      "assumptions": [
+        "Water, grid impact, and ratepayer allocation are now project design requirements."
+      ],
+      "contradictions_or_limits": [
+        "Promised mitigations need operational verification after commissioning."
+      ],
+      "fak_implications": [
+        "Record cooling design, grid-upgrade payer, and local operating constraints."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "coreweave-platform-2026",
+      "category": "ai_cloud",
+      "entity": "CoreWeave",
+      "topic": [
+        "goodput",
+        "reliability",
+        "utilization"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "CoreWeave AI cloud platform",
+      "source_url": "https://www.coreweave.com/",
+      "source_kind": "vendor_site",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium",
+      "claim": "CoreWeave markets up to 96% cluster goodput and up to 50% fewer daily interruptions from AI-native health, lifecycle, and observability systems.",
+      "quantified": {
+        "cluster_goodput_pct_up_to": 96,
+        "interruptions_reduction_pct_up_to": 50
+      },
+      "assumptions": [
+        "Useful output depends on operational recovery and health, not allocated GPU-hours."
+      ],
+      "contradictions_or_limits": [
+        "The landing page does not disclose workload, baseline, customer distribution, or methodology."
+      ],
+      "fak_implications": [
+        "Prefer interruption-adjusted goodput over nominal allocation."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "groq-funding-scale-2026",
+      "category": "ai_cloud",
+      "entity": "Groq",
+      "topic": [
+        "inference_cloud",
+        "geography",
+        "demand",
+        "funding"
+      ],
+      "published_at": "2026-08-17",
+      "event_at": "2026-08-17",
+      "source_title": "Groq Closes $350 million Series A",
+      "source_url": "https://groq.com/newsroom/groq-closes-usd350-million-series-a-building-the-world-s-leading-ai-inference-cloud",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Groq reported a $350M round after $650M in June 2026 to scale an inference cloud, with planned NVIDIA participation.",
+      "quantified": {
+        "funding_usd": 350000000,
+        "recent_funding_total_usd": 1000000000,
+        "valuation_usd": 3500000000
+      },
+      "assumptions": [
+        "Specialized inference clouds require substantial capital and incumbent ecosystem links."
+      ],
+      "contradictions_or_limits": [
+        "Financing does not prove workload economics; planned participation is not completed."
+      ],
+      "fak_implications": [
+        "Track capital, deployed MW, tokens, active tenants, and concentration separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "neocloud-q2-2026",
+      "category": "market_signal",
+      "entity": "CoreWeave / Nebius / Cerebras",
+      "topic": [
+        "economics",
+        "revenue",
+        "losses",
+        "capacity"
+      ],
+      "published_at": "2026-08-14",
+      "event_at": "2026-08-14",
+      "source_title": "Neocloud results Q2 2026: CoreWeave, Nebius, Cerebras",
+      "source_url": "https://www.datacenterdynamics.com/en/news/neocloud-results-q2-2026-coreweave-nebius-cerebras/",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "Q2 reporting showed accelerating neocloud revenue alongside widening losses as operators expanded capacity.",
+      "quantified": {},
+      "assumptions": [
+        "Demand growth can coexist with poor near-term capital efficiency and financing risk."
+      ],
+      "contradictions_or_limits": [
+        "Cross-company accounting and backlog definitions differ."
+      ],
+      "fak_implications": [
+        "Compare net economics including financing, idle capacity, and customer concentration."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "datacenter-opposition-2026",
+      "category": "datacenter_physical",
+      "entity": "U.S. datacenter sector",
+      "topic": [
+        "permitting",
+        "community",
+        "water",
+        "power"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "Data center controversies transform the midterm elections",
+      "source_url": "https://apnews.com/article/e5a350af1bc12e6a4f470d3b68be51d7",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "high",
+      "claim": "AP reported intensifying bipartisan opposition and tighter state rules involving datacenter water, power, land, pollution, and incentives.",
+      "quantified": {},
+      "assumptions": [
+        "Social license and permitting can delay capacity independently of capital and chip supply."
+      ],
+      "contradictions_or_limits": [
+        "Outcomes vary by jurisdiction and project."
+      ],
+      "fak_implications": [
+        "Add permitting, community, water, and local-cost-allocation states to capacity forecasts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "datacenter-delays-2026",
+      "category": "market_signal",
+      "entity": "U.S. AI datacenter pipeline",
+      "topic": [
+        "delays",
+        "power",
+        "electrical_supply_chain"
+      ],
+      "published_at": "2026-04-07",
+      "event_at": "2026-04-07",
+      "source_title": "US AI expansion hit by power shortages, half planned data centers delayed or canceled",
+      "source_url": "https://www.thestandard.com.hk/innovation/article/328687/US-AI-expansion-hit-by-power-shortages-half-planned-data-centers-delayed-or-canceled",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_estimate",
+      "confidence": "medium",
+      "claim": "Reporting citing Bloomberg said 30-50% of planned 2026 U.S. AI datacenters could be delayed or canceled because of power and electrical-component shortages.",
+      "quantified": {
+        "delay_or_cancel_pct_low": 30,
+        "delay_or_cancel_pct_high": 50
+      },
+      "assumptions": [
+        "Announced project pipelines substantially overstate delivered near-term capacity."
+      ],
+      "contradictions_or_limits": [
+        "The estimate is secondary reporting and depends on how projects and delay are defined."
+      ],
+      "fak_implications": [
+        "Apply delivery probabilities and component/power gates to announced capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "datacenterwatch-2026",
+      "category": "datacenter_physical",
+      "entity": "Data Center Watch",
+      "topic": [
+        "community",
+        "delays",
+        "capex_at_risk"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "$64 billion of data center projects have been blocked or delayed amid local opposition",
+      "source_url": "https://www.datacenterwatch.org/report",
+      "source_kind": "advocacy_dataset",
+      "evidence_class": "analyst_estimate",
+      "confidence": "medium",
+      "claim": "Data Center Watch estimates $64B of U.S. projects blocked or delayed by local opposition.",
+      "quantified": {
+        "projects_blocked_or_delayed_usd": 64000000000
+      },
+      "assumptions": [
+        "Community opposition is a quantifiable pipeline risk."
+      ],
+      "contradictions_or_limits": [
+        "Advocacy methodology and project attribution require independent checking."
+      ],
+      "fak_implications": [
+        "Carry source bias and confidence when pricing nontechnical project risk."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-memory-price-rumor-2026",
+      "category": "supply_chain",
+      "entity": "NVIDIA / HBM suppliers",
+      "topic": [
+        "hbm",
+        "pricing",
+        "supply_constraint"
+      ],
+      "published_at": "2026-08-23",
+      "event_at": "2026-08-23",
+      "source_title": "Nvidia reportedly warns biggest customers of 15% price hikes on AI servers",
+      "source_url": "https://www.tomshardware.com/pc-components/dram/nvidia-reportedly-warns-biggest-customers-of-15-percent-price-hikes-on-ai-servers",
+      "source_kind": "credible_reporting",
+      "evidence_class": "rumor",
+      "confidence": "low",
+      "claim": "Tom's Hardware relayed reports that NVIDIA warned major customers of AI-server price increases above 15%, attributed to memory costs and constrained HBM supply.",
+      "quantified": {
+        "reported_price_increase_pct_gt": 15
+      },
+      "assumptions": [
+        "HBM availability and price can become a system-level accelerator bottleneck."
+      ],
+      "contradictions_or_limits": [
+        "The customer warning and exact increase were not confirmed by NVIDIA in the indexed source."
+      ],
+      "fak_implications": [
+        "Treat accelerator price and delivery as uncertain, memory-sensitive variables; do not present this report as confirmed."
+      ],
+      "rumor": {
+        "is_rumor": true,
+        "origin": "industry reporting relayed by Tom's Hardware",
+        "corroboration": "memory-price pressure is broadly reported, but the specific NVIDIA customer notice remains unconfirmed here"
+      }
+    },
+    {
+      "id": "optics-squeeze-2026",
+      "category": "supply_chain",
+      "entity": "AI optical interconnect sector",
+      "topic": [
+        "optics",
+        "cpo",
+        "supply_constraint"
+      ],
+      "published_at": "2026-05-26",
+      "event_at": "2026-05-26",
+      "source_title": "AI boom squeezes optical tech and Huawei makes a chip comeback",
+      "source_url": "https://www.ft.com/content/0d9fe3e2-904f-494c-b10d-6292aebc334c",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "Financial Times reporting described shortages and price pressure in optical fiber, lasers, and indium-phosphide substrates as AI networks scale toward co-packaged optics.",
+      "quantified": {},
+      "assumptions": [
+        "Network optics and packaging can gate cluster delivery even when accelerators are available."
+      ],
+      "contradictions_or_limits": [
+        "Company-specific shortages and timelines can change rapidly."
+      ],
+      "fak_implications": [
+        "Capacity BOMs should include optics, switches, packaging, and serviceability, not GPUs alone."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-dsx-2026",
+      "category": "datacenter_physical",
+      "entity": "NVIDIA DSX",
+      "topic": [
+        "digital_twin",
+        "power",
+        "cooling",
+        "operations"
+      ],
+      "published_at": "2026-03-16",
+      "event_at": "2026-03-16",
+      "source_title": "NVIDIA Releases Vera Rubin DSX AI Factory Reference Design",
+      "source_url": "https://nvidianews.nvidia.com/news/nvidia-releases-vera-rubin-dsx-ai-factory-reference-design-and-omniverse-dsx-digital-twin-blueprint-with-broad-industry-support",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "DSX proposes simulating power topology, thermal behavior, network layout, and operational policy before physical deployment.",
+      "quantified": {},
+      "assumptions": [
+        "Facility and workload decisions are sufficiently coupled to warrant system digital twins."
+      ],
+      "contradictions_or_limits": [
+        "Simulation fidelity and business benefit require site-specific validation."
+      ],
+      "fak_implications": [
+        "Preserve facility/workload coupling in scenario models and label simulated evidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "amd-cerebras-2026",
+      "category": "market_signal",
+      "entity": "AMD / Cerebras",
+      "topic": [
+        "partnership",
+        "specialized_inference",
+        "heterogeneous_systems"
+      ],
+      "published_at": "2026-07-23",
+      "event_at": "2026-07-23",
+      "source_title": "AMD inks deal with AI chip startup Cerebras",
+      "source_url": "https://www.axios.com/2026/07/23/amd-cerebras-ai-chips",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "AMD and Cerebras announced an integration intended to split inference work across their systems, with Cerebras adding AMD Helios systems to its cloud.",
+      "quantified": {},
+      "assumptions": [
+        "Different inference phases or workload classes may be assigned to distinct accelerator architectures."
+      ],
+      "contradictions_or_limits": [
+        "The offering was not yet generally available and no matched production economics were reported."
+      ],
+      "fak_implications": [
+        "Evaluate heterogeneous phase placement using end-to-end transfer and scheduling costs."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-stargate-over-10gw-2026",
+      "category": "frontier_lab",
+      "entity": "OpenAI / Stargate",
+      "topic": [
+        "capacity",
+        "delivery",
+        "ecosystem"
+      ],
+      "published_at": "2026-04-29",
+      "event_at": "2026-04-29",
+      "source_title": "Building the compute infrastructure for the Intelligence Age",
+      "source_url": "https://openai.com/index/building-the-compute-infrastructure-for-the-intelligence-age/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "OpenAI said it had surpassed its 10 GW U.S. infrastructure goal, adding more than 3 GW in the prior 90 days, and explicitly named power, land, permitting, transmission, workforce, community support, and partner readiness as site requirements.",
+      "quantified": {
+        "secured_power_gw_gt": 10,
+        "power_added_prior_90_days_gw_gt": 3
+      },
+      "assumptions": [
+        "Capacity acquisition is an ecosystem coordination problem spanning technical, financial, labor, government, and community actors."
+      ],
+      "contradictions_or_limits": [
+        "Secured or planned capacity is not necessarily online; the publication does not disclose accepted goodput."
+      ],
+      "fak_implications": [
+        "Represent each capacity project as a gated delivery pipeline with non-compute constraints."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-georgia-3p2gw-2026",
+      "category": "datacenter_physical",
+      "entity": "OpenAI / Georgia Power",
+      "topic": [
+        "power",
+        "delivery_schedule",
+        "community"
+      ],
+      "published_at": "2026-07-22",
+      "event_at": "2026-07-22",
+      "source_title": "Building AI infrastructure with the Effingham County community",
+      "source_url": "https://openai.com/index/building-ai-infrastructure-with-the-effingham-county-community/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "OpenAI said it was contracting for 3.2 GW in Georgia, delivered in phases from 2028 through 2032.",
+      "quantified": {
+        "contracted_power_gw": 3.2,
+        "delivery_start_year": 2028,
+        "delivery_end_year": 2032
+      },
+      "assumptions": [
+        "Power delivery is staged over multi-year horizons rather than instantly available with a datacenter announcement."
+      ],
+      "contradictions_or_limits": [
+        "The source describes contracted future power, not installed IT load or utilization."
+      ],
+      "fak_implications": [
+        "Capacity forecasts need phased dates and should not count future utility delivery as present compute."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-multisite-million-tpu-2026",
+      "category": "hyperscaler",
+      "entity": "Google",
+      "topic": [
+        "distributed_training",
+        "multi_site",
+        "cluster_scale"
+      ],
+      "published_at": "2026-05-19",
+      "event_at": "2026-05-19",
+      "source_title": "Google I/O 2026: Sundar Pichai opening keynote",
+      "source_url": "https://blog.google/innovation-and-ai/sundar-pichai-io-2026/",
+      "source_kind": "official_keynote",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Google said JAX and Pathways can distribute training across multiple sites and more than one million TPUs globally, explicitly moving beyond a single massive datacenter.",
+      "quantified": {
+        "global_tpu_scale_gt": 1000000,
+        "expected_2026_capex_usd_low": 180000000000,
+        "expected_2026_capex_usd_high": 190000000000
+      },
+      "assumptions": [
+        "Frontier training can cross site boundaries; wide-area coordination and failure modes are part of the cluster."
+      ],
+      "contradictions_or_limits": [
+        "The statement provides no topology, synchronization efficiency, or measured training goodput."
+      ],
+      "fak_implications": [
+        "Do not assume one low-latency fabric or one site when defining frontier training envelopes."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-agent-tokens-2026",
+      "category": "workload_trace",
+      "entity": "Google internal developer tools",
+      "topic": [
+        "agentic",
+        "token_volume",
+        "growth",
+        "enterprise"
+      ],
+      "published_at": "2026-05-19",
+      "event_at": "2026-05-19",
+      "source_title": "Google I/O 2026: Sundar Pichai opening keynote",
+      "source_url": "https://blog.google/innovation-and-ai/sundar-pichai-io-2026/",
+      "source_kind": "official_keynote",
+      "evidence_class": "production_observation",
+      "confidence": "high",
+      "claim": "Google reported internal AI developer-tool traffic growing from about 0.5 trillion tokens per day in March 2026 to more than 3 trillion per day by May, while saying top companies process about 1 trillion tokens daily.",
+      "quantified": {
+        "internal_tokens_per_day_march_2026": 500000000000,
+        "internal_tokens_per_day_may_2026_gt": 3000000000000,
+        "top_company_tokens_per_day_approx": 1000000000000
+      },
+      "assumptions": [
+        "Agentic coding workloads can grow by multiples over weeks and can dominate enterprise token budgets."
+      ],
+      "contradictions_or_limits": [
+        "Aggregate token volume omits active users, request count, cache reuse, modalities, and input/output split."
+      ],
+      "fak_implications": [
+        "Capacity planning should include rapid growth regimes and token-phase decomposition, not static annual averages."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aliyun-kvcache-wild-2025",
+      "category": "workload_trace",
+      "entity": "Alibaba Cloud / Aliyun",
+      "topic": [
+        "prefix_reuse",
+        "cache",
+        "consumer_vs_api",
+        "reuse_skew"
+      ],
+      "published_at": "2025-06-03",
+      "event_at": "2025-06-03",
+      "source_title": "KVCache Cache in the Wild: Characterizing and Optimizing KVCache Cache at a Large Cloud Provider",
+      "source_url": "https://arxiv.org/html/2506.02634v3",
+      "source_kind": "research_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "Two Aliyun production workloads show skewed KV reuse; single-turn reuse can matter as much as multi-turn reuse, while reuse time and probability are diverse globally but more predictable within request categories.",
+      "quantified": {},
+      "assumptions": [
+        "Prefix popularity and reuse are skewed but category-dependent; one global Zipf parameter is inadequate.",
+        "Consumer chat and developer API workloads should be modeled separately."
+      ],
+      "contradictions_or_limits": [
+        "The public paper does not expose all raw business-sensitive population details and studies one provider."
+      ],
+      "fak_implications": [
+        "Measure reuse by request class, user/channel, and time; compare learned eviction against LRU/LFU using the real mix."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tracelab-coding-agents-2026",
+      "category": "workload_trace",
+      "entity": "TraceLab coding-agent corpus",
+      "topic": [
+        "agents",
+        "prefix_cache",
+        "tool_calls",
+        "heavy_tail",
+        "human_gaps"
+      ],
+      "published_at": "2026-06-29",
+      "event_at": "2026-06-29",
+      "source_title": "TraceLab: Characterizing Coding Agent Workloads for LLM Serving",
+      "source_url": "https://arxiv.org/abs/2606.30560",
+      "source_kind": "preprint_and_open_dataset",
+      "evidence_class": "production_measurement",
+      "confidence": "medium_high",
+      "claim": "A corpus of roughly 4,300 coding-agent sessions, 350,000 LLM steps, and 430,000 tool calls found long autonomous loops, long contexts with short outputs, heavily tailed tool calls, and high but imperfect prefix-cache hit rates.",
+      "quantified": {
+        "sessions_approx": 4300,
+        "llm_steps_approx": 350000,
+        "tool_calls_approx": 430000
+      },
+      "assumptions": [
+        "Coding-agent demand differs from chat: closed loops, appended context, tool latency, and human-paced idle gaps affect cache residency."
+      ],
+      "contradictions_or_limits": [
+        "The trace comes from the authors own use rather than a provider-wide random user sample."
+      ],
+      "fak_implications": [
+        "Use coding-agent-specific workload profiles and include tool turns, idle gaps, append length, and imperfect cache hits."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "llmd-prefix-bimodal-2026",
+      "category": "serving_system",
+      "entity": "llm-d / Google",
+      "topic": [
+        "prefix_cache",
+        "routing",
+        "bimodal_distribution"
+      ],
+      "published_at": "2026-03-13",
+      "event_at": "2026-03-13",
+      "source_title": "Predicted-Latency Based Scheduling for LLMs",
+      "source_url": "https://llm-d.ai/blog/predicted-latency-based-scheduling-for-llms",
+      "source_kind": "engineering_blog",
+      "evidence_class": "production_observation",
+      "confidence": "medium_high",
+      "claim": "llm-d reports an internal production prefix-match distribution that is roughly bimodal: about half of request-pod pairs are above 0.80 and half below, motivating an affinity gate rather than a smooth global score.",
+      "quantified": {
+        "affinity_threshold": 0.8
+      },
+      "assumptions": [
+        "Conversation state often creates near-binary cache locality at a replica: the history is present or absent."
+      ],
+      "contradictions_or_limits": [
+        "The underlying trace, sample size, and tenant mix are not public."
+      ],
+      "fak_implications": [
+        "Benchmark session-affinity routing against load balancing and record hit-ratio distributions, not just averages."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "output-length-heavy-tail-2026",
+      "category": "workload_model",
+      "entity": "TIE scheduling study",
+      "topic": [
+        "output_length",
+        "heavy_tail",
+        "continuous_batching",
+        "tail_latency"
+      ],
+      "published_at": "2026-05-25",
+      "event_at": "2026-05-25",
+      "source_title": "Scheduling LLM Inference with Uncertainty-Aware Output Length Predictions",
+      "source_url": "https://arxiv.org/html/2604.00499",
+      "source_kind": "research_paper",
+      "evidence_class": "synthetic_experiment",
+      "confidence": "medium_high",
+      "claim": "Across 1,000 LMSYS prompts with 100 generations each, output lengths were strongly heavy-tailed: average skewness 3.10, mean coefficient of variation 1.09, and P99/P50 10.77; the top decile contributed 35.7% of generated length.",
+      "quantified": {
+        "prompts": 1000,
+        "samples_per_prompt": 100,
+        "average_skewness": 3.1,
+        "average_coefficient_variation": 1.09,
+        "cv_gt_1_share_pct": 78.6,
+        "top_decile_length_share_pct": 35.7,
+        "p90_p50": 4.62,
+        "p99_p50": 10.77
+      },
+      "assumptions": [
+        "Even identical prompts produce uncertain, heavy-tailed service times; point output-length prediction is structurally weak."
+      ],
+      "contradictions_or_limits": [
+        "Generated responses over public prompts are not a direct production arrival trace; fitted tails depend on model and decoding."
+      ],
+      "fak_implications": [
+        "Schedulers should price output-length uncertainty, continuous batching, preemption, and tail risk rather than use one expected length."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aws-bedrock-batch-discount-2025",
+      "category": "serving_system",
+      "entity": "AWS Bedrock",
+      "topic": [
+        "offline_batch",
+        "pricing",
+        "latency_tier"
+      ],
+      "published_at": "2025-09-18",
+      "event_at": "2025-09-18",
+      "source_title": "Monitor Amazon Bedrock batch inference using Amazon CloudWatch metrics",
+      "source_url": "https://aws.amazon.com/blogs/machine-learning/monitor-amazon-bedrock-batch-inference-using-amazon-cloudwatch-metrics/",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "AWS distinguishes bulk batch inference from on-demand serving and advertises a 50% lower price for workloads that can trade interactive latency for scheduled throughput.",
+      "quantified": {
+        "discount_vs_on_demand_pct": 50
+      },
+      "assumptions": [
+        "A meaningful share of inference can be delayed and optimized for cost/throughput instead of TTFT."
+      ],
+      "contradictions_or_limits": [
+        "List-price discount does not prove realized cost once queueing, data movement, retries, and deadlines are included."
+      ],
+      "fak_implications": [
+        "Keep offline batch and online continuous batching as distinct workload classes and compare net completion cost."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "ietf-llm-workload-profiles-2026",
+      "category": "standard",
+      "entity": "IETF Internet-Draft authors",
+      "topic": [
+        "benchmarking",
+        "workload_profiles",
+        "concurrency",
+        "cache_behavior"
+      ],
+      "published_at": "2026-04-10",
+      "event_at": "2026-04-10",
+      "source_title": "Benchmarking Workload Profiles for Large Language Model Inference Serving",
+      "source_url": "https://datatracker.ietf.org/doc/draft-mondal-llm-serving-workload-profiles/",
+      "source_kind": "internet_draft",
+      "evidence_class": "official_statement",
+      "confidence": "medium",
+      "claim": "An Internet-Draft proposes six benchmark profile groups defined by input/output distributions, output structure, latency sensitivity, concurrency, and caching behavior: non-generative, minimal-output, interactive streaming, prefill-heavy, decode-heavy, and multi-step chained.",
+      "quantified": {
+        "profile_groups": 6
+      },
+      "assumptions": [
+        "No single benchmark profile represents all production inference; latency and caching behavior are workload-defining dimensions."
+      ],
+      "contradictions_or_limits": [
+        "An Internet-Draft is mutable and not an adopted standard or production measurement."
+      ],
+      "fak_implications": [
+        "Map fak benchmarks to named workload profiles and retain the exact draft/version used."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "xai-series-e-2026",
+      "category": "frontier_lab",
+      "entity": "xAI",
+      "topic": [
+        "cluster_scale",
+        "userbase",
+        "funding"
+      ],
+      "published_at": "2026-01-06",
+      "event_at": "2026-01-06",
+      "source_title": "xAI Raises $20B Series E",
+      "source_url": "https://x.ai/news/series-e",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "xAI said Colossus I and II ended 2025 with more than one million H100-equivalent GPUs and that X plus Grok reached about 600 million monthly active users.",
+      "quantified": {
+        "funding_usd": 20000000000,
+        "h100_equivalent_gpu_count_gt": 1000000,
+        "monthly_active_users_approx": 600000000
+      },
+      "assumptions": [
+        "A single lab can pair million-accelerator infrastructure with a consumer-scale distribution channel."
+      ],
+      "contradictions_or_limits": [
+        "H100-equivalent is not a physical SKU count, and monthly active users do not reveal request or token distributions."
+      ],
+      "fak_implications": [
+        "Keep physical hardware, normalized equivalents, active users, requests, and tokens as separate measures."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "xai-grok4-colossus-2025",
+      "category": "frontier_lab",
+      "entity": "xAI",
+      "topic": [
+        "reinforcement_learning",
+        "cluster_scale",
+        "test_time_compute"
+      ],
+      "published_at": "2025-07-09",
+      "event_at": "2025-07-09",
+      "source_title": "Grok 4",
+      "source_url": "https://x.ai/news/grok-4",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "xAI said Grok 4 reinforcement learning used a 200,000-GPU Colossus cluster at pretraining scale and that stack changes improved training compute efficiency sixfold.",
+      "quantified": {
+        "gpu_count": 200000,
+        "claimed_training_compute_efficiency_gain": 6
+      },
+      "assumptions": [
+        "Reasoning post-training can consume pretraining-scale compute rather than being a small finishing stage."
+      ],
+      "contradictions_or_limits": [
+        "The efficiency baseline, GPU mix, goodput, and energy are not fully specified."
+      ],
+      "fak_implications": [
+        "Capacity accounting should separate pretraining, post-training/RL, evaluation, and inference demand."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "xai-reasoning-duration-2025",
+      "category": "workload_model",
+      "entity": "xAI Grok 3",
+      "topic": [
+        "reasoning",
+        "output_length",
+        "test_time_compute"
+      ],
+      "published_at": "2025-02-19",
+      "event_at": "2025-02-19",
+      "source_title": "Grok 3 Beta — The Age of Reasoning Agents",
+      "source_url": "https://x.ai/news/grok-3",
+      "source_kind": "official_model_release",
+      "evidence_class": "production_observation",
+      "confidence": "medium_high",
+      "claim": "xAI described reasoning requests as spending from seconds to minutes and reported a highest-compute evaluation using 64 sampled chains.",
+      "quantified": {
+        "high_compute_sampling": "cons@64"
+      },
+      "assumptions": [
+        "Reasoning-service time and sampled-compute demand can vary by orders of magnitude across requests and settings."
+      ],
+      "contradictions_or_limits": [
+        "Product prose does not provide a production duration distribution or user-selection rate."
+      ],
+      "fak_implications": [
+        "Model reasoning budget as a request-controlled distribution, not a fixed output length."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "mistral-compute-2025",
+      "category": "frontier_lab",
+      "entity": "Mistral AI",
+      "topic": [
+        "sovereign_cloud",
+        "vertical_integration",
+        "deployment_choice"
+      ],
+      "published_at": "2025-06-11",
+      "event_at": "2025-06-11",
+      "source_title": "Mistral Compute",
+      "source_url": "https://mistral.ai/news/mistral-compute/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Mistral announced a vertically integrated European infrastructure offering spanning GPUs, orchestration, APIs, products, bare metal, and managed PaaS, motivated by scarce expensive GPUs and patchy tooling.",
+      "quantified": {},
+      "assumptions": [
+        "Sovereign buyers want infrastructure and control boundaries, not only a serverless model API."
+      ],
+      "contradictions_or_limits": [
+        "The announcement does not disclose fleet size, utilization, or delivered economics."
+      ],
+      "fak_implications": [
+        "Treat deployment/control preference and sovereignty as workload-placement constraints."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "mistral-environmental-lca-2025",
+      "category": "frontier_lab",
+      "entity": "Mistral AI",
+      "topic": [
+        "energy",
+        "water",
+        "lifecycle",
+        "inference"
+      ],
+      "published_at": "2025-07-22",
+      "event_at": "2025-07-22",
+      "source_title": "Our contribution to a global environmental standard for AI",
+      "source_url": "https://mistral.ai/news/our-contribution-to-a-global-environmental-standard-for-ai/",
+      "source_kind": "official_report",
+      "evidence_class": "production_observation",
+      "confidence": "medium_high",
+      "claim": "Mistral reported lifecycle impacts for training Mistral Large 2 and marginal impacts for a 400-token Le Chat response, including carbon, water, and resource-depletion metrics.",
+      "quantified": {
+        "training_ghg_tco2e": 20.4,
+        "training_water_m3": 281000,
+        "response_tokens": 400,
+        "inference_ghg_gco2e": 1.14,
+        "inference_water_ml": 45
+      },
+      "assumptions": [
+        "Environmental accounting can be attached to concrete training and inference units rather than facility totals alone."
+      ],
+      "contradictions_or_limits": [
+        "The scope, geography, amortization, and model-serving stack limit cross-provider comparison."
+      ],
+      "fak_implications": [
+        "Report energy/water boundaries and per-accepted-token impacts with methodology, not marketing aggregates."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "mistral3-training-2025",
+      "category": "frontier_lab",
+      "entity": "Mistral AI",
+      "topic": [
+        "training_cluster",
+        "moe",
+        "inference_stack"
+      ],
+      "published_at": "2025-12-02",
+      "event_at": "2025-12-02",
+      "source_title": "Introducing Mistral 3",
+      "source_url": "https://mistral.ai/news/mistral-3/",
+      "source_kind": "official_model_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Mistral said its 675B-total/41B-active MoE Large 3 was trained from scratch on 3,000 H200 GPUs and was being optimized for prefill/decode disaggregation and speculative decoding on rack-scale systems.",
+      "quantified": {
+        "training_h200_gpu_count": 3000,
+        "total_parameters": 675000000000,
+        "active_parameters": 41000000000
+      },
+      "assumptions": [
+        "Frontier-capable open models may be trained on clusters far smaller than million-accelerator fleet announcements, while serving still benefits from phase-specific optimization."
+      ],
+      "contradictions_or_limits": [
+        "The source does not disclose training duration, utilization, tokens, failures, or full cost."
+      ],
+      "fak_implications": [
+        "Do not infer required cluster size solely from model capability; preserve architecture and training-efficiency context."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "deepseek-v3-cluster-2024",
+      "category": "frontier_lab",
+      "entity": "DeepSeek",
+      "topic": [
+        "training_cluster",
+        "moe",
+        "networking",
+        "efficiency"
+      ],
+      "published_at": "2024-12-27",
+      "event_at": "2024-12-27",
+      "source_title": "DeepSeek-V3 Technical Report",
+      "source_url": "https://arxiv.org/html/2412.19437v1",
+      "source_kind": "technical_report",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "DeepSeek-V3 used 2,048 H800 GPUs in 8-GPU NVLink/NVSwitch nodes with InfiniBand across nodes, reporting 2.788M H800 GPU-hours for full training and no irrecoverable loss spikes or rollback.",
+      "quantified": {
+        "h800_gpu_count": 2048,
+        "gpu_hours": 2788000,
+        "pretraining_tokens": 14800000000000
+      },
+      "assumptions": [
+        "Model/hardware co-design and overlap of communication can make a modest cluster competitive with much larger public buildouts."
+      ],
+      "contradictions_or_limits": [
+        "Self-reported training cost excludes broader R&D, failed experiments, data, inference, and facility overhead."
+      ],
+      "fak_implications": [
+        "Compare net training runs with boundaries and reliability events, not headline GPU count alone."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "deepseek-hardware-reflections-2025",
+      "category": "frontier_lab",
+      "entity": "DeepSeek",
+      "topic": [
+        "memory",
+        "interconnect",
+        "low_precision",
+        "co_design"
+      ],
+      "published_at": "2025-05-14",
+      "event_at": "2025-05-14",
+      "source_title": "Insights into DeepSeek-V3: Scaling Challenges and Reflections on Hardware for AI Architectures",
+      "source_url": "https://arxiv.org/abs/2505.09343",
+      "source_kind": "technical_report",
+      "evidence_class": "production_observation",
+      "confidence": "high",
+      "claim": "DeepSeek identified memory capacity, compute efficiency, and interconnect bandwidth as binding constraints, and highlighted FP8, MLA, MoE communication overlap, and multi-plane networking as co-design responses.",
+      "quantified": {},
+      "assumptions": [
+        "Frontier efficiency depends on matching model architecture to hardware bottlenecks rather than scaling hardware alone."
+      ],
+      "contradictions_or_limits": [
+        "The analysis is authored by the model team and does not independently compare every alternative."
+      ],
+      "fak_implications": [
+        "Prioritize native kernels and topology-aware communication where the real model exposes those bottlenecks."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "qwen3-thinking-budget-2025",
+      "category": "frontier_lab",
+      "entity": "Alibaba Qwen",
+      "topic": [
+        "reasoning",
+        "budgeting",
+        "model_mix"
+      ],
+      "published_at": "2025-05-14",
+      "event_at": "2025-05-14",
+      "source_title": "Qwen3 Technical Report",
+      "source_url": "https://arxiv.org/abs/2505.09388",
+      "source_kind": "technical_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Qwen3 unified thinking and non-thinking modes and exposed a thinking-budget mechanism to allocate inference compute by task complexity.",
+      "quantified": {
+        "model_size_range_billion_parameters": [
+          0.6,
+          235
+        ]
+      },
+      "assumptions": [
+        "User- or router-controlled reasoning budgets create multiple service classes within one model family."
+      ],
+      "contradictions_or_limits": [
+        "The report does not establish production selection frequencies or exact service-time distributions."
+      ],
+      "fak_implications": [
+        "Benchmarks should sweep reasoning budgets and routing policies rather than use one fixed mode."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "kimi-k2-cluster-2025",
+      "category": "frontier_lab",
+      "entity": "Moonshot AI",
+      "topic": [
+        "training_cluster",
+        "roce",
+        "fault_tolerance",
+        "moe"
+      ],
+      "published_at": "2025-07-28",
+      "event_at": "2025-07-28",
+      "source_title": "Kimi K2: Open Agentic Intelligence",
+      "source_url": "https://arxiv.org/html/2507.20534v1",
+      "source_kind": "technical_report",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "Kimi K2 was trained on H800 nodes with eight GPUs, 2 TB host RAM, and eight 400 Gbps RoCE links across nodes; the report treats fault tolerance and large-scale MoE communication as core infrastructure.",
+      "quantified": {
+        "gpus_per_node": 8,
+        "host_ram_tb": 2,
+        "roce_links_per_node": 8,
+        "roce_link_gbps": 400
+      },
+      "assumptions": [
+        "Frontier clusters can use Ethernet/RoCE rather than InfiniBand if topology, congestion, and collective behavior are engineered together."
+      ],
+      "contradictions_or_limits": [
+        "The indexed excerpt does not state total GPU count or production serving distribution."
+      ],
+      "fak_implications": [
+        "Keep fabric type, topology, collective efficiency, and failure recovery in training receipts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "minimax-m3-context-2026",
+      "category": "frontier_lab",
+      "entity": "MiniMax",
+      "topic": [
+        "long_context",
+        "multimodal",
+        "agents"
+      ],
+      "published_at": "2026-06-01",
+      "event_at": "2026-06-01",
+      "source_title": "MiniMax M3: Frontier Coding, 1M Context, Native Multimodality",
+      "source_url": "https://www.minimax.io/blog/minimax-m3",
+      "source_kind": "official_model_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "MiniMax M3 advertises a one-million-token context, native image/video input, and computer-use capability for coding and agentic workloads.",
+      "quantified": {
+        "context_tokens": 1000000
+      },
+      "assumptions": [
+        "Long-context multimodal agents create heterogeneous prefill, media-processing, tool, and decode demand."
+      ],
+      "contradictions_or_limits": [
+        "Maximum supported context does not show the production context-length distribution or SLO at that limit."
+      ],
+      "fak_implications": [
+        "Keep supported maximum distinct from observed percentiles and benchmark multimodal/tool phases separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meta-richland-5gw-2026",
+      "category": "datacenter_physical",
+      "entity": "Meta",
+      "topic": [
+        "power",
+        "capex",
+        "community",
+        "generation"
+      ],
+      "published_at": "2026-07-13",
+      "event_at": "2026-07-13",
+      "source_title": "Teachers and Local Businesses Win as Meta Expands Louisiana Data Center",
+      "source_url": "https://about.fb.com/news/2026/07/teachers-local-businesses-win-as-meta-expands-louisiana-data-center/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Meta said the Richland Parish datacenter would expand to 5 GW of compute capacity with more than $50B invested, over $1B in local infrastructure, and new gas generation, batteries, and nuclear uprates.",
+      "quantified": {
+        "compute_capacity_gw": 5,
+        "investment_usd_gt": 50000000000,
+        "local_infrastructure_usd_gt": 1000000000
+      },
+      "assumptions": [
+        "A single AI campus can become a regional power, infrastructure, labor, and fiscal program."
+      ],
+      "contradictions_or_limits": [
+        "Compute-capacity wording may not equal delivered IT load; community-benefit claims are company-authored."
+      ],
+      "fak_implications": [
+        "Attach generation mix, transmission, water, workforce, and local-cost allocation to site capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tair-kvcache-hisim-2026",
+      "category": "serving_system",
+      "entity": "Alibaba Cloud Tair",
+      "topic": [
+        "kv_cache",
+        "simulation",
+        "tiering",
+        "slo"
+      ],
+      "published_at": "2026-05-22",
+      "event_at": "2026-05-22",
+      "source_title": "Alibaba Cloud Tair KVCache Simulation Analysis",
+      "source_url": "https://www.alibabacloud.com/blog/alibaba-cloud-tair-kvcache-simulation-analysis-high-precision-computational-and-caching-simulation-design-and-implementation_603164",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Tair describes multi-tier KV cache as system infrastructure for agents and long context, using real-workload replay to co-optimize GPU, storage media, bandwidth, prefetch, eviction, latency, throughput, and cost under SLOs.",
+      "quantified": {
+        "claimed_prediction_error_pct_lt": 5,
+        "claimed_cost_advantage_vs_hardware_trials": 390000
+      },
+      "assumptions": [
+        "KV storage, compute, network, and policy form one high-dimensional operating envelope."
+      ],
+      "contradictions_or_limits": [
+        "Accuracy and cost are vendor claims and need independent trace/hardware validation."
+      ],
+      "fak_implications": [
+        "Use simulation for search, then require real native endpoint witnesses before accepting a policy."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aws-rainier-operational-2025",
+      "category": "hyperscaler",
+      "entity": "AWS / Anthropic",
+      "topic": [
+        "cluster_scale",
+        "multi_site",
+        "delivery"
+      ],
+      "published_at": "2025-06-24",
+      "event_at": "2025-06-24",
+      "source_title": "AWS activates Project Rainier: One of the world’s largest AI compute clusters comes online",
+      "source_url": "https://www.aboutamazon.com/news/aws/aws-project-rainier-ai-trainium-chips-compute-cluster",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "AWS said Project Rainier became operational with nearly 500,000 Trainium2 chips across multiple U.S. datacenters less than a year after announcement, with Anthropic already running workloads.",
+      "quantified": {
+        "trainium2_chips_approx": 500000
+      },
+      "assumptions": [
+        "A named cluster can span multiple datacenters and move from announcement to workload use on a sub-year delivery cycle."
+      ],
+      "contradictions_or_limits": [
+        "AWS does not disclose healthy-chip fraction, topology efficiency, failures, utilization, or useful goodput."
+      ],
+      "fak_implications": [
+        "Record cluster geography and delivery state plus healthy/schedulable/goodput conversion."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-ml-demand-response-2025",
+      "category": "hyperscaler",
+      "entity": "Google",
+      "topic": [
+        "demand_response",
+        "power",
+        "batching"
+      ],
+      "published_at": "2025-08-04",
+      "event_at": "2025-08-04",
+      "source_title": "How we’re making data centers more flexible to benefit power grids",
+      "source_url": "https://blog.google/innovation-and-ai/infrastructure-and-cloud/global-network/how-were-making-data-centers-more-flexible-to-benefit-power-grids/",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "production_observation",
+      "confidence": "high",
+      "claim": "Google said it shifted or reduced machine-learning workload power during grid events and signed utility agreements to make datacenter demand response operational.",
+      "quantified": {},
+      "assumptions": [
+        "Some ML work is deferrable or movable enough to act as a grid resource."
+      ],
+      "contradictions_or_limits": [
+        "The source does not disclose which AI workloads moved, performance impact, or capacity fraction."
+      ],
+      "fak_implications": [
+        "Classify work by deadline/mobility and account for grid-driven scheduling as an operating constraint."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "kv-robust-reservation-2026",
+      "category": "serving_system",
+      "entity": "Robust KV cache management study",
+      "topic": [
+        "output_uncertainty",
+        "kv_cache",
+        "reservation",
+        "heterogeneous_clusters"
+      ],
+      "published_at": "2026-07-18",
+      "event_at": "2026-07-18",
+      "source_title": "Robust KV Cache Management for LLM Serving under Output Token Length Uncertainty",
+      "source_url": "https://arxiv.org/abs/2607.16892",
+      "source_kind": "preprint",
+      "evidence_class": "synthetic_experiment",
+      "confidence": "medium_high",
+      "claim": "The study jointly optimizes parallelism, per-class KV reservation, heterogeneous-group routing, and prefix caching under distribution shift, reporting up to 56% lower cost on trace-driven evaluations.",
+      "quantified": {
+        "claimed_cost_reduction_pct_up_to": 56
+      },
+      "assumptions": [
+        "Unknown output length creates a quantile-dependent tradeoff between memory waste and preemption/recompute risk."
+      ],
+      "contradictions_or_limits": [
+        "Trace-driven optimization is not direct production deployment evidence; results depend on cost and SLO assumptions."
+      ],
+      "fak_implications": [
+        "Model reservation uncertainty and distribution shift; verify on native production-like traces before adoption."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "cacheroute-2026",
+      "category": "serving_system",
+      "entity": "CacheRoute",
+      "topic": [
+        "prefix_affinity",
+        "routing",
+        "hot_keys",
+        "load_balance"
+      ],
+      "published_at": "2026-08-20",
+      "event_at": "2026-08-20",
+      "source_title": "CacheRoute: Planned Prefix-Affinity Routing for Large-Scale LLM Serving",
+      "source_url": "https://arxiv.org/abs/2608.19677",
+      "source_kind": "preprint",
+      "evidence_class": "synthetic_experiment",
+      "confidence": "medium_high",
+      "claim": "CacheRoute plans stable warm destinations for high-rate prefix keys; on a semi-synthetic 60-H100 workload it raised served cache hit rate from 64.1% to 93.2% and throughput 2.3x, but counterexamples erased gains when recoverable KV work was small.",
+      "quantified": {
+        "h100_gpu_count": 60,
+        "baseline_cache_hit_pct": 64.1,
+        "planned_cache_hit_pct": 93.2,
+        "throughput_gain": 2.3,
+        "p99_slo_seconds": 3.5
+      },
+      "assumptions": [
+        "Prefix-key popularity and affinity can be exploited only when expected reuse outweighs load skew."
+      ],
+      "contradictions_or_limits": [
+        "Primary evidence is semi-synthetic and includes negative 32B counterexamples."
+      ],
+      "fak_implications": [
+        "Require shadow replay and a no-gain gate rather than enabling affinity universally."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "multitenant-cache-admission-2026",
+      "category": "serving_system",
+      "entity": "Multi-tenant prefix-cache admission study",
+      "topic": [
+        "multi_tenancy",
+        "fairness",
+        "cache_admission"
+      ],
+      "published_at": "2026-08-03",
+      "event_at": "2026-08-03",
+      "source_title": "Preserving Admission Responsibility in Multi-Tenant Large Language Model Inference",
+      "source_url": "https://arxiv.org/html/2608.01657v1",
+      "source_kind": "preprint",
+      "evidence_class": "synthetic_experiment",
+      "confidence": "medium",
+      "claim": "The paper identifies an admission-responsibility gap: one tenant can materialize KV blocks that evict another tenant’s reusable state, while ordinary request schedulers and eviction policies do not assign responsibility.",
+      "quantified": {},
+      "assumptions": [
+        "Shared prefix cache is persistent cross-tenant state whose admission can impose externalities."
+      ],
+      "contradictions_or_limits": [
+        "The proposal is research evidence, not a disclosed frontier-provider policy."
+      ],
+      "fak_implications": [
+        "Account cache admission and eviction by tenant, cap externalities, and expose fairness/read-back metrics."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "ibm-together-b300-2026",
+      "category": "ai_cloud",
+      "entity": "IBM Cloud / Together AI",
+      "topic": [
+        "inference_cluster",
+        "partnership",
+        "enterprise"
+      ],
+      "published_at": "2026-08-11",
+      "event_at": "2026-08-11",
+      "source_title": "IBM and Together AI Sign Multi-Year Agreement to Scale Open-Source AI Inference",
+      "source_url": "https://newsroom.ibm.com/2026-08-11-IBM-and-Together-AI-Sign-Multi-Year-Agreement-to-Scale-Open-Source-AI-Inference-with-NVIDIA-AI-Infrastructure-on-IBM-Cloud",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "IBM and Together AI announced a multi-year agreement for a large-scale enterprise inference cluster using NVIDIA HGX B300 systems on IBM Cloud.",
+      "quantified": {},
+      "assumptions": [
+        "Open-model inference platforms increasingly pair specialized serving software with incumbent cloud enterprise distribution."
+      ],
+      "contradictions_or_limits": [
+        "Cluster size, customer distribution, SLO, and economics are undisclosed."
+      ],
+      "fak_implications": [
+        "Track go-live state and measured tenant/workload mix rather than partnership announcements alone."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-nscale-45b-2026",
+      "category": "market_signal",
+      "entity": "Anthropic / Nscale",
+      "topic": [
+        "lease",
+        "power",
+        "natural_gas",
+        "ipo"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "Anthropic agrees $45bn AI data centre deal with UK start-up Nscale",
+      "source_url": "https://www.ft.com/content/0ec76ba3-5f7f-4085-88fb-acf21954bc85",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "Financial Times reported a six-year $45B agreement for Anthropic to use 460 MW of Vera Rubin capacity from a planned West Virginia Nscale facility beginning in late 2027.",
+      "quantified": {
+        "contract_value_usd": 45000000000,
+        "term_years": 6,
+        "anthropic_capacity_mw": 460,
+        "facility_power_gw": 1.35,
+        "generation_power_gw": 2
+      },
+      "assumptions": [
+        "Frontier labs are using long-duration leases from startups backed by dedicated generation to diversify supply."
+      ],
+      "contradictions_or_limits": [
+        "The site and processors are prospective, and commercial terms are reported rather than fully public."
+      ],
+      "fak_implications": [
+        "Model credit, construction, generation, and counterparty risk in future-capacity leases."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-decart-rumor-2026",
+      "category": "market_signal",
+      "entity": "Anthropic / Decart",
+      "topic": [
+        "acquisition",
+        "inference_infrastructure",
+        "rumor"
+      ],
+      "published_at": "2026-08-13",
+      "event_at": "2026-08-13",
+      "source_title": "Anthropic in Talks for $6 Billion AI Infrastructure Bet",
+      "source_url": "https://www.youtube.com/watch?v=XeXMUOigCaQ",
+      "source_kind": "credible_reporting",
+      "evidence_class": "rumor",
+      "confidence": "low",
+      "claim": "Bloomberg reporting said Anthropic was in talks to acquire AI infrastructure startup Decart for about $6B.",
+      "quantified": {
+        "reported_deal_value_usd": 6000000000
+      },
+      "assumptions": [
+        "Frontier labs may acquire infrastructure optimization capability rather than only lease capacity."
+      ],
+      "contradictions_or_limits": [
+        "Talks may fail or change; no completed transaction or official confirmation is indexed."
+      ],
+      "fak_implications": [
+        "Watch Decart’s technical seam and any official filing, but do not treat the acquisition as fact."
+      ],
+      "rumor": {
+        "is_rumor": true,
+        "origin": "Bloomberg reporting summarized in Bloomberg Technology video",
+        "corroboration": "Multiple later outlets repeated the report, but independent sourcing is not established in this ledger."
+      }
+    },
+    {
+      "id": "openai-datacenter-leadership-rumor-2026",
+      "category": "market_signal",
+      "entity": "OpenAI",
+      "topic": [
+        "organization",
+        "datacenter_strategy",
+        "rumor"
+      ],
+      "published_at": "2026-08-25",
+      "event_at": "2026-08-25",
+      "source_title": "OpenAI’s Head of Data Centers Has Left the Company",
+      "source_url": "https://www.wsj.com/tech/ai/openais-head-of-data-centers-has-left-company-6d24fd83",
+      "source_kind": "credible_reporting",
+      "evidence_class": "rumor",
+      "confidence": "low",
+      "claim": "The Wall Street Journal reported that OpenAI’s head of datacenters left amid an infrastructure reorganization and a greater use of leases/cloud partnerships.",
+      "quantified": {},
+      "assumptions": [
+        "Organizational execution and build-versus-lease strategy can alter capacity delivery independent of announced capital."
+      ],
+      "contradictions_or_limits": [
+        "Personnel and strategic interpretation are reported; OpenAI had not provided a complete official account in the indexed source."
+      ],
+      "fak_implications": [
+        "Treat leadership and strategy reports as delivery-risk signals only until confirmed."
+      ],
+      "rumor": {
+        "is_rumor": true,
+        "origin": "Wall Street Journal reporting",
+        "corroboration": "No independent primary confirmation of the full strategic interpretation is recorded."
+      }
+    },
+    {
+      "id": "anthropic-fluidstack-50b-2025",
+      "category": "frontier_lab",
+      "entity": "Anthropic / Fluidstack",
+      "topic": [
+        "datacenter_buildout",
+        "jobs",
+        "delivery"
+      ],
+      "published_at": "2025-11-12",
+      "event_at": "2025-11-12",
+      "source_title": "Anthropic invests $50 billion in American AI infrastructure",
+      "source_url": "https://www.anthropic.com/news/anthropic-invests-50-billion-in-american-ai-infrastructure",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Anthropic announced a $50B U.S. infrastructure program with Fluidstack, with initial sites expected online through 2026.",
+      "quantified": {
+        "investment_usd": 50000000000,
+        "permanent_jobs_approx": 800,
+        "construction_jobs_approx": 2400
+      },
+      "assumptions": [
+        "Frontier labs combine hyperscaler commitments with direct or partner-developed sites."
+      ],
+      "contradictions_or_limits": [
+        "Investment headline and expected online dates do not prove installed capacity or useful goodput."
+      ],
+      "fak_implications": [
+        "Track developer, site, delivery, and acceptance states for each capacity channel."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-energy-model-scale-2025",
+      "category": "datacenter_physical",
+      "entity": "Anthropic",
+      "topic": [
+        "training_power",
+        "sector_forecast",
+        "grid"
+      ],
+      "published_at": "2025-07-21",
+      "event_at": "2025-07-21",
+      "source_title": "Build AI in America: Anthropic Energy Report",
+      "source_url": "https://www.anthropic.com/news/build-ai-in-america",
+      "source_kind": "official_report",
+      "evidence_class": "analyst_estimate",
+      "confidence": "medium_high",
+      "claim": "Anthropic projected that developing a single advanced model could need 2 GW in 2027 and 5 GW in 2028, framing power buildout as a model-development constraint.",
+      "quantified": {
+        "single_model_power_gw_2027": 2,
+        "single_model_power_gw_2028": 5
+      },
+      "assumptions": [
+        "Training demand may consume site-scale gigawatts for one frontier program."
+      ],
+      "contradictions_or_limits": [
+        "These are company projections, not observed metered demand, and boundaries may include supporting capacity."
+      ],
+      "fak_implications": [
+        "Keep scenario probabilities and do not promote forecast gigawatts into current workload facts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-sector-50gw-2026",
+      "category": "datacenter_physical",
+      "entity": "Anthropic",
+      "topic": [
+        "sector_power",
+        "ratepayer",
+        "grid"
+      ],
+      "published_at": "2026-02-11",
+      "event_at": "2026-02-11",
+      "source_title": "Covering electricity price increases from our data centers",
+      "source_url": "https://www.anthropic.com/news/covering-electricity-price-increases",
+      "source_kind": "official_policy_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Anthropic said the U.S. AI sector would need at least 50 GW over the next several years and proposed that datacenter developers cover attributable electricity-system costs.",
+      "quantified": {
+        "us_ai_sector_capacity_gw_at_least": 50
+      },
+      "assumptions": [
+        "Ratepayer allocation and utility tariff design are part of infrastructure feasibility and social license."
+      ],
+      "contradictions_or_limits": [
+        "The sector demand is a company estimate and lacks a fully disclosed forecasting model."
+      ],
+      "fak_implications": [
+        "Record who pays generation, transmission, distribution, and interconnection upgrades."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aws-govcloud-1p3gw-2025",
+      "category": "hyperscaler",
+      "entity": "AWS",
+      "topic": [
+        "government_cloud",
+        "sovereignty",
+        "capacity"
+      ],
+      "published_at": "2025-11-24",
+      "event_at": "2025-11-24",
+      "source_title": "Amazon to invest up to $50 billion to expand AI and supercomputing infrastructure for US government agencies",
+      "source_url": "https://www.aboutamazon.com/news/company-news/amazon-ai-investment-us-federal-agencies",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "AWS announced up to $50B to add nearly 1.3 GW across Top Secret, Secret, and GovCloud regions, with construction starting in 2026.",
+      "quantified": {
+        "investment_usd_up_to": 50000000000,
+        "capacity_gw_approx": 1.3
+      },
+      "assumptions": [
+        "Classified and sovereign workloads need dedicated regional infrastructure and security boundaries."
+      ],
+      "contradictions_or_limits": [
+        "Construction start is not online capacity; AI and HPC are combined."
+      ],
+      "fak_implications": [
+        "Preserve classification/sovereignty and separate mixed HPC/AI capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aws-ai-factories-2025",
+      "category": "hyperscaler",
+      "entity": "AWS",
+      "topic": [
+        "on_premises",
+        "sovereign",
+        "integrated_system"
+      ],
+      "published_at": "2025-12-02",
+      "event_at": "2025-12-02",
+      "source_title": "New AWS AI Factories transform customers existing infrastructure into AI-optimized environments",
+      "source_url": "https://www.aboutamazon.com/news/aws/aws-data-centers-ai-factories",
+      "source_kind": "official_product_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "AWS AI Factories place AWS-managed NVIDIA/Trainium, networking, storage, and AI services in customer-provided datacenter space, power, and connectivity.",
+      "quantified": {},
+      "assumptions": [
+        "Cloud control planes can extend into customer facilities when sovereignty, latency, or existing power/space dominate placement."
+      ],
+      "contradictions_or_limits": [
+        "The announcement provides no production scale, economics, or workload distribution."
+      ],
+      "fak_implications": [
+        "Model ownership and receipt boundaries separately from physical location."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aws-cerebras-phase-split-2026",
+      "category": "serving_system",
+      "entity": "AWS / Cerebras",
+      "topic": [
+        "prefill_decode",
+        "heterogeneous_accelerators",
+        "networking"
+      ],
+      "published_at": "2026-03-13",
+      "event_at": "2026-03-13",
+      "source_title": "AWS and Cerebras collaboration aims to set a new standard for AI inference speed",
+      "source_url": "https://www.aboutamazon.com/news/aws/aws-cerebras-ai-inference",
+      "source_kind": "official_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "AWS announced a Bedrock system pairing Trainium for prefill with Cerebras CS-3 for decode over EFA networking.",
+      "quantified": {},
+      "assumptions": [
+        "Inference phases may be mapped to different accelerator architectures, not only different GPU pools."
+      ],
+      "contradictions_or_limits": [
+        "The solution was announced for future launch and superlative speed claims lacked a public matched production receipt."
+      ],
+      "fak_implications": [
+        "Measure cross-architecture transfer, queueing, quality, availability, and cost before adopting phase specialization."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openai-domestic-supply-rfp-2026",
+      "category": "supply_chain",
+      "entity": "OpenAI",
+      "topic": [
+        "manufacturing",
+        "procurement",
+        "resilience"
+      ],
+      "published_at": "2026-01-15",
+      "event_at": "2026-01-15",
+      "source_title": "Strengthening the US AI supply chain through domestic manufacturing",
+      "source_url": "https://openai.com/index/strengthening-the-us-ai-supply-chain/",
+      "source_kind": "official_rfp",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "OpenAI launched an RFP for U.S. manufacturing capacity across datacenter inputs, consumer electronics, and robotics to shorten infrastructure timelines and improve resilience.",
+      "quantified": {},
+      "assumptions": [
+        "Frontier buildout depends on a broad manufactured bill of materials and procurement strategy beyond accelerators."
+      ],
+      "contradictions_or_limits": [
+        "An RFP signals a perceived constraint but does not quantify shortages or contracted output."
+      ],
+      "fak_implications": [
+        "Maintain a component-level supply ledger and distinguish discovery from secured supply."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "iea-2026-electricity-update",
+      "category": "datacenter_physical",
+      "entity": "International Energy Agency",
+      "topic": [
+        "electricity",
+        "forecast",
+        "ai_growth"
+      ],
+      "published_at": "2026-04-16",
+      "event_at": "2026-04-16",
+      "source_title": "Data centre electricity use surged in 2025, even with tightening bottlenecks",
+      "source_url": "https://www.iea.org/news/data-centre-electricity-use-surged-in-2025-even-with-tightening-bottlenecks-driving-a-scramble-for-solutions",
+      "source_kind": "intergovernmental_report",
+      "evidence_class": "analyst_estimate",
+      "confidence": "high",
+      "claim": "The IEA said datacenter electricity demand rose 17% in 2025 and projected roughly 485 TWh in 2025 to 950 TWh in 2030, with AI-focused demand growing faster.",
+      "quantified": {
+        "2025_growth_pct": 17,
+        "electricity_twh_2025": 485,
+        "electricity_twh_2030_approx": 950
+      },
+      "assumptions": [
+        "Sector demand is growing faster than grid and general electricity demand, increasing site and timing constraints."
+      ],
+      "contradictions_or_limits": [
+        "Forecasts depend on utilization, efficiency, model demand, and project completion."
+      ],
+      "fak_implications": [
+        "Carry forecast ranges and update them rather than freezing one report year."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "iea-grid-delay-2025",
+      "category": "datacenter_physical",
+      "entity": "International Energy Agency",
+      "topic": [
+        "grid_queue",
+        "delay_probability",
+        "capacity_lifecycle"
+      ],
+      "published_at": "2025-04-10",
+      "event_at": "2025-04-10",
+      "source_title": "AI and energy security",
+      "source_url": "https://www.iea.org/reports/energy-and-ai/ai-and-energy-security",
+      "source_kind": "intergovernmental_report",
+      "evidence_class": "analyst_estimate",
+      "confidence": "high",
+      "claim": "A location-specific IEA analysis estimated grid constraints could delay around 20% of global datacenter capacity planned through 2030.",
+      "quantified": {
+        "global_planned_capacity_delay_pct_approx": 20
+      },
+      "assumptions": [
+        "Grid connection is a probabilistic delivery gate that should discount announced capacity."
+      ],
+      "contradictions_or_limits": [
+        "The estimate is scenario-based and varies by location and policy."
+      ],
+      "fak_implications": [
+        "Attach grid-connection confidence and delay distributions to each planned site."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "semianalysis-half-delayed-rebuttal-2026",
+      "category": "market_signal",
+      "entity": "SemiAnalysis",
+      "topic": [
+        "contradiction",
+        "delivery_pipeline",
+        "methodology"
+      ],
+      "published_at": "2026-06-18",
+      "event_at": "2026-06-18",
+      "source_title": "Stop Saying Half of 2026 US Datacenter Capacity Is Delayed",
+      "source_url": "https://newsletter.semianalysis.com/p/stop-saying-half-of-2026-us-datacenter",
+      "source_kind": "industry_analysis",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "SemiAnalysis challenged the widely repeated claim that half of 2026 U.S. datacenter capacity was delayed or canceled, tracing it to one Bloomberg framing and arguing that boundaries and project states were being conflated.",
+      "quantified": {},
+      "assumptions": [
+        "Headline pipeline failure rates are sensitive to denominator, expected-delivery date, and project-state definitions."
+      ],
+      "contradictions_or_limits": [
+        "The full analysis may rely on proprietary tracking and is itself a secondary interpretation."
+      ],
+      "fak_implications": [
+        "Keep both claim and rebuttal; require a project roster and common lifecycle denominator before using a cancellation percentage."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "ai-dc-power-architecture-2026",
+      "category": "datacenter_physical",
+      "entity": "AI datacenter power architecture research",
+      "topic": [
+        "power_delivery",
+        "rack_voltage",
+        "transients"
+      ],
+      "published_at": "2026-06-23",
+      "event_at": "2026-06-23",
+      "source_title": "Toward Next-Generation AI Data Centers: Power Delivery Architecture Shifts, Emerging Technologies, and Challenges",
+      "source_url": "https://arxiv.org/abs/2606.25095",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "The review argues AI current transients and thermal density expose limits in 48 V rack and conventional AC distribution, motivating higher-voltage DC conversion, facility low-voltage DC, and medium-voltage solid-state transformers.",
+      "quantified": {},
+      "assumptions": [
+        "Rack and facility power architecture must evolve with accelerator density and transient behavior."
+      ],
+      "contradictions_or_limits": [
+        "This is a review and design roadmap, not proof of broad deployment or reliability."
+      ],
+      "fak_implications": [
+        "Include power-delivery topology and transient constraints in next-generation rack assumptions."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "deepseek-v3-economics-2024",
+      "category": "frontier_lab",
+      "entity": "DeepSeek",
+      "topic": [
+        "training_economics",
+        "gpu_hours",
+        "cost_boundary"
+      ],
+      "published_at": "2024-12-27",
+      "event_at": "2024-12-27",
+      "source_title": "DeepSeek-V3 Technical Report",
+      "source_url": "https://arxiv.org/html/2412.19437v1",
+      "source_kind": "technical_report",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "DeepSeek reported 2.788M H800 GPU-hours and a $5.576M rental-price estimate for the official V3 training run.",
+      "quantified": {
+        "gpu_hours": 2788000,
+        "reported_training_cost_usd": 5576000,
+        "assumed_gpu_hour_price_usd": 2
+      },
+      "assumptions": [
+        "Algorithm/hardware co-design can reduce the compute cost of one successful run."
+      ],
+      "contradictions_or_limits": [
+        "The headline excludes prior research, ablations, data, salaries, failed runs, infrastructure ownership, and serving."
+      ],
+      "fak_implications": [
+        "Never compare one-run rental estimates with all-in lab or hyperscaler capex."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "anthropic-2026-user-scale",
+      "category": "frontier_lab",
+      "entity": "Anthropic",
+      "topic": [
+        "userbase",
+        "enterprise",
+        "demand"
+      ],
+      "published_at": "2026-06-18",
+      "event_at": "2026-06-18",
+      "source_title": "Anthropic’s Economic Index: New measures of AI usage across the economy",
+      "source_url": "https://www.anthropic.com/research/anthropic-economic-index-june-2026",
+      "source_kind": "official_research",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "Anthropic said millions of people use Claude daily and 80% of the Fortune 500 use it, while reporting economic-use patterns from Claude interactions.",
+      "quantified": {
+        "fortune_500_usage_pct": 80,
+        "daily_users": "millions"
+      },
+      "assumptions": [
+        "Enterprise and consumer channels coexist and likely have different request, privacy, latency, and workload distributions."
+      ],
+      "contradictions_or_limits": [
+        "Company-reported adoption does not reveal active seats, token share, tenant concentration, or infrastructure allocation."
+      ],
+      "fak_implications": [
+        "Keep channel and tenant class in traces; do not infer traffic from logo/adoption counts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "mistral-claude-crosscloud-2026",
+      "category": "market_signal",
+      "entity": "Anthropic / Mistral / Microsoft",
+      "topic": [
+        "multi_provider",
+        "azure",
+        "sovereignty"
+      ],
+      "published_at": "2026-08-12",
+      "event_at": "2026-08-12",
+      "source_title": "Anthropic models available through European provider Mistral following Microsoft deal",
+      "source_url": "https://www.reuters.com/business/media-telecom/anthropic-models-available-through-european-provider-mistral-following-microsoft-deal-2026-08-12/",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "high",
+      "claim": "Reuters reported Claude models becoming available through Mistral on Azure following a Microsoft-Mistral agreement.",
+      "quantified": {},
+      "assumptions": [
+        "Distribution channels can nest providers and clouds, complicating capacity, billing, policy, and provenance."
+      ],
+      "contradictions_or_limits": [
+        "Commercial routing and traffic shares are undisclosed."
+      ],
+      "fak_implications": [
+        "Receipts should retain model provider, reseller/platform, underlying cloud, region, and policy boundary."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "data-center-water-2025",
+      "category": "datacenter_physical",
+      "entity": "U.S. datacenter sector",
+      "topic": [
+        "water",
+        "reporting",
+        "externalities"
+      ],
+      "published_at": "2025-04-09",
+      "event_at": "2025-04-09",
+      "source_title": "Why AI data centers are driving up water consumption across the US",
+      "source_url": "https://www.cnbc.com/2025/04/09/why-ai-data-centers-are-driving-up-water-consumption-across-the-us.html",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "CNBC reported rising water concern around U.S. AI datacenters and weak disclosure, emphasizing that cooling design, climate, and electricity generation determine direct and indirect water use.",
+      "quantified": {},
+      "assumptions": [
+        "Water impact cannot be inferred from compute or power alone and may be locally binding."
+      ],
+      "contradictions_or_limits": [
+        "Public reporting is incomplete and facility boundaries differ."
+      ],
+      "fak_implications": [
+        "Record direct/indirect water boundary, cooling design, climate, and disclosure confidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "training-bubbles-2025",
+      "category": "workload_model",
+      "entity": "Large-scale training reliability study",
+      "topic": [
+        "failures",
+        "recovery",
+        "scheduling"
+      ],
+      "published_at": "2025-06-05",
+      "event_at": "2025-06-05",
+      "source_title": "Training Bubbles: Rescheduling at Scale for Distributed Training",
+      "source_url": "https://arxiv.org/abs/2506.05552",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "Training Bubbles studies how to continue large distributed jobs through accelerator failures using redundant or spare capacity rather than full rollback.",
+      "quantified": {},
+      "assumptions": [
+        "At large cluster scale, failures are routine workload events and recovery policy changes useful training goodput."
+      ],
+      "contradictions_or_limits": [
+        "Research evaluation may not match every topology, optimizer, or frontier training stack."
+      ],
+      "fak_implications": [
+        "Count failure detection, lost work, spare capacity, rescheduling, and recovery in training throughput."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aws-nvidia-2m-2026",
+      "category": "hyperscaler",
+      "entity": "AWS / NVIDIA",
+      "topic": [
+        "capacity",
+        "roadmap",
+        "heterogeneity",
+        "government"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "AWS and NVIDIA to Deliver 2 Million Additional GPUs and Next-Generation Infrastructure for Agentic and Physical AI",
+      "source_url": "https://nvidianews.nvidia.com/news/aws-and-nvidia-to-deliver-2-million-additional-gpus-and-next-generation-infrastructure-for-agentic-and-physical-ai",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "AWS and NVIDIA announced plans for two million additional Blackwell Ultra, Rubin, and Rubin Ultra GPUs across AWS in 2027-2028, including 100,000 GPUs for secure U.S. government infrastructure and integration of Trainium with NVLink Fusion/NVHBM.",
+      "quantified": {
+        "additional_gpu_count": 2000000,
+        "delivery_start_year": 2027,
+        "delivery_end_year": 2028,
+        "government_gpu_count": 100000
+      },
+      "assumptions": [
+        "Hyperscaler fleets will mix multiple NVIDIA generations, custom silicon, custom HBM/interconnect, and classified capacity."
+      ],
+      "contradictions_or_limits": [
+        "This is a forward plan; demand, manufacturing, power, and deployment can change delivered counts."
+      ],
+      "fak_implications": [
+        "Track generation, security domain, delivery year, and custom-silicon interoperability separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-groq3-production-2026",
+      "category": "accelerator_platform",
+      "entity": "NVIDIA / Groq",
+      "topic": [
+        "agentic_inference",
+        "decode",
+        "long_context",
+        "production"
+      ],
+      "published_at": "2026-08-24",
+      "event_at": "2026-08-24",
+      "source_title": "NVIDIA Groq 3 LPX Now in Full Production With World-Class Speed for Agentic AI",
+      "source_url": "https://nvidianews.nvidia.com/news/nvidia-groq-3-lpx-now-in-full-production-with-world-class-speed-for-agentic-ai",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "high",
+      "claim": "NVIDIA said Groq 3 LPX entered full production as a decode/interactivity extension to Vera Rubin, with Nebius first to adopt and Groq planning adoption; a benchmark reported 3,400 output tokens/s for a 31B model at 100k context.",
+      "quantified": {
+        "benchmark_output_tokens_per_second": 3400,
+        "benchmark_context_tokens": 100000,
+        "benchmark_model_parameters_billion": 31
+      },
+      "assumptions": [
+        "Agentic demand is being decomposed into context processing and ultra-low-latency generation at the rack-platform level."
+      ],
+      "contradictions_or_limits": [
+        "The record is vendor-selected and model/context specific; availability through clouds and net economics require independent evidence."
+      ],
+      "fak_implications": [
+        "Benchmark phase-specialized hardware on complete agent loops including tool time, quality, transfer, and utilization."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "leyline-agentic-cache-2026",
+      "category": "serving_system",
+      "entity": "Leyline",
+      "topic": [
+        "agentic",
+        "kv_cache",
+        "editing",
+        "replay"
+      ],
+      "published_at": "2026-05-31",
+      "event_at": "2026-05-31",
+      "source_title": "Leyline: KV Cache Directives for Agentic Inference",
+      "source_url": "https://arxiv.org/abs/2606.01065",
+      "source_kind": "preprint",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "medium_high",
+      "claim": "Leyline argues append-only chatbot cache assumptions fail for agents that retry tools, drop stale output, pivot, or splice trajectories; its cache directives preserve valid work across edits.",
+      "quantified": {
+        "replay_cache_hit_gain_percentage_points": 11.2,
+        "latency_reduction_ms_up_to": 241,
+        "debug_solve_rate_gain_percentage_points": 14.3
+      },
+      "assumptions": [
+        "Agent trajectories are editable state, not permanently append-only conversations."
+      ],
+      "contradictions_or_limits": [
+        "Open benchmark results do not establish broad production adoption, semantic safety across all edits, or every attention architecture."
+      ],
+      "fak_implications": [
+        "Expose policy-directed cache edits with correctness receipts and compare against re-prefill including quality."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-lumentum-optics-2026",
+      "category": "supply_chain",
+      "entity": "NVIDIA / Lumentum",
+      "topic": [
+        "optics",
+        "lasers",
+        "manufacturing",
+        "capacity"
+      ],
+      "published_at": "2026-03-02",
+      "event_at": "2026-03-02",
+      "source_title": "NVIDIA Announces Strategic Partnership With Lumentum to Develop State-of-the-Art Optics Technology",
+      "source_url": "https://nvidianews.nvidia.com/news/nvidia-announces-strategic-partnership-with-lumentum-to-develop-state-of-the-art-optics-technology",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "NVIDIA committed multibillion-dollar purchases and invested $2B in Lumentum to expand U.S. advanced-laser and optics manufacturing capacity for AI datacenters.",
+      "quantified": {
+        "nvidia_investment_usd": 2000000000
+      },
+      "assumptions": [
+        "Advanced optics supply is strategic enough for accelerator vendors to finance manufacturing directly."
+      ],
+      "contradictions_or_limits": [
+        "Investment and purchase commitments do not disclose delivered component volume or eliminate concentration risk."
+      ],
+      "fak_implications": [
+        "Include lasers/optics capacity rights and manufacturing lead time in cluster delivery ledgers."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-coherent-optics-2026",
+      "category": "supply_chain",
+      "entity": "NVIDIA / Coherent",
+      "topic": [
+        "optics",
+        "packaging",
+        "manufacturing",
+        "capacity"
+      ],
+      "published_at": "2026-03-02",
+      "event_at": "2026-03-02",
+      "source_title": "NVIDIA and Coherent Announce Strategic Partnership to Develop Optics Technology to Scale Next-Generation Data Center Architecture",
+      "source_url": "https://nvidianews.nvidia.com/news/nvidia-and-coherent-announce-strategic-partnership-to-develop-optics-technology-to-scale-next-generation-data-center-architecture",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "NVIDIA committed multibillion-dollar purchases and invested $2B in Coherent for advanced laser, optical networking, package integration, R&D, and U.S. manufacturing capacity.",
+      "quantified": {
+        "nvidia_investment_usd": 2000000000
+      },
+      "assumptions": [
+        "Optical interconnect and package integration are foundational constraints for scaling AI factories."
+      ],
+      "contradictions_or_limits": [
+        "The source is a capacity commitment, not measured delivered network goodput or yield."
+      ],
+      "fak_implications": [
+        "Track optical BOM, packaging integration, yield, and capacity access alongside accelerator orders."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    }
+  ]
+}
