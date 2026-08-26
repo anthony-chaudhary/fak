@@ -21,9 +21,14 @@ type Config struct {
 	Endpoint, APIKey, Model string
 	Repetitions             int
 	Timeout                 time.Duration
-	BeforeTrial             func(context.Context, qwen38quant.Fixture, int) error
-	Sample                  func(context.Context) (ResourceSample, error)
+	// NativeDecodeTrace requests the buffered fak-native token-commit receipt.
+	// It never enables streaming or infers tokens from response fragments.
+	NativeDecodeTrace bool
+	BeforeTrial       func(context.Context, qwen38quant.Fixture, int) error
+	Sample            func(context.Context) (ResourceSample, error)
 }
+
+const LongDecodeWorkload = "long_output_decode"
 
 type ResourceSample struct {
 	MemoryBytes uint64  `json:"memory_bytes,omitempty"`
@@ -31,19 +36,21 @@ type ResourceSample struct {
 }
 
 type Result struct {
-	FixtureID         string         `json:"fixture_id"`
-	Workload          string         `json:"workload"`
-	Repeat            int            `json:"repeat"`
-	LatencyMS         float64        `json:"latency_ms"`
-	Usage             map[string]int `json:"usage,omitempty"`
-	Quality           string         `json:"quality"`
-	Failure           string         `json:"failure,omitempty"`
-	Output            string         `json:"output,omitempty"`
-	ToolName          string         `json:"tool_name,omitempty"`
-	ToolArgs          map[string]any `json:"tool_args,omitempty"`
-	Phase             string         `json:"phase,omitempty"`
-	CachedInputTokens int            `json:"cached_input_tokens,omitempty"`
-	Resource          ResourceSample `json:"resource,omitempty"`
+	FixtureID         string              `json:"fixture_id"`
+	Workload          string              `json:"workload"`
+	Repeat            int                 `json:"repeat"`
+	LatencyMS         float64             `json:"latency_ms"`
+	Usage             map[string]int      `json:"usage,omitempty"`
+	Quality           string              `json:"quality"`
+	Failure           string              `json:"failure,omitempty"`
+	Output            string              `json:"output,omitempty"`
+	ToolName          string              `json:"tool_name,omitempty"`
+	ToolArgs          map[string]any      `json:"tool_args,omitempty"`
+	Phase             string              `json:"phase,omitempty"`
+	CachedInputTokens int                 `json:"cached_input_tokens,omitempty"`
+	Resource          ResourceSample      `json:"resource,omitempty"`
+	DecodeTrace       *DecodeTrace        `json:"decode_trace,omitempty"`
+	DecodeWindows     *DecodeWindowReport `json:"decode_windows,omitempty"`
 }
 
 type Runner struct{ Client *http.Client }
@@ -62,6 +69,10 @@ type chatResponse struct {
 	UsageDetails struct {
 		CachedTokens int
 	}
+	Fak *struct {
+		DecodeTrace *DecodeTrace `json:"decode_trace,omitempty"`
+	} `json:"fak,omitempty"`
+	DecodeWindows *DecodeWindowReport `json:"-"`
 }
 
 func (r *chatResponse) UnmarshalJSON(data []byte) error {
@@ -127,8 +138,39 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 	if err := preflightModel(ctx, client, cfg); err != nil {
 		return nil, err
 	}
+	return r.runFixtures(ctx, client, cfg, corpus.Fixtures, reps)
+}
+
+// RunLongDecode runs the issue-8385 measurement fixture exactly three times
+// without adding a benchmark-only workload to the frozen quality corpus.
+func (r Runner) RunLongDecode(ctx context.Context, cfg Config, fixture qwen38quant.Fixture) ([]Result, error) {
+	if cfg.Endpoint == "" || cfg.APIKey == "" || cfg.Model == "" {
+		return nil, fmt.Errorf("endpoint, API key, and exact model are required")
+	}
+	if fixture.ID == "" || fixture.Prompt == "" || fixture.Workload != LongDecodeWorkload || fixture.MaxOutputTokens < MinimumLongDecodeTokens {
+		return nil, fmt.Errorf("long decode fixture requires identity, prompt, workload %q, and at least %d max output tokens", LongDecodeWorkload, MinimumLongDecodeTokens)
+	}
+	if cfg.Repetitions != 0 && cfg.Repetitions != MinimumDecodeRepetitions {
+		return nil, fmt.Errorf("long decode campaign requires exactly %d repetitions", MinimumDecodeRepetitions)
+	}
+	cfg.Repetitions = MinimumDecodeRepetitions
+	cfg.NativeDecodeTrace = true
+	client := r.Client
+	if client == nil {
+		client = &http.Client{Timeout: cfg.Timeout}
+		if client.Timeout == 0 {
+			client.Timeout = 10 * time.Minute
+		}
+	}
+	if err := preflightModel(ctx, client, cfg); err != nil {
+		return nil, err
+	}
+	return r.runFixtures(ctx, client, cfg, []qwen38quant.Fixture{fixture}, MinimumDecodeRepetitions)
+}
+
+func (r Runner) runFixtures(ctx context.Context, client *http.Client, cfg Config, fixtures []qwen38quant.Fixture, reps int) ([]Result, error) {
 	var out []Result
-	for fixtureIndex, f := range corpus.Fixtures {
+	for fixtureIndex, f := range fixtures {
 		for n := 1; n <= reps; n++ {
 			res := Result{FixtureID: f.ID, Workload: f.Workload, Repeat: n, Quality: "FAIL"}
 			if f.Workload == "repeated_workflow_cache" {
@@ -154,6 +196,13 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 			}
 			res.Usage = resp.Usage
 			res.CachedInputTokens = resp.UsageDetails.CachedTokens
+			if cfg.NativeDecodeTrace {
+				trace := *resp.Fak.DecodeTrace
+				trace.Events = append([]DecodeTraceEvent(nil), trace.Events...)
+				report := *resp.DecodeWindows
+				report.Windows = append([]DecodeWindow(nil), report.Windows...)
+				res.DecodeTrace, res.DecodeWindows = &trace, &report
+			}
 			if cfg.Sample != nil {
 				if sample, sampleErr := cfg.Sample(ctx); sampleErr == nil {
 					res.Resource = sample
@@ -163,7 +212,11 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 					continue
 				}
 			}
-			grade(&res, f, resp)
+			if f.Workload == LongDecodeWorkload {
+				gradeLongDecode(&res)
+			} else {
+				grade(&res, f, resp)
+			}
 			out = append(out, res)
 			if fixtureIndex == 0 && n == 1 && res.Usage["completion_tokens"] == 0 {
 				return nil, fmt.Errorf("API canary %s produced zero completion tokens; fix the serving contract before running the campaign matrix", f.ID)
@@ -171,6 +224,21 @@ func (r Runner) Run(ctx context.Context, cfg Config, corpus qwen38quant.Corpus) 
 		}
 	}
 	return out, nil
+}
+
+func gradeLongDecode(result *Result) {
+	if result.Usage["completion_tokens"] < MinimumLongDecodeTokens {
+		result.Quality = "FAIL"
+		result.Failure = fmt.Sprintf("completion_tokens=%d below %d", result.Usage["completion_tokens"], MinimumLongDecodeTokens)
+		return
+	}
+	if result.DecodeTrace == nil || result.DecodeWindows == nil {
+		result.Quality = "FAIL"
+		result.Failure = "missing native decode trace"
+		return
+	}
+	result.Quality = "PASS"
+	result.Failure = ""
 }
 
 func preflightModel(ctx context.Context, client *http.Client, cfg Config) error {
@@ -221,6 +289,9 @@ func cachePhase(f qwen38quant.Fixture, repetition int) string {
 func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.Fixture) (chatResponse, error) {
 	prompt := materialize(f)
 	body := map[string]any{"model": cfg.Model, "messages": []map[string]string{{"role": "user", "content": prompt}}, "temperature": 0, "max_tokens": f.MaxOutputTokens, "chat_template_kwargs": map[string]bool{"enable_thinking": false}}
+	if cfg.NativeDecodeTrace {
+		body["fak_decode_trace"] = true
+	}
 	if f.Workload == "json_schema" {
 		body["response_format"] = map[string]any{
 			"type": "json_schema",
@@ -263,6 +334,20 @@ func runOne(ctx context.Context, client *http.Client, cfg Config, f qwen38quant.
 	}
 	if len(out.Choices) == 0 {
 		return out, fmt.Errorf("response has no choices")
+	}
+	if cfg.NativeDecodeTrace {
+		if out.Fak == nil || out.Fak.DecodeTrace == nil {
+			return out, fmt.Errorf("response missing fak.decode_trace")
+		}
+		if got := out.Fak.DecodeTrace.Provenance; got != "" && got != NativeDecodeTraceProvenance {
+			return out, fmt.Errorf("decode trace provenance mismatch: got %q want %q", got, NativeDecodeTraceProvenance)
+		}
+		out.Fak.DecodeTrace.Provenance = NativeDecodeTraceProvenance
+		report, traceErr := BuildDecodeWindows(*out.Fak.DecodeTrace, NativeDecodeContract, out.Usage["completion_tokens"])
+		if traceErr != nil {
+			return out, traceErr
+		}
+		out.DecodeWindows = &report
 	}
 	return out, nil
 }

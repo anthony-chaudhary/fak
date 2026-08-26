@@ -77,6 +77,42 @@ func TestIssue8319SoakAdapterRefusesInlineSecrets(t *testing.T) {
 	}
 }
 
+func TestDecodeWindowsSoakAggregation(t *testing.T) {
+	report, err := BuildDecodeWindows(nativeLinearTrace(MinimumLongDecodeTokens, 10), NativeDecodeContract, MinimumLongDecodeTokens)
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make([]Result, 3)
+	for i := range results {
+		trace := nativeLinearTrace(MinimumLongDecodeTokens, 10)
+		window := report
+		window.Windows = append([]DecodeWindow(nil), report.Windows...)
+		results[i] = Result{FixtureID: "long-output", Repeat: i + 1, Usage: map[string]int{"completion_tokens": MinimumLongDecodeTokens}, Quality: "PASS", DecodeTrace: &trace, DecodeWindows: &window}
+	}
+	metrics := summarizeMetrics(nil, results, true)
+	if metrics.DecodeWindows == nil || metrics.DecodeWindows.Verdict != "PASS" || metrics.DecodeWindows.Confidence.Repetitions != 3 {
+		t.Fatalf("metrics=%+v", metrics)
+	}
+	results[1].DecodeTrace.Events[1].TokenIndex = 1
+	metrics = summarizeMetrics(nil, results, true)
+	if metrics.DecodeWindows == nil || metrics.DecodeWindows.Verdict != "HOLD" || !strings.Contains(metrics.DecodeWindows.Failure, "duplicate") {
+		t.Fatalf("tampered metrics=%+v", metrics)
+	}
+	if got := deriveArmVerdict(SoakArmResult{Campaign: qwen38quant.Report{Verdict: "PROMOTE"}, Metrics: metrics}); got != "HOLD" {
+		t.Fatalf("verdict=%s want HOLD", got)
+	}
+}
+
+func TestDecodeWindowsSoakRefusesComparatorNativeReceipt(t *testing.T) {
+	_, _, err := (Runner{}).RunSoakArm(context.Background(), SoakArmConfig{Campaign: CampaignConfig{
+		Endpoint: Config{NativeDecodeTrace: true}, ExecutionEngine: qwen38quant.EngineLlamaCpp,
+		Arm: "llama.cpp", RollbackThreshold: "late/early below 0.85", Probe: &staticProbe{}, Lifecycle: &lifecycleSpy{},
+	}}, qwen38quant.DefaultCorpus(), DefaultSoakTasks())
+	if err == nil || !strings.Contains(err.Error(), "comparator transport timings are not token commits") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 	corpus := frozenCorpus(t)
 	tasks := DefaultSoakTasks()
@@ -85,6 +121,10 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 		wants[task.Prompt] = task.ExpectedExact
 	}
 
+	nativeEvents := make([]map[string]any, MinimumLongDecodeTokens)
+	for i := range nativeEvents {
+		nativeEvents[i] = map[string]any{"token_index": i + 1, "elapsed_ns": int64(i/2+1) * 1_000_000}
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.URL.Path == "/v1/models" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
@@ -94,7 +134,8 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 			Messages []struct {
 				Content string `json:"content"`
 			} `json:"messages"`
-			Tools []any `json:"tools"`
+			Tools          []any `json:"tools"`
+			FakDecodeTrace bool  `json:"fak_decode_trace"`
 		}
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 			http.Error(w, "bad JSON", http.StatusBadRequest)
@@ -103,6 +144,14 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 		prompt := body.Messages[0].Content
 		if strings.Contains(prompt, "prime numbers below one million") {
 			<-req.Context().Done()
+			return
+		}
+		if body.FakDecodeTrace {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"model": "exact", "choices": []any{map[string]any{"message": map[string]any{"content": "bounded"}}},
+				"usage": map[string]int{"prompt_tokens": 9, "completion_tokens": MinimumLongDecodeTokens},
+				"fak":   map[string]any{"decode_trace": map[string]any{"schema": NativeDecodeTraceSchema, "engine": NativeDecodeTraceEngine, "events": nativeEvents}},
+			})
 			return
 		}
 		message := map[string]any{"content": wants[prompt]}
@@ -139,6 +188,7 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 		ContextTokens: 16384, CacheMode: "prefix", Resident: true, MemoryBytes: 24 << 30, PowerWatts: 217,
 	}
 	probe, lifecycle := &staticProbe{observation: observation}, &lifecycleSpy{}
+	comparator := makeLlamaDecodeResults("long-output", MinimumLongDecodeTokens)
 	arm, raw, err := (Runner{Client: server.Client()}).RunSoakArm(context.Background(), SoakArmConfig{
 		Campaign: CampaignConfig{
 			Endpoint: Config{Endpoint: server.URL, APIKey: "secret", Model: "exact"}, ExecutionEngine: qwen38quant.EngineFakNative, Arm: "q4_k_m",
@@ -147,6 +197,10 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 			Probe: probe, Lifecycle: lifecycle,
 		},
 		CancellationAfter: 5 * time.Millisecond,
+		LongDecode: &LongDecodeCampaignConfig{
+			Fixture:    qwen38quant.Fixture{ID: "long-output", Workload: LongDecodeWorkload, Prompt: "continue to the output limit", MaxOutputTokens: MinimumLongDecodeTokens},
+			Comparator: comparator,
+		},
 	}, corpus, tasks)
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +216,16 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 	}
 	if arm.Metrics.CodingThroughput <= 0 || arm.Metrics.PeakMemoryBytes == 0 || arm.Metrics.PeakPowerWatts == 0 {
 		t.Fatalf("metrics=%+v", arm.Metrics)
+	}
+	if arm.Metrics.DecodeWindows == nil || arm.Metrics.DecodeWindows.Verdict != "PASS" || arm.MatchedDecode == nil || arm.MatchedDecode.Verdict != "PASS" {
+		t.Fatalf("decode evidence metrics=%+v matched=%+v", arm.Metrics.DecodeWindows, arm.MatchedDecode)
+	}
+	var liveDecodeArchive soakArmArchive
+	if err := json.Unmarshal(raw, &liveDecodeArchive); err != nil {
+		t.Fatal(err)
+	}
+	if liveDecodeArchive.Decode == nil || len(liveDecodeArchive.Decode.Native) != MinimumDecodeRepetitions || len(liveDecodeArchive.Decode.Comparator) != MinimumDecodeRepetitions || len(liveDecodeArchive.Decode.Comparator[0].Events) != MinimumLongDecodeTokens {
+		t.Fatalf("raw matched decode archive=%+v", liveDecodeArchive.Decode)
 	}
 
 	arms := []SoakArmResult{arm, cloneSoakArm(arm, "fp8"), cloneSoakArm(arm, "q5_k_m")}
@@ -204,6 +268,61 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 	if err := ValidateSoakArtifacts(report, combined, corpus); err != nil {
 		t.Fatal(err)
 	}
+	recomputedTamperReport := report
+	recomputedTamperReport.Arms = append([]SoakArmResult(nil), report.Arms...)
+	recomputedTamperArchives := append([]json.RawMessage(nil), armArchives...)
+	var recomputedTamper soakArmArchive
+	if err := json.Unmarshal(recomputedTamperArchives[0], &recomputedTamper); err != nil {
+		t.Fatal(err)
+	}
+	for i := 700; i < len(recomputedTamper.Decode.Comparator[0].Events); i++ {
+		recomputedTamper.Decode.Comparator[0].Events[i].ElapsedNS += 1_000
+	}
+	recomputedTamperRaw, err := canonicalJSON(recomputedTamper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recomputedTamperArchives[0] = json.RawMessage(recomputedTamperRaw)
+	recomputedTamperArmSum := sha256.Sum256(recomputedTamperRaw)
+	recomputedTamperReport.Arms[0].ArchiveSHA256 = hex.EncodeToString(recomputedTamperArmSum[:])
+	recomputedTamperCombined, err := canonicalJSON(soakArchive{Schema: SoakArchiveSchema, Arms: recomputedTamperArchives})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recomputedTamperCombinedSum := sha256.Sum256(recomputedTamperCombined)
+	recomputedTamperReport.RawArchiveSHA256 = hex.EncodeToString(recomputedTamperCombinedSum[:])
+	if err := ValidateSoakArtifacts(recomputedTamperReport, recomputedTamperCombined, corpus); err == nil || !strings.Contains(err.Error(), "matched decode archive mismatch") {
+		t.Fatalf("recomputed comparator tamper err=%v", err)
+	}
+	legacyReport := report
+	legacyReport.Arms = append([]SoakArmResult(nil), report.Arms...)
+	legacyArchives := make([]json.RawMessage, 0, len(armArchives))
+	for i, encoded := range armArchives {
+		var legacy soakArmArchive
+		if err := json.Unmarshal(encoded, &legacy); err != nil {
+			t.Fatal(err)
+		}
+		legacy.Decode = nil
+		legacyRaw, err := canonicalJSON(legacy)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacyArchives = append(legacyArchives, json.RawMessage(legacyRaw))
+		legacyReport.Arms[i].Metrics.DecodeWindows = nil
+		legacyReport.Arms[i].MatchedDecode = nil
+		legacyReport.Arms[i].Verdict = deriveArmVerdict(legacyReport.Arms[i])
+		legacySum := sha256.Sum256(legacyRaw)
+		legacyReport.Arms[i].ArchiveSHA256 = hex.EncodeToString(legacySum[:])
+	}
+	legacyCombined, err := canonicalJSON(soakArchive{Schema: SoakArchiveSchema, Arms: legacyArchives})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyCombinedSum := sha256.Sum256(legacyCombined)
+	legacyReport.RawArchiveSHA256 = hex.EncodeToString(legacyCombinedSum[:])
+	if err := ValidateSoakArtifacts(legacyReport, legacyCombined, corpus); err != nil {
+		t.Fatalf("legacy archive roundtrip: %v", err)
+	}
 	zeroThroughput := report
 	zeroThroughput.Arms = append([]SoakArmResult(nil), report.Arms...)
 	zeroThroughput.Arms[0].Metrics.CodingThroughput = 0
@@ -242,4 +361,16 @@ func cloneSoakArm(src SoakArmResult, arm string) SoakArmResult {
 	clone.Arm = arm
 	clone.Campaign.Arm = arm
 	return clone
+}
+
+func makeLlamaDecodeResults(fixtureID string, tokens int) []LlamaClientDecodeResult {
+	results := make([]LlamaClientDecodeResult, MinimumDecodeRepetitions)
+	for repetition := range results {
+		events := make([]LlamaClientArrivalEvent, tokens)
+		for i := range events {
+			events[i] = LlamaClientArrivalEvent{TokenIDs: []int{10_000 + i}, TokensPredicted: i + 1, ElapsedNS: 250_000_000 + int64(i/2+1)*1_000_000}
+		}
+		results[repetition] = LlamaClientDecodeResult{FixtureID: fixtureID, Repeat: repetition + 1, Events: events, Final: LlamaClientFinal{StopType: "limit", TokensPredicted: tokens}}
+	}
+	return results
 }

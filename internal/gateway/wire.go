@@ -376,6 +376,7 @@ type ChatRequest struct {
 // FakRequestExt is the opt-in request half of fak's response extension.
 type FakRequestExt struct {
 	NativeInferenceReceipt bool `json:"native_inference_receipt,omitempty"`
+	NativeDecodeTokenIDs   bool `json:"native_decode_token_ids,omitempty"`
 }
 
 func (r ChatRequest) GuidedDecodeFields() map[string]json.RawMessage {
@@ -572,6 +573,9 @@ type FakExt struct {
 	// NativeInferenceReceipt is emitted only for an explicitly requested,
 	// successfully measured in-kernel turn.
 	NativeInferenceReceipt *agent.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
+	// NativeDecodeTokenIDs is emitted only alongside an explicitly requested
+	// native decode trace and carries the ordered committed token IDs.
+	NativeDecodeTokenIDs *agent.NativeDecodeTokenIDs `json:"native_decode_token_ids,omitempty"`
 	// DecodeTrace is emitted only for an explicitly requested buffered fak-native
 	// turn. Its schema and engine fields make the provenance self-describing.
 	DecodeTrace *agent.NativeDecodeTrace `json:"decode_trace,omitempty"`

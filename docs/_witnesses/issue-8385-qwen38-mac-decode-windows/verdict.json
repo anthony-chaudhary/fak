@@ -1,0 +1,25 @@
+{
+  "schema": "fak.issue-8385-qwen38-mac-decode-windows-verdict/1",
+  "verdict": "HOLD",
+  "promotion": "DEMOTE",
+  "reason": "native stopped after 251 tokens, below the 2048-token minimum",
+  "native": {
+    "engine": "fak-native",
+    "requested_tokens": 2048,
+    "completion_tokens": 251,
+    "finish_reason": "stop",
+    "trace_events": 251,
+    "lightweight_token_ids": 251,
+    "exact_trace_token_cardinality": true
+  },
+  "comparator": {
+    "engine": "llama.cpp",
+    "started": false,
+    "repetitions": 0
+  },
+  "eligible": {
+    "decay_verdict": false,
+    "parity_verdict": false,
+    "matched_3x2_verdict": false
+  }
+}

@@ -37,6 +37,9 @@ func TestRunnerPinsNoThinkingProfile(t *testing.T) {
 	if !ok || kwargs["enable_thinking"] != false {
 		t.Fatalf("chat_template_kwargs = %#v, want enable_thinking=false", captured["chat_template_kwargs"])
 	}
+	if captured["fak_decode_trace"] != nil || captured["stream"] != nil {
+		t.Fatalf("default request fabricated a token trace or stream: %#v", captured)
+	}
 }
 func TestRunAllFixturesAndRepetitions(t *testing.T) {
 	c := qwen38quant.DefaultCorpus()
@@ -260,5 +263,45 @@ func TestRunOneDecodesOpenAIUsageObject(t *testing.T) {
 	}
 	if got.UsageDetails.CachedTokens != 17 {
 		t.Fatalf("cached tokens = %d", got.UsageDetails.CachedTokens)
+	}
+}
+
+func TestRunLongDecodeExactlyThreeRepetitions(t *testing.T) {
+	events := make([]map[string]any, MinimumLongDecodeTokens)
+	for i := range events {
+		events[i] = map[string]any{"token_index": i + 1, "elapsed_ns": int64(i/2+1) * 1_000_000}
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path == "/v1/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"id": "exact"}}})
+			return
+		}
+		requests++
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["fak_decode_trace"] != true || int(body["max_tokens"].(float64)) != MinimumLongDecodeTokens {
+			t.Fatalf("long decode request=%#v", body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "exact", "choices": []any{map[string]any{"message": map[string]any{"content": "bounded"}}},
+			"usage": map[string]int{"completion_tokens": MinimumLongDecodeTokens},
+			"fak":   map[string]any{"decode_trace": map[string]any{"schema": NativeDecodeTraceSchema, "engine": NativeDecodeTraceEngine, "events": events}},
+		})
+	}))
+	defer server.Close()
+	results, err := (Runner{Client: server.Client()}).RunLongDecode(context.Background(), Config{Endpoint: server.URL, APIKey: "secret", Model: "exact"}, qwen38quant.Fixture{
+		ID: "long-output", Workload: LongDecodeWorkload, Prompt: "continue to the limit", MaxOutputTokens: MinimumLongDecodeTokens,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != MinimumDecodeRepetitions || len(results) != MinimumDecodeRepetitions {
+		t.Fatalf("requests=%d results=%d", requests, len(results))
+	}
+	if summary := FoldDecodeResults(results); summary.Verdict != "PASS" || summary.RawCompletionTokensPerRun != MinimumLongDecodeTokens {
+		t.Fatalf("summary=%+v", summary)
 	}
 }

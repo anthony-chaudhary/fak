@@ -1,0 +1,9 @@
+scenario_id,category,source_refs,physical_bytes_per_token_gb,bandwidth_limited_tokens_s,raw_tokens_s,accepted_tokens_per_hour,capex_usd_per_hour,energy_usd_per_hour,migration_usd_per_hour,reliability_usd_per_hour,total_usd_per_hour,net_accepted_tokens_per_usd,assumption_set
+h100_sxm,gpu,nvidia_h100_sxm,80.000000,41.875000,41.875000,78426.560644,1.141553,0.046200,0.342466,0.080000,1.610218,48705.546544,illustrative-v1
+cpu_epyc9754,cpu,amd_epyc_9754,80.000000,5.760000,5.760000,13800.994099,0.342466,0.030240,0.570776,0.050000,0.993482,13891.539024,illustrative-v1
+m2_ultra,unified-memory,apple_m2_ultra,80.000000,10.000000,10.000000,20432.412000,0.199772,0.021600,0.410959,0.040000,0.672331,30390.424286,illustrative-v1
+mi300x_hbm,hbm-cache,amd_mi300x,80.000000,66.250000,66.250000,135357.646050,0.951294,0.054000,0.410959,0.080000,1.496253,90464.431136,illustrative-v1
+cxl3_pool,cxl-link,cxl_30;pcie_60,80.000000,1.600000,1.600000,3784.635187,0.684932,0.043200,1.141553,0.120000,1.989684,1902.128756,illustrative-v1
+nvme_tier,storage-topology,solidigm_p5336,80.000000,0.087500,0.087500,211.150800,0.256849,0.002250,0.799087,0.100000,1.158186,182.311638,illustrative-v1
+nvlink8_topology,storage-topology,nvidia_h100_sxm;nvidia_nvlink_h100,640.000000,18.750000,18.750000,39809.323125,9.132420,0.436800,2.739726,0.500000,12.808946,3107.931188,illustrative-v1
+h100_byte_reduced,software-byte-reduction,nvidia_h100_sxm;flashattention2;gqa,33.600000,99.702381,99.702381,177356.746875,1.217656,0.048180,1.369863,0.100000,2.735699,64830.504086,illustrative-v1

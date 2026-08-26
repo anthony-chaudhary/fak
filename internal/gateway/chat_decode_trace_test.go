@@ -7,11 +7,21 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
+	"github.com/anthony-chaudhary/fak/internal/modelengine"
 )
 
+func chatDecodeTraceNativeServer(t *testing.T) *Server {
+	t.Helper()
+	// Gateway tests intentionally reset the process-global ABI registry. Restore
+	// the production in-kernel engine so this wire witness is order-independent.
+	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
+	return nativeReceiptServer(t)
+}
+
 func TestChatDecodeTraceProductionSchemaAndEngine(t *testing.T) {
-	srv := nativeReceiptServer(t)
+	srv := chatDecodeTraceNativeServer(t)
 	body := `{"model":"synthetic-live","messages":[{"role":"user","content":"trace"}],"max_tokens":4,"fak_decode_trace":true}`
 	rr := postNativeReceipt(t, srv, body)
 	if rr.Code != http.StatusOK {
@@ -34,6 +44,44 @@ func TestChatDecodeTraceProductionSchemaAndEngine(t *testing.T) {
 	for i, event := range trace.Events {
 		if event.TokenIndex != i+1 || event.ElapsedNS < 0 || (i > 0 && event.ElapsedNS < trace.Events[i-1].ElapsedNS) {
 			t.Fatalf("event[%d] = %+v, want consecutive monotonic trace", i, event)
+		}
+	}
+}
+
+func TestChatDecodeTraceAndLightTokenIDsProductionCardinalityAndOrder(t *testing.T) {
+	srv := chatDecodeTraceNativeServer(t)
+	body := `{"model":"synthetic-live","messages":[{"role":"user","content":"trace and tokens"}],"max_tokens":4,"temperature":0,"fak_decode_trace":true,"fak":{"native_decode_token_ids":true}}`
+	rr := postNativeReceipt(t, srv, body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var resp ChatResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Fak == nil || resp.Fak.DecodeTrace == nil || resp.Fak.NativeDecodeTokenIDs == nil {
+		t.Fatalf("response missing requested trace or receipt: %s", rr.Body.String())
+	}
+	if resp.Fak.NativeInferenceReceipt != nil {
+		t.Fatalf("light token receipt unexpectedly enabled full native inference receipt: %s", rr.Body.String())
+	}
+	if bytes.Contains(rr.Body.Bytes(), []byte(`"token_id":`)) {
+		t.Fatalf("native decode trace /1 unexpectedly contains token_id: %s", rr.Body.String())
+	}
+	trace := resp.Fak.DecodeTrace
+	receipt := resp.Fak.NativeDecodeTokenIDs
+	if trace.Schema != agent.NativeDecodeTraceSchema || trace.Engine != agent.NativeDecodeTraceEngine {
+		t.Fatalf("trace provenance = schema %q engine %q", trace.Schema, trace.Engine)
+	}
+	if receipt.Schema != agent.NativeDecodeTokenIDsSchema || receipt.Engine != agent.NativeDecodeTokenIDsEngine {
+		t.Fatalf("token-ID provenance = schema %q engine %q", receipt.Schema, receipt.Engine)
+	}
+	if len(trace.Events) != 4 || len(receipt.TokenIDs) != len(trace.Events) || resp.Usage.CompletionTokens != len(trace.Events) {
+		t.Fatalf("events/token_ids/completion = %d/%d/%d, want 4 equal entries", len(trace.Events), len(receipt.TokenIDs), resp.Usage.CompletionTokens)
+	}
+	for i, event := range trace.Events {
+		if event.TokenIndex != i+1 || event.ElapsedNS < 0 || (i > 0 && event.ElapsedNS < trace.Events[i-1].ElapsedNS) {
+			t.Fatalf("event[%d] = %+v, cannot bind ordered receipt token_id %d", i, event, receipt.TokenIDs[i])
 		}
 	}
 }
@@ -78,6 +126,7 @@ func TestChatDecodeTraceRejectsStreamAndProxyBeforeInference(t *testing.T) {
 	}{
 		{name: "stream", native: true, body: `{"messages":[{"role":"user","content":"x"}],"stream":true,"fak_decode_trace":true}`},
 		{name: "proxy", native: false, body: `{"messages":[{"role":"user","content":"x"}],"fak_decode_trace":true}`},
+		{name: "token-ids-without-trace", native: true, body: `{"messages":[{"role":"user","content":"x"}],"fak":{"native_decode_token_ids":true}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

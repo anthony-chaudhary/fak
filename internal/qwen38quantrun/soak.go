@@ -23,6 +23,7 @@ import (
 const (
 	SoakSchema             = "fak.qwen38-quant-soak/1"
 	SoakArchiveSchema      = "fak.qwen38-quant-soak-raw/1"
+	DecodeCampaignSchema   = "fak.qwen38-decode-campaign-raw/1"
 	MinimumSoakFinalists   = 3
 	MinimumCodingTasks     = 30
 	defaultCancellationLag = 250 * time.Millisecond
@@ -54,25 +55,27 @@ type SoakScenario struct {
 }
 
 type SoakMetrics struct {
-	CodingLatencyP50MS float64 `json:"coding_latency_p50_ms"`
-	CodingThroughput   float64 `json:"coding_output_tokens_per_second"`
-	PeakMemoryBytes    uint64  `json:"peak_memory_bytes"`
-	PeakPowerWatts     float64 `json:"peak_power_watts"`
-	CacheColdMS        float64 `json:"cache_cold_ms"`
-	CacheWarmMS        float64 `json:"cache_warm_ms"`
-	CacheAfterRestart  float64 `json:"cache_after_restart_ms"`
-	CacheSavedMS       float64 `json:"cache_saved_ms"`
+	CodingLatencyP50MS float64              `json:"coding_latency_p50_ms"`
+	CodingThroughput   float64              `json:"coding_output_tokens_per_second"`
+	PeakMemoryBytes    uint64               `json:"peak_memory_bytes"`
+	PeakPowerWatts     float64              `json:"peak_power_watts"`
+	CacheColdMS        float64              `json:"cache_cold_ms"`
+	CacheWarmMS        float64              `json:"cache_warm_ms"`
+	CacheAfterRestart  float64              `json:"cache_after_restart_ms"`
+	CacheSavedMS       float64              `json:"cache_saved_ms"`
+	DecodeWindows      *DecodeWindowSummary `json:"decode_windows,omitempty"`
 }
 
 type SoakArmResult struct {
-	Arm                   string             `json:"arm"`
-	Campaign              qwen38quant.Report `json:"campaign"`
-	CampaignArchiveSHA256 string             `json:"campaign_archive_sha256"`
-	Coding                []Result           `json:"coding"`
-	Scenarios             []SoakScenario     `json:"scenarios"`
-	Metrics               SoakMetrics        `json:"metrics"`
-	Verdict               string             `json:"verdict"`
-	ArchiveSHA256         string             `json:"archive_sha256"`
+	Arm                   string                      `json:"arm"`
+	Campaign              qwen38quant.Report          `json:"campaign"`
+	CampaignArchiveSHA256 string                      `json:"campaign_archive_sha256"`
+	Coding                []Result                    `json:"coding"`
+	Scenarios             []SoakScenario              `json:"scenarios"`
+	Metrics               SoakMetrics                 `json:"metrics"`
+	MatchedDecode         *MatchedDecodeWindowSummary `json:"matched_decode,omitempty"`
+	Verdict               string                      `json:"verdict"`
+	ArchiveSHA256         string                      `json:"archive_sha256"`
 }
 
 type SoakReport struct {
@@ -89,14 +92,31 @@ type SoakReport struct {
 type SoakArmConfig struct {
 	Campaign          CampaignConfig
 	CancellationAfter time.Duration
+	LongDecode        *LongDecodeCampaignConfig
+}
+
+// LongDecodeCampaignConfig adds one measurement-only long-output fixture to a
+// soak arm without changing the frozen quality corpus. Comparator results are
+// caller-captured b9828 raw events and remain optional for a native-only run.
+type LongDecodeCampaignConfig struct {
+	Fixture    qwen38quant.Fixture       `json:"fixture"`
+	Comparator []LlamaClientDecodeResult `json:"comparator,omitempty"`
+}
+
+type DecodeCampaignArchive struct {
+	Schema     string                    `json:"schema"`
+	FixtureID  string                    `json:"fixture_id"`
+	Native     []Result                  `json:"native"`
+	Comparator []LlamaClientDecodeResult `json:"comparator,omitempty"`
 }
 
 type soakArmArchive struct {
-	Schema    string          `json:"schema"`
-	Arm       string          `json:"arm"`
-	Coding    []Result        `json:"coding"`
-	Scenarios []SoakScenario  `json:"scenarios"`
-	Campaign  json.RawMessage `json:"campaign"`
+	Schema    string                 `json:"schema"`
+	Arm       string                 `json:"arm"`
+	Coding    []Result               `json:"coding"`
+	Scenarios []SoakScenario         `json:"scenarios"`
+	Campaign  json.RawMessage        `json:"campaign"`
+	Decode    *DecodeCampaignArchive `json:"decode,omitempty"`
 }
 
 type soakArchive struct {
@@ -157,6 +177,12 @@ func (r Runner) RunSoakArm(ctx context.Context, cfg SoakArmConfig, corpus qwen38
 	if cfg.Campaign.Arm == "" || cfg.Campaign.RollbackThreshold == "" {
 		return arm, nil, errors.New("arm and rollback threshold are required")
 	}
+	if cfg.Campaign.Endpoint.NativeDecodeTrace && cfg.Campaign.ExecutionEngine != qwen38quant.EngineFakNative {
+		return arm, nil, errors.New("native decode trace requires explicit fak-native execution; comparator transport timings are not token commits")
+	}
+	if cfg.LongDecode != nil && cfg.Campaign.ExecutionEngine != qwen38quant.EngineFakNative {
+		return arm, nil, errors.New("long decode campaign requires explicit fak-native execution")
+	}
 
 	cleanupOwnedByCampaign := false
 	defer func() {
@@ -195,8 +221,42 @@ func (r Runner) RunSoakArm(ctx context.Context, cfg SoakArmConfig, corpus qwen38
 		cancelled.Outcome = "FAIL"
 	}
 
+	var decodeArchive *DecodeCampaignArchive
+	var matchedDecode *MatchedDecodeWindowSummary
+	if cfg.LongDecode != nil {
+		endpoint := cfg.Campaign.Endpoint
+		endpoint.NativeDecodeTrace = true
+		endpoint.Repetitions = MinimumDecodeRepetitions
+		endpoint.Sample = func(sampleCtx context.Context) (ResourceSample, error) {
+			observed, sampleErr := cfg.Campaign.Probe.Observe(sampleCtx)
+			if sampleErr != nil {
+				return ResourceSample{}, sampleErr
+			}
+			if err := admitObservation(observed, cfg.Campaign); err != nil {
+				return ResourceSample{}, err
+			}
+			return ResourceSample{MemoryBytes: observed.MemoryBytes, PowerWatts: observed.PowerWatts}, nil
+		}
+		native, decodeErr := r.RunLongDecode(ctx, endpoint, cfg.LongDecode.Fixture)
+		if decodeErr != nil {
+			return arm, nil, fmt.Errorf("long decode campaign: %w", decodeErr)
+		}
+		decodeArchive = &DecodeCampaignArchive{Schema: DecodeCampaignSchema, FixtureID: cfg.LongDecode.Fixture.ID, Native: native, Comparator: append([]LlamaClientDecodeResult(nil), cfg.LongDecode.Comparator...)}
+		if len(cfg.LongDecode.Comparator) > 0 {
+			matched, matchErr := FoldMatchedDecodeCampaign(native, cfg.LongDecode.Comparator)
+			if matchErr != nil {
+				return arm, nil, fmt.Errorf("matched decode campaign: %w", matchErr)
+			}
+			matchedDecode = &matched
+		}
+	}
+
 	cleanupOwnedByCampaign = true
-	campaign, campaignErr := r.RunCampaign(ctx, cfg.Campaign, corpus)
+	campaignCfg := cfg.Campaign
+	if cfg.LongDecode != nil {
+		campaignCfg.Endpoint.NativeDecodeTrace = false
+	}
+	campaign, campaignErr := r.RunCampaign(ctx, campaignCfg, corpus)
 	if campaignErr != nil {
 		return arm, nil, campaignErr
 	}
@@ -211,7 +271,11 @@ func (r Runner) RunSoakArm(ctx context.Context, cfg SoakArmConfig, corpus qwen38
 		restartScenario(campaignArchive),
 		cacheScenario(campaignArchive),
 	}
-	metrics := summarizeMetrics(coding, campaignArchive.Results)
+	metrics := summarizeMetrics(coding, campaignArchive.Results, cfg.Campaign.Endpoint.NativeDecodeTrace && cfg.LongDecode == nil)
+	if decodeArchive != nil {
+		summary := FoldDecodeResults(decodeArchive.Native)
+		metrics.DecodeWindows = &summary
+	}
 	campaignHash := sha256.Sum256(campaign.Archive)
 	arm = SoakArmResult{
 		Arm:                   cfg.Campaign.Arm,
@@ -220,9 +284,10 @@ func (r Runner) RunSoakArm(ctx context.Context, cfg SoakArmConfig, corpus qwen38
 		Coding:                coding,
 		Scenarios:             scenarios,
 		Metrics:               metrics,
+		MatchedDecode:         matchedDecode,
 	}
 	arm.Verdict = deriveArmVerdict(arm)
-	armRaw := soakArmArchive{Schema: SoakArchiveSchema, Arm: arm.Arm, Coding: coding, Scenarios: scenarios, Campaign: json.RawMessage(campaign.Archive)}
+	armRaw := soakArmArchive{Schema: SoakArchiveSchema, Arm: arm.Arm, Coding: coding, Scenarios: scenarios, Campaign: json.RawMessage(campaign.Archive), Decode: decodeArchive}
 	archive, err = canonicalJSON(armRaw)
 	if err != nil {
 		return SoakArmResult{}, nil, err
@@ -244,12 +309,14 @@ func (r Runner) client(timeout time.Duration) *http.Client {
 }
 
 func (r Runner) runCodingTasks(ctx context.Context, client *http.Client, cfg CampaignConfig, tasks []CodingTask) []Result {
+	endpoint := cfg.Endpoint
+	endpoint.NativeDecodeTrace = false
 	out := make([]Result, 0, len(tasks))
 	for _, task := range tasks {
 		fixture := qwen38quant.Fixture{ID: task.ID, Workload: "coding_reasoning", Prompt: task.Prompt, ExpectedExact: task.ExpectedExact, MaxOutputTokens: task.MaxOutputTokens}
 		result := Result{FixtureID: task.ID, Workload: fixture.Workload, Repeat: 1, Quality: "FAIL"}
 		start := time.Now()
-		response, err := runOne(ctx, client, cfg.Endpoint, fixture)
+		response, err := runOne(ctx, client, endpoint, fixture)
 		result.LatencyMS = float64(time.Since(start).Microseconds()) / 1000
 		if err != nil {
 			result.Failure = err.Error()
@@ -381,7 +448,7 @@ func resultsScenario(name string, results []Result, workload string, readback Ob
 	return s
 }
 
-func summarizeMetrics(coding, campaign []Result) SoakMetrics {
+func summarizeMetrics(coding, campaign []Result, requireDecodeWindows bool) SoakMetrics {
 	latencies := make([]float64, 0, len(coding))
 	var outputTokens int
 	var elapsedSeconds float64
@@ -424,6 +491,10 @@ func summarizeMetrics(coding, campaign []Result) SoakMetrics {
 		}
 	}
 	metrics.CacheSavedMS = metrics.CacheColdMS - metrics.CacheWarmMS
+	if requireDecodeWindows {
+		summary := FoldDecodeResults(campaign)
+		metrics.DecodeWindows = &summary
+	}
 	return metrics
 }
 
@@ -537,6 +608,47 @@ func ValidateSoakArtifacts(report SoakReport, archive []byte, corpus qwen38quant
 		if campaign.Arm != arm.Arm || campaign.CorpusID != report.CorpusID {
 			return fmt.Errorf("arm %s campaign archive identity mismatch", arm.Arm)
 		}
+		if arm.Decode != nil {
+			if arm.Decode.Schema != DecodeCampaignSchema || arm.Decode.FixtureID == "" {
+				return fmt.Errorf("arm %s decode campaign identity mismatch", arm.Arm)
+			}
+			for _, result := range arm.Decode.Native {
+				if result.FixtureID != arm.Decode.FixtureID {
+					return fmt.Errorf("arm %s native decode fixture mismatch", arm.Arm)
+				}
+			}
+			for _, result := range arm.Decode.Comparator {
+				if result.FixtureID != arm.Decode.FixtureID {
+					return fmt.Errorf("arm %s comparator decode fixture mismatch", arm.Arm)
+				}
+			}
+			rebuilt := FoldDecodeResults(arm.Decode.Native)
+			if reported.Metrics.DecodeWindows == nil || !reflect.DeepEqual(rebuilt, *reported.Metrics.DecodeWindows) {
+				return fmt.Errorf("arm %s decode-window archive mismatch", arm.Arm)
+			}
+			if len(arm.Decode.Comparator) > 0 {
+				matched, err := FoldMatchedDecodeCampaign(arm.Decode.Native, arm.Decode.Comparator)
+				if err != nil || reported.MatchedDecode == nil || !reflect.DeepEqual(matched, *reported.MatchedDecode) {
+					return fmt.Errorf("arm %s matched decode archive mismatch: %v", arm.Arm, err)
+				}
+			} else if reported.MatchedDecode != nil {
+				return fmt.Errorf("arm %s matched decode report lacks comparator raw evidence", arm.Arm)
+			}
+		} else {
+			hasDecodeTrace := false
+			for _, result := range campaign.Results {
+				hasDecodeTrace = hasDecodeTrace || result.DecodeTrace != nil || result.DecodeWindows != nil
+			}
+			if hasDecodeTrace || reported.Metrics.DecodeWindows != nil {
+				rebuilt := FoldDecodeResults(campaign.Results)
+				if reported.Metrics.DecodeWindows == nil || !reflect.DeepEqual(rebuilt, *reported.Metrics.DecodeWindows) {
+					return fmt.Errorf("arm %s decode-window archive mismatch", arm.Arm)
+				}
+			}
+			if reported.MatchedDecode != nil {
+				return fmt.Errorf("arm %s matched decode report lacks raw evidence", arm.Arm)
+			}
+		}
 		campaignCanonical, err := canonicalJSON(campaign)
 		if err != nil {
 			return err
@@ -592,6 +704,16 @@ func validateSoakArm(arm SoakArmResult, corpus qwen38quant.Corpus) error {
 	if metrics.CodingLatencyP50MS <= 0 || metrics.CodingThroughput < 0 || math.IsNaN(metrics.CodingThroughput) || math.IsInf(metrics.CodingThroughput, 0) || metrics.PeakMemoryBytes == 0 || metrics.PeakPowerWatts <= 0 || metrics.CacheColdMS <= 0 || metrics.CacheWarmMS <= 0 || metrics.CacheAfterRestart <= 0 || math.IsNaN(metrics.CacheSavedMS) || math.IsInf(metrics.CacheSavedMS, 0) {
 		return fmt.Errorf("latency, throughput, memory, power, or cache metrics missing: %+v", metrics)
 	}
+	if metrics.DecodeWindows != nil {
+		if err := validateDecodeWindowSummary(*metrics.DecodeWindows); err != nil {
+			return err
+		}
+	}
+	if arm.MatchedDecode != nil {
+		if err := validateMatchedDecodeWindowSummary(*arm.MatchedDecode); err != nil {
+			return err
+		}
+	}
 	if arm.Verdict != deriveArmVerdict(arm) {
 		return errors.New("arm verdict does not follow retained quality evidence")
 	}
@@ -630,6 +752,12 @@ func deriveArmVerdict(arm SoakArmResult) string {
 		return "EXCLUDE"
 	}
 	if arm.Campaign.Verdict != "PROMOTE" {
+		return "HOLD"
+	}
+	if arm.Metrics.DecodeWindows != nil && arm.Metrics.DecodeWindows.Verdict != "PASS" {
+		return "HOLD"
+	}
+	if arm.MatchedDecode != nil && arm.MatchedDecode.Verdict != "PASS" {
 		return "HOLD"
 	}
 	for _, result := range arm.Coding {
@@ -694,9 +822,10 @@ type SoakAdapterConfig struct {
 }
 
 type SoakAdapterArm struct {
-	Campaign  AdapterConfig `json:"campaign"`
-	APIKeyEnv string        `json:"api_key_env"`
-	Setup     []string      `json:"setup_command,omitempty"`
+	Campaign   AdapterConfig             `json:"campaign"`
+	APIKeyEnv  string                    `json:"api_key_env"`
+	Setup      []string                  `json:"setup_command,omitempty"`
+	LongDecode *LongDecodeCampaignConfig `json:"long_decode,omitempty"`
 }
 
 func RunSoakAdapter(ctx context.Context, configPath, corpusPath, reportPath, archivePath string) error {
@@ -757,6 +886,7 @@ func RunSoakAdapter(ctx context.Context, configPath, corpusPath, reportPath, arc
 				},
 			},
 			CancellationAfter: lag,
+			LongDecode:        finalist.LongDecode,
 		}, corpus, DefaultSoakTasks())
 		if err != nil {
 			return fmt.Errorf("arm %s: %w", campaignCfg.Arm, err)

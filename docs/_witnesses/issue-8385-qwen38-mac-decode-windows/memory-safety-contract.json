@@ -1,0 +1,25 @@
+{
+  "schema": "fak.issue-8385-memory-safety-contract/1",
+  "during_load_and_requests": {
+    "footprint_invocations": 0,
+    "sampling": [
+      "rss_bytes",
+      "free_memory_percent",
+      "memorystatus_percent",
+      "swap_used_bytes"
+    ],
+    "maximum_swap_growth_bytes": 12884901888,
+    "minimum_free_memory_percent": 10,
+    "minimum_memorystatus_percent": 10
+  },
+  "swap_baseline": {
+    "scope": "per-arm",
+    "phase": "immediately-before-fresh-process-start"
+  },
+  "peak_footprint": {
+    "phase": "after-three-responses-frozen-before-teardown",
+    "samples_per_arm": 1,
+    "maximum_footprint_bytes": 61162389504,
+    "semantics": "post-arm high-water gate"
+  }
+}
