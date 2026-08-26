@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/flock"
@@ -92,6 +93,7 @@ const (
 // Fields contains the caller-supplied, content-free launch facts. New adds the
 // schema, UTC millisecond timestamp, and deterministic child identity.
 type Fields struct {
+	LaunchID          string
 	ParentPID         int
 	ChildPID          int
 	ChildCreatedUTCMS int64
@@ -129,13 +131,16 @@ func New(now time.Time, fields Fields) (Receipt, error) {
 		ParentPID:         fields.ParentPID,
 		ChildPID:          fields.ChildPID,
 		ChildCreatedUTCMS: fields.ChildCreatedUTCMS,
-		LaunchID:          ChildIdentity(fields.ChildPID, fields.ChildCreatedUTCMS),
+		LaunchID:          fields.LaunchID,
 		LaunchClass:       fields.LaunchClass,
 		ShellImage:        fields.ShellImage,
 		ShellEdition:      fields.ShellEdition,
 		ShellVersion:      fields.ShellVersion,
 		Outcome:           fields.Outcome,
 		ErrorClass:        fields.ErrorClass,
+	}
+	if receipt.LaunchID == "" && receipt.ChildPID > 0 && receipt.ChildCreatedUTCMS > 0 {
+		receipt.LaunchID = ChildIdentity(receipt.ChildPID, receipt.ChildCreatedUTCMS)
 	}
 	if err := receipt.Validate(); err != nil {
 		return Receipt{}, err
@@ -165,14 +170,23 @@ func (r Receipt) Validate() error {
 	if r.ParentPID <= 0 {
 		return errors.New("shellprov: parent_pid must be positive")
 	}
-	if r.ChildPID <= 0 {
-		return errors.New("shellprov: child_pid must be positive")
+	if r.ChildPID < 0 {
+		return errors.New("child_pid must not be negative")
 	}
-	if r.ChildCreatedUTCMS <= 0 {
-		return errors.New("shellprov: child_created_utc_ms must be positive")
+	if r.ChildCreatedUTCMS < 0 {
+		return errors.New("child_created_utc_ms must not be negative")
 	}
-	if r.LaunchID != ChildIdentity(r.ChildPID, r.ChildCreatedUTCMS) {
-		return errors.New("shellprov: launch_id does not match child identity")
+	if r.LaunchID == "" || len(r.LaunchID) > 128 {
+		return errors.New("launch_id must be non-empty and at most 128 bytes")
+	}
+	if r.ChildPID == 0 && (r.Outcome != OutcomeFailed || r.ErrorClass != ErrorLaunch) {
+		return errors.New("missing child identity is only valid for launch failure")
+	}
+	if r.ChildPID > 0 && r.ChildCreatedUTCMS == 0 && r.Outcome != OutcomeFailed {
+		return errors.New("missing child creation time requires failed outcome")
+	}
+	if r.ChildPID > 0 && r.ChildCreatedUTCMS > 0 && r.LaunchID != ChildIdentity(r.ChildPID, r.ChildCreatedUTCMS) && !strings.HasPrefix(r.LaunchID, "attempt-") {
+		return errors.New("launch_id does not match child identity")
 	}
 	if !validLaunchClass(r.LaunchClass) {
 		return errors.New("shellprov: invalid launch_class (want tool, hook, worker, or probe)")
