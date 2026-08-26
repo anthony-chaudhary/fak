@@ -26,14 +26,14 @@ For the quickest proof, run the offline demo below. For security details, inspec
 default-deny policy. For performance, follow the witnessed native-model results.
 Claims and limitations link to the evidence behind them.
 
-<!-- native-status: 2026-08-25 -->
-### Native-model status — 2026-08-25
+<!-- native-status: 2026-08-26 -->
+### Native-model status — 2026-08-26
 
 This compact readout is designed for frequent refreshes; every row links its authority and says what is *not* proven.
 
 | Lane | Latest witnessed result | Current hold |
 |---|---|---|
-| [Qwen3.8-27B](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | Exact BF16 target: 3/3 correct with thinking on and off; disabling thinking cut p95 time to first correct arithmetic answer from 3,378 ms to 376 ms in the frozen two-GPU envelope. The fak-native CUDA Q4_K_M path separately passed 5/5 cold exact-answer checks. ([BF16 ladder](docs/_witnesses/issue-8623-qwen38-27b/README.md) · [native campaign](docs/_witnesses/issue-8848-qwen38-overnight/README.md)) | Below parity and not production-ready: cached fak-native decode collapsed to 0.3 tok/s median versus 36.55 tok/s for the pinned matched-artifact llama.cpp reference; cache-identical quality was 0/5. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md)) |
+| [Qwen3.8-27B](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | Exact BF16 target: 3/3 correct with thinking on and off; disabling thinking cut p95 time to first correct arithmetic answer from 3,378 ms to 376 ms in the frozen two-GPU envelope. The fak-native CUDA Q4_K_M path separately passed 5/5 cold exact-answer checks. ([BF16 ladder](docs/_witnesses/issue-8623-qwen38-27b/README.md) · [native campaign](docs/_witnesses/issue-8848-qwen38-overnight/README.md)) | Below parity and not production-ready: cached fak-native decode collapsed to 0.3 tok/s median versus 36.55 tok/s for the pinned matched-artifact llama.cpp reference; cache-identical quality was 0/5. On the exact-P32 M3 Pro envelope, partial profiling attributed 29.7% of median wall time to measured Q4_K GPU execution and 49.5% to Q8 CPU plus Q6_K wall, but lacked the counters needed for completion; the control profile bounds deleting all measured Q6_K compute to a 1.040× ideal wall-speedup, so that isolated optimization was superseded. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) · [partial Metal attribution](docs/_witnesses/issue-9236-metalprof/README.md) · [Q6_K ordering guard](docs/_witnesses/issue-9238-q6k-mm.json)) |
 | Ultracode / microagents | A `qwen2.5:0.5b` small-model scout/writer campaign preserved the accepted output through width 8 while reading 13,126 scoped tokens vs 32,760 in the full-context counterfactual. This is a context-access result, not a Qwen3.8 or billed-cost claim. ([access frontier](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md)) | ABSTAIN on the GPT-5.6 Ultracode pair: activation and billed-token/spend accounting were not independently verified, and the observed fleet run was slower (0.47× concurrency speedup). ([paired witness](docs/_witnesses/issue-8168-ultracode-live/README.md)) |
 
 Refresh contract: update the dated marker, both rows, linked committed witnesses, and each row's explicit hold; then run `python tools/readme_freshness_audit.py --json`.
