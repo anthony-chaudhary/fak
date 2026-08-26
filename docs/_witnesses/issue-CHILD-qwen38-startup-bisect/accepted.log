@@ -1,0 +1,25 @@
+issue=8964
+machine=Apple M3 Pro; 18 GPU cores; 36 GiB unified memory; Darwin 25.6.0
+artifact_bytes=17106775008
+artifact_sha256=7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169
+revision=8145dc0beac8396db08d75dee1a969faf0e80bf9
+cache_displacement_bytes=64915847712
+command=FAK_METAL_STREAM_Q4K=1 FAK_Q4K_FREE_CPU=1 FAK_Q4K=1 fak serve --addr 127.0.0.1:18964 --gguf <exact-gguf> --model qwen38:27b --metal --context-budget-tokens 4096
+readiness_endpoint=http://127.0.0.1:18964/v1/models
+deadline_seconds=180
+result=READY
+elapsed_seconds=31
+max_sampled_rss_kib=17085792
+swap_used_before_mib=2622.44
+swap_used_after_mib=2534.44
+execution_marker=fak: in-kernel chat decode -> Apple-Silicon Metal GPU
+listener_marker=fak gateway listening on http://127.0.0.1:18964 (engine=inkernel model=qwen38:27b)
+fallback_active=false
+llama_cpp_used=false
+
+countercontrol_command=FAK_METAL_STREAM_Q4K=1 FAK_Q4K_FREE_CPU=1 fak serve --addr 127.0.0.1:18964 --gguf <exact-gguf> --model qwen38:27b --metal --context-budget-tokens 4096
+countercontrol_result=EXITED_BEFORE_READY
+countercontrol_elapsed_seconds=91
+countercontrol_process_exit=137
+countercontrol_max_sampled_rss_kib=22863968
+countercontrol_fallback_active=false

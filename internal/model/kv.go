@@ -84,6 +84,8 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 
 // Clone makes a second independent owner for lookup; the cache retains the original.
 func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
+	started := prefixProfileStart()
+	defer func() { emitPrefixProfile(started, "device_clone", "complete", p, nil) }()
 	if p == nil || p.Cache == nil {
 		return nil, nil
 	}
@@ -381,11 +383,18 @@ type Session struct {
 	// arithmetic change (TestDecodeStepAllocationStaysBounded guards the bound).
 	decodeScores []float32
 	v4Expert     v4LiveExpertRuntime
+	// closeOnce covers backend resources and the model-weight reference. Legacy sessions also
+	// participate because retained no-copy Metal weights borrow model-owned backing.
+	closeOnce        sync.Once
+	modelWeightsHeld bool
 }
 
 // NewSession starts a fresh generation session.
 func (m *Model) NewSession() *Session {
-	return &Session{M: m, Cache: NewKVCache(m.Cfg)}
+	if !m.holdModelWeights() {
+		panic("model: weights are closing or closed")
+	}
+	return &Session{M: m, Cache: NewKVCache(m.Cfg), modelWeightsHeld: true}
 }
 
 // token runs one position through all layers and projects to logits. It is

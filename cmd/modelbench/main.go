@@ -22,12 +22,17 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,6 +47,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
 
@@ -248,6 +254,8 @@ type benchFlags struct {
 	loadProgress          *bool
 	checkpoint            *string
 	resume                *string
+	nativeProfileOut      *string
+	nativeProfileReadback *string
 }
 
 // parseFlags defines and parses the command-line flags, then expands a leading ~
@@ -286,6 +294,8 @@ func parseFlags() *benchFlags {
 		loadProgress:          flag.Bool("load-progress", true, "stream throttled load progress (percent / GB / elapsed / GB-per-s) to stderr on lean/q4k GGUF loads so a multi-minute load is not silent; -load-progress=false silences it"),
 		checkpoint:            flag.String("checkpoint", "", "per-cell write-ahead checkpoint path (#2382): each grid cell (prefill size / decode / workload case) is appended as it completes, so a crash mid-grid keeps the cells already measured instead of discarding the whole sweep"),
 		resume:                flag.String("resume", "", "resume from an existing checkpoint (alias for -checkpoint on an existing file): reuse the recorded cells and measure only the missing ones; refuses if the file was built for a different model/precision/grid"),
+		nativeProfileOut:      flag.String("native-performance-profile", "", "write one fak-native Metal P=32/T=64 session capture in the existing native-performance v1 schema, then exit"),
+		nativeProfileReadback: flag.String("native-performance-readback", "", "validate a native-performance profile and its companion raw-event receipt without loading a model"),
 	}
 	flag.Parse()
 	*f.dir = pathutil.ExpandTilde(*f.dir)
@@ -311,6 +321,14 @@ func applyBudget(budget float64) {
 
 // validateFlags enforces the flag combinations that must hold before any load.
 func validateFlags(f *benchFlags) {
+	if *f.nativeProfileReadback != "" && *f.nativeProfileOut != "" {
+		fmt.Fprintln(os.Stderr, "-native-performance-readback and -native-performance-profile are mutually exclusive")
+		os.Exit(2)
+	}
+	if *f.nativeProfileOut != "" && (*f.gguf == "" || !*f.q4k || !*f.metal || *f.decodePrompt != 32 || *f.decodeSteps != 64) {
+		fmt.Fprintln(os.Stderr, "-native-performance-profile requires -gguf, -q4k, -metal, -decode-prompt=32, and -decode-steps=64")
+		os.Exit(2)
+	}
 	if *f.q4k {
 		switch {
 		case *f.gguf == "":
@@ -664,6 +682,437 @@ func modelConfigReport(cfg model.Config) map[string]any {
 	}
 }
 
+func nativeModelConfigIdentity(cfg model.Config) (map[string]any, error) {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	var identity map[string]any
+	if err := json.Unmarshal(raw, &identity); err != nil {
+		return nil, err
+	}
+	// Config deliberately excludes loader-only identity fields from its ordinary JSON shape.
+	// The capture receipt needs the exact loaded identity, so bind those fields alongside every
+	// exported config axis rather than relying on modelConfigReport's display subset.
+	identity["name"] = cfg.Name
+	identity["eos_token_id"] = cfg.EOSTokenID
+	identity["eos_token_ids"] = cfg.EOSTokenIDs
+	return identity, nil
+}
+
+const (
+	nativeProfileReceiptSchema = "fak-native-metal-profile-receipt/v1"
+	nativeProfileArtifactBytes = int64(17106775008)
+	nativeProfileUnset         = "<unset>"
+)
+
+var nativeProfileRequiredEnvironment = map[string]string{
+	"FAK_METAL_STREAM_Q4K": "1",
+	"FAK_Q4K":              "1",
+}
+
+// nativeProfileDeniedEnvironment is the complete set of process controls read by the Qwen3.8
+// resident-Q4_K forward, its attention/KV helpers, and its worker scheduler. The profile contract
+// pins their default behavior by requiring them to be absent. FAK_Q4K_FREE_CPU and
+// FAK_METAL_Q8_UPLOAD are deliberately denied: either one changes residency and must never
+// masquerade as the documented all-Metal, no-override control run.
+var nativeProfileDeniedEnvironment = []string{
+	"FAK_ARM_TILE",
+	"FAK_BUDGET",
+	"FAK_FDOT3_SIMD",
+	"FAK_FDOT3_SIMD_MINB",
+	"FAK_GDN_BATCHED",
+	"FAK_HIDDEN_STEER",
+	"FAK_HIDDEN_STEER_ALPHA",
+	"FAK_HIDDEN_STEER_LAYER",
+	"FAK_HIDDEN_STEER_POS",
+	"FAK_HIDDEN_TAP",
+	"FAK_HIDDEN_TAP_OPS",
+	"FAK_HIDDEN_TAP_POS",
+	"FAK_HYBRID_KV",
+	"FAK_KQ_INT8",
+	"FAK_METAL_DECODE",
+	"FAK_METAL_Q8_UPLOAD",
+	"FAK_METAL_RESIDENT",
+	"FAK_PAGED_KV",
+	"FAK_PAGED_KV_BLOCK_TOKENS",
+	"FAK_PAR_SHARDS",
+	"FAK_PAR_SPIN",
+	"FAK_PREFILL_NO_ATTN",
+	"FAK_PREFILL_NO_GDN",
+	"FAK_Q4K_FREE_CPU",
+	"FAK_Q4K_MM",
+	"FAK_Q8_GEMM_GROUP",
+	"FAK_QATTN_GQA",
+	"FAK_QGEMM",
+	"FAK_QGEMM_GROUP",
+	"FAK_QGEMM_GROUP_MAXP",
+	"FAK_QKERNEL",
+	"FAK_QPROFILE",
+	"FAK_QWEN35_PREFILL_TOKEN_LOOP",
+	"FAK_SAXPY3_SIMD_MINB",
+	"FAK_SAXPY3_SIMD_MINPOS",
+	"FAK_WORKERS",
+	"GOMAXPROCS",
+}
+
+const (
+	nativeControlFlagBudget   = "flag:-budget"
+	nativeControlLogicalCPUs  = "runtime:logical_cpus"
+	nativeControlGOMAXPROCS   = "runtime:gomaxprocs"
+	nativeControlWorkers      = "runtime:matmul_workers"
+	nativeControlQ8Workers    = "runtime:q8_decode_workers"
+	nativeControlWorkerBudget = "runtime:worker_budget"
+)
+
+func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ []string, budget float64) (map[string]string, error) {
+	if budget != 0 {
+		return nil, fmt.Errorf("native performance profile unavailable: -budget must be 0, got %g", budget)
+	}
+	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+6)
+	for key, want := range nativeProfileRequiredEnvironment {
+		got, ok := lookup(key)
+		if !ok || got != want {
+			return nil, fmt.Errorf("native performance profile unavailable: %s must equal %s", key, want)
+		}
+		controls[key] = got
+	}
+	for _, key := range nativeProfileDeniedEnvironment {
+		if got, ok := lookup(key); ok {
+			return nil, fmt.Errorf("native performance profile unavailable: %s override is not allowed (got %q)", key, got)
+		}
+		controls[key] = nativeProfileUnset
+	}
+	// Refuse unknown FAK_* declarations too: otherwise a newly added process knob could alter a
+	// run before the receipt schema learns to bind it. This is intentionally fail-closed.
+	for _, declaration := range environ {
+		key, _, _ := strings.Cut(declaration, "=")
+		if !strings.HasPrefix(key, "FAK_") {
+			continue
+		}
+		if _, ok := nativeProfileRequiredEnvironment[key]; ok {
+			continue
+		}
+		return nil, fmt.Errorf("native performance profile unavailable: unrecognized %s override is not allowed", key)
+	}
+	controls[nativeControlFlagBudget] = "0"
+	controls[nativeControlLogicalCPUs] = strconv.Itoa(runtime.NumCPU())
+	controls[nativeControlGOMAXPROCS] = strconv.Itoa(runtime.GOMAXPROCS(0))
+	controls[nativeControlWorkers] = strconv.Itoa(model.NumWorkers())
+	controls[nativeControlQ8Workers] = strconv.Itoa(model.Q8DecodeWorkers())
+	controls[nativeControlWorkerBudget] = model.WorkerBudget()
+	if err := validateNativeProfileControls(controls); err != nil {
+		return nil, err
+	}
+	return controls, nil
+}
+
+func validateNativeProfileControls(controls map[string]string) error {
+	wantLen := len(nativeProfileRequiredEnvironment) + len(nativeProfileDeniedEnvironment) + 6
+	if len(controls) != wantLen {
+		return fmt.Errorf("native performance control receipt has %d fields, want %d", len(controls), wantLen)
+	}
+	for key, want := range nativeProfileRequiredEnvironment {
+		if controls[key] != want {
+			return fmt.Errorf("required control %s was not captured as %s", key, want)
+		}
+	}
+	for _, key := range nativeProfileDeniedEnvironment {
+		if controls[key] != nativeProfileUnset {
+			return fmt.Errorf("denied control %s was not captured as unset", key)
+		}
+	}
+	if controls[nativeControlFlagBudget] != "0" || controls[nativeControlWorkerBudget] != "default(GOMAXPROCS)" {
+		return fmt.Errorf("worker budget controls are not the default envelope")
+	}
+	for _, key := range []string{nativeControlLogicalCPUs, nativeControlGOMAXPROCS, nativeControlWorkers, nativeControlQ8Workers} {
+		value, err := strconv.Atoi(controls[key])
+		if err != nil || value <= 0 {
+			return fmt.Errorf("control %s is not a positive integer", key)
+		}
+	}
+	return nil
+}
+
+type nativeFileIdentity struct {
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+type nativeArtifactIdentity struct {
+	nativeFileIdentity
+	Model         string `json:"model"`
+	ModelRevision string `json:"model_revision"`
+}
+
+type nativeHostIdentity struct {
+	GOOS                 string `json:"goos"`
+	GOARCH               string `json:"goarch"`
+	CPU                  string `json:"cpu"`
+	MetalDevice          string `json:"metal_device"`
+	GPUCores             int    `json:"gpu_cores"`
+	MemoryBytes          uint64 `json:"memory_bytes"`
+	MetalWorkingSetBytes uint64 `json:"metal_working_set_bytes"`
+}
+
+type nativeSourceIdentity struct {
+	Revision   string `json:"revision"`
+	Modified   bool   `json:"modified"`
+	DiffBytes  int    `json:"diff_bytes,omitempty"`
+	DiffSHA256 string `json:"diff_sha256,omitempty"`
+}
+
+type nativeProfileReceipt struct {
+	Schema            string                     `json:"schema"`
+	BindingSHA256     string                     `json:"binding_sha256"`
+	ProfileSHA256     string                     `json:"profile_sha256"`
+	EnvelopeID        string                     `json:"envelope_id"`
+	Artifact          nativeArtifactIdentity     `json:"artifact"`
+	ModelConfig       map[string]any             `json:"model_config"`
+	ModelConfigSHA256 string                     `json:"model_config_sha256"`
+	Host              nativeHostIdentity         `json:"host"`
+	Source            nativeSourceIdentity       `json:"source"`
+	Binary            nativeFileIdentity         `json:"binary"`
+	Controls          map[string]string          `json:"controls"`
+	Execution         metalgemm.ExecutionReceipt `json:"execution"`
+	Fallbacks         model.MetalFallbackReceipt `json:"fallbacks"`
+}
+
+func sha256JSON(v any) (string, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum), nil
+}
+
+func fileIdentity(path string) (nativeFileIdentity, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nativeFileIdentity{}, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nativeFileIdentity{}, err
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nativeFileIdentity{}, err
+	}
+	return nativeFileIdentity{Bytes: info.Size(), SHA256: fmt.Sprintf("%x", h.Sum(nil))}, nil
+}
+
+func profileEnvelopeByID(graph nativeperf.Graph, id string) (nativeperf.Envelope, error) {
+	for _, envelope := range graph.Envelopes {
+		if envelope.ID == id {
+			return envelope, nil
+		}
+	}
+	return nativeperf.Envelope{}, fmt.Errorf("unknown native-performance envelope %q", id)
+}
+
+func exactMetalProfileEnvelope(graph nativeperf.Graph, artifact nativeFileIdentity) (nativeperf.Envelope, error) {
+	for _, envelope := range graph.Envelopes {
+		if envelope.Backend == "metal" && envelope.ArtifactSHA256 == artifact.SHA256 {
+			if artifact.Bytes != nativeProfileArtifactBytes {
+				return nativeperf.Envelope{}, fmt.Errorf("artifact bytes = %d, want %d", artifact.Bytes, nativeProfileArtifactBytes)
+			}
+			return envelope, nil
+		}
+	}
+	return nativeperf.Envelope{}, fmt.Errorf("artifact SHA-256 %q is not a pinned Metal envelope", artifact.SHA256)
+}
+
+func commandOutput(name string, args ...string) (string, error) {
+	b, err := exec.Command(name, args...).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+func captureNativeHost() (nativeHostIdentity, error) {
+	host := nativeHostIdentity{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, MetalDevice: metalgemm.DeviceName()}
+	if host.GOOS != "darwin" || host.GOARCH != "arm64" || host.MetalDevice == "" {
+		return nativeHostIdentity{}, fmt.Errorf("native Metal host unavailable: %s/%s device=%q", host.GOOS, host.GOARCH, host.MetalDevice)
+	}
+	var err error
+	if host.CPU, err = commandOutput("sysctl", "-n", "machdep.cpu.brand_string"); err != nil || host.CPU == "" {
+		return nativeHostIdentity{}, fmt.Errorf("CPU identity: %w", err)
+	}
+	memory, err := commandOutput("sysctl", "-n", "hw.memsize")
+	if err != nil {
+		return nativeHostIdentity{}, fmt.Errorf("host memory: %w", err)
+	}
+	if host.MemoryBytes, err = strconv.ParseUint(memory, 10, 64); err != nil || host.MemoryBytes == 0 {
+		return nativeHostIdentity{}, fmt.Errorf("host memory value %q: %w", memory, err)
+	}
+	var displays struct {
+		GPUs []struct {
+			Name  string `json:"_name"`
+			Model string `json:"sppci_model"`
+			Cores string `json:"sppci_cores"`
+		} `json:"SPDisplaysDataType"`
+	}
+	displayJSON, err := exec.Command("system_profiler", "SPDisplaysDataType", "-json").Output()
+	if err != nil {
+		return nativeHostIdentity{}, fmt.Errorf("GPU identity unavailable: %w", err)
+	}
+	if err := json.Unmarshal(displayJSON, &displays); err != nil {
+		return nativeHostIdentity{}, fmt.Errorf("GPU identity decode: %w", err)
+	}
+	for _, gpu := range displays.GPUs {
+		if gpu.Name == host.MetalDevice || gpu.Model == host.MetalDevice {
+			host.GPUCores, err = strconv.Atoi(gpu.Cores)
+			break
+		}
+	}
+	if err != nil || host.GPUCores <= 0 {
+		return nativeHostIdentity{}, fmt.Errorf("GPU core identity unavailable for %q", host.MetalDevice)
+	}
+	if host.MetalWorkingSetBytes, _ = metalgemm.DeviceMemoryTotal(); host.MetalWorkingSetBytes == 0 {
+		return nativeHostIdentity{}, fmt.Errorf("Metal working-set capacity unavailable")
+	}
+	return host, nil
+}
+
+func captureNativeBuild() (nativeSourceIdentity, nativeFileIdentity, error) {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return nativeSourceIdentity{}, nativeFileIdentity{}, fmt.Errorf("Go build identity unavailable")
+	}
+	var source nativeSourceIdentity
+	revisionFound, modifiedFound := false, false
+	for _, setting := range info.Settings {
+		switch setting.Key {
+		case "vcs.revision":
+			source.Revision, revisionFound = setting.Value, setting.Value != ""
+		case "vcs.modified":
+			source.Modified, modifiedFound = setting.Value == "true", true
+		}
+	}
+	if !revisionFound || !modifiedFound {
+		return nativeSourceIdentity{}, nativeFileIdentity{}, fmt.Errorf("binary lacks vcs.revision or vcs.modified build settings")
+	}
+	if source.Modified {
+		diff, err := exec.Command("git", "diff", "--no-ext-diff", "--binary", source.Revision, "--").Output()
+		if err != nil || len(diff) == 0 {
+			return nativeSourceIdentity{}, nativeFileIdentity{}, fmt.Errorf("modified source diff identity unavailable: %w", err)
+		}
+		diffSum := sha256.Sum256(diff)
+		source.DiffBytes = len(diff)
+		source.DiffSHA256 = fmt.Sprintf("%x", diffSum)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return nativeSourceIdentity{}, nativeFileIdentity{}, err
+	}
+	binary, err := fileIdentity(executable)
+	return source, binary, err
+}
+
+func validateNativeHost(envelope nativeperf.Envelope, host nativeHostIdentity) error {
+	wantHardware := fmt.Sprintf("%s, %d-GPU-core", host.CPU, host.GPUCores)
+	if host.GOOS != "darwin" || host.GOARCH != "arm64" || host.CPU == "" || host.MetalDevice != host.CPU || host.GPUCores <= 0 || wantHardware != envelope.Hardware {
+		return fmt.Errorf("host identity %+v does not match envelope hardware %q", host, envelope.Hardware)
+	}
+	if host.MemoryBytes != uint64(envelope.MemoryGiB)*(1<<30) || host.MetalWorkingSetBytes == 0 {
+		return fmt.Errorf("host memory identity physical=%d Metal=%d does not match %d GiB envelope", host.MemoryBytes, host.MetalWorkingSetBytes, envelope.MemoryGiB)
+	}
+	return nil
+}
+
+func nativeReceiptBinding(receipt nativeProfileReceipt) (string, error) {
+	receipt.BindingSHA256 = ""
+	return sha256JSON(receipt)
+}
+
+func validateNativeProfileReceipt(profileBytes []byte, profile nativeperf.ProfileBundle, receipt nativeProfileReceipt) error {
+	if receipt.Schema != nativeProfileReceiptSchema {
+		return fmt.Errorf("unexpected native profile receipt schema %q", receipt.Schema)
+	}
+	if err := nativeperf.ValidateProfile(nativeperf.ActiveGraph(), profile); err != nil {
+		return err
+	}
+	envelope, err := profileEnvelopeByID(nativeperf.ActiveGraph(), profile.EnvelopeID)
+	if err != nil {
+		return err
+	}
+	profileSum := sha256.Sum256(profileBytes)
+	if receipt.ProfileSHA256 != fmt.Sprintf("%x", profileSum) || receipt.EnvelopeID != profile.EnvelopeID {
+		return fmt.Errorf("profile digest or envelope binding mismatch")
+	}
+	if receipt.Artifact.SHA256 != envelope.ArtifactSHA256 || receipt.Artifact.Bytes != nativeProfileArtifactBytes || receipt.Artifact.Model != envelope.Model || receipt.Artifact.ModelRevision != envelope.ModelRevision {
+		return fmt.Errorf("artifact identity does not match envelope")
+	}
+	if len(receipt.ModelConfig) == 0 {
+		return fmt.Errorf("model config is empty")
+	}
+	configSHA, err := sha256JSON(receipt.ModelConfig)
+	if err != nil || configSHA != receipt.ModelConfigSHA256 {
+		return fmt.Errorf("model config digest mismatch")
+	}
+	if err := validateNativeHost(envelope, receipt.Host); err != nil {
+		return err
+	}
+	if receipt.Source.Revision == "" || receipt.Binary.Bytes <= 0 || len(receipt.Binary.SHA256) != 64 {
+		return fmt.Errorf("source revision or binary identity incomplete")
+	}
+	if receipt.Source.Modified && (receipt.Source.DiffBytes <= 0 || len(receipt.Source.DiffSHA256) != 64) {
+		return fmt.Errorf("modified source lacks an exact diff identity")
+	}
+	if !receipt.Source.Modified && (receipt.Source.DiffBytes != 0 || receipt.Source.DiffSHA256 != "") {
+		return fmt.Errorf("clean source carries a contradictory diff identity")
+	}
+	if err := validateNativeProfileControls(receipt.Controls); err != nil {
+		return err
+	}
+	if err := metalgemm.ValidateExecutionReceipt(receipt.Execution); err != nil {
+		return err
+	}
+	if err := model.ValidateMetalFallbackReceipt(receipt.Fallbacks); err != nil {
+		return err
+	}
+	if receipt.Fallbacks.PromisedCPUFallbacks != profile.Execution.FallbackCount {
+		return fmt.Errorf("raw fallback total does not match v1 execution identity")
+	}
+	if profile.Metal == nil || receipt.Execution.Counters.CommandBuffers != profile.Metal.CommandBuffers || receipt.Execution.Counters.Encoders != profile.Metal.Encoders || receipt.Execution.Counters.DispatchMilliseconds != profile.Metal.DispatchMilliseconds || receipt.Execution.Counters.WaitMilliseconds != profile.Metal.WaitMilliseconds {
+		return fmt.Errorf("raw execution totals do not match v1 Metal counter block")
+	}
+	binding, err := nativeReceiptBinding(receipt)
+	if err != nil || binding != receipt.BindingSHA256 {
+		return fmt.Errorf("source/binary/artifact/event binding digest mismatch")
+	}
+	return nil
+}
+
+func nativeReceiptPath(profilePath string) string {
+	ext := filepath.Ext(profilePath)
+	return strings.TrimSuffix(profilePath, ext) + ".receipt.json"
+}
+
+func runNativeProfileReadback(profilePath string) error {
+	profileBytes, err := os.ReadFile(profilePath)
+	if err != nil {
+		return err
+	}
+	profile, err := nativeperf.DecodeProfile(profileBytes)
+	if err != nil {
+		return err
+	}
+	receiptBytes, err := os.ReadFile(nativeReceiptPath(profilePath))
+	if err != nil {
+		return err
+	}
+	var receipt nativeProfileReceipt
+	if err := json.Unmarshal(receiptBytes, &receipt); err != nil {
+		return err
+	}
+	return validateNativeProfileReceipt(profileBytes, profile, receipt)
+}
+
 // timePrefillReps runs reps fresh-session prefills of ids (a new Session per rep, closed
 // after timing) and returns the median wall time in ms.
 func timePrefillReps(newSession func() *model.Session, ids []int, reps int) float64 {
@@ -703,6 +1152,193 @@ func stepDecode(s *model.Session, id, steps, vocab int) time.Duration {
 		_ = logits
 	}
 	return time.Since(t)
+}
+
+func requireNoMetalFallbacks(count int) error {
+	if count != 0 {
+		return fmt.Errorf("native performance profile unavailable: session observed %d promised Metal dispatch fallbacks", count)
+	}
+	return nil
+}
+
+func appendNativeProfilePhase(phases []nativeperf.ProfilePhase, name string, duration time.Duration) []nativeperf.ProfilePhase {
+	startMilliseconds := 0.0
+	if len(phases) > 0 {
+		previous := phases[len(phases)-1]
+		startMilliseconds = previous.StartMilliseconds + previous.DurationMilliseconds
+	}
+	return append(phases, nativeperf.ProfilePhase{
+		Name:                 name,
+		StartMilliseconds:    startMilliseconds,
+		DurationMilliseconds: float64(duration.Nanoseconds()) / 1e6,
+	})
+}
+
+func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64, vocab int, controls map[string]string, newSession func() *model.Session) error {
+	loadDuration := time.Duration(loadNanos)
+	phases := appendNativeProfilePhase(nil, "load-setup", loadDuration)
+
+	s := newSession()
+	profiler := model.NewPhaseProfiler()
+	s.PhaseProfiler = profiler
+	prompt := lcgIDs(32, vocab)
+	t := time.Now()
+	logits := s.Prefill(prompt)
+	d := time.Since(t)
+	phases = appendNativeProfilePhase(phases, "prefill", d)
+
+	id := 7 % vocab
+	t = time.Now()
+	logits = s.Step(id)
+	d = time.Since(t)
+	phases = appendNativeProfilePhase(phases, "first-token", d)
+
+	t = time.Now()
+	for i := 1; i < 64; i++ {
+		id = (id*48271 + 1) % vocab
+		logits = s.Step(id)
+	}
+	d = time.Since(t)
+	phases = appendNativeProfilePhase(phases, "steady-decode", d)
+
+	t = time.Now()
+	for _, value := range logits {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return fmt.Errorf("native performance verification: non-finite logits")
+		}
+	}
+	executionReceipt, err := profiler.MetalExecutionReceipt()
+	if err != nil {
+		return fmt.Errorf("native performance profile unavailable: %w", err)
+	}
+	if err := metalgemm.ValidateExecutionReceipt(executionReceipt); err != nil {
+		return fmt.Errorf("native performance profile unavailable: %w", err)
+	}
+	counters := executionReceipt.Counters
+	fallbackReceipt, err := profiler.MetalFallbackReceipt()
+	if err != nil {
+		return fmt.Errorf("native performance fallback receipt unavailable: %w", err)
+	}
+	fallbackCount := fallbackReceipt.PromisedCPUFallbacks
+	if err := requireNoMetalFallbacks(fallbackCount); err != nil {
+		return err
+	}
+	resident := m.ResidentReport().TotalResidentBytes
+	workingSet, err := peakRSSBytes()
+	if err != nil || resident <= 0 || workingSet == 0 {
+		return fmt.Errorf("native performance profile unavailable: memory capture resident=%d working_set=%d: %w", resident, workingSet, err)
+	}
+	d = time.Since(t)
+	phases = appendNativeProfilePhase(phases, "verification", d)
+
+	t = time.Now()
+	s.Close()
+	d = time.Since(t)
+	phases = appendNativeProfilePhase(phases, "teardown", d)
+
+	artifactFile, err := fileIdentity(*f.gguf)
+	if err != nil {
+		return fmt.Errorf("native performance artifact identity: %w", err)
+	}
+	envelope, err := exactMetalProfileEnvelope(nativeperf.ActiveGraph(), artifactFile)
+	if err != nil {
+		return fmt.Errorf("native performance profile unavailable: %w", err)
+	}
+	if envelope.PromptTokens != 32 || envelope.DecodeTokens != 64 || *f.decodePrompt != envelope.PromptTokens || *f.decodeSteps != envelope.DecodeTokens {
+		return fmt.Errorf("native performance P/T controls do not match envelope: got P=%d T=%d, want P=%d T=%d", *f.decodePrompt, *f.decodeSteps, envelope.PromptTokens, envelope.DecodeTokens)
+	}
+	if *f.name != "qwen38:27b" {
+		return fmt.Errorf("native performance model name %q is not the pinned qwen38:27b identity", *f.name)
+	}
+	host, err := captureNativeHost()
+	if err != nil {
+		return fmt.Errorf("native performance host identity: %w", err)
+	}
+	if err := validateNativeHost(envelope, host); err != nil {
+		return fmt.Errorf("native performance profile unavailable: %w", err)
+	}
+	source, binary, err := captureNativeBuild()
+	if err != nil {
+		return fmt.Errorf("native performance build identity: %w", err)
+	}
+	weights, err := ggufload.OpenWeights(*f.gguf)
+	if err != nil {
+		return fmt.Errorf("native performance artifact config: %w", err)
+	}
+	headerConfig, configErr := weights.File.Config()
+	weights.Close()
+	if configErr != nil {
+		return fmt.Errorf("native performance artifact config: %w", configErr)
+	}
+	loadedConfig, err := nativeModelConfigIdentity(m.Cfg)
+	if err != nil {
+		return err
+	}
+	headerConfigReport, err := nativeModelConfigIdentity(headerConfig)
+	if err != nil {
+		return err
+	}
+	loadedConfigSHA, err := sha256JSON(loadedConfig)
+	if err != nil {
+		return err
+	}
+	headerConfigSHA, err := sha256JSON(headerConfigReport)
+	if err != nil || headerConfigSHA != loadedConfigSHA {
+		return fmt.Errorf("native performance loaded model config does not match exact artifact header")
+	}
+
+	profile := nativeperf.ProfileBundle{
+		Schema:                 nativeperf.ProfileSchema,
+		EnvelopeID:             envelope.ID,
+		Execution:              nativeperf.ExecutionIdentity{Engine: envelope.Engine, ForwardPath: envelope.ForwardPath, FallbackCount: fallbackCount},
+		Phases:                 phases,
+		Metal:                  &nativeperf.MetalCounters{CommandBuffers: counters.CommandBuffers, Encoders: counters.Encoders, DispatchMilliseconds: counters.DispatchMilliseconds, WaitMilliseconds: counters.WaitMilliseconds, ResidentBytes: uint64(resident), WorkingSetBytes: workingSet},
+		AttributionUnavailable: &nativeperf.AttributionUnavailable{Reason: nativeperf.AttributionUnavailableCapture, Detail: "fak-native session lifecycle capture does not export per-lever dispatch attribution"},
+	}
+	if err := nativeperf.ValidateProfile(nativeperf.ActiveGraph(), profile); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	profileSum := sha256.Sum256(b)
+	receipt := nativeProfileReceipt{
+		Schema:            nativeProfileReceiptSchema,
+		ProfileSHA256:     fmt.Sprintf("%x", profileSum),
+		EnvelopeID:        envelope.ID,
+		Artifact:          nativeArtifactIdentity{nativeFileIdentity: artifactFile, Model: envelope.Model, ModelRevision: envelope.ModelRevision},
+		ModelConfig:       loadedConfig,
+		ModelConfigSHA256: loadedConfigSHA,
+		Host:              host,
+		Source:            source,
+		Binary:            binary,
+		Controls:          controls,
+		Execution:         executionReceipt,
+		Fallbacks:         fallbackReceipt,
+	}
+	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
+	if err != nil {
+		return err
+	}
+	if err := validateNativeProfileReceipt(b, profile, receipt); err != nil {
+		return fmt.Errorf("native performance receipt self-check: %w", err)
+	}
+	receiptBytes, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		return err
+	}
+	receiptBytes = append(receiptBytes, '\n')
+	if err := os.WriteFile(*f.nativeProfileOut, b, 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(nativeReceiptPath(*f.nativeProfileOut), receiptBytes, 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stderr, "wrote", *f.nativeProfileOut)
+	fmt.Fprintln(os.Stderr, "wrote", nativeReceiptPath(*f.nativeProfileOut))
+	return nil
 }
 
 // runPrefill times Session.Prefill over each P in prefillSizes (builds KV cache, last
@@ -900,8 +1536,25 @@ func openCheckpoint(f *benchFlags, modelName string) *benchckpt.Ledger {
 
 func main() {
 	f := parseFlags()
-	applyBudget(*f.budget)
 	validateFlags(f)
+	var nativeControls map[string]string
+	if *f.nativeProfileOut != "" {
+		var err error
+		nativeControls, err = nativeProfileControlEnvironment(os.LookupEnv, os.Environ(), *f.budget)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	applyBudget(*f.budget)
+	if *f.nativeProfileReadback != "" {
+		if err := runNativeProfileReadback(*f.nativeProfileReadback); err != nil {
+			fmt.Fprintln(os.Stderr, "native performance readback:", err)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stderr, "native performance readback: PASS", *f.nativeProfileReadback)
+		return
+	}
 
 	// FAIL FAST: -preflight reads only the GGUF header and exits in seconds, never loading a
 	// tensor. It is the answer to "load something for 20 min just to learn a small thing".
@@ -988,6 +1641,13 @@ func main() {
 		s := m.NewSession()
 		applyLegacySessionFlags(s, f)
 		return s
+	}
+	if *f.nativeProfileOut != "" {
+		if err := runNativePerformanceProfile(f, m, loadNanos, vocab, nativeControls, newSession); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if *f.verify {

@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,11 +16,10 @@ import (
 
 func TestBuildCodexLaunchArgvDefault(t *testing.T) {
 	got := buildCodexLaunchArgv("/bin/fak", codexLaunchOptions{
-		skipPermissions: true,
-		splitMode:       "auto",
-		splitWhere:      "bottom",
-		splitInterval:   2 * time.Second,
-		codexConfig:     true,
+		splitMode:     "auto",
+		splitWhere:    "bottom",
+		splitInterval: 2 * time.Second,
+		codexConfig:   true,
 	})
 	want := []string{
 		"/bin/fak", "guard",
@@ -28,7 +29,6 @@ func TestBuildCodexLaunchArgvDefault(t *testing.T) {
 		"--",
 		"codex",
 		"-c", "model_auto_compact_token_limit=96000",
-		"--dangerously-bypass-approvals-and-sandbox",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildCodexLaunchArgv default = %#v\nwant %#v", got, want)
@@ -174,17 +174,98 @@ func TestRunCodexDryRun(t *testing.T) {
 		"guard --split off",
 		"--policy floor.json",
 		"--api-key-env MY_OPENAI_KEY",
-		"codex -c model_auto_compact_token_limit=96000 --dangerously-bypass-approvals-and-sandbox exec --json check the repo",
+		"codex -c model_auto_compact_token_limit=96000 exec --json check the repo",
 	} {
 		if !strings.Contains(gotOut, want) {
 			t.Fatalf("dry-run stdout missing %q:\n%s", want, gotOut)
 		}
 	}
 	gotErr := errb.String()
-	for _, want := range []string{"agent 80% / fak info 20%", "fak floor is the permission system", "dry-run"} {
+	if strings.Contains(gotOut, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Fatalf("bare dry-run unexpectedly bypassed Codex approvals/sandbox:\n%s", gotOut)
+	}
+	for _, want := range []string{"agent 80% / fak info 20%", "Codex native approvals + sandbox (default)", "fak gates remain active", "dry-run"} {
 		if !strings.Contains(gotErr, want) {
 			t.Fatalf("dry-run stderr missing %q:\n%s", want, gotErr)
 		}
+	}
+}
+
+func TestRunCodexDryRunExplicitSkipPermissions(t *testing.T) {
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--dry-run",
+		"--split", "off",
+		"--skip-permissions",
+		"--", "exec", "check the repo",
+	})
+	if rc != 0 {
+		t.Fatalf("explicit bypass dry-run rc=%d stderr=%s", rc, errb.String())
+	}
+	if !strings.Contains(out.String(), "codex -c model_auto_compact_token_limit=96000 --dangerously-bypass-approvals-and-sandbox exec check the repo") {
+		t.Fatalf("explicit bypass dry-run omitted Codex flag:\n%s", out.String())
+	}
+	for _, want := range []string{"full approval/sandbox bypass explicitly requested", "fak gates remain active"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("explicit bypass banner missing %q:\n%s", want, errb.String())
+		}
+	}
+}
+
+func TestRunCodexSkipPermissionsHelpNamesNativeDefaultAndFakGates(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runCodex(&out, &errb, []string{"--help"}); rc != 2 {
+		t.Fatalf("runCodex --help rc=%d, want 2", rc)
+	}
+	for _, want := range []string{"default false: native Codex approvals + sandbox", "fak routing, capacity, policy, hook, and loop gates still apply"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("Codex help missing %q:\n%s", want, errb.String())
+		}
+	}
+}
+
+func TestCodexDryRunSubprocessPermissions(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	built := filepath.Join(t.TempDir(), "fak-codex-permissions-test")
+	if runtime.GOOS == "windows" {
+		built += ".exe"
+	}
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", built, "./cmd/fak")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fak subprocess witness: %v\n%s", err, output)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		extra      []string
+		wantBypass bool
+		wantBanner string
+	}{
+		{name: "bare keeps native Codex layer", wantBanner: "Codex native approvals + sandbox (default)"},
+		{name: "explicit flag selects full bypass", extra: []string{"--skip-permissions"}, wantBypass: true, wantBanner: "full approval/sandbox bypass explicitly requested"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{"codex", "--freshness-gate", "off", "--dry-run", "--split", "off"}
+			args = append(args, tc.extra...)
+			args = append(args, "--", "exec", "check the repo")
+			cmd := exec.Command(built, args...)
+			cmd.Dir = repoRoot
+			cmd.Env = append(os.Environ(), "FLEET_CODEX_LOOP_GATE=off")
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("fak codex subprocess: %v\n%s", err, output)
+			}
+			got := string(output)
+			if has := strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox"); has != tc.wantBypass {
+				t.Fatalf("subprocess bypass present=%v, want %v:\n%s", has, tc.wantBypass, got)
+			}
+			for _, want := range []string{tc.wantBanner, "fak gates remain active"} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("subprocess output missing %q:\n%s", want, got)
+				}
+			}
+		})
 	}
 }
 
@@ -199,7 +280,7 @@ func TestRunCodexExecSeam(t *testing.T) {
 	t.Cleanup(func() { codexLaunchRun = orig })
 
 	var out, errb bytes.Buffer
-	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--skip-permissions=false", "--", "exec", "do x"})
+	rc := runCodex(&out, &errb, []string{"--split", "off", "--loop-gate", "off", "--", "exec", "do x"})
 	if rc != 17 {
 		t.Fatalf("runCodex rc=%d, want seam rc 17; stderr=%s", rc, errb.String())
 	}
@@ -207,7 +288,7 @@ func TestRunCodexExecSeam(t *testing.T) {
 		t.Fatalf("argv was not a guard launch: %#v", gotArgv)
 	}
 	if strings.Contains(strings.Join(gotArgv, " "), "--dangerously-bypass-approvals-and-sandbox") {
-		t.Fatalf("--skip-permissions=false still passed Codex bypass flag: %#v", gotArgv)
+		t.Fatalf("bare Codex exec still passed bypass flag: %#v", gotArgv)
 	}
 	if !strings.HasSuffix(strings.Join(gotArgv, " "), "-- codex -c model_auto_compact_token_limit=96000 exec do x") {
 		t.Fatalf("argv tail wrong: %#v", gotArgv)
@@ -254,6 +335,76 @@ func TestRunCodexLoopGateRefusesBeforeSpawn(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("loop-gate stderr missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunCodexLoopGateDefaultOffSkipsAudit(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("FLEET_CODEX_LOOP_GATE", "")
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	if err := writeCodexGuardWitness(home, "loop-session"); err != nil {
+		t.Fatal(err)
+	}
+	orig := codexLaunchRun
+	spawned := false
+	codexLaunchRun = func(_, _ io.Writer, argv, _ []string) int {
+		spawned = true
+		if !strings.Contains(strings.Join(argv, " "), "--codex-loop-gate off") {
+			t.Fatalf("default-off outer launcher did not suppress the nested audit: %#v", argv)
+		}
+		return 17
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--", "exec", "do x",
+	})
+	if rc != 17 || !spawned {
+		t.Fatalf("default-off Codex launch rc=%d spawned=%v, want guarded child rc=17; stderr=%s", rc, spawned, errb.String())
+	}
+	if strings.Contains(errb.String(), "loop gate REFUSE") || strings.Contains(errb.String(), "loop gate allow") {
+		t.Fatalf("default-off Codex launch evaluated the loop gate:\n%s", errb.String())
+	}
+}
+
+func TestRunCodexLoopGateEnvironmentOptInRefusesBeforeSpawn(t *testing.T) {
+	t.Setenv("CODEX_THREAD_ID", "")
+	t.Setenv("FLEET_CODEX_LOOP_GATE", "loop")
+	home := codexLauncherLoopFixtureForProvider(t, "fak")
+	if err := writeCodexGuardWitness(home, "loop-session"); err != nil {
+		t.Fatal(err)
+	}
+	orig := codexLaunchRun
+	codexLaunchRun = func(_, _ io.Writer, _, _ []string) int {
+		t.Fatal("Codex child spawned despite environment-opted-in loop gate refusal")
+		return 99
+	}
+	t.Cleanup(func() { codexLaunchRun = orig })
+
+	var out, errb bytes.Buffer
+	rc := runCodex(&out, &errb, []string{
+		"--split", "off",
+		"--codex-home", home,
+		"--loop-gate-since-hours", "0",
+		"--", "exec", "do x",
+	})
+	if rc != 1 || !strings.Contains(errb.String(), "loop gate REFUSE fail-on=loop verdict=LOOP") {
+		t.Fatalf("environment-opted-in loop gate rc=%d, want witnessed refusal; stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+}
+
+func TestRunCodexLoopGateHelpSaysOptInDefaultOff(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runCodex(&out, &errb, []string{"--help"}); rc != 2 {
+		t.Fatalf("runCodex --help rc=%d, want 2", rc)
+	}
+	for _, want := range []string{"opt-in pre-launch audit", "else off", "loop|action"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("Codex help missing %q:\n%s", want, errb.String())
 		}
 	}
 }

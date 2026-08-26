@@ -20,6 +20,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/httptrust"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
 // Role constants for chat messages.
@@ -360,8 +361,9 @@ type Completion struct {
 	FinishReason       string
 	Usage              Usage
 	ProviderCache      *cachemeta.Entry
-	Raw                []byte // the raw response body (transcript witness for the live seam)
-	PreSendQuarantines int    // tool-result payloads held out before provider serialization
+	CacheHint          *CacheHintResult // requested/emitted/effective provider-cache receipt
+	Raw                []byte           // the raw response body (transcript witness for the live seam)
+	PreSendQuarantines int              // tool-result payloads held out before provider serialization
 	// PreSendRedactions counts the outbound messages whose content was span-redacted
 	// (rung 5, #572) before provider serialization on the re-marshal path. It mirrors
 	// PreSendQuarantines so a caller can observe that something was redacted, not only
@@ -393,6 +395,7 @@ type Completion struct {
 	// benign empty turn — the kernel's permission floor must never be bypassed by a
 	// format it failed to parse. Set by normalizeCompletionToolCalls.
 	ToolCallsDropped bool
+	ServiceTier      modelroute.ServiceMode
 }
 
 // SampleParams are the per-request sampling overrides a CALLER may attach to one
@@ -403,6 +406,7 @@ type Completion struct {
 // planner like HTTPPlanner already runs temperature 0, so the two only differ when
 // the caller also wants top_p/stop, and a bare float64 could not carry that intent.
 type SampleParams struct {
+	ServiceTier modelroute.ServiceMode
 	// Model, when non-empty, overrides the planner's configured ModelID for THIS
 	// request — the gateway's request-model pass-through (#82). It is the model id
 	// that reaches the upstream request body (and, for a path-templated provider
@@ -530,6 +534,8 @@ type HTTPPlanner struct {
 	Provider             Provider
 	Adapter              TranscriptAdapter
 	ExtraBody            json.RawMessage
+	// CacheIntent negotiates provider-owned prompt-cache behavior. Nil preserves the legacy wire.
+	CacheIntent *CacheIntent
 	// OpenAIToolMessagesAsText is an opt-in compatibility mode for OpenAI-compatible
 	// upstreams whose chat template accepts Qwen text tool blocks but rejects native
 	// role=tool continuation messages. Default false preserves the normal OpenAI wire.
@@ -1014,6 +1020,10 @@ func (p *HTTPPlanner) Complete(ctx context.Context, messages []Message, tools []
 		comp = normalizeCompletionToolCalls(comp)
 		attachProviderReportedCost(comp, raw)
 		p.attachProviderCacheTelemetry(comp, call.body, call.adapter.Provider())
+		if call.cacheHint.Requested != nil {
+			hint := call.cacheHint
+			comp.CacheHint = &hint
+		}
 		comp.Raw = raw
 		comp.PreSendQuarantines = call.quarantined
 		comp.PreSendRedactions = call.redacted

@@ -169,6 +169,32 @@ func TestLaunchSkipPermsFlag(t *testing.T) {
 	}
 }
 
+func TestAccountsLaunchSkipPermissionsOptionResolution(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "omitted Codex keeps native approvals and sandbox", args: []string{"--command", "codex"}, want: false},
+		{name: "explicit Codex bypass", args: []string{"--command", "codex", "--skip-permissions"}, want: true},
+		{name: "explicit false Codex", args: []string{"--command", "codex", "--skip-permissions=false"}, want: false},
+		{name: "omitted Claude preserves historical bypass", args: []string{"--command", "claude"}, want: true},
+		{name: "explicit false Claude", args: []string{"--command", "claude", "--skip-permissions=false"}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, code := parseAccountsCmd(io.Discard, "launch", tc.args)
+			if code != 0 {
+				t.Fatalf("parseAccountsCmd code=%d", code)
+			}
+			got := resolveAccountsLaunchSkipPermissions(*cmd.launchCommand, *cmd.launchSkipPerms, flagSet(cmd.fs, "skip-permissions"))
+			if got != tc.want {
+				t.Fatalf("resolved skip-permissions=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // launchRegistry writes a registry with one active seat pointed at by the active role and
 // returns (registryPath, seatDir).
 func launchRegistry(t *testing.T, home string) (string, string) {
@@ -227,6 +253,64 @@ func TestRunAccountsLaunchDryRun(t *testing.T) {
 	}
 	if strings.Contains(gotErr, seat) {
 		t.Fatalf("dry-run stderr leaked raw account dir %q:\n%s", seat, gotErr)
+	}
+}
+
+func TestRunAccountsCodexLaunchDryRunPermissions(t *testing.T) {
+	root := t.TempDir()
+	userHome := filepath.Join(root, "home")
+	codexHome := filepath.Join(userHome, ".codex-blue")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const token = "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhY2N0LWJsdWUifQ.sig"
+	auth := `{"auth_mode":"chatgpt","tokens":{"access_token":"` + token + `","account_id":"acct-blue"}}`
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(auth), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_USER_HOME", userHome)
+	t.Setenv("FLEET_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("FLEET_REG_DIR", filepath.Join(root, "fleet-registry"))
+	t.Setenv("FLEET_POLICY_DIR", filepath.Join(root, "policy"))
+	t.Setenv(fleetManagedCacheEnv, "")
+	t.Setenv(fleetGuardAPIKeyEnvEnv, "")
+
+	for _, tc := range []struct {
+		name       string
+		extra      []string
+		wantBypass bool
+		wantBanner string
+	}{
+		{name: "bare keeps native Codex layer", wantBanner: "Codex native approvals + sandbox (default); fak gates remain active"},
+		{name: "explicit flag selects full bypass", extra: []string{"--skip-permissions"}, wantBypass: true, wantBanner: "Codex full approval/sandbox bypass explicitly requested"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := []string{"launch", "--dry-run", "--registry", filepath.Join(root, "accounts.json"), "--home", filepath.Join(root, "claude-home"), "--name", "blue", "--command", "codex", "--managed-cache", "auto", "--ultracode", "off"}
+			args = append(args, tc.extra...)
+			var out, errb bytes.Buffer
+			if rc := runAccounts(&out, &errb, args); rc != 0 {
+				t.Fatalf("Codex accounts dry-run rc=%d stderr=%s", rc, errb.String())
+			}
+			combined := out.String() + "\n" + errb.String()
+			if has := strings.Contains(combined, "--dangerously-bypass-approvals-and-sandbox"); has != tc.wantBypass {
+				t.Fatalf("accounts dry-run bypass present=%v, want %v:\n%s", has, tc.wantBypass, combined)
+			}
+			if !strings.Contains(errb.String(), tc.wantBanner) || !strings.Contains(errb.String(), "fak gates remain active") {
+				t.Fatalf("accounts dry-run banner missing permissions posture:\n%s", errb.String())
+			}
+		})
+	}
+}
+
+func TestAccountsLaunchSkipPermissionsHelpDistinguishesCodexFromFakGates(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runAccounts(&out, &errb, []string{"launch", "--help"}); rc != 2 {
+		t.Fatalf("accounts launch --help rc=%d, want 2", rc)
+	}
+	for _, want := range []string{"keeps Codex native approvals + sandbox", "does not bypass fak routing, capacity, policy, hook, or loop gates"} {
+		if !strings.Contains(errb.String(), want) {
+			t.Fatalf("accounts launch help missing %q:\n%s", want, errb.String())
+		}
 	}
 }
 

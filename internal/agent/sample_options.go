@@ -3,6 +3,8 @@ package agent
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
 // SampleOpt is a functional option that mutates a SampleParams. The variadic
@@ -253,4 +255,9 @@ func applySampleOpts(opts ...SampleOpt) SampleParams {
 		}
 	}
 	return sp
+}
+
+// WithServiceTier requests a portable provider service mode. Standard remains omitted on wire.
+func WithServiceTier(mode modelroute.ServiceMode) SampleOpt {
+	return func(sp *SampleParams) { sp.ServiceTier = mode }
 }

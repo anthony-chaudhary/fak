@@ -33,10 +33,10 @@ type processMemoryCountersCommit struct {
 	PeakPagefileUsage          uintptr
 }
 
-func collectCommitSnapshot(rootPID int) (CommitSnapshot, bool, string) {
+func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	rows, err := snapshotWindowsProcessesNative(true)
 	if err != "" {
-		return CommitSnapshot{RootPID: rootPID}, true, err
+		return MemorySnapshot{Metric: MemoryMetricCommit, RootPID: rootPID}, true, err
 	}
 	children := make(map[int][]int)
 	byPID := make(map[int]Proc, len(rows))
@@ -57,7 +57,7 @@ func collectCommitSnapshot(rootPID int) (CommitSnapshot, bool, string) {
 		owned[pid] = true
 		queue = append(queue, children[pid]...)
 	}
-	s := CommitSnapshot{RootPID: rootPID}
+	s := MemorySnapshot{Metric: MemoryMetricCommit, RootPID: rootPID}
 	for pid := range owned {
 		h, openErr := syscall.OpenProcess(processQueryLimitedInformation|processVMRead, false, uint32(pid))
 		if openErr != nil {
@@ -79,8 +79,8 @@ func collectCommitSnapshot(rootPID int) (CommitSnapshot, bool, string) {
 			ppid = *row.PPID
 		}
 		commit := uint64(counters.PagefileUsage)
-		s.TreeCommitBytes += commit
-		s.Processes = append(s.Processes, CommitProcess{PID: pid, PPID: ppid, Name: row.Name, CommandLine: row.Cmdline, CommitBytes: commit})
+		s.TreeBytes += commit
+		s.Processes = append(s.Processes, MemoryProcess{PID: pid, PPID: ppid, Name: row.Name, CommandLine: row.Cmdline, Bytes: commit})
 	}
 	var perf performanceInformation
 	perf.CB = unsafe.Sizeof(perf)
@@ -88,9 +88,19 @@ func collectCommitSnapshot(rootPID int) (CommitSnapshot, bool, string) {
 	if r == 0 {
 		return s, true, fmt.Sprintf("GetPerformanceInfo: %v", callErr)
 	}
-	s.SystemCommitBytes = uint64(perf.CommitTotal) * uint64(perf.PageSize)
-	s.SystemCommitLimit = uint64(perf.CommitLimit) * uint64(perf.PageSize)
+	s.SystemBytes = uint64(perf.CommitTotal) * uint64(perf.PageSize)
+	s.SystemLimit = uint64(perf.CommitLimit) * uint64(perf.PageSize)
 	return s, true, ""
+}
+
+func hostPhysicalMemoryBytes() (uint64, string) {
+	var perf performanceInformation
+	perf.CB = unsafe.Sizeof(perf)
+	r, _, callErr := procGetPerformanceInfo.Call(uintptr(unsafe.Pointer(&perf)), perf.CB)
+	if r == 0 {
+		return 0, fmt.Sprintf("GetPerformanceInfo: %v", callErr)
+	}
+	return uint64(perf.PhysicalTotal) * uint64(perf.PageSize), ""
 }
 
 // processExitedDuringSnapshot recognizes the Windows result for a PID that vanished

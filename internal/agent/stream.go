@@ -71,6 +71,7 @@ type upstreamCall struct {
 	quarantined  int
 	redacted     int                   // rung 5 (#572): messages whose content was span-redacted pre-send
 	redactions   []TranscriptRedaction // the full reversible records (CAS Original) behind that count (#882)
+	cacheHint    CacheHintResult
 	// responsesStreamed marks a buffered caller that had to ask an OpenAI Responses
 	// upstream for SSE anyway. Codex's ChatGPT-subscription backend requires stream=true,
 	// but the gateway still buffers, adjudicates, and returns the client's requested shape.
@@ -399,6 +400,10 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 	var reqBody []byte
 	redactedN := 0
 	var redactions []TranscriptRedaction
+	cacheHint, err := negotiateCacheIntent(adapter.Provider(), modelID, p.CacheIntent)
+	if err != nil {
+		return nil, err
+	}
 	if len(sp.RawRequestBody) > 0 && adapter.Provider() == ProviderAnthropic {
 		reqBody = forceAnthropicNonStreaming(sp.RawRequestBody)
 	} else {
@@ -415,6 +420,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		}
 		reqBody, err = adapter.MarshalRequest(adapterRequest{
 			Model:                    modelID,
+			ServiceTier:              sp.ServiceTier,
 			Messages:                 safeMessages,
 			Tools:                    tools,
 			Temperature:              temperature,
@@ -441,6 +447,10 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 			}
 		}
 	}
+	reqBody, err = applyCacheHintToJSON(reqBody, cacheHint)
+	if err != nil {
+		return nil, err
+	}
 	// Transparent hop: when the inbound client supplied its own upstream credential
 	// (passthrough), authenticate with THAT key rather than the planner's. Otherwise use
 	// the planner's EFFECTIVE key, which re-resolves a rotating subscription token per
@@ -461,6 +471,7 @@ func (p *HTTPPlanner) prepareUpstream(messages []Message, tools []ToolDef, strea
 		quarantined:       len(quarantines),
 		redacted:          redactedN,
 		redactions:        redactions,
+		cacheHint:         cacheHint,
 		responsesStreamed: forceResponsesStream,
 		authRefreshable:   authRefreshable,
 	}, nil

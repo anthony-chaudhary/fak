@@ -1,0 +1,693 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "openai/codex",
+  "url": "https://github.com/openai/codex",
+  "indexed_revision": "2764e83626efe55f64e04d153fc99a157327f3c2",
+  "observed_at": "2026-08-26T02:30:00Z",
+  "totals": {
+    "files": 6613,
+    "directories": 848,
+    "bytes": 67249248,
+    "runtime_files": 4278,
+    "test_files": 751,
+    "docs_files": 615,
+    "text_lines": 1770693
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        ".devcontainer/README.md",
+        ".github/workflows/README.md",
+        "README.md",
+        "codex-cli/scripts/README.md",
+        "codex-rs/README.md",
+        "codex-rs/ansi-escape/README.md",
+        "codex-rs/app-server-client/README.md",
+        "codex-rs/app-server-daemon/README.md",
+        "codex-rs/app-server-test-client/README.md",
+        "codex-rs/app-server/README.md",
+        "codex-rs/apply-patch/tests/fixtures/scenarios/README.md",
+        "codex-rs/chatgpt/README.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        ".github/actions/setup-akv-pkcs11-codesigning/action.yaml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".codex/environments/environment.toml",
+        ".codex/skills/babysit-pr/agents/openai.yaml",
+        ".codex/skills/babysit-pr/scripts/gh_pr_watch.py",
+        ".codex/skills/update-v8-version/agents/openai.yaml",
+        ".devcontainer/Dockerfile",
+        ".devcontainer/codex-install/package.json",
+        ".devcontainer/codex-install/pnpm-lock.yaml",
+        ".devcontainer/codex-install/pnpm-workspace.yaml",
+        ".devcontainer/devcontainer.json",
+        ".devcontainer/devcontainer.secure.json",
+        ".devcontainer/init-firewall.sh",
+        ".devcontainer/post-start.sh"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".codex/skills/babysit-pr/scripts/test_gh_pr_watch.py",
+        ".github/scripts/macos-signing/test_notarize_with_akv.py",
+        ".github/scripts/test_macos_signing_entitlements.py",
+        ".github/scripts/test_run_bazel_with_buildbuddy.py",
+        ".github/scripts/test_rusty_v8_bazel.py",
+        ".github/scripts/test_v8_canary_changes.py",
+        "bazel/rules/testing/compat/exec_server_compat_test.bzl",
+        "bazel/rules/testing/compat/exec_server_compat_test.rs",
+        "bazel/rules/testing/wine/fixtures/windows_smoke.rs",
+        "codex-rs/app-server-transport/src/transport/remote_control/tests/clients_tests.rs",
+        "codex-rs/app-server-transport/src/transport/remote_control/tests/pairing_tests.rs",
+        "codex-rs/app-server/src/bin/test_notify_capture.rs"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".github/scripts/archive-release-symbols-and-strip-binaries.sh",
+        ".github/scripts/build-zsh-release-artifact.sh",
+        ".github/scripts/publish_r2_release.py",
+        ".github/scripts/test_v8_canary_changes.py",
+        ".github/scripts/v8_canary_changes.py",
+        ".github/workflows/python-runtime-release.yml",
+        ".github/workflows/python-sdk-release.yml",
+        ".github/workflows/r2-release.yml",
+        ".github/workflows/rust-release-argument-comment-lint.yml",
+        ".github/workflows/rust-release-prepare.yml",
+        ".github/workflows/rust-release-windows.yml",
+        ".github/workflows/rust-release-zsh.yml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/1-codex-app.yml",
+        ".github/ISSUE_TEMPLATE/2-extension.yml",
+        ".github/ISSUE_TEMPLATE/3-cli.yml",
+        ".github/ISSUE_TEMPLATE/4-bug-report.yml",
+        ".github/ISSUE_TEMPLATE/5-feature-request.yml",
+        ".github/ISSUE_TEMPLATE/6-docs-issue.yml"
+      ],
+      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        ".devcontainer/codex-install/package.json",
+        "LICENSE",
+        "NOTICE",
+        "codex-cli/package.json",
+        "codex-rs/Cargo.toml",
+        "codex-rs/agent-graph-store/Cargo.toml",
+        "codex-rs/agent-identity/Cargo.toml",
+        "codex-rs/agent-roles/Cargo.toml",
+        "codex-rs/analytics/Cargo.toml",
+        "codex-rs/ansi-escape/Cargo.toml",
+        "codex-rs/app-server-client/Cargo.toml",
+        "codex-rs/app-server-daemon/Cargo.toml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "codex-rs",
+      "files": 6177,
+      "directories": 741,
+      "bytes": 61684739,
+      "runtime_files": 4045,
+      "test_files": 701,
+      "docs_files": 564,
+      "text_lines": 1690763,
+      "languages": [
+        {
+          "language": "Rust",
+          "files": 3374
+        },
+        {
+          "language": "TypeScript",
+          "files": 695
+        },
+        {
+          "language": "Docs",
+          "files": 564
+        },
+        {
+          "language": "Config",
+          "files": 500
+        },
+        {
+          "language": "Python",
+          "files": 17
+        },
+        {
+          "language": "Shell",
+          "files": 4
+        },
+        {
+          "language": "C",
+          "files": 1
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "codex-rs/.cargo/audit.toml",
+        "codex-rs/.cargo/config.toml",
+        "codex-rs/.config/nextest.toml",
+        "codex-rs/Cargo.toml",
+        "codex-rs/README.md",
+        "codex-rs/agent-graph-store/Cargo.toml",
+        "codex-rs/agent-graph-store/src/error.rs",
+        "codex-rs/agent-graph-store/src/lib.rs"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "sdk",
+      "files": 117,
+      "directories": 31,
+      "bytes": 1066804,
+      "runtime_files": 75,
+      "test_files": 28,
+      "docs_files": 7,
+      "text_lines": 28166,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 74
+        },
+        {
+          "language": "TypeScript",
+          "files": 24
+        },
+        {
+          "language": "Docs",
+          "files": 7
+        },
+        {
+          "language": "Config",
+          "files": 4
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "sdk/python/README.md",
+        "sdk/python/_runtime_setup.py",
+        "sdk/python/docs/api-reference.md",
+        "sdk/python/docs/faq.md",
+        "sdk/python/docs/getting-started.md",
+        "sdk/python/examples/01_quickstart_constructor/async.py",
+        "sdk/python/examples/01_quickstart_constructor/sync.py",
+        "sdk/python/examples/02_turn_run/async.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 91,
+      "directories": 18,
+      "bytes": 1365343,
+      "runtime_files": 72,
+      "test_files": 5,
+      "docs_files": 6,
+      "text_lines": 14620,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 48
+        },
+        {
+          "language": "Python",
+          "files": 15
+        },
+        {
+          "language": "Shell",
+          "files": 14
+        },
+        {
+          "language": "Docs",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        ".github/ISSUE_TEMPLATE/1-codex-app.yml",
+        ".github/ISSUE_TEMPLATE/2-extension.yml",
+        ".github/ISSUE_TEMPLATE/3-cli.yml",
+        ".github/ISSUE_TEMPLATE/4-bug-report.yml",
+        ".github/ISSUE_TEMPLATE/5-feature-request.yml",
+        ".github/ISSUE_TEMPLATE/6-docs-issue.yml",
+        ".github/actions/check-clean-worktree/action.yml",
+        ".github/actions/linux-code-sign/action.yml"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "open_closed_issues_prs_discussions",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 56,
+      "directories": 4,
+      "bytes": 850175,
+      "runtime_files": 38,
+      "test_files": 12,
+      "docs_files": 2,
+      "text_lines": 24465,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 37
+        },
+        {
+          "language": "Shell",
+          "files": 9
+        },
+        {
+          "language": "Config",
+          "files": 4
+        },
+        {
+          "language": "Docs",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "scripts/asciicheck.py",
+        "scripts/build_codex_package.py",
+        "scripts/check-module-bazel-lock.sh",
+        "scripts/check_blob_size.py",
+        "scripts/codex_package/README.md",
+        "scripts/codex_package/__init__.py",
+        "scripts/codex_package/archive.py",
+        "scripts/codex_package/cargo.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 32,
+      "directories": 13,
+      "bytes": 1858185,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 4,
+      "text_lines": 5977,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Docs",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        ".markdownlint-cli2.yaml",
+        ".prettierrc.toml",
+        "AGENTS.md",
+        "CHANGELOG.md",
+        "LICENSE",
+        "README.md",
+        "SECURITY.md",
+        "announcement_tip.toml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "tools",
+      "files": 31,
+      "directories": 5,
+      "bytes": 103567,
+      "runtime_files": 19,
+      "test_files": 1,
+      "docs_files": 1,
+      "text_lines": 1567,
+      "languages": [
+        {
+          "language": "Rust",
+          "files": 13
+        },
+        {
+          "language": "Python",
+          "files": 4
+        },
+        {
+          "language": "Config",
+          "files": 2
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "tools/argument-comment-lint/.cargo/config.toml",
+        "tools/argument-comment-lint/Cargo.toml",
+        "tools/argument-comment-lint/README.md",
+        "tools/argument-comment-lint/driver.rs",
+        "tools/argument-comment-lint/list-bazel-targets.sh",
+        "tools/argument-comment-lint/run-prebuilt-linter.py",
+        "tools/argument-comment-lint/run.py",
+        "tools/argument-comment-lint/src/bin/argument-comment-lint.rs"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "patches",
+      "files": 22,
+      "directories": 0,
+      "bytes": 79937,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "bazel",
+      "files": 20,
+      "directories": 11,
+      "bytes": 61192,
+      "runtime_files": 2,
+      "test_files": 3,
+      "docs_files": 0,
+      "text_lines": 1240,
+      "languages": [
+        {
+          "language": "Rust",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        "bazel/rules/testing/compat/exec_server_compat_test.bzl",
+        "bazel/rules/testing/compat/exec_server_compat_test.rs",
+        "bazel/rules/testing/wine/fixtures/windows_smoke.rs",
+        "bazel/rules/testing/wine/src/lib.rs",
+        "bazel/rules/testing/wine/src/lib_tests.rs"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".codex",
+      "files": 18,
+      "directories": 17,
+      "bytes": 78970,
+      "runtime_files": 4,
+      "test_files": 1,
+      "docs_files": 13,
+      "text_lines": 1930,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 13
+        },
+        {
+          "language": "Config",
+          "files": 3
+        },
+        {
+          "language": "Python",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".codex/environments/environment.toml",
+        ".codex/skills/babysit-pr/SKILL.md",
+        ".codex/skills/babysit-pr/agents/openai.yaml",
+        ".codex/skills/babysit-pr/references/github-api-notes.md",
+        ".codex/skills/babysit-pr/references/heuristics.md",
+        ".codex/skills/babysit-pr/scripts/gh_pr_watch.py",
+        ".codex/skills/babysit-pr/scripts/test_gh_pr_watch.py",
+        ".codex/skills/code-review/SKILL.md"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 15,
+      "directories": 0,
+      "bytes": 9828,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 15,
+      "text_lines": 206,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 15
+        }
+      ],
+      "example_paths": [
+        "docs/CLA.md",
+        "docs/agents_md.md",
+        "docs/authentication.md",
+        "docs/config.md",
+        "docs/contributing.md",
+        "docs/example-config.md",
+        "docs/exec.md",
+        "docs/execpolicy.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "third_party",
+      "files": 13,
+      "directories": 5,
+      "bytes": 33740,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 116,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "third_party/v8/README.md",
+        "third_party/wezterm/LICENSE"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": ".devcontainer",
+      "files": 11,
+      "directories": 1,
+      "bytes": 22798,
+      "runtime_files": 9,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 624,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 6
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".devcontainer/Dockerfile",
+        ".devcontainer/README.md",
+        ".devcontainer/codex-install/package.json",
+        ".devcontainer/codex-install/pnpm-lock.yaml",
+        ".devcontainer/codex-install/pnpm-workspace.yaml",
+        ".devcontainer/devcontainer.json",
+        ".devcontainer/devcontainer.secure.json",
+        ".devcontainer/init-firewall.sh"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "codex-cli",
+      "files": 7,
+      "directories": 2,
+      "bytes": 32070,
+      "runtime_files": 5,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 957,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 2
+        },
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "codex-cli/bin/codex.js",
+        "codex-cli/package.json",
+        "codex-cli/scripts/README.md",
+        "codex-cli/scripts/build_npm_package.py",
+        "codex-cli/scripts/init_firewall.sh",
+        "codex-cli/scripts/run_in_container.sh"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".vscode",
+      "files": 3,
+      "directories": 0,
+      "bytes": 1900,
+      "runtime_files": 3,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 62,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        ".vscode/extensions.json",
+        ".vscode/launch.json",
+        ".vscode/settings.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    }
+  ],
+  "skipped_dirs": [
+    ".git",
+    "codex-rs/vendor"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git, codex-rs/vendor; classes checked absent in local tree: roadmap_todos; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+}

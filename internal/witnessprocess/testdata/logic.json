@@ -1,0 +1,9 @@
+{
+  "envelope": "parser input and deterministic Go environment",
+  "promotion_gate": "go test ./internal/parser",
+  "context": "logic-correctness",
+  "durable_witness": "table-driven regression",
+  "lever": "change token boundary only",
+  "baseline_artifact": "failing table case",
+  "candidate_artifact": "passing table case"
+}

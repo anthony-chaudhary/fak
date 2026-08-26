@@ -41,6 +41,21 @@ This was a second, broader pass over the local snapshot rather than another READ
 
 The enclosing Git history contains only two unrelated commits and Git-note commits; it is not evidence about this snapshot's development. The unavailable remote also prevents a defensible open/closed issue or PR survey. Those are explicit evidence gaps, not silently replaced with inference.
 
+## Exhaustive inventory refresh (2026-08-25)
+
+[`inventory/local-tensor-build.json`](inventory/local-tensor-build.json) is the pinned machine denominator generated with `fak study-inventory` at `snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288`. The raw snapshot still contains **6,358 regular files / 218,328,563 bytes**. The inventory indexes **6,318 files / 217,599,107 bytes / 1,482,659 text lines** after deliberately skipping 40 generated files (729,456 bytes) under `internal/build` and `internal/conn/web/dist`; every other regular file is grouped into 18 top-level subsystem rows. This reconciles, rather than changes, the original snapshot pin.
+
+The non-tree audit is explicit in the map's `non_tree_study` block:
+
+- **History, changelog, and releases:** `CHANGELOG.md` is indexed. The snapshot is uncommitted inside an unrelated enclosing checkout, so source Git history, release history, and blame cannot be attributed to TensorBuild.
+- **Issues, PRs, and discussions:** templates exist, but no trustworthy forge identity is recoverable with the available credentials. Open/closed issues, pull requests, discussions, and releases therefore remain unavailable, not silently treated as empty.
+- **Roadmap/TODOs:** no dedicated roadmap or TODO path exists. Prose future-work mentions were sampled, but are not promoted to a canonical roadmap.
+- **License and provenance:** module manifests are present, but no repository `LICENSE`, `COPYING`, or `NOTICE` file exists. They establish module/dependency provenance, not permission to copy TensorBuild source; this study remains **concepts only**.
+- **FAK self-query and dedupe:** three replayable `fak capabilities` queries and the source/issue checks behind the candidate matrix are recorded in the map. The refresh found no novel unowned borrow. #6874 is now closed; #6875 and #6876 remain the open owners.
+- **Completeness critic:** the map records every skipped tree, the raw-versus-indexed denominator, all unavailable non-tree surfaces, the candidate dispositions, and issue tracking. The largest residual uncertainty is provenance: without source history or a license, code transfer remains out of scope.
+
+The refresh also corrects the original table's issue-number association: artifact reachability maps to **#6876**, work-class/token-cost attribution maps to **#6874**, and the negative experiment ledger maps to **#6875**.
+
 ## Architecture map
 
 ### 1. Identity before optimization
@@ -83,9 +98,9 @@ This remains a watch candidate rather than a new issue: a registry-only change w
 
 | Candidate mechanism | Source fact | Current fak evidence | Verdict | Disposition |
 |---|---|---|---|---|
-| Claim-to-proof artifact reachability | Typed nodes/edges and reachability from named roots. | Closed #5937 measures docs, but searches for `artifact reachability`, `artifact graph`, and `orphaned docs` found no proof-liveness equivalent. | **PARTIAL** | Filed #6874. |
-| Work-class × token-cost × outcome join | Agent spend is audited by work class with coverage and delivered artifacts. | `internal/worktype` classifies work; closed #3329 reports cost; no joined issue was found. | **PARTIAL** | Filed #6875. |
-| Scoped negative experiment ledger | Result schema and engine identity preserve evidence class and exact environment. | Individual negatives exist (for example closed #5852), but no structured failed-experiment lookup was found. | **PARTIAL** | Filed #6876. |
+| Claim-to-proof artifact reachability | Typed nodes/edges and reachability from named roots. | Closed #5937 measures docs, but searches for `artifact reachability`, `artifact graph`, and `orphaned docs` found no proof-liveness equivalent. | **PARTIAL** | Filed #6876; open at refresh. |
+| Work-class × token-cost × outcome join | Agent spend is audited by work class with coverage and delivered artifacts. | `internal/worktype` classifies work; closed #3329 reports cost; no joined issue was found. | **SHIPPED** | Filed #6874; closed at refresh. |
+| Scoped negative experiment ledger | Result schema and engine identity preserve evidence class and exact environment. | Individual negatives exist (for example closed #5852), but no structured failed-experiment lookup was found. | **PARTIAL** | Filed #6875; open at refresh. |
 | Complete cache/build identity | Artifact keys cover model, flags, toolchain, and silicon. | fak has content-addressed keys, build-profile SSOT, runtime receipts, model fingerprints, and effect safety. | **PRESENT** | Retain as audit heuristic. |
 | Evidence-tiered verified claims | Evidence grades refuse omitted/unknown states. | Open #3949, #4084, and #4085 cover tiers, basis quorum, and reproducibility. | **ALREADY FILED** | Deduped. |
 | Documentation reachability denominator | Named roots/resolvers report reachable/total. | Closed #5937 shipped named `R-LINK`/`R-MENTION` semantics and denominators. | **PRESENT** | #6874 starts above docs. |

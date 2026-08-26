@@ -385,11 +385,13 @@ func inventorySourceClassDisposition(class string, evidence []string) (string, s
 }
 
 func inventoryCompletenessNote(classes []InventoryClassStatus, skipped []string) string {
-	var external, absent []string
+	var external, partial, absent []string
 	for _, class := range classes {
 		switch class.Status {
 		case InventoryClassExternalRequired:
 			external = append(external, class.Class)
+		case InventoryClassPartial:
+			partial = append(partial, class.Class)
 		case InventoryClassCheckedAbsent:
 			absent = append(absent, class.Class)
 		}
@@ -402,12 +404,14 @@ func inventoryCompletenessNote(classes []InventoryClassStatus, skipped []string)
 	if len(absent) > 0 {
 		parts = append(parts, fmt.Sprintf("classes checked absent in local tree: %s", strings.Join(absent, ", ")))
 	}
+	if len(partial) > 0 {
+		parts = append(parts, fmt.Sprintf("classes with partial local evidence still requiring non-tree completion: %s", strings.Join(partial, ", ")))
+	}
 	if len(external) > 0 {
 		parts = append(parts, fmt.Sprintf("still requires non-tree study artifacts: %s", strings.Join(external, ", ")))
 	}
 	return strings.Join(parts, "; ")
 }
-
 func shouldSkipInventoryDir(name string) bool {
 	switch strings.ToLower(name) {
 	case ".git", ".hg", ".svn", "node_modules", "vendor", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".cache", ".turbo", ".pytest_cache", "target", "coverage":
@@ -486,11 +490,14 @@ func isInventoryDoc(lower, base, ext string) bool {
 }
 
 func isInventoryTest(lower, base string) bool {
-	return strings.Contains(lower, "/test/") ||
-		strings.Contains(lower, "/tests/") ||
-		strings.Contains(lower, "/__tests__/") ||
-		strings.Contains(lower, "/fixture") ||
-		strings.Contains(lower, "/fixtures/") ||
+	components := strings.Split(lower, "/")
+	for _, component := range components[:len(components)-1] {
+		switch component {
+		case "test", "tests", "__tests__", "testdata", "fixture", "fixtures":
+			return true
+		}
+	}
+	return strings.HasPrefix(base, "test_") ||
 		strings.Contains(base, "_test.") ||
 		strings.Contains(base, ".test.") ||
 		strings.Contains(base, ".spec.")

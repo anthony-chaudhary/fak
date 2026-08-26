@@ -26,6 +26,9 @@ func requireCompletedExecution(t *testing.T, observation *ExecutionObservation, 
 	if !event.Committed || !event.CompletedWait || !event.HostReadback {
 		t.Fatalf("incomplete native lifecycle: %+v", event)
 	}
+	if event.Encoders <= 0 || !event.TimingAvailable || event.GPUMilliseconds <= 0 || event.WaitMilliseconds < 0 {
+		t.Fatalf("missing native counters: %+v", event)
+	}
 }
 
 func TestExecutionObservationCapturesQuantizedMetalLifecycle(t *testing.T) {

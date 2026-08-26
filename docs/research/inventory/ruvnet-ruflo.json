@@ -111,12 +111,13 @@
     },
     {
       "class": "open_closed_issues_prs_discussions",
-      "status": "partial",
+      "status": "external_required",
       "evidence": [
-        ".github/ISSUE_TEMPLATE/rollback-incident.md",
-        ".github/issues/alpha-89-telemetry-implementation.md"
+        "https://github.com/ruvnet/ruflo/issues?q=created%3A%3C%3D2026-08-14T15%3A39%3A43Z",
+        "https://github.com/ruvnet/ruflo/pulls?q=created%3A%3C%3D2026-08-14T15%3A39%3A43Z",
+        "https://github.com/ruvnet/ruflo/discussions"
       ],
-      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+      "note": "GitHub API read-back at the pinned commit timestamp found 1,613 issues (556 open, 1,057 closed), 1,291 pull requests (261 open, 1,030 closed), and all 86 discussions (84 open, 2 closed; 3 answered). Counts exclude items created after 2026-08-14T15:39:43Z."
     },
     {
       "class": "roadmap_todos",
@@ -150,12 +151,19 @@
     {
       "class": "fak_selfquery_witness",
       "status": "external_required",
-      "note": "process artifact created by the study pass, not by the foreign repository tree"
+      "evidence": [
+        "fak help --all (routing, memory, hooks, skills, orchestration, telemetry)",
+        "rg -n -i <candidate-axis> README.md docs internal cmd examples"
+      ],
+      "note": "Queried fak first across adoption, performance, security, reliability, architecture/orchestration, and operations; the candidate matrix records the closest owned surface and avoids filing duplicate capabilities."
     },
     {
       "class": "candidate_matrix",
       "status": "external_required",
-      "note": "process artifact created by the study pass, not by the foreign repository tree"
+      "evidence": [
+        "docs/research/inventory/ruvnet-ruflo.json#non_tree_study.candidate_matrix"
+      ],
+      "note": "Four source-backed candidates were compared against fak-native surfaces; all were rejected or already owned, so no borrow survived."
     },
     {
       "class": "completeness_critic",
@@ -165,7 +173,10 @@
     {
       "class": "issue_tracking",
       "status": "external_required",
-      "note": "process artifact created by the study pass, not by the foreign repository tree"
+      "evidence": [
+        "https://github.com/anthony-chaudhary/fak/issues/8931"
+      ],
+      "note": "Issue #8931 tracks this inventory completion. Candidate adjudication produced no surviving borrow, so no additional implementation issue was filed."
     }
   ],
   "subsystems": [
@@ -801,5 +812,110 @@
   "skipped_dirs": [
     ".git"
   ],
-  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+  "completeness_critic": "exhaustive local tree map plus pinned-timestamp GitHub issue, pull-request, and complete discussion read-back; fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped dependency/cache/control directories: .git",
+  "non_tree_study": {
+    "observed_at": "2026-08-25",
+    "source_cutoff": {
+      "revision": "4dcff483482cee316f47552a961bcbaadc89f378",
+      "commit_timestamp": "2026-08-14T15:39:43Z"
+    },
+    "github_surface": {
+      "issues": {
+        "total": 1613,
+        "open": 556,
+        "closed": 1057
+      },
+      "pull_requests": {
+        "total": 1291,
+        "open": 261,
+        "closed": 1030
+      },
+      "discussions": {
+        "total": 86,
+        "open": 84,
+        "closed": 2,
+        "answered": 3
+      },
+      "method": "GitHub REST issues endpoint paged to exhaustion (issues and pull requests split by pull_request presence), plus GraphQL discussions(first:100); retained records created no later than the pinned commit timestamp."
+    },
+    "self_query_axes": [
+      {
+        "axis": "adoption",
+        "fak_surface": "managed harness integrations, MCP, skills, and setup/doctor surfaces",
+        "verdict": "owned"
+      },
+      {
+        "axis": "performance",
+        "fak_surface": "native routing, shared setup/cache, context memory, benchmarks, and SOTA checks",
+        "verdict": "owned"
+      },
+      {
+        "axis": "security",
+        "fak_surface": "default-deny policy/adjudication, guard hooks, capability floors, and security scorecards",
+        "verdict": "owned"
+      },
+      {
+        "axis": "reliability",
+        "fak_surface": "DOS leases, goal gates, independent witnesses, watchdogs, and recovery surfaces",
+        "verdict": "owned"
+      },
+      {
+        "axis": "architecture_orchestration",
+        "fak_surface": "ultracode/task orchestration, lanes, messaging, reconciliation, and trajectory control",
+        "verdict": "owned"
+      },
+      {
+        "axis": "operations",
+        "fak_surface": "telemetry, health/doctor, study monitoring, ledgers, and observable outcomes",
+        "verdict": "owned"
+      }
+    ],
+    "candidate_matrix": [
+      {
+        "candidate": "power-of-two-choices mesh load balancing",
+        "source": [
+          "https://github.com/ruvnet/ruflo/issues/3026",
+          "https://github.com/ruvnet/ruflo/pull/3027"
+        ],
+        "alternative": "fak native routing and orchestration scheduler",
+        "disposition": "reject",
+        "reason": "Ruflo evaluated and rejected its own experiment at the pinned revision; no validated gain or transferable witness survives."
+      },
+      {
+        "candidate": "evaluation bridge for memory retrieval fusion",
+        "source": [
+          "https://github.com/ruvnet/ruflo/issues/3019",
+          "https://github.com/ruvnet/ruflo/pull/3020"
+        ],
+        "alternative": "fak memory/context benchmarks and claim gates",
+        "disposition": "stay_minimal",
+        "reason": "The source is a Ruflo-specific BM25/semantic benchmark bridge, not evidence of a better fak-native memory primitive."
+      },
+      {
+        "candidate": "persisted swarm-health reporting",
+        "source": [
+          "https://github.com/ruvnet/ruflo/pull/3017"
+        ],
+        "alternative": "fak DOS liveness, productivity, lease, and ultracode status witnesses",
+        "disposition": "already_owned",
+        "reason": "fak already exposes stronger witnessed scheduler health rather than a self-reported swarm status."
+      },
+      {
+        "candidate": "doctor checks for runtime/environment drift",
+        "source": [
+          "https://github.com/ruvnet/ruflo/issues/3022",
+          "https://github.com/ruvnet/ruflo/issues/3023",
+          "https://github.com/ruvnet/ruflo/pull/3028"
+        ],
+        "alternative": "fak doctor/setup/preflight and deterministic gates",
+        "disposition": "already_owned",
+        "reason": "The fixes are Ruflo dependency and environment details; the reusable diagnostic pattern is already native to fak."
+      }
+    ],
+    "issue_tracking": {
+      "study_issue": "https://github.com/anthony-chaudhary/fak/issues/8931",
+      "filed_borrows": [],
+      "reason": "No candidate survived source validation and fak self-query as a distinct, evidence-backed borrow."
+    }
+  }
 }

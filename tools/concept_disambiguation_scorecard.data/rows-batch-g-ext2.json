@@ -58,7 +58,8 @@
       "distinction": "It is the SPAWN admission preflight that decides if a worker may launch, NOT the per-call tool-admission preflight ladder that schema-checks one tool call before the kernel runs it.",
       "distinct_from": [
         "preflight ladder",
-        "adjudicator"
+        "adjudicator",
+        "supervisionpolicy"
       ],
       "aliases": [
         "preflightinput",

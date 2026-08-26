@@ -5,15 +5,24 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
+	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
 
 func testBool(v bool) *bool { return &v }
@@ -252,5 +261,237 @@ func TestAllFinite(t *testing.T) {
 				t.Fatalf("allFinite(%v) = %v, want %v", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func testNativeProfileControls() map[string]string {
+	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+6)
+	for key, value := range nativeProfileRequiredEnvironment {
+		controls[key] = value
+	}
+	for _, key := range nativeProfileDeniedEnvironment {
+		controls[key] = nativeProfileUnset
+	}
+	controls[nativeControlFlagBudget] = "0"
+	controls[nativeControlLogicalCPUs] = strconv.Itoa(runtime.NumCPU())
+	controls[nativeControlGOMAXPROCS] = strconv.Itoa(runtime.GOMAXPROCS(0))
+	controls[nativeControlWorkers] = strconv.Itoa(model.NumWorkers())
+	controls[nativeControlQ8Workers] = strconv.Itoa(model.Q8DecodeWorkers())
+	controls[nativeControlWorkerBudget] = "default(GOMAXPROCS)"
+	return controls
+}
+
+func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
+	required := map[string]string{}
+	declarations := make([]string, 0, len(nativeProfileRequiredEnvironment))
+	for key, value := range nativeProfileRequiredEnvironment {
+		required[key] = value
+		declarations = append(declarations, key+"="+value)
+	}
+	lookup := func(key string) (string, bool) { value, ok := required[key]; return value, ok }
+	if _, err := nativeProfileControlEnvironment(lookup, declarations, 0); err != nil {
+		t.Fatalf("documented control envelope rejected: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		key         string
+		value       string
+		budget      float64
+		declaration string
+	}{
+		{name: "forced q8 upload", key: "FAK_METAL_Q8_UPLOAD", value: "1"},
+		{name: "free q4k cpu", key: "FAK_Q4K_FREE_CPU", value: "1"},
+		{name: "q4k mm", key: "FAK_Q4K_MM", value: "1"},
+		{name: "q8 gemm group", key: "FAK_Q8_GEMM_GROUP", value: "1"},
+		{name: "workers", key: "FAK_WORKERS", value: "4"},
+		{name: "budget env", key: "FAK_BUDGET", value: "0.5"},
+		{name: "budget flag", budget: 0.5},
+		{name: "unknown fak control", declaration: "FAK_FUTURE_Q4K_SWITCH=1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			env := make(map[string]string, len(required)+1)
+			decls := append([]string(nil), declarations...)
+			for key, value := range required {
+				env[key] = value
+			}
+			if test.key != "" {
+				env[test.key] = test.value
+				decls = append(decls, test.key+"="+test.value)
+			}
+			if test.declaration != "" {
+				decls = append(decls, test.declaration)
+			}
+			lookup := func(key string) (string, bool) { value, ok := env[key]; return value, ok }
+			if _, err := nativeProfileControlEnvironment(lookup, decls, test.budget); err == nil {
+				t.Fatal("behavior-changing control was accepted")
+			}
+		})
+	}
+}
+
+func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, nativeProfileReceipt) {
+	t.Helper()
+	executionSession := metalgemm.NewExecutionSession()
+	executionSession.Record(metalgemm.ExecutionSnapshot{Events: []metalgemm.ExecutionEvent{{
+		Operation: metalgemm.ExecutionQ4KGEMM, CommandBufferID: 1, Committed: true,
+		CompletedWait: true, HostReadback: true, Encoders: 2, GPUMilliseconds: 3,
+		WaitMilliseconds: 4, TimingAvailable: true,
+	}}}, nil)
+	execution, err := executionSession.Receipt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	phases := make([]nativeperf.ProfilePhase, 0, 6)
+	for i, name := range []string{"load-setup", "prefill", "first-token", "steady-decode", "verification", "teardown"} {
+		phases = append(phases, nativeperf.ProfilePhase{Name: name, StartMilliseconds: float64(i), DurationMilliseconds: 1})
+	}
+	profile := nativeperf.ProfileBundle{
+		Schema:     nativeperf.ProfileSchema,
+		EnvelopeID: "qwen38-27b-q4km-m3pro-p32-t64",
+		Execution:  nativeperf.ExecutionIdentity{Engine: "fak-native", ForwardPath: "metal/qwen35-hybrid-session-v1"},
+		Phases:     phases,
+		Metal: &nativeperf.MetalCounters{
+			CommandBuffers: 1, Encoders: 2, DispatchMilliseconds: 3, WaitMilliseconds: 4,
+			ResidentBytes: 1, WorkingSetBytes: 1,
+		},
+		AttributionUnavailable: &nativeperf.AttributionUnavailable{Reason: nativeperf.AttributionUnavailableCapture, Detail: "test capture has no per-lever attribution"},
+	}
+	profileBytes, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileBytes = append(profileBytes, '\n')
+	profileSHA := sha256.Sum256(profileBytes)
+	config := map[string]any{"model_type": "qwen3_5_text", "hidden_size": float64(5120)}
+	configSHA, err := sha256JSON(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallbackEvents := []model.MetalFallbackEvent{}
+	fallbackSHA, err := sha256JSON(fallbackEvents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := nativeProfileReceipt{
+		Schema:        nativeProfileReceiptSchema,
+		ProfileSHA256: fmt.Sprintf("%x", profileSHA),
+		EnvelopeID:    profile.EnvelopeID,
+		Artifact: nativeArtifactIdentity{
+			nativeFileIdentity: nativeFileIdentity{Bytes: nativeProfileArtifactBytes, SHA256: "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"},
+			Model:              "unsloth/Qwen3.8-27B-GGUF", ModelRevision: "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
+		},
+		ModelConfig: config, ModelConfigSHA256: configSHA,
+		Host:      nativeHostIdentity{GOOS: "darwin", GOARCH: "arm64", CPU: "Apple M3 Pro", MetalDevice: "Apple M3 Pro", GPUCores: 18, MemoryBytes: 36 << 30, MetalWorkingSetBytes: 1},
+		Source:    nativeSourceIdentity{Revision: strings.Repeat("a", 40)},
+		Binary:    nativeFileIdentity{Bytes: 123, SHA256: strings.Repeat("b", 64)},
+		Controls:  testNativeProfileControls(),
+		Execution: execution,
+		Fallbacks: model.MetalFallbackReceipt{Schema: "fak-metal-fallback-receipt/v1", Events: fallbackEvents, EventsSHA256: fallbackSHA},
+	}
+	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return profileBytes, profile, receipt
+}
+
+func TestAppendNativeProfilePhaseUsesPreviousEncodedEnd(t *testing.T) {
+	// Independent nanosecond-to-millisecond conversions can round a cumulative
+	// phase start below the previous encoded end at real model-load durations.
+	load := 83753567806 * time.Nanosecond
+	prefill := 8307754683 * time.Nanosecond
+	oldEnd := float64(load.Nanoseconds())/1e6 + float64(prefill.Nanoseconds())/1e6
+	oldNextStart := float64((load + prefill).Nanoseconds()) / 1e6
+	if oldNextStart >= oldEnd {
+		t.Fatal("test durations no longer reproduce cumulative conversion overlap")
+	}
+
+	phases := appendNativeProfilePhase(nil, "load-setup", load)
+	phases = appendNativeProfilePhase(phases, "prefill", prefill)
+	phases = appendNativeProfilePhase(phases, "first-token", time.Nanosecond)
+	previousEnd := phases[1].StartMilliseconds + phases[1].DurationMilliseconds
+	if phases[2].StartMilliseconds != previousEnd {
+		t.Fatalf("next phase start = %.17g, want previous encoded end %.17g", phases[2].StartMilliseconds, previousEnd)
+	}
+}
+
+func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
+	profileBytes, profile, receipt := testNativeProfileReceipt(t)
+	if err := validateNativeProfileReceipt(profileBytes, profile, receipt); err != nil {
+		t.Fatalf("valid receipt rejected: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		edit func(*nativeProfileReceipt)
+	}{
+		{name: "artifact bytes", edit: func(r *nativeProfileReceipt) { r.Artifact.Bytes++ }},
+		{name: "model config", edit: func(r *nativeProfileReceipt) { r.ModelConfig["hidden_size"] = float64(1) }},
+		{name: "host", edit: func(r *nativeProfileReceipt) { r.Host.GPUCores = 17 }},
+		{name: "source", edit: func(r *nativeProfileReceipt) { r.Source.Revision = "" }},
+		{name: "binary", edit: func(r *nativeProfileReceipt) { r.Binary.SHA256 = strings.Repeat("c", 64) }},
+		{name: "raw event", edit: func(r *nativeProfileReceipt) { r.Execution.Events[0].Encoders++ }},
+		{name: "fallback aggregate", edit: func(r *nativeProfileReceipt) { r.Fallbacks.PromisedCPUFallbacks++ }},
+		{name: "forced q8 upload", edit: func(r *nativeProfileReceipt) { r.Controls["FAK_METAL_Q8_UPLOAD"] = "1" }},
+		{name: "worker budget", edit: func(r *nativeProfileReceipt) { r.Controls[nativeControlWorkers] = "0" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			copy := receipt
+			copy.ModelConfig = mapsClone(receipt.ModelConfig)
+			copy.Controls = mapsStringClone(receipt.Controls)
+			copy.Execution.Events = append([]metalgemm.ExecutionEvent(nil), receipt.Execution.Events...)
+			test.edit(&copy)
+			if err := validateNativeProfileReceipt(profileBytes, profile, copy); err == nil {
+				t.Fatal("tampered receipt was accepted")
+			}
+		})
+	}
+}
+
+func mapsStringClone(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func mapsClone(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func TestNativeProfileReadbackRecomputesCompanion(t *testing.T) {
+	profileBytes, _, receipt := testNativeProfileReceipt(t)
+	dir := t.TempDir()
+	profilePath := filepath.Join(dir, "profile.json")
+	receiptPath := nativeReceiptPath(profilePath)
+	receiptBytes, err := json.MarshalIndent(receipt, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(profilePath, profileBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(receiptPath, receiptBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runNativeProfileReadback(profilePath); err != nil {
+		t.Fatalf("readback failed: %v", err)
+	}
+}
+
+func TestNativeProfileRefusesAnyPromisedMetalFallback(t *testing.T) {
+	if err := requireNoMetalFallbacks(0); err != nil {
+		t.Fatalf("zero fallback rejected: %v", err)
+	}
+	if err := requireNoMetalFallbacks(1); err == nil {
+		t.Fatal("nonzero fallback accepted")
 	}
 }

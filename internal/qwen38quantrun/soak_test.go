@@ -57,7 +57,7 @@ func TestIssue8319SoakAdapterRefusesInlineSecrets(t *testing.T) {
 	for _, arm := range []string{"bf16", "fp8", "q4_k_m"} {
 		cfg.Finalists = append(cfg.Finalists, SoakAdapterArm{
 			Campaign: AdapterConfig{
-				Arm: arm, Endpoint: EndpointConfig{APIKey: "inline-secret"},
+				Arm: arm, ExecutionEngine: qwen38quant.EngineFakNative, Endpoint: EndpointConfig{APIKey: "inline-secret"},
 				ObservationCommand: []string{"observe"}, RestartCommand: []string{"restart"},
 				ReadyCommand: []string{"ready"}, CleanupCommand: []string{"cleanup"},
 			},
@@ -141,7 +141,7 @@ func TestRunSoakArmCapturesCodingAndFailureReadbacks(t *testing.T) {
 	probe, lifecycle := &staticProbe{observation: observation}, &lifecycleSpy{}
 	arm, raw, err := (Runner{Client: server.Client()}).RunSoakArm(context.Background(), SoakArmConfig{
 		Campaign: CampaignConfig{
-			Endpoint: Config{Endpoint: server.URL, APIKey: "secret", Model: "exact"}, Arm: "q4_k_m",
+			Endpoint: Config{Endpoint: server.URL, APIKey: "secret", Model: "exact"}, ExecutionEngine: qwen38quant.EngineFakNative, Arm: "q4_k_m",
 			Expected: identity, Command: []string{"fak", "serve"}, RequireDevice: "A100",
 			StaleAfter: "2026-09-21", RollbackThreshold: "any quality failure",
 			Probe: probe, Lifecycle: lifecycle,

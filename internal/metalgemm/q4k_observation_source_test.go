@@ -24,3 +24,46 @@ func TestQ4KRepeatedBatchForwardsExecutionObservation(t *testing.T) {
 		}
 	}
 }
+
+// This source witness runs on non-Darwin hosts and protects the ownership seam that cgo cannot
+// type-check there. The Darwin witness in q4k_test.go captures the real Metal lifecycle and parity.
+func TestMixedQ4KQ8ObservationSourceIsCallerOwned(t *testing.T) {
+	goSource, err := os.ReadFile("q4k.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nativeSource, err := os.ReadFile("q4k.m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q8Source, err := os.ReadFile("q8.m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"GEMVGroupMixedQ4KQ8(", "observation *ExecutionObservation",
+		"observation.record(uintptr(event.command_buffer)", "MixedQ4KQ8PostSubmitError",
+	} {
+		if !strings.Contains(string(goSource), want) {
+			t.Fatalf("mixed Go source missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"mg_q4k_q8_gemv_group(", "mg_execution_event* event",
+		"event->command_buffer", "event->host_readback = 1",
+	} {
+		if !strings.Contains(string(nativeSource), want) {
+			t.Fatalf("mixed native source missing %q", want)
+		}
+	}
+	for _, want := range []string{"mg_q8_prepare_gemv_group", "mg_q8_encode_gemv_group", "mg_q8_read_gemv_group"} {
+		if !strings.Contains(string(q8Source), want) {
+			t.Fatalf("Q8 caller-owned helper missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"gQuantCommandBuffers", "mg_quant_event_snapshot", "ResetMixed"} {
+		if strings.Contains(string(goSource), forbidden) || strings.Contains(string(nativeSource), forbidden) || strings.Contains(string(q8Source), forbidden) {
+			t.Fatalf("mixed implementation reintroduced package-global attribution %q", forbidden)
+		}
+	}
+}

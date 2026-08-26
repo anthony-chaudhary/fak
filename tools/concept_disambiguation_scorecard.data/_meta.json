@@ -1374,11 +1374,24 @@
       "tokens": []
     },
     {
-      "classifications": [],
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Literal FAK_PREFILL_NO_ATTN environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new attention concept.",
+          "token": "fakprefillnoattn"
+        },
+        {
+          "category": "incidental",
+          "reason": "Literal FAK_QATTN_GQA environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new attention concept.",
+          "token": "fakqattngqa"
+        }
+      ],
       "id": "attention",
       "ignore": [
         "attentions",
         "attentive",
+        "fakprefillnoattn",
+        "fakqattngqa",
         "tattn"
       ],
       "known_tokens": [],
@@ -5558,6 +5571,21 @@
           "category": "incidental",
           "reason": "Issue #8754 wire-contract identifier for existing session lifecycle recovery, not a distinct runtime concept.",
           "token": "start_new_session"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8739 implementation symbol scoped to the established Codex logical-session continuity contract",
+          "token": "CodexSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8739 persistence record scoped to the established Codex logical-session continuity contract",
+          "token": "CodexSessionState"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #8739 constructor scoped to the established Codex logical-session continuity contract",
+          "token": "OpenCodexSession"
         }
       ],
       "id": "session-runtime",
@@ -5570,6 +5598,8 @@
         "AttributeOutcomes",
         "BeginSessionEffect",
         "BytesPerSession",
+        "CodexSession",
+        "CodexSessionState",
         "ConfigureSessionClientAuth",
         "ConfigureSessionMove",
         "CoveredSessions",
@@ -5595,6 +5625,7 @@
         "NewSessionAffinityGateway",
         "NewSessionRow",
         "ObservedSessions",
+        "OpenCodexSession",
         "OutcomeEvidence",
         "OutcomeSession",
         "PROVIDER_SESSION_CLEAR",
@@ -12454,6 +12485,11 @@
           "category": "incidental",
           "reason": "Implementation helper for atomic multi-token classification, not a distinct operator concept.",
           "token": "PlanClassifyMany"
+        },
+        {
+          "category": "incidental",
+          "reason": "exported provenance field names the exact alias candidates inspected by the speculator receipt guard; it is not a planning concept",
+          "token": "CandidateAliases"
         }
       ],
       "exclude": [
@@ -12469,6 +12505,7 @@
         "BaselineDecodeMicroseconds",
         "BaselineTaskAccuracy",
         "BuildSweepPlan",
+        "CandidateAliases",
         "CandidateArm",
         "CandidateDecodeMicroseconds",
         "CandidateMeanTokensPerS",
@@ -13420,6 +13457,11 @@
           "category": "incidental",
           "reason": "Server listener endpoint constrained to loopback networking, not an agent execution loop.",
           "token": "LoopbackEndpoint"
+        },
+        {
+          "category": "incidental",
+          "reason": "Literal FAK_QWEN35_PREFILL_TOKEN_LOOP environment-control key in the complete evidence allowlist; it toggles an evidence control and introduces no new loop concept.",
+          "token": "fakqwen35prefilltokenloop"
         }
       ],
       "id": "loop",
@@ -13461,6 +13503,7 @@
         "fakbgloopup",
         "fakloopledger",
         "faklooprunid",
+        "fakqwen35prefilltokenloop",
         "findcodexlooparchivemanifest",
         "isLoopbackFleetHost",
         "keepSuperloopAlive",

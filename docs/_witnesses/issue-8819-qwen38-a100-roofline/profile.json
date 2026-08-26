@@ -1,0 +1,18 @@
+{
+  "schema": "fak-native-performance-profile/v1",
+  "envelope_id": "qwen38-27b-q4k-a100-p1-decode",
+  "execution": {"engine":"fak-native","forward_path":"cuda/q4k-p1-decode","fallback_count":0},
+  "phases": [
+    {"name":"load-setup","start_milliseconds":0,"duration_milliseconds":0.001},
+    {"name":"prefill","start_milliseconds":0.001,"duration_milliseconds":6190},
+    {"name":"first-token","start_milliseconds":6190.001,"duration_milliseconds":788.3},
+    {"name":"steady-decode","start_milliseconds":6978.301,"duration_milliseconds":3941.7},
+    {"name":"verification","start_milliseconds":10920.001,"duration_milliseconds":0.001},
+    {"name":"teardown","start_milliseconds":10920.002,"duration_milliseconds":0.001}
+  ],
+  "cuda": {"launches":7,"occupancy_percent":0,"achieved_bandwidth_gbs":0,"peak_bandwidth_gbs":1555,"achieved_compute_tflops":0,"peak_compute_tflops":19.5,"synchronization_milliseconds":0},
+  "attributions": [
+    {"name":"qwen35-gdn-decode-after-prefix-restore","layer":0,"lever_id":"cuda.q8_1-activation-quant","count":6},
+    {"name":"prefix-device-clone-161218560-bytes-29.15ms","layer":0,"lever_id":"cuda.q8_1-activation-quant","count":1}
+  ]
+}

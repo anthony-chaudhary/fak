@@ -1,0 +1,608 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "obra/superpowers",
+  "url": "https://github.com/obra/superpowers",
+  "indexed_revision": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797",
+  "observed_at": "2026-08-25T22:43:08Z",
+  "totals": {
+    "files": 195,
+    "directories": 60,
+    "bytes": 1711859,
+    "runtime_files": 29,
+    "test_files": 60,
+    "docs_files": 103,
+    "text_lines": 40395
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "docs/README.kimi.md",
+        "docs/README.opencode.md",
+        "docs/plans/2025-11-22-opencode-support-design.md",
+        "docs/plans/2025-11-22-opencode-support-implementation.md",
+        "docs/plans/2025-11-28-skills-improvements-from-user-feedback.md",
+        "docs/plans/2026-01-17-visual-brainstorming.md",
+        "docs/porting-to-a-new-harness.md",
+        "docs/superpowers/plans/2026-01-22-document-review-system.md",
+        "docs/superpowers/plans/2026-02-19-visual-brainstorming-refactor.md",
+        "docs/superpowers/plans/2026-03-11-zero-dep-brainstorm-server.md",
+        "docs/superpowers/plans/2026-03-23-codex-app-compatibility.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "docs/plans/2025-11-22-opencode-support-design.md",
+        "docs/superpowers/plans/2026-07-15-sdd-fix-loop-redesign.md",
+        "docs/superpowers/specs/2026-01-22-document-review-system-design.md",
+        "docs/superpowers/specs/2026-02-19-visual-brainstorming-refactor-design.md",
+        "docs/superpowers/specs/2026-03-11-zero-dep-brainstorm-server-design.md",
+        "docs/superpowers/specs/2026-03-23-codex-app-compatibility-design.md",
+        "docs/superpowers/specs/2026-04-06-worktree-rototill-design.md",
+        "docs/superpowers/specs/2026-05-05-platform-neutral-config-refs-design.md",
+        "docs/superpowers/specs/2026-05-05-platform-neutral-prose-design.md",
+        "docs/superpowers/specs/2026-05-05-platform-neutral-readme-design.md",
+        "docs/superpowers/specs/2026-05-06-lift-drill-into-evals-design.md",
+        "docs/superpowers/specs/2026-06-09-sdd-task-scoped-review-dispatch-design.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".agents/plugins/marketplace.json",
+        ".claude-plugin/marketplace.json",
+        ".claude-plugin/plugin.json",
+        ".codex-plugin/plugin.json",
+        ".cursor-plugin/plugin.json",
+        ".devin-plugin/plugin.json",
+        ".github/FUNDING.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".hermes-plugin/__init__.py",
+        ".hermes-plugin/plugin.yaml",
+        ".kimi-plugin/plugin.json",
+        ".opencode/plugins/superpowers.js"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        "tests/antigravity/run-tests.sh",
+        "tests/antigravity/test-antigravity-tools.sh",
+        "tests/brainstorm-server/auth.test.js",
+        "tests/brainstorm-server/branding.test.js",
+        "tests/brainstorm-server/browser-launcher.test.js",
+        "tests/brainstorm-server/helper.test.js",
+        "tests/brainstorm-server/lifecycle.test.js",
+        "tests/brainstorm-server/package-lock.json",
+        "tests/brainstorm-server/package.json",
+        "tests/brainstorm-server/server.test.js",
+        "tests/brainstorm-server/start-server.test.sh",
+        "tests/brainstorm-server/stop-server.test.sh"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        "RELEASE-NOTES.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/bug_report.md",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.md",
+        ".github/ISSUE_TEMPLATE/platform_support.md",
+        ".github/PULL_REQUEST_TEMPLATE.md"
+      ],
+      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "LICENSE",
+        "package.json",
+        "tests/brainstorm-server/package.json"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "tests",
+      "files": 60,
+      "directories": 17,
+      "bytes": 298062,
+      "runtime_files": 0,
+      "test_files": 60,
+      "docs_files": 10,
+      "text_lines": 8477,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 34
+        },
+        {
+          "language": "Docs",
+          "files": 10
+        },
+        {
+          "language": "JavaScript",
+          "files": 7
+        },
+        {
+          "language": "Python",
+          "files": 5
+        },
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "tests/antigravity/run-tests.sh",
+        "tests/antigravity/test-antigravity-tools.sh",
+        "tests/brainstorm-server/auth.test.js",
+        "tests/brainstorm-server/branding.test.js",
+        "tests/brainstorm-server/browser-launcher.test.js",
+        "tests/brainstorm-server/helper.test.js",
+        "tests/brainstorm-server/lifecycle.test.js",
+        "tests/brainstorm-server/package-lock.json"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "skills",
+      "files": 51,
+      "directories": 18,
+      "bytes": 369641,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 39,
+      "text_lines": 8434,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 39
+        },
+        {
+          "language": "Shell",
+          "files": 3
+        },
+        {
+          "language": "JavaScript",
+          "files": 2
+        },
+        {
+          "language": "TypeScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "skills/brainstorming/SKILL.md",
+        "skills/brainstorming/scripts/helper.js",
+        "skills/brainstorming/scripts/start-server.sh",
+        "skills/brainstorming/scripts/stop-server.sh",
+        "skills/brainstorming/spec-document-reviewer-prompt.md",
+        "skills/brainstorming/visual-companion.md",
+        "skills/dispatching-parallel-agents/SKILL.md",
+        "skills/executing-plans/SKILL.md"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 43,
+      "directories": 5,
+      "bytes": 794170,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 43,
+      "text_lines": 19118,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 43
+        }
+      ],
+      "example_paths": [
+        "docs/README.kimi.md",
+        "docs/README.opencode.md",
+        "docs/plans/2025-11-22-opencode-support-design.md",
+        "docs/plans/2025-11-22-opencode-support-implementation.md",
+        "docs/plans/2025-11-28-skills-improvements-from-user-feedback.md",
+        "docs/plans/2026-01-17-visual-brainstorming.md",
+        "docs/porting-to-a-new-harness.md",
+        "docs/superpowers/plans/2026-01-22-document-review-system.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 13,
+      "directories": 16,
+      "bytes": 124118,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 6,
+      "text_lines": 2065,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 6
+        },
+        {
+          "language": "Config",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        ".pre-commit-config.yaml",
+        ".version-bump.json",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CODE_OF_CONDUCT.md",
+        "GEMINI.md",
+        "LICENSE",
+        "README.md"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 6,
+      "directories": 1,
+      "bytes": 10293,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 4,
+      "text_lines": 287,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 4
+        },
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".github/FUNDING.yml",
+        ".github/ISSUE_TEMPLATE/bug_report.md",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.md",
+        ".github/ISSUE_TEMPLATE/platform_support.md",
+        ".github/PULL_REQUEST_TEMPLATE.md"
+      ],
+      "source_classes": [
+        "open_closed_issues_prs_discussions",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "hooks",
+      "files": 4,
+      "directories": 0,
+      "bytes": 4205,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 27,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "hooks/hooks-cursor.json",
+        "hooks/hooks.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 4,
+      "directories": 0,
+      "bytes": 36882,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 1311,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        "scripts/bump-version.sh",
+        "scripts/lint-shell.sh",
+        "scripts/package-codex-plugin.sh",
+        "scripts/sync-to-codex-plugin.sh"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".claude-plugin",
+      "files": 2,
+      "directories": 0,
+      "bytes": 1011,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 40,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".claude-plugin/marketplace.json",
+        ".claude-plugin/plugin.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".hermes-plugin",
+      "files": 2,
+      "directories": 0,
+      "bytes": 4088,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 110,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".hermes-plugin/__init__.py",
+        ".hermes-plugin/plugin.yaml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".opencode",
+      "files": 2,
+      "directories": 1,
+      "bytes": 8806,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 254,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".opencode/INSTALL.md",
+        ".opencode/plugins/superpowers.js"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "assets",
+      "files": 2,
+      "directories": 0,
+      "bytes": 49964,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": ".agents",
+      "files": 1,
+      "directories": 1,
+      "bytes": 363,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 20,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".agents/plugins/marketplace.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".codex-plugin",
+      "files": 1,
+      "directories": 0,
+      "bytes": 1730,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 48,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".codex-plugin/plugin.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".cursor-plugin",
+      "files": 1,
+      "directories": 0,
+      "bytes": 578,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 23,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".cursor-plugin/plugin.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".devin-plugin",
+      "files": 1,
+      "directories": 0,
+      "bytes": 575,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 22,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".devin-plugin/plugin.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".kimi-plugin",
+      "files": 1,
+      "directories": 0,
+      "bytes": 3090,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 38,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".kimi-plugin/plugin.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".pi",
+      "files": 1,
+      "directories": 1,
+      "bytes": 4283,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 121,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".pi/extensions/superpowers.ts"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    }
+  ],
+  "skipped_dirs": [
+    ".git"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; classes checked absent in local tree: roadmap_todos; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+}

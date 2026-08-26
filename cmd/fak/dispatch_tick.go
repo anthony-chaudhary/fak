@@ -268,7 +268,7 @@ func parseDispatchTickFlags(stderr io.Writer, argv []string) (dispatchTickOption
 	acceptanceOverride := fs.String("model-acceptance-override", "", "operator reason to override a model acceptance HOLD (audited)")
 	modelDowngrade := fs.Bool("model-downgrade", dispatchModelDowngradeDefault(), "Layer-2 in-tick re-dispatch for model-switchable exits (default on; --model-downgrade=false or FLEET_DISPATCH_MODEL_DOWNGRADE=false disables)")
 	focusHold := fs.Bool("focus-hold", false, "focus WIP backpressure (#3223): HOLD (refuse) a spawn that OPENS a new objective while the fleet is at/over the focusscore WIP cap, instead of the default WARN (advise + still spawn); continuation of an already-open objective is never held ($FLEET_DISPATCH_FOCUS_HOLD also enables)")
-	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, audit recent Codex sessions before spawn and refuse at threshold: loop|action|off (default: $FLEET_CODEX_LOOP_GATE or loop)")
+	codexLoopGate := fs.String("codex-loop-gate", dispatchCodexLoopGateDefaultThreshold(), "for live Codex workers, opt in to a pre-spawn audit of recent Codex sessions and refuse at threshold loop|action, or use off (default: $FLEET_CODEX_LOOP_GATE, else off)")
 	codexLoopGateSinceHours := fs.Float64("codex-loop-gate-since-hours", dispatchCodexLoopGateDefaultSinceHoursValue(), "with --codex-loop-gate, only scan Codex sessions modified within N hours (0 = all)")
 	codexLoopGateLimit := fs.Int("codex-loop-gate-limit", dispatchCodexLoopGateDefaultLimitValue(), "with --codex-loop-gate, maximum newest Codex sessions to scan")
 	placementEvidence := fs.Bool("placement-evidence", false, "record #5416 placement evidence: write the .workclass/.zone sidecars beside each worker log and append the witness sweep's graded turn outcomes to the runs-directory journal (default off: no extra sidecars, no extra payload keys, no journal)")
@@ -735,6 +735,8 @@ func prepareDispatchWorkerCommand(root string, opts dispatchTickOptions, pick di
 	}
 	launchPreview, guardedPreview = guardedDispatchCommand(root, pick.Lane, opts.Backend, preview)
 	payload["command"] = dispatchtick.LaunchCommandShape(preview, root, account)
+	// command is prepared before admission completes; execution is proven only after the spawner returns a child.
+	payload["command_executed"] = false
 	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchPreview, root, account)
 	payload["guarded"] = guardedPreview
 	return launch, launchPreview, guardedPreview, nil
@@ -865,6 +867,7 @@ func dispatchTickLiveSpawn(root, runsDir string, opts dispatchTickOptions, pick 
 		return finish(payload), nil
 	}
 	payload["command"] = dispatchtick.LaunchCommandShape(command, root, account)
+	payload["command_executed"] = true
 	payload["launch_command"] = dispatchtick.LaunchCommandShape(launchCommand, root, account)
 	payload["guarded"] = guarded
 	if bundle := mapAt(payload, "startup_bundle"); len(bundle) > 0 {

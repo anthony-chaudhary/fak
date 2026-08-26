@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "supervisionpolicy",
+      "canonical": "supervision policy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "Typed platform-neutral decision policy for fault-domain restart, reattach, hold, and escalation.",
+      "distinction": "Unlike dispatch admission policy, it decides process recovery from role, generation, checkpoint, effect certainty, backoff, and restart intensity; it does not authorize execution.",
+      "distinct_from": [
+        "x2-policy-capability-dispatchpreflight"
+      ],
+      "aliases": [],
+      "grounding": "supervisionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/cacheobs"
+	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
 // maxBody bounds an inbound tool-args / MCP-frame body (defense against an
@@ -538,7 +539,6 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateSampling(req)) {
 		return
 	}
-	ctx := r.Context()
 	// Request-model pass-through (#82): forward the client's requested model to the
 	// upstream verbatim, falling back to the gateway's configured model only when the
 	// client omitted one. This stops the gateway silently serving a DIFFERENT model
@@ -554,44 +554,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Thread one request TraceID across every proposed call in this chat so the IFC
 	// ledger, plan-CFI, response header, and access log all correlate. The
 	// middleware honors a client-supplied X-Trace-Id or mints one.
-	reqTrace := s.useHTTPTrace(w, r, "")
-	// Operator control / budget / pace at the served request boundary. With
-	// DecideSession wired this mutates the live session table (TurnsLeft debit,
-	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
-	// still refuses paused/draining/stopped sessions.
-	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
-	if canceled {
+	ctx, reqTrace, messages, sessionTurn, admitted := s.admitServedRequest(w, r, req.Messages)
+	if !admitted {
 		return
 	}
-	if !ok {
-		// Budget drained: opt-in human-like reset (distill seed, re-arm, continue on
-		// the fresh trace) when wired; else the historical 409 directive. Mirrors the
-		// Anthropic wire in messages.go.
-		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, req.Messages); reset {
-			req.Messages = resetMessages
-			reqTrace = newTrace
-			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
-			if canceled {
-				return
-			}
-			if !ok {
-				writeSessionRefusal(w, sessionTurn.state)
-				return
-			}
-		} else {
-			writeSessionRefusal(w, sessionTurn.state)
-			return
-		}
-	}
-	// Coherence thrash (#3159): actuate an armed hard reset on this ADMITTED turn (mirrors the
-	// budget-reset block above; a no-op when nothing is armed or no resetter is wired).
-	if reqTrace, req.Messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, req.Messages, sessionTurn); canceled {
-		return
-	}
-	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
-		writeSessionRefusal(w, sessionTurn.state)
-		return
-	}
+	req.Messages = messages
 	resultAdmissions, err := s.admitInboundResults(ctx, req.Messages, req.Tools, reqTrace)
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "upstream cache invalidation failed")
@@ -1160,6 +1127,10 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			return data[i]["id"].(string) < data[j]["id"].(string)
 		})
 	}
+	tiers, tierRows := []string{}, []map[string]string{}
+	if contract, ok := modelroute.LookupProviderContract("openai"); ok {
+		tiers, tierRows = modelroute.SupportedServiceTierMetadata(contract)
+	}
 	codexModels := make([]map[string]any, 0, len(data))
 	for _, row := range data {
 		id := strings.TrimSpace(fmt.Sprint(row["id"]))
@@ -1198,8 +1169,8 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 			"supports_search_tool":             false,
 			"use_responses_lite":               false,
 			"priority":                         0,
-			"additional_speed_tiers":           []string{},
-			"service_tiers":                    []map[string]string{},
+			"additional_speed_tiers":           tiers,
+			"service_tiers":                    tierRows,
 			"availability_nux":                 nil,
 		})
 	}

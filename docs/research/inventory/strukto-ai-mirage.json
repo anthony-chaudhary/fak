@@ -1,0 +1,910 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "strukto-ai/mirage",
+  "url": "https://github.com/strukto-ai/mirage",
+  "indexed_revision": "2ed4257af98fc1a206a5444057d1290892190e69",
+  "observed_at": "2026-08-25T22:30:00Z",
+  "totals": {
+    "files": 8921,
+    "directories": 1556,
+    "bytes": 57587995,
+    "runtime_files": 5777,
+    "test_files": 2731,
+    "docs_files": 404,
+    "text_lines": 1116124
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "conformance/README.md",
+        "docs/.mintignore",
+        "docs/docs.json",
+        "docs/favicon.svg",
+        "docs/home/architecture.mdx",
+        "docs/home/auth.mdx",
+        "docs/home/bash.mdx",
+        "docs/home/cache.mdx",
+        "docs/home/cli.mdx",
+        "docs/home/install.mdx",
+        "docs/home/introduction.mdx"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "docs/home/architecture.mdx",
+        "examples/python/demo/design_feedback.py",
+        "integ/fixtures/github/repo-v1/docs/architecture.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".agents/plugins/marketplace.json",
+        ".github/ISSUE_TEMPLATE/report.yml",
+        ".github/actions/integ-battery-setup/action.yml",
+        ".github/dependabot.yml",
+        ".github/workflows/pre-commit.yml",
+        ".pre-commit-config.yaml",
+        "conformance/cases/cat.json",
+        "conformance/cases/cmp.json",
+        "conformance/cases/du.json",
+        "conformance/cases/file.json",
+        "conformance/cases/find.json",
+        "conformance/cases/grep.json"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".github/workflows/test_cli.yml",
+        ".github/workflows/test_install.yml",
+        ".github/workflows/test_integ.yml",
+        ".github/workflows/test_python.yml",
+        ".github/workflows/test_typescript.yml",
+        "integ/bash/test/dbl.json",
+        "integ/bash/test/quoted.json",
+        "integ/bash/test/test.json",
+        "integ/bash/test/tst.json",
+        "integ/fixtures/calendar/v1.json",
+        "integ/fixtures/cli/tally_cli.js",
+        "integ/fixtures/cli/tally_cli.mjs"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        "integ/fixtures/github/repo-v1/docs/release.md",
+        "python/mirage/accessor/history.py",
+        "python/mirage/commands/builtin/history/history.py",
+        "python/mirage/commands/cli/builtin/git/changes.py",
+        "python/mirage/commands/cli/builtin/git/history.py",
+        "python/mirage/core/discord/history.py",
+        "python/mirage/core/slack/history.py",
+        "python/mirage/resource/history/history.py",
+        "python/mirage/workspace/executor/builtins/history/history.py",
+        "python/tests/commands/builtin/history/test_history.py",
+        "python/tests/commands/builtin/test_history.py",
+        "python/tests/commands/cli/builtin/git/test_changes.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "external_required",
+      "evidence": [
+        "gh issue list --repo strukto-ai/mirage --state all --limit 1000 --json number,title,state,createdAt,closedAt,labels,url",
+        "gh pr list --repo strukto-ai/mirage --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+        "gh api graphql repository(owner:strukto-ai,name:mirage) discussions(first:100)"
+      ],
+      "note": "Complete GitHub read-back at the pinned cutoff: 206 issues, 706 pull requests, and zero discussions."
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "covered",
+      "note": "No dedicated roadmap path; roadmap issues and a full TODO/FIXME tree scan cover distributed planning evidence.",
+      "evidence": [
+        "https://github.com/strukto-ai/mirage/issues/721",
+        "https://github.com/strukto-ai/mirage/issues/705",
+        "https://github.com/strukto-ai/mirage/issues/861",
+        "git grep -n -i -E roadmap|TODO|FIXME"
+      ]
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "LICENSE",
+        "examples/typescript/browser/package.json",
+        "examples/typescript/package.json",
+        "integ/fixtures/github/repo-v1/pyproject.toml",
+        "integ/package.json",
+        "python/LICENSE",
+        "python/pyproject.toml",
+        "typescript/package.json",
+        "typescript/packages/agents/package.json",
+        "typescript/packages/browser/package.json",
+        "typescript/packages/cli/package.json",
+        "typescript/packages/core/package.json"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "Candidate-specific fak capability queries were captured and adjudicated.",
+      "evidence": [
+        "fak capabilities \"resume replay mutable external input drift pre-effect validation\" --json",
+        "fak capabilities \"typed backend capability negotiation transactional workspace filesystem\" --json",
+        "fak capabilities \"virtual filesystem sandbox remote execution file tool\" --json"
+      ]
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "Six candidates re-adjudicated against current fak.",
+      "evidence": [
+        "docs/research/inventory/strukto-ai-mirage.json#candidate-matrix"
+      ]
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "Tree denominator and every required non-tree source class are explicit at the pinned revision.",
+      "evidence": [
+        "docs/research/inventory/strukto-ai-mirage.json#non-tree-study"
+      ]
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "Refresh tracker and the sole surviving borrow are read back.",
+      "evidence": [
+        "https://github.com/anthony-chaudhary/fak/issues/8986",
+        "https://github.com/anthony-chaudhary/fak/issues/7256"
+      ]
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "python",
+      "files": 3461,
+      "directories": 611,
+      "bytes": 17244351,
+      "runtime_files": 2006,
+      "test_files": 1445,
+      "docs_files": 3,
+      "text_lines": 405921,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 3447
+        },
+        {
+          "language": "Config",
+          "files": 4
+        },
+        {
+          "language": "Docs",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "python/LICENSE",
+        "python/README.md",
+        "python/mirage/__init__.py",
+        "python/mirage/accessor/__init__.py",
+        "python/mirage/accessor/_hf.py",
+        "python/mirage/accessor/base.py",
+        "python/mirage/accessor/box.py",
+        "python/mirage/accessor/chroma.py",
+        "python/mirage/accessor/databricks_volume.py",
+        "python/mirage/accessor/dify.py",
+        "python/mirage/accessor/discord.py",
+        "python/mirage/accessor/disk.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "typescript",
+      "files": 3083,
+      "directories": 438,
+      "bytes": 16545568,
+      "runtime_files": 1986,
+      "test_files": 1080,
+      "docs_files": 9,
+      "text_lines": 385308,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 3038
+        },
+        {
+          "language": "Config",
+          "files": 25
+        },
+        {
+          "language": "Docs",
+          "files": 9
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "typescript/.changeset/README.md",
+        "typescript/.changeset/bright-agents-mount.md",
+        "typescript/.changeset/config.json",
+        "typescript/.changeset/green-drives-remember.md",
+        "typescript/.prettierrc.json",
+        "typescript/eslint.config.js",
+        "typescript/knip.json",
+        "typescript/package.json",
+        "typescript/packages/agents/README.md",
+        "typescript/packages/agents/package.json",
+        "typescript/packages/agents/src/claude-agent-sdk/descriptions.ts",
+        "typescript/packages/agents/src/claude-agent-sdk/index.ts"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "integ",
+      "files": 1324,
+      "directories": 295,
+      "bytes": 5579709,
+      "runtime_files": 1122,
+      "test_files": 200,
+      "docs_files": 37,
+      "text_lines": 180991,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1091
+        },
+        {
+          "language": "Python",
+          "files": 149
+        },
+        {
+          "language": "Docs",
+          "files": 37
+        },
+        {
+          "language": "TypeScript",
+          "files": 18
+        },
+        {
+          "language": "Shell",
+          "files": 9
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "integ/bash/arith/assign.json",
+        "integ/bash/arith/c.json",
+        "integ/bash/arith/cmd.json",
+        "integ/bash/arith/divzero.json",
+        "integ/bash/arith/if.json",
+        "integ/bash/arith/incr.json",
+        "integ/bash/arith/short.json",
+        "integ/bash/arith/while.json",
+        "integ/bash/array/basic.json",
+        "integ/bash/assign/assoc.json",
+        "integ/bash/assign/export_attr.json",
+        "integ/bash/assign/nameref.json"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "examples",
+      "files": 364,
+      "directories": 155,
+      "bytes": 1610144,
+      "runtime_files": 342,
+      "test_files": 0,
+      "docs_files": 13,
+      "text_lines": 42617,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 174
+        },
+        {
+          "language": "TypeScript",
+          "files": 157
+        },
+        {
+          "language": "Docs",
+          "files": 13
+        },
+        {
+          "language": "Config",
+          "files": 11
+        }
+      ],
+      "example_paths": [
+        "examples/python/README.md",
+        "examples/python/agents/agno/agno_example.py",
+        "examples/python/agents/camel/sandbox_agent.py",
+        "examples/python/agents/claude_agent_sdk/all_tools.py",
+        "examples/python/agents/langchain/databricks_volume_deepagent.py",
+        "examples/python/agents/langchain/ram_pdf_deepagent.py",
+        "examples/python/agents/langchain/s3_deepagent.py",
+        "examples/python/agents/openai_agents/multimodal_agent.py",
+        "examples/python/agents/openai_agents/ram_agent.py",
+        "examples/python/agents/openai_agents/sandbox_agent.py",
+        "examples/python/agents/openai_agents/slack_vision_agent.py",
+        "examples/python/agents/openhands/README.md"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 327,
+      "directories": 22,
+      "bytes": 1630694,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 327,
+      "text_lines": 31243,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "docs/.mintignore",
+        "docs/docs.json",
+        "docs/favicon.svg",
+        "docs/home/architecture.mdx",
+        "docs/home/auth.mdx",
+        "docs/home/bash.mdx",
+        "docs/home/cache.mdx",
+        "docs/home/cli.mdx",
+        "docs/home/install.mdx",
+        "docs/home/introduction.mdx",
+        "docs/home/observer.mdx",
+        "docs/home/permissions.mdx"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "spec",
+      "files": 285,
+      "directories": 7,
+      "bytes": 1276965,
+      "runtime_files": 284,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 60266,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 284
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "spec/README.md",
+        "spec/layout_exceptions.json",
+        "spec/parity_exceptions.json",
+        "spec/python/general/awk.json",
+        "spec/python/general/base64.json",
+        "spec/python/general/basename.json",
+        "spec/python/general/bash.json",
+        "spec/python/general/bc.json",
+        "spec/python/general/cat.json",
+        "spec/python/general/chgrp.json",
+        "spec/python/general/chmod.json",
+        "spec/python/general/chown.json"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "conformance",
+      "files": 15,
+      "directories": 1,
+      "bytes": 23564,
+      "runtime_files": 14,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 1097,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 14
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "conformance/README.md",
+        "conformance/cases/cat.json",
+        "conformance/cases/cmp.json",
+        "conformance/cases/du.json",
+        "conformance/cases/file.json",
+        "conformance/cases/find.json",
+        "conformance/cases/grep.json",
+        "conformance/cases/head.json",
+        "conformance/cases/ls.json",
+        "conformance/cases/md5.json",
+        "conformance/cases/sort.json",
+        "conformance/cases/stat.json"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 12,
+      "directories": 16,
+      "bytes": 97184,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 5,
+      "text_lines": 1186,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 5
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".pre-commit-config.yaml",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "README.md",
+        "SECURITY.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 11,
+      "directories": 0,
+      "bytes": 88160,
+      "runtime_files": 10,
+      "test_files": 1,
+      "docs_files": 0,
+      "text_lines": 2365,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 10
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "scripts/check_barrel_surface.py",
+        "scripts/check_docs_frontmatter.py",
+        "scripts/check_layout_parity.py",
+        "scripts/check_normalize_renames.py",
+        "scripts/check_spec_parity.py",
+        "scripts/check_test_pathspec.py",
+        "scripts/gen_specs.py",
+        "scripts/gen_width_table.py",
+        "scripts/google_oauth.py",
+        "scripts/install.sh",
+        "scripts/seed_mongodb_test.py"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 10,
+      "directories": 4,
+      "bytes": 126974,
+      "runtime_files": 4,
+      "test_files": 5,
+      "docs_files": 0,
+      "text_lines": 3526,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 9
+        }
+      ],
+      "example_paths": [
+        ".github/ISSUE_TEMPLATE/report.yml",
+        ".github/actions/integ-battery-setup/action.yml",
+        ".github/dependabot.yml",
+        ".github/workflows/pre-commit.yml",
+        ".github/workflows/test_cli.yml",
+        ".github/workflows/test_install.yml",
+        ".github/workflows/test_integ.yml",
+        ".github/workflows/test_python.yml",
+        ".github/workflows/test_typescript.yml"
+      ],
+      "source_classes": [
+        "open_closed_issues_prs_discussions",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "data",
+      "files": 8,
+      "directories": 0,
+      "bytes": 13032682,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 257,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "data/example.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "assets",
+      "files": 6,
+      "directories": 0,
+      "bytes": 264117,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "plugins",
+      "files": 5,
+      "directories": 5,
+      "bytes": 3601,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 88,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 4
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "plugins/mirage/.codex-plugin/plugin.json",
+        "plugins/mirage/.mcp.json",
+        "plugins/mirage/plugin.json",
+        "plugins/mirage/skills/mirage-filesystem/SKILL.md",
+        "plugins/mirage/skills/mirage-filesystem/agents/openai.yaml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "readme",
+      "files": 5,
+      "directories": 0,
+      "bytes": 55959,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 5,
+      "text_lines": 990,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 5
+        }
+      ],
+      "example_paths": [
+        "readme/README.fr.md",
+        "readme/README.ko.md",
+        "readme/README.vi.md",
+        "readme/README.zh-CN.md",
+        "readme/README.zh-TW.md"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "licenses",
+      "files": 3,
+      "directories": 0,
+      "bytes": 6583,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 217,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 2
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "licenses/license_template_py.txt",
+        "licenses/license_template_ts.txt",
+        "licenses/update_license.js"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".agents",
+      "files": 1,
+      "directories": 1,
+      "bytes": 357,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 20,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".agents/plugins/marketplace.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "docker",
+      "files": 1,
+      "directories": 1,
+      "bytes": 1383,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 32,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "docker/sandbox/Dockerfile"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    }
+  ],
+  "skipped_dirs": [
+    ".git"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; classes checked absent in local tree: roadmap_todos; classes with partial local evidence still requiring non-tree completion: open_closed_issues_prs_discussions; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking",
+  "non_tree_study": {
+    "observed_at": "2026-08-25",
+    "source_cutoff": {
+      "revision": "2ed4257af98fc1a206a5444057d1290892190e69",
+      "commit_timestamp": "2026-08-25T22:18:51Z"
+    },
+    "github_surface": {
+      "issues": {
+        "total": 206,
+        "open": 99,
+        "closed": 107
+      },
+      "pull_requests": {
+        "total": 706,
+        "open": 13,
+        "closed": 24,
+        "merged": 669
+      },
+      "discussions": {
+        "total": 0,
+        "open": 0,
+        "closed": 0
+      },
+      "releases": {
+        "total": 5,
+        "latest_at_cutoff": "v0.0.5"
+      },
+      "method": "GitHub CLI issue and PR lists paged beyond the complete denominator plus GraphQL discussions(first:100) and REST releases; all records were created or published no later than the pinned commit timestamp. State is the 2026-08-25 read-back."
+    },
+    "history_roadmap_license": {
+      "history": "Full local Git history through the pinned revision: 1,798 commits, five merged tags, and all five GitHub releases. The repository has no checked-in CHANGELOG; release records and history are the release denominator.",
+      "roadmap": "No dedicated roadmap file exists. Issues #721 and #705 are explicit roadmaps; #861 and the complete issue/PR ledger plus the full TODO/FIXME tree scan cover distributed direction without treating proposals as shipped behavior.",
+      "license": "Root LICENSE and python/LICENSE are Apache-2.0; package manifests declare Apache-2.0 and licenses/ records bundled MIT and BSD-3-Clause notices. Borrow decisions are clean-room adaptations; direct ports require file-level provenance review."
+    },
+    "self_query_axes": [
+      {
+        "axis": "adoption",
+        "fak_surface": "typed tools/resources and narrow integrations rather than a universal filesystem",
+        "verdict": "stay_minimal"
+      },
+      {
+        "axis": "performance",
+        "fak_surface": "artifact/cache identity, bounded receipts, and replay witnesses",
+        "verdict": "owned"
+      },
+      {
+        "axis": "security",
+        "fak_surface": "kernel adjudication and policy preflight at the effect seam",
+        "verdict": "owned"
+      },
+      {
+        "axis": "reliability",
+        "fak_surface": "resume/replay witnesses lack an external-input drift manifest",
+        "verdict": "open_follow_on_7256"
+      },
+      {
+        "axis": "architecture_orchestration",
+        "fak_surface": "provider features, capability degradation, and transactional speculation plans",
+        "verdict": "owned_with_open_follow_ons"
+      },
+      {
+        "axis": "operations",
+        "fak_surface": "effect receipts and observer continuity witnesses",
+        "verdict": "owned_with_test_debt"
+      }
+    ],
+    "candidate_matrix": [
+      {
+        "candidate": "snapshot fingerprints with strict checks before resumed effects",
+        "source": [
+          "python/mirage/resource/snapshot/",
+          "typescript/packages/core/src/resource/snapshot/"
+        ],
+        "alternative": "artifact/effect digests without a run-level mutable-input contract",
+        "disposition": "filed",
+        "issue": "https://github.com/anthony-chaudhary/fak/issues/7256",
+        "reason": "Still a distinct reliability gap; adapt without filesystem emulation."
+      },
+      {
+        "candidate": "typed per-operation backend capabilities",
+        "source": [
+          "python/mirage/resource/base.py",
+          "typescript/packages/core/src/resource/"
+        ],
+        "alternative": "fak provider features and orchestration capability degradation",
+        "disposition": "existing",
+        "issue": "https://github.com/anthony-chaudhary/fak/issues/5310",
+        "reason": "Existing stronger seam and enforcement follow-on own the applicable gap."
+      },
+      {
+        "candidate": "copy-on-write staged workspace rollback",
+        "source": [
+          "python/mirage/resource/workspace/",
+          "typescript/packages/core/src/resource/workspace/"
+        ],
+        "alternative": "fak transactional effectful speculation",
+        "disposition": "existing",
+        "issue": "https://github.com/anthony-chaudhary/fak/issues/4234",
+        "reason": "Existing plan covers isolation, judged merge/abort, receipts, and cleanup."
+      },
+      {
+        "candidate": "policy checks at every operation door",
+        "source": [
+          "python/mirage/policy/",
+          "typescript/packages/core/src/policy/",
+          "https://github.com/strukto-ai/mirage/issues/675"
+        ],
+        "alternative": "fak adjudicator/kernel/gateway checkpoint",
+        "disposition": "shipped",
+        "reason": "Confirmation and caution, not a new borrow."
+      },
+      {
+        "candidate": "observer retention across workspace forks",
+        "source": [
+          "python/mirage/resource/observer/",
+          "typescript/packages/core/src/resource/observer/"
+        ],
+        "alternative": "fak observers and orchestration receipts",
+        "disposition": "defer_to_existing_witness",
+        "issue": "https://github.com/anthony-chaudhary/fak/issues/4234",
+        "reason": "Test telemetry continuity with transactional branches rather than create VFS-shaped scope."
+      },
+      {
+        "candidate": "universal virtual filesystem for heterogeneous resources",
+        "source": [
+          "python/mirage/",
+          "typescript/packages/core/",
+          "spec/"
+        ],
+        "alternative": "typed tools preserving remote semantics",
+        "disposition": "reject",
+        "reason": "Worse default for fak; retain only bounded optional integration potential."
+      }
+    ],
+    "issue_tracking": {
+      "study_issue": "https://github.com/anthony-chaudhary/fak/issues/8986",
+      "filed_borrows": [
+        "https://github.com/anthony-chaudhary/fak/issues/7256"
+      ],
+      "reason": "The exhaustive refresh preserves the one existing surviving borrow. Every other candidate is shipped, already tracked, deferred into an existing witness, or rejected; no new issue is warranted."
+    },
+    "completeness_critic": "All 8,921 tracked files in 17 top-level subsystems were indexed at the pinned revision; full history/tags/releases, all 206 issues, all 706 PRs, zero discussions, roadmap/TODO evidence, licenses, three fak self-queries, six candidate decisions, and issue read-back are explicit. The forge counts are a point-in-time state read-back constrained by record creation time; skipped .git internals are represented by history commands rather than treated as source files."
+  }
+}

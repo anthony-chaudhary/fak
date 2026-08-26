@@ -1,0 +1,123 @@
+{
+  "schema": "fak.qwen38-metal-startup-bisect/1",
+  "issue": 8964,
+  "verdict": "NO_BISECT_INVALID_PREDICATE",
+  "artifact": {
+    "model": "qwen38:27b",
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169"
+  },
+  "machine": {
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "unified_memory_gib": 36,
+    "os_kernel": "Darwin 25.6.0"
+  },
+  "readiness": {
+    "endpoint": "http://127.0.0.1:18964/v1/models",
+    "deadline_seconds": 180
+  },
+  "documented_recipe": {
+    "environment": [
+      "FAK_METAL_STREAM_Q4K=1",
+      "FAK_Q4K_FREE_CPU=1",
+      "FAK_Q4K=1"
+    ],
+    "arguments": [
+      "serve",
+      "--addr",
+      "127.0.0.1:18964",
+      "--gguf",
+      "<exact-gguf>",
+      "--model",
+      "qwen38:27b",
+      "--metal",
+      "--context-budget-tokens",
+      "4096"
+    ],
+    "cache_displacement_bytes": 64915847712,
+    "accepted": {
+      "revision": "8145dc0beac8396db08d75dee1a969faf0e80bf9",
+      "result": "READY",
+      "elapsed_seconds": 31,
+      "max_sampled_rss_kib": 17085792,
+      "swap_used_before_mib": 2622.44,
+      "swap_used_after_mib": 2534.44
+    },
+    "alleged_bad": {
+      "revision": "2a7cbe0c5d1a909df8f1353e6477bb7344734856",
+      "result": "READY",
+      "elapsed_seconds": 28,
+      "max_sampled_rss_kib": 17895520,
+      "swap_used_before_mib": 2470.44,
+      "swap_used_after_mib": 2446.44
+    }
+  },
+  "reported_recipe_control": {
+    "environment": [
+      "FAK_METAL_STREAM_Q4K=1",
+      "FAK_Q4K_FREE_CPU=1"
+    ],
+    "missing_required_environment": "FAK_Q4K=1",
+    "accepted": {
+      "revision": "8145dc0beac8396db08d75dee1a969faf0e80bf9",
+      "result": "EXITED_BEFORE_READY",
+      "elapsed_seconds": 91,
+      "process_exit": 137,
+      "max_sampled_rss_kib": 22863968
+    },
+    "issue_era_head_trials": [
+      {
+        "revision": "2a7cbe0c5d1a909df8f1353e6477bb7344734856",
+        "result": "TIMEOUT",
+        "elapsed_seconds": 180,
+        "process_exit": 143,
+        "max_sampled_rss_kib": 3809904
+      },
+      {
+        "revision": "2a7cbe0c5d1a909df8f1353e6477bb7344734856",
+        "result": "EXITED_BEFORE_READY",
+        "elapsed_seconds": 96,
+        "process_exit": 137,
+        "max_sampled_rss_kib": 21697024
+      }
+    ]
+  },
+  "later_head_observations": {
+    "revision": "2fbb2961fa530b6567fed18736f5bc576efeeaea",
+    "environment": [
+      "FAK_METAL_STREAM_Q4K=1",
+      "FAK_Q4K_FREE_CPU=1",
+      "FAK_Q4K=1"
+    ],
+    "results": [
+      {
+        "result": "READY",
+        "elapsed_seconds": 146,
+        "max_sampled_rss_kib": 4536320
+      },
+      {
+        "result": "READY",
+        "elapsed_seconds": 131,
+        "max_sampled_rss_kib": 4953248
+      }
+    ]
+  },
+  "execution": {
+    "engine": "inkernel",
+    "backend": "metal",
+    "fallback_active": false,
+    "llama_cpp_used": false
+  },
+  "boundary": {
+    "last_good": null,
+    "first_bad": null,
+    "reason": "The documented native recipe passes both endpoints; the reported two-flag recipe fails at the supposed good endpoint."
+  },
+  "bounded_invariant": {
+    "path": "cmd/fak/serve_load_helpers.go",
+    "name": "resident Q4_K load-arm selection",
+    "statement": "FAK_Q4K selects the resident Q4_K loader; FAK_Q4K_FREE_CPU only releases CPU backing after Metal upload.",
+    "changed_source_paths": []
+  }
+}

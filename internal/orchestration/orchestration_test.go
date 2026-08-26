@@ -1,6 +1,7 @@
 package orchestration
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,7 +12,7 @@ import (
 
 func ptr[T any](v T) *T { return &v }
 func nativeCaps() HarnessCapabilities {
-	return HarnessCapabilities{SupportNative, SupportNative, SupportNative, SupportNative, SupportNative}
+	return HarnessCapabilities{SupportNative, SupportNative, SupportNative, SupportNative, SupportNative, SupportNative}
 }
 
 func TestPrecedence(t *testing.T) {
@@ -212,4 +213,76 @@ func TestStableJSONSortsDuplicateFieldProvenance(t *testing.T) {
 	if string(first) != string(second) {
 		t.Fatalf("unstable JSON:\n%s\n---\n%s", first, second)
 	}
+}
+
+func TestFastIntentSupportedClaudeBinding(t *testing.T) {
+	task := fastTask("supported")
+	got, err := Resolve(OrchestrationProfile{Name: ProfileFast}, task, nativeCaps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fast := got.Resolved.Fast
+	if fast == nil || fast.Resolved.Speed != "fast" || fast.Launched.Speed != "fast" || fast.Realized.Speed != "unknown" {
+		t.Fatalf("unexpected receipt: %+v", fast)
+	}
+	if outcome(fast.Outcomes, "claude_speed") != SupportNative {
+		t.Fatalf("claude outcome: %+v", fast.Outcomes)
+	}
+}
+
+func TestFastIntentUnsupportedHarnessDegradesOrRefuses(t *testing.T) {
+	task := fastTask("unsupported")
+	got, err := Resolve(OrchestrationProfile{Name: ProfileFast}, task, HarnessCapabilities{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Resolved.Fast.Launched.Speed != "standard" || got.Resolved.Fast.Realized.Speed != "unknown" || outcome(got.Resolved.Fast.Outcomes, "claude_speed") != SupportDegraded {
+		t.Fatalf("unexpected degradation: %+v", got.Resolved.Fast)
+	}
+	task.FastIntent.FallbackPolicy = "refuse"
+	if _, err := Resolve(OrchestrationProfile{Name: ProfileFast}, task, HarnessCapabilities{}); err == nil || !strings.Contains(err.Error(), "fallback_policy is refuse") {
+		t.Fatalf("expected refusal, got %v", err)
+	}
+}
+
+func TestFastIntentOperatorPinsWinWithProvenance(t *testing.T) {
+	task := fastTask("override")
+	task.Pins.Speed = "standard"
+	task.Pins.Model = "pinned-model"
+	w := 2
+	task.Pins.MaxWorkers = &w
+	got, err := Resolve(OrchestrationProfile{Name: ProfileFast}, task, nativeCaps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Resolved.Fast.Resolved.Speed != "standard" || got.Resolved.Fast.Resolved.Model != "pinned-model" || got.Resolved.Budget.MaxWorkers != 2 {
+		t.Fatalf("pins lost: %+v", got.Resolved)
+	}
+	if outcome(got.Resolved.Fast.Outcomes, "claude_speed") != SupportNotSelected {
+		t.Fatalf("speed should not be selected: %+v", got.Resolved.Fast.Outcomes)
+	}
+	stable, _ := StableJSON(got)
+	if !bytes.Contains(stable, []byte(`"source": "operator.pin"`)) {
+		t.Fatalf("missing provenance: %s", stable)
+	}
+}
+
+func TestFastIntentInvalidFieldsRefuse(t *testing.T) {
+	task := fastTask("invalid")
+	task.FastIntent.CachePolicy = "magic"
+	if _, err := Resolve(OrchestrationProfile{Name: ProfileFast}, task, nativeCaps()); err == nil || !strings.Contains(err.Error(), "cache_policy") {
+		t.Fatalf("expected typed refusal, got %v", err)
+	}
+}
+
+func fastTask(id string) TaskSpec {
+	return TaskSpec{Schema: "fak-orchestration-task/1", ID: id, FastIntent: &FastIntent{Schema: FastIntentSchemaVersion, LatencyClass: "interactive", QualityFloor: "accepted", CostCeiling: "bounded", CachePolicy: "preserve", FallbackPolicy: "degrade"}}
+}
+func outcome(all []MechanismOutcome, name string) SupportLevel {
+	for _, o := range all {
+		if o.Mechanism == name {
+			return o.Outcome
+		}
+	}
+	return ""
 }

@@ -90,3 +90,25 @@ func TestUltracodeBenchAbstainsOnUnacknowledgedTreatment(t *testing.T) {
 		t.Fatalf("report=%+v", report)
 	}
 }
+
+func TestRunUltracodeBenchNetWorkReceipt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	path := filepath.Join("..", "..", "internal", "ultracodebench", "testdata", "issue8679-net-work-campaign.json")
+	if code := runUltracodeBench(&stdout, &stderr, []string{"--net-work", path, "--json"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var report ultracodebench.NetWorkReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Schema != ultracodebench.NetWorkReportSchema || report.Verdict != "LOSS" || report.HillClimb.StopWidth != 4 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestRunUltracodeBenchRejectsMultipleModes(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runUltracodeBench(&stdout, &stderr, []string{"--selfcheck", "--net-work", "campaign.json"}); code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}

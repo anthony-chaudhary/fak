@@ -33,6 +33,9 @@ var (
 	// metalQ8Budget caches, per *Model, whether the Q8-minority GPU upload fits the device's
 	// working-set budget (computed once by metalQ8UploadAllowed). Guarded by metalQ4KMu.
 	metalQ8Budget = map[*Model]bool{}
+	// metalQ8Exact records the immutable, all-or-nothing Qwen3.8 no-copy publication. Its order is
+	// the canonical 272-name runtime band and therefore also the reverse teardown order.
+	metalQ8Exact = map[*Model]*metalQ8ExactState{}
 	// freeCPUCopyAfterUpload, when set, drops qt.raw after a successful GPU upload for single
 	// residency. Default OFF: the CPU prefill/decode fallbacks (q4kGemm/q4kMatRows) still read
 	// qt.raw and panic on nil when the GPU path isn't taken for some tensor (#1067). Opt in with
@@ -44,10 +47,28 @@ var (
 	q4kMMOnce sync.Once
 )
 
+type metalQ8ExactState struct {
+	names   []string
+	handles []*metalgemm.Q8Weight
+	err     error
+}
+
 func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call func(*metalgemm.ExecutionObservation)) {
 	observation := metalgemm.NewExecutionObservation(operation)
 	call(observation)
-	s.observeQwen35MetalExecution(observation)
+	snapshot, err := observation.Snapshot()
+	if s.PhaseProfiler != nil {
+		s.PhaseProfiler.recordMetal(snapshot, err)
+	}
+	if err == nil {
+		s.observeQwen35MetalExecutionSnapshot(snapshot)
+	}
+}
+
+func (s *Session) recordMetalFallback(route MetalFallbackRoute) {
+	if s != nil && s.PhaseProfiler != nil {
+		s.PhaseProfiler.recordMetalFallback(route)
+	}
 }
 
 func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P int) []float32 {
@@ -57,11 +78,20 @@ func (s *Session) q4kGemmDispatch(name string, qt *q4kTensor, Xf []float32, P in
 	Y := make([]float32, P*qt.out)
 	if !s.M.withMetalQ4K(name, qt, func(w *metalgemm.Q4KWeight) {
 		if P == 1 {
-			w.GEMV(Xf, Y)
+			s.metalExecution(metalgemm.ExecutionQ4KGEMV, func(observation *metalgemm.ExecutionObservation) {
+				w.GEMVWithEvents(Xf, Y, observation)
+			})
 			return
 		}
-		w.GEMM(Xf, P, Y)
+		s.metalExecution(metalgemm.ExecutionQ4KGEMM, func(observation *metalgemm.ExecutionObservation) {
+			w.GEMMWithEvents(Xf, P, Y, observation)
+		})
 	}) {
+		route := MetalFallbackQ4KGEMMCPU
+		if P == 1 {
+			route = MetalFallbackQ4KGEMVPanelCPU
+		}
+		s.recordMetalFallback(route)
 		if qt.lazy != nil {
 			panic("model: lazy Q4_K Metal GEMM upload failed: " + name)
 		}
@@ -113,6 +143,11 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 		})
 	}
 	if grouped == nil {
+		route := MetalFallbackQ4KGEMMGroupDispatch
+		if P == 1 {
+			route = MetalFallbackQ4KGEMVGroupDispatch
+		}
+		s.recordMetalFallback(route)
 		return nil
 	}
 	out := make([][]float32, n)
@@ -134,6 +169,7 @@ func (s *Session) q8GemmDispatch(name string, qt *q8Tensor, Xq *q8Panel) []float
 	}
 	w := s.M.metalQ8Weight(name, qt)
 	if w == nil {
+		s.recordMetalFallback(MetalFallbackQ8GEMMCPU)
 		return qGemm8(qt, Xq)
 	}
 	Y := make([]float32, Xq.P*qt.out)
@@ -177,6 +213,7 @@ func (s *Session) q8GemmGroupDispatch(names []string, Xq *q8Panel, P int) [][]fl
 		grouped = metalgemm.GEMMGroupQ8WithEvents(ws, Xq.q, Xq.d, P, observation)
 	})
 	if grouped == nil {
+		s.recordMetalFallback(MetalFallbackQ8GEMMGroupDispatch)
 		return nil
 	}
 	out := make([][]float32, n)
@@ -197,10 +234,13 @@ func (s *Session) kQuantGemmDispatch(name string, qt *kQuantTensor, Xf []float32
 	}
 	w := s.M.metalQ6KWeight(name, qt)
 	if w == nil {
+		s.recordMetalFallback(MetalFallbackQ6KGEMMCPU)
 		kQuantMatRowsIntoBatch(qt, Xf, P, Y)
 		return Y
 	}
-	w.GEMM(Xf, P, Y)
+	s.metalExecution(metalgemm.ExecutionQ6KGEMM, func(observation *metalgemm.ExecutionObservation) {
+		w.GEMMWithEvents(Xf, P, Y, observation)
+	})
 	return Y
 }
 
@@ -215,10 +255,13 @@ func (s *Session) kQuantMatRowsIntoDispatch(name string, qt *kQuantTensor, xf, y
 	}
 	w := s.M.metalQ6KWeight(name, qt)
 	if w == nil {
+		s.recordMetalFallback(MetalFallbackQ6KGEMVCPU)
 		kQuantMatRowsInto(qt, xf, y)
 		return
 	}
-	w.GEMV(xf, y)
+	s.metalExecution(metalgemm.ExecutionQ6KGEMV, func(observation *metalgemm.ExecutionObservation) {
+		w.GEMVWithEvents(xf, y, observation)
+	})
 }
 
 // q4kMatRowsDispatch is the decode-GEMV twin of q4kGemmDispatch: under MetalQ4K it runs the q4_k
@@ -235,6 +278,7 @@ func (s *Session) q4kMatRowsDispatch(name string, qt *q4kTensor, xf []float32) [
 			w.GEMVWithEvents(xf, y, observation)
 		})
 	}) {
+		s.recordMetalFallback(MetalFallbackQ4KGEMVCPU)
 		if qt.lazy != nil {
 			panic("model: lazy Q4_K Metal GEMV upload failed: " + name)
 		}
@@ -255,11 +299,14 @@ func (s *Session) q8MatRowsDispatch(name string, qt *q8Tensor, xf []float32) []f
 	}
 	w := s.M.metalQ8Weight(name, qt)
 	if w == nil {
+		s.recordMetalFallback(MetalFallbackQ8GEMVCPU)
 		return qMatRows(qt, s.quantizeVecQ8(xf))
 	}
 	qv := s.quantizeVecQ8(xf)
 	y := make([]float32, qt.out)
-	w.GEMV(qv.q, qv.d, y)
+	s.metalExecution(metalgemm.ExecutionQ8GEMV, func(observation *metalgemm.ExecutionObservation) {
+		w.GEMVWithEvents(qv.q, qv.d, y, observation)
+	})
 	return y
 }
 
@@ -317,6 +364,8 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 				out[i] = grouped[j]
 			}
 			routed = true
+		} else {
+			s.recordMetalFallback(MetalFallbackQ4KGEMVGroupDispatch)
 		}
 	}
 
@@ -340,6 +389,8 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 				out[i] = grouped[j]
 			}
 			routed = true
+		} else {
+			s.recordMetalFallback(MetalFallbackQ8GEMVGroupDispatch)
 		}
 	}
 
@@ -361,6 +412,7 @@ func (s *Session) q4kGroupDispatch(names []string, xf []float32, outs []int) [][
 		} else {
 			qt := s.M.q8(name)
 			q := getQ8()
+			s.recordMetalFallback(MetalFallbackQ4KGroupQ8CPU)
 			out[i] = qMatRows(qt, q)
 		}
 	}
@@ -392,7 +444,12 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 			return nil
 		}
 		y := make([]float32, dt.out)
-		if !metalgemm.FusedMLP(gw, uw, dw, x, y) {
+		ok := false
+		s.metalExecution(metalgemm.ExecutionQ4KFusedMLP, func(observation *metalgemm.ExecutionObservation) {
+			ok = metalgemm.FusedMLPWithEvents(gw, uw, dw, x, y, observation)
+		})
+		if !ok {
+			s.recordMetalFallback(MetalFallbackFusedMLPDispatch)
 			return nil
 		}
 		return y
@@ -406,7 +463,12 @@ func (s *Session) q4kFusedMLP(gateName, upName, downName string, x []float32) []
 			return nil
 		}
 		y := make([]float32, dq.out)
-		if !metalgemm.FusedMLPQ6Down(gw, uw, dw, x, y) {
+		ok := false
+		s.metalExecution(metalgemm.ExecutionQ4KFusedMLPQ6Down, func(observation *metalgemm.ExecutionObservation) {
+			ok = metalgemm.FusedMLPQ6DownWithEvents(gw, uw, dw, x, y, observation)
+		})
+		if !ok {
+			s.recordMetalFallback(MetalFallbackFusedMLPQ6DownDispatch)
 			return nil
 		}
 		return y
@@ -451,7 +513,12 @@ func (s *Session) q4kFusedMLPBatch(gate, up, down []string, x []float32) [][]flo
 		dout = dq.out
 	}
 	ycat := make([]float32, n*dout)
-	if !metalgemm.FusedMLPQ6DownBatch(gws, uws, dws, x, ycat) {
+	ok := false
+	s.metalExecution(metalgemm.ExecutionQ4KFusedMLPQ6DownBatch, func(observation *metalgemm.ExecutionObservation) {
+		ok = metalgemm.FusedMLPQ6DownBatchWithEvents(gws, uws, dws, x, ycat, observation)
+	})
+	if !ok {
+		s.recordMetalFallback(MetalFallbackFusedMLPBatchDispatch)
 		return nil
 	}
 	out := make([][]float32, n)
@@ -507,6 +574,14 @@ func (m *Model) metalQ8UploadAllowed() bool {
 // projections in the resident-Q4_K lane. Declines (returns nil, caller stays on CPU qGemm8) when
 // the device working-set budget can't absorb the additive Q8 GPU copy (metalQ8UploadAllowed).
 func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
+	if _, err := qwen38MetalQ8RuntimeNames(m.Cfg); err == nil {
+		if m.promoteMetalQ8Residency() != nil {
+			return nil
+		}
+		metalQ4KMu.Lock()
+		defer metalQ4KMu.Unlock()
+		return metalQ8KW[m][name]
+	}
 	// Budget gate BEFORE the lock (metalQ8UploadAllowed takes metalQ4KMu itself; sync.Mutex is
 	// not reentrant). On a tight device the additive Q8 GPU copy would OOM the serve, so decline
 	// here and let q8GemmDispatch fall back to the CPU qGemm8 — the pre-#1087, non-OOM path.
@@ -526,6 +601,77 @@ func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
 	w := metalgemm.UploadQ8(qt.q, qt.d, qt.out, qt.in)
 	tbl[name] = w
 	return w
+}
+
+func (m *Model) promoteMetalQ8Residency() error {
+	names, err := qwen38MetalQ8RuntimeNames(m.Cfg)
+	if err != nil {
+		return err
+	}
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	if state, ok := metalQ8Exact[m]; ok {
+		return state.err
+	}
+	r := m.ResidentReport()
+	deviceTotal := int64(0)
+	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
+		deviceTotal = int64(total)
+	}
+	if err := q8AliasFits(r.TotalResidentBytes, deviceTotal, os.Getenv("FAK_METAL_Q8_UPLOAD")); err != nil {
+		metalQ8Exact[m] = &metalQ8ExactState{err: err}
+		return err
+	}
+	handles, err := buildAllOrNothing(names, func(name string) (*metalgemm.Q8Weight, error) {
+		if m.q4kw[name] != nil || m.kqw[name] != nil {
+			return nil, &MetalQ8ResidencyUnavailableError{Reason: "promised Q8 projection resolved to another quant type: " + name}
+		}
+		qt := m.q8w[name]
+		if qt == nil {
+			return nil, &MetalQ8ResidencyUnavailableError{Reason: "missing promised Q8 projection: " + name}
+		}
+		w := metalgemm.AliasQ8(qt.q, qt.d, qt.out, qt.in)
+		if w == nil || !w.NoCopy() {
+			if w != nil {
+				w.Release()
+			}
+			return nil, &MetalQ8ResidencyUnavailableError{Reason: "no-copy Metal alias declined: " + name}
+		}
+		return w, nil
+	}, func(w *metalgemm.Q8Weight) { w.Release() })
+	if err != nil {
+		metalQ8Exact[m] = &metalQ8ExactState{err: err}
+		return err
+	}
+	tbl := make(map[string]*metalgemm.Q8Weight, len(names))
+	for i, name := range names {
+		tbl[name] = handles[i]
+	}
+	metalQ8KW[m] = tbl // immutable publication: readers only retrieve handles after this assignment.
+	metalQ8Exact[m] = &metalQ8ExactState{names: append([]string(nil), names...), handles: handles}
+	return nil
+}
+
+func (m *Model) releaseMetalQ8Residency() {
+	metalQ4KMu.Lock()
+	state := metalQ8Exact[m]
+	delete(metalQ8Exact, m)
+	tbl := metalQ8KW[m]
+	delete(metalQ8KW, m)
+	delete(metalQ8Budget, m)
+	metalQ4KMu.Unlock()
+	if state != nil && len(state.handles) > 0 {
+		for i := len(state.handles) - 1; i >= 0; i-- {
+			state.handles[i].Release()
+		}
+		return
+	}
+	// Preserve UploadQ8 compatibility while giving copied per-model handles deterministic teardown.
+	for _, w := range tbl {
+		if w != nil {
+			w.Release()
+		}
+	}
 }
 
 // metalQ4KWeights uploads all Q4_K projection weights for this model to the GPU once,
@@ -571,6 +717,16 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 func (m *Model) metalQ8Weights() map[string]bool {
 	if !metalgemm.Available() {
 		return nil
+	}
+	if names, err := qwen38MetalQ8RuntimeNames(m.Cfg); err == nil {
+		if m.promoteMetalQ8Residency() != nil {
+			return nil
+		}
+		uploaded := make(map[string]bool, len(names))
+		for _, name := range names {
+			uploaded[name] = true
+		}
+		return uploaded
 	}
 	// Skip the whole bulk pre-upload when the device budget can't absorb the additive Q8 GPU
 	// copy — otherwise the 7 GiB projection store doubles and the serve is SIGKILLed at first

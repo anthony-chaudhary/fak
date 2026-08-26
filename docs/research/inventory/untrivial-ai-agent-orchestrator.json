@@ -1,0 +1,631 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "Untrivial-ai/agent-orchestrator",
+  "url": "https://github.com/Untrivial-ai/agent-orchestrator",
+  "indexed_revision": "ee2c58a577317d4480a2b2ee5ff77f25e5307af9",
+  "observed_at": "2026-08-25T00:00:00Z",
+  "totals": {
+    "files": 2456,
+    "directories": 446,
+    "bytes": 82879866,
+    "runtime_files": 1336,
+    "test_files": 674,
+    "docs_files": 100,
+    "text_lines": 567415
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "docs/README.md",
+        "docs/STATUS.md",
+        "docs/adr/0001-lan-listener-for-mobile.md",
+        "docs/adr/0002-secure-interactive-reviewer-gateway.md",
+        "docs/ao-start-bootstrapper-and-npm-deprecation.md",
+        "docs/architecture.md",
+        "docs/assets/readme/agents/autohand-stacked-dark.png",
+        "docs/assets/readme/agents/autohand-stacked-light.png",
+        "docs/assets/readme/agents/pi-coding-agent.svg",
+        "docs/assets/readme/agents/prime-agent.svg",
+        "docs/assets/readme/browser-preview.png"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "DESIGN.md",
+        "docs/adr/0001-lan-listener-for-mobile.md",
+        "docs/adr/0002-secure-interactive-reviewer-gateway.md",
+        "docs/architecture.md",
+        "docs/plans/2026-07-20-first-run-scratch-project-design.html",
+        "docs/superpowers/specs/2026-07-25-kill-state-isolation-design.md",
+        "frontend/src/landing/content/docs/architecture.mdx",
+        "frontend/src/landing/public/design-partners/hero-car-engine-olive.png",
+        "frontend/src/landing/public/design-partners/roadmap-engine-room-olive.png",
+        "frontend/src/landing/public/design-partners/roadmap-fleet-olive.png",
+        "frontend/src/landing/public/design-partners/roadmap-mission-control-olive.png",
+        "frontend/src/landing/public/design-partners/roadmap-roi-olive.png"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".agents/skills/ao-desktop-dev/agents/openai.yaml",
+        ".agents/skills/bug-triage/scripts/push_fix_to_github.py",
+        ".claude/skills/bug-triage/scripts/push_fix_to_github.py",
+        ".github/.gitleaks.toml",
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/actions/macos-signing-setup/action.yml",
+        ".github/workflows/build-artifacts.yml",
+        ".github/workflows/cli-e2e.yml",
+        ".github/workflows/deploy-landing.yml",
+        ".github/workflows/e2e-gate-tests.yml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        "backend/e2e/chat_compaction_test.go",
+        "backend/e2e/chat_composer_test.go",
+        "backend/e2e/chat_conversation_test.go",
+        "backend/e2e/chat_history_test.go",
+        "backend/e2e/chat_lifecycle_test.go",
+        "backend/e2e/chat_mode_test.go",
+        "backend/e2e/chat_output_diff_test.go",
+        "backend/e2e/chat_provider_state_test.go",
+        "backend/e2e/chat_steer_test.go",
+        "backend/e2e/chat_usage_test.go",
+        "backend/e2e/harness_test.go",
+        "backend/internal/adapters/agent/activitydispatch/dispatch_test.go"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".github/workflows/feature-release-cleanup.yml",
+        ".github/workflows/frontend-release.yml",
+        ".github/workflows/release-latest-guard.yml",
+        "backend/e2e/chat_history_test.go",
+        "backend/internal/adapters/chatdriver/acp/history.go",
+        "backend/internal/adapters/chatdriver/codexappserver/history.go",
+        "backend/internal/adapters/chatdriver/codexappserver/history_test.go",
+        "backend/internal/httpd/controllers/conversation_history_test.go",
+        "backend/internal/service/chat/history.go",
+        "backend/internal/service/chat/history_test.go",
+        "backend/internal/storage/sqlite/gen/changelog.sql.go",
+        "backend/internal/storage/sqlite/migrate_auto_inject_review_history_test.go"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/pull_request_template.md"
+      ],
+      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "covered",
+      "evidence": [
+        "frontend/src/landing/public/design-partners/roadmap-engine-room-olive.png",
+        "frontend/src/landing/public/design-partners/roadmap-fleet-olive.png",
+        "frontend/src/landing/public/design-partners/roadmap-mission-control-olive.png",
+        "frontend/src/landing/public/design-partners/roadmap-roi-olive.png",
+        "frontend/src/landing/public/optimized/design-partners/roadmap-engine-room-olive.webp",
+        "frontend/src/landing/public/optimized/design-partners/roadmap-fleet-olive.webp",
+        "frontend/src/landing/public/optimized/design-partners/roadmap-mission-control-olive.webp",
+        "frontend/src/landing/public/optimized/design-partners/roadmap-roi-olive.webp",
+        "frontend/src/landing/src/app/design-partners/RoadmapSlideshow.tsx"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "LICENSE",
+        "backend/go.mod",
+        "frontend/acp-runtime/package.json",
+        "frontend/package.json",
+        "frontend/src/docs/package.json",
+        "frontend/src/landing/package.json",
+        "frontend/src/landing/packages/auth/package.json",
+        "frontend/src/landing/packages/email/package.json",
+        "frontend/src/landing/packages/shaders-react/package.json",
+        "frontend/src/landing/packages/shared/package.json",
+        "frontend/src/landing/packages/typescript/package.json",
+        "frontend/src/landing/packages/ui/package.json"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "backend",
+      "files": 1061,
+      "directories": 181,
+      "bytes": 10664638,
+      "runtime_files": 552,
+      "test_files": 394,
+      "docs_files": 19,
+      "text_lines": 288938,
+      "languages": [
+        {
+          "language": "Go",
+          "files": 935
+        },
+        {
+          "language": "Docs",
+          "files": 19
+        },
+        {
+          "language": "TypeScript",
+          "files": 4
+        },
+        {
+          "language": "Config",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "backend/.golangci.yml",
+        "backend/cmd/ao/main.go",
+        "backend/cmd/gencodexproto/main.go",
+        "backend/cmd/genspec/main.go",
+        "backend/e2e/chat_compaction_test.go",
+        "backend/e2e/chat_composer_test.go",
+        "backend/e2e/chat_conversation_test.go",
+        "backend/e2e/chat_history_test.go"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "frontend",
+      "files": 979,
+      "directories": 187,
+      "bytes": 57376573,
+      "runtime_files": 579,
+      "test_files": 205,
+      "docs_files": 2,
+      "text_lines": 183123,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 703
+        },
+        {
+          "language": "Config",
+          "files": 69
+        },
+        {
+          "language": "Docs",
+          "files": 2
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "frontend/acp-runtime/package-lock.json",
+        "frontend/acp-runtime/package.json",
+        "frontend/components.json",
+        "frontend/docs/desktop-release.md",
+        "frontend/e2e/chat-scroll-overflow.spec.ts",
+        "frontend/e2e/ci-auto-inject.spec.ts",
+        "frontend/e2e/history-nav.spec.ts",
+        "frontend/e2e/inspector-toggle.spec.ts"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "roadmap_todos",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "packages",
+      "files": 288,
+      "directories": 33,
+      "bytes": 2762758,
+      "runtime_files": 177,
+      "test_files": 67,
+      "docs_files": 4,
+      "text_lines": 49397,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 216
+        },
+        {
+          "language": "Config",
+          "files": 20
+        },
+        {
+          "language": "Docs",
+          "files": 4
+        },
+        {
+          "language": "JavaScript",
+          "files": 3
+        },
+        {
+          "language": "Shell",
+          "files": 3
+        },
+        {
+          "language": "Python",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "packages/ao/bin/ao.js",
+        "packages/ao/package.json",
+        "packages/ao-darwin-arm64/package.json",
+        "packages/ao-darwin-x64/package.json",
+        "packages/ao-linux-x64/package.json",
+        "packages/ao-win32-x64/package.json",
+        "packages/build-binaries.sh",
+        "packages/cloud-client/README.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 56,
+      "directories": 14,
+      "bytes": 8426379,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 56,
+      "text_lines": 33152,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 21
+        }
+      ],
+      "example_paths": [
+        "docs/README.md",
+        "docs/STATUS.md",
+        "docs/adr/0001-lan-listener-for-mobile.md",
+        "docs/adr/0002-secure-interactive-reviewer-gateway.md",
+        "docs/ao-start-bootstrapper-and-npm-deprecation.md",
+        "docs/architecture.md",
+        "docs/assets/readme/agents/autohand-stacked-dark.png",
+        "docs/assets/readme/agents/autohand-stacked-light.png"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "readme_docs"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 20,
+      "directories": 4,
+      "bytes": 77815,
+      "runtime_files": 19,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 2008,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 19
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".github/.gitleaks.toml",
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/actions/macos-signing-setup/action.yml",
+        ".github/pull_request_template.md",
+        ".github/workflows/build-artifacts.yml",
+        ".github/workflows/cli-e2e.yml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "open_closed_issues_prs_discussions",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 15,
+      "directories": 13,
+      "bytes": 83858,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 6,
+      "text_lines": 1193,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 6
+        },
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "CONTEXT.md",
+        "CONTRIBUTING.md",
+        "DESIGN.md",
+        "LICENSE",
+        "README.md",
+        "package-lock.json"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "assets",
+      "files": 9,
+      "directories": 0,
+      "bytes": 3041792,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "test",
+      "files": 7,
+      "directories": 3,
+      "bytes": 23263,
+      "runtime_files": 0,
+      "test_files": 7,
+      "docs_files": 1,
+      "text_lines": 501,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 3
+        },
+        {
+          "language": "TypeScript",
+          "files": 2
+        },
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "test/cli/Dockerfile",
+        "test/cli/README.md",
+        "test/cli/install-check.sh",
+        "test/e2e-pod/boot-real.sh",
+        "test/e2e-pod/playwright.electron.config.ts",
+        "test/e2e-pod/real-app.spec.ts",
+        "test/submodule/optional-private-checkout.sh"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "translations",
+      "files": 7,
+      "directories": 0,
+      "bytes": 154995,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 7,
+      "text_lines": 1740,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 7
+        }
+      ],
+      "example_paths": [
+        "translations/README.de.md",
+        "translations/README.es.md",
+        "translations/README.fr.md",
+        "translations/README.ja.md",
+        "translations/README.ko.md",
+        "translations/README.pt-BR.md",
+        "translations/README.zh-CN.md"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 6,
+      "directories": 0,
+      "bytes": 111796,
+      "runtime_files": 3,
+      "test_files": 1,
+      "docs_files": 0,
+      "text_lines": 2631,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 2
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "scripts/ao-e2e-pod-gate.test.mjs",
+        "scripts/daemon-build.sh",
+        "scripts/package-lock.json",
+        "scripts/package.json"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".agents",
+      "files": 4,
+      "directories": 5,
+      "bytes": 32373,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 689,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 2
+        },
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".agents/skills/ao-desktop-dev/SKILL.md",
+        ".agents/skills/ao-desktop-dev/agents/openai.yaml",
+        ".agents/skills/bug-triage/SKILL.md",
+        ".agents/skills/bug-triage/scripts/push_fix_to_github.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".claude",
+      "files": 3,
+      "directories": 4,
+      "bytes": 18306,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 440,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 2
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".claude/skills/ao-desktop-dev/SKILL.md",
+        ".claude/skills/bug-triage/SKILL.md",
+        ".claude/skills/bug-triage/scripts/push_fix_to_github.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "contracts",
+      "files": 1,
+      "directories": 1,
+      "bytes": 105320,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 3603,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "contracts/cloud/openapi.yaml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "private",
+      "files": 0,
+      "directories": 1,
+      "bytes": 0,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    }
+  ],
+  "skipped_dirs": [
+    ".git"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git; classes with partial local evidence still requiring non-tree completion: open_closed_issues_prs_discussions; still requires non-tree study artifacts: fak_selfquery_witness, candidate_matrix, issue_tracking"
+}

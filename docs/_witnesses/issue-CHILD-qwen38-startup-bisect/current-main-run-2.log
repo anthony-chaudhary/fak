@@ -1,0 +1,19 @@
+issue=8964
+machine=Apple M3 Pro; 18 GPU cores; 36 GiB unified memory; Darwin 25.6.0
+artifact_bytes=17106775008
+artifact_sha256=7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169
+revision=2a7cbe0c5d1a909df8f1353e6477bb7344734856
+command=FAK_METAL_STREAM_Q4K=1 FAK_Q4K_FREE_CPU=1 fak serve --addr 127.0.0.1:18964 --gguf <exact-gguf> --model qwen38:27b --metal --context-budget-tokens 4096
+readiness_endpoint=http://127.0.0.1:18964/v1/models
+deadline_seconds=180
+result=EXITED_BEFORE_READY
+elapsed_seconds=96
+max_sampled_rss_kib=21697024
+process_exit=137
+swap_used_before_mib=2723.81
+swap_used_after_mib=2974.50
+listener_marker=absent
+fallback_marker=absent
+
+classification=memory-pressure control; not a second identical alive-and-unbound timeout
+conclusion=the reported recipe is not a stable bisect predicate

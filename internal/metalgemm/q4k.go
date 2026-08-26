@@ -17,19 +17,26 @@ typedef struct {
     int committed;
     int completed_wait;
     int host_readback;
+    int encoders;
+    double gpu_milliseconds;
+    double wait_milliseconds;
+    int timing_available;
 } mg_execution_event;
 int  mg_q4k_upload(const unsigned char* raw, int out, int in);
 int  mg_q4k_upload_nocopy(const unsigned char* raw, int out, int in);
-void mg_q4k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
+int  mg_q4k_gemv(int wid, const float* x, float* y, int vectorized_mode, mg_execution_event* event);
 void mg_q4k_gemv_batch(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemv_batch_multi(int wid, const float* Xcat, int n, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, const int* yoff, mg_execution_event* event);
-void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
+int  mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_y, const int* q4_yoff,
+                           const int* q8_wids, int nq8, const signed char* xq, const float* xd,
+                           float* q8_y, const int* q8_yoff, mg_execution_event* event);
+void mg_q4k_mlp(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
 int  mg_q6k_upload(const unsigned char* raw, int out, int in);
-void mg_q6k_gemv(int wid, const float* x, float* y);
-void mg_q6k_gemm(int wid, const float* X, int P, float* Y);
-void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y);
-int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat);
+void mg_q6k_gemv(int wid, const float* x, float* y, mg_execution_event* event);
+void mg_q6k_gemm(int wid, const float* X, int P, float* Y, mg_execution_event* event);
+void mg_q4k_mlp_q6down(int gate_wid, int up_wid, int down_wid, const float* x, float* y, mg_execution_event* event);
+int  mg_q4k_mlp_q6down_batch(const int* gate_wids, const int* up_wids, const int* down_wids, int n, const float* x, float* Ycat, mg_execution_event* event);
 void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, mg_execution_event* event);
 void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff, double* out_gpu_ms, mg_execution_event* event);
 void mg_q4k_set_use_mm(int on);
@@ -39,6 +46,7 @@ void mg_q4k_reset(void);
 import "C"
 
 import (
+	"errors"
 	"math"
 	"runtime"
 	"sync"
@@ -64,6 +72,42 @@ var lastGEMMGPUMs atomic.Uint64
 // command-buffer timestamps is cheap, so the profile path costs one extra out-param write per call
 // and nothing when unused.
 func LastGEMMGPUMs() float64 { return math.Float64frombits(lastGEMMGPUMs.Load()) }
+
+// SetGEMVUseVectorized selects the experimental vectorized P=1 Q4_K kernel. The scalar
+// q4k_gemv pipeline remains the default and is restored by passing false. Selection affects only
+// Q4KWeight.GEMV; grouped, batched, fused-MLP, and prefill dispatch retain their existing kernels.
+func SetGEMVUseVectorized(on bool) {
+	q4kUseVectorized.Store(on)
+}
+
+var q4kUseVectorized atomic.Bool
+
+func recordQ4KEvent(observation *ExecutionObservation, event *C.mg_execution_event) {
+	if event == nil {
+		return
+	}
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0,
+		event.host_readback != 0, int(event.encoders), float64(event.gpu_milliseconds),
+		float64(event.wait_milliseconds), event.timing_available != 0)
+}
+
+type q4kGEMVExecution int
+
+const (
+	q4kGEMVNotExecuted q4kGEMVExecution = iota
+	q4kGEMVExecutedScalar
+	q4kGEMVExecutedVectorized
+)
+
+type q4kGEMVMode int
+
+const (
+	q4kGEMVModeScalar q4kGEMVMode = iota
+	q4kGEMVModeVectorized
+	// q4kGEMVModeVectorizedUnavailable exercises the native fail-closed branch without
+	// mutating the process-global Metal pipeline table. Production selection never emits it.
+	q4kGEMVModeVectorizedUnavailable = -1
+)
 
 // Q4KWeight is a handle to a raw q4_k weight matrix [Out, In] resident on the GPU. In must be
 // a multiple of 256 (the q4_k super-block size); the resident byte cost is Out*(In/256)*144.
@@ -120,13 +164,26 @@ func UploadQ4K(raw []byte, out, in int) *Q4KWeight {
 
 // GEMV computes y[Out] = W · x for one f32 activation row x (length In). y must have length
 // >= Out. Both slices are accessed only during the call. This is the decode GEMV.
-func (w *Q4KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
+func (w *Q4KWeight) gemvWithEventsMode(x, y []float32, observation *ExecutionObservation, mode q4kGEMVMode) q4kGEMVExecution {
 	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
-		return
+		return q4kGEMVNotExecuted
 	}
 	var event C.mg_execution_event
-	C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	executed := C.mg_q4k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), C.int(mode), &event)
+	recordQ4KEvent(observation, &event)
+	return q4kGEMVExecution(executed)
+}
+
+func (w *Q4KWeight) gemvWithEvents(x, y []float32, observation *ExecutionObservation) q4kGEMVExecution {
+	mode := q4kGEMVModeScalar
+	if q4kUseVectorized.Load() {
+		mode = q4kGEMVModeVectorized
+	}
+	return w.gemvWithEventsMode(x, y, observation, mode)
+}
+
+func (w *Q4KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
+	w.gemvWithEvents(x, y, observation)
 }
 
 const (
@@ -146,7 +203,7 @@ func q4kUseMultiVector(out, in, n int) bool {
 func (w *Q4KWeight) gemvBatchRepeatedWithEvents(Xcat []float32, n int, Ycat []float32, observation *ExecutionObservation) {
 	var event C.mg_execution_event
 	C.mg_q4k_gemv_batch(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ4KEvent(observation, &event)
 }
 
 // gemvBatchRepeated preserves the pre-observation helper for parity and benchmark tests.
@@ -165,7 +222,7 @@ func (w *Q4KWeight) GEMVBatchWithEvents(Xcat []float32, n int, Ycat []float32, o
 	if q4kUseMultiVector(w.Out, w.In, n) {
 		var event C.mg_execution_event
 		C.mg_q4k_gemv_batch_multi(w.id, (*C.float)(unsafe.Pointer(&Xcat[0])), C.int(n), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
-		observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+		recordQ4KEvent(observation, &event)
 		return
 	}
 	w.gemvBatchRepeatedWithEvents(Xcat, n, Ycat, observation)
@@ -198,7 +255,7 @@ func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObs
 	var event C.mg_execution_event
 	C.mg_q4k_gemv_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&x[0])),
 		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ4KEvent(observation, &event)
 	out := make([][]float32, n)
 	o := 0
 	for i, w := range ws {
@@ -208,12 +265,108 @@ func GEMVGroupWithEvents(ws []*Q4KWeight, x []float32, observation *ExecutionObs
 	return out
 }
 
+const ExecutionMixedQ4KQ8QKV ExecutionOperation = "mixed-q4_k-q8-qkv"
+
+// MixedQ4KQ8PreflightError reports that mixed projection inputs were rejected before Metal
+// created a command buffer. The caller may safely choose another whole-operation route.
+type MixedQ4KQ8PreflightError struct{ Reason string }
+
+func (e *MixedQ4KQ8PreflightError) Error() string { return "mixed Q4_K/Q8 preflight: " + e.Reason }
+
+// MixedQ4KQ8PostSubmitError reports failure after the candidate command buffer was created.
+// Callers must fail closed: retrying either projection separately could expose partial work.
+type MixedQ4KQ8PostSubmitError struct{}
+
+func (*MixedQ4KQ8PostSubmitError) Error() string {
+	return "mixed Q4_K/Q8 Metal command buffer failed after creation"
+}
+
+// IsMixedQ4KQ8PostSubmit reports whether err requires fail-closed handling.
+func IsMixedQ4KQ8PostSubmit(err error) bool {
+	var target *MixedQ4KQ8PostSubmitError
+	return errors.As(err, &target)
+}
+
+func mixedQ4KQ8StatusError(status int) error {
+	if status < 0 {
+		return &MixedQ4KQ8PostSubmitError{}
+	}
+	if status == 0 {
+		return &MixedQ4KQ8PreflightError{Reason: "native resources unavailable"}
+	}
+	return nil
+}
+
+// GEMVGroupMixedQ4KQ8 applies at least one Q4_K and one Q8 weight sharing one activation in
+// one caller-observed native command buffer. Every input is checked before native encoding.
+func GEMVGroupMixedQ4KQ8(q4ws []*Q4KWeight, q8ws []*Q8Weight, x []float32, xq []int8, xd []float32, observation *ExecutionObservation) (q4out, q8out [][]float32, err error) {
+	if len(q4ws) == 0 || len(q8ws) == 0 {
+		return nil, nil, &MixedQ4KQ8PreflightError{Reason: "both quantization groups are required"}
+	}
+	if q4ws[0] == nil || q8ws[0] == nil {
+		return nil, nil, &MixedQ4KQ8PreflightError{Reason: "nil weight"}
+	}
+	in := q4ws[0].In
+	if in <= 0 || q8ws[0].In != in || len(x) < in || len(xq) < in || len(xd) < q8ws[0].Nblk {
+		return nil, nil, &MixedQ4KQ8PreflightError{Reason: "activation geometry mismatch"}
+	}
+	q4ids := make([]C.int, len(q4ws))
+	q4off := make([]C.int, len(q4ws)+1)
+	q4flatLen := 0
+	for i, w := range q4ws {
+		if w == nil || w.id < 0 || w.In != in || w.Out <= 0 {
+			return nil, nil, &MixedQ4KQ8PreflightError{Reason: "invalid Q4_K weight"}
+		}
+		q4ids[i] = C.int(w.id)
+		q4off[i] = C.int(q4flatLen)
+		q4flatLen += w.Out
+	}
+	q4off[len(q4ws)] = C.int(q4flatLen)
+	q8ids := make([]C.int, len(q8ws))
+	q8off := make([]C.int, len(q8ws)+1)
+	q8flatLen := 0
+	for i, w := range q8ws {
+		if w == nil || w.id < 0 || w.In != in || w.Nblk != q8ws[0].Nblk || w.Out <= 0 {
+			return nil, nil, &MixedQ4KQ8PreflightError{Reason: "invalid Q8 weight"}
+		}
+		q8ids[i] = C.int(w.id)
+		q8off[i] = C.int(q8flatLen)
+		q8flatLen += w.Out
+	}
+	q8off[len(q8ws)] = C.int(q8flatLen)
+
+	q4flat := make([]float32, q4flatLen)
+	q8flat := make([]float32, q8flatLen)
+	var event C.mg_execution_event
+	status := int(C.mg_q4k_q8_gemv_group(
+		(*C.int)(unsafe.Pointer(&q4ids[0])), C.int(len(q4ids)), (*C.float)(unsafe.Pointer(&x[0])),
+		(*C.float)(unsafe.Pointer(&q4flat[0])), (*C.int)(unsafe.Pointer(&q4off[0])),
+		(*C.int)(unsafe.Pointer(&q8ids[0])), C.int(len(q8ids)), (*C.schar)(unsafe.Pointer(&xq[0])),
+		(*C.float)(unsafe.Pointer(&xd[0])), (*C.float)(unsafe.Pointer(&q8flat[0])),
+		(*C.int)(unsafe.Pointer(&q8off[0])), &event))
+	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0,
+		event.host_readback != 0, int(event.encoders), float64(event.gpu_milliseconds),
+		float64(event.wait_milliseconds), event.timing_available != 0)
+	if err := mixedQ4KQ8StatusError(status); err != nil {
+		return nil, nil, err
+	}
+	q4out = make([][]float32, len(q4ws))
+	for i := range q4ws {
+		q4out[i] = q4flat[int(q4off[i]):int(q4off[i+1])]
+	}
+	q8out = make([][]float32, len(q8ws))
+	for i := range q8ws {
+		q8out[i] = q8flat[int(q8off[i]):int(q8off[i+1])]
+	}
+	return q4out, q8out, nil
+}
+
 // FusedMLP runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) * (up·x) )
 // — in ONE Metal command buffer, keeping the intermediate-wide gate/up/inter resident on the GPU
 // (only x and y cross the boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==
 // down.In (=I); len(x)>=H, len(y)>=H. Returns false on a shape mismatch (caller uses the per-matmul
 // path). The activation is silu — the caller must gate on a non-GELU config.
-func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
+func FusedMLPWithEvents(gate, up, down *Q4KWeight, x, y []float32, observation *ExecutionObservation) bool {
 	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
 		return false
 	}
@@ -223,8 +376,14 @@ func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
 	if len(x) < gate.In || len(y) < down.Out {
 		return false
 	}
-	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+	var event C.mg_execution_event
+	C.mg_q4k_mlp(gate.id, up.id, down.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	recordQ4KEvent(observation, &event)
 	return true
+}
+
+func FusedMLP(gate, up, down *Q4KWeight, x, y []float32) bool {
+	return FusedMLPWithEvents(gate, up, down, x, y, nil)
 }
 
 // Q6KWeight is a handle to a raw Q6_K weight matrix [Out, In] resident on the GPU (210-B
@@ -261,30 +420,38 @@ func (w *Q6KWeight) ID() int { return int(w.id) }
 
 // GEMV computes y[Out] = W · x for one f32 activation row. It is the standalone decode/head
 // twin of the Q6_K GEMV already used inside FusedMLPQ6Down.
-func (w *Q6KWeight) GEMV(x, y []float32) {
+func (w *Q6KWeight) GEMVWithEvents(x, y []float32, observation *ExecutionObservation) {
 	if w == nil || w.id < 0 || len(x) < w.In || len(y) < w.Out {
 		return
 	}
-	C.mg_q6k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+	var event C.mg_execution_event
+	C.mg_q6k_gemv(w.id, (*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	recordQ4KEvent(observation, &event)
 }
+
+func (w *Q6KWeight) GEMV(x, y []float32) { w.GEMVWithEvents(x, y, nil) }
 
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ for a resident Q6_K matrix. It is the prefill twin of
 // the Q6_K GEMV used by the mixed Q4_K/Q6_K fused decode MLP. The kernel keeps the Q6_K bytes on
 // the GPU and only moves the f32 activation panel/result, so q4_k_m dense down_proj no longer falls
 // back to the CPU batched k-quant loop during hybrid Qwen prefill.
-func (w *Q6KWeight) GEMM(X []float32, P int, Y []float32) {
+func (w *Q6KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation *ExecutionObservation) {
 	if w == nil || w.id < 0 || P <= 0 || len(X) < P*w.In || len(Y) < P*w.Out {
 		return
 	}
-	C.mg_q6k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])))
+	var event C.mg_execution_event
+	C.mg_q6k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &event)
+	recordQ4KEvent(observation, &event)
 }
+
+func (w *Q6KWeight) GEMM(X []float32, P int, Y []float32) { w.GEMMWithEvents(X, P, Y, nil) }
 
 // FusedMLPQ6Down runs a whole dense SwiGLU MLP for one decode token — y = down( silu(gate·x) *
 // (up·x) ) — in ONE Metal command buffer, exactly like FusedMLP, but with a Q6_K down_proj
 // (gate/up stay Q4_K). The intermediate-wide gate/up/inter stays resident (only x and y cross the
 // boundary). Requires gate.In==up.In==down.Out (=H), gate.Out==up.Out==down.In (=I); len(x)>=H,
 // len(y)>=down.Out. Returns false on a shape mismatch. The activation is silu.
-func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
+func FusedMLPQ6DownWithEvents(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32, observation *ExecutionObservation) bool {
 	if gate == nil || up == nil || down == nil || gate.id < 0 || up.id < 0 || down.id < 0 {
 		return false
 	}
@@ -294,9 +461,15 @@ func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
 	if len(x) < gate.In || len(y) < down.Out {
 		return false
 	}
+	var event C.mg_execution_event
 	C.mg_q4k_mlp_q6down(gate.id, up.id, down.id,
-		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])))
+		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&y[0])), &event)
+	recordQ4KEvent(observation, &event)
 	return true
+}
+
+func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
+	return FusedMLPQ6DownWithEvents(gate, up, down, x, y, nil)
 }
 
 // FusedMLPQ6DownBatch runs n experts' fused SwiGLU MLP (Q4_K gate/up, Q6_K down) — each y_e =
@@ -307,7 +480,7 @@ func FusedMLPQ6Down(gate, up *Q4KWeight, down *Q6KWeight, x, y []float32) bool {
 // loop exactly. All experts must share one geometry (gate.In==up.In==down.Out=H, gate.Out==up.Out==
 // down.In=I). Returns false if n<=0, len(x)<H, len(Ycat)<n*down.Out, any handle is invalid, or the
 // backend declines a shape — the caller then runs the proven per-expert FusedMLPQ6Down loop.
-func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32) bool {
+func FusedMLPQ6DownBatchWithEvents(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32, observation *ExecutionObservation) bool {
 	n := len(gate)
 	if n == 0 || len(up) != n || len(down) != n {
 		return false
@@ -332,9 +505,15 @@ func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []flo
 	if len(x) < H || len(Ycat) < n*Dout {
 		return false
 	}
+	var event C.mg_execution_event
 	rc := C.mg_q4k_mlp_q6down_batch(&gw[0], &uw[0], &dw[0], C.int(n),
-		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&Ycat[0])))
+		(*C.float)(unsafe.Pointer(&x[0])), (*C.float)(unsafe.Pointer(&Ycat[0])), &event)
+	recordQ4KEvent(observation, &event)
 	return rc == 0
+}
+
+func FusedMLPQ6DownBatch(gate, up []*Q4KWeight, down []*Q6KWeight, x, Ycat []float32) bool {
+	return FusedMLPQ6DownBatchWithEvents(gate, up, down, x, Ycat, nil)
 }
 
 // GEMM computes Y[P, Out] = X[P, In] · Wᵀ (batched prefill GEMM). X and Y are f32 row-major;
@@ -349,7 +528,7 @@ func (w *Q4KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation 
 	var gpuMs C.double
 	var event C.mg_execution_event
 	C.mg_q4k_gemm(w.id, (*C.float)(unsafe.Pointer(&X[0])), C.int(P), (*C.float)(unsafe.Pointer(&Y[0])), &gpuMs, &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ4KEvent(observation, &event)
 	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 }
 
@@ -383,7 +562,7 @@ func GEMMGroupWithEvents(ws []*Q4KWeight, X []float32, P int, observation *Execu
 	var event C.mg_execution_event
 	C.mg_q4k_gemm_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
 		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &gpuMs, &event)
-	observation.record(uintptr(event.command_buffer), event.committed != 0, event.completed_wait != 0, event.host_readback != 0)
+	recordQ4KEvent(observation, &event)
 	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 	out := make([][]float32, n)
 	o := 0

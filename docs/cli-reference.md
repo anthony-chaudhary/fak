@@ -33,6 +33,7 @@ fak native-performance --baseline metal.command-buffer-amortization > baseline.j
 fak native-performance --compare baseline.json --candidate candidate.json
 fak native-performance --profile profile.json
 fak native-performance --profile-next profile.json
+fak native-performance --gate gate-request.json
 fak native-performance --next
 fak native-performance --dot
 ```
@@ -1350,7 +1351,7 @@ fak study-monitor --inventory-check --json
 
 The command reads `docs/research/monitored-repositories.json` by default, sorts by priority, and reports each source's status, pinned checked revision, `last_checked` age, and whether it is due for refresh. `--as-of` exists for deterministic witnesses and tests. The command does not contact GitHub or mutate the registry; scouts update all check fields together after inspecting the source.
 
-`--inventory-check` switches the readout to the stricter exhaustive-inventory contract. Candidate and studied rows are treated as needing a machine-readable map by default; the check exits nonzero until each row has an `inventory` block with a map path, matching indexed revision, positive subsystem count, completeness-critic result, and the required source-class coverage set.
+`--inventory-check` switches the readout to the stricter exhaustive-inventory contract. Candidate and studied rows are treated as needing a machine-readable map by default; the check exits nonzero until each row has an `inventory` block with a map path, matching indexed revision, positive subsystem count, completeness-critic result, and the required source-class coverage set. The map itself must include positive totals that equal its subsystem aggregates and one status row for every required source class. Local tree classes can be satisfied by `covered` rows with path evidence or by `checked_absent` rows from the complete tree walk. Forge history can only be `partial` or `external_required`; fak self-query witnesses, candidate matrices, and issue tracking remain `external_required` in the map and need traceable `source_evidence` entries instead of bare class names. The compound forge class must reference issue, pull-request, and discussion evidence.
 
 ## `fak vcache session-history`
 
@@ -1416,3 +1417,6 @@ fak server down --dir DIR --json
 ```
 
 `init` records immutable model and executable identity. `up` starts only the declared executable and waits within its readiness deadline; `status` reports the typed lifecycle state; `down` signals only the process proven by the instance receipt. Each subcommand emits JSON. Run `fak server` with no subcommand for the live usage text.
+
+
+--gate FILE strictly decodes an envelope-scoped gate request, compares the candidate to the last accepted witnessed receipt, and emits pass/investigate/regression plus suspect module revisions and a guarded bisect packet. Regression exits 3. Policy, cadence, override, and rollback evidence are defined in [the regression-gate contract](benchmarks/NATIVE-PERFORMANCE-REGRESSION-GATE.md).

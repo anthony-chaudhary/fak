@@ -297,6 +297,9 @@ type Config struct {
 	// HTTP planners in a ReplicaRouter and dispatches turns round-robin. Empty keeps
 	// the historical single-upstream behavior.
 	ReplicaBaseURLs []string
+	// HedgePolicy explicitly enables bounded delayed hedging for eligible buffered
+	// calls. Nil preserves the historical one-physical-call default.
+	HedgePolicy *HedgePolicy
 	// Provider selects the upstream transcript wire when BaseURL is set
 	// (openai, anthropic, gemini, xai). Empty keeps the OpenAI-compatible default.
 	Provider string
@@ -2554,7 +2557,12 @@ func newProxyPlanner(cfg Config, model string, baseURLs []string) (agent.Planner
 			Planner: p,
 		})
 	}
-	return NewReplicaRouter(model, replicas)
+	router, err := NewReplicaRouter(model, replicas)
+	if err != nil {
+		return nil, err
+	}
+	router.Hedge = cfg.HedgePolicy
+	return router, nil
 }
 
 // newConfiguredHTTPPlanner dials one upstream and applies every Config-derived knob to

@@ -1187,8 +1187,10 @@ func reviewDispatchContract(issue Issue) dispatchContractReview {
 	has := func(names ...string) bool {
 		return strings.TrimSpace(firstPromptSection(sections, names...)) != ""
 	}
+	hasScope := has("scope") ||
+		(has("core through-line", "in scope") && has("gold-plating boundary", "out of scope"))
 	missing := !has("current state") ||
-		!(has("scope") || (has("in scope") && has("out of scope"))) ||
+		!hasScope ||
 		!has("done condition", "done condition / witness") ||
 		!has("witness", "done condition / witness") ||
 		!has("likely files", "path hints", "paths", "files") ||

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -202,7 +203,12 @@ func runFleetAccounts(stdout, stderr io.Writer, argv []string) int {
 		if mode == "launch" {
 			return 0
 		}
-		return executeFleetLaunch(decision, os.Stdin, stdout, stderr, os.Environ())
+		outcome := executeFleetLaunchOutcome(decision, os.Stdin, stdout, stderr, os.Environ())
+		if err := appendFleetTurnOutcome(*launchLedger, decision, outcome); err != nil {
+			fmt.Fprintf(stderr, "fleet-accounts turn ledger: %v\n", err)
+			return 1
+		}
+		return outcome.Code
 	case "resolve":
 		taskClass := fleetAccountsTaskClass(*t1, *t2, *t3)
 		strict := *t1 || *t2 || *t3
@@ -445,6 +451,28 @@ func emitRosterJSON(stdout, stderr io.Writer, paths fleetaccounts.Paths,
 	return 0
 }
 
+type fleetLaunchLedgerEntry struct {
+	TS string `json:"ts"`
+	fleetaccounts.LaunchDecision
+}
+
+type fleetTurnOutcome struct {
+	Code   int
+	OK     bool
+	Reason string
+}
+
+type fleetTurnLedgerEntry struct {
+	TS            string `json:"ts"`
+	Phase         string `json:"phase"`
+	Account       string `json:"account,omitempty"`
+	Product       string `json:"product,omitempty"`
+	LaunchOK      bool   `json:"launch_ok"`
+	CompletedTurn bool   `json:"completed_turn_ok"`
+	ExitCode      int    `json:"exit_code"`
+	OutcomeReason string `json:"outcome_reason,omitempty"`
+}
+
 func appendFleetLaunchLedger(path string, decision fleetaccounts.LaunchDecision) error {
 	if strings.TrimSpace(path) == "" {
 		return nil
@@ -475,9 +503,13 @@ func appendFleetLaunchLedger(path string, decision fleetaccounts.LaunchDecision)
 var fleetLaunchExecCommand = exec.Command
 
 func executeFleetLaunch(d fleetaccounts.LaunchDecision, stdin io.Reader, stdout, stderr io.Writer, environ []string) int {
+	return executeFleetLaunchOutcome(d, stdin, stdout, stderr, environ).Code
+}
+
+func executeFleetLaunchOutcome(d fleetaccounts.LaunchDecision, stdin io.Reader, stdout, stderr io.Writer, environ []string) fleetTurnOutcome {
 	if len(d.Argv) == 0 {
 		fmt.Fprintln(stderr, "fleet-accounts exec: empty command")
-		return 2
+		return fleetTurnOutcome{Code: 2, Reason: "EMPTY_COMMAND"}
 	}
 	cmd := fleetLaunchExecCommand(d.Argv[0], d.Argv[1:]...)
 	cmd.Stdin, cmd.Stderr = stdin, stderr
@@ -491,31 +523,35 @@ func executeFleetLaunch(d fleetaccounts.LaunchDecision, stdin io.Reader, stdout,
 	}
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode()
+			return fleetTurnOutcome{Code: ee.ExitCode(), Reason: "PROCESS_EXIT"}
 		}
 		fmt.Fprintf(stderr, "fleet-accounts exec: %v\n", err)
-		return 1
+		return fleetTurnOutcome{Code: 1, Reason: "PROCESS_START"}
 	}
 	if d.Product == "codex" && !codexAssistantCompleted(codexOutput.Bytes()) {
 		reason := "ASSISTANT_RESPONSE_MISSING"
 		kind := "access"
+		reset := ""
 		lower := bytes.ToLower(codexOutput.Bytes())
-		if bytes.Contains(lower, []byte("userpromptsubmit blocked")) {
+		if message, ok := codexUsageLimitFailure(codexOutput.Bytes()); ok {
+			reason, kind = "PROVIDER_USAGE_LIMIT", "usage"
+			reset = codexUsageLimitReset(message, time.Now())
+		} else if bytes.Contains(lower, []byte("userpromptsubmit blocked")) {
 			reason = "PROMPT_HOOK_BLOCK"
 		} else if bytes.Contains(lower, []byte("401 unauthorized")) || bytes.Contains(lower, []byte("upstream rejected the credential")) {
 			reason, kind = "UPSTREAM_AUTH", "auth"
 		}
-		recordFleetCodexProbe(d.Account, strings.ToUpper(kind), kind, reason)
+		recordFleetCodexProbe(d.Account, strings.ToUpper(kind), kind, reason, reset)
 		fmt.Fprintf(stderr, "fleet-accounts exec: codex turn incomplete (%s): no completed assistant response\n", reason)
-		return 70
+		return fleetTurnOutcome{Code: 70, Reason: reason}
 	}
 	if d.Product == "codex" {
-		recordFleetCodexProbe(d.Account, "OK", "", "guarded assistant response completed")
+		recordFleetCodexProbe(d.Account, "OK", "", "guarded assistant response completed", "")
 	}
-	return 0
+	return fleetTurnOutcome{OK: true}
 }
 
-func recordFleetCodexProbe(account, status, kind, reason string) {
+func recordFleetCodexProbe(account, status, kind, reason, reset string) {
 	if strings.TrimSpace(account) == "" {
 		return
 	}
@@ -524,7 +560,70 @@ func recordFleetCodexProbe(account, status, kind, reason string) {
 		Account:     account,
 		Status:      status,
 		BlockReason: reason,
+		Reset:       reset,
 	})
+}
+
+func appendFleetTurnOutcome(path string, decision fleetaccounts.LaunchDecision, outcome fleetTurnOutcome) error {
+	entry := fleetTurnLedgerEntry{
+		TS: time.Now().UTC().Format(time.RFC3339Nano), Phase: "turn-outcome",
+		Account: decision.Account, Product: decision.Product, LaunchOK: decision.OK,
+		CompletedTurn: outcome.OK, ExitCode: outcome.Code, OutcomeReason: outcome.Reason,
+	}
+	return appendFleetLedgerJSON(path, entry)
+}
+
+func appendFleetLedgerJSON(path string, entry any) error {
+	body, err := json.Marshal(entry)
+	if err != nil {
+		return err
+	}
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintln(f, string(body))
+	return err
+}
+
+type codexEvent struct {
+	Type  string `json:"type"`
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func codexUsageLimitFailure(output []byte) (string, bool) {
+	for _, line := range bytes.Split(output, []byte{'\n'}) {
+		var event codexEvent
+		if json.Unmarshal(line, &event) == nil && event.Type == "turn.failed" && strings.Contains(strings.ToLower(event.Error.Message), "usage limit") {
+			return event.Error.Message, true
+		}
+	}
+	return "", false
+}
+
+var codexUsageResetPattern = regexp.MustCompile(`(?i)try again at\s+([A-Z][a-z]{2}\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\s+\d{1,2}:\d{2}\s+[AP]M)`)
+
+func codexUsageLimitReset(message string, now time.Time) string {
+	m := codexUsageResetPattern.FindStringSubmatch(message)
+	if len(m) != 2 {
+		return ""
+	}
+	raw := regexp.MustCompile(`(?i)(\d{1,2})(st|nd|rd|th)`).ReplaceAllString(m[1], "$1")
+	loc := now.Location()
+	for _, layout := range []string{"Jan 2, 2006 3:04 PM", "Jan 2 2006 3:04 PM"} {
+		if reset, err := time.ParseInLocation(layout, raw, loc); err == nil {
+			return reset.Format(time.RFC3339)
+		}
+	}
+	return ""
 }
 
 func overlayFleetLaunchEnv(base []string, overlay map[string]string) []string {
