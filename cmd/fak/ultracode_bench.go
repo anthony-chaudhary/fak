@@ -11,9 +11,10 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ultracodebench"
 )
 
-const ultracodeBenchUsage = `usage: fak ultracode bench --pair PAIR.json [--json]
+const ultracodeBenchUsage = `usage: fak ultracode bench (--pair PAIR.json | --factorial CAMPAIGN.json | --net-work CAMPAIGN.json) [--json]
        fak ultracode bench --selfcheck [--json]
   fak ultracode bench --scenario access-frontier [--scenario-input RUN.json] --widths 1,2,4,8 [--json]
+  fak ultracode bench --scenario fast-profile --pair BUNDLE.json --json
 
 Evaluate identical single-agent and ultracode-fleet runs as one paired artifact.
 The access-frontier scenario proves same-task micro-context and shared-prefix savings without
@@ -24,7 +25,7 @@ requested provider-billing axis; unavailable, noisy, or unequal pairs ABSTAIN.
 Fleet pairs without a complete provider-authoritative aggregate budget receipt ABSTAIN.`
 
 func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
-	var pairPath, scenario, scenarioInput, widthsText string
+	var pairPath, factorialPath, netWorkPath, scenario, scenarioInput, widthsText string
 	selfcheck, jsonOutput := false, false
 	widthsText = "1,2,4,8"
 	for i := 0; i < len(args); i++ {
@@ -57,13 +58,21 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 			}
 			i++
 			widthsText = args[i]
-		case "--pair":
+		case "--pair", "--factorial", "--net-work":
+			flag := args[i]
 			if i+1 >= len(args) {
-				fmt.Fprintln(stderr, "fak ultracode bench: --pair requires a path")
+				fmt.Fprintf(stderr, "fak ultracode bench: %s requires a path\n", flag)
 				return 2
 			}
 			i++
-			pairPath = args[i]
+			switch flag {
+			case "--pair":
+				pairPath = args[i]
+			case "--factorial":
+				factorialPath = args[i]
+			case "--net-work":
+				netWorkPath = args[i]
+			}
 		default:
 			fmt.Fprintf(stderr, "fak ultracode bench: unknown argument %q\n", args[i])
 			return 2
@@ -73,15 +82,45 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 	if selfcheck {
 		chosen++
 	}
-	if pairPath != "" {
+	if pairPath != "" && scenario == "" {
+		chosen++
+	}
+	if factorialPath != "" {
+		chosen++
+	}
+	if netWorkPath != "" {
 		chosen++
 	}
 	if scenario != "" {
 		chosen++
 	}
 	if chosen != 1 {
-		fmt.Fprintln(stderr, "fak ultracode bench: choose exactly one of --selfcheck, --pair PATH, or --scenario NAME")
+		fmt.Fprintln(stderr, "fak ultracode bench: choose exactly one of --selfcheck, --pair PATH, --factorial PATH, --net-work PATH, or --scenario NAME")
 		return 2
+	}
+	if scenario == "fast-profile" {
+		if pairPath == "" {
+			fmt.Fprintln(stderr, "fak ultracode bench: --scenario fast-profile requires --pair PATH")
+			return 2
+		}
+		b, err := os.ReadFile(pairPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: read pair: %v\n", err)
+			return 1
+		}
+		var bundle ultracodebench.FastProfileBundle
+		if err := json.Unmarshal(b, &bundle); err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: decode fast-profile: %v\n", err)
+			return 1
+		}
+		report := ultracodebench.EvaluateFastProfile(bundle)
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "fak ultracode bench: encode report: %v\n", err)
+			return 1
+		}
+		return 0
 	}
 	if scenario != "" {
 		if scenario != "access-frontier" {
@@ -93,22 +132,57 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 			fmt.Fprintf(stderr, "fak ultracode bench: %v\n", err)
 			return 2
 		}
-		frontier := ultracodebench.AccessFrontierFixture()
-		if scenarioInput != "" {
+		var report any
+		if scenarioInput == "" {
+			frontier := ultracodebench.AccessModeFrontierFixture()
+			evaluated, err := ultracodebench.EvaluateAccessModeFrontier(frontier, widths)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
+				return 1
+			}
+			report = evaluated
+		} else {
 			b, err := os.ReadFile(scenarioInput)
 			if err != nil {
 				fmt.Fprintf(stderr, "fak ultracode bench: read scenario input: %v\n", err)
 				return 1
 			}
-			if err := json.Unmarshal(b, &frontier); err != nil {
+			var header struct {
+				Schema string `json:"schema"`
+			}
+			if err := json.Unmarshal(b, &header); err != nil {
 				fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
 				return 1
 			}
-		}
-		report, err := ultracodebench.EvaluateAccessFrontier(frontier, widths)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
-			return 1
+			switch header.Schema {
+			case ultracodebench.AccessModeFrontierSchema:
+				var frontier ultracodebench.AccessModeFrontier
+				if err := json.Unmarshal(b, &frontier); err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
+					return 1
+				}
+				evaluated, err := ultracodebench.EvaluateAccessModeFrontier(frontier, widths)
+				if err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
+					return 1
+				}
+				report = evaluated
+			case ultracodebench.AccessFrontierSchema:
+				var frontier ultracodebench.AccessFrontier
+				if err := json.Unmarshal(b, &frontier); err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: decode scenario input: %v\n", err)
+					return 1
+				}
+				evaluated, err := ultracodebench.EvaluateAccessFrontier(frontier, widths)
+				if err != nil {
+					fmt.Fprintf(stderr, "fak ultracode bench: evaluate access-frontier: %v\n", err)
+					return 1
+				}
+				report = evaluated
+			default:
+				fmt.Fprintf(stderr, "fak ultracode bench: unsupported access-frontier schema %q\n", header.Schema)
+				return 1
+			}
 		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -118,6 +192,43 @@ func runUltracodeBench(stdout, stderr io.Writer, args []string) int {
 		}
 		return 0
 	}
+	if factorialPath != "" {
+		data, err := os.ReadFile(factorialPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "read factorial campaign: %v\n", err)
+			return 1
+		}
+		var campaign ultracodebench.FactorialCampaign
+		if err := json.Unmarshal(data, &campaign); err != nil {
+			fmt.Fprintf(stderr, "parse factorial campaign: %v\n", err)
+			return 1
+		}
+		report, err := ultracodebench.EvaluateFactorialCampaign(campaign, ultracodebench.FactorialWidths(campaign))
+		if err != nil {
+			fmt.Fprintf(stderr, "evaluate factorial campaign: %v\n", err)
+			return 1
+		}
+		return writeUltracodeBenchJSON(stdout, stderr, report)
+	}
+	if netWorkPath != "" {
+		data, err := os.ReadFile(netWorkPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "read net-work campaign: %v\n", err)
+			return 1
+		}
+		var campaign ultracodebench.NetWorkCampaign
+		if err := json.Unmarshal(data, &campaign); err != nil {
+			fmt.Fprintf(stderr, "parse net-work campaign: %v\n", err)
+			return 1
+		}
+		report, err := ultracodebench.EvaluateNetWorkCampaign(campaign)
+		if err != nil {
+			fmt.Fprintf(stderr, "evaluate net-work campaign: %v\n", err)
+			return 1
+		}
+		return writeUltracodeBenchJSON(stdout, stderr, report)
+	}
+
 	var pair ultracodebench.Pair
 	var budgetReceipt ultracodeBenchBudgetReceipt
 	if selfcheck {
@@ -218,6 +329,16 @@ func ultracodeBenchKnownAccounting(input, output, cacheRead, cacheWrite, billed 
 		BilledTokens: token(billed, ultracodebench.AuthorityProviderBilling),
 		SpendUSD:     ultracodebench.SpendAccounting{Availability: ultracodebench.AccountingAvailable, Authority: ultracodebench.AuthorityProviderBilling, ArtifactDigest: digest, Coverage: 1, ValueUSD: &spend},
 	}
+}
+
+func writeUltracodeBenchJSON(stdout, stderr io.Writer, value any) int {
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		fmt.Fprintf(stderr, "encode benchmark report: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func parseUltracodeWidths(raw string) ([]int, error) {

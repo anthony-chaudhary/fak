@@ -25,12 +25,12 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 		return runOrchestrationStatus(stdout, stderr, args[1:])
 	}
 	if len(args) == 0 || args[0] != "plan" {
-		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--launch] [--max-wall DURATION] [--selfcheck]")
+		fmt.Fprintln(stderr, "usage: fak orchestration plan --profile off|auto|fast|ultracode (--task FIXTURE | --task-text TEXT) [--json] [--strict] [--launch] [--max-wall DURATION] [--selfcheck]")
 		return 2
 	}
 	fs := flag.NewFlagSet("orchestration plan", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	profile := fs.String("profile", "auto", "orchestration profile: off, auto, or ultracode")
+	profile := fs.String("profile", "auto", "orchestration profile: off, auto, fast, or ultracode")
 	outputProfile := fs.String("output-profile", agentDefaultOutputStyle, "fleet response profile")
 	workProfile := fs.String("work-profile", agentDefaultWorkProfile, "fleet work profile")
 	taskPath := fs.String("task", "", "versioned task fixture JSON")
@@ -42,10 +42,12 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	codexHome := fs.String("codex-home", "", "Codex home used for a session-linked invocation receipt")
 	capset := fs.String("capabilities", "native", "harness fixture: native or unsupported")
 	maxWorkers := orchestrationOptionalInt{}
+	exactWorkers := orchestrationOptionalInt{}
 	maxTokens := orchestrationOptionalInt64{}
 	maxWall := fs.Duration("max-wall", defaultUltracodeWallBudget, "one parent wall deadline shared by launch staggering and all workers")
 	attended := orchestrationOptionalBool{}
 	fs.Var(&maxWorkers, "max-workers", "operator worker cap")
+	fs.Var(&exactWorkers, "exact-workers", "operator exact-width pin (stronger than adaptive selection)")
 	fs.Var(&maxTokens, "max-tokens", "operator token cap")
 	fs.Var(&attended, "attended", "operator interaction policy (true or false)")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -99,6 +101,9 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 	req := orchestration.OrchestrationProfile{Name: orchestration.Profile(*profile), Strict: *strict}
 	if maxWorkers.set {
 		req.MaxWorkers = &maxWorkers.value
+	}
+	if exactWorkers.set {
+		req.ExactWorkers = &exactWorkers.value
 	}
 	if maxTokens.set {
 		req.MaxTokens = &maxTokens.value
@@ -174,6 +179,9 @@ func runOrchestration(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 		launchReceipt = &launched
+		if resolved.Resolved.Width != nil {
+			resolved.Resolved.Width.Realized = len(launched.Workers)
+		}
 		if !*jsonOut {
 			fmt.Fprintf(stdout, "launch=%s run_id=%s workers=%d decline=%s\n", launched.Status, launched.RunID, len(launched.Workers), launched.DeclineReason)
 		}

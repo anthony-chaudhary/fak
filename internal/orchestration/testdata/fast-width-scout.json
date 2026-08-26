@@ -1,0 +1,70 @@
+{
+  "schema": "fak-orchestration-width-evidence/1",
+  "digest": "sha256:9e0934e439ea387a4daa37e5a2d7c2d234363068f908993506df2bbae7653b80",
+  "generated_at": "2026-08-25T12:00:00Z",
+  "max_age_seconds": 86400,
+  "key": {
+    "task_class": "grind",
+    "access_mix": "read-only-scouts",
+    "model_provider": "openai/gpt-5.6-sol",
+    "cache_posture": "warm-prefix",
+    "harness_capabilities": [
+      "cancellation",
+      "concurrency",
+      "independent_witness",
+      "leases",
+      "task_messaging"
+    ],
+    "benchmark_revision": "frontier-r1"
+  },
+  "cells": [
+    {
+      "width": 1,
+      "verdict": "GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 4000,
+      "total_worker_millis": 4000,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    },
+    {
+      "width": 2,
+      "verdict": "GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 2600,
+      "total_worker_millis": 5200,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    },
+    {
+      "width": 4,
+      "verdict": "GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 1800,
+      "total_worker_millis": 7200,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    },
+    {
+      "width": 8,
+      "verdict": "NO_GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 1700,
+      "total_worker_millis": 13600,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    }
+  ]
+}

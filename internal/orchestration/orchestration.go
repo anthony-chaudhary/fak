@@ -20,6 +20,7 @@ type Profile string
 const (
 	ProfileOff       Profile = "off"
 	ProfileAuto      Profile = "auto"
+	ProfileFast      Profile = "fast"
 	ProfileUltracode Profile = "ultracode"
 )
 
@@ -44,6 +45,7 @@ type OrchestrationProfile struct {
 	Name           Profile `json:"name"`
 	Strict         bool    `json:"strict,omitempty"`
 	MaxWorkers     *int    `json:"max_workers,omitempty"`
+	ExactWorkers   *int    `json:"exact_workers,omitempty"`
 	MaxTokens      *int64  `json:"max_tokens,omitempty"`
 	Attended       *bool   `json:"attended,omitempty"`
 	RequireWitness *bool   `json:"require_independent_witness,omitempty"`
@@ -58,13 +60,15 @@ type HarnessCapabilities struct {
 }
 
 type TaskSpec struct {
-	Schema     string    `json:"schema"`
-	ID         string    `json:"id"`
-	WorkClass  WorkClass `json:"work_class,omitempty"`
-	Attended   *bool     `json:"attended,omitempty"`
-	MaxWorkers *int      `json:"max_workers,omitempty"`
-	MaxTokens  *int64    `json:"max_tokens,omitempty"`
-	EngineRef  string    `json:"engine_ref,omitempty"`
+	Schema       string        `json:"schema"`
+	ID           string        `json:"id"`
+	WorkClass    WorkClass     `json:"work_class,omitempty"`
+	Attended     *bool         `json:"attended,omitempty"`
+	MaxWorkers   *int          `json:"max_workers,omitempty"`
+	ExactWorkers *int          `json:"exact_workers,omitempty"`
+	Width        *WidthRequest `json:"width,omitempty"`
+	MaxTokens    *int64        `json:"max_tokens,omitempty"`
+	EngineRef    string        `json:"engine_ref,omitempty"`
 }
 
 type ChildAccessMode string
@@ -203,6 +207,7 @@ type WorkflowPlan struct {
 	SOLRoute     SOLRoute          `json:"sol_route"`
 	Degradations []Degradation     `json:"degradations"`
 	Explanation  []string          `json:"explanation"`
+	Width        *WidthSelection   `json:"width,omitempty"`
 }
 
 type Resolution struct {
@@ -315,7 +320,7 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	if req.Name == "" {
 		req.Name = ProfileAuto
 	}
-	if req.Name != ProfileOff && req.Name != ProfileAuto && req.Name != ProfileUltracode {
+	if req.Name != ProfileOff && req.Name != ProfileAuto && req.Name != ProfileFast && req.Name != ProfileUltracode {
 		return Resolution{}, fmt.Errorf("unknown profile %q", req.Name)
 	}
 	workers, tokens, attended, witness := 1, int64(4096), false, false
@@ -333,6 +338,10 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 			resolvedProfile = ProfileOff
 		}
 		prov = append(prov, Provenance{"profile", "task.work_class", resolvedProfile})
+	} else if req.Name == ProfileFast {
+		workers, tokens = 8, 65536
+		resolvedProfile = ProfileFast
+		prov = append(prov, Provenance{"profile", "preset.fast", resolvedProfile})
 	} else if req.Name == ProfileUltracode {
 		workers, tokens, witness = 4, 65536, true
 		prov = append(prov, Provenance{"profile", "preset.ultracode", resolvedProfile})
@@ -368,8 +377,35 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 		witness = *req.RequireWitness
 		prov = append(prov, Provenance{"witness.independent", "operator", witness})
 	}
-	if workers < 1 || tokens < 1 {
+	if workers < 1 || tokens < 1 || (task.MaxWorkers != nil && *task.MaxWorkers < 1) || (req.MaxWorkers != nil && *req.MaxWorkers < 1) {
 		return Resolution{}, errors.New("budgets must be positive")
+	}
+	var width *WidthSelection
+	if resolvedProfile == ProfileFast {
+		workers = 8
+		if task.MaxWorkers != nil && *task.MaxWorkers < workers {
+			workers = *task.MaxWorkers
+		}
+		if req.MaxWorkers != nil && *req.MaxWorkers < workers {
+			workers = *req.MaxWorkers
+		}
+		selected := SelectFastWidth(task.Width, workers, tokens)
+		if task.ExactWorkers != nil {
+			if *task.ExactWorkers < 1 || *task.ExactWorkers > workers {
+				return Resolution{}, errors.New("task exact_workers must be positive and within max_workers")
+			}
+			selected.Selected, selected.Hold, selected.Reason = *task.ExactWorkers, "", "explicit task exact-width pin"
+			prov = append(prov, Provenance{"budget.max_workers", "task.exact_workers", selected.Selected})
+		}
+		if req.ExactWorkers != nil {
+			if *req.ExactWorkers < 1 || *req.ExactWorkers > workers {
+				return Resolution{}, errors.New("operator exact_workers must be positive and within max_workers")
+			}
+			selected.Selected, selected.Hold, selected.Reason = *req.ExactWorkers, "", "explicit operator exact-width pin"
+			prov = append(prov, Provenance{"budget.max_workers", "operator.exact_workers", selected.Selected})
+		}
+		workers = selected.Selected
+		width = &selected
 	}
 	multi := resolvedProfile != ProfileOff && workers > 1
 	required := map[string]bool{"concurrency": multi, "task_messaging": multi, "cancellation": multi, "leases": multi, "independent_witness": witness}
@@ -408,7 +444,7 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	for _, d := range deg {
 		explain = append(explain, "degraded: "+d.Reason)
 	}
-	plan := WorkflowPlan{SchemaVersion, resolvedProfile, task.ID, task.WorkClass, roles, dag, Budget{workers, tokens}, LeasePolicy{"taskmgr", multi}, WitnessPolicy{witness, witness}, ReconcilePolicy{multi, "effect-readback"}, InteractionPolicy{attended, multi, multi}, engine, solRoute, deg, explain}
+	plan := WorkflowPlan{Schema: SchemaVersion, Profile: resolvedProfile, TaskID: task.ID, WorkClass: task.WorkClass, Roles: roles, DAG: dag, Budget: Budget{workers, tokens}, Leases: LeasePolicy{"taskmgr", multi}, Witness: WitnessPolicy{witness, witness}, Reconcile: ReconcilePolicy{multi, "effect-readback"}, Interaction: InteractionPolicy{attended, multi, multi}, EngineRef: engine, SOLRoute: solRoute, Degradations: deg, Explanation: explain, Width: width}
 	return Resolution{SchemaVersion, req, plan, prov, deg}, nil
 }
 

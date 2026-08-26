@@ -17,7 +17,7 @@ func TestUltracodeBenchAccessFrontierJSON(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	var report ultracodebench.AccessFrontierReport
+	var report ultracodebench.AccessModeFrontierReport
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
@@ -30,14 +30,11 @@ func TestUltracodeBenchAccessFrontierJSON(t *testing.T) {
 			t.Fatalf("missing exclusion %q in %q", excluded, joined)
 		}
 	}
-	var climb ultracodebench.HillClimb
-	for _, h := range report.HillClimb {
-		if h.Mode == "multi_writer" {
-			climb = h
-		}
+	if len(report.Artifacts) != 2 || len(report.Artifacts[0].Cells) != 12 || len(report.Artifacts[1].Cells) != 12 {
+		t.Fatalf("matrix shape = %+v", report.Artifacts)
 	}
-	if climb.ChosenWidth != 2 || climb.StopWidth != 4 {
-		t.Fatalf("climb = %+v", climb)
+	if report.Artifacts[0].Cells[4].Verdict != "GAIN" || report.Artifacts[1].Cells[0].Verdict != "ABSTAIN" {
+		t.Fatalf("offline/live verdicts = %+v", report.Artifacts)
 	}
 }
 
@@ -65,7 +62,7 @@ func TestUltracodeBenchAccessFrontierObservedInput(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	var report ultracodebench.AccessFrontierReport
+	var report ultracodebench.AccessModeFrontierReport
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}

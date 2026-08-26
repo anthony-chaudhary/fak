@@ -1,0 +1,70 @@
+{
+  "schema": "fak-orchestration-width-evidence/1",
+  "digest": "sha256:02280cf5a10470508f795821c08b41d51ccff234efc58864a5257a8c477f1674",
+  "generated_at": "2026-08-25T12:00:00Z",
+  "max_age_seconds": 86400,
+  "key": {
+    "task_class": "grind",
+    "access_mix": "contending-writers",
+    "model_provider": "openai/gpt-5.6-sol",
+    "cache_posture": "warm-prefix",
+    "harness_capabilities": [
+      "cancellation",
+      "concurrency",
+      "independent_witness",
+      "leases",
+      "task_messaging"
+    ],
+    "benchmark_revision": "frontier-r1"
+  },
+  "cells": [
+    {
+      "width": 1,
+      "verdict": "GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 4000,
+      "total_worker_millis": 4000,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    },
+    {
+      "width": 2,
+      "verdict": "NO_GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 3900,
+      "total_worker_millis": 7800,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    },
+    {
+      "width": 4,
+      "verdict": "NO_GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 4100,
+      "total_worker_millis": 16400,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    },
+    {
+      "width": 8,
+      "verdict": "NO_GAIN",
+      "accepted_outcome_equal": true,
+      "telemetry_complete": true,
+      "critical_path_millis": 5000,
+      "total_worker_millis": 40000,
+      "total_tokens": 1000,
+      "cache_cost_tokens": 100,
+      "lease_wait_millis": 10,
+      "reconcile_millis": 10
+    }
+  ]
+}

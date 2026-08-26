@@ -1,0 +1,2034 @@
+{
+  "schema": "fak-ultracode-net-work-campaign/1",
+  "evidence_kind": "synthetic_fixture",
+  "source_receipt": "internal/ultracodebench/testdata/issue8679-net-work-campaign.json",
+  "order_policy": "rotating",
+  "minimum_repetitions": 3,
+  "envelope": {
+    "model": "deterministic-fixture",
+    "runtime": "in-process",
+    "tokenizer": "fixture-tokenizer",
+    "task_digest": "sha256:issue8679-fixture",
+    "cache_posture": "controlled",
+    "campaign_version": "issue8679-v1"
+  },
+  "cells": [
+    {
+      "width": 1,
+      "treatment": "no-reuse",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w1/no-reuse/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 100,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 95,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/no-reuse/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 105,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 100,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/no-reuse/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 110,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 105,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 1,
+      "treatment": "prefix-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w1/prefix-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 92,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 87,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/prefix-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 97,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 92,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/prefix-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 102,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 97,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 1,
+      "treatment": "scope-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w1/scope-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 80,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 75,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/scope-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 85,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 80,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/scope-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 90,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 85,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 1,
+      "treatment": "combined",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w1/combined/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 70,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 65,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/combined/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 75,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 70,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w1/combined/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 80,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 75,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "no-reuse",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w2/no-reuse/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 100,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 95,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/no-reuse/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 105,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 100,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/no-reuse/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 110,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 105,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "prefix-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w2/prefix-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 92,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 87,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/prefix-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 97,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 92,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/prefix-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 102,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 97,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "scope-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w2/scope-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 80,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 75,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/scope-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 85,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 80,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/scope-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 90,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 85,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 2,
+      "treatment": "combined",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w2/combined/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 70,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 65,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/combined/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 75,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 70,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w2/combined/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 80,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 75,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "no-reuse",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w4/no-reuse/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 100,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 95,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/no-reuse/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 105,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 100,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/no-reuse/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 110,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 105,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "prefix-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w4/prefix-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 92,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 87,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/prefix-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 97,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 92,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/prefix-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 102,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 97,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "scope-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w4/scope-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 80,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 75,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/scope-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 85,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 80,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/scope-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 90,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 85,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 4,
+      "treatment": "combined",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w4/combined/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 105,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 100,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/combined/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 110,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 105,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w4/combined/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 115,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 110,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "no-reuse",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w8/no-reuse/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 100,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 95,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/no-reuse/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 105,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 100,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/no-reuse/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 1000,
+          "cached_tokens": 0,
+          "wall_latency_ns": 110,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 105,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "prefix-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w8/prefix-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 92,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 87,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/prefix-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 97,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 92,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/prefix-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 800,
+          "cached_tokens": 200,
+          "wall_latency_ns": 102,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 97,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "scope-only",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w8/scope-only/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 80,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 75,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/scope-only/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 85,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 80,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/scope-only/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 600,
+          "cached_tokens": 0,
+          "wall_latency_ns": 90,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 85,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 8,
+      "treatment": "combined",
+      "repetitions": [
+        {
+          "receipt": "fixture://issue8679/w8/combined/r1",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 105,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 100,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/combined/r2",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 110,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 105,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        },
+        {
+          "receipt": "fixture://issue8679/w8/combined/r3",
+          "accepted": true,
+          "outcome_digest": "accepted",
+          "input_tokens": 400,
+          "cached_tokens": 200,
+          "wall_latency_ns": 115,
+          "components": {
+            "model_prefill": {
+              "controller": "runtime",
+              "duration_ns": 110,
+              "authoritative": true
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "cache_operations": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "routing": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            },
+            "orchestration": {
+              "controller": "fak",
+              "duration_ns": 0,
+              "authoritative": true
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accepted_outcome_digest": "accepted"
+}

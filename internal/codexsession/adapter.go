@@ -11,7 +11,9 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/harnessprotocol"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
@@ -20,12 +22,16 @@ import (
 const Engine = "codex"
 
 type Config struct {
-	Command   string
-	Args      []string
-	Workspace string
-	Version   string
-	RunID     string
-	Sink      func(harnesskit.Envelope) error
+	Command         string
+	Args            []string
+	Workspace       string
+	Version         string
+	RunID           string
+	Sink            func(harnesskit.Envelope) error
+	ApprovalPolicy  ApprovalPolicy
+	ApprovalJournal func(ApprovalJournalEntry)
+	ApprovalTimeout time.Duration
+	Now             func() time.Time
 }
 
 type Adapter struct {
@@ -35,6 +41,12 @@ type Adapter struct {
 	threadID string
 	turnID   string
 	nextID   int64
+	writeMu  sync.Mutex
+	pending  map[string]pendingApproval
+	resolved map[string]struct{}
+	inputIDs map[string]struct{}
+	epoch    uint64
+	emit     func(harnesskit.EventType, string, string, any) error
 }
 
 type rpcMessage struct {
@@ -66,6 +78,12 @@ func New(cfg Config) (*Adapter, error) {
 		return nil, err
 	}
 	cfg.Workspace = filepath.Clean(root)
+	if cfg.ApprovalTimeout <= 0 {
+		cfg.ApprovalTimeout = 2 * time.Minute
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 	return &Adapter{cfg: cfg}, nil
 }
 
@@ -86,6 +104,10 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 	}
 	a.mu.Lock()
 	a.stdin = stdin
+	a.pending = make(map[string]pendingApproval)
+	a.resolved = make(map[string]struct{})
+	a.inputIDs = make(map[string]struct{})
+	a.epoch++
 	a.mu.Unlock()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start Codex app-server: %w", err)
@@ -100,6 +122,7 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 		}
 		return a.cfg.Sink(e)
 	}
+	a.emit = emit
 	runCause := "codex-session"
 	if err := emit(harnesskit.EventRunStarted, a.cfg.RunID, runCause, harnesskit.RunPayload{Status: "running", Reason: fmt.Sprintf("engine=%s transport=stdio:// codex=%s workspace=%s", Engine, a.cfg.Version, a.cfg.Workspace)}); err != nil {
 		return err
@@ -148,7 +171,7 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 	if err := json.NewEncoder(stdin).Encode(map[string]any{"jsonrpc": "2.0", "method": "initialized"}); err != nil {
 		return err
 	}
-	if err := write(2, "thread/start", map[string]any{"cwd": a.cfg.Workspace, "ephemeral": true}); err != nil {
+	if err := write(2, "thread/start", map[string]any{"cwd": a.cfg.Workspace, "ephemeral": true, "approvalPolicy": "untrusted", "sandbox": "workspace-write"}); err != nil {
 		return err
 	}
 	raw, err := wait(2)
@@ -187,6 +210,19 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 		if err := json.Unmarshal(scan.Bytes(), &m); err != nil {
 			return err
 		}
+		if len(m.ID) != 0 && strings.Contains(m.Method, "requestApproval") {
+			if err := a.handleApprovalRequest(m); err != nil {
+				a.failPending("adapter_crash")
+				return err
+			}
+			continue
+		}
+		if len(m.ID) != 0 { // Additive server requests fail closed and stay visible.
+			if err := a.handleApprovalRequest(m); err != nil {
+				return err
+			}
+			continue
+		}
 		if done, err := a.notification(emit, m); err != nil {
 			return err
 		} else if done {
@@ -195,6 +231,7 @@ func (a *Adapter) Run(ctx context.Context, text string) error {
 		}
 	}
 	waitErr := cmd.Wait()
+	a.failPending("disconnect")
 	serr := <-stderrDone
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -277,3 +314,5 @@ func (a *Adapter) Interrupt() error {
 	a.nextID++
 	return json.NewEncoder(a.stdin).Encode(map[string]any{"jsonrpc": "2.0", "id": 1000 + a.nextID, "method": "turn/interrupt", "params": map[string]any{"threadId": a.threadID, "turnId": a.turnID}})
 }
+
+func (a *Adapter) now() time.Time { return a.cfg.Now() }

@@ -1,0 +1,716 @@
+{
+  "schema": "fak-ultracode-net-work-report/1",
+  "verdict": "LOSS",
+  "evidence_kind": "synthetic_fixture",
+  "source_receipt": "internal/ultracodebench/testdata/issue8679-net-work-campaign.json",
+  "envelope": {
+    "model": "deterministic-fixture",
+    "runtime": "in-process",
+    "tokenizer": "fixture-tokenizer",
+    "task_digest": "sha256:issue8679-fixture",
+    "cache_posture": "controlled",
+    "campaign_version": "issue8679-v1"
+  },
+  "widths": [
+    {
+      "width": 1,
+      "verdict": "GAIN",
+      "cells": [
+        {
+          "treatment": "no-reuse",
+          "repetitions": 3,
+          "input_tokens_median": 1000,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 100,
+          "wall_latency_median_ns": 105,
+          "wall_latency_p95_ns": 110,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 100,
+              "p95_ns": 105
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "prefix-only",
+          "repetitions": 3,
+          "input_tokens_median": 800,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 92,
+          "wall_latency_median_ns": 97,
+          "wall_latency_p95_ns": 102,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 92,
+              "p95_ns": 97
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "scope-only",
+          "repetitions": 3,
+          "input_tokens_median": 600,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 80,
+          "wall_latency_median_ns": 85,
+          "wall_latency_p95_ns": 90,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 80,
+              "p95_ns": 85
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "combined",
+          "repetitions": 3,
+          "input_tokens_median": 400,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 70,
+          "wall_latency_median_ns": 75,
+          "wall_latency_p95_ns": 80,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 70,
+              "p95_ns": 75
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        }
+      ],
+      "combined_net_work_delta_ns": -30,
+      "combined_wall_delta_ns": -30,
+      "combined_token_delta": -600
+    },
+    {
+      "width": 2,
+      "verdict": "GAIN",
+      "cells": [
+        {
+          "treatment": "no-reuse",
+          "repetitions": 3,
+          "input_tokens_median": 1000,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 100,
+          "wall_latency_median_ns": 105,
+          "wall_latency_p95_ns": 110,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 100,
+              "p95_ns": 105
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "prefix-only",
+          "repetitions": 3,
+          "input_tokens_median": 800,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 92,
+          "wall_latency_median_ns": 97,
+          "wall_latency_p95_ns": 102,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 92,
+              "p95_ns": 97
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "scope-only",
+          "repetitions": 3,
+          "input_tokens_median": 600,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 80,
+          "wall_latency_median_ns": 85,
+          "wall_latency_p95_ns": 90,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 80,
+              "p95_ns": 85
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "combined",
+          "repetitions": 3,
+          "input_tokens_median": 400,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 70,
+          "wall_latency_median_ns": 75,
+          "wall_latency_p95_ns": 80,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 70,
+              "p95_ns": 75
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        }
+      ],
+      "combined_net_work_delta_ns": -30,
+      "combined_wall_delta_ns": -30,
+      "combined_token_delta": -600
+    },
+    {
+      "width": 4,
+      "verdict": "LOSS",
+      "reason": "combined cell has an equal-outcome net loss",
+      "cells": [
+        {
+          "treatment": "no-reuse",
+          "repetitions": 3,
+          "input_tokens_median": 1000,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 100,
+          "wall_latency_median_ns": 105,
+          "wall_latency_p95_ns": 110,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 100,
+              "p95_ns": 105
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "prefix-only",
+          "repetitions": 3,
+          "input_tokens_median": 800,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 92,
+          "wall_latency_median_ns": 97,
+          "wall_latency_p95_ns": 102,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 92,
+              "p95_ns": 97
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "scope-only",
+          "repetitions": 3,
+          "input_tokens_median": 600,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 80,
+          "wall_latency_median_ns": 85,
+          "wall_latency_p95_ns": 90,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 80,
+              "p95_ns": 85
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "combined",
+          "repetitions": 3,
+          "input_tokens_median": 400,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 105,
+          "wall_latency_median_ns": 110,
+          "wall_latency_p95_ns": 115,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 105,
+              "p95_ns": 110
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        }
+      ],
+      "combined_net_work_delta_ns": 5,
+      "combined_wall_delta_ns": 5,
+      "combined_token_delta": -600
+    },
+    {
+      "width": 8,
+      "verdict": "LOSS",
+      "reason": "combined cell has an equal-outcome net loss",
+      "cells": [
+        {
+          "treatment": "no-reuse",
+          "repetitions": 3,
+          "input_tokens_median": 1000,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 100,
+          "wall_latency_median_ns": 105,
+          "wall_latency_p95_ns": 110,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 100,
+              "p95_ns": 105
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "prefix-only",
+          "repetitions": 3,
+          "input_tokens_median": 800,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 92,
+          "wall_latency_median_ns": 97,
+          "wall_latency_p95_ns": 102,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 92,
+              "p95_ns": 97
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "scope-only",
+          "repetitions": 3,
+          "input_tokens_median": 600,
+          "cached_tokens_median": 0,
+          "accounted_work_median_ns": 80,
+          "wall_latency_median_ns": 85,
+          "wall_latency_p95_ns": 90,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 80,
+              "p95_ns": 85
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        },
+        {
+          "treatment": "combined",
+          "repetitions": 3,
+          "input_tokens_median": 400,
+          "cached_tokens_median": 200,
+          "accounted_work_median_ns": 105,
+          "wall_latency_median_ns": 110,
+          "wall_latency_p95_ns": 115,
+          "components": {
+            "cache_operations": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_decode": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "model_prefill": {
+              "controller": "runtime",
+              "median_ns": 105,
+              "p95_ns": 110
+            },
+            "orchestration": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "routing": {
+              "controller": "fak",
+              "median_ns": 0,
+              "p95_ns": 0
+            },
+            "tool_work": {
+              "controller": "runtime",
+              "median_ns": 0,
+              "p95_ns": 0
+            }
+          }
+        }
+      ],
+      "combined_net_work_delta_ns": 5,
+      "combined_wall_delta_ns": 5,
+      "combined_token_delta": -600
+    }
+  ],
+  "hill_climb": {
+    "chosen_width": 2,
+    "stop_width": 4,
+    "stop_reason": "combined cell has an equal-outcome net loss"
+  },
+  "replay_command": "fak ultracode bench --net-work \u003ccampaign.json\u003e --json"
+}
