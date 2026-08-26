@@ -20,6 +20,8 @@
 
 #import <Metal/Metal.h>
 #include "q8_bridge.h"
+#include <stdlib.h>
+#include <unistd.h>
 
 typedef struct {
     uintptr_t command_buffer;
@@ -177,6 +179,8 @@ typedef struct {
     CFTypeRef codes;  // retained id<MTLBuffer>, int8 [out*in]
     CFTypeRef scales; // retained id<MTLBuffer>, f32  [out*nblk]
     int out, in, nblk;
+    void* owned_codes;
+    void* owned_scales;
 } Q8W;
 
 #define MG_MAX_Q8 8192
@@ -204,6 +208,45 @@ static void q8_grow_scratch(long inBytes, long nblkElems, long yElems) {
     }
 }
 
+static size_t q8_page_round(size_t n) {
+    size_t page = (size_t)getpagesize();
+    return (n + page - 1) & ~(page - 1);
+}
+
+// mg_q8_upload_nocopy_owned creates one page-aligned native owner per payload and exposes it to
+// both Metal and the CPU oracle. Publication is atomic: every allocation/view succeeds or none is
+// installed in the global table and the copied CPU input remains authoritative.
+int mg_q8_upload_nocopy_owned(const signed char* codes, const float* scales, int out, int in,
+                              signed char** owned_codes, float** owned_scales) {
+    if (owned_codes) *owned_codes = NULL;
+    if (owned_scales) *owned_scales = NULL;
+    if (gDev == nil || codes == NULL || scales == NULL || owned_codes == NULL || owned_scales == NULL) return -1;
+    if (!q8_init() || in % 32 != 0 || out <= 0 || gNQ8 >= MG_MAX_Q8) return -1;
+    int nblk = in / 32;
+    size_t codeBytes = (size_t)out * (size_t)in;
+    size_t scaleBytes = (size_t)out * (size_t)nblk * sizeof(float);
+    size_t codeAlloc = q8_page_round(codeBytes);
+    size_t scaleAlloc = q8_page_round(scaleBytes);
+    void* cq = NULL;
+    void* sd = NULL;
+    size_t page = (size_t)getpagesize();
+    if (posix_memalign(&cq, page, codeAlloc) != 0 || posix_memalign(&sd, page, scaleAlloc) != 0) {
+        free(cq); free(sd); return -1;
+    }
+    memcpy(cq, codes, codeBytes);
+    memcpy(sd, scales, scaleBytes);
+    id<MTLBuffer> cb = [gDev newBufferWithBytesNoCopy:cq length:codeAlloc options:MTLResourceStorageModeShared deallocator:nil];
+    id<MTLBuffer> sb = [gDev newBufferWithBytesNoCopy:sd length:scaleAlloc options:MTLResourceStorageModeShared deallocator:nil];
+    if (cb == nil || sb == nil) { free(cq); free(sd); return -1; }
+    int id = gNQ8++;
+    gQ8[id].codes = CFBridgingRetain(cb);
+    gQ8[id].scales = CFBridgingRetain(sb);
+    gQ8[id].out = out; gQ8[id].in = in; gQ8[id].nblk = nblk;
+    gQ8[id].owned_codes = cq; gQ8[id].owned_scales = sd;
+    *owned_codes = (signed char*)cq;
+    *owned_scales = (float*)sd;
+    return id;
+}
 // mg_q8_upload copies a Q8_0 weight (out*in int8 codes + out*nblk f32 block scales, nblk=in/32)
 // resident onto the GPU and returns an integer handle (>=0), or -1 on failure.
 int mg_q8_upload(const signed char* codes, const float* scales, int out, int in) {
@@ -461,12 +504,23 @@ void mg_q8_dims(int wid, int* out, int* in, int* nblk) {
     *out = gQ8[wid].out; *in = gQ8[wid].in; *nblk = gQ8[wid].nblk;
 }
 
+void mg_q8_release(int wid) {
+    if (wid < 0 || wid >= gNQ8) return;
+    if (gQ8[wid].codes != NULL) { CFBridgingRelease(gQ8[wid].codes); gQ8[wid].codes = NULL; }
+    if (gQ8[wid].scales != NULL) { CFBridgingRelease(gQ8[wid].scales); gQ8[wid].scales = NULL; }
+    free(gQ8[wid].owned_codes); free(gQ8[wid].owned_scales);
+    gQ8[wid].owned_codes = NULL; gQ8[wid].owned_scales = NULL;
+    gQ8[wid].out = gQ8[wid].in = gQ8[wid].nblk = 0;
+    while (gNQ8 > 0 && gQ8[gNQ8 - 1].codes == NULL && gQ8[gNQ8 - 1].scales == NULL &&
+           gQ8[gNQ8 - 1].owned_codes == NULL && gQ8[gNQ8 - 1].owned_scales == NULL) {
+        gNQ8--;
+    }
+}
 // mg_q8_reset releases every resident Q8 weight buffer and the reused scratch, returning the Q8
 // table to empty. Mirrors mg_q4k_reset. Call only when no Q8Weight handle is still in use.
 void mg_q8_reset(void) {
     for (int i = 0; i < gNQ8; i++) {
-        if (gQ8[i].codes  != NULL) { CFBridgingRelease(gQ8[i].codes);  gQ8[i].codes  = NULL; }
-        if (gQ8[i].scales != NULL) { CFBridgingRelease(gQ8[i].scales); gQ8[i].scales = NULL; }
+        mg_q8_release(i);
     }
     gNQ8 = 0;
     gQ8XBuf  = nil; gQ8XCap  = 0;
