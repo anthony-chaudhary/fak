@@ -1,0 +1,4 @@
+FAIL	./internal/qwenflashnext [setup failed]
+# ./internal/qwenflashnext
+no Go files in C:\Users\USER\AppData\Local\Fleet\worker-worktrees\fak-worker-wt-issue-9124-f2b2906c1776\internal\qwenflashnext
+FAIL

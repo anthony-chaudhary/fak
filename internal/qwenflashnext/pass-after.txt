@@ -1,0 +1,1 @@
+ok  	github.com/anthony-chaudhary/fak/internal/qwenflashnext	0.067s

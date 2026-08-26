@@ -1,0 +1,181 @@
+{
+  "source": "Qwen/Qwen3.8-Flash-Next",
+  "revision": "f5d08274bafd880402bd16f5e3e6c514136ec06c",
+  "tokenizer_json_sha256": "0997f410c57a1f4e53b09e4be8f4a172d90edd9564368fb0847030937229b9f3",
+  "tokenizer_config_json_sha256": "b11349aafa7cdc6a320767cf7ceb29ed82f7eda5d65e8e0819e76f0ce947bf27",
+  "eos_token": {
+    "content": "<|im_end|>",
+    "id": 248046
+  },
+  "pad_token": {
+    "content": "<|endoftext|>",
+    "id": 248044
+  },
+  "added_tokens": [
+    {
+      "content": "<|endoftext|>",
+      "id": 248044,
+      "special": true
+    },
+    {
+      "content": "<|im_start|>",
+      "id": 248045,
+      "special": true
+    },
+    {
+      "content": "<|im_end|>",
+      "id": 248046,
+      "special": true
+    },
+    {
+      "content": "<|object_ref_start|>",
+      "id": 248047,
+      "special": true
+    },
+    {
+      "content": "<|object_ref_end|>",
+      "id": 248048,
+      "special": true
+    },
+    {
+      "content": "<|box_start|>",
+      "id": 248049,
+      "special": true
+    },
+    {
+      "content": "<|box_end|>",
+      "id": 248050,
+      "special": true
+    },
+    {
+      "content": "<|quad_start|>",
+      "id": 248051,
+      "special": true
+    },
+    {
+      "content": "<|quad_end|>",
+      "id": 248052,
+      "special": true
+    },
+    {
+      "content": "<|vision_start|>",
+      "id": 248053,
+      "special": true
+    },
+    {
+      "content": "<|vision_end|>",
+      "id": 248054,
+      "special": true
+    },
+    {
+      "content": "<|vision_pad|>",
+      "id": 248055,
+      "special": true
+    },
+    {
+      "content": "<|image_pad|>",
+      "id": 248056,
+      "special": true
+    },
+    {
+      "content": "<|video_pad|>",
+      "id": 248057,
+      "special": true
+    },
+    {
+      "content": "<tool_call>",
+      "id": 248058,
+      "special": false
+    },
+    {
+      "content": "</tool_call>",
+      "id": 248059,
+      "special": false
+    },
+    {
+      "content": "<|fim_prefix|>",
+      "id": 248060,
+      "special": false
+    },
+    {
+      "content": "<|fim_middle|>",
+      "id": 248061,
+      "special": false
+    },
+    {
+      "content": "<|fim_suffix|>",
+      "id": 248062,
+      "special": false
+    },
+    {
+      "content": "<|fim_pad|>",
+      "id": 248063,
+      "special": false
+    },
+    {
+      "content": "<|repo_name|>",
+      "id": 248064,
+      "special": false
+    },
+    {
+      "content": "<|file_sep|>",
+      "id": 248065,
+      "special": false
+    },
+    {
+      "content": "<tool_response>",
+      "id": 248066,
+      "special": false
+    },
+    {
+      "content": "</tool_response>",
+      "id": 248067,
+      "special": false
+    },
+    {
+      "content": "<think>",
+      "id": 248068,
+      "special": false
+    },
+    {
+      "content": "</think>",
+      "id": 248069,
+      "special": false
+    },
+    {
+      "content": "<|audio_start|>",
+      "id": 248070,
+      "special": true
+    },
+    {
+      "content": "<|audio_end|>",
+      "id": 248071,
+      "special": true
+    },
+    {
+      "content": "<tts_pad>",
+      "id": 248072,
+      "special": true
+    },
+    {
+      "content": "<tts_text_bos>",
+      "id": 248073,
+      "special": true
+    },
+    {
+      "content": "<tts_text_eod>",
+      "id": 248074,
+      "special": true
+    },
+    {
+      "content": "<tts_text_bos_single>",
+      "id": 248075,
+      "special": true
+    },
+    {
+      "content": "<|audio_pad|>",
+      "id": 248076,
+      "special": true
+    }
+  ]
+}
