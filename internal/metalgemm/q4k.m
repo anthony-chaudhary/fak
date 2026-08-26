@@ -1240,6 +1240,64 @@ void mg_q4k_gemv_group(const int* wids, int n, const float* x, float* Ycat, cons
     }
 }
 
+// mg_q4k_q8_gemv_group is the mixed full-attention projection spine: Q/K Q8 and V Q4_K
+// share one caller-owned command buffer. Return 0 only before a command buffer exists, 1 after a
+// completed submission, and -1 after a submitted command buffer fails.
+int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_y, const int* q4_yoff,
+                         const int* q8_wids, int nq8, const signed char* xq, const float* xd,
+                         float* q8_y, const int* q8_yoff, mg_execution_event* event) {
+    mg_execution_event_reset(event);
+    if (nq4 <= 0 || nq8 <= 0 || q4_wids == NULL || q8_wids == NULL ||
+        x == NULL || xq == NULL || xd == NULL || q4_y == NULL || q8_y == NULL ||
+        q4_yoff == NULL || q8_yoff == NULL) return 0;
+    for (int i = 0; i < nq4; i++) {
+        if (q4_wids[i] < 0 || q4_wids[i] >= gNQ4) return 0;
+    }
+    int in = gQ4[q4_wids[0]].in;
+    for (int i = 1; i < nq4; i++) {
+        if (gQ4[q4_wids[i]].in != in) return 0;
+    }
+    if (mg_q8_prepare_gemv_group(q8_wids, nq8, xq, xd, q8_yoff) == 0) return 0;
+    long q4total = (long)q4_yoff[nq4];
+    q4k_grow_scratch((long)in, q4total);
+    if (gQXBuf == nil || gQYBuf == nil) return 0;
+    memcpy(gQXBuf.contents, x, (size_t)in * 4);
+
+    @autoreleasepool {
+        id<MTLCommandBuffer> cb = [gQueue commandBuffer];
+        if (cb == nil) return 0;
+        if (event != NULL) event->command_buffer = (uintptr_t)(__bridge void*)cb;
+
+        id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
+        if (e == nil) return -1;
+        [e setComputePipelineState:psoQ4KGemv];
+        [e setBuffer:gQXBuf offset:0 atIndex:1];
+        for (int i = 0; i < nq4; i++) {
+            Q4KW W = gQ4[q4_wids[i]];
+            [e setBuffer:(__bridge id<MTLBuffer>)W.buf offset:0 atIndex:0];
+            [e setBuffer:gQYBuf offset:(NSUInteger)((long)q4_yoff[i] * 4) atIndex:2];
+            [e setBytes:&W.nblk length:sizeof(int) atIndex:3];
+            [e setBytes:&W.out length:sizeof(int) atIndex:4];
+            [e dispatchThreadgroups:MTLSizeMake((NSUInteger)W.out, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(32, 1, 1)];
+        }
+        [e endEncoding];
+        if (mg_q8_encode_gemv_group((__bridge void*)cb, q8_wids, nq8, q8_yoff) == 0) {
+            return -1; // candidate encoding began; fail closed rather than falling back mid-batch.
+        }
+        [cb commit];
+        if (event != NULL) event->committed = 1;
+        [cb waitUntilCompleted];
+        if (event != NULL) event->completed_wait = 1;
+        if (cb.status != MTLCommandBufferStatusCompleted) return -1;
+
+        memcpy(q4_y, gQYBuf.contents, (size_t)q4total * 4);
+        mg_q8_read_gemv_group(q8_y, q8_yoff[nq8]);
+        if (event != NULL) event->host_readback = 1;
+        return 1;
+    }
+}
+
 // mg_q4k_gemm computes Y[P, out] = X[P, in] · W[wid]^T (batched prefill GEMM). f32 in/out,
 // row-major; Y must hold P*out floats. out_gpu_ms is nullable: when non-NULL it receives the
 // command buffer's on-GPU execution window (cb.GPUEndTime - cb.GPUStartTime, in ms), valid after
