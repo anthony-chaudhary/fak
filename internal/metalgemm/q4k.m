@@ -20,6 +20,7 @@
 // from the f16 table (it holds raw bytes, not f16), with its own teardown via mg_q4k_reset.
 
 #import <Metal/Metal.h>
+#include "q8_bridge.h"
 
 typedef struct {
     uintptr_t command_buffer;

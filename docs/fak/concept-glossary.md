@@ -2372,3 +2372,10 @@ Typed platform-neutral decision policy for fault-domain restart, reattach, hold,
 The campaign evidence field naming the runtime that actually executed model math (fak-native or llama.cpp), which the validator uses to decide whether a result is eligible for promotion.
 
 **Distinct from:** It records the model-math executor for evidence promotion, not GatewayURL or EndpointConfig HTTP endpoint identity, a planner or model route, gateway transport, or the compute.Backend hardware/device selected inside that runtime.
+
+
+### ExecutionEngine values (fak-native / llama.cpp)
+
+The closed qwen38 campaign values selecting either fak-native model math for promotion eligibility or the pinned llama.cpp comparison-only runtime.
+
+**Distinct from:** These are the values carried by ExecutionEngine, not the ExecutionEngine evidence field itself, the generic engine dispatch interface, a backend/device choice, or permission to fall back between runtimes.
