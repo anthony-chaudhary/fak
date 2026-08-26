@@ -172,6 +172,7 @@ type serveFlags struct {
 	dojoMode                     *bool
 	native                       *bool
 	nativeMaxTurns               *int
+	nativeAdmissionTokenBudget   *int
 	nativeCodeWorkspace          *string
 	nativeCodeTools              *bool
 	nativeSpeculate              *bool
@@ -256,6 +257,7 @@ func newServeFlagSet() (*flag.FlagSet, *serveFlags) {
 	sf.dojoMode = fs.Bool("dojo", false, "enable live dojo mode: write a start-marker for each serve session into the live-episode corpus (.dojo/live-episodes/ under the workspace root) for issue #956. NOTE: live-episode scoring is not yet wired into `fak dojo run` (which today scores Claude Code transcripts passed via --corpus), so this records the boundary but does not yet feed the scorer.")
 	sf.native = fs.Bool("native", false, "NATIVE HARNESS (#1316/#1837): drive fak's OWN agent loop for every /v1/messages turn instead of the single-shot proxy turn. Both buffered and `stream: true` requests stay on the owned native path; streaming drives agent.RunArmStream and renders its text deltas plus typed lifecycle progress as Anthropic SSE and does not fall through to the proxy. If streaming cannot be safely emitted â a response writer that cannot flush, a planner that does not support streaming, or an armed answer stop-gate (a rejected answer must never leak as a delta) â the request degrades to the buffered native handler — the same owned loop, one response instead of deltas. The in-kernel syscall boundary remains the sole tool path, and ArmMetrics ride on the response `fak.native_arm` extension. Off by default (the proxy path is byte-for-byte unchanged).")
 	sf.nativeMaxTurns = fs.Int("native-max-turns", gateway.DefaultNativeMaxTurns, "with --native: cap the owned loop's model round-trips per served request (<=0 uses the built-in default)")
+	sf.nativeAdmissionTokenBudget = fs.Int("native-admission-token-budget", gateway.DefaultAdmissionPolicy().TokenBudget, "with a fak-native in-kernel model: cap the total token footprint admitted by the request scheduler; must be positive (default 8192)")
 	sf.nativeCodeWorkspace = fs.String("native-code-workspace", "", "override the workspace root for default-on kernel Read/Write/Edit/Bash/Grep/Glob (requires --native)")
 	sf.nativeCodeTools = fs.Bool("native-code-tools", true, "with --native, arm bounded kernel Read/Write/Edit/Bash/Grep/Glob in the current workspace; use --native-code-tools=false to disable")
 	sf.nativeSpeculate = fs.Bool("native-speculate", false, "enable effect-free coding speculation (requires --native-code-workspace)")
@@ -321,6 +323,10 @@ func cmdServe(argv []string) {
 		os.Exit(2)
 	}
 	*sf.qwen38Runtime = qwen38Runtime
+	if _, err := serveNativeAdmissionPolicy(sf); err != nil {
+		fmt.Fprintf(os.Stderr, "fak serve: %v\n", err)
+		os.Exit(2)
+	}
 	if *sf.printEffectiveConfig {
 		if err := json.NewEncoder(os.Stdout).Encode(effectiveServeConfigWithQwen38Runtime(sf, manifest, manifestPresent, explicit)); err != nil {
 			fmt.Fprintf(os.Stderr, "fak serve: print effective config: %v\n", err)
@@ -662,7 +668,10 @@ func (rt *serveRuntime) buildGateway(sf *serveFlags) {
 	srv.AddStartupMessages(startupMessages...)
 	srv.SetModelLoadProfile(rt.loadProfile)
 	if rt.inKernelModel != nil && rt.inKernelTok != nil && strings.TrimSpace(*sf.baseURL) == "" && len(sf.replicaBaseURLs.Values()) == 0 {
-		srv.SetAdmissionController(gateway.NewAdmissionController(gateway.DefaultAdmissionPolicy()))
+		controller, message, err := newServeNativeAdmissionController(sf)
+		must(err)
+		srv.SetAdmissionController(controller)
+		srv.AddStartupMessages(message)
 	}
 	// Control-plane SPEND CAP (#4859, the CLI half of #3273): --spend-cap builds the
 	// governor, --spend-scope-trace the trace->ScopeKey resolver, and --budget-webhook is
