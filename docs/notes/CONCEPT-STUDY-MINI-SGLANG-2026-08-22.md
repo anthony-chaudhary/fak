@@ -96,3 +96,13 @@ No new issue was opened. Every actionable PARTIAL/ABSENT default candidate dedup
 ## Completion boundary
 
 This study establishes where mini-sglang should influence fak and binds each useful mechanism to current fak code or an existing issue. It does **not** claim that #8395 is implemented, that mini-sglang's performance claims reproduce on fak hardware, or that CUDA graph replay is worthwhile for agent traffic. Those claims require the sanctioned-GPU campaign already named by #8395.
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue #9000 refreshed the study denominator without changing the original technical verdict. The pinned machine-readable map is [`docs/research/inventory/sgl-project-mini-sglang.json`](../research/inventory/sgl-project-mini-sglang.json), generated from all **121 files**, **32 directories**, and **10,874 text lines** at `9a91cfafe754aa85daee49998176275667eb58f2`.
+
+The non-tree audit paged the GitHub surfaces through that revision's `2026-05-17T12:37:42Z` timestamp: **25 issues** (12 open, 13 closed), **123 pull requests** (38 open, 85 closed), **0 releases**, and **171 commits**. GraphQL confirms discussions are disabled. The tree has no standalone roadmap or changelog; its roadmap signal is nine TODO sites covering FA4/Blackwell, MLA and HiCache, host-cache matching and prefill estimation, decode-first scheduling, sampling parameters, and batch tokenization. `LICENSE` and `pyproject.toml` confirm MIT provenance.
+
+Three candidate-specific `fak capabilities` self-queries covered prefix/KV reuse, serving scheduler and tensor-parallel ordering, and user-visible serving measurement. The six-candidate matrix in the map adjudicates every retained idea as already owned, already tracked by [#8395](https://github.com/anthony-chaudhary/fak/issues/8395), or deliberately stay-minimal. No new borrow issue survived; #9000 is the inventory tracker and #8395 remains the implementation owner.
+
+Completeness critic: the generator walked the entire pinned tree; the refresh separately exhausted issues, pull requests, releases, and commit history, confirmed the absence of discussions, inspected all repository TODOs and license evidence, ran the fak self-query, adjudicated the candidate matrix, and reconciled issue tracking. `.git` is the only skipped control directory.

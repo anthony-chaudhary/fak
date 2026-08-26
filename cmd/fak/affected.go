@@ -668,6 +668,14 @@ type goPkg struct {
 	GoFiles           []string
 	CgoFiles          []string
 	CFiles            []string
+	CXXFiles          []string
+	MFiles            []string
+	HFiles            []string
+	FFiles            []string
+	SFiles            []string
+	SwigFiles         []string
+	SwigCXXFiles      []string
+	SysoFiles         []string
 	TestGoFiles       []string
 	XTestGoFiles      []string
 	EmbedFiles        []string
@@ -742,7 +750,9 @@ func parseGoList(r io.Reader) (fileToPkg map[string]string, edges map[string][]s
 			if rel, relErr := filepath.Rel(modDir, p.Dir); relErr == nil {
 				relSlash := filepath.ToSlash(rel)
 				for _, group := range [][]string{
-					p.GoFiles, p.CgoFiles, p.CFiles, p.TestGoFiles, p.XTestGoFiles,
+					p.GoFiles, p.CgoFiles, p.CFiles, p.CXXFiles, p.MFiles, p.HFiles,
+					p.FFiles, p.SFiles, p.SwigFiles, p.SwigCXXFiles, p.SysoFiles,
+					p.TestGoFiles, p.XTestGoFiles,
 					p.EmbedFiles, p.TestEmbedFiles, p.XTestEmbedFiles,
 					p.IgnoredGoFiles, p.IgnoredOtherFiles,
 				} {
