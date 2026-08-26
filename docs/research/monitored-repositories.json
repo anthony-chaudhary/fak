@@ -268,13 +268,99 @@
       "url": "https://github.com/rdi-berkeley/agents-last-exam",
       "status": "studied",
       "priority": 11,
-      "why": "Broad artifact-scored professional-work benchmark deeply studied for official hidden-reference grading, run-local ALE-Claw gateway composition, typed trajectories, timeout-aware artifact scoring, and cross-harness controls. One FAK benchmark-entry spine survived as #8223; ALE trajectory evidence was folded into #6629.",
-      "last_checked": "2026-08-20",
-      "checked_revision": "75a3f866535946b67f9a57e4f158eb30ad50be8a",
-      "stars_at_check": 955,
-      "last_push_at_check": "2026-08-16T04:18:19Z",
+      "why": "Broad artifact-scored professional-work benchmark deeply studied and exhaustively refreshed for official hidden-reference grading, run-local ALE-Claw gateway composition, typed trajectories, timeout-aware artifact scoring, cross-harness controls, and provider operating-envelope risks. The official raw-vs-fak spine remains #8223; trajectory fidelity remains #6629.",
+      "last_checked": "2026-08-25",
+      "checked_revision": "0b6465b13c85b5a0a017d4c88bcf979a519a5e1f",
+      "stars_at_check": 970,
+      "last_push_at_check": "2026-08-25T22:20:05Z",
       "study_note": "docs/notes/CONCEPT-STUDY-AGENTS-LAST-EXAM-2026-08-20.md",
-      "refresh_issue": "#8990"
+      "refresh_issue": "#8990",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/rdi-berkeley-agents-last-exam.json",
+        "indexed_revision": "0b6465b13c85b5a0a017d4c88bcf979a519a5e1f",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 11,
+        "candidate_count": 4,
+        "filed_issue_count": 2,
+        "completeness_critic": "exhaustive pinned tree map plus complete GitHub repository, issue, pull-request, discussion, release, tag, branch, and history read-back; FAK self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped control and vendored dependency/cache directories are explicit",
+        "source_evidence": [
+          {
+            "class": "history_changelog_releases",
+            "evidence": [
+              "git -C _scratch/study-ale-8990/ale log --all",
+              "https://github.com/rdi-berkeley/agents-last-exam/releases/tag/runtime-qe-bgw-6.7.0-4.0",
+              "gh api repos/rdi-berkeley/agents-last-exam/releases?per_page=100",
+              "gh api repos/rdi-berkeley/agents-last-exam/tags?per_page=100"
+            ],
+            "note": "Full pinned clone history plus the sole release and tag were inspected; 173 commits were visible."
+          },
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api --paginate repos/rdi-berkeley/agents-last-exam/issues?state=all&per_page=100",
+              "gh api graphql repository(owner:rdi-berkeley,name:agents-last-exam) issues/pullRequests/discussions",
+              "https://github.com/rdi-berkeley/agents-last-exam/issues",
+              "https://github.com/rdi-berkeley/agents-last-exam/pulls"
+            ],
+            "note": "Complete read-back: 16 issues, 63 pull requests, and 0 discussions at observation."
+          },
+          {
+            "class": "roadmap_todos",
+            "evidence": [
+              "docs/research/inventory/rdi-berkeley-agents-last-exam.json#non_tree_study.history_and_roadmap",
+              "https://github.com/rdi-berkeley/agents-last-exam/issues/7",
+              "https://github.com/rdi-berkeley/agents-last-exam/issues/26",
+              "https://github.com/rdi-berkeley/agents-last-exam/issues/27",
+              "https://github.com/rdi-berkeley/agents-last-exam/issues/68",
+              "https://github.com/rdi-berkeley/agents-last-exam/issues/75"
+            ],
+            "note": "No dedicated roadmap file at the pin; tree TODOs, open forge work, and remote branches were reviewed as the roadmap surface."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"artifact-scored professional-work benchmark hidden-reference grading typed trajectories timeout harness comparison\"",
+              "fak capabilities \"benchmark entry external agent harness run receipt quality score operating envelope\"",
+              "fak capabilities \"trajectory import artifact evaluator cross harness benchmark\""
+            ],
+            "note": "No ALE-shaped benchmark or trajectory-import capability was found; existing #8223 and #6629 remain the owned gaps."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/rdi-berkeley-agents-last-exam.json#non_tree_study.candidate_matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8990",
+              "https://github.com/anthony-chaudhary/fak/issues/8223",
+              "https://github.com/anthony-chaudhary/fak/issues/6629"
+            ],
+            "note": "The refresh issue and both surviving prior follow-ons are explicit; no duplicate issue was filed."
+          }
+        ],
+        "issue_refs": [
+          "#8990",
+          "#8223",
+          "#6629"
+        ]
+      }
     },
     {
       "repository": "llm-as-a-verifier/llm-as-a-verifier",
