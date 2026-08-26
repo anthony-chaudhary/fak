@@ -49,6 +49,25 @@ func TestFailureAnalysisCardFrozenBundleValidatesAndRenders(t *testing.T) {
 			t.Fatalf("Markdown output missing %q:\n%s", want, markdown)
 		}
 	}
+	for _, tc := range []struct {
+		label string
+		want  int
+	}{
+		{"Verdict", 1},
+		{"Most important problem", 1},
+		{"Classification rationale", 1},
+		{"Task", 1},
+		{"Constraint", len(card.Task.Constraints)},
+		{"Strength", len(card.Strengths)},
+		{"Observed", len(card.Failures.Observations)},
+		{"Inferred", len(card.Failures.Inferences)},
+		{"Final score", 1},
+		{"Breakdown", len(card.Scoring.Breakdown)},
+	} {
+		if got := strings.Count(markdown, "- "+tc.label+" ("); got != tc.want {
+			t.Errorf("rendered %q label count = %d, want %d", tc.label, got, tc.want)
+		}
+	}
 
 	after := readFailureAnalysisArtifacts(t, root, card)
 	for path, want := range before {
@@ -96,6 +115,58 @@ func TestFailureAnalysisCardAdversarialFixturesFailClosed(t *testing.T) {
 			err := ValidateFailureAnalysisCard(root, &card)
 			if err == nil || !strings.Contains(err.Error(), tc.WantError) {
 				t.Fatalf("err = %v, want substring %q", err, tc.WantError)
+			}
+		})
+	}
+}
+
+func TestFailureAnalysisClaimValidationPrefixes(t *testing.T) {
+	root, original := loadFailureAnalysisFixture(t)
+	tests := []struct {
+		name   string
+		prefix string
+		mutate func(*FailureAnalysisCard)
+	}{
+		{"verdict summary", "verdict summary", func(card *FailureAnalysisCard) {
+			card.Verdict.Summary.Text = ""
+		}},
+		{"most important problem", "most important problem", func(card *FailureAnalysisCard) {
+			card.Verdict.MostImportantProblem.Text = ""
+		}},
+		{"task summary", "task summary", func(card *FailureAnalysisCard) {
+			card.Task.Summary.Text = ""
+		}},
+		{"task constraint", "task constraint 1", func(card *FailureAnalysisCard) {
+			card.Task.Constraints[0].Text = ""
+		}},
+		{"strength", "strength 1", func(card *FailureAnalysisCard) {
+			card.Strengths[0].Text = ""
+		}},
+		{"failure observation", "failure observation 1", func(card *FailureAnalysisCard) {
+			card.Failures.Observations[0].Text = ""
+		}},
+		{"failure inference", "failure inference 1", func(card *FailureAnalysisCard) {
+			card.Failures.Inferences[0].Text = ""
+		}},
+		{"final score", "final score", func(card *FailureAnalysisCard) {
+			card.Scoring.FinalScore.Text = ""
+		}},
+		{"score breakdown", "score breakdown 1", func(card *FailureAnalysisCard) {
+			card.Scoring.Breakdown[0].Text = ""
+		}},
+		{"classification rationale", "classification rationale", func(card *FailureAnalysisCard) {
+			card.Classification.Rationale.Text = ""
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			card := cloneFailureAnalysisCard(t, original)
+			tc.mutate(&card)
+			err := ValidateFailureAnalysisCard(root, &card)
+			want := tc.prefix + " requires text"
+			if err == nil || err.Error() != want {
+				t.Fatalf("err = %v, want %q", err, want)
 			}
 		})
 	}
