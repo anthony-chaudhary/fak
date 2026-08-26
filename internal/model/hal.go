@@ -78,12 +78,14 @@ func (s *Session) Close() {
 		return
 	}
 	s.closeOnce.Do(func() {
+		// Sequence auxiliary state can be owned by a native capability even when
+		// Backend is nil, so its teardown is outside the compute-HAL branch.
+		s.closeQwen35HALState()
 		if s.Backend != nil {
 			s.halClosed = true
 			if b, ok := s.Backend.(batchBackend); ok {
 				b.FlushBatch()
 			}
-			s.closeQwen35HALState()
 			if s.halW != nil {
 				for name, t := range s.halW {
 					s.Backend.Free(t)
