@@ -163,3 +163,33 @@ geography, original event date, and whether later articles are independent evide
 - Metered PUE/WUE, installed-to-healthy conversion, failure/interruption, and cluster goodput.
 - China, Middle East, India, and Europe supply chains and export-control substitutions.
 - Cancellation/refutation history instead of announcement-only accumulation.
+
+## Named vendor and site lifecycle additions
+
+| Evidence date | Entity / system | Observed lifecycle state | Quantified evidence | What it does **not** prove |
+|---|---|---|---|---|
+| 2026-02-11 | Vertiv power and thermal infrastructure | Supplier backlog / ordered | Q4 organic orders +252%; ~2.9× book-to-bill; $15.0B backlog, +109% YoY. | Product mix, shipment date, site installation, commissioning, or online MW. |
+| 2026-07-29 | SK hynix HBM4 | Mass shipments begun | Supplier says HBM4 mass shipments started in Q2 2026. | Units, yield, customer allocation, accelerator integration, or accepted systems. |
+| 2026-06-18 | SK hynix 12-layer HBM4E | Customer samples / qualification | Up to 16 Gbps/pin; >20% claimed power-efficiency gain; 17% claimed heat-resistance reduction. | Qualification success, mass-production timing, yield, or fleet availability. |
+| 2026-04-23 | TSMC CoWoS | 5.5-reticle production; larger package roadmap | 14-reticle package with ~10 compute dies and 20 HBM stacks planned for 2028. | Wafer-equivalent capacity, yield, allocation, shipment volume, or delivered accelerators. |
+| 2025-07-22 | GE Vernova / Crusoe onsite generation | Ordered | 29 turbine packages, expected nearly 1 GW nameplate; 19 booked June 2025 after 10 in December 2024. | Delivery/commissioning, continuous output, IT load, PUE, fuel, emissions permits, or compute acceptance. |
+| 2026 case study | Start Campus Sines / Siemens Energy | Phase 1 equipment delivered for early operations; future phases planned | Blue GIS, transformers, and electrical infrastructure in Phase 1; future substations and seawater cooling. | Accepted MW, PUE, water flow, commissioning dates, equipment lead time, or independent uptime. |
+
+### Lifecycle joins these rows require
+
+```text
+supplier order/backlog
+  -> factory slot
+  -> sample/qualification (for semiconductors)
+  -> shipped
+  -> site delivered
+  -> installed
+  -> commissioned
+  -> accepted/healthy
+  -> schedulable
+  -> active
+  -> quality-constrained goodput
+```
+
+No row above may skip from backlog, sample, roadmap, or equipment order directly to
+usable AI capacity.

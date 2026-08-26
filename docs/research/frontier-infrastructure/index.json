@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T17:12:00-07:00",
-  "issue": 9302,
+  "updated_at": "2026-08-26T17:28:00-07:00",
+  "issue": 9304,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 117,
+    "entry_count": 123,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -106,6 +106,7 @@
       "Data Center Watch",
       "DeepSeek",
       "FineServe",
+      "GE Vernova / Crusoe",
       "GitHub Copilot coding agent",
       "Google",
       "Google / utility partners",
@@ -144,17 +145,21 @@
       "OpenAI / Stargate",
       "Oracle",
       "Robust KV cache management study",
+      "SK hynix",
       "Sakana AI",
       "Sarvam AI",
       "Sea AI Lab",
       "SemiAnalysis",
       "ServeGen production study",
+      "Siemens Energy / Start Campus",
       "TIE scheduling study",
+      "TSMC",
       "Technology Innovation Institute",
       "Tencent",
       "TraceLab coding-agent corpus",
       "U.S. AI datacenter pipeline",
       "U.S. datacenter sector",
+      "Vertiv",
       "Z.ai / Zhipu AI",
       "llm-d / Google",
       "xAI",
@@ -4341,6 +4346,238 @@
       "fak_implications": [
         "Use China-cloud revenue as a market signal only; retain audit and segment-boundary labels.",
         "Do not convert percentage growth into installed capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "vertiv-q4-2025-backlog-2026",
+      "category": "supply_chain",
+      "entity": "Vertiv",
+      "topic": [
+        "cooling",
+        "power_equipment",
+        "backlog",
+        "orders",
+        "delivery_risk"
+      ],
+      "published_at": "2026-02-11",
+      "event_at": "2025-12-31",
+      "source_title": "Vertiv Reports Strong Fourth Quarter with Organic Orders Growth of 252%",
+      "source_url": "https://investors.vertiv.com/news/news-details/2026/Vertiv-Reports-Strong-Fourth-Quarter-with-Organic-Orders-Growth-of-252-and-Diluted-EPS-Growth-of-200-Adjusted-Diluted-EPS-37/default.aspx",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Vertiv reported Q4 2025 organic orders up about 252%, a roughly 2.9x book-to-bill ratio, and $15.0B backlog, with hyperscale and colocation datacenters leading demand across power and thermal infrastructure.",
+      "quantified": {
+        "quarter_organic_orders_yoy_pct_approx": 252,
+        "book_to_bill_approx": 2.9,
+        "backlog_usd": 15000000000,
+        "backlog_yoy_growth_pct": 109
+      },
+      "assumptions": [
+        "Power and cooling equipment delivery can lag compute procurement and gate datacenter commissioning."
+      ],
+      "contradictions_or_limits": [
+        "Backlog is contracted demand, not shipped, installed, commissioned, or healthy equipment.",
+        "The disclosure does not split backlog into cooling, UPS, switchgear, regions, projects, or delivery dates."
+      ],
+      "fak_implications": [
+        "Track critical-infrastructure backlog and delivery state separately from accelerator availability.",
+        "Do not convert supplier backlog into online MW without project-level shipment and acceptance evidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "skhynix-hbm4-mass-shipments-2026",
+      "category": "supply_chain",
+      "entity": "SK hynix",
+      "topic": [
+        "hbm",
+        "mass_production",
+        "shipments",
+        "customer_qualification",
+        "memory_supply"
+      ],
+      "published_at": "2026-07-29",
+      "event_at": "2026-06-30",
+      "source_title": "SK hynix Announces 2Q26 Financial Results",
+      "source_url": "https://news.skhynix.com/en/q2-2026-business-results/",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "SK hynix said HBM4 mass shipments began in Q2 2026 while it expanded long-term customer contracts and production capacity.",
+      "quantified": {},
+      "assumptions": [
+        "HBM lifecycle must distinguish samples, qualification, mass-production readiness, mass shipments, accelerator integration, and accepted systems."
+      ],
+      "contradictions_or_limits": [
+        "Mass shipments do not reveal unit volume, yield, customer allocation, accelerator install rate, or usable fleet capacity.",
+        "Supplier statements are not a neutral industry-wide HBM supply census."
+      ],
+      "fak_implications": [
+        "Record HBM generation and shipment lifecycle on accelerator receipts.",
+        "Do not infer installed accelerator capacity from memory shipment status alone."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tsmc-cowos-roadmap-2026",
+      "category": "supply_chain",
+      "entity": "TSMC",
+      "topic": [
+        "advanced_packaging",
+        "cowos",
+        "hbm",
+        "roadmap",
+        "production_lifecycle"
+      ],
+      "published_at": "2026-04-23",
+      "event_at": "2026-04-23",
+      "source_title": "TSMC Debuts A13 Technology at 2026 North America Technology Symposium",
+      "source_url": "https://pr.tsmc.com/english/news/3302",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "TSMC said it was producing 5.5-reticle-size CoWoS and planned a 14-reticle version integrating about 10 large compute dies and 20 HBM stacks for production in 2028, followed by beyond-14-reticle expansion in 2029.",
+      "quantified": {
+        "current_cowos_reticle_size": 5.5,
+        "planned_2028_reticle_size": 14,
+        "planned_compute_dies_2028_approx": 10,
+        "planned_hbm_stacks_2028_approx": 20,
+        "planned_production_year": 2028
+      },
+      "assumptions": [
+        "Advanced packaging size and HBM integration are accelerator-platform constraints with multi-year production roadmaps."
+      ],
+      "contradictions_or_limits": [
+        "A roadmap is not delivered capacity, yield, customer allocation, or package shipment volume.",
+        "Reticle size does not identify wafer-equivalent throughput or accepted accelerator systems."
+      ],
+      "fak_implications": [
+        "Track package generation, qualification, and volume-production date separately from GPU announcements.",
+        "Avoid forecasting fleet capacity from package geometry without throughput and yield."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "gevernova-crusoe-29-turbines-2025",
+      "category": "datacenter_physical",
+      "entity": "GE Vernova / Crusoe",
+      "topic": [
+        "onsite_generation",
+        "gas_turbines",
+        "power",
+        "order",
+        "emissions"
+      ],
+      "published_at": "2025-07-22",
+      "event_at": "2025-06-30",
+      "source_title": "GE Vernova and Crusoe announce major 29-unit aeroderivative gas turbine deal to deliver power to AI data centers",
+      "source_url": "https://www.gevernova.com/news/press-releases/ge-vernova-crusoe-announce-major-29-unit-aeroderivative-gas-turbine-deliver-ai-data-centers",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "GE Vernova and Crusoe announced orders totaling 29 LM2500XPRESS turbine packages expected to provide nearly 1 GW of electricity for AI datacenters; 19 units were booked in June 2025 after 10 ordered in December 2024.",
+      "quantified": {
+        "turbine_packages": 29,
+        "expected_generation_gw_approx": 1,
+        "units_booked_june_2025": 19,
+        "units_ordered_december_2024": 10
+      },
+      "assumptions": [
+        "Onsite generation can bypass grid timing but adds fuel, emissions, permitting, equipment delivery, and operations constraints."
+      ],
+      "contradictions_or_limits": [
+        "An equipment order and nameplate generation are not commissioned continuous IT load.",
+        "The source does not state site, delivery dates, capacity factor, PUE, gas interconnection, water use, or accepted compute capacity."
+      ],
+      "fak_implications": [
+        "Maintain ordered, delivered, commissioned, available, and IT-load-equivalent power states.",
+        "Count fuel, emissions control, redundancy, PUE, and outages in capacity receipts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "siemens-start-campus-sines-lifecycle-2026",
+      "category": "datacenter_physical",
+      "entity": "Siemens Energy / Start Campus",
+      "topic": [
+        "grid_connection",
+        "transformers",
+        "switchgear",
+        "seawater_cooling",
+        "phased_delivery",
+        "site_lifecycle"
+      ],
+      "published_at": "2026-06-01",
+      "event_at": "2026-06-01",
+      "source_title": "Start Campus, Portugal: Renewable energy for hyperscale data center",
+      "source_url": "https://www.siemens-energy.com/global/en/home/references/start-campus-sines-datacenter.html",
+      "source_kind": "official_case_study",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Siemens Energy describes a phased Sines, Portugal campus delivery: Phase 1 supplied Blue gas-insulated switchgear, transformers, and electrical infrastructure for early operations; future phases add substations, capacity, and seawater cooling.",
+      "quantified": {},
+      "assumptions": [
+        "Named equipment and phased site records are stronger lifecycle evidence than campus target capacity alone.",
+        "Cooling and grid infrastructure can enter service in different phases."
+      ],
+      "contradictions_or_limits": [
+        "The case study does not provide shipment/commissioning dates, accepted MW, PUE, water flow, equipment lead times, or independent operating evidence.",
+        "Future phases remain plans."
+      ],
+      "fak_implications": [
+        "Track each site phase and equipment system through delivery and acceptance.",
+        "Do not treat planned seawater cooling or substations as current operating capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "skhynix-hbm4e-samples-2026",
+      "category": "supply_chain",
+      "entity": "SK hynix",
+      "topic": [
+        "hbm4e",
+        "samples",
+        "qualification",
+        "bandwidth",
+        "power_efficiency"
+      ],
+      "published_at": "2026-06-18",
+      "event_at": "2026-06-18",
+      "source_title": "SK hynix Ships Samples of 12-Layer Next-Gen HBM4E",
+      "source_url": "https://news.skhynix.com/en/sk-hynix-ships-samples-of-12-layer-next-gen-hbm4e-2/",
+      "source_kind": "official_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "SK hynix shipped 12-layer HBM4E samples to major customers, reporting up to 16 Gbps per pin, more than 20% better power efficiency, and 17% lower heat resistance, with future mass production still pending.",
+      "quantified": {
+        "layers": 12,
+        "max_gbps_per_pin": 16,
+        "power_efficiency_improvement_pct_gt": 20,
+        "heat_resistance_reduction_pct": 17
+      },
+      "assumptions": [
+        "Sample shipment is an early qualification state, not supply available for production fleets."
+      ],
+      "contradictions_or_limits": [
+        "Performance is vendor-reported and customer qualification outcomes, yield, volume, allocation, and mass-production timing are undisclosed."
+      ],
+      "fak_implications": [
+        "Represent sample, qualification, and mass-production states explicitly.",
+        "Do not benchmark future HBM performance as installed hardware."
       ],
       "rumor": {
         "is_rumor": false

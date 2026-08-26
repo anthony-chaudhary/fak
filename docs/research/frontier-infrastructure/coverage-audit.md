@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **117** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **112** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **90** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 15; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 9; `serving_system` 11; `standard` 1; `supply_chain` 5; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 57; `vendor_claim` 15; `reported_observation` 9; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 82; `medium_high` 26; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **117/117 published; 117/117 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **123** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **118** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **95** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 9; `serving_system` 11; `standard` 1; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 61; `vendor_claim` 17; `reported_observation` 9; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 86; `medium_high` 28; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **123/123 published; 123/123 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 117 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 123 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -90,7 +90,7 @@ and coverage of non-U.S. and sovereign clouds.
 ### 3. Datacenter power, grid, cooling, water, construction, and permitting — **Partial**
 
 **Present:** IEA demand/grid evidence, U.S. project-pipeline and delay reporting,
-selected utilities/site announcements, NVIDIA DSX power architecture, and a
+selected utilities/site announcements, NVIDIA DSX power architecture, GE Vernova/Crusoe ordered generation, a phased Siemens/Start Campus site record, and a
 supply-chain lifecycle framework. Power is treated as a gating resource rather than an
 afterthought.
 
@@ -106,7 +106,7 @@ subsequent delay/cancellation resolution.
 
 ### 4. HBM, advanced packaging, optics, network, and storage — **Partial**
 
-**Present:** selected NVIDIA/HBM, optical-interconnect, networking, and platform
+**Present:** selected NVIDIA/HBM, SK hynix HBM4/HBM4E, TSMC CoWoS, optical-interconnect, networking, and platform
 announcements; architectural recognition that accelerator availability alone does not
 set cluster capacity.
 
@@ -271,8 +271,8 @@ dates, affected hardware/services, implementation status, and later amendments.
 |---|---|---|
 | Production measurement/observation | **16 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
 | Benchmark/synthetic | **11 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **57 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
-| Vendor claims | **15 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
+| Official statements | **61 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Vendor claims | **17 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **15 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
 
