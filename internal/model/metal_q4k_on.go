@@ -480,36 +480,27 @@ func (m *Model) metalQ6KWeight(name string, qt *kQuantTensor) *metalgemm.Q6KWeig
 	return w
 }
 
-// metalQ8UploadAllowed reports (and caches per *Model) whether this model's Q8-minority
-// projections may be uploaded to the GPU without breaching the device working-set budget. When it
-// returns false, both the bulk pre-upload (metalQ8Weights) and the lazy per-call upload
-// (metalQ8Weight) decline, so the Q8 minority stays on the proven CPU qGemm8 path — exactly the
-// pre-#1087 behavior, which serves the 27B on a 36 GiB Mac without the OOM. Callers already hold
-// no lock; this takes metalQ4KMu to guard the cache.
+// metalQ8UploadAllowed reports whether Q8 can be promoted without an additive device copy. The
+// no-copy owner makes residentBytes+q8Bytes irrelevant; an explicit off switch still wins and an
+// unknown Metal budget fails closed.
 func (m *Model) metalQ8UploadAllowed() bool {
 	metalQ4KMu.Lock()
 	defer metalQ4KMu.Unlock()
 	if v, ok := metalQ8Budget[m]; ok {
 		return v
 	}
-	r := m.ResidentReport()
 	deviceTotal := int64(0)
 	if total, ok := metalgemm.DeviceMemoryTotal(); ok {
 		deviceTotal = int64(total)
 	}
-	allowed := q8UploadFits(r.TotalResidentBytes, r.Q8Bytes, deviceTotal, os.Getenv("FAK_METAL_Q8_UPLOAD"))
+	allowed := q8SingleResidencyAllowed(deviceTotal, os.Getenv("FAK_METAL_Q8_UPLOAD"))
 	metalQ8Budget[m] = allowed
 	return allowed
 }
 
-// metalQ8Weight returns this model's GPU Q8 handle for `name`, uploading the Q8_0 codes/scales
-// once (cached per *Model, nil cached too). It backs batched Metal prefill for the Q8-minority
-// projections in the resident-Q4_K lane. Declines (returns nil, caller stays on CPU qGemm8) when
-// the device working-set budget can't absorb the additive Q8 GPU copy (metalQ8UploadAllowed).
+// metalQ8Weight atomically replaces the CPU tensor slices with aliases of a page-aligned native
+// owner only after both Metal views exist. Failure leaves the original CPU tensor untouched.
 func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
-	// Budget gate BEFORE the lock (metalQ8UploadAllowed takes metalQ4KMu itself; sync.Mutex is
-	// not reentrant). On a tight device the additive Q8 GPU copy would OOM the serve, so decline
-	// here and let q8GemmDispatch fall back to the CPU qGemm8 — the pre-#1087, non-OOM path.
 	if !m.metalQ8UploadAllowed() {
 		return nil
 	}
@@ -523,7 +514,10 @@ func (m *Model) metalQ8Weight(name string, qt *q8Tensor) *metalgemm.Q8Weight {
 	if w, ok := tbl[name]; ok {
 		return w
 	}
-	w := metalgemm.UploadQ8(qt.q, qt.d, qt.out, qt.in)
+	w, q, d := metalgemm.UploadQ8NoCopyOwned(qt.q, qt.d, qt.out, qt.in)
+	if w != nil {
+		qt.q, qt.d = q, d
+	}
 	tbl[name] = w
 	return w
 }
@@ -569,27 +563,21 @@ func (m *Model) metalQ4KWeights() map[string]bool {
 // deliberately skips names already present in q4kw or kqw: those route through Q4_K/Q6_K resident
 // kernels, and uploading their Q8 copies would waste unified memory.
 func (m *Model) metalQ8Weights() map[string]bool {
-	if !metalgemm.Available() {
+	if !metalgemm.Available() || !m.metalQ8UploadAllowed() {
 		return nil
 	}
-	// Skip the whole bulk pre-upload when the device budget can't absorb the additive Q8 GPU
-	// copy — otherwise the 7 GiB projection store doubles and the serve is SIGKILLed at first
-	// prefill (#1087 OOM). metalQ8Weight would decline each tensor anyway; returning early keeps
-	// the intent legible and avoids the pointless per-tensor budget re-checks.
-	if !m.metalQ8UploadAllowed() {
-		return nil
+	type candidate struct {
+		name string
+		qt   *q8Tensor
 	}
-	uploaded := map[string]bool{}
+	var candidates []candidate
+	seen := map[string]bool{}
 	add := func(name string) {
-		if m.q4kw[name] != nil || m.kqw[name] != nil {
+		if seen[name] || m.q4kw[name] != nil || m.kqw[name] != nil || m.q8w[name] == nil {
 			return
 		}
-		qt := m.q8w[name]
-		if qt == nil {
-			return
-		}
-		w := m.metalQ8Weight(name, qt)
-		uploaded[name] = w != nil
+		seen[name] = true
+		candidates = append(candidates, candidate{name, m.q8w[name]})
 	}
 	cfg := m.Cfg
 	for l := 0; l < cfg.NumLayers; l++ {
@@ -607,9 +595,52 @@ func (m *Model) metalQ8Weights() map[string]bool {
 			}
 		}
 	}
-	return uploaded
-}
 
+	if cfg.NumLayers == 64 && len(cfg.LayerTypes) == 64 && qwen35RuntimeQ8ProjectionCount(cfg) == 272 && len(candidates) != 272 {
+		metalQ4KMu.Lock()
+		metalQ8Budget[m] = false
+		metalQ4KMu.Unlock()
+		return nil
+	}
+	// Preflight and publish as one transaction. CPU slices are not replaced until every Metal
+	// handle exists; ResetQ8 releases the unpublished native owners after any partial failure.
+	type promoted struct {
+		candidate
+		w *metalgemm.Q8Weight
+		q []int8
+		d []float32
+	}
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	if tbl := metalQ8KW[m]; len(tbl) != 0 {
+		result := make(map[string]bool, len(tbl))
+		for name, w := range tbl {
+			result[name] = w != nil
+		}
+		return result
+	}
+	batch := make([]promoted, 0, len(candidates))
+	for _, c := range candidates {
+		w, q, d := metalgemm.UploadQ8NoCopyOwned(c.qt.q, c.qt.d, c.qt.out, c.qt.in)
+		if w == nil {
+			for _, p := range batch {
+				p.w.Release()
+			}
+			metalQ8Budget[m] = false
+			return nil
+		}
+		batch = append(batch, promoted{candidate: c, w: w, q: q, d: d})
+	}
+	tbl := make(map[string]*metalgemm.Q8Weight, len(batch))
+	result := make(map[string]bool, len(batch))
+	for _, p := range batch {
+		p.qt.q, p.qt.d = p.q, p.d
+		tbl[p.name] = p.w
+		result[p.name] = true
+	}
+	metalQ8KW[m] = tbl
+	return result
+}
 func denseProjectionNames(lp func(string) string) []string {
 	return []string{
 		lp("self_attn.q_proj.weight"), lp("self_attn.k_proj.weight"),
@@ -668,4 +699,16 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 		qt.raw = nil
 	}
 	return w
+}
+
+// releaseMetalQ8 releases Metal views before their page-aligned CPU owners. Model callers must not
+// execute after CloseWeights; clearing the maps prevents stale handles from surviving reloads.
+func (m *Model) releaseMetalQ8() {
+	metalQ4KMu.Lock()
+	defer metalQ4KMu.Unlock()
+	for _, w := range metalQ8KW[m] {
+		w.Release()
+	}
+	delete(metalQ8KW, m)
+	delete(metalQ8Budget, m)
 }

@@ -38,3 +38,29 @@ func q8UploadFits(residentBytes, q8Bytes, deviceTotal int64, forceEnv string) bo
 	projected := residentBytes + q8Bytes
 	return float64(projected) <= metalQ8UploadFraction*float64(deviceTotal)
 }
+
+// q8SingleResidencyAllowed gates the no-copy Q8 publication path. Since publication aliases one
+// owner rather than adding q8Bytes to the Metal working set, only backend capacity and an explicit
+// operator disable are admission inputs. A forced enable cannot manufacture an unknown capacity.
+func q8SingleResidencyAllowed(deviceTotal int64, forceEnv string) bool {
+	switch forceEnv {
+	case "0", "off", "OFF", "false", "FALSE":
+		return false
+	}
+	return deviceTotal > 0
+}
+
+// qwen35RuntimeQ8ProjectionCount returns the promised runtime Q8 band and ignores checkpoint-only
+// trailing tensors. Each linear-attention layer contributes five projections; each full-attention
+// layer contributes q/k. The Qwen3.8 64-layer graph is therefore 48*5 + 16*2 = 272.
+func qwen35RuntimeQ8ProjectionCount(cfg Config) int {
+	count := 0
+	for l := 0; l < cfg.NumLayers; l++ {
+		if cfg.isLinearAttnLayer(l) {
+			count += 5
+		} else {
+			count += 2
+		}
+	}
+	return count
+}
