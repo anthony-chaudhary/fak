@@ -59,8 +59,8 @@ func TestMetalGGUFPeakCapacity(t *testing.T) {
 }
 
 func TestStreamedQ4KMetalCapacityUsesMeasuredNativePeak(t *testing.T) {
-	if streamedQ4KMeasuredPeakBytes != 17895520*1024 {
-		t.Fatalf("measured peak = %d, want current-head receipt's 17,895,520 KiB", streamedQ4KMeasuredPeakBytes)
+	if streamedQ4KMeasuredPeakBytes != 22754885632 {
+		t.Fatalf("measured peak = %d, want canonical no-FREE_CPU receipt's /usr/bin/time RSS", streamedQ4KMeasuredPeakBytes)
 	}
 	if streamedQ4KMetalCapacityBytes < streamedQ4KMeasuredPeakBytes {
 		t.Fatalf("capacity bound %d is below measured peak %d", streamedQ4KMetalCapacityBytes, streamedQ4KMeasuredPeakBytes)
@@ -76,7 +76,8 @@ func TestStreamedQ4KMetalCapacityUsesMeasuredNativePeak(t *testing.T) {
 	}{
 		{name: "one byte below measured bound refuses", total: streamedQ4KMetalCapacityBytes - 1, known: true, required: streamedQ4KMetalCapacityBytes, refuse: true, wantError: true},
 		{name: "measured bound admits", total: streamedQ4KMetalCapacityBytes, known: true, required: streamedQ4KMetalCapacityBytes},
-		{name: "36 GiB receipt host admits", total: 36 << 30, known: true, required: streamedQ4KMetalCapacityBytes},
+		{name: "36 GiB receipt host refuses after positive swap", total: 36 << 30, known: true, required: streamedQ4KMetalCapacityBytes, refuse: true, wantError: true},
+		{name: "44 GiB measured bound admits", total: 44 << 30, known: true, required: streamedQ4KMetalCapacityBytes},
 		{name: "unknown host memory preserves existing behavior", known: false},
 	}
 	for _, tt := range tests {
@@ -90,7 +91,7 @@ func TestStreamedQ4KMetalCapacityUsesMeasuredNativePeak(t *testing.T) {
 				t.Fatalf("error = %v, wantError %v", err, tt.wantError)
 			}
 			if err != nil {
-				for _, want := range []string{"METAL_STREAM_Q4K_PEAK_TOO_BIG", "requires 19327352832 bytes", "host has 19327352831 bytes"} {
+				for _, want := range []string{"METAL_STREAM_Q4K_PEAK_TOO_BIG", "requires 47244640256 bytes"} {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("error %q does not contain %q", err, want)
 					}

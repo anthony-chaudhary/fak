@@ -12490,6 +12490,11 @@
           "category": "incidental",
           "reason": "exported provenance field names the exact alias candidates inspected by the speculator receipt guard; it is not a planning concept",
           "token": "CandidateAliases"
+        },
+        {
+          "category": "incidental",
+          "reason": "it is the local DTO for the bounded #8971 capture recipe, not a reusable planning concept",
+          "token": "nativecapacitycaptureplan"
         }
       ],
       "exclude": [
@@ -12627,6 +12632,7 @@
         "measuredPlanner",
         "mergePlanDigest",
         "motifDetectPlanFanoutReconcile",
+        "nativecapacitycaptureplan",
         "newLivePlanner",
         "notplanned",
         "nplan",

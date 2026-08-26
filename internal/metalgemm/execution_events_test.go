@@ -62,6 +62,57 @@ func TestExecutionObservationsAreConcurrentAndIsolated(t *testing.T) {
 	}
 }
 
+func TestMixedQ4KQ8ObservationsAreConcurrentAndIsolated(t *testing.T) {
+	const eventsPerObservation = 64
+	mixedOperation := ExecutionOperation("mixed-q4_k-q8-qkv")
+	left := newExecutionObservation(mixedOperation, true)
+	right := newExecutionObservation(mixedOperation, true)
+	start := make(chan struct{})
+
+	var wg sync.WaitGroup
+	for _, tc := range []struct {
+		observation *ExecutionObservation
+		encoders    int
+		gpuMS       float64
+	}{
+		{observation: left, encoders: 2, gpuMS: 0.25},
+		{observation: right, encoders: 7, gpuMS: 0.75},
+	} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < eventsPerObservation; i++ {
+				tc.observation.record(uintptr(i+1), true, true, true, tc.encoders, tc.gpuMS, 1, true)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for name, tc := range map[string]struct {
+		observation *ExecutionObservation
+		encoders    int
+		gpuMS       float64
+	}{
+		"left":  {observation: left, encoders: 2, gpuMS: 0.25},
+		"right": {observation: right, encoders: 7, gpuMS: 0.75},
+	} {
+		snapshot, err := tc.observation.Snapshot()
+		if err != nil {
+			t.Fatalf("%s snapshot: %v", name, err)
+		}
+		if len(snapshot.Events) != eventsPerObservation {
+			t.Fatalf("%s events=%d, want %d", name, len(snapshot.Events), eventsPerObservation)
+		}
+		for i, event := range snapshot.Events {
+			if event.Operation != mixedOperation || event.CommandBufferID != uint64(i+1) || event.Encoders != tc.encoders || event.GPUMilliseconds != tc.gpuMS {
+				t.Fatalf("%s event[%d]=%+v, want isolated operation/id/encoders/gpu_ms", name, i, event)
+			}
+		}
+	}
+}
+
 func TestExecutionSessionAggregatesAndFailsClosed(t *testing.T) {
 	session := NewExecutionSession()
 	session.Record(ExecutionSnapshot{Events: []ExecutionEvent{{

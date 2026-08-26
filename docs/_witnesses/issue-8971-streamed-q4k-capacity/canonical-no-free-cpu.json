@@ -1,0 +1,187 @@
+{
+  "schema": "fak-native-streamed-q4k-capacity/1",
+  "issue": 8971,
+  "binding_sha256": "fb6a82499fdfe3e5a2d92e322f7b1a70199418c7e24ceac49bd844a315d04161",
+  "artifact": {
+    "bytes": 17106775008,
+    "sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "model": "qwen38:27b",
+    "model_revision": "unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe"
+  },
+  "source": {
+    "revision": "9e2f837c0950a0fcb21ced81e5d2fa0d2c6c1eb1",
+    "dirty": false
+  },
+  "binary": {
+    "bytes": 80673090,
+    "sha256": "34748a82d7bef95e9f4a70b28d24683aff6046b1126cb7cf5d7986cddd0b172a"
+  },
+  "host": {
+    "scrubbed_id": "m3pro-18gpu-36g",
+    "soc": "Apple M3 Pro",
+    "gpu_cores": 18,
+    "memory_bytes": 38654705664,
+    "os_kernel": "macOS 26.6.2 / Darwin 25.6.0",
+    "architecture": "darwin/arm64"
+  },
+  "environment": {
+    "present": [
+      "FAK_METAL_STREAM_Q4K=1",
+      "FAK_Q4K=1"
+    ],
+    "absent": [
+      "FAK_BUDGET",
+      "FAK_METAL_Q8_UPLOAD",
+      "FAK_Q4K_FREE_CPU",
+      "FAK_Q4K_MM",
+      "FAK_Q8_GEMM_GROUP",
+      "FAK_WORKERS",
+      "GOMAXPROCS"
+    ]
+  },
+  "cache_displacement": {
+    "total_bytes": 48368448672,
+    "sources": [
+      {
+        "scrubbed_id": "cache-control-a",
+        "bytes": 29811762848,
+        "sha256": "33c45709dc2638426f1b86abc71a4dc4ecf6aae94fea583308b38459d99fee71"
+      },
+      {
+        "scrubbed_id": "cache-control-b",
+        "bytes": 18556685824,
+        "sha256": "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5"
+      }
+    ]
+  },
+  "readiness": {
+    "endpoint": "http://127.0.0.1:18971/v1/models",
+    "http_status": 200,
+    "elapsed_millis": 39000,
+    "deadline_seconds": 420
+  },
+  "execution": {
+    "engine": "inkernel",
+    "backend": "metal",
+    "forward_path": "metal/qwen35-hybrid-session-v1",
+    "fallback_count": 0,
+    "llama_cpp_used": false,
+    "identity_source": "startup log, owned-model endpoint, generated-token metrics, and native chat log"
+  },
+  "memory": {
+    "rss_samples_bytes": [
+      7917142016,
+      6857932800,
+      7262994432,
+      7065714688,
+      7629602816,
+      7572176896,
+      4359831552,
+      4073717760,
+      4141907968,
+      3277553664,
+      2893791232,
+      2081062912,
+      2077573120,
+      2083733504,
+      2093957120,
+      2105016320,
+      2113683456,
+      2120433664,
+      2130100224,
+      2143322112,
+      3441213440,
+      1595359232,
+      2087895040,
+      2255945728,
+      2416967680,
+      2620293120,
+      2686861312,
+      2686861312,
+      2686861312,
+      2686861312,
+      2686861312,
+      2686861312,
+      2686910464,
+      2686910464,
+      2686910464,
+      2686910464,
+      2686910464,
+      2688352256,
+      2688352256
+    ],
+    "max_sampled_rss_bytes": 7917142016,
+    "time_maximum_resident_set_bytes": 22754885632,
+    "os_footprint_samples_bytes": [
+      29700019800,
+      29700216408,
+      30347450400,
+      33104715704,
+      34355979056,
+      35246908832,
+      35247351200,
+      35247416736,
+      35248170400,
+      35249235360,
+      35250103736,
+      35250955704,
+      35250972088,
+      35251103160,
+      35251234232,
+      35251381688,
+      35251529144,
+      35251545528,
+      35251709368,
+      35251873208,
+      35853723520,
+      36224460936,
+      36301039776,
+      36301252768,
+      36301367456,
+      36301826208,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048,
+      36301990048
+    ],
+    "os_peak_memory_footprint_bytes": 36301990048,
+    "swap_used_before_bytes": 2540049531,
+    "swap_used_peak_bytes": 10221980221,
+    "swap_used_after_bytes": 9920451707,
+    "swap_peak_delta_bytes": 7681930690,
+    "swap_delta_bytes": 7380402176
+  },
+  "outcome": {
+    "admission": "refused",
+    "reason": "positive-swap-delta",
+    "required_bytes": 47244640256,
+    "required_method": "ceil-gib(host-memory-bytes+peak-swap-delta-bytes)"
+  },
+  "watcher": {
+    "port": 8090,
+    "owner_command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+    "signal": "TERM",
+    "matched_terms": 1,
+    "unmatched_signals": 0,
+    "reused_pid_signals": 0,
+    "watcher_stopped": true,
+    "hard_deadline_seconds": 600,
+    "restoration": {
+      "restored": true,
+      "owner_command_sha256": "a0c13c8d7e84fa92c76db532db0a6fed13b3b42313a75e10b8f69e252f76a91d",
+      "health_http_status": 200,
+      "models_http_status": 200,
+      "elapsed_millis": 992000,
+      "deadline_seconds": 1200
+    }
+  }
+}
