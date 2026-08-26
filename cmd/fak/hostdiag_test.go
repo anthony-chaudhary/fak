@@ -215,3 +215,40 @@ func TestLoadOwnedShellLaunchesRejectsMalformedReceipt(t *testing.T) {
 		t.Fatal("accepted foreign shell receipt")
 	}
 }
+
+func TestHostdiagTrendFlagsAndPrivacySafeJSON(t *testing.T) {
+	dir := t.TempDir()
+	ledger := filepath.Join(dir, "hostdiag.jsonl")
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	row := hostdiag.Correlation{Schema: hostdiag.CorrelationSchema, CorrelationID: "one", TimeMS: now.Add(-time.Hour).UnixMilli(), EventName: "APP_CRASH", App: `C:\private\fak.exe`, ReportID: "sensitive-report"}
+	data, _ := json.Marshal(row)
+	if err := os.WriteFile(ledger, append(data, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if rc := runHostdiag(&stdout, &stderr, []string{"trend", "--ledger", ledger, "--recent", "24h", "--baseline", "48h", "--now", now.Format(time.RFC3339)}); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s ledger=%s", rc, stderr.String(), data)
+	}
+	var got hostdiag.Trend
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil || got.Recent.Total != 1 || got.Recent.Crash != 1 {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	if strings.Contains(stdout.String(), "sensitive-report") || strings.Contains(stdout.String(), "private") || strings.Contains(stdout.String(), "report_id") {
+		t.Fatalf("sensitive output: %s", stdout.String())
+	}
+}
+
+func TestHostdiagTrendRejectsBadFlagsAndMalformedLedger(t *testing.T) {
+	ledger := filepath.Join(t.TempDir(), "hostdiag.jsonl")
+	_ = os.WriteFile(ledger, []byte(`{"schema":"`+hostdiag.CorrelationSchema+`"}`+"\n"), 0o600)
+	for _, args := range [][]string{
+		{"trend", "--ledger", ledger, "--recent", "0s"},
+		{"trend", "--ledger", ledger, "--now", "not-time"},
+		{"trend", "--ledger", ledger},
+	} {
+		var stdout, stderr bytes.Buffer
+		if rc := runHostdiag(&stdout, &stderr, args); rc == 0 {
+			t.Fatalf("accepted args=%v output=%s", args, stdout.String())
+		}
+	}
+}
