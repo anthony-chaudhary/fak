@@ -275,6 +275,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		maxNew:      maxNew,
 		measurement: measurement,
 	}
+	measurement.startDecodeTrace()
 	td := time.Now()
 	if p.batchDecode {
 		// Opt-in: drive this one request through the shared continuous-batch step. For B==1
@@ -366,10 +367,14 @@ type decodeLane struct {
 }
 
 type nativeInferenceMeasurement struct {
-	startedAt time.Time
-	tokenIDs  []int
-	logprobs  []float64
-	ttftS     float64
+	startedAt         time.Time
+	tokenIDs          []int
+	logprobs          []float64
+	ttftS             float64
+	inferenceDisabled bool
+	traceNow          func() time.Time
+	traceStartedAt    time.Time
+	traceEvents       []NativeDecodeTraceEvent
 }
 
 func (m *nativeInferenceMeasurement) reset() {
@@ -379,10 +384,12 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.tokenIDs = m.tokenIDs[:0]
 	m.logprobs = m.logprobs[:0]
 	m.ttftS = 0
+	m.traceStartedAt = time.Time{}
+	m.traceEvents = m.traceEvents[:0]
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
-	if m == nil {
+	if m == nil || m.inferenceDisabled {
 		return nil
 	}
 	lp, err := chosenTokenLogprob(logits, token)
@@ -394,6 +401,30 @@ func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
 	}
 	m.tokenIDs = append(m.tokenIDs, token)
 	m.logprobs = append(m.logprobs, lp)
+	return nil
+}
+
+func (m *nativeInferenceMeasurement) startDecodeTrace() {
+	if m == nil || m.traceNow == nil {
+		return
+	}
+	m.traceStartedAt = m.traceNow()
+	m.traceEvents = m.traceEvents[:0]
+}
+
+func (m *nativeInferenceMeasurement) recordDecodeTrace(tokenIndex int) error {
+	if m == nil || m.traceNow == nil {
+		return nil
+	}
+	wantIndex := len(m.traceEvents) + 1
+	if tokenIndex != wantIndex {
+		return fmt.Errorf("native decode trace token index %d, want %d", tokenIndex, wantIndex)
+	}
+	elapsed := m.traceNow().Sub(m.traceStartedAt).Nanoseconds()
+	if elapsed < 0 || (len(m.traceEvents) > 0 && elapsed < m.traceEvents[len(m.traceEvents)-1].ElapsedNS) {
+		return fmt.Errorf("native decode trace clock moved backwards at token %d", tokenIndex)
+	}
+	m.traceEvents = append(m.traceEvents, NativeDecodeTraceEvent{TokenIndex: tokenIndex, ElapsedNS: elapsed})
 	return nil
 }
 
@@ -447,24 +478,26 @@ func (ln *decodeLane) decodeOne(ctx context.Context) (next int, advance bool) {
 	if ln.counts != nil && next < len(ln.counts) {
 		ln.counts[next]++
 	}
-	if ln.emit != nil && ln.emit(next) {
-		ln.gen++ // this token WAS generated; count it before finishing
+	emitStopped := ln.emit != nil && ln.emit(next)
+	ln.gen++ // this non-stop token was emitted/generated; trace only after this count.
+	if err := ln.measurement.recordDecodeTrace(ln.gen); err != nil {
+		ln.err, ln.done = err, true
+		return 0, false
+	}
+	if emitStopped {
 		ln.stopped, ln.done = true, true
 		return 0, false
 	}
 	if ln.emit != nil {
 		if err := ctx.Err(); err != nil {
-			ln.gen++ // this token was emitted before cancellation became visible
 			ln.err, ln.done = err, true
 			return 0, false
 		}
 	}
-	if ln.gen == ln.maxNew-1 {
-		ln.gen++ // this token was generated; avoid computing unused next-token logits.
+	if ln.gen == ln.maxNew {
 		ln.done = true
 		return 0, false
 	}
-	ln.gen++ // matches the serial loop's post-increment before the next Step.
 	return next, true
 }
 

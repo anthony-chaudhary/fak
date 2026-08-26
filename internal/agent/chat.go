@@ -400,6 +400,30 @@ type Completion struct {
 	// receipt and this planner executed the model math in-kernel. It is captured at
 	// the logits/decode seam, never reconstructed from text or gateway timing.
 	NativeInference *NativeInferenceReceipt
+	// DecodeTrace is populated only for an explicitly requested in-kernel decode.
+	// Its events are authored at the native token-commit seam; proxy text and SSE
+	// fragments are never eligible sources.
+	DecodeTrace *NativeDecodeTrace
+}
+
+const (
+	NativeDecodeTraceSchema = "fak.native-decode-trace/1"
+	NativeDecodeTraceEngine = "fak-native"
+)
+
+// NativeDecodeTrace is the versioned, engine-authored timeline of generated-token
+// commits for one buffered in-kernel completion.
+type NativeDecodeTrace struct {
+	Schema string                   `json:"schema"`
+	Engine string                   `json:"engine"`
+	Events []NativeDecodeTraceEvent `json:"events"`
+}
+
+// NativeDecodeTraceEvent records one non-stop generated token after it has been
+// emitted and counted. TokenIndex is 1-based and consecutive within the attempt.
+type NativeDecodeTraceEvent struct {
+	TokenIndex int   `json:"token_index"`
+	ElapsedNS  int64 `json:"elapsed_ns"`
 }
 
 // NativeInferenceReceipt binds generated tokens and their normalized chosen-token
@@ -495,6 +519,9 @@ type SampleParams struct {
 	// NativeInferenceReceipt requests the strict native measurement envelope. It is
 	// false by default, preserving both planner work and response bytes.
 	NativeInferenceReceipt bool
+	// DecodeTrace requests native token-commit timestamps. It is false by default,
+	// so ordinary turns allocate no trace slice and perform no per-token clock read.
+	DecodeTrace bool
 	// GuidedDecode carries provider-native guided-decode fields that are not part of
 	// the OpenAI core wire but are accepted by OpenAI-compatible ride engines such as
 	// vLLM/SGLang (`guided_json`, `guided_regex`, `guided_grammar`, `guided_choice`,
@@ -532,6 +559,14 @@ type Planner interface {
 	Complete(ctx context.Context, messages []Message, tools []ToolDef, opts ...SampleOpt) (*Completion, error)
 	// Model is the model id (for provenance).
 	Model() string
+}
+
+// NativeDecodeTracePlanner marks planners which author token traces at their own
+// native decode seam. Callers use this capability before inference so a proxy or
+// wrapper cannot be mistaken for a native trace source.
+type NativeDecodeTracePlanner interface {
+	Planner
+	NativeDecodeTraceSupported() bool
 }
 
 // ---------------------------------------------------------------------------

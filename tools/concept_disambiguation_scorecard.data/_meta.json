@@ -7501,6 +7501,21 @@
           "category": "incidental",
           "reason": "Windows accounting field, not a gateway engine.",
           "token": "ThisPeriodTotalKernelTime"
+        },
+        {
+          "category": "incidental",
+          "reason": "Versioned receipt provenance constant names the already-canonical fak-native engine and does not define a new gateway engine abstraction.",
+          "token": "NativeDecodeTraceEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Capability method reports native trace support on the existing in-kernel planner and does not define an engine family member.",
+          "token": "NativeDecodeTraceSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Wire option requests a receipt from an already-selected fak-native route and does not select or define a gateway engine.",
+          "token": "fak_decode_trace"
         }
       ],
       "id": "gateway-engine",
@@ -7522,6 +7537,8 @@
         "InKernelKVPrefixPressureSource",
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelTurns",
+        "NativeDecodeTraceEngine",
+        "NativeDecodeTraceSupported",
         "NewSessionAffinityGateway",
         "PrivateAgentAEngineCalls",
         "PrivateAgentBEngineCalls",
@@ -7545,6 +7562,7 @@
         "engineered",
         "engineering",
         "engineers",
+        "fak_decode_trace",
         "fak_gateway_compaction_thrash_sessions_total",
         "fak_gateway_kv_prefix_tier_capacity_bytes",
         "fak_gateway_kv_prefix_tier_evictions_total",
@@ -10488,6 +10506,16 @@
           "category": "incidental",
           "reason": "Internal receipt construction helper, not a product maturity label.",
           "token": "requestedSupport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Boolean capability method reports availability of an opt-in receipt and does not claim product maturity or support status.",
+          "token": "NativeDecodeTraceSupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Request validation helper checks a planner capability and does not define a support or maturity level.",
+          "token": "chatDecodeTraceSupported"
         }
       ],
       "exclude": [
@@ -10533,6 +10561,7 @@
         "MaturityLabel",
         "MinSupport",
         "NATIVE_MESSAGE_ROLE_UNSUPPORTED",
+        "NativeDecodeTraceSupported",
         "NonCacheParity",
         "OutcomeSupported",
         "PARTIAL_COVERAGE",
@@ -10619,6 +10648,7 @@
         "backend_does_not_support_transition",
         "calendar_coverage",
         "cgroupFaultDomain",
+        "chatDecodeTraceSupported",
         "cmdLaunchParityCheck",
         "cmdManageParity",
         "compareParity",
@@ -12597,6 +12627,11 @@
           "category": "incidental",
           "reason": "it is the local DTO for the bounded #8971 capture recipe, not a reusable planning concept",
           "token": "nativecapacitycaptureplan"
+        },
+        {
+          "category": "incidental",
+          "reason": "Narrow optional capability interface extends the existing Planner contract for receipt authorship and does not introduce a planning concept.",
+          "token": "NativeDecodeTracePlanner"
         }
       ],
       "exclude": [
@@ -12641,6 +12676,7 @@
         "MaintenanceSeconds",
         "MergePlan",
         "MotifCatalogPlanFanoutReconcile",
+        "NativeDecodeTracePlanner",
         "NewCandidates",
         "NormalizeWorkflowPlanAccess",
         "NoteCandidates",

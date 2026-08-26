@@ -540,6 +540,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
+	decodeTraceRequested := req.FakDecodeTrace
+	if decodeTraceRequested && req.Stream {
+		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a buffered fak-native request")
+		return
+	}
 	if receiptRequested && req.Stream {
 		writeErr(w, http.StatusBadRequest, "native inference receipts require a buffered request")
 		return
@@ -558,6 +563,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	reqModel := req.Model
 	if reqModel == "" {
 		reqModel = s.model
+	}
+	if decodeTraceRequested && !s.chatDecodeTraceSupported(req.Model) {
+		writeErr(w, http.StatusBadRequest, "fak_decode_trace requires a fak-native model route")
+		return
 	}
 
 	// Thread one request TraceID across every proposed call in this chat so the IFC
@@ -639,6 +648,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		agent.WithFrequencyPenalty(req.FrequencyPenalty),
 		agent.WithPresencePenalty(req.PresencePenalty),
 		agent.WithNativeInferenceReceipt(receiptRequested),
+		agent.WithDecodeTrace(decodeTraceRequested),
 	)
 	if err != nil {
 		// Map the upstream failure to an honest status. Log the detail for the operator
@@ -685,6 +695,10 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "configured planner cannot produce a native inference receipt")
 		return
 	}
+	if decodeTraceRequested && comp.DecodeTrace == nil {
+		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
+		return
+	}
 
 	kept, adjs, dropped, servedText, servedHits, bodyRefused := s.adjudicateProposedTurn(ctx, asst, reqTrace)
 	finish := s.applyAdjudicatedTurn(&asst, adjs, kept, dropped, servedHits, servedText, bodyRefused, comp.FinishReason)
@@ -713,11 +727,29 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.Fak.NativeInferenceReceipt = comp.NativeInference
 	}
+	if decodeTraceRequested {
+		if resp.Fak == nil {
+			resp.Fak = &FakExt{}
+		}
+		resp.Fak.DecodeTrace = comp.DecodeTrace
+	}
 	if stream != nil {
 		writeChatCompletionStream(stream, resp)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) chatDecodeTraceSupported(reqModel string) bool {
+	p := s.planner
+	if dual, ok := p.(*DualPlanner); ok {
+		if !dual.RoutesLocal(reqModel) {
+			return false
+		}
+		p = dual.Local()
+	}
+	capable, ok := p.(agent.NativeDecodeTracePlanner)
+	return ok && capable.NativeDecodeTraceSupported()
 }
 
 func (s *Server) responseModel(served, requested, streamModel, issue string) string {
