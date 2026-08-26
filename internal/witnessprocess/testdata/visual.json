@@ -1,0 +1,9 @@
+{
+  "envelope": "80x24 terminal and issue pane",
+  "promotion_gate": "render witness has zero spill bytes",
+  "context": "tui-visual",
+  "durable_witness": "render-witness test and before/after screenshot",
+  "lever": "clip one status row",
+  "baseline_artifact": "captured corrupt render",
+  "candidate_artifact": "captured clean render"
+}

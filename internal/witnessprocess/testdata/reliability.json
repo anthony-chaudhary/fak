@@ -1,0 +1,9 @@
+{
+  "envelope": "30 minute soak with dependency fault",
+  "promotion_gate": "recovery SLO passes with retry cost counted",
+  "context": "reliability-operations",
+  "durable_witness": "deterministic fault test",
+  "lever": "bound one retry interval",
+  "baseline_artifact": "fault and recovery timeline",
+  "candidate_artifact": "candidate soak receipt"
+}
