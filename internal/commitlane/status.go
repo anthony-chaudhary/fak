@@ -680,9 +680,9 @@ $rows = @(Get-CimInstance Win32_Process | Where-Object {
   }
 })
 ConvertTo-Json -Depth 3 -InputObject $rows`
-	out, err := runProcessJSON(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	out, err := runWindowsProcessJSON(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	if err != nil {
-		out, err = runProcessJSON(ctx, "pwsh", "-NoProfile", "-NonInteractive", "-Command", script)
+		out, err = runWindowsProcessJSON(ctx, "pwsh", "-NoProfile", "-NonInteractive", "-Command", script)
 	}
 	if err != nil {
 		return nil, err
