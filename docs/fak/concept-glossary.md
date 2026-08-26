@@ -2365,3 +2365,10 @@ Reconciliation receipt that binds a read-only child result to its observed state
 Typed platform-neutral decision policy for fault-domain restart, reattach, hold, and escalation.
 
 **Distinct from:** Unlike dispatch admission policy, it decides process recovery from role, generation, checkpoint, effect certainty, backoff, and restart intensity; it does not authorize execution.
+
+
+### ExecutionEngine (campaign evidence)
+
+The campaign evidence field naming the runtime that actually executed model math (fak-native or llama.cpp), which the validator uses to decide whether a result is eligible for promotion.
+
+**Distinct from:** It records the model-math executor for evidence promotion, not GatewayURL or EndpointConfig HTTP endpoint identity, a planner or model route, gateway transport, or the compute.Backend hardware/device selected inside that runtime.

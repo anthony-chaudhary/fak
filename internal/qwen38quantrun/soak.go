@@ -746,7 +746,7 @@ func RunSoakAdapter(ctx context.Context, configPath, corpusPath, reportPath, arc
 		campaignCfg.Endpoint.APIKey = apiKey
 		arm, raw, err := (Runner{}).RunSoakArm(ctx, SoakArmConfig{
 			Campaign: CampaignConfig{
-				Endpoint: campaignCfg.Endpoint.runnerConfig(), Arm: campaignCfg.Arm, Expected: campaignCfg.Expected,
+				Endpoint: campaignCfg.Endpoint.runnerConfig(), ExecutionEngine: campaignCfg.ExecutionEngine, Arm: campaignCfg.Arm, Expected: campaignCfg.Expected,
 				Command: campaignCfg.Command, RequireDevice: campaignCfg.RequireDevice, StaleAfter: campaignCfg.StaleAfter,
 				RollbackThreshold: campaignCfg.RollbackThreshold,
 				Probe:             commandProbe{argv: campaignCfg.ObservationCommand},

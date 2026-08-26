@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "gateway-engine-execution-engine",
+      "canonical": "ExecutionEngine (campaign evidence)",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The campaign evidence field naming the runtime that actually executed model math (fak-native or llama.cpp), which the validator uses to decide whether a result is eligible for promotion.",
+      "distinction": "It records the model-math executor for evidence promotion, not GatewayURL or EndpointConfig HTTP endpoint identity, a planner or model route, gateway transport, or the compute.Backend hardware/device selected inside that runtime.",
+      "distinct_from": [
+        "engine"
+      ],
+      "aliases": [],
+      "grounding": "ExecutionEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

@@ -30,7 +30,7 @@ func TestRunOracleBindsQualityBeforePerformance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Verdict != "PROMOTE" || len(report.NumericQuality) != len(corpus.Fixtures)*2 || len(report.Performance) != 4 {
+	if report.Verdict != "HOLD" || len(report.NumericQuality) != len(corpus.Fixtures)*2 || len(report.Performance) != 4 {
 		t.Fatalf("verdict=%s quality=%d performance=%d", report.Verdict, len(report.NumericQuality), len(report.Performance))
 	}
 	raw, err := os.ReadFile(archivePath)
@@ -155,12 +155,16 @@ func writeOracleRuntimeFixture(t *testing.T, dir, name string, corpus qwen38quan
 	}
 	archiveSum := sha256.Sum256(bytes.TrimSpace(archiveRaw))
 	report := qwen38quant.Report{
-		Schema: qwen38quant.Schema, CorpusID: corpus.ID, CorpusSHA256: qwen38quant.CorpusDigest(corpus), Arm: "q4_k_m", Identity: identity,
+		Schema: qwen38quant.Schema, ExecutionEngine: qwen38quant.EngineFakNative, CorpusID: corpus.ID, CorpusSHA256: qwen38quant.CorpusDigest(corpus), Arm: "q4_k_m", Identity: identity,
 		Environment: qwen38quant.Environment{Command: command, Hardware: observation.Hardware, Software: observation.Software, ContextTokens: observation.ContextTokens, CacheMode: observation.CacheMode, RequireDevice: "CUDA", DenyFallback: true},
 		Trials:      trials, Verdict: "PROMOTE", EvidenceClass: "CAMPAIGN", RawArchiveSHA256: hex.EncodeToString(archiveSum[:]), StaleAfter: "2026-11-21", RollbackThreshold: "any exact-effect failure",
 	}
+	if name == "llama.cpp" {
+		report.ExecutionEngine = qwen38quant.EngineLlamaCpp
+		report.Verdict = "HOLD"
+	}
 	adapter := AdapterConfig{
-		Endpoint: EndpointConfig{Endpoint: "http://127.0.0.1:9999", APIKey: "adapter-secret", Model: identity.Model}, Arm: "q4_k_m", Expected: identity, Command: command,
+		Endpoint: EndpointConfig{Endpoint: "http://127.0.0.1:9999", APIKey: "adapter-secret", Model: identity.Model}, ExecutionEngine: report.ExecutionEngine, Arm: "q4_k_m", Expected: identity, Command: command,
 		RequireDevice: "CUDA", StaleAfter: report.StaleAfter, RollbackThreshold: report.RollbackThreshold,
 		ObservationCommand: []string{"observe"}, RestartCommand: []string{"restart"}, ReadyCommand: []string{"ready"}, CleanupCommand: []string{"cleanup"},
 	}
