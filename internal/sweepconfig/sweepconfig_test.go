@@ -165,6 +165,33 @@ func TestMalformedOrUnsupportedYAMLReturnsLineAwareError(t *testing.T) {
 	}
 }
 
+func TestYAMLScalarErrorsRetainLineAndFieldContext(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"top-level bool", "name: valid\nskip_api: maybe\n", "line 2: skip_api: expected true or false"},
+		{"workload integer", "name: valid\nworkload:\n  max_turns: many\n", "line 3: max_turns: expected an integer"},
+		{"model string", "name: valid\nmodels:\n  - name: true\n", "line 3: name: expected a string"},
+		{"model bool", "name: valid\nmodels:\n  - name: model\n    enabled: maybe\n", "line 4: enabled: expected true or false"},
+		{"price number", "name: valid\nmodels:\n  - name: model\n    price_hint:\n      input: many\n", "line 5: input: expected a number"},
+		{"price source", "name: valid\nmodels:\n  - name: model\n    price_hint:\n      source: true\n", "line 5: source: expected a string"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "bad.yaml")
+			if err := osWrite(path, []byte(tt.body)); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadProfile(path)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestQuotedScalarsAndInlineCommentsLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "quoted.yaml")
 	body := []byte(`name: "quick: smoke #1" # profile comment

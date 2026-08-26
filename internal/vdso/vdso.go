@@ -23,6 +23,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +36,41 @@ import (
 
 // DefaultCacheSize is the tier-2 LRU capacity (unit 35 RSI tweak target).
 const DefaultCacheSize = 1024
+
+// ErrInvalidTier2Capacity is returned when a live resize requests a non-positive
+// capacity. The current capacity, entries, LRU order, and generation are unchanged.
+var ErrInvalidTier2Capacity = errors.New("vdso: tier-2 capacity must be positive")
+
+// Tier2CacheState is the coherent readback for the live tier-2 cache budget.
+// Generation belongs only to this configuration; it is independent of the world
+// and trust epochs that govern cache-entry validity.
+type Tier2CacheState struct {
+	Capacity   int    `json:"capacity"`
+	Occupancy  int    `json:"occupancy"`
+	Evictions  uint64 `json:"evictions"`
+	Generation uint64 `json:"generation"`
+}
+
+// Tier2ResizeRequest asks a live VDSO to change its tier-2 entry capacity.
+type Tier2ResizeRequest struct {
+	Capacity int    `json:"capacity"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// Tier2ResizeReceipt seals one accepted resize request. A same-capacity request
+// is accepted as an idempotent no-op (Changed=false) and preserves Generation.
+type Tier2ResizeReceipt struct {
+	OldCapacity   int       `json:"old_capacity"`
+	NewCapacity   int       `json:"new_capacity"`
+	OldOccupancy  int       `json:"old_occupancy"`
+	NewOccupancy  int       `json:"new_occupancy"`
+	Evicted       int       `json:"evicted"`
+	OldGeneration uint64    `json:"old_generation"`
+	NewGeneration uint64    `json:"new_generation"`
+	Changed       bool      `json:"changed"`
+	Reason        string    `json:"reason,omitempty"`
+	Timestamp     time.Time `json:"timestamp"`
+}
 
 // DefaultNodeEpochLimit bounds the finer-eraser epoch table. When pressure evicts
 // a node epoch, the vDSO bumps the root epoch so old keys cannot become reachable.
@@ -62,10 +98,12 @@ type VDSO struct {
 	// read in keyLocked (which already holds v.mu). A nil map reads as "none".
 	shareable map[string]bool
 
-	cap      int
-	cache    map[string]*list.Element // tier 2: key -> LRU node
-	lru      *list.List               // front = most-recent
-	worldVer uint64                   // the root ("*") epoch — lock-free Global hot path
+	cap       int
+	cache     map[string]*list.Element // tier 2: key -> LRU node
+	lru       *list.List               // front = most-recent
+	cacheGen  uint64                   // live tier-2 capacity generation; starts at 1
+	evictions uint64                   // cumulative CacheEvict removals
+	worldVer  uint64                   // the root ("*") epoch — lock-free Global hot path
 
 	// Finer-eraser state (scope.go). gran selects how broadly a write invalidates;
 	// nodes holds the per-namespace / per-entity epochs the hierarchical key binds;
@@ -227,6 +265,7 @@ func New(capacity int) *VDSO {
 		cap:          capacity,
 		cache:        map[string]*list.Element{},
 		lru:          list.New(),
+		cacheGen:     1,
 		nodes:        map[string]uint64{},
 		nodeCap:      DefaultNodeEpochLimit,
 		nodeLRU:      list.New(),
@@ -236,6 +275,78 @@ func New(capacity int) *VDSO {
 		revokedLRU:   list.New(),
 		revokedIndex: map[string]*list.Element{},
 	}
+}
+
+// Tier2State returns one mutex-coherent snapshot of the live tier-2 budget and
+// occupancy. It does not expose or mutate entry identities.
+func (v *VDSO) Tier2State() Tier2CacheState {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.tier2StateLocked()
+}
+
+func (v *VDSO) tier2StateLocked() Tier2CacheState {
+	return Tier2CacheState{
+		Capacity:   v.cap,
+		Occupancy:  v.lru.Len(),
+		Evictions:  v.evictions,
+		Generation: v.cacheGen,
+	}
+}
+
+// ResizeTier2 changes the capacity of this live instance without rebuilding it.
+// Grow preserves the entire cache. Shrink removes only LRU-tail entries, releasing
+// each cache-owned CAS pin while the entry mutation is serialized under v.mu. The
+// corresponding lifecycle events are dispatched after unlock so observers may
+// safely re-enter the VDSO.
+func (v *VDSO) ResizeTier2(req Tier2ResizeRequest) (Tier2ResizeReceipt, error) {
+	if req.Capacity <= 0 {
+		return Tier2ResizeReceipt{}, ErrInvalidTier2Capacity
+	}
+
+	v.mu.Lock()
+	before := v.tier2StateLocked()
+	receipt := Tier2ResizeReceipt{
+		OldCapacity:   before.Capacity,
+		NewCapacity:   before.Capacity,
+		OldOccupancy:  before.Occupancy,
+		NewOccupancy:  before.Occupancy,
+		OldGeneration: before.Generation,
+		NewGeneration: before.Generation,
+		Reason:        req.Reason,
+		Timestamp:     v.clock(),
+	}
+	if req.Capacity == v.cap {
+		v.mu.Unlock()
+		return receipt, nil
+	}
+
+	v.cap = req.Capacity
+	v.cacheGen++
+	receipt.Changed = true
+	receipt.NewCapacity = v.cap
+	receipt.NewGeneration = v.cacheGen
+	var evicted []emitJob
+	for v.lru.Len() > v.cap {
+		back := v.lru.Back()
+		if back == nil {
+			break
+		}
+		e := back.Value.(*entry)
+		v.lru.Remove(back)
+		delete(v.cache, e.key)
+		abi.UnpinResolved(e.ref)
+		v.evictions++
+		evicted = append(evicted, emitJob{key: e.key, ref: e.ref, witness: e.witness})
+	}
+	receipt.Evicted = len(evicted)
+	receipt.NewOccupancy = v.lru.Len()
+	v.mu.Unlock()
+
+	for _, e := range evicted {
+		v.emitCache(CacheEvict, e.key, e.ref, e.witness)
+	}
+	return receipt, nil
 }
 
 // RegisterPure adds a tier-1 pure tool.
@@ -573,6 +684,7 @@ func (v *VDSO) Emit(ev abi.Event) {
 			v.lru.Remove(back)
 			delete(v.cache, ce.key)
 			abi.UnpinResolved(ce.ref) // left the cache -> release its CAS pin
+			v.evictions++
 			evicted = append(evicted, emitJob{key: ce.key, ref: ce.ref, witness: ce.witness})
 		}
 		return fill, evicted

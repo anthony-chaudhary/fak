@@ -245,30 +245,30 @@ func (b *StreamBridge) Checkpoint() Checkpoint { return b.ctl.Checkpoint() }
 // Text feeds one accepted output delta. The bytes join the durable prefix and
 // are checked against text-scope rules in the same step.
 func (b *StreamBridge) Text(delta string) (Transition, error) {
-	if b.steering != nil {
-		return Transition{}, ErrEpochClosed
-	}
-	if delta == "" {
-		return Transition{Directive: Directive{Kind: Continue}}, nil
-	}
-	b.textDeltas++
-	tr, err := b.ctl.ObserveText(streamrules.StreamKey{Scope: streamrules.ScopeText}, delta)
-	if err != nil {
-		return Transition{}, err
-	}
-	return b.settle(tr), nil
+	return b.feedDelta(delta, &b.textDeltas, func(delta string) (Transition, error) {
+		return b.ctl.ObserveText(streamrules.StreamKey{Scope: streamrules.ScopeText}, delta)
+	})
 }
 
 // Thinking feeds one reasoning delta. It is steerable but never accepted.
 func (b *StreamBridge) Thinking(delta string) (Transition, error) {
+	return b.feedDelta(delta, &b.thinkingDeltas, func(delta string) (Transition, error) {
+		return b.ctl.ObserveThinking(streamrules.StreamKey{Scope: streamrules.ScopeThinking}, delta)
+	})
+}
+
+// feedDelta applies the provider bridge's common boundary semantics before handing a
+// non-empty delta to its scope-specific controller method. Counting happens only after
+// the epoch-open and non-empty gates, exactly once per observed provider fragment.
+func (b *StreamBridge) feedDelta(delta string, count *int, observe func(string) (Transition, error)) (Transition, error) {
 	if b.steering != nil {
 		return Transition{}, ErrEpochClosed
 	}
 	if delta == "" {
 		return Transition{Directive: Directive{Kind: Continue}}, nil
 	}
-	b.thinkingDeltas++
-	tr, err := b.ctl.ObserveThinking(streamrules.StreamKey{Scope: streamrules.ScopeThinking}, delta)
+	(*count)++
+	tr, err := observe(delta)
 	if err != nil {
 		return Transition{}, err
 	}
