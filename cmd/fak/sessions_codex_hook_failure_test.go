@@ -17,14 +17,15 @@ func (failingCodexHookWriter) Write([]byte) (int, error) {
 func TestCodexLoopHookFailureRecoveryMessages(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
 	t.Setenv(guardActiveEnv, "")
+	t.Setenv("CODEX_THREAD_ID", "")
 	for _, tc := range []struct {
 		name, payload string
 		argv          []string
 		want          string
 	}{
-		{name: "UnreadablePayload", payload: "{", argv: []string{"codex-loop-hook"}, want: "recovery: relaunch with `fak codex`"},
-		{name: "AbsentSessionId", payload: "{}", argv: []string{"codex-loop-hook"}, want: "set CODEX_THREAD_ID"},
-		{name: "UnresolvedTranscript", payload: `{"session_id":"missing-session"}`, argv: []string{"codex-loop-hook", "--codex-home", t.TempDir()}, want: "verify --codex-home/CODEX_HOME"},
+		{name: "UnreadablePayload", payload: "{", argv: []string{"codex-loop-hook", "--hardened"}, want: "recovery: relaunch with `fak codex`"},
+		{name: "AbsentSessionId", payload: "{}", argv: []string{"codex-loop-hook", "--hardened"}, want: "set CODEX_THREAD_ID"},
+		{name: "UnresolvedTranscript", payload: `{"session_id":"missing-session"}`, argv: []string{"codex-loop-hook", "--hardened", "--codex-home", t.TempDir()}, want: "verify --codex-home/CODEX_HOME"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -46,7 +47,7 @@ func TestCodexLoopHookDiagnoseFailureAllowsWithRecovery(t *testing.T) {
 	t.Setenv(guardActiveEnv, "")
 	home, sessionID := writeCodexHookSession(t, "openai")
 	var stdout, stderr bytes.Buffer
-	code := sessionsCodexLoopHookUnbounded(&stdout, &stderr, strings.NewReader(`{"session_id":"`+sessionID+`"}`), []string{"--codex-home", home}, func(io.Reader, string) (codexLoopDiagnosis, error) {
+	code := sessionsCodexLoopHookUnbounded(&stdout, &stderr, strings.NewReader(`{"session_id":"`+sessionID+`"}`), []string{"--hardened", "--codex-home", home}, func(io.Reader, string) (codexLoopDiagnosis, error) {
 		return codexLoopDiagnosis{}, errors.New("injected diagnose failure")
 	})
 	if code != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "inspect the rollout JSONL") {
@@ -61,7 +62,7 @@ func TestCodexLoopHookEncodeErrorNamesRecovery(t *testing.T) {
 	t.Setenv(guardActiveEnv, "")
 	home, sessionID := writeCodexHookSession(t, "openai")
 	var stderr bytes.Buffer
-	code := sessionsCodexLoopHookUnbounded(failingCodexHookWriter{}, &stderr, strings.NewReader(`{"session_id":"`+sessionID+`"}`), []string{"--codex-home", home}, probeCodexLoopProvider)
+	code := sessionsCodexLoopHookUnbounded(failingCodexHookWriter{}, &stderr, strings.NewReader(`{"session_id":"`+sessionID+`"}`), []string{"--hardened", "--codex-home", home}, probeCodexLoopProvider)
 	if code != 1 || !strings.Contains(stderr.String(), "turn not blocked") || !strings.Contains(stderr.String(), "relaunch with `fak codex`") {
 		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}

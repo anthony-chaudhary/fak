@@ -18,8 +18,17 @@ const (
 
 	// Recovery is evaluated by the shell before invoking fak, so it remains usable
 	// when fak is missing, stale, or broken. The exact value avoids accidental bypass.
-	codexContinuationHookCommand        = "if [ \"${" + codexRawRecoveryEnv + ":-}\" = \"" + codexRawRecoveryValue + "\" ]; then echo '" + codexRawRecoveryWarning + "' >&2; else fak sessions codex-loop-hook 2>/dev/null || true; fi"
-	codexContinuationHookCommandWindows = "if ($env:" + codexRawRecoveryEnv + " -eq '" + codexRawRecoveryValue + "') { [Console]::Error.WriteLine('" + codexRawRecoveryWarning + "') } else { fak sessions codex-loop-hook 2>$null; exit 0 }"
+	// The default declaration avoids spawning fak for ordinary direct prompts. A
+	// guarded child marks its environment, while a user can opt a direct shell into
+	// hardened cross-instance enforcement with the explicit environment switch.
+	codexContinuationHookCommand        = "if [ \"${" + codexRawRecoveryEnv + ":-}\" = \"" + codexRawRecoveryValue + "\" ]; then echo '" + codexRawRecoveryWarning + "' >&2; elif [ \"${" + guardActiveEnv + ":-}\" = \"1\" ] || [ \"${" + codexLoopHookHardenedEnv + ":-}\" = \"1\" ]; then fak sessions codex-loop-hook 2>/dev/null || true; fi"
+	codexContinuationHookCommandWindows = "if \"%" + codexRawRecoveryEnv + "%\"==\"" + codexRawRecoveryValue + "\" (echo " + codexRawRecoveryWarning + " 1>&2) else if \"%" + guardActiveEnv + "%\"==\"1\" (fak sessions codex-loop-hook 2>nul || exit /b 0) else if \"%" + codexLoopHookHardenedEnv + "%\"==\"1\" (fak sessions codex-loop-hook 2>nul || exit /b 0) else (exit /b 0)"
+
+	// --hardened is an installer-time choice. Unlike the default declaration, this
+	// command intentionally invokes the hook for every prompt and pins the runtime
+	// enforcement flag even when the launching shell has no mode environment set.
+	codexContinuationHookHardenedCommand        = "if [ \"${" + codexRawRecoveryEnv + ":-}\" = \"" + codexRawRecoveryValue + "\" ]; then echo '" + codexRawRecoveryWarning + "' >&2; else fak sessions codex-loop-hook --hardened 2>/dev/null || true; fi"
+	codexContinuationHookHardenedCommandWindows = "if \"%" + codexRawRecoveryEnv + "%\"==\"" + codexRawRecoveryValue + "\" (echo " + codexRawRecoveryWarning + " 1>&2) else (fak sessions codex-loop-hook --hardened 2>nul || exit /b 0)"
 )
 
 func sessionsCodexHookInstall(stdout, stderr io.Writer, argv []string) int {
@@ -27,7 +36,10 @@ func sessionsCodexHookInstall(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
 	dryRun := fs.Bool("dry-run", false, "print the projected manifest without writing it")
-	fs.Usage = func() { fmt.Fprintln(stderr, "usage: fak sessions codex-hook-install [--codex-home DIR] [--dry-run]") }
+	hardened := fs.Bool("hardened", false, "block unguarded direct Codex prompts across instances (default: guarded children only)")
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak sessions codex-hook-install [--codex-home DIR] [--dry-run] [--hardened]")
+	}
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
@@ -49,7 +61,7 @@ func sessionsCodexHookInstall(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak sessions codex-hook-install: read %s: %v\n", path, readErr)
 		return 1
 	}
-	installCodexContinuationHook(manifest)
+	installCodexContinuationHook(manifest, *hardened)
 	projected, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "fak sessions codex-hook-install: encode manifest: %v\n", err)
@@ -76,24 +88,60 @@ func sessionsCodexHookInstall(stdout, stderr io.Writer, argv []string) int {
 	return 0
 }
 
-func installCodexContinuationHook(manifest map[string]any) {
+func installCodexContinuationHook(manifest map[string]any, hardened bool) {
 	hooks, _ := manifest["hooks"].(map[string]any)
 	if hooks == nil {
 		hooks = map[string]any{}
 		manifest["hooks"] = hooks
 	}
 	entries, _ := hooks["UserPromptSubmit"].([]any)
-	filtered := make([]any, 0, len(entries)+1)
-	for _, entry := range entries {
-		if !containsCodexContinuationHook(entry) {
-			filtered = append(filtered, entry)
-		}
+	filtered := removeCodexContinuationHooks(entries)
+	command, commandWindows := codexContinuationHookCommand, codexContinuationHookCommandWindows
+	if hardened {
+		command, commandWindows = codexContinuationHookHardenedCommand, codexContinuationHookHardenedCommandWindows
 	}
 	filtered = append(filtered, map[string]any{"hooks": []any{map[string]any{
-		"type": "command", "command": codexContinuationHookCommand,
-		"commandWindows": codexContinuationHookCommandWindows, "timeout": float64(30),
+		"type": "command", "command": command,
+		"commandWindows": commandWindows, "timeout": float64(30),
 	}}})
 	hooks["UserPromptSubmit"] = filtered
+}
+
+// removeCodexContinuationHooks removes only fak's command hook from each group. A
+// UserPromptSubmit group may carry several independent hooks; dropping the whole group
+// when one child is fak-owned would silently uninstall the user's sibling hooks.
+func removeCodexContinuationHooks(entries []any) []any {
+	filtered := make([]any, 0, len(entries)+1)
+	for _, entry := range entries {
+		group, ok := entry.(map[string]any)
+		if !ok {
+			filtered = append(filtered, entry)
+			continue
+		}
+		hookEntries, grouped := group["hooks"].([]any)
+		if !grouped {
+			if !containsCodexContinuationHook(entry) {
+				filtered = append(filtered, entry)
+			}
+			continue
+		}
+		kept := make([]any, 0, len(hookEntries))
+		for _, hook := range hookEntries {
+			if !containsCodexContinuationHook(hook) {
+				kept = append(kept, hook)
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		updated := make(map[string]any, len(group))
+		for key, value := range group {
+			updated[key] = value
+		}
+		updated["hooks"] = kept
+		filtered = append(filtered, updated)
+	}
+	return filtered
 }
 
 func containsCodexContinuationHook(value any) bool {

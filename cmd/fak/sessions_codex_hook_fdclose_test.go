@@ -30,7 +30,7 @@ func TestCodexLoopHookClosesTranscriptBeforeDiagnose(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := sessionsCodexLoopHookUnbounded(&stdout, &stderr,
 		strings.NewReader(`{"session_id":"`+sessionID+`"}`),
-		[]string{"--codex-home", home},
+		[]string{"--hardened", "--codex-home", home},
 		func(r io.Reader, path string) (codexLoopDiagnosis, error) {
 			// Witness 1: the handle is already gone by the time diagnosis starts.
 			_, sawFile = r.(*os.File)

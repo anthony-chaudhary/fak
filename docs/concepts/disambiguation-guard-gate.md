@@ -75,3 +75,10 @@ This map positions the current `guard-gate` coverage backlog. Each entry names t
 - **`guardactiveenv`** — the exact guard-gate symbol, not the broader family label.
 - **`guardcodexoauthplaceholderapikey`** — the exact guard-gate symbol, not the broader family label.
 - **`guardalloweffectivereadlayers`** — the exact guard-gate symbol, not the broader family label.
+
+
+### FAK_GUARD_ACTIVE (guarded-child marker)
+
+The inherited environment marker set only on a fak-managed guard child; the Codex UserPromptSubmit selector reads it to invoke scoped child context while ordinary direct sessions remain permissive.
+
+**Distinct from:** This is the child-lineage marker consumed by the submit selector, not guardActiveEnv (the Go constant that names it), and not FAK_CODEX_SUBMIT_HARDENED (the separate operator opt-in that blocks unguarded peer sessions).
