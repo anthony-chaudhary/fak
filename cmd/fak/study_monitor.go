@@ -12,6 +12,9 @@ import (
 const defaultStudyMonitorRegistry = "docs/research/monitored-repositories.json"
 
 func runStudyMonitor(stdout, stderr io.Writer, args []string) int {
+	if len(args) > 0 && args[0] == "import" {
+		return runStudyImport(stdout, stderr, args[1:])
+	}
 	fs := flag.NewFlagSet("study-monitor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	registryPath := fs.String("registry", defaultStudyMonitorRegistry, "path to the monitored repository registry")
