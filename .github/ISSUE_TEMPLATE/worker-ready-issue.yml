@@ -183,6 +183,96 @@ body:
       placeholder: "Example: The producer skips unscoped candidates and reports ISSUE_SCOPE_INCOMPLETE."
     validations:
       required: true
+  - type: markdown
+    attributes:
+      value: |
+        ### Witness-first contract
+
+        For substantive implementation, select the failure context and name the evidence chain
+        before dispatch: envelope -> baseline artifact -> one lever -> candidate artifact -> promotion
+        gate -> durable witness. The adapter points to existing project proof primitives; it does not
+        impose performance fields on unrelated work. Missing fields warn by default and fail closed
+        only on proof-enforced lanes. Read-only triage, trivial changes, urgent safety/outage work,
+        and unavailable external systems may use the documented exception field.
+  - type: dropdown
+    id: witness-context
+    attributes:
+      label: Witness context adapter
+      description: Select the artifact class that matches the failure; choose Exception only for a documented exception below.
+      options:
+        - Logic/correctness - failing behavior repro to focused test to regression test
+        - TUI/visual - captured render to render assertion to render-witness test/screenshot
+        - Security/policy - preflight or red-team receipt to policy/attestation gate to policy fixture
+        - Reliability/operations - incident or soak artifact to end-to-end SLO to fault/soak witness
+        - Cost/token - net-true usage receipt to quality-constrained cost gate to usage regression
+        - Native performance - native benchmark receipt to matched-envelope gate to benchmark regression
+        - Documented exception
+    validations:
+      required: true
+  - type: textarea
+    id: witness-envelope
+    attributes:
+      label: Context / envelope
+      description: Pin only the inputs, environment, policy, load, accounting, quality, or hardware axes relevant to the selected adapter.
+      placeholder: "Example: parser input and deterministic Go environment; or native engine/model/hardware/workload/quality envelope."
+    validations:
+      required: false
+  - type: input
+    id: baseline-artifact
+    attributes:
+      label: Baseline artifact
+      description: Existing failure artifact requested by the selected adapter.
+      placeholder: "Example: failing test case, captured render, preflight receipt, soak artifact, usage receipt, or native benchmark receipt."
+    validations:
+      required: false
+  - type: input
+    id: declared-lever
+    attributes:
+      label: One declared lever
+      description: The single controlled change under test; additional levers require another candidate cycle.
+      placeholder: "Example: Change only the token boundary."
+    validations:
+      required: false
+  - type: input
+    id: candidate-artifact
+    attributes:
+      label: Candidate artifact
+      description: The comparable post-change artifact requested by the selected adapter.
+      placeholder: "Example: passing repro, corrected render, candidate receipt, or matched benchmark."
+    validations:
+      required: false
+  - type: input
+    id: promotion-gate
+    attributes:
+      label: Promotion gate
+      description: Falsifiable command/threshold; include end-to-end costs for performance, cost, and reliability work.
+      placeholder: "Example: go test ./internal/parser; or quality holds and net billed tokens fall."
+    validations:
+      required: false
+  - type: input
+    id: durable-witness
+    attributes:
+      label: Durable regression witness
+      description: Existing project witness primitive that prevents recurrence.
+      placeholder: "Example: regression test, render witness, policy fixture, fault test, usage fixture, or benchmark receipt check."
+    validations:
+      required: false
+  - type: textarea
+    id: rejected-levers
+    attributes:
+      label: Rejected levers / falsifying results
+      description: Record each attempted lever, its artifact, and falsifier so later workers do not repeat it.
+      placeholder: "Example: retry interval - soak-17.json - p99 recovery regressed."
+    validations:
+      required: false
+  - type: textarea
+    id: witness-exception
+    attributes:
+      label: Witness exception
+      description: Required only when Documented exception is selected; name read-only triage, trivial change, urgent safety/outage response, or unavailable external system and explain why.
+      placeholder: "Example: Read-only triage; no implementation dispatch occurs."
+    validations:
+      required: false
   - type: input
     id: witness
     attributes:

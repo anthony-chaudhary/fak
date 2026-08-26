@@ -1,6 +1,10 @@
 package orchestration
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/witnessprocess"
+)
 
 func TestTaskFromTextClassifiesWorkShape(t *testing.T) {
 	tests := []struct {
@@ -39,5 +43,21 @@ func TestTaskFromTextRejectsEmptyAndDoesNotRetainPrompt(t *testing.T) {
 	}
 	if task.ID == "Implement Secret_Widget and verify it" || len(task.ID) != len("task-")+16 {
 		t.Fatalf("task id %q is not a bounded digest", task.ID)
+	}
+}
+
+func TestResolveWitnessFirstWarnsOrEnforcesBeforeDispatch(t *testing.T) {
+	incomplete := &witnessprocess.Block{Context: witnessprocess.Logic, Envelope: "fixed input", Lever: "one parser change", CandidateArtifact: "candidate", DurableWitness: "test"}
+	task := TaskSpec{Schema: "fak-orchestration-task/1", ID: "task-witness", WorkClass: WorkGrind, WitnessFirst: incomplete}
+	got, err := Resolve(OrchestrationProfile{Name: ProfileUltracode}, task, HarnessCapabilities{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Resolved.Warnings) != 1 {
+		t.Fatalf("warnings=%v", got.Resolved.Warnings)
+	}
+	incomplete.Policy = witnessprocess.Enforce
+	if _, err := Resolve(OrchestrationProfile{Name: ProfileUltracode}, task, HarnessCapabilities{}); err == nil {
+		t.Fatal("enforced lane accepted incomplete witness block")
 	}
 }

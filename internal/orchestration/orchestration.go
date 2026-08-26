@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/witnessprocess"
 )
 
 const SchemaVersion = "fak-orchestration-plan/1"
@@ -60,15 +62,16 @@ type HarnessCapabilities struct {
 }
 
 type TaskSpec struct {
-	Schema       string        `json:"schema"`
-	ID           string        `json:"id"`
-	WorkClass    WorkClass     `json:"work_class,omitempty"`
-	Attended     *bool         `json:"attended,omitempty"`
-	MaxWorkers   *int          `json:"max_workers,omitempty"`
-	ExactWorkers *int          `json:"exact_workers,omitempty"`
-	Width        *WidthRequest `json:"width,omitempty"`
-	MaxTokens    *int64        `json:"max_tokens,omitempty"`
-	EngineRef    string        `json:"engine_ref,omitempty"`
+	Schema       string                `json:"schema"`
+	ID           string                `json:"id"`
+	WorkClass    WorkClass             `json:"work_class,omitempty"`
+	Attended     *bool                 `json:"attended,omitempty"`
+	MaxWorkers   *int                  `json:"max_workers,omitempty"`
+	ExactWorkers *int                  `json:"exact_workers,omitempty"`
+	Width        *WidthRequest         `json:"width,omitempty"`
+	MaxTokens    *int64                `json:"max_tokens,omitempty"`
+	EngineRef    string                `json:"engine_ref,omitempty"`
+	WitnessFirst *witnessprocess.Block `json:"witness_first,omitempty"`
 }
 
 type ChildAccessMode string
@@ -207,6 +210,7 @@ type WorkflowPlan struct {
 	SOLRoute     SOLRoute          `json:"sol_route"`
 	Degradations []Degradation     `json:"degradations"`
 	Explanation  []string          `json:"explanation"`
+	Warnings     []string          `json:"warnings,omitempty"`
 	Width        *WidthSelection   `json:"width,omitempty"`
 }
 
@@ -317,6 +321,14 @@ func ParseResolution(data []byte) (Resolution, error) {
 }
 
 func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) (Resolution, error) {
+	var witnessWarnings []string
+	if task.WitnessFirst != nil {
+		var err error
+		witnessWarnings, err = task.WitnessFirst.Validate()
+		if err != nil {
+			return Resolution{}, err
+		}
+	}
 	if req.Name == "" {
 		req.Name = ProfileAuto
 	}
@@ -444,7 +456,7 @@ func Resolve(req OrchestrationProfile, task TaskSpec, caps HarnessCapabilities) 
 	for _, d := range deg {
 		explain = append(explain, "degraded: "+d.Reason)
 	}
-	plan := WorkflowPlan{Schema: SchemaVersion, Profile: resolvedProfile, TaskID: task.ID, WorkClass: task.WorkClass, Roles: roles, DAG: dag, Budget: Budget{workers, tokens}, Leases: LeasePolicy{"taskmgr", multi}, Witness: WitnessPolicy{witness, witness}, Reconcile: ReconcilePolicy{multi, "effect-readback"}, Interaction: InteractionPolicy{attended, multi, multi}, EngineRef: engine, SOLRoute: solRoute, Degradations: deg, Explanation: explain, Width: width}
+	plan := WorkflowPlan{Schema: SchemaVersion, Profile: resolvedProfile, TaskID: task.ID, WorkClass: task.WorkClass, Roles: roles, DAG: dag, Budget: Budget{workers, tokens}, Leases: LeasePolicy{"taskmgr", multi}, Witness: WitnessPolicy{witness, witness}, Reconcile: ReconcilePolicy{multi, "effect-readback"}, Interaction: InteractionPolicy{attended, multi, multi}, EngineRef: engine, SOLRoute: solRoute, Degradations: deg, Explanation: explain, Warnings: witnessWarnings, Width: width}
 	return Resolution{SchemaVersion, req, plan, prov, deg}, nil
 }
 
