@@ -15,7 +15,8 @@ claims. [`workload-parameters.md`](workload-parameters.md) records measured popu
 parameters, and exact limits for replay and generation. [`startups-landscape.md`](startups-landscape.md) is the adjacent-provider taxonomy
 and watchlist. [`filings-ledger.md`](filings-ledger.md) normalizes hyperscaler capex,
 leases, asset mix, backlog, and accounting boundaries. [`supply-chain-ledger.md`](supply-chain-ledger.md) tracks the
-power-to-goodput delivery pipeline and contradiction evidence. [`refresh-protocol.md`](refresh-protocol.md) defines the online-search,
+power-to-goodput delivery pipeline and contradiction evidence. [`market-chronology.md`](market-chronology.md) preserves
+releases, partnerships, funding, failures, and rumor outcomes by date. [`refresh-protocol.md`](refresh-protocol.md) defines the online-search,
 contradiction, and rumor lifecycle. The `slices/` directory is reserved for independently
 researched coverage ledgers.
 Empty or missing slices are coverage debt, not evidence that a category has no activity.
@@ -137,7 +138,7 @@ Immediate next slices:
 2. extend the [`workload-parameters.md`](workload-parameters.md) ledger with missing production distributions;
 3. extend the [`filings-ledger.md`](filings-ledger.md) beyond the four largest U.S. hyperscalers;
 4. extend the [`supply-chain-ledger.md`](supply-chain-ledger.md) into a named site/vendor delivery census;
-5. startup, release, acquisition, failure, and rumor chronology;
+5. expand the [`market-chronology.md`](market-chronology.md) with startup failures, cancellations, and resolved rumors;
 6. contradiction matrix and recurring validator.
 
 The clearest workload-distribution evidence so far is not a universal Zipf law. It is a
