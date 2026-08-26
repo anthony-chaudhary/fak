@@ -12,7 +12,7 @@ func TestWatchdogWatchdogAuditTaskIsOrthogonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	xml := string(raw)
-	for _, want := range []string{"<LogonType>S4U</LogonType>", "tools\\watchdog_watchdog_audit.ps1", "-Json"} {
+	for _, want := range []string{"<LogonType>S4U</LogonType>", "%USERPROFILE%\\bin\\fak.exe", "watchdog-audit-run", "tools\\watchdog_watchdog_audit.ps1", "%LOCALAPPDATA%\\fak-watchdog-audit\\audit.jsonl", "--max-bytes 4194304"} {
 		if !strings.Contains(xml, want) {
 			t.Errorf("task capture missing %q", want)
 		}

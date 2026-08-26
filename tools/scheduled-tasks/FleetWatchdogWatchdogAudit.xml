@@ -35,8 +35,8 @@
   </Triggers>
   <Actions Context="Author">
     <Exec>
-      <Command>conhost.exe</Command>
-      <Arguments>--headless powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "C:\work\fak\tools\watchdog_watchdog_audit.ps1" -Json</Arguments>
+      <Command>%USERPROFILE%\bin\fak.exe</Command>
+      <Arguments>watchdog-audit-run --script "C:\work\fak\tools\watchdog_watchdog_audit.ps1" --log "%LOCALAPPDATA%\fak-watchdog-audit\audit.jsonl" --max-bytes 4194304</Arguments>
     </Exec>
   </Actions>
 </Task>
