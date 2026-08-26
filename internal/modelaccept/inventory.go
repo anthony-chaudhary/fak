@@ -6,7 +6,71 @@ import (
 	"time"
 )
 
-const InventorySchema = "fak.modelaccept.inventory/1"
+const (
+	InventorySchema             = "fak.modelaccept.inventory/1"
+	Qwen38LadderInventorySchema = "fak.modelaccept.qwen38-ladder-readiness/1"
+)
+
+type ReadinessCellStatus string
+
+const (
+	ReadinessCellPass        ReadinessCellStatus = "PASS"
+	ReadinessCellHold        ReadinessCellStatus = "HOLD"
+	ReadinessCellUnwitnessed ReadinessCellStatus = "UNWITNESSED"
+)
+
+type ReadinessCell struct {
+	ID       string              `json:"id"`
+	Status   ReadinessCellStatus `json:"status"`
+	Envelope string              `json:"envelope"`
+	Owner    string              `json:"owner"`
+}
+
+type RuntimePair struct {
+	BaselineSHA  string `json:"baseline_sha"`
+	CandidateSHA string `json:"candidate_sha"`
+}
+
+type CorrectnessPair struct {
+	BaselinePassed  int `json:"baseline_passed"`
+	CandidatePassed int `json:"candidate_passed"`
+	Trials          int `json:"trials"`
+}
+
+type P95Pair struct {
+	Metric          string  `json:"metric"`
+	BaselineMetric  float64 `json:"baseline_ms"`
+	CandidateMetric float64 `json:"candidate_ms"`
+	Improvement     float64 `json:"improvement_pct"`
+}
+
+type ArtifactHash struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+type LadderReadinessEvidence struct {
+	Issue             string          `json:"issue"`
+	Model             string          `json:"model"`
+	Revision          string          `json:"revision"`
+	Precision         string          `json:"precision"`
+	Topology          string          `json:"topology"`
+	Runtime           string          `json:"runtime"`
+	CapturedAt        string          `json:"captured_at"`
+	RuntimePair       RuntimePair     `json:"runtime_pair"`
+	CorpusID          string          `json:"corpus_id"`
+	CorpusSHA256      string          `json:"corpus_sha256"`
+	EnvironmentSHA256 string          `json:"environment_sha256"`
+	Correctness       CorrectnessPair `json:"correctness"`
+	P95               P95Pair         `json:"p95"`
+	ArtifactHashes    []ArtifactHash  `json:"artifact_hashes"`
+}
+
+type InventorySemantics struct {
+	Default     string `json:"default"`
+	Replacement string `json:"replacement"`
+	Rollback    string `json:"rollback"`
+}
 
 type InventoryOptions struct {
 	Artifact         string
@@ -17,30 +81,33 @@ type InventoryOptions struct {
 }
 
 type InventoryRow struct {
-	Model            string   `json:"model"`
-	Family           string   `json:"family"`
-	Generation       string   `json:"generation"`
-	Lifecycle        string   `json:"lifecycle"`
-	EvalReason       string   `json:"eval_reason,omitempty"`
-	CapabilityGate   Verdict  `json:"capability_gate"`
-	RequestedTier    int      `json:"requested_tier"`
-	WitnessedTier    *int     `json:"witnessed_tier,omitempty"`
-	CorpusID         string   `json:"corpus_id"`
-	DeclaredAt       string   `json:"declared_at"`
-	ObservedFirst    string   `json:"observed_first,omitempty"`
-	ObservedLast     string   `json:"observed_last,omitempty"`
-	Samples          int      `json:"samples"`
-	Artifact         string   `json:"artifact"`
-	ArtifactRevision string   `json:"artifact_revision"`
-	Reasons          []string `json:"reasons,omitempty"`
+	Model            string                   `json:"model"`
+	Family           string                   `json:"family"`
+	Generation       string                   `json:"generation"`
+	Lifecycle        string                   `json:"lifecycle"`
+	EvalReason       string                   `json:"eval_reason,omitempty"`
+	CapabilityGate   Verdict                  `json:"capability_gate"`
+	RequestedTier    int                      `json:"requested_tier"`
+	WitnessedTier    *int                     `json:"witnessed_tier,omitempty"`
+	CorpusID         string                   `json:"corpus_id"`
+	DeclaredAt       string                   `json:"declared_at"`
+	ObservedFirst    string                   `json:"observed_first,omitempty"`
+	ObservedLast     string                   `json:"observed_last,omitempty"`
+	Samples          int                      `json:"samples"`
+	Artifact         string                   `json:"artifact"`
+	ArtifactRevision string                   `json:"artifact_revision"`
+	Reasons          []string                 `json:"reasons,omitempty"`
+	ReadinessCells   []ReadinessCell          `json:"readiness_cells,omitempty"`
+	LadderEvidence   *LadderReadinessEvidence `json:"ladder_evidence,omitempty"`
 }
 
 type Inventory struct {
-	Schema   string         `json:"schema"`
-	Verdict  Verdict        `json:"verdict"`
-	CorpusID string         `json:"corpus_id"`
-	Rows     []InventoryRow `json:"rows"`
-	Reasons  []string       `json:"reasons,omitempty"`
+	Schema    string              `json:"schema"`
+	Verdict   Verdict             `json:"verdict"`
+	CorpusID  string              `json:"corpus_id"`
+	Rows      []InventoryRow      `json:"rows"`
+	Reasons   []string            `json:"reasons,omitempty"`
+	Semantics *InventorySemantics `json:"semantics,omitempty"`
 }
 
 // BuildInventory joins an acceptance fold to exact model IDs. It never borrows
