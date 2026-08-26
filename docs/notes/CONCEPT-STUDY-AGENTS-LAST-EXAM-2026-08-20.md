@@ -202,3 +202,42 @@ CUA effect enforcement.
 - **Provenance:** no ALE code, task data, reference output, or submodule content was
   copied. All implementation proposals are Go-side adapters/contracts around the
   public upstream interface.
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue [#8990](https://github.com/anthony-chaudhary/fak/issues/8990) refreshes the denominator at upstream revision
+[`0b6465b13c85b5a0a017d4c88bcf979a519a5e1f`](https://github.com/rdi-berkeley/agents-last-exam/commit/0b6465b13c85b5a0a017d4c88bcf979a519a5e1f)
+(2026-08-25T22:20:05Z). The machine-readable exhaustive map is
+[`docs/research/inventory/rdi-berkeley-agents-last-exam.json`](../research/inventory/rdi-berkeley-agents-last-exam.json):
+1,061 files, 470 directories, 27,605,074 bytes, and 209,538 text lines after the generator's explicit `.git` and
+vendored dependency/cache exclusions. It records every required source class, subsystem aggregates and examples,
+non-tree forge/history evidence, FAK self-queries, candidate adjudication, and issue tracking.
+
+The forge read-back covered all 16 issues (8 open, 8 closed), all 63 pull requests (14 open, 6 closed unmerged,
+43 merged), zero discussions, one release/tag, 35 remote branches, and 173 visible commits. Repository metadata at
+observation was 970 stars, Apache-2.0, default branch `main`, and not archived. The single release is
+`runtime-qe-bgw-6.7.0-4.0` (2026-08-13). The tree has no dedicated roadmap file at this pin; the actionable roadmap
+is instead visible in open issues/PRs and remote feature branches. In particular, upstream #7 (reasoning effort),
+#26 (provider disk requirements), #27 (bulk artifact transfer), #68 (boot-time dependency churn), and #75 (CUA
+coordinate space) expose cross-harness and operating-envelope concerns relevant to honest benchmark execution.
+
+Eight commits separate this pin from the original study's `75a3f866` cutoff. They add the Octavus CLI harness,
+harden the RGI MCR-1 scorer and canonical paths, and merge then revert shared evaluator-security helpers. These
+changes broaden harness social context and reinforce scorer/path scrutiny, but they do not overturn the original
+FAK boundary: use ALE's runner, task artifacts, and official grader as external authority; do not import its
+provider-specific deployers or create another trajectory schema.
+
+### Refreshed FAK decisions and follow-ons
+
+| Candidate | Current FAK decision | Follow-on |
+|---|---|---|
+| Official raw-vs-fak artifact-scored ALE spine | **ADAPT / already filed.** This remains the smallest end-to-end borrow; upstream owns runner and hidden-reference grading, while FAK owns launch, receipt, comparison, and operating-envelope proof. | [#8223](https://github.com/anthony-chaudhary/fak/issues/8223), open |
+| ALE-v1.0 trajectory fixture with explicit schema-loss accounting | **ADAPT / already owned.** Use ALE as an external fidelity fixture; do not fork a competing interchange format. | [#6629](https://github.com/anthony-chaudhary/fak/issues/6629), open |
+| Expanded harness catalog, including Octavus CLI | **REJECT as a port.** It is useful cross-harness context, but importing provider-specific deployers duplicates product-shell code and weakens FAK-native ownership. | None |
+| ALE provider lifecycle and bulk artifact transport | **REJECT as implementation; borrow the questions.** Disk, network, timeout, and transfer constraints belong in #8223's matched operating envelope, not in copied provider code. | #8223 |
+
+Fresh `fak capabilities` queries found no ALE-shaped benchmark entry or trajectory-import capability. That negative
+self-query keeps #8223's benchmark gap honest and leaves trajectory conformance with #6629. No new unowned,
+evidence-backed candidate survived the field-borrow matrix, so this refresh creates no duplicate follow-on issue.
+The row-specific completion witness is `fak study-monitor --inventory-check --json`, whose
+`rdi-berkeley/agents-last-exam` row must report `ready: true` at the same indexed revision.
