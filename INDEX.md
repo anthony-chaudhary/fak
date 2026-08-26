@@ -981,6 +981,7 @@ These reader-facing references complement the curated paths above. They are grou
 - [microcontext natural traffic 2026 08 16](docs/research/microcontext-natural-traffic-2026-08-16.md)
 - [mirage study 2026 08 17](docs/research/mirage-study-2026-08-17.md)
 - [monitored repositories](docs/research/monitored-repositories.md)
+- [z lab dflash exhaustive study inventory](docs/research/inventory/z-lab-dflash.json)
 - [native harness dependency management 2026 08 15](docs/research/native-harness-dependency-management-2026-08-15.md)
 - [openrouter study 2026 08 18](docs/research/openrouter-study-2026-08-18.md)
 - [attention vq](docs/research/quantization/attention-vq.md)

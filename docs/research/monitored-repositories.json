@@ -326,7 +326,93 @@
       "stars_at_check": 5809,
       "last_push_at_check": "2026-08-18T21:14:10Z",
       "study_note": "docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md",
-      "refresh_issue": "#8994"
+      "refresh_issue": "#8994",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/z-lab-dflash.json",
+        "indexed_revision": "07ebd93db9f472af339b644bb70221ad8428328a",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "source_evidence": [
+          {
+            "class": "history_changelog_releases",
+            "evidence": [
+              "gh api 'repos/z-lab/dflash/commits?per_page=100'",
+              "gh api 'repos/z-lab/dflash/releases?per_page=100'",
+              "https://github.com/z-lab/dflash/releases/tag/v0.1.0"
+            ],
+            "note": "Complete pinned commit history plus the sole tag/release checked on 2026-08-25; no changelog file exists."
+          },
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh issue list --repo z-lab/dflash --state open --limit 200 --json number,title,state,createdAt,closedAt,url",
+              "gh issue list --repo z-lab/dflash --state closed --limit 200 --json number,title,state,createdAt,closedAt,url",
+              "gh pr list --repo z-lab/dflash --state all --limit 200 --json number,title,state,createdAt,closedAt,mergedAt,url",
+              "gh api graphql repository discussions(first:100) and state totals"
+            ],
+            "note": "Full forge state classes checked on 2026-08-25: issues 85 open/48 closed; PRs 11 open/8 closed/3 merged; 7 discussions; zero milestones."
+          },
+          {
+            "class": "roadmap_todos",
+            "evidence": [
+              "gh api 'repos/z-lab/dflash/git/trees/07ebd93db9f472af339b644bb70221ad8428328a?recursive=1'",
+              "gh api 'repos/z-lab/dflash/contents/README.md?ref=07ebd93db9f472af339b644bb70221ad8428328a'",
+              "gh issue list --repo z-lab/dflash --state all --limit 200 --json number,title,state,createdAt,closedAt,url",
+              "gh pr list --repo z-lab/dflash --state all --limit 200 --json number,title,state,createdAt,closedAt,mergedAt,url",
+              "gh api graphql repository discussions(first:100), milestones totals"
+            ],
+            "note": "No canonical roadmap, milestone, or source TODO exists; requests remain distributed across forge threads."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities 'DFlash block diffusion flash speculative decoding candidate path selector dynamic convolution exact verification per-position acceptance'",
+              "go run ./cmd/fak-dev index docs 'DFlash block diffusion flash speculative decoding candidate path selector dynamic convolution exact verification per-position acceptance'",
+              "go run ./cmd/fak-dev index leaves 'DFlash block diffusion flash speculative decoding candidate path selector dynamic convolution exact verification per-position acceptance'",
+              "fak capabilities 'stochastic speculative decoding rejection sampling lossless temperature acceptance'"
+            ],
+            "note": "Self-query found the existing DFlash study, shipped per-position acceptance work, and open stochastic-losslessness gap; no native DFlash architecture implementation was found."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-DFLASH2-2026-08-20.md#candidate-matrix-refresh"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8258",
+              "https://github.com/anthony-chaudhary/fak/issues/4202",
+              "https://github.com/anthony-chaudhary/fak/issues/8936",
+              "https://github.com/anthony-chaudhary/fak/issues/8994"
+            ]
+          }
+        ],
+        "subsystem_count": 3,
+        "candidate_count": 8,
+        "filed_issue_count": 0,
+        "issue_refs": [
+          "#8258",
+          "#4202",
+          "#8936",
+          "#8994"
+        ],
+        "completeness_critic": "Exhaustive 11-file/14-entry pinned tree map plus complete dated forge state-class read-back; architecture is embedded in README/source, tests and roadmap are confirmed absent, and every process-owned source class points to concrete evidence."
+      }
     },
     {
       "repository": "anthropics/claude-code",
