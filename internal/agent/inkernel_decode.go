@@ -303,20 +303,39 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 // paths keep the historical single Prefill call because they do not share that
 // append proof.
 func (p *InKernelPlanner) prefillDivergentSuffix(ctx context.Context, s inKernelPrefillSession, ids []int) ([]float32, error) {
-	if p.m == nil || p.backend != nil || !p.q4k || !p.m.Cfg.IsQwen35Hybrid() || len(ids) <= inKernelQwenQ4KPrefillChunkTokens {
+	chunkTokens := p.effectiveQwenQ4KPrefillChunkTokens()
+	if !p.qwenQ4KPrefillChunkTarget() || len(ids) <= chunkTokens {
 		return s.Prefill(ids), nil
 	}
-	for len(ids) > inKernelQwenQ4KPrefillChunkTokens {
+	for len(ids) > chunkTokens {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		s.PrefillNoLogits(ids[:inKernelQwenQ4KPrefillChunkTokens])
-		ids = ids[inKernelQwenQ4KPrefillChunkTokens:]
+		s.PrefillNoLogits(ids[:chunkTokens])
+		ids = ids[chunkTokens:]
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	return s.Prefill(ids), nil
+}
+
+func (p *InKernelPlanner) qwenQ4KPrefillChunkTarget() bool {
+	return p != nil && p.m != nil && p.backend == nil && p.q4k && p.m.Cfg.IsQwen35Hybrid()
+}
+
+func (p *InKernelPlanner) effectiveQwenQ4KPrefillChunkTokens() int {
+	if p != nil && p.qwenQ4KPrefillChunkTokens > 0 {
+		return p.qwenQ4KPrefillChunkTokens
+	}
+	return inKernelQwenQ4KPrefillChunkTokens
+}
+
+func (p *InKernelPlanner) nativeInferencePrefillChunkTokens() int {
+	if !p.qwenQ4KPrefillChunkTarget() {
+		return 0
+	}
+	return p.effectiveQwenQ4KPrefillChunkTokens()
 }
 
 // decodeLane is one request's live decode state. decodeOne runs one token's worth of the

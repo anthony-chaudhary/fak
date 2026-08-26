@@ -407,17 +407,30 @@ type Completion struct {
 // are log_softmax over the unmodified model logits, so receipt capture is supported
 // only for greedy sampling without bias or repetition penalties.
 type NativeInferenceReceipt struct {
-	TokenIDs       []int     `json:"token_ids"`
-	TokenLogprobs  []float64 `json:"token_logprobs"`
-	PrefillSeconds float64   `json:"prefill_seconds"`
-	TTFTSeconds    float64   `json:"ttft_seconds"`
-	DecodeSeconds  float64   `json:"decode_seconds"`
-	Model          string    `json:"model"`
-	Engine         string    `json:"engine"`
-	Backend        string    `json:"backend"`
-	ForwardPath    string    `json:"forward_path"`
-	Q4K            bool      `json:"q4k"`
-	FallbackActive bool      `json:"fallback_active"`
+	TokenIDs           []int     `json:"token_ids"`
+	TokenLogprobs      []float64 `json:"token_logprobs"`
+	PrefillSeconds     float64   `json:"prefill_seconds"`
+	TTFTSeconds        float64   `json:"ttft_seconds"`
+	DecodeSeconds      float64   `json:"decode_seconds"`
+	Model              string    `json:"model"`
+	Engine             string    `json:"engine"`
+	Backend            string    `json:"backend"`
+	ForwardPath        string    `json:"forward_path"`
+	Q4K                bool      `json:"q4k"`
+	FallbackActive     bool      `json:"fallback_active"`
+	PrefillChunkTokens int       `json:"prefill_chunk_tokens"`
+}
+
+// InKernelQwenQ4KPrefillChunkConfigError is retained by a planner when the
+// bounded Qwen resident-Q4_K prefill control is nonempty but not one of the
+// supported widths. Targeted requests return it before tokenization or model
+// execution; unrelated model paths do not acquire a new failure mode.
+type InKernelQwenQ4KPrefillChunkConfigError struct {
+	Value string
+}
+
+func (e *InKernelQwenQ4KPrefillChunkConfigError) Error() string {
+	return fmt.Sprintf("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS=%q: want one of 512, 1024, 2048, 4096, 8192", e.Value)
 }
 
 // NativeInferenceReceiptUnsupportedError is returned before model execution when

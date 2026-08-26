@@ -57,6 +57,12 @@ type InKernelPlanner struct {
 	temp        float64
 	seed        int64
 
+	// qwenQ4KPrefillChunkTokens and its typed parse error are resolved once at
+	// construction. The error is request-gated to the exact resident hybrid path,
+	// so an unrelated model remains byte-for-byte on its historical forward.
+	qwenQ4KPrefillChunkTokens    int
+	qwenQ4KPrefillChunkConfigErr *InKernelQwenQ4KPrefillChunkConfigError
+
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
 	// multi-thousand-token static system+tool-schema prefix is prefilled once and the
 	// next turn REUSES its KV, prefilling only the divergent suffix — the candidate-#13
@@ -182,18 +188,21 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	if len(cpuOffloadExpertsOpt) > 0 {
 		cpuOffloadExperts = cpuOffloadExpertsOpt[0]
 	}
+	prefillChunkTokens, prefillChunkErr := resolveInKernelQwenQ4KPrefillChunkTokens(os.Getenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS"))
 	p := &InKernelPlanner{
-		m:                 m,
-		tok:               tok,
-		modelID:           modelID,
-		q4k:               q4k,
-		quant:             true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
-		backend:           backend,
-		metal:             metal,
-		cpuOffloadExperts: cpuOffloadExperts,
-		maxNew:            envInt("FAK_INKERNEL_MAX_TOKENS", 256),
-		temp:              envFloat("FAK_INKERNEL_TEMP", 0),
-		seed:              int64(envInt("FAK_INKERNEL_SEED", 0)),
+		m:                            m,
+		tok:                          tok,
+		modelID:                      modelID,
+		q4k:                          q4k,
+		quant:                        true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
+		backend:                      backend,
+		metal:                        metal,
+		cpuOffloadExperts:            cpuOffloadExperts,
+		maxNew:                       envInt("FAK_INKERNEL_MAX_TOKENS", 256),
+		temp:                         envFloat("FAK_INKERNEL_TEMP", 0),
+		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
+		qwenQ4KPrefillChunkTokens:    prefillChunkTokens,
+		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -232,6 +241,25 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		p.batchDecode = true
 	}
 	return p
+}
+
+func resolveInKernelQwenQ4KPrefillChunkTokens(raw string) (int, *InKernelQwenQ4KPrefillChunkConfigError) {
+	switch raw {
+	case "":
+		return inKernelQwenQ4KPrefillChunkTokens, nil
+	case "512":
+		return 512, nil
+	case "1024":
+		return 1024, nil
+	case "2048":
+		return 2048, nil
+	case "4096":
+		return 4096, nil
+	case "8192":
+		return 8192, nil
+	default:
+		return 0, &InKernelQwenQ4KPrefillChunkConfigError{Value: raw}
+	}
 }
 
 func inKernelPlannerPrefixReuseSupported(m *model.Model, backend compute.Backend) bool {
@@ -763,6 +791,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 			panic(r)
 		}
 	}()
+	if p.qwenQ4KPrefillChunkTarget() && p.qwenQ4KPrefillChunkConfigErr != nil {
+		return nil, p.qwenQ4KPrefillChunkConfigErr
+	}
 	sp := applySampleOpts(opts...)
 	var requestStarted time.Time
 	if sp.NativeInferenceReceipt {
@@ -930,20 +961,7 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		Usage:         Usage{PromptTokens: promptTok, CompletionTokens: gen, TotalTokens: promptTok + gen, PromptTokensDetails: &UsageTokenDetails{CachedTokens: matched}},
 	}
 	if measurement != nil {
-		backend, forwardPath := p.executionIdentity()
-		comp.NativeInference = &NativeInferenceReceipt{
-			TokenIDs:       append([]int(nil), measurement.tokenIDs...),
-			TokenLogprobs:  append([]float64(nil), measurement.logprobs...),
-			PrefillSeconds: prefillS,
-			TTFTSeconds:    measurement.ttftS,
-			DecodeSeconds:  decodeS,
-			Model:          p.modelID,
-			Engine:         "inkernel",
-			Backend:        backend,
-			ForwardPath:    forwardPath,
-			Q4K:            p.q4k,
-			FallbackActive: false,
-		}
+		comp.NativeInference = p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
 	}
 	// Lift the model's text-form <tool_call> emissions into structured Message.ToolCalls
 	// (Hermes dialect == Qwen2.5 native), set FinishReason="tool_calls", and flag a
@@ -968,6 +986,24 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		comp.ToolCallsDropped = true
 	}
 	return comp, nil
+}
+
+func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *NativeInferenceReceipt {
+	backend, forwardPath := p.executionIdentity()
+	return &NativeInferenceReceipt{
+		TokenIDs:           append([]int(nil), measurement.tokenIDs...),
+		TokenLogprobs:      append([]float64(nil), measurement.logprobs...),
+		PrefillSeconds:     prefillS,
+		TTFTSeconds:        measurement.ttftS,
+		DecodeSeconds:      decodeS,
+		Model:              p.modelID,
+		Engine:             "inkernel",
+		Backend:            backend,
+		ForwardPath:        forwardPath,
+		Q4K:                p.q4k,
+		FallbackActive:     false,
+		PrefillChunkTokens: p.nativeInferencePrefillChunkTokens(),
+	}
 }
 
 func (p *InKernelPlanner) requiresDeviceSerialization() bool {
