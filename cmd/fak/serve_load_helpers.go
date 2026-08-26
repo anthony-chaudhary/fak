@@ -325,6 +325,20 @@ func resetOnBudgetHook(enabled bool, freshContextTokens int) gateway.ResetOnBudg
 // Qwen3.8-27B Q4_K_M campaign on an M3 Pro, not a GGUF steady-state estimate.
 const metalGGUFObservedPeakMultiplier = 3.5
 
+const (
+	// streamedQ4KMeasuredPeakBytes is the maximum sampled RSS from the current-head,
+	// exact-checkpoint native Metal control receipt at
+	// docs/_witnesses/issue-CHILD-qwen38-startup-bisect/bisect.json, committed as
+	// 4ffff11fc3cb4d363cb187fad364b7a575b967b5. The receipt records 17,895,520 KiB,
+	// engine=inkernel, backend=metal, no fallback, no llama.cpp, and no swap growth.
+	streamedQ4KMeasuredPeakBytes int64 = 17895520 * 1024
+
+	// Round the measured high-water mark up to the next whole GiB. This reserves
+	// 1,002,340,352 bytes above the control without pretending macOS's larger
+	// /usr/bin/time footprint field is allocated physical memory.
+	streamedQ4KMetalCapacityBytes int64 = 18 << 30
+)
+
 func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak int64, refuse bool) {
 	if !metal || steady <= 0 || total <= 0 || !known {
 		return 0, false
@@ -337,11 +351,25 @@ func metalGGUFPeakCapacity(metal bool, steady, total int64, known bool) (peak in
 	return peak, peak > total
 }
 
-func refuseOversubscribedMetalGGUF(path string) error {
-	// The streamed dense-Q4_K experiment replaces the all-resident startup shape this
-	// observed multiplier guards. Its acceptance run measures the new bound directly.
-	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+func streamedQ4KMetalCapacity(total int64, known bool) (required int64, refuse bool) {
+	if total <= 0 || !known {
+		return 0, false
+	}
+	return streamedQ4KMetalCapacityBytes, streamedQ4KMetalCapacityBytes > total
+}
+
+func refuseStreamedQ4KMetalCapacity(total int64, known bool) error {
+	required, refuse := streamedQ4KMetalCapacity(total, known)
+	if !refuse {
 		return nil
+	}
+	return fmt.Errorf("fak serve: METAL_STREAM_Q4K_PEAK_TOO_BIG: native streamed Q4_K startup requires %d bytes (%.2f GiB), host has %d bytes (%.2f GiB); use a larger-memory Mac", required, float64(required)/(1<<30), total, float64(total)/(1<<30))
+}
+
+func refuseOversubscribedMetalGGUF(path string) error {
+	if os.Getenv("FAK_STREAM_Q4K") == "1" || os.Getenv("FAK_METAL_STREAM_Q4K") == "1" {
+		total, _, known := compute.HostSystemMemoryInfo()
+		return refuseStreamedQ4KMetalCapacity(total, known)
 	}
 	ws, err := ggufload.OpenWeights(path)
 	if err != nil {

@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestMetalGGUFPeakCapacity(t *testing.T) {
 	const gib = int64(1 << 30)
@@ -55,9 +58,44 @@ func TestMetalGGUFPeakCapacity(t *testing.T) {
 	}
 }
 
-func TestStreamedDenseQ4KBypassesAllResidentMetalPeakGuard(t *testing.T) {
-	t.Setenv("FAK_METAL_STREAM_Q4K", "1")
-	if err := refuseOversubscribedMetalGGUF("missing-checkpoint.gguf"); err != nil {
-		t.Fatalf("streamed dense Q4_K was rejected by all-resident guard: %v", err)
+func TestStreamedQ4KMetalCapacityUsesMeasuredNativePeak(t *testing.T) {
+	if streamedQ4KMeasuredPeakBytes != 17895520*1024 {
+		t.Fatalf("measured peak = %d, want current-head receipt's 17,895,520 KiB", streamedQ4KMeasuredPeakBytes)
+	}
+	if streamedQ4KMetalCapacityBytes < streamedQ4KMeasuredPeakBytes {
+		t.Fatalf("capacity bound %d is below measured peak %d", streamedQ4KMetalCapacityBytes, streamedQ4KMeasuredPeakBytes)
+	}
+
+	tests := []struct {
+		name      string
+		total     int64
+		known     bool
+		required  int64
+		refuse    bool
+		wantError bool
+	}{
+		{name: "one byte below measured bound refuses", total: streamedQ4KMetalCapacityBytes - 1, known: true, required: streamedQ4KMetalCapacityBytes, refuse: true, wantError: true},
+		{name: "measured bound admits", total: streamedQ4KMetalCapacityBytes, known: true, required: streamedQ4KMetalCapacityBytes},
+		{name: "36 GiB receipt host admits", total: 36 << 30, known: true, required: streamedQ4KMetalCapacityBytes},
+		{name: "unknown host memory preserves existing behavior", known: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			required, refuse := streamedQ4KMetalCapacity(tt.total, tt.known)
+			if required != tt.required || refuse != tt.refuse {
+				t.Fatalf("capacity = (%d, %v), want (%d, %v)", required, refuse, tt.required, tt.refuse)
+			}
+			err := refuseStreamedQ4KMetalCapacity(tt.total, tt.known)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("error = %v, wantError %v", err, tt.wantError)
+			}
+			if err != nil {
+				for _, want := range []string{"METAL_STREAM_Q4K_PEAK_TOO_BIG", "requires 19327352832 bytes", "host has 19327352831 bytes"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not contain %q", err, want)
+					}
+				}
+			}
+		})
 	}
 }
