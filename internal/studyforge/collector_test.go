@@ -1,0 +1,145 @@
+package studyforge
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestCapturePaginatesClassifiesCutsOffAndIsDeterministic(t *testing.T) {
+	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-GitHub-Request-Id", "fixture")
+		switch r.URL.Path {
+		case "/repos/acme/widget":
+			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/acme/widget/commits/main":
+			fmt.Fprint(w, `{"sha":"abc123"}`)
+		case "/repos/acme/widget/issues":
+			if r.URL.Query().Get("page") == "1" {
+				w.Header().Set("Link", `<`+server.URL+`/repos/acme/widget/issues?page=2>; rel="next"`)
+				fmt.Fprint(w, `[{"id":2,"number":2,"title":"PR ref","created_at":"2026-08-25T00:00:00Z","pull_request":{}},{"id":1,"number":1,"title":"issue","labels":[{"name":"z"},{"name":"a"}],"created_at":"2026-08-25T00:00:00Z"}]`)
+			} else {
+				fmt.Fprint(w, `[{"id":3,"number":3,"title":"future","created_at":"2026-08-27T00:00:00Z"}]`)
+			}
+		case "/repos/acme/widget/pulls":
+			fmt.Fprint(w, `[{"id":2,"number":2,"title":"pull","created_at":"2026-08-25T00:00:00Z","base":{"ref":"main","sha":"b"},"head":{"ref":"work","sha":"h"}}]`)
+		case "/repos/acme/widget/discussions":
+			fmt.Fprint(w, `[{"id":4,"number":4,"title":"talk","created_at":"2026-08-25T00:00:00Z","category":{"name":"Ideas"}}]`)
+		case "/repos/acme/widget/releases":
+			fmt.Fprint(w, `[{"id":5,"tag_name":"v1","created_at":"2026-08-25T00:00:00Z"}]`)
+		case "/repos/acme/widget/labels":
+			fmt.Fprint(w, `[{"id":6,"name":"bug"}]`)
+		case "/repos/acme/widget/milestones":
+			fmt.Fprint(w, `[{"id":7,"number":1,"title":"M1","created_at":"2026-08-25T00:00:00Z"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	c := NewCollector(server.Client())
+	c.BaseURL = server.URL
+	c.Now = func() time.Time { return cutoff }
+	got, err := c.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = Validate(got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Receipt.Status != StatusComplete || len(got.Records) != 6 {
+		t.Fatalf("status=%s records=%d", got.Receipt.Status, len(got.Records))
+	}
+	issues, _ := sourceByName(got.Receipt.Sources, "issues")
+	if len(issues.Pages) != 2 || issues.ClassifiedPullCount != 1 || issues.CutoffExcludedCount != 1 {
+		t.Fatalf("issues receipt: %+v", issues)
+	}
+	if strings.Join(got.Records[0].Labels, ",") != "a,z" {
+		t.Fatalf("labels not normalized: %v", got.Records[0].Labels)
+	}
+	again, err := c.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Receipt.IndexChecksum != again.Receipt.IndexChecksum {
+		t.Fatal("checksum changed")
+	}
+}
+
+func TestCaptureRetriesAndResumesFirstMissingPage(t *testing.T) {
+	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	calls := map[string]int{}
+	failPage2 := true
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls[r.URL.RequestURI()]++
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/repos/o/r":
+			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/o/r/commits/main":
+			fmt.Fprint(w, `{"sha":"rev"}`)
+		case "/repos/o/r/issues":
+			if r.URL.Query().Get("page") == "1" {
+				w.Header().Set("Link", `<`+server.URL+`/repos/o/r/issues?page=2>; rel="next"`)
+				fmt.Fprint(w, `[{"id":1,"created_at":"2026-08-25T00:00:00Z"}]`)
+			} else if failPage2 {
+				http.Error(w, "temporary", 500)
+			} else {
+				fmt.Fprint(w, `[{"id":2,"created_at":"2026-08-25T00:00:00Z"}]`)
+			}
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+	c := NewCollector(server.Client())
+	c.BaseURL = server.URL
+	c.MaxRetries = 1
+	c.RetryWait = func(context.Context, time.Duration) error { return nil }
+	c.Now = func() time.Time { return cutoff }
+	partial, err := c.Capture(context.Background(), CaptureRequest{Owner: "o", Repository: "r", Cutoff: cutoff})
+	if err == nil || partial.Receipt.Status != StatusPartial {
+		t.Fatalf("expected partial: %v %+v", err, partial.Receipt)
+	}
+	failPage2 = false
+	done, err := c.Capture(context.Background(), CaptureRequest{Owner: "o", Repository: "r", Resume: &partial})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = Validate(done); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	page1 := calls["/repos/o/r/issues?state=all&sort=created&direction=asc&per_page=100&page=1"]
+	mu.Unlock()
+	if page1 != 1 {
+		t.Fatalf("resume refetched page 1: calls=%d", page1)
+	}
+}
+
+func TestValidateRejectsCorruptReceipts(t *testing.T) {
+	base := Corpus{Schema: CorpusSchema, Receipt: Receipt{Schema: ReceiptSchema, Repository: "o/r", Revision: "x", Cutoff: "2026-08-26T00:00:00Z", Status: StatusComplete}, Records: []Record{{Source: "issues", Kind: "issue", ID: 1}}}
+	for _, n := range SourceNames {
+		base.Receipt.Sources = append(base.Receipt.Sources, SourceReceipt{Name: n, Status: StatusComplete, Pages: []PageReceipt{{Number: 1}}, FetchedCount: len(recordsForSource(base.Records, n)), Checksum: recordDigest(recordsForSource(base.Records, n))})
+	}
+	refreshChecksums(&base)
+	cases := map[string]func(*Corpus){"duplicate id": func(c *Corpus) { c.Records = append(c.Records, c.Records[0]); refreshChecksums(c) }, "mixed row": func(c *Corpus) { c.Records[0].Kind = "pull"; refreshChecksums(c) }, "count mismatch": func(c *Corpus) { c.Receipt.Sources[0].FetchedCount++ }, "partial marked complete": func(c *Corpus) { c.Receipt.Sources[0].Status = StatusPartial }, "missing page": func(c *Corpus) { c.Receipt.Sources[0].Pages[0].Number = 2 }, "checksum": func(c *Corpus) { c.Receipt.IndexChecksum = "sha256:tampered" }}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := cloneCorpus(base)
+			mutate(&c)
+			if Validate(c) == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}

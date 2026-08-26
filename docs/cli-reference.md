@@ -1364,6 +1364,20 @@ missing fields, nonzero exits, and non-JSON output.
 Runnable hidden/exposed example and self-check:
 [`examples/skill-program/`](../examples/skill-program/).
 
+## `fak study-forge`
+
+Capture and validate a deterministic GitHub forge census for a pinned study:
+
+```bash
+fak study-forge capture --repository owner/name --cutoff 2026-08-26T22:00:00Z --out /tmp/owner-name.corpus.json
+fak study-forge capture --repository owner/name --cutoff 2026-08-26T22:00:00Z --out /tmp/owner-name.corpus.json --resume
+fak study-forge validate --receipt /tmp/owner-name.corpus.json
+```
+
+`capture` is REST-first. It resolves the repository's default-branch revision, follows the terminal pagination link for issues, pulls, discussions, releases, labels, and milestones, partitions pull-request rows out of the mixed issues endpoint, applies the inclusive RFC3339 cutoff, and writes canonical records plus `fak-studyforge-receipt/1` evidence. Each source receipt preserves the page chain, fetched/normalized/unique counts, excluded-row counts, checksums, and API metadata. The corpus is `complete` only when every source reached its terminal page and reconciled; otherwise the command writes explicit `partial` or `failed` state and exits nonzero. `--resume` accepts only the same repository, cutoff, and revision and continues the first incomplete source without duplicating normalized records. Transient REST failures retry up to `--retries`; `--token-env` names the environment variable holding an optional read-only token.
+
+`validate` is offline and exits nonzero for an invalid schema, partial receipt, missing or non-contiguous pages, duplicate identities, mixed unclassified issue/PR rows, count drift, ordering drift, or checksum mismatch. The checked output is a compact classification index, not a relational archive: comments, reviews, review comments, timelines/events, and linked commits require a later per-parent enrichment pass. Separate endpoint walks are not a snapshot-atomic GitHub transaction; the pinned revision, cutoff, page receipts, and fetch times make that boundary explicit. Raw oversized API pages are represented by their checksums and belong in allocated scratch or a declared content-addressed artifact when they must be retained.
+
 ## `fak study-inventory`
 
 Render a deterministic local-checkout map for an exhaustive `study-repo` pass:
@@ -1389,7 +1403,7 @@ fak study-monitor --inventory-check --json
 
 The command reads `docs/research/monitored-repositories.json` by default, sorts by priority, and reports each source's status, pinned checked revision, `last_checked` age, and whether it is due for refresh. `--as-of` exists for deterministic witnesses and tests. The command does not contact GitHub or mutate the registry; scouts update all check fields together after inspecting the source.
 
-`--inventory-check` switches the readout to the stricter exhaustive-inventory contract. Candidate and studied rows are treated as needing a machine-readable map by default; the check exits nonzero until each row has an `inventory` block with a map path, matching indexed revision, positive subsystem count, completeness-critic result, and the required source-class coverage set. The map itself must include positive totals that equal its subsystem aggregates and one status row for every required source class. Local tree classes can be satisfied by `covered` rows with path evidence or by `checked_absent` rows from the complete tree walk. Forge history can only be `partial` or `external_required`; fak self-query witnesses, candidate matrices, and issue tracking remain `external_required` in the map and need traceable `source_evidence` entries instead of bare class names. The compound forge class must reference issue, pull-request, and discussion evidence.
+`--inventory-check` switches the readout to the stricter exhaustive-inventory contract. Candidate and studied rows are treated as needing a machine-readable map by default; the check exits nonzero until each row has an `inventory` block with a map path, matching indexed revision, positive subsystem count, completeness-critic result, and the required source-class coverage set. The map itself must include positive totals that equal its subsystem aggregates and one status row for every required source class. Local tree classes can be satisfied by `covered` rows with path evidence or by `checked_absent` rows from the complete tree walk. Forge history remains `partial` or `external_required` in that local map. Set `inventory.forge_receipt_path` to a `study-forge capture` corpus (or its standalone receipt) to satisfy the compound forge class with validated external evidence: the monitor binds schema, repository, checked revision, cutoff, complete status, all six complete source receipts, reconciled uniqueness counts, and checksums. An invalid or partial declared receipt blocks the row rather than falling back silently. Legacy traceable `source_evidence` can still name issue, pull-request, and discussion evidence, but is not replayed. Fak self-query witnesses, candidate matrices, and issue tracking remain `external_required` and need traceable `source_evidence` entries instead of bare class names.
 
 ## `fak vcache session-history`
 
