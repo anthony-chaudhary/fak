@@ -3,6 +3,8 @@ package taskmgr
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/witnessprocess"
 	"time"
 )
 
@@ -255,5 +257,18 @@ func fakeSampler(base time.Time) Sampler {
 			SysBytes:       uint64(4000 + elapsed*100),
 			Goroutines:     5 + int(elapsed),
 		}
+	}
+}
+
+func TestStartTaskCarriesWitnessFirstWorkerPacket(t *testing.T) {
+	manager := NewManager()
+	block := &witnessprocess.Block{Context: witnessprocess.Logic, Envelope: "fixed input", BaselineArtifact: "failing test", Lever: "one parser change", CandidateArtifact: "passing test", PromotionGate: "go test", DurableWitness: "regression test", Policy: witnessprocess.Enforce}
+	if _, err := manager.StartTask(TaskSpec{TaskID: "task_witness_packet", WitnessFirst: block}); err != nil {
+		t.Fatal(err)
+	}
+	incomplete := *block
+	incomplete.BaselineArtifact = ""
+	if _, err := manager.StartTask(TaskSpec{TaskID: "task_witness_missing", WitnessFirst: &incomplete}); err == nil {
+		t.Fatal("proof-enforced packet accepted missing baseline")
 	}
 }
