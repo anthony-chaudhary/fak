@@ -30,7 +30,7 @@ func cmdHostdiag(args []string) { os.Exit(runHostdiag(os.Stdout, os.Stderr, args
 
 func runHostdiag(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: fak hostdiag census|correlate [flags]")
+		fmt.Fprintln(stderr, "usage: fak hostdiag census|correlate|trend [flags]")
 		return 2
 	}
 	switch args[0] {
@@ -38,10 +38,51 @@ func runHostdiag(stdout, stderr io.Writer, args []string) int {
 		return runHostdiagCensus(stdout, stderr, args[1:])
 	case "correlate":
 		return runHostdiagCorrelate(stdout, stderr, args[1:])
+	case "trend":
+		return runHostdiagTrend(stdout, stderr, args[1:])
 	default:
-		fmt.Fprintln(stderr, "usage: fak hostdiag census|correlate [flags]")
+		fmt.Fprintln(stderr, "usage: fak hostdiag census|correlate|trend [flags]")
 		return 2
 	}
+}
+
+func runHostdiagTrend(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("hostdiag trend", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	ledger := fs.String("ledger", defaultHostdiagLedger(), "mixed-schema JSONL host diagnostics ledger")
+	recent := fs.Duration("recent", 7*24*time.Hour, "recent half-open window duration")
+	baseline := fs.Duration("baseline", 7*24*time.Hour, "preceding baseline window duration")
+	nowText := fs.String("now", "", "window end in RFC3339 (defaults to current time)")
+	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || *recent <= 0 || *baseline <= 0 {
+		return 2
+	}
+	now := time.Now().UTC()
+	if *nowText != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, *nowText)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak hostdiag trend: --now: %v\n", err)
+			return 2
+		}
+		now = parsed.UTC()
+	}
+	file, err := os.Open(*ledger)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak hostdiag trend: ledger: %v\n", err)
+		return 1
+	}
+	defer file.Close()
+	trend, err := hostdiag.SummarizeTrend(file, now, *recent, *baseline)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak hostdiag trend: %v\n", err)
+		return 1
+	}
+	data, err := json.Marshal(trend)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak hostdiag trend: encode: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(data))
+	return 0
 }
 
 func runHostdiagCensus(stdout, stderr io.Writer, args []string) int {
