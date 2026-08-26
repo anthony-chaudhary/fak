@@ -8,7 +8,7 @@
 // dispatchpost, dojopost, marketing, nodeusagepost) and the chatrelay bridge resolve
 // their bot token and channel id through here. Before this package each one carried a
 // byte-identical envFileValue walk-up; the duplication meant a fix or a test had to be
-// applied eight times and usually was not. Now they delegate to FileValue.
+// applied eight times and usually was not. Now they delegate to Lookup/Resolve.
 //
 // It holds NO secret and NO channel id in source: it only knows HOW to read the key an
 // operator set, never WHICH value. Pure stdlib (os + path/filepath + strings); tier-1
@@ -120,4 +120,18 @@ func Lookup(key string) Resolved {
 		return Resolved{Value: v, Source: SourceFile, Key: key}
 	}
 	return Resolved{Source: SourceUnset, Key: key}
+}
+
+// Resolve returns key's environment-or-file value, or lazily calls fallback when the
+// key is unset. A nil fallback resolves to "". Keeping the fallback lazy preserves the
+// publisher contract that a surface-specific value wins without consulting a shared
+// workspace fallback.
+func Resolve(key string, fallback func() string) string {
+	if resolved := Lookup(key); resolved.Set() {
+		return resolved.Value
+	}
+	if fallback == nil {
+		return ""
+	}
+	return fallback()
 }

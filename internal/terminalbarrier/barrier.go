@@ -75,8 +75,7 @@ func (c Coordinator) Replace(ctx context.Context, pressured bool, forest Forest,
 		return r
 	}
 	for _, m := range active {
-		base := lifecycleadapter.Request{TransactionID: transactionID, ForestID: forest.ID, MemberID: m.ID, Generation: m.Generation, Deadline: deadline, Operation: lifecycleadapter.Prepare}
-		n, res := lifecycleadapter.Execute(ctx, base, m.Adapter)
+		n, res := executeMember(ctx, forest, m, transactionID, deadline, lifecycleadapter.Prepare)
 		if !n.Supported || res.State != lifecycleadapter.ResultCompleted {
 			c.writeAck(&r, forest, m, fleetbus.LifecycleAckRefused, "prepare refused: "+res.Reason, "", now)
 			r.Reason = "member prepare barrier incomplete"
@@ -88,8 +87,7 @@ func (c Coordinator) Replace(ctx context.Context, pressured bool, forest Forest,
 		return r
 	}
 	for _, m := range active {
-		base := lifecycleadapter.Request{TransactionID: transactionID, ForestID: forest.ID, MemberID: m.ID, Generation: m.Generation, Deadline: deadline, Operation: lifecycleadapter.Pause}
-		n, res := lifecycleadapter.Execute(ctx, base, m.Adapter)
+		n, res := executeMember(ctx, forest, m, transactionID, deadline, lifecycleadapter.Pause)
 		if !n.Supported || res.State != lifecycleadapter.ResultCompleted {
 			c.writeAck(&r, forest, m, fleetbus.LifecycleAckRefused, "pause refused: "+res.Reason, "", now)
 			r.Reason = "member pause barrier incomplete"
@@ -97,8 +95,7 @@ func (c Coordinator) Replace(ctx context.Context, pressured bool, forest Forest,
 		}
 		checkpoint := ""
 		if n.Document.ApplicationCheckpoint {
-			base.Operation = lifecycleadapter.Checkpoint
-			n, res = lifecycleadapter.Execute(ctx, base, m.Adapter)
+			n, res = executeMember(ctx, forest, m, transactionID, deadline, lifecycleadapter.Checkpoint)
 			if !n.Supported || res.State != lifecycleadapter.ResultCompleted {
 				c.writeAck(&r, forest, m, fleetbus.LifecycleAckRefused, "checkpoint failed: "+res.Reason, "", now)
 				r.Reason = "member checkpoint barrier incomplete"
@@ -162,14 +159,12 @@ func (c Coordinator) Replace(ctx context.Context, pressured bool, forest Forest,
 	}
 	r.RestoreCalls++
 	for _, m := range active {
-		base := lifecycleadapter.Request{TransactionID: transactionID, ForestID: forest.ID, MemberID: m.ID, Generation: m.Generation, Operation: lifecycleadapter.Resume, Deadline: deadline}
-		_, res := lifecycleadapter.Execute(ctx, base, m.Adapter)
+		_, res := executeMember(ctx, forest, m, transactionID, deadline, lifecycleadapter.Resume)
 		if res.State != lifecycleadapter.ResultCompleted {
 			r.Reason = "member resume failed"
 			return r
 		}
-		base.Operation = lifecycleadapter.Readiness
-		_, res = lifecycleadapter.Execute(ctx, base, m.Adapter)
+		_, res = executeMember(ctx, forest, m, transactionID, deadline, lifecycleadapter.Readiness)
 		if res.State != lifecycleadapter.ResultCompleted {
 			r.Reason = "member readiness failed"
 			return r
@@ -180,6 +175,19 @@ func (c Coordinator) Replace(ctx context.Context, pressured bool, forest Forest,
 	r.Reason = "all active members quiesced, host replaced, restored, resumed, and ready"
 	return r
 }
+
+func executeMember(ctx context.Context, forest Forest, member Member, transactionID string, deadline time.Time, operation lifecycleadapter.Operation) (lifecycleadapter.Negotiation, lifecycleadapter.Result) {
+	request := lifecycleadapter.Request{
+		TransactionID: transactionID,
+		ForestID:      forest.ID,
+		MemberID:      member.ID,
+		Generation:    member.Generation,
+		Operation:     operation,
+		Deadline:      deadline,
+	}
+	return lifecycleadapter.Execute(ctx, request, member.Adapter)
+}
+
 func (c Coordinator) publish(f Forest, transactionID string, action fleetbus.LifecycleAction, deadline time.Time, ids []string) error {
 	return c.Bus.Broadcast(fleetbus.LifecycleRequest{Schema: fleetbus.LifecycleSchema, TransactionID: transactionID, ForestID: f.ID, Generation: f.Generation, Action: action, Deadline: deadline, Capability: "forest.pause", IdempotencyKey: transactionID + ":" + string(action), Authority: f.Authority}, ids)
 }

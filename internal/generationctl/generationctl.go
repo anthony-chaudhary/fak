@@ -116,10 +116,7 @@ func (c *Controller) ObserveText(key streamrules.StreamKey, delta string) (Trans
 // durable trajectory prefix, so a checkpoint taken here carries the output
 // committed before it and nothing from the reasoning channel.
 func (c *Controller) ObserveThinking(key streamrules.StreamKey, delta string) (Transition, error) {
-	if c.closed {
-		return Transition{}, errors.New("generation epoch is closed")
-	}
-	return c.observe(key, delta)
+	return c.observeSpeculative(key, delta)
 }
 
 // ObserveToolDelta checks speculative tool arguments as they stream. A matched
@@ -127,6 +124,13 @@ func (c *Controller) ObserveThinking(key streamrules.StreamKey, delta string) (T
 // bytes are never accepted, which is what keeps a refused call's arguments out
 // of the prefix the next epoch resumes from.
 func (c *Controller) ObserveToolDelta(key streamrules.StreamKey, delta string) (Transition, error) {
+	return c.observeSpeculative(key, delta)
+}
+
+// observeSpeculative is the shared gate for stream scopes whose bytes must never join
+// the durable accepted prefix. Both reasoning and partial tool arguments stop at the
+// same closed-epoch boundary before the matcher sees another delta.
+func (c *Controller) observeSpeculative(key streamrules.StreamKey, delta string) (Transition, error) {
 	if c.closed {
 		return Transition{}, errors.New("generation epoch is closed")
 	}

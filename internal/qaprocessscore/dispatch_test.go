@@ -88,6 +88,30 @@ func TestKeyStableAcrossDetailDrift(t *testing.T) {
 	}
 }
 
+func TestGapInstructionsStayAlignedByKPI(t *testing.T) {
+	tests := []struct {
+		name string
+		kpi  string
+		want []string
+	}{
+		{"regression", RegressionCatchKey, []string{"reproduces the bug", "reproduces the reverted bug", "covering the reverted behavior"}},
+		{"coverage", CoverageDisciplineKey, []string{"coverage ratchet", "go tool cover -func", "coverage floor/ratchet"}},
+		{"flake", FlakeQuarantineKey, []string{"deterministic", "run the test in a loop / under -race", "without a rerun"}},
+		{"fallback", "future-kpi", []string{"Close the qa-process gap", "Fix the underlying qa-process gap", "Close the named qa-process gap"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gap := Gap{KPI: tt.kpi}
+			got := []string{gap.NextAction("internal/example"), gap.WorkingSpine("internal/example"), gap.InScope("internal/example")}
+			for i, want := range tt.want {
+				if !strings.Contains(got[i], want) || !strings.Contains(got[i], "internal/example") {
+					t.Errorf("instruction %d = %q, want host and %q", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
 // TestRerunUpdatesInPlace proves the dedup convergence end-to-end through the backlog bridge:
 // a first dry-run plans two creates; feeding the generated issues back (matched by their
 // marker key) turns the same batch into two updates, never a duplicate create.

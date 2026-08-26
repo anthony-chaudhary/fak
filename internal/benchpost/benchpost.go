@@ -33,7 +33,6 @@ package benchpost
 import (
 	"encoding/json"
 	"os"
-	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
@@ -66,30 +65,14 @@ var (
 // control channel would be a cross-workspace mistake — scoreboard.ResolveToken already
 // refuses that fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_BENCH_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the bench channel id from FAK_BENCH_CHANNEL, then a
 // FAK_BENCH_CHANNEL= line in .env.slack.local. Returns "" if none found so a caller
 // can require an explicit --channel (the real id is never a tracked default).
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_BENCH_CHANNEL"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveCICDReportChannel()
+	return slackenv.Resolve(channelEnvs[0], scoreboard.ResolveCICDReportChannel)
 }
 
 // Run is one benchmark run from experiments/benchmark/catalog.json (schema

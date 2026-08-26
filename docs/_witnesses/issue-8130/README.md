@@ -4,7 +4,7 @@ This directory turns the research done condition into an executable document con
 
 ## Fail-before / pass-after
 
-At base `d5c84386cf42aa2aaec77de88d5519071f598680`, the map did not exist, so the same command failed while loading `../../research/qwen38-upstream-support-map-2026-08-26.md` (`file not found`). After adding the map:
+At base `d5c84386cf42aa2aaec77de88d5519071f598680`, the map did not exist, so the same command failed while loading `../../notes/qwen38-upstream-support-map-2026-08-26.md` (`file not found`). After adding the map:
 
 ```text
 > go test ./docs/_witnesses/issue-8130 -count=1

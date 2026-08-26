@@ -58,6 +58,43 @@ func TestTeamGatewayAcceptsUserOpinions(t *testing.T) {
 	}
 }
 
+func TestGatewayPostureDefaultsAndHardenedOverrides(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Options
+		want []string
+	}{
+		{
+			name: "team defaults",
+			opts: Options{Posture: "team-gateway"},
+			want: []string{`require_key_env = "FAK_GATEWAY_KEY"`, `bind = "0.0.0.0:8080"`},
+		},
+		{
+			name: "hardened defaults",
+			opts: Options{Posture: "hardened"},
+			want: []string{`floor = "policy.json"`, `require_key_env = "FAK_GATEWAY_KEY"`, `bind = "127.0.0.1:8080"`},
+		},
+		{
+			name: "hardened overrides",
+			opts: Options{Posture: "hardened", PolicyPath: "reviewed.json", KeyEnv: "TEAM_KEY", Bind: "10.0.0.4:9443"},
+			want: []string{`floor = "reviewed.json"`, `require_key_env = "TEAM_KEY"`, `bind = "10.0.0.4:9443"`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Guide(tt.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(result.Manifest, want) {
+					t.Errorf("manifest missing %q:\n%s", want, result.Manifest)
+				}
+			}
+		})
+	}
+}
+
 func TestLongSessionAcceptsBudgetOpinion(t *testing.T) {
 	result, err := Guide(Options{Posture: "long-session", Budget: 240000})
 	if err != nil {

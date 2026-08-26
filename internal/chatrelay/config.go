@@ -1,9 +1,6 @@
 package chatrelay
 
 import (
-	"os"
-	"strings"
-
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
@@ -28,25 +25,12 @@ var (
 // FAK_CHATRELAY_TOKEN= line in .env.slack.local, then a fallback to the scoreboard bot
 // token. Returns "" if none is found.
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_CHATRELAY_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the relay channel id from FAK_CHATRELAY_CHANNEL, then a
 // FAK_CHATRELAY_CHANNEL= line in .env.slack.local. Returns "" if none found so the caller
 // requires an explicit --channel (no silent fall-through to another channel's default).
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	return slackenv.FileValue("FAK_CHATRELAY_CHANNEL")
+	return slackenv.Lookup(channelEnvs[0]).Value
 }
