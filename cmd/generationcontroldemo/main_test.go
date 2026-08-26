@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/cmd/internal/democapture"
 )
 
 func TestCapturedSelfcheckTrace(t *testing.T) {
@@ -32,5 +34,8 @@ func TestCapturedSelfcheckTrace(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("trace missing %q:\n%s", want, got)
 		}
+	}
+	if err := democapture.MatchMarkdown("EXAMPLE-OUTPUT.md", []byte(got)); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -2,7 +2,7 @@
   "rows": [
     {
       "id": "x2-score-debt-gitdailyhealthdebtkey",
-      "canonical": "HealthDebtKey (git-daily health card)",
+      "canonical": "GitDailyDebtKey (git-daily health card)",
       "family": "score-debt",
       "kind": "symbol",
       "definition": "The scorecard debt-integer key for the git-daily health card: the string \"git_daily_debt\" under which the card publishes its count of health lenses scoring below the pass line.",
@@ -12,7 +12,7 @@
         "x2-score-debt-scorecardvariants"
       ],
       "aliases": [],
-      "grounding": "HealthDebtKey",
+      "grounding": "GitDailyDebtKey",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",
@@ -22,17 +22,17 @@
   ,
     {
       "id": "x2-render-materialize-gitdailyrenderhealth",
-      "canonical": "RenderHealth (git-daily health readout)",
+      "canonical": "GitDailyHealthFragment (git-daily health readout)",
       "family": "render-materialize",
       "kind": "symbol",
-      "definition": "The one-call operator readout for the git-daily health card: it composes the graded card from HealthFacts and projects it through scorecard.Render as a terminal work-list keyed on HealthDebtKey.",
-      "distinction": "Not the generic scorecard markdown projector (x2-render-materialize-renderer), which it calls, and not a transcript renderer (x2-render-materialize-rendertext): this is the git-daily-specific compose-then-render pairing, the only entry point that decides WHICH debt key orders the readout.",
+      "definition": "metrics.GitDailyHealthFragment renders a graded git-daily payload and its ledger-derived counts as one deterministic operator line: grade, runs, outcomes, folded objects, refusal streak, and GitDailyDebtKey debt.",
+      "distinction": "It emits the compact git-daily status fragment from an already-graded payload. It is not scorecard.Render, which emits a generic multi-line work list, and not GradeGitDailyHealth, which computes the grade and debt.",
       "distinct_from": [
         "x2-render-materialize-renderer",
         "x2-render-materialize-rendertext"
       ],
       "aliases": [],
-      "grounding": "RenderHealth",
+      "grounding": "GitDailyHealthFragment",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/fak/concept-glossary.md",
       "parent": "",

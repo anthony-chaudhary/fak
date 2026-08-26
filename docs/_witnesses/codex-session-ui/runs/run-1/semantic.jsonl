@@ -1,0 +1,13 @@
+{"seq":1,"kind":"session.started","owner":"fak","logical_session":"dogfood-8742"}
+{"seq":2,"kind":"plan.updated","owner":"codex","text":"inspect, edit, test, review"}
+{"seq":3,"kind":"tool.streaming","owner":"codex","tool":"read","status":"running"}
+{"seq":4,"kind":"approval.pending","owner":"fak","capability":"shell","command":"delete seed"}
+{"seq":5,"kind":"approval.decided","owner":"operator","decision":"deny"}
+{"seq":6,"kind":"tool.failed","owner":"codex","reason":"operator_denied"}
+{"seq":7,"kind":"workspace.edit","owner":"codex","effect_id":"edit-greeting-comma"}
+{"seq":8,"kind":"transport.disconnected","owner":"browser"}
+{"seq":9,"kind":"session.reconnected","owner":"fak","logical_session":"dogfood-8742","replayed_effects":0}
+{"seq":10,"kind":"turn.cancelled","owner":"operator","workspace_effects":0}
+{"seq":11,"kind":"turn.retried","owner":"operator","attempt":2}
+{"seq":12,"kind":"test.completed","owner":"codex","command":"go test ./...","exit_code":0}
+{"seq":13,"kind":"session.completed","owner":"fak","duplicate_effects":0,"final_diff":"expected.diff"}

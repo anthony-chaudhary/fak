@@ -1,0 +1,6 @@
+{
+  "command": "go test ./...",
+  "exit_code": 0,
+  "stdout": "ok  example.invalid/codex-ui-dogfood",
+  "classification": "fak-controlled deterministic seed execution"
+}

@@ -5,7 +5,7 @@ description: "A micro agent is one bounded agent loop fak hosts in-process. What
 
 # Micro agents
 
-A micro agent is one bounded agent loop — a small task, a small context, and a fixed step budget — that a host process drives as a goroutine behind one shared kernel gateway, instead of running as its own operating-system process. Micro agents exist to make a fleet of agents cheap enough to run by the hundred: the unit of work stays an agent, but the unit of cost stops being a process.
+A micro agent is the smallest useful agentic identity/state boundary: one bounded objective, a minimal context or checkpoint, a fixed budget, and an observable contribution. Today fak demonstrates that concept as a bounded agent loop driven in-process behind one shared kernel gateway. The semantic boundary can become smaller than a whole loop—as narrow as a turn, hardware scheduling unit, or activation-bounded contribution—only when the unit still has an objective, bounds, and a result that can be attributed. Micro agents make large fleets economical because the unit of work stays agentic while shared setup, scheduling, and cache state need not be duplicated. They occupy the smallest end of fak's [macro → baseline → sub → micro lifecycle hierarchy](agent-scale-hierarchy.md); lifecycle scale is independent from model size and fleet count.
 
 **Primary audience:** readers deciding whether a micro agent is the right shape for a task, before opening any implementation code.
 
@@ -15,9 +15,11 @@ A micro agent is one bounded agent loop — a small task, a small context, and a
 
 ## What is a micro agent?
 
-A micro agent is an agent loop reduced to one interface with one method. In fak the contract is `Microagent.Step(ctx, gw) (done bool, err error)`: the host advances the agent by one unit of work — typically one model turn — and retires it when `Step` reports `done`. The agent never dials a model itself; it is handed the host's single shared gateway on every step.
+In the current fak implementation, a micro agent is an agent loop reduced to one interface with one method. The contract is `Microagent.Step(ctx, gw) (done bool, err error)`: the host advances the agent by one unit of work—typically one model turn—and retires it when `Step` reports `done`. The agent never dials a model itself; it is handed the host's single shared gateway on every step. This goroutine/loop packaging is a concrete implementation witness, not the definition of the lifecycle class.
 
 > Source: `internal/microagent/microagent.go` — [`Microagent` and `Gateway`](https://github.com/anthony-chaudhary/fak/blob/main/internal/microagent/microagent.go).
+
+“Micro” describes the identity and state boundary, not the model or fleet size. One micro agent may use a frontier model for one difficult response, while 100,000 micro agents may use small models with shared-prefix cache reuse. See [Agent scale: macro, baseline, sub, and micro](agent-scale-hierarchy.md).
 
 Three properties follow from that shape, and they are what "micro" actually means here:
 
@@ -45,7 +47,7 @@ Prefer something else in each of these cases. The first four are stated limits o
 
 - **The task is a single deterministic tool call.** Use `fak preflight` and get one adjudicated verdict. An agent loop buys you nothing when there is no loop.
 - **The agent needs per-agent operating-system state.** Its own working directory, credential files, or process-tree tools do not fit a goroutine-per-agent model. The package names this as its own invalidating assumption: if the real loop cannot be stepped without per-agent OS state, the host under-isolates and needs a subprocess execution seam first.
-- **You need a real provider today.** Only the Mock engine is supported in-process by this path; `fak micro --engine` accepts nothing else.
+- **You need a direct provider engine inside the micro host.** The in-process engine remains deterministic Mock. For real inference, `--engine gateway` crosses the fak kernel seam through a running `fak serve`; it is not a provider implementation embedded in the micro host.
 - **The agent must hibernate while blocked inside a live tool call.** Go does not serialize a goroutine stack, so hibernation happens only at a step boundary — between units of work, never mid-`Step`.
 - **Provider seats, not process weight, are your binding cost.** That is the package's stated demotion criterion: if per-agent cost is dominated by rate limits rather than local process weight, the in-process host buys no density and should be retired.
 
@@ -59,7 +61,7 @@ Three surfaces, at three levels of maturity.
 2. **A host package.** `internal/microagent` supplies the worker pool, bounded spawn queue, slot scheduler, hibernation, fair scheduling, retry, and the single audit sink.
 3. **A capability floor.** Every tool-execution backend — the in-process goroutine function, the subprocess backend, and any container or remote backend registered later — executes only behind the in-process kernel adjudication floor. The seam adjudicates *before* dispatch, so a denied call costs zero execution at every isolation level, and no package API yields a bare unadjudicated executor. *Witness:* `go test ./internal/microagent -run TestAdjudicationFloorBlocksDeniedActionAcrossAllRegisteredBackends`.
 
-**The honest caveat, because it changes what the CLI proves:** the `fak micro` run path drives the deterministic Mock planner as its gateway seam. The served kernel gateway and the tool-execution floor are **not yet wired into that verb**; the Mock run bounds concurrency through the slot pool only. The `--admission-*` caps are resolved and reported by `fak micro` but enforced on the served gateway, not by the Mock run. So the floor invariant above is witnessed by the package's conformance suite — not by the command you type.
+**The honest caveat, because it changes what the CLI proves:** the default `fak micro` run drives the deterministic Mock planner and bounds concurrency through the slot pool only. The explicit `--engine gateway --gateway HOST:PORT --model ID` path does cross a running fak kernel and its shared session table, where the `--admission-*` caps are enforced. The tool-execution floor remains a separate invariant: it is witnessed across registered execution backends by the package conformance suite, not merely by a model turn crossing the gateway.
 
 > Source: `cmd/fak/micro.go` — [the `fak micro` front door](https://github.com/anthony-chaudhary/fak/blob/main/cmd/fak/micro.go), whose header states the same caveat. Policy background: [Policy in the kernel](../explainers/policy-in-the-kernel.md) and [the security model](../fak/security.md).
 
@@ -152,20 +154,26 @@ fak micro --engine gateway --gateway 127.0.0.1:8080 --model kernel-model \
 
 The wire regression is `go test ./cmd/fak -run TestMicroGatewayEngineUsesRealFakKernel`: two agents must make two requests to `/v1/chat/completions`, preserve the requested model, and record provider-reported usage in separate timelines. `TestSessionGatewayConcurrentLoadOneTableRaceClean` separately pins concurrent fan-in through one session table.
 
-## Micro agent vs. full agent vs. subagent vs. tool call
+## Micro agent vs. full agent vs. sub-agent vs. tool call
 
-Four shapes, ordered from most autonomy to least. Pick the least autonomous one that does the job.
+Lifecycle scale, delegation, and effects are separate concerns:
 
-| | Full autonomous agent | Micro agent | Subagent | Deterministic tool call |
-|---|---|---|---|---|
-| **What it is** | A long-lived agent loop with an open-ended goal | One bounded agent loop with a small task and a step budget | A micro agent spawned *by* an orchestrator to collapse a pipeline | One adjudicated effect, no loop |
-| **Who drives the loop** | The agent itself, until it stops | The host's worker pool, one `Step` at a time | The parent, via `RunScript` | Nobody — a single call |
-| **Context** | Grows across the whole session | Bounded per agent | Bounded, and **separate** from the orchestrator's | One request and one verdict |
-| **Runtime unit** | Its own process (a `fak manage` proxy plus an agent CLI) | A goroutine behind one shared gateway | A goroutine plus a collapsed summary | A function call behind the policy floor |
-| **Try it with** | `fak manage -- claude` · `fak agent --offline` | `fak micro` · `fak micro host` | `internal/microagent` `RunScript` (no CLI verb yet) | `fak preflight --tool <name> --args '{}'` |
-| **Maturity** | Shipped, default path | `gen/second-next` option, Mock engine only | Package-level spine, test-witnessed | Shipped, default path |
+| Concept | What it describes | Defining boundary |
+|---|---|---|
+| **Full autonomous agent** | An agent with an ongoing objective and an agentic loop | Retains the identity and state needed for its objective |
+| **Micro agent** | The smallest useful agentic execution/state unit | Retires after one bounded decision, effect, check, or contribution |
+| **Sub-agent** | A relational delegation role, not a smaller runtime class | A parent delegates a narrower objective with inherited limits and a return edge |
+| **Deterministic tool call** | One adjudicated effect without an agentic loop | Returns one result or verdict for one request |
 
-The row that matters for a decision is *runtime unit*. Everything else about a micro agent — the bounded queue, the seats, the hibernation — exists to make that row's "goroutine" affordable at fleet scale.
+Any macro, baseline, or micro lifecycle actor may be a sub-agent when it has that parent-child
+contract. “Sub-agent” says how the actor received work and where its result returns; it does not
+specify lifecycle size, process shape, thread shape, model size, or fleet size.
+
+**Current fak packaging:** the micro host advances `Microagent.Step` in its worker-pool
+implementation, and `internal/microagent.RunScript` provides the current test-witnessed RPC
+sub-agent collapse spine (with no CLI verb yet). These are concrete implementation choices, not
+the universal definitions of micro agent or sub-agent. Full and micro agents may share a runtime
+or use different runtime units; neither processes nor goroutines define the class.
 
 ## What is shipped and what is research
 

@@ -53,7 +53,6 @@ type jobAccounting struct {
 	TotalUserTime, TotalKernelTime, ThisPeriodTotalUserTime, ThisPeriodTotalKernelTime int64
 	TotalPageFaultCount, TotalProcesses, ActiveProcesses, TotalTerminatedProcesses     uint32
 }
-type jobPIDListHeader struct{ AssignedProcesses, NumberOfProcessIDsInList uint32 }
 
 type windowsFaultDomain struct{ job syscall.Handle }
 

@@ -102,6 +102,52 @@ func TestGuardResourceMonitorFailureIsTypedAndVisible(t *testing.T) {
 	}
 }
 
+func TestGuardResourceMonitorFailureReceiptPersistsScrubbedDetail(t *testing.T) {
+	rawDetail := "owned pids missing from rss census: [101 102]\n" +
+		"collector=/vault/alice/private/ps.txt windows=C:\\private\\ps.exe host=db1.corp token=hunter2 address=10.2.3.4 " +
+		strings.Repeat("safe-detail ", 80)
+	snapshot := procguard.MemorySnapshot{
+		Metric:  procguard.MemoryMetricRSS,
+		RootPID: 42,
+		Processes: []procguard.MemoryProcess{{
+			PID:         42,
+			Name:        "codex",
+			CommandLine: "/Users/alice/bin/codex --api-key=hunter2",
+		}},
+	}
+	event := guardResourceMonitorFailure(42, snapshot, "CHILD_RESOURCE_MONITOR_ERROR", rawDetail)
+	if event.Resource == nil {
+		t.Fatal("monitor failure has no resource decision")
+	}
+	receipt := newGuardResourceReceipt("trace", "codex", 42, *event.Resource)
+	path := filepath.Join(t.TempDir(), "child-resource.jsonl")
+	if err := appendGuardResourceReceipt(path, receipt); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got guardResourceReceipt
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode receipt: %v\n%s", err, data)
+	}
+	if got.Reason != "CHILD_RESOURCE_MONITOR_ERROR" || !strings.Contains(got.Detail, "owned pids missing from rss census: [101 102]") {
+		t.Fatalf("typed public detail was not preserved: %+v", got)
+	}
+	if got.Detail == "" || len(got.Detail) > guardResourceDetailMaxBytes || strings.ContainsAny(got.Detail, "\r\n\t") {
+		t.Fatalf("detail is not nonblank, bounded and one-line: %q", got.Detail)
+	}
+	for _, leaked := range []string{"/vault/alice", `C:\private`, "db1.corp", "hunter2", "10.2.3.4"} {
+		if strings.Contains(got.Detail, leaked) || strings.Contains(event.Reason, leaked) {
+			t.Errorf("resource detail leaked %q: receipt=%q event=%q", leaked, got.Detail, event.Reason)
+		}
+	}
+	if got.OffenderCommand != "" || strings.Contains(string(data), snapshot.Processes[0].CommandLine) {
+		t.Fatalf("receipt persisted raw offender command: %s", data)
+	}
+}
+
 func TestGuardResourceReceiptsKeepCommitAndRSSFieldsDistinct(t *testing.T) {
 	commitDecision := guardResourceDecision{Metric: procguard.MemoryMetricCommit, Reason: "CHILD_TREE_COMMIT_LIMIT", TreeBytes: 10, SystemBytes: 20, SystemLimit: 30}
 	commit, err := json.Marshal(newGuardResourceReceipt("trace", "codex", 1, commitDecision))
@@ -253,7 +299,7 @@ func TestGuardResourceReceiptAdversarialStringsRemainOneJSONRecord(t *testing.T)
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("receipt is not valid JSON: %v: %q", err, data)
 	}
-	if got.TraceID != "trace\nnext" || got.OffenderName != "name\n{\"forged\":true}" || got.TreeRSSBytes == nil || *got.TreeRSSBytes != 123 {
+	if got.TraceID != "trace\nnext" || got.OffenderName != "name\n{\"forged\":true}" || got.OffenderCommand != "" || got.TreeRSSBytes == nil || *got.TreeRSSBytes != 123 {
 		t.Fatalf("receipt=%+v", got)
 	}
 }
@@ -277,7 +323,7 @@ func TestGuardResourceErrorPathsEdgeAndAdversarial(t *testing.T) {
 	})
 	t.Run("collector failure without processes keeps root", func(t *testing.T) {
 		event := guardResourceMonitorFailure(-7, procguard.MemorySnapshot{Metric: procguard.MemoryMetricRSS}, "MONITOR_ERROR", "malformed\noutput")
-		if event.Resource == nil || event.Resource.Offender.PID != -7 || !slices.Equal(event.Resource.OwnedPIDs, []int{-7}) || event.Reason != "MONITOR_ERROR: malformed\noutput" {
+		if event.Resource == nil || event.Resource.Offender.PID != -7 || !slices.Equal(event.Resource.OwnedPIDs, []int{-7}) || event.Resource.Detail != "malformed output" || event.Reason != "MONITOR_ERROR: malformed output" {
 			t.Fatalf("event=%+v", event)
 		}
 	})

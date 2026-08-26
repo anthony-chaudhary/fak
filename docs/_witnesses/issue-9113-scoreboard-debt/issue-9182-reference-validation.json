@@ -1,0 +1,213 @@
+{
+  "schema": "fak-milestone-reference-validation/1",
+  "issue": 9182,
+  "audited_commit": "286b455221f5b73e27a1cb08a9a4237111150690",
+  "date": "2026-08-26",
+  "status": "pass",
+  "checks": {
+    "referenced_files_and_tokens": true,
+    "audited_cells_match_live_m1_grid": true,
+    "live_m1_cells": 24,
+    "audited_cells": 24,
+    "every_cell_evidence_set_resolves": true,
+    "unresolved_evidence_sets": []
+  },
+  "references": [
+    {
+      "path": "internal/model/kv.go",
+      "exists": true,
+      "required_tokens": [
+        "func (s *Session) requirePreNorm",
+        "func (s *Session) requireGLMDsaSession"
+      ],
+      "missing_tokens": [],
+      "git_blob": "e8f6b9c192a71425d7bc51d06bd2136b490b1cee",
+      "sha256": "85bca3796ade4e94a301be4ede099291a3307b685b05512e48f763cccba96a84",
+      "last_touch_commit": "c5ff58dbdb9d22e645017a014b37fdda34de1a4a",
+      "ok": true
+    },
+    {
+      "path": "internal/covmatrix/covmatrix_test.go",
+      "exists": true,
+      "required_tokens": [
+        "func TestClassify",
+        "func TestSparseAttnFenceCoverageMatchesKernel"
+      ],
+      "missing_tokens": [],
+      "git_blob": "64aad920a88c7477a40df65d63c74fba1cee7972",
+      "sha256": "b40d8685dc041f0f8da1afdc37b2320a22e0fd20714248634234aa8646f038d1",
+      "last_touch_commit": "a967cb3d2ecedb59ce3480c7d1c70d0baffb2c0a",
+      "ok": true
+    },
+    {
+      "path": "internal/model/minimax_m3_session.go",
+      "exists": true,
+      "required_tokens": [
+        "func (s *Session) requireMiniMaxSession"
+      ],
+      "missing_tokens": [],
+      "git_blob": "62bc9655e2da894dbb367b2bfb983281647aa4b1",
+      "sha256": "f8087553a01bc8490816551cffc818562d87e4f70dab00fe8b8d4a7b66cfdf3e",
+      "last_touch_commit": "aa480bbc54156a2f4546186892fd1a0db18c49b2",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_minimax_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "func TestMiniMaxCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "2c78e72e06fa9d9ec855643684ce19db05d026f0",
+      "sha256": "109dac2040831812f08eb200b8c53cd0c38ae64e54e2aaf3f285920e3ccc6f5b",
+      "last_touch_commit": "bbfdafdd1e98730d7d2e639a49376c5aa80bd18e",
+      "ok": true
+    },
+    {
+      "path": "internal/compute/cuda_specialized.go",
+      "exists": true,
+      "required_tokens": [
+        "func (c *cudaBackend) DSASparseAttend",
+        "func (c *cudaBackend) DSAIndexSelect"
+      ],
+      "missing_tokens": [],
+      "git_blob": "7f15bc86d57cb3db43134d0cc7fdfcdf480b731f",
+      "sha256": "d89c3f612dc8cdc36f478375f27f96c1238c1e36fadafc0b46ceac5db4d8a0a6",
+      "last_touch_commit": "1ab2eeee359266d1419255159ca04fccfe78b2da",
+      "ok": true
+    },
+    {
+      "path": "internal/model/glm_dsa_cuda_test.go",
+      "exists": true,
+      "required_tokens": [
+        "func TestCUDAGLMMoeDsaBackendForward",
+        "func TestCUDAGLMMoeDsaIndexSelectMatches"
+      ],
+      "missing_tokens": [],
+      "git_blob": "cba1579e5b7ff2750c606c74b720646abeeb897a",
+      "sha256": "26114e4aa785afe5fd04a36e5e6217262329f7f955df34707ae5c20d28dc9ee5",
+      "last_touch_commit": "72d94c62a5e715b1f8e5497702baf2a3b72f6542",
+      "ok": true
+    },
+    {
+      "path": "docs/nightrun/collected.jsonl",
+      "exists": true,
+      "required_tokens": [
+        "glm52-moe-dsa-gpu-witness"
+      ],
+      "missing_tokens": [],
+      "git_blob": "c85c674d6a6012ec4dbe853fe446223fecc6678e",
+      "sha256": "235fe399586aa3cb7da5c7bae522313da5b6cd61a9672c8f70082890ccbb90f7",
+      "last_touch_commit": "554046e41653b16d14438320fbadbcbba668996e",
+      "ok": true
+    },
+    {
+      "path": "docs/notes/GLM52-DSA-FULL-FORWARD-ON-PURE-KERNEL-GPU-SERVER-2026-06-23.md",
+      "exists": true,
+      "required_tokens": [
+        "TestCUDAGLMMoeDsaBackendForward"
+      ],
+      "missing_tokens": [],
+      "git_blob": "c78bd04e291960be26405f253eafb49eb8f71b1c",
+      "sha256": "740b0475409351c0b64cff9e01e10ecf47c69d70e90caf6f0b4a298b74bda9a4",
+      "last_touch_commit": "2b783059f6d7ea49dca44322054b5716576a0db1",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_gptneox_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestGPTNeoXCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "081c9cc39dae8c0da73bd3e9b37d71459d77a781",
+      "sha256": "e9c0928eb8ced4ebf3dc2b1df0265841a6a0ecf83b74248a3130bfb326f87d80",
+      "last_touch_commit": "04667225211fdc526ef0086e3f57abc57cd68745",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_falcon_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestFalconCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "6851f92045283726b3e0fa5c32c4fd524f4c8b97",
+      "sha256": "8a3963c4dbc8aff186ae6337b1c3bd78291ca81e3e72586d266681a8053e38cb",
+      "last_touch_commit": "715ff823c2ecd8487ea49c00a897ccf64e69e2ed",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestOlmo2CPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "5294aabcd23cff80ec664bd4817e58f8dbc2603e",
+      "sha256": "ca95ad3eac90374a9fef650e4a41632497c475103ad339f2148433f1259a2ec1",
+      "last_touch_commit": "2f4ffd74cbb537d40115cf75b419d3596cd615fe",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_cohere_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestCohereCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "40eaa372b9b38731a767b2c25e7a89f9bc3f7199",
+      "sha256": "276fb786aa3c7ec5c8291d12131648d55bbdc8bfaa5aef9f809f216d398eae60",
+      "last_touch_commit": "fa63195ca53313c2c13604de19014e0ae17773b0",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_gemma_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestGemmaCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "23a9d9ef7be10bcf2015de2cddf269e26691ce12",
+      "sha256": "edfdce99d7bfe49255952906326fb11f37071b01509a738918abc77c0c3a7edf",
+      "last_touch_commit": "48eca3e166b41082fd037388493b24c20fcd91a0",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_deepseek_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestDeepSeekCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "090d0a0d528c7ecb38c7c6615f83099111e1b866",
+      "sha256": "38a29b5864c7ac4319d32d55edd327d67dcc933bfa4e110ba10f960b9af64fbf",
+      "last_touch_commit": "14a98bb40e623dc3b4eb4ac88ae1a1d9296ceebe",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_glm_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestGLMDsaCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "4540ff5a7d217c2295ae5a1867b0a819147f319b",
+      "sha256": "a1d7ea446c62970d2c2a1eaae300924d811ba222be1b9502b56c1c29ef14e6c6",
+      "last_touch_commit": "aa4cb194c2ecac513adb135f36b30ee4f634afe9",
+      "ok": true
+    },
+    {
+      "path": "internal/model/family_minimax_cpu_oracle_test.go",
+      "exists": true,
+      "required_tokens": [
+        "TestMiniMaxCPUNumericOracle"
+      ],
+      "missing_tokens": [],
+      "git_blob": "2c78e72e06fa9d9ec855643684ce19db05d026f0",
+      "sha256": "109dac2040831812f08eb200b8c53cd0c38ae64e54e2aaf3f285920e3ccc6f5b",
+      "last_touch_commit": "bbfdafdd1e98730d7d2e639a49376c5aa80bd18e",
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+diff --git a/greeting.go b/greeting.go
+index 21ac101..219728f 100644
+--- a/greeting.go
++++ b/greeting.go
+@@ -1,3 +1,3 @@
+ package greeting
+ 
+-func Greeting(name string) string { return "hello " + name }
++func Greeting(name string) string { return "hello, " + name }

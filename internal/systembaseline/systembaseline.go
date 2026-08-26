@@ -1,6 +1,7 @@
 package systembaseline
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,13 @@ import (
 )
 
 const Schema = "fak.system-baseline/v1"
+
+const (
+	linuxClockTicks = uint64(100)
+	// Operational reports disclose at most five platform-bounded image names;
+	// this generous ceiling keeps hostile Decode readers from growing memory.
+	maxEncodedReportBytes = 1 << 20
+)
 
 const (
 	VerdictClean       = "clean"
@@ -160,6 +168,7 @@ func Capture() Snapshot {
 func Build(baselineSamples, samples []Snapshot, rootPID int, interval time.Duration, policy Policy, exitCode int, timedOut bool) Report {
 	r := Report{Schema: Schema, Verdict: VerdictClean, Policy: normalizePolicy(policy), CommandExitCode: exitCode, TimedOut: timedOut, TopNonSUT: []Consumer{}, Findings: []Finding{}}
 	if len(baselineSamples) > 0 {
+		baselineSamples = append([]Snapshot(nil), baselineSamples...)
 		sort.SliceStable(baselineSamples, func(i, j int) bool { return baselineSamples[i].At.Before(baselineSamples[j].At) })
 		r.Baseline = windowFor(baselineSamples, interval)
 		r.BaselineHost = foldHostTotals(baselineSamples)
@@ -171,6 +180,7 @@ func Build(baselineSamples, samples []Snapshot, rootPID int, interval time.Durat
 		r.Seal()
 		return r
 	}
+	samples = append([]Snapshot(nil), samples...)
 	sort.SliceStable(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
 	r.Window = windowFor(samples, interval)
 	r.CommandSampler = foldSamplerOverhead(samples, r.Window)
@@ -220,10 +230,10 @@ func normalizePolicy(p Policy) Policy {
 	if p.MinimumSamples <= 0 {
 		p.MinimumSamples = 2
 	}
-	if p.MaximumNonSUTCPUPercent <= 0 {
+	if p.MaximumNonSUTCPUPercent <= 0 || p.MaximumNonSUTCPUPercent > 100 || math.IsNaN(p.MaximumNonSUTCPUPercent) || math.IsInf(p.MaximumNonSUTCPUPercent, 0) {
 		p.MaximumNonSUTCPUPercent = 20
 	}
-	if p.MaximumSamplerDutyPercent <= 0 {
+	if p.MaximumSamplerDutyPercent <= 0 || p.MaximumSamplerDutyPercent > 100 || math.IsNaN(p.MaximumSamplerDutyPercent) || math.IsInf(p.MaximumSamplerDutyPercent, 0) {
 		p.MaximumSamplerDutyPercent = 10
 	}
 	return p
@@ -238,7 +248,13 @@ func foldSamplerOverhead(samples []Snapshot, window Window) SamplerOverhead {
 	overhead.CountedSamples = len(samples) - 1
 	for _, sample := range samples[:len(samples)-1] {
 		if sample.CensusWallNS < 0 {
+			overhead.WallNS = 0
 			overhead.DutyPercent = unavailable("percent", "negative census wall duration")
+			return overhead
+		}
+		if sample.CensusWallNS > math.MaxInt64-overhead.WallNS {
+			overhead.WallNS = 0
+			overhead.DutyPercent = unavailable("percent", "census wall duration overflow")
 			return overhead
 		}
 		overhead.WallNS += sample.CensusWallNS
@@ -251,7 +267,11 @@ func windowFor(samples []Snapshot, interval time.Duration) Window {
 	if len(samples) == 0 {
 		return Window{}
 	}
-	return Window{StartedAtUTC: samples[0].At.UTC().Format(time.RFC3339Nano), EndedAtUTC: samples[len(samples)-1].At.UTC().Format(time.RFC3339Nano), DurationNS: samples[len(samples)-1].At.Sub(samples[0].At).Nanoseconds(), IntervalNS: interval.Nanoseconds(), Samples: len(samples)}
+	intervalNS := interval.Nanoseconds()
+	if intervalNS < 0 {
+		intervalNS = 0
+	}
+	return Window{StartedAtUTC: samples[0].At.UTC().Format(time.RFC3339Nano), EndedAtUTC: samples[len(samples)-1].At.UTC().Format(time.RFC3339Nano), DurationNS: samples[len(samples)-1].At.Sub(samples[0].At).Nanoseconds(), IntervalNS: intervalNS, Samples: len(samples)}
 }
 
 // canonicalLinuxCPUTicks excludes guest counters because Linux already includes
@@ -266,6 +286,9 @@ func canonicalLinuxCPUTicks(ticks []uint64) (total, idle uint64, ok bool) {
 		limit = 8
 	}
 	for _, tick := range ticks[:limit] {
+		if tick > math.MaxUint64-total {
+			return 0, 0, false
+		}
 		total += tick
 	}
 	idle = ticks[3]
@@ -273,6 +296,50 @@ func canonicalLinuxCPUTicks(ticks []uint64) (total, idle uint64, ok bool) {
 		idle += ticks[4]
 	}
 	return total, idle, total >= idle
+}
+
+func linuxCPUTicksToNS(ticks uint64) (uint64, bool) {
+	const nsPerSecond = uint64(time.Second)
+	whole, remainder := ticks/linuxClockTicks, ticks%linuxClockTicks
+	fraction := remainder * nsPerSecond / linuxClockTicks
+	if whole > (math.MaxUint64-fraction)/nsPerSecond {
+		return 0, false
+	}
+	return whole*nsPerSecond + fraction, true
+}
+
+// canonicalWindowsHostCPUNS keeps the FILETIME conversion testable without a
+// Windows kernel. GetSystemTimes includes idle time in the kernel counter.
+func canonicalWindowsHostCPUNS(idle, kernel, user uint64) (total, busy uint64, ok bool) {
+	if kernel < idle || user > math.MaxUint64-kernel {
+		return 0, 0, false
+	}
+	totalTicks := kernel + user
+	busyTicks := kernel - idle
+	if user > math.MaxUint64-busyTicks {
+		return 0, 0, false
+	}
+	busyTicks += user
+	total, totalOK := windows100NSTicksToNS(totalTicks)
+	busy, busyOK := windows100NSTicksToNS(busyTicks)
+	if !totalOK || !busyOK {
+		return 0, 0, false
+	}
+	return total, busy, true
+}
+
+func canonicalWindowsProcessCPUNS(kernel, user uint64) (uint64, bool) {
+	if user > math.MaxUint64-kernel {
+		return 0, false
+	}
+	return windows100NSTicksToNS(kernel + user)
+}
+
+func windows100NSTicksToNS(ticks uint64) (uint64, bool) {
+	if ticks > math.MaxUint64/100 {
+		return 0, false
+	}
+	return ticks * 100, true
 }
 
 func (r *Report) foldHost(samples []Snapshot) {
@@ -284,7 +351,11 @@ func foldHostTotals(samples []Snapshot) HostTotals {
 	first, last, ok := hostCPUEndpoints(samples)
 	if ok && last.TotalCPUNS > first.TotalCPUNS && last.BusyCPUNS >= first.BusyCPUNS {
 		total, busy := last.TotalCPUNS-first.TotalCPUNS, last.BusyCPUNS-first.BusyCPUNS
-		out.CPUPercent = available(float64(busy)/float64(total)*100, "percent", "cumulative host CPU counters")
+		if busy <= total {
+			out.CPUPercent = available(float64(busy)/float64(total)*100, "percent", "cumulative host CPU counters")
+		} else {
+			out.CPUPercent = unavailable("percent", "host busy CPU exceeds total CPU delta")
+		}
 	} else {
 		out.CPUPercent = unavailable("percent", "host CPU counter delta unavailable")
 	}
@@ -440,7 +511,7 @@ func (r *Report) foldProcesses(samples []Snapshot, rootPID int) {
 	if sutAttributionComplete && hostOK && last.TotalCPUNS > first.TotalCPUNS && last.BusyCPUNS >= first.BusyCPUNS {
 		total := last.TotalCPUNS - first.TotalCPUNS
 		busy := last.BusyCPUNS - first.BusyCPUNS
-		if sutCPU <= busy {
+		if busy <= total && sutCPU <= busy {
 			sutPct := float64(sutCPU) / float64(total) * 100
 			nonPct := float64(busy-sutCPU) / float64(total) * 100
 			r.Attribution.SUTCPUPercentOfHost = available(sutPct, "percent", "root PID + descendant process CPU deltas")
@@ -490,13 +561,13 @@ func classifyWindowsProcessAdvance(result, errorCode uintptr) (done, truncated b
 }
 
 func (r *Report) applyPolicy() {
-	if r.Baseline.Samples < r.Policy.MinimumBaselineSamples || r.Baseline.DurationNS <= 0 {
+	if r.Baseline.Samples < r.Policy.MinimumBaselineSamples || r.Baseline.DurationNS <= 0 || r.Baseline.IntervalNS <= 0 {
 		r.Verdict = VerdictInvalid
-		r.Findings = append(r.Findings, Finding{Code: "INVALID_BASELINE_WINDOW", Detail: "quiet baseline sample count or duration is invalid"})
+		r.Findings = append(r.Findings, Finding{Code: "INVALID_BASELINE_WINDOW", Detail: "quiet baseline sample count, duration, or interval is invalid"})
 	}
-	if r.Window.Samples < r.Policy.MinimumSamples || r.Window.DurationNS <= 0 || r.Coverage.SUTRootPID <= 0 {
+	if r.Window.Samples < r.Policy.MinimumSamples || r.Window.DurationNS <= 0 || r.Window.IntervalNS <= 0 || r.Coverage.SUTRootPID <= 0 {
 		r.Verdict = VerdictInvalid
-		r.Findings = append(r.Findings, Finding{Code: "INVALID_WINDOW", Detail: "sample count, duration, or SUT root is invalid"})
+		r.Findings = append(r.Findings, Finding{Code: "INVALID_WINDOW", Detail: "sample count, duration, interval, or SUT root is invalid"})
 	}
 	unknown := false
 	if r.Policy.RequireHostCPU && !r.BaselineHost.CPUPercent.Available {
@@ -573,8 +644,11 @@ func scrubImage(s string) string {
 func (r *Report) canonicalDigest() string {
 	saved := r.Digest
 	r.Digest = ""
-	b, _ := json.Marshal(r)
+	b, err := json.Marshal(r)
 	r.Digest = saved
+	if err != nil {
+		return ""
+	}
 	s := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(s[:])
 }
@@ -582,7 +656,17 @@ func (r *Report) Seal() { r.Digest = r.canonicalDigest() }
 
 func Decode(rd io.Reader) (Report, error) {
 	var r Report
-	dec := json.NewDecoder(rd)
+	if rd == nil {
+		return r, errors.New("systembaseline: decode: nil reader")
+	}
+	raw, err := io.ReadAll(io.LimitReader(rd, maxEncodedReportBytes+1))
+	if err != nil {
+		return r, fmt.Errorf("systembaseline: decode: %w", err)
+	}
+	if len(raw) > maxEncodedReportBytes {
+		return r, fmt.Errorf("systembaseline: decode: input exceeds %d bytes", maxEncodedReportBytes)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&r); err != nil {
 		return r, fmt.Errorf("systembaseline: decode: %w", err)
@@ -599,7 +683,7 @@ func Decode(rd io.Reader) (Report, error) {
 
 func (r Report) policyVerdict() string {
 	p := normalizePolicy(r.Policy)
-	if r.Baseline.Samples < p.MinimumBaselineSamples || r.Baseline.DurationNS <= 0 || r.Window.Samples < p.MinimumSamples || r.Window.DurationNS <= 0 || r.Coverage.SUTRootPID <= 0 || r.CommandExitCode != 0 || r.TimedOut {
+	if r.Baseline.Samples < p.MinimumBaselineSamples || r.Baseline.DurationNS <= 0 || r.Baseline.IntervalNS <= 0 || r.Window.Samples < p.MinimumSamples || r.Window.DurationNS <= 0 || r.Window.IntervalNS <= 0 || r.Coverage.SUTRootPID <= 0 || r.CommandExitCode != 0 || r.TimedOut {
 		return VerdictInvalid
 	}
 	if p.RequireHostCPU && (!r.BaselineHost.CPUPercent.Available || !r.Host.CPUPercent.Available) {
@@ -636,7 +720,7 @@ func (r Report) Validate() error {
 	if r.Digest == "" || r.canonicalDigest() != r.Digest {
 		return errors.New("systembaseline: canonical digest mismatch")
 	}
-	if r.Baseline.Samples < 0 || r.Baseline.DurationNS < 0 || r.Window.Samples < 0 || r.Window.DurationNS < 0 || r.Coverage.ProcessUnreadable < 0 || r.BaselineSampler.CountedSamples < 0 || r.BaselineSampler.WallNS < 0 || r.CommandSampler.CountedSamples < 0 || r.CommandSampler.WallNS < 0 {
+	if r.Baseline.Samples < 0 || r.Baseline.DurationNS < 0 || r.Baseline.IntervalNS < 0 || r.Window.Samples < 0 || r.Window.DurationNS < 0 || r.Window.IntervalNS < 0 || r.Coverage.ProcessSnapshots < 0 || r.Coverage.ProcessesObserved < 0 || r.Coverage.ProcessReads < 0 || r.Coverage.ProcessUnreadable < 0 || r.Coverage.HostCPUSamples < 0 || r.Coverage.HostMemorySamples < 0 || r.BaselineSampler.CountedSamples < 0 || r.BaselineSampler.WallNS < 0 || r.CommandSampler.CountedSamples < 0 || r.CommandSampler.WallNS < 0 {
 		return errors.New("systembaseline: negative window or coverage value")
 	}
 	if err := validateSamplerOverhead("baseline", r.BaselineSampler, r.Baseline); err != nil {
@@ -656,9 +740,15 @@ func (r Report) Validate() error {
 	if len(r.TopNonSUT) > 0 && !r.Policy.IncludeTopConsumers {
 		return errors.New("systembaseline: top consumers present without opt-in policy")
 	}
+	if len(r.TopNonSUT) > 5 {
+		return errors.New("systembaseline: top consumers exceed bounded disclosure")
+	}
 	for _, c := range r.TopNonSUT {
 		if c.PID <= 0 || c.Image != scrubImage(c.Image) || strings.ContainsAny(c.Image, "/\\") {
 			return errors.New("systembaseline: non-SUT consumer identity is not scrubbed")
+		}
+		if math.IsNaN(c.CPUSeconds) || math.IsInf(c.CPUSeconds, 0) || c.CPUSeconds < 0 {
+			return errors.New("systembaseline: non-SUT consumer CPU is invalid")
 		}
 	}
 	return nil
@@ -668,8 +758,14 @@ func validateSamplerOverhead(name string, overhead SamplerOverhead, window Windo
 	if window.Samples < 2 || window.DurationNS <= 0 {
 		return nil
 	}
-	if overhead.CountedSamples != window.Samples-1 || !overhead.DutyPercent.Available {
+	if overhead.CountedSamples != window.Samples-1 {
 		return fmt.Errorf("systembaseline: %s sampler coverage is inconsistent with its window", name)
+	}
+	if !overhead.DutyPercent.Available {
+		if overhead.WallNS != 0 || overhead.DutyPercent.Reason == "" {
+			return fmt.Errorf("systembaseline: %s sampler unavailable state is inconsistent", name)
+		}
+		return nil
 	}
 	want := float64(overhead.WallNS) / float64(window.DurationNS) * 100
 	if math.Abs(overhead.DutyPercent.Value-want) > 1e-9 {

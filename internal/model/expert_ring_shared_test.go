@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/polymodel"
@@ -523,5 +524,69 @@ func TestSharedRingServesConcurrentAgentsBoundedAndUnchanged(t *testing.T) {
 	}
 	if err := sh.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestSharedExpertRingPolicySwapIsAtomicWhileAttached(t *testing.T) {
+	m := expertRingTestModel(t, 256, 6)
+	be := &sharedRingBackend{Backend: compute.Default()}
+	sh, err := NewSharedExpertRing(SharedExpertRingConfig{
+		Model: m, Backend: be, BudgetBytes: expertRingWeightBytes(t, m) * 6,
+	})
+	if err != nil {
+		t.Fatalf("NewSharedExpertRing: %v", err)
+	}
+	defer sh.Close()
+	a, b := sharedRingAgent(m, be), sharedRingAgent(m, be)
+	defer a.Close()
+	defer b.Close()
+	if err := sh.Attach(a, "a"); err != nil {
+		t.Fatalf("attach a: %v", err)
+	}
+	if err := sh.Attach(b, "b"); err != nil {
+		t.Fatalf("attach b: %v", err)
+	}
+	driveExpertWindow(a, m, []int{0})
+	before := sh.Stats()
+
+	// Hold an active shared-ring span. The swap must wait on the same mutex rather than changing
+	// the plain policy field under an operation that already entered under generation one.
+	doneSpan := a.ringEnter(a.expertRing)
+	type result struct {
+		receipt ExpertRingPolicySwapReceipt
+		err     error
+	}
+	started := make(chan struct{})
+	resultCh := make(chan result, 1)
+	go func() {
+		close(started)
+		r, err := sh.SwapExpertRingEvictPolicy(ExpertRingEvictValueAware)
+		resultCh <- result{r, err}
+	}()
+	<-started
+	select {
+	case got := <-resultCh:
+		doneSpan()
+		t.Fatalf("swap crossed an active ring span: %+v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if a.expertRing.policyGeneration != 1 || a.expertRing.policy != ExpertRingEvictLRU {
+		doneSpan()
+		t.Fatalf("active span observed a premature swap: policy=%s generation=%d",
+			a.expertRing.policy, a.expertRing.policyGeneration)
+	}
+	doneSpan()
+	got := <-resultCh
+	if got.err != nil || !got.receipt.Changed || got.receipt.PolicyGeneration != 2 {
+		t.Fatalf("swap result=%+v err=%v", got.receipt, got.err)
+	}
+	after := sh.Stats()
+	if after.Agents != 2 || after.Ring.ResidentCount != before.Ring.ResidentCount ||
+		after.Ring.ResidentBytes != before.Ring.ResidentBytes || after.Ring.PageIns != before.Ring.PageIns {
+		t.Fatalf("swap disturbed attachments/residency/counters: before=%+v after=%+v", before, after)
+	}
+	driveExpertWindow(b, m, []int{1})
+	if st := b.ExpertRing(); st.Policy != ExpertRingEvictValueAware || st.PolicyGeneration != 2 {
+		t.Fatalf("next attached operation did not see new epoch: %+v", st)
 	}
 }

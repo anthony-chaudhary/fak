@@ -74,12 +74,14 @@ type ExpertAccessTraceEvent struct {
 // ExpertAccessTrace is a replayable expert-residency corpus. UnsizedTouches makes an
 // unsupported/f32-only observation visible rather than silently inventing a byte size.
 type ExpertAccessTrace struct {
-	Schema         string                   `json:"schema"`
-	Name           string                   `json:"name"`
-	Source         string                   `json:"source"`
-	BudgetBytes    int64                    `json:"budget_bytes"`
-	Events         []ExpertAccessTraceEvent `json:"events"`
-	UnsizedTouches int                      `json:"unsized_touches,omitempty"`
+	Schema           string                   `json:"schema"`
+	Name             string                   `json:"name"`
+	Source           string                   `json:"source"`
+	Policy           ExpertRingEvictPolicy    `json:"policy"`
+	PolicyGeneration uint64                   `json:"policy_generation"`
+	BudgetBytes      int64                    `json:"budget_bytes"`
+	Events           []ExpertAccessTraceEvent `json:"events"`
+	UnsizedTouches   int                      `json:"unsized_touches,omitempty"`
 }
 
 // ExpertLocalityReport tests the prior behind LRU. Positive correlation means weights

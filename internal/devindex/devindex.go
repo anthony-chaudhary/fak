@@ -410,9 +410,6 @@ var docLineRE = regexp.MustCompile(`^\s*[-*]\s*\[(.+?)\]\(([^)]+)\)\s*(?:[—–
 // parseDocs extracts the curated doc map out of INDEX.md. Only markdown link
 // bullets are taken; prose lines are skipped. Titles keep their text minus
 // surrounding backticks.
-func (c *Catalog) parseDocs(text string) {
-	c.parseDocsFrom("INDEX.md", text)
-}
 
 func (c *Catalog) parseDocsFrom(source, text string) {
 	seen := map[string]bool{}

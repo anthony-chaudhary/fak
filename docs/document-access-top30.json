@@ -1,0 +1,189 @@
+{
+  "schema": "fak/document-access-backfill/v1",
+  "window": "trailing 12 months at 2026-08-26",
+  "provenance": "OBSERVED git touch frequency proxy; not page-view analytics",
+  "threshold_lines": 150,
+  "count": 30,
+  "documents": [
+    {
+      "path": "INDEX.md",
+      "access_proxy": 555,
+      "lines": 1002,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/concept-disambiguation-scorecard/README.md",
+      "access_proxy": 230,
+      "lines": 2792,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/cli-reference.md",
+      "access_proxy": 186,
+      "lines": 1460,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "README.md",
+      "access_proxy": 153,
+      "lines": 138,
+      "backfill_status": "already-bounded"
+    },
+    {
+      "path": "CLAIMS.md",
+      "access_proxy": 141,
+      "lines": 41,
+      "backfill_status": "already-bounded"
+    },
+    {
+      "path": "AGENTS.md",
+      "access_proxy": 97,
+      "lines": 315,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "BENCHMARK-AUTHORITY.md",
+      "access_proxy": 68,
+      "lines": 967,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/fak/concept-glossary.md",
+      "access_proxy": 61,
+      "lines": 2388,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/index.md",
+      "access_proxy": 59,
+      "lines": 305,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/benchmarks/NATIVE-IMPLEMENTATION-COMPARISONS.md",
+      "access_proxy": 49,
+      "lines": 86,
+      "backfill_status": "already-bounded"
+    },
+    {
+      "path": "docs/research/README.md",
+      "access_proxy": 46,
+      "lines": 122,
+      "backfill_status": "already-bounded"
+    },
+    {
+      "path": "internal/disambiguation/README.md",
+      "access_proxy": 39,
+      "lines": 528,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/concept-disambiguation-scorecard/INDEX.md",
+      "access_proxy": 38,
+      "lines": 3653,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/integrations/claude.md",
+      "access_proxy": 36,
+      "lines": 985,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "START-HERE.md",
+      "access_proxy": 33,
+      "lines": 117,
+      "backfill_status": "already-bounded"
+    },
+    {
+      "path": "docs/integrations/README.md",
+      "access_proxy": 32,
+      "lines": 353,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/run-the-demos.md",
+      "access_proxy": 32,
+      "lines": 586,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/dev-tooling.md",
+      "access_proxy": 29,
+      "lines": 425,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "examples/README.md",
+      "access_proxy": 28,
+      "lines": 408,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/FAQ.md",
+      "access_proxy": 26,
+      "lines": 2946,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "GETTING-STARTED.md",
+      "access_proxy": 26,
+      "lines": 379,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "access_proxy": 25,
+      "lines": 372,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/dispatch-status.md",
+      "access_proxy": 25,
+      "lines": 0,
+      "backfill_status": "already-bounded"
+    },
+    {
+      "path": "docs/integrations/openai-codex.md",
+      "access_proxy": 25,
+      "lines": 779,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "INSTALL.md",
+      "access_proxy": 25,
+      "lines": 260,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/HARDWARE-MATRIX.md",
+      "access_proxy": 24,
+      "lines": 265,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": ".claude/skills/README.md",
+      "access_proxy": 23,
+      "lines": 242,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/dispatch-loop.md",
+      "access_proxy": 23,
+      "lines": 452,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/fak/deployment-guide.md",
+      "access_proxy": 21,
+      "lines": 701,
+      "backfill_status": "follow-up-required"
+    },
+    {
+      "path": "docs/model-accounts.md",
+      "access_proxy": 21,
+      "lines": 859,
+      "backfill_status": "follow-up-required"
+    }
+  ]
+}

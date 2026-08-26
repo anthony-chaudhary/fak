@@ -408,11 +408,6 @@ func emitRosterJSON(stdout, stderr io.Writer, paths fleetaccounts.Paths,
 	return 0
 }
 
-type fleetLaunchLedgerEntry struct {
-	TS string `json:"ts"`
-	fleetaccounts.LaunchDecision
-}
-
 type fleetTurnOutcome struct {
 	Code   int
 	OK     bool

@@ -572,3 +572,9 @@ func TestEmitJSON(t *testing.T) {
 		t.Fatalf("EmitJSON = %q, want %q", got, want)
 	}
 }
+
+func TestVerdict(t *testing.T) {
+	if got, want := Verdict("first clause.", "Second clause."), "first clause. Second clause."; got != want {
+		t.Fatalf("Verdict = %q, want %q", got, want)
+	}
+}

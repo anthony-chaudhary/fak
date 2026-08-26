@@ -398,16 +398,16 @@
     },
     {
       "id": "cov-debt-tail-guard-gate-breathgate",
-      "canonical": "guard-gate implementation surface for breathgate",
+      "canonical": "runBreath (documentation-breath ratchet gate)",
       "family": "guard-gate",
       "kind": "symbol",
-      "definition": "`breathgate` is the exact repository symbol or term named `breathgate` in the guard-gate concept family; its owning implementation determines the concrete operation.",
-      "distinction": "This row positions the exact `breathgate` spelling rather than the broader `guard-gate` domain or a sibling symbol.",
+      "definition": "cmd/fak.runBreath audits documentation vocabulary and, when `--gate` is armed, exits 1 only for findings above the counted baseline; its default census is advisory and an input failure exits 2.",
+      "distinction": "This is a repository-documentation growth ratchet. It is not the runtime `gate` decision point that admits or refuses a tool call, and it does not enforce existing below-baseline findings.",
       "distinct_from": [
-        "insufficientaggregatehbm"
+        "gate"
       ],
       "aliases": [],
-      "grounding": "breathgate",
+      "grounding": "runBreath",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
       "parent": "",
@@ -422,7 +422,8 @@
       "definition": "`guardActiveEnv` is the guard-gate symbol declared or used at `cmd/fak/guard_child.go:759` as `const guardActiveEnv = \"FAK_GUARD_ACTIVE\"`. This row positions that concrete implementation surface, not merely the family label.",
       "distinction": "Use `guardActiveEnv` for the operation evidenced at `cmd/fak/guard_child.go:759`. Unlike `insufficientaggregatehbm`, it names this exact implementation surface; unlike `guard-gate`, it is not the umbrella domain.",
       "distinct_from": [
-        "insufficientaggregatehbm"
+        "insufficientaggregatehbm",
+        "issue-9234-fak-guard-active-env"
       ],
       "aliases": [],
       "grounding": "guardactiveenv",
@@ -462,6 +463,25 @@
       ],
       "aliases": [],
       "grounding": "guardalloweffectivereadlayers",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue-9234-fak-guard-active-env",
+      "canonical": "FAK_GUARD_ACTIVE (guarded-child marker)",
+      "family": "guard-gate",
+      "kind": "config",
+      "definition": "The inherited environment marker set only on a fak-managed guard child; the Codex UserPromptSubmit selector reads it to invoke scoped child context while ordinary direct sessions remain permissive.",
+      "distinction": "This is the child-lineage marker consumed by the submit selector, not guardActiveEnv (the Go constant that names it), and not FAK_CODEX_SUBMIT_HARDENED (the separate operator opt-in that blocks unguarded peer sessions).",
+      "distinct_from": [
+        "cov-debt-tail-guard-gate-guardactiveenv"
+      ],
+      "aliases": [],
+      "grounding": "FAK_GUARD_ACTIVE",
       "grounding_kind": "symbol",
       "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
       "parent": "",

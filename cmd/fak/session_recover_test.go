@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/resume"
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
@@ -490,5 +491,34 @@ func TestSessionRecoverUnifiedPreviewAndLiveWitness(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(live.WitnessPath); err != nil || !bytes.Contains(raw, []byte(`"advanced": true`)) {
 		t.Fatalf("durable live witness err=%v body=%s", err, raw)
+	}
+}
+
+func TestSessionRecoverRefusesMalformedIdentityBeforeInventoryOrLaunch(t *testing.T) {
+	regDir := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", regDir)
+	if err := os.WriteFile(resume.IdentityLedgerPath(regDir), []byte("not-json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldInv, oldLaunch := recoveryInventory, recoveryLaunch
+	defer func() { recoveryInventory, recoveryLaunch = oldInv, oldLaunch }()
+	inventoryCalls := 0
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		inventoryCalls++
+		return sessionrecovery.InventoryReport{}, nil
+	}
+	cap := &captureLauncher{}
+	recoveryLaunch = cap
+	var out, stderr bytes.Buffer
+	receipts := filepath.Join(t.TempDir(), "receipts")
+	code := runSessionRecover(&out, &stderr, []string{"--live", "--all", "--journal=false", "--receipts", receipts})
+	if code == 0 || inventoryCalls != 0 || len(cap.got) != 0 {
+		t.Fatalf("code=%d inventory=%d launches=%d", code, inventoryCalls, len(cap.got))
+	}
+	if !strings.Contains(stderr.String(), resume.IdentityLedgerPath(regDir)) || !strings.Contains(stderr.String(), "1 invalid") {
+		t.Fatalf("stderr=%q", stderr.String())
+	}
+	if _, err := os.Stat(receipts); !os.IsNotExist(err) {
+		t.Fatalf("receipts created: %v", err)
 	}
 }

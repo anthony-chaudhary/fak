@@ -336,11 +336,12 @@
       "family": "render-materialize",
       "kind": "symbol",
       "definition": "The renderTUI* family formats one fak console dashboard pane (loops/agent/garden/guard/issues/overview/sessions) from its typed report struct into a fixed-width terminal text view.",
-      "distinction": "Not the bench RenderMarkdown/contract renderers (which emit Markdown docs); these emit width-bounded terminal panes for the live `fak` console.",
+      "distinction": "These renderTUI* functions format typed live-console reports into width-bounded dashboard panes. They are not harnesspreview.RenderTUI, which renders one launch-change preview, and not the benchmark RenderMarkdown functions, which emit Markdown documents.",
       "distinct_from": [
         "RenderMarkdown (bench report)",
         "render-materialize-render-toc",
-        "x-render-materialize-renderturn"
+        "x-render-materialize-renderturn",
+        "cov-debt250-render-materialize-rendertui"
       ],
       "aliases": [
         "rendertuiagent",

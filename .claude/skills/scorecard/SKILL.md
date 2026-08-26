@@ -97,6 +97,36 @@ its generated pane, compare its discovered inputs with `fak score --help`.
 
 ---
 
+## Default portfolio contract for scoreboard-debt work
+
+When a task names **scoreboard debt**, **scorecard debt**, score improvement, or
+a 2×/50% target, the individual card is not the whole acceptance surface. Run
+the canonical portfolio pane before edits and after the final candidate:
+
+```bash
+python tools/scorecard_control_pane.py --json > <allocated-scratch>/pane-before.json
+# run the owning leaf scorecard with the same workspace/corpus scope
+python tools/scorecard_control_pane.py --json > <allocated-scratch>/pane-after.json
+```
+
+Treat the receipts as comparable only when workspace, corpus, and detector
+versions match. The pane's `index_coverage` is a completion gate:
+`index_coverage.ok` must be true, `unindexed_count` must be zero, and each
+excluded implementation must carry a production-owned reason. A card absent
+from default reporting is unfinished integration, not an improved card.
+
+Report both the owning card's leaf-debt delta and the pane's `total_debt` delta.
+For a 2× / 50% reduction, prove `debt_after <= debt_before / 2` against the
+declared authoritative baseline. A grade change, narrower corpus, or stale
+baseline comparison does not prove 2×.
+
+Preserve the measuring stick. Detector logic, discovery, exclusions, weights,
+thresholds, and the pinned baseline cannot count as debt retirement unless the
+issue explicitly requests a separately reviewed measurement migration. Never
+`--pin` merely to make residual debt or a regression green. Store same-scope
+before/after receipts for substantive cohorts and bind them to the shipped
+commit or issue witness.
+
 ## Running one as an RSI pass (the loop every scorecard skill shares)
 
 Whichever surface you're on, the pass is the same five steps:

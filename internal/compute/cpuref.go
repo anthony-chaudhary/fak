@@ -2,6 +2,7 @@ package compute
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -40,7 +41,7 @@ func (h *hostBuf) Ready() bool    { return true }
 func (h *hostBuf) F32() []float32 { return h.f32 }
 func (h *hostBuf) I8() []int8     { return h.i8 }
 
-type cpuBackend struct{}
+type cpuBackend struct{ identity byte }
 
 func (c *cpuBackend) Name() string            { return "cpu-ref" }
 func (c *cpuBackend) Tier() string            { return "scalar" } // a real cpu backend probes CPUID here
@@ -628,4 +629,30 @@ func qgemm8cell(qw []int8, dw []float32, qx []int8, dx []float32, nblk, block in
 	acc[0] += acc[2]
 	acc[1] += acc[3]
 	return acc[0] + acc[1]
+}
+
+// PrepareMatMul freezes the Q8_0 matrix-vector compatibility envelope and workspace
+// requirement. Other dtypes retain Backend.MatMul as their direct path.
+func (c *cpuBackend) PrepareMatMul(w, x Tensor) (*MatMulPlan, error) {
+	started := time.Now()
+	if w.Backend() != c || x.Backend() != c {
+		return nil, errors.New("compute: prepare matmul requires tensors owned by cpu-ref; upload them first")
+	}
+	if w.Dtype != Q8_0 || x.Dtype != F32 {
+		return nil, fmt.Errorf("compute: cpu-ref planned matmul supports q8_0 weight and f32 input, got %s/%s; use Backend.MatMul directly", w.Dtype, x.Dtype)
+	}
+	if len(w.Shape) != 2 || len(x.Shape) != 1 || w.Shape[1] != x.Shape[0] {
+		return nil, fmt.Errorf("compute: prepare matmul needs weight [out,in] and input [in], got %v and %v", w.Shape, x.Shape)
+	}
+	if w.Quant == nil || w.Quant.Block <= 0 || w.Shape[1]%w.Quant.Block != 0 || w.Quant.Block%4 != 0 {
+		return nil, errors.New("compute: prepare matmul requires a q8_0 quant block divisible by 4 and exactly dividing input width")
+	}
+	workspace := w.Shape[1] + 4*(w.Shape[1]/w.Quant.Block)
+	return &MatMulPlan{revision: matMulPlanRevision, desc: MatMulPlanDescriptor{
+		Operation: "matmul", Backend: c.Name(), Device: planDevice(c),
+		WeightDtype: w.Dtype, InputDtype: x.Dtype,
+		WeightShape: append([]int(nil), w.Shape...), InputShape: append([]int(nil), x.Shape...),
+		WeightLayout: w.Layout, InputLayout: x.Layout, QuantBlock: w.Quant.Block,
+		WorkspaceBytes: workspace, Preparation: time.Since(started),
+	}}, nil
 }

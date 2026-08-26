@@ -583,8 +583,6 @@ func runDisambiguationGenerate(stdout, stderr io.Writer, args []string) int {
 	return 0
 }
 
-const defaultDisambiguationDocsDir = "docs/generated/disambiguation"
-
 type disambiguationDocsFile struct {
 	Path    string `json:"path"`
 	SHA256  string `json:"sha256"`

@@ -171,11 +171,12 @@ func main() {
 			"flip is consistent with pure accumulation/precision divergence -> match llama.cpp's scan " +
 			"reduction order / state dtype. Confirm the actual (layer,op) with the Mac per-layer probe."
 	} else {
-		res.Verdict = "numerics-as-rounding is INSUFFICIENT on its own: even the f16-state bracket stays " +
-			"far below the rho needed to flip the 1.75-logit near-tie, so accumulated reduction-order/precision " +
-			"divergence ALONE cannot explain token-3. The flip implies an ANOMALOUS (algorithmic/ordering) " +
-			"divergence, not mere rounding -> the per-layer probe must find where cosine drops anomalously " +
-			"(a real op mismatch), and a 1-ULP-floor threshold would miss it."
+		insufficient := []string{
+			"numerics-as-rounding is INSUFFICIENT on its own: even the f16-state bracket stays far below the rho needed to flip the 1.75-logit near-tie,",
+			"so accumulated reduction-order/precision divergence ALONE cannot explain token-3; the flip implies an ANOMALOUS algorithmic or ordering divergence, not mere rounding.",
+			"The per-layer probe must find the real op mismatch where cosine drops anomalously; a 1-ULP-floor threshold would miss it.",
+		}
+		res.Verdict = gdn.Verdict(insufficient...)
 	}
 
 	if *asJSON {
