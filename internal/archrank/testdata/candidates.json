@@ -1,0 +1,145 @@
+{
+  "schema_version": "archrank.candidates/v1",
+  "formulas": {
+    "active_bytes": "active_bytes = active_weight_bytes + state_bytes + kv_bytes_at_envelope",
+    "score": "quality_per_active_byte = quality / active_bytes"
+  },
+  "candidates": [
+    {
+      "id": "synthetic-control-a",
+      "architecture": "synthetic dense control A",
+      "migration_class": "method-witness-only",
+      "envelope_id": "synthetic-envelope-v1",
+      "quality_metric": "synthetic_quality_fraction",
+      "quality_source_kind": "synthetic_deterministic_measurement",
+      "measurement_status": "accepted",
+      "quality": 0.8,
+      "active_weight_bytes": 100,
+      "state_bytes": 10,
+      "kv_bytes_at_envelope": 10,
+      "provenance": {
+        "kind": "synthetic_control_measurement",
+        "locator": "internal/archrank/testdata/candidates.json#synthetic-control-a"
+      }
+    },
+    {
+      "id": "synthetic-control-b",
+      "architecture": "synthetic dense control B",
+      "migration_class": "method-witness-only",
+      "envelope_id": "synthetic-envelope-v1",
+      "quality_metric": "synthetic_quality_fraction",
+      "quality_source_kind": "synthetic_deterministic_measurement",
+      "measurement_status": "accepted",
+      "quality": 0.75,
+      "active_weight_bytes": 80,
+      "state_bytes": 10,
+      "kv_bytes_at_envelope": 10,
+      "provenance": {
+        "kind": "synthetic_control_measurement",
+        "locator": "internal/archrank/testdata/candidates.json#synthetic-control-b"
+      }
+    },
+    {
+      "id": "hypothesis-gqa",
+      "architecture": "grouped-query attention (GQA)",
+      "migration_class": "attention-layout",
+      "envelope_id": "literature-hypothesis-not-measured",
+      "quality_metric": "unverified_quality_fraction",
+      "quality_source_kind": "literature_hypothesis",
+      "measurement_status": "estimated",
+      "quality": 0.8,
+      "active_weight_bytes": 80,
+      "state_bytes": 8,
+      "kv_bytes_at_envelope": 12,
+      "provenance": {
+        "kind": "literature_hypothesis",
+        "url": "https://arxiv.org/abs/2305.13245"
+      }
+    },
+    {
+      "id": "hypothesis-mqa",
+      "architecture": "multi-query attention (MQA)",
+      "migration_class": "attention-layout",
+      "envelope_id": "literature-hypothesis-not-measured",
+      "quality_metric": "unverified_quality_fraction",
+      "quality_source_kind": "literature_hypothesis",
+      "measurement_status": "estimated",
+      "quality": 0.76,
+      "active_weight_bytes": 75,
+      "state_bytes": 8,
+      "kv_bytes_at_envelope": 8,
+      "provenance": {
+        "kind": "literature_hypothesis",
+        "url": "https://arxiv.org/abs/1911.02150"
+      }
+    },
+    {
+      "id": "hypothesis-mla",
+      "architecture": "multi-head latent attention (MLA)",
+      "migration_class": "attention-latent-compression",
+      "envelope_id": "literature-hypothesis-not-measured",
+      "quality_metric": "unverified_quality_fraction",
+      "quality_source_kind": "literature_hypothesis",
+      "measurement_status": "estimated",
+      "quality": 0.82,
+      "active_weight_bytes": 82,
+      "state_bytes": 8,
+      "kv_bytes_at_envelope": 6,
+      "provenance": {
+        "kind": "literature_hypothesis",
+        "url": "https://arxiv.org/abs/2405.04434"
+      }
+    },
+    {
+      "id": "hypothesis-ssm",
+      "architecture": "state-space model (SSM)",
+      "migration_class": "sequence-backbone-replacement",
+      "envelope_id": "literature-hypothesis-not-measured",
+      "quality_metric": "unverified_quality_fraction",
+      "quality_source_kind": "literature_hypothesis",
+      "measurement_status": "estimated",
+      "quality": 0.78,
+      "active_weight_bytes": 72,
+      "state_bytes": 16,
+      "kv_bytes_at_envelope": 0,
+      "provenance": {
+        "kind": "literature_hypothesis",
+        "url": "https://arxiv.org/abs/2312.00752"
+      }
+    },
+    {
+      "id": "hypothesis-conditional-depth",
+      "architecture": "conditional depth",
+      "migration_class": "execution-routing",
+      "envelope_id": "literature-hypothesis-not-measured",
+      "quality_metric": "unverified_quality_fraction",
+      "quality_source_kind": "literature_hypothesis",
+      "measurement_status": "estimated",
+      "quality": 0.81,
+      "active_weight_bytes": 60,
+      "state_bytes": 10,
+      "kv_bytes_at_envelope": 10,
+      "provenance": {
+        "kind": "literature_hypothesis",
+        "url": "https://arxiv.org/abs/2404.02258"
+      }
+    },
+    {
+      "id": "hypothesis-sparse-attention",
+      "architecture": "sparse attention",
+      "migration_class": "attention-pattern",
+      "envelope_id": "literature-hypothesis-not-measured",
+      "quality_metric": "unverified_quality_fraction",
+      "quality_source_kind": "literature_hypothesis",
+      "measurement_status": "estimated",
+      "quality": 0.79,
+      "active_weight_bytes": 78,
+      "state_bytes": 8,
+      "kv_bytes_at_envelope": 9,
+      "provenance": {
+        "kind": "literature_hypothesis",
+        "url": "https://arxiv.org/abs/2007.14062"
+      }
+    }
+  ]
+}
