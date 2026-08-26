@@ -126,16 +126,12 @@ func (w *guardAllowWatcher) Run(ctx context.Context) error {
 	}
 }
 
-func startGuardAllowWatcher(ctx context.Context, reload gateway.PolicyReloadFunc, quiet bool) {
+func startGuardAllowWatcher(ctx context.Context, reload gateway.PolicyReloadFunc, _ bool) {
 	w := newGuardAllowWatcher(guardAllowWatchInterval, reload, func(e guardAllowWatchEvent) {
-		if quiet && e.Reloaded {
+		if !e.Rejected {
 			return
 		}
-		status := "reloaded"
-		if e.Rejected {
-			status = "rejected; keeping last-good floor"
-		}
-		fmt.Fprintf(os.Stderr, "fak guard allow watcher: %s: %s\n", status, e.Detail)
+		fmt.Fprintf(os.Stderr, "fak guard allow watcher: rejected; keeping last-good floor: %s\n", e.Detail)
 	})
 	go func() { _ = w.Run(ctx) }()
 }

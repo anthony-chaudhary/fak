@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +63,33 @@ func TestGuardAllowWatcherLiveAddRemoveAndMalformedLastGood(t *testing.T) {
 	}
 }
 
+func TestGuardAllowWatcherRenderSuppressesSuccessfulReloads(t *testing.T) {
+	var output bytes.Buffer
+	w := &guardAllowWatcher{onEvent: func(e guardAllowWatchEvent) {
+		if !e.Rejected {
+			return
+		}
+		fmt.Fprintf(&output, "fak guard allow watcher: rejected; keeping last-good floor: %s\n", e.Detail)
+	}}
+
+	for range 3 {
+		w.emit(guardAllowWatchEvent{Reloaded: true, Detail: "operator allow overlay reloaded"})
+	}
+	if output.Len() != 0 {
+		t.Fatalf("successful reload diagnostics = %q, want no attended-terminal output", output.String())
+	}
+
+	w.emit(guardAllowWatchEvent{Rejected: true, Detail: "invalid overlay version"})
+	got := output.String()
+	if strings.Count(got, "\n") != 1 {
+		t.Fatalf("rejected reload diagnostics = %q, want one line", got)
+	}
+	for _, want := range []string{"rejected", "keeping last-good floor", "invalid overlay version"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rejected reload diagnostics = %q, want %q", got, want)
+		}
+	}
+}
 func TestGuardAllowWatcherRunStopsWithContext(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(guardAllowOverlayEnv, filepath.Join(dir, "allow.json"))
