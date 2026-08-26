@@ -151,13 +151,7 @@ func (s *Server) handleGeminiGenerateContent(w http.ResponseWriter, r *http.Requ
 	}
 	stream := req.Stream || method == "streamGenerateContent"
 
-	ctx := r.Context()
-	reqTrace := s.useHTTPTrace(w, r, "")
-	// Operator control / budget / pace at the served request boundary. With
-	// DecideSession wired this mutates the live session table (TurnsLeft debit,
-	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
-	// still refuses paused/draining/stopped sessions.
-	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	ctx, reqTrace, sessionTurn, ok, canceled := s.beginServedRequest(w, r)
 	if canceled {
 		return
 	}

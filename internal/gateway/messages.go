@@ -206,46 +206,14 @@ func (s *Server) handleAnthropicMessages(w http.ResponseWriter, r *http.Request)
 		s.serveNativeMessages(w, r, req, reqTrace)
 		return
 	}
-	// Operator control / budget / pace at the served request boundary. With
-	// DecideSession wired this mutates the live session table (TurnsLeft debit,
-	// budget exhaustion, pace cap); without it the legacy observe-only admission guard
-	// still refuses paused/draining/stopped sessions.
-	sessionTurn, ok, canceled := s.beginServedSessionTurn(ctx, reqTrace)
+	// The native path above owns its admission. Proxy requests enter the shared
+	// model-facing boundary here; useHTTPTrace preserves the established trace.
+	ctx, reqTrace, messages, sessionTurn, admitted := s.admitServedRequest(w, r, req.Messages)
 	defer sessionTurn.complete()
-	if canceled {
+	if !admitted {
 		return
 	}
-	if !ok {
-		// Budget drained: if the host wired the opt-in human-like reset, distill a
-		// carryover seed, re-arm a fresh session, and continue transparently on the
-		// new trace instead of refusing. Otherwise emit the historical 409 directive.
-		if newTrace, resetMessages, resetTurn, resetOK, resetCanceled, reset := s.applyBudgetReset(ctx, sessionTurn.state, req.Messages); reset {
-			req.Messages = resetMessages
-			reqTrace = newTrace
-			sessionTurn, ok, canceled = resetTurn, resetOK, resetCanceled
-			if canceled {
-				return
-			}
-			if !ok {
-				writeSessionRefusal(w, sessionTurn.state)
-				return
-			}
-		} else {
-			writeSessionRefusal(w, sessionTurn.state)
-			return
-		}
-	}
-	// Coherence thrash (#3159): if a prior turn's non-holding-rewrite escalation armed a hard
-	// reset for this trace and the host wired the opt-in reset, distill a carryover seed and
-	// continue transparently on a fresh trace — the same human-like reset the budget path uses,
-	// triggered by fak's own compaction-coherence signal on an ADMITTED turn instead of a drain.
-	if reqTrace, req.Messages, sessionTurn, ok, canceled = s.resetOnCoherenceIfArmed(ctx, reqTrace, req.Messages, sessionTurn); canceled {
-		return
-	}
-	if !ok { // the fresh reset trace somehow refuses — fall back, never loop
-		writeSessionRefusal(w, sessionTurn.state)
-		return
-	}
+	req.Messages = messages
 	applySessionPaceToAnthropicRequest(req, sessionTurn)
 	s.injectGuardRecoveryPrompt(req, reqTrace)
 	prep := s.prepareServedAnthropicRequest(ctx, r, req, reqTrace, sessionTurn)
