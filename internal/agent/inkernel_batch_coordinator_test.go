@@ -13,11 +13,15 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	cfg := tinyConcurrencyConfig()
 	cfg.EOSTokenID = -1
 	cfg.LayerTypes = []string{"linear_attention"}
+	cfg.LinearConvKernelDim = 3
+	cfg.LinearKeyHeadDim = 8
+	cfg.LinearNumKeyHeads = 2
+	cfg.LinearValueHeadDim = 8
+	cfg.LinearNumValueHeads = 4
 	newPlanner := func(enabled bool) *InKernelPlanner {
 		m := model.NewSynthetic(cfg)
-		m.QuantizeQ4()
+		m.Quantize()
 		p := NewInKernelPlanner(m, loadProbeTok(t), "synthetic-qwen-coalesce", true, nil, false)
-		p.quant = false
 		p.maxNew = 6
 		p.batchDecode = enabled
 		return p
