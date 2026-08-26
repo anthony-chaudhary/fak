@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T17:44:00-07:00",
-  "issue": 9305,
+  "updated_at": "2026-08-26T18:03:00-07:00",
+  "issue": 9315,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 128,
+    "entry_count": 134,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -62,6 +62,7 @@
       "frontier_lab",
       "hyperscaler",
       "market_signal",
+      "policy_regulation",
       "serving_system",
       "standard",
       "supply_chain",
@@ -106,6 +107,8 @@
       "CoreWeave / Nebius / Cerebras",
       "Data Center Watch",
       "DeepSeek",
+      "European Commission / EuroHPC",
+      "European Union / AI Office",
       "FineServe",
       "GE Vernova / Crusoe",
       "GitHub Copilot coding agent",
@@ -117,6 +120,7 @@
       "Groq",
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
+      "IndiaAI Mission",
       "International Energy Agency",
       "Large-scale training reliability study",
       "Leyline",
@@ -154,13 +158,16 @@
       "SemiAnalysis",
       "ServeGen production study",
       "Siemens Energy / Start Campus",
+      "Singapore IMDA",
       "TIE scheduling study",
       "TSMC",
       "Technology Innovation Institute",
       "Tencent",
       "TraceLab coding-agent corpus",
       "U.S. AI datacenter pipeline",
+      "U.S. Bureau of Industry and Security",
       "U.S. datacenter sector",
+      "Ultra Ethernet Consortium",
       "Untether AI",
       "Untether AI / AMD",
       "Vertiv",
@@ -4770,6 +4777,238 @@
       "fak_implications": [
         "Track runway, liabilities, support continuity, and customer exit plans in alternative-hardware adoption.",
         "Funding raised is not evidence of durable operations."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "bis-ai-diffusion-rescission-2025",
+      "category": "policy_regulation",
+      "entity": "U.S. Bureau of Industry and Security",
+      "topic": [
+        "export_controls",
+        "ai_chips",
+        "china",
+        "rule_lifecycle",
+        "supply_chain"
+      ],
+      "published_at": "2025-05-13",
+      "event_at": "2025-05-13",
+      "source_title": "Department of Commerce Announces Rescission of Biden-Era Artificial Intelligence Diffusion Rule, Strengthens Chip-Related Export Controls",
+      "source_url": "https://www.bis.gov/press-release/department-commerce-announces-rescission-biden-era-artificial-intelligence-diffusion-rule-strengthens",
+      "source_kind": "official_policy_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "BIS announced it would rescind the January 15, 2025 AI Diffusion Rule before its May 15 compliance date, instructed enforcement officials not to enforce it, and issued separate guidance on PRC advanced-computing ICs, Chinese-model training/inference, and diversion risk.",
+      "quantified": {
+        "original_rule_issued_at": "2025-01-15",
+        "planned_compliance_at": "2025-05-15"
+      },
+      "assumptions": [
+        "Export-control state can change between publication and compliance, so architecture policy must bind to effective and enforcement dates, not headlines."
+      ],
+      "contradictions_or_limits": [
+        "The announcement said a formal rescission and replacement rule would follow; it is not the full replacement-control text.",
+        "Guidance and enforcement posture are not identical to statutory or regulatory classification for a specific transaction."
+      ],
+      "fak_implications": [
+        "Version regional hardware eligibility by jurisdiction, effective date, end user, end use, and enforcement state.",
+        "Never encode a withdrawn proposal as an active capacity constraint."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "eu-ai-gigafactories-call-2026",
+      "category": "policy_regulation",
+      "entity": "European Commission / EuroHPC",
+      "topic": [
+        "sovereign_compute",
+        "ai_gigafactories",
+        "public_funding",
+        "private_investment",
+        "procurement"
+      ],
+      "published_at": "2026-07-30",
+      "event_at": "2026-07-30",
+      "source_title": "EU launches AI Gigafactories call to boost Europe’s computing capacity and unlock more than €30 billion in investment",
+      "source_url": "https://digital-strategy.ec.europa.eu/en/news/eu-launches-ai-gigafactories-call-boost-europes-computing-capacity-and-unlock-more-eu30-billion",
+      "source_kind": "official_policy_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "The EU launched a tender call for up to seven AI Gigafactories, supported by up to €10B in EU/national funding and intended to unlock at least €20B in private investment for training, inference, and fine-tuning infrastructure.",
+      "quantified": {
+        "gigafactories_up_to": 7,
+        "public_funding_eur_up_to": 10000000000,
+        "private_investment_eur_expected_at_least": 20000000000,
+        "existing_ai_factories": 19
+      },
+      "assumptions": [
+        "Sovereign compute programs combine procurement, public funding, private capital, access policy, and regional regulatory constraints."
+      ],
+      "contradictions_or_limits": [
+        "A call for tenders and expected investment are not selected sites, financed projects, installed accelerators, or useful capacity.",
+        "Processor mix, MW, construction schedule, access allocation, and delivered goodput remain unspecified."
+      ],
+      "fak_implications": [
+        "Track tender, award, financing, construction, acceptance, access, and workload states separately.",
+        "Treat sovereign access and EU data/safety obligations as scheduler and deployment constraints only when applicable."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "indiaai-18000-gpu-capacity-2025",
+      "category": "policy_regulation",
+      "entity": "IndiaAI Mission",
+      "topic": [
+        "sovereign_compute",
+        "gpu_marketplace",
+        "public_private_partnership",
+        "subsidized_access",
+        "allocation"
+      ],
+      "published_at": "2025-01-31",
+      "event_at": "2025-01-31",
+      "source_title": "Union Minister announces the availability of 18,000+ affordable AI compute units",
+      "source_url": "https://indiaai.gov.in/article/union-minister-of-electronics-it-railways-and-i-b-announces-the-availability-of-18-000-affordable-ai-compute-units",
+      "source_kind": "official_policy_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "IndiaAI announced more than 18,000 GPU compute units through empaneled cloud providers for startups, researchers, students, government, and other approved users, alongside indigenous-model and safety-institute initiatives.",
+      "quantified": {
+        "gpu_compute_units_gt": 18000,
+        "mission_pillars": 7
+      },
+      "assumptions": [
+        "Sovereign compute can be delivered through a subsidized multi-provider marketplace rather than one government-owned cluster."
+      ],
+      "contradictions_or_limits": [
+        "Empaneled/available units are not necessarily simultaneously installed, allocated, healthy, or used.",
+        "The headline total mixes GPU types/providers and does not provide time-varying supply, utilization, or useful-goodput conversion."
+      ],
+      "fak_implications": [
+        "Record provider, GPU SKU, allocation, subsidy, project window, and start-by date per sovereign allocation.",
+        "Do not treat a heterogeneous marketplace unit count as one matched cluster."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "singapore-green-dc-roadmap-2024",
+      "category": "policy_regulation",
+      "entity": "Singapore IMDA",
+      "topic": [
+        "datacenter_regulation",
+        "power_capacity",
+        "green_energy",
+        "energy_efficiency",
+        "regional_supply"
+      ],
+      "published_at": "2024-05-30",
+      "event_at": "2024-05-30",
+      "source_title": "Singapore announces Green Data Centre Roadmap for sustainable growth",
+      "source_url": "https://www.imda.gov.sg/resources/press-releases-factsheets-and-speeches/press-releases/2024/sg-announces-green-data-centre-roadmap",
+      "source_kind": "official_policy_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Singapore’s Green Data Centre Roadmap targeted at least 300 MW of additional near-term capacity, with potentially another 200 MW or more through green-energy deployments, tied to energy-efficiency and low-carbon-energy pathways.",
+      "quantified": {
+        "additional_capacity_mw_at_least": 300,
+        "potential_green_energy_capacity_mw_at_least": 200
+      },
+      "assumptions": [
+        "Datacenter capacity in constrained regions can be allocated through policy calls conditioned on energy efficiency and energy source."
+      ],
+      "contradictions_or_limits": [
+        "Roadmap capacity is not awarded, constructed, energized, commissioned, or AI-specific IT load.",
+        "Potential green-energy capacity depends on later projects and qualifying pathways."
+      ],
+      "fak_implications": [
+        "Include jurisdictional capacity allocation, energy-efficiency conditions, and energy-source eligibility in site admission.",
+        "Keep roadmap MW separate from operating facility and IT load."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "eu-ai-act-application-2026",
+      "category": "policy_regulation",
+      "entity": "European Union / AI Office",
+      "topic": [
+        "ai_regulation",
+        "gpai",
+        "enforcement",
+        "transparency",
+        "deployment_obligations"
+      ],
+      "published_at": "2026-07-31",
+      "event_at": "2026-08-02",
+      "source_title": "AI Act regulatory framework and application timeline",
+      "source_url": "https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai",
+      "source_kind": "official_policy_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "The EU AI Act became generally applicable on August 2, 2026; GPAI obligations had applied since August 2, 2025, and the AI Office and national authorities began implementation, supervision, and enforcement from August 2, 2026.",
+      "quantified": {
+        "gpai_obligations_applicable_at": "2025-08-02",
+        "general_application_at": "2026-08-02",
+        "high_risk_annex_i_transition_at": "2028-08-02"
+      },
+      "assumptions": [
+        "Model serving in the EU can carry provider/deployer documentation, transparency, safety, incident, and governance obligations independent of hardware capacity."
+      ],
+      "contradictions_or_limits": [
+        "Applicability depends on actor role, model/system classification, jurisdiction, and later amendments/guidance.",
+        "This ledger is operational research, not legal advice or a substitute for the final regulation and counsel."
+      ],
+      "fak_implications": [
+        "Represent jurisdiction, provider/deployer role, model class, documentation, and audit obligations in deployment policy.",
+        "Version compliance logic by effective date and preserve the exact legal source."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "uec-spec-103-2026",
+      "category": "standard",
+      "entity": "Ultra Ethernet Consortium",
+      "topic": [
+        "network_standard",
+        "ai_fabric",
+        "interoperability",
+        "congestion_control",
+        "specification_lifecycle"
+      ],
+      "published_at": "2026-07-16",
+      "event_at": "2026-07-16",
+      "source_title": "Ultra Ethernet Specification history",
+      "source_url": "https://ultraethernet.org/specification-history/",
+      "source_kind": "official_standard",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "The Ultra Ethernet Consortium lists Specification 1.0.3, published July 16, 2026, as the current public Ultra Ethernet version after the initial 1.0 release on June 11, 2025 and corrective 1.0.1/1.0.2 updates.",
+      "quantified": {
+        "current_version": "1.0.3",
+        "initial_public_release_at": "2025-06-11",
+        "current_release_at": "2026-07-16"
+      },
+      "assumptions": [
+        "AI-fabric standards and correction releases can change congestion-control and interoperability behavior across cluster generations."
+      ],
+      "contradictions_or_limits": [
+        "A published specification is not compliance certification, deployment prevalence, multi-vendor interoperability, or measured application goodput.",
+        "Existing clusters may run earlier revisions or proprietary extensions."
+      ],
+      "fak_implications": [
+        "Record network specification/version and compliance evidence in cluster receipts.",
+        "Benchmark the deployed implementation rather than assuming specification conformance implies performance."
       ],
       "rumor": {
         "is_rumor": false

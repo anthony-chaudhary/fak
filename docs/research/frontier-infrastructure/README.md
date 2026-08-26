@@ -12,6 +12,7 @@ The machine-readable source of truth is [`index.json`](index.json). The derived
 views are:
 
 - [`coverage-audit.md`](coverage-audit.md) — requirement-by-requirement completeness audit, exact corpus counts, and proof still needed;
+- [`policy-standards-ledger.md`](policy-standards-ledger.md) — export controls, sovereign compute, datacenter policy, regulation, and standards lifecycle;
 - [`contradiction-matrix.md`](contradiction-matrix.md) — denominator, lifecycle, accounting, distribution, and rumor conflicts normalized before comparison;
 - [`slices/frontier-lab-census.md`](slices/frontier-lab-census.md) — compact lab-by-lab census of the current source set;
 - [`workload-assumptions.md`](workload-assumptions.md) — architecture and benchmark priors;
@@ -129,8 +130,8 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **128 dated entries**, **123 unique source URLs**, and
-**99 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
+The current spine contains **134 dated entries**, **129 unique source URLs**, and
+**105 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
 and **3 explicit rumors**. It is broad, but it is not entity-complete. The
 requirement-level verdict is in [`coverage-audit.md`](coverage-audit.md); the detailed

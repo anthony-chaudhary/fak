@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **128** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **123** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **99** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 14; `serving_system` 11; `standard` 1; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 64; `vendor_claim` 17; `reported_observation` 11; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 89; `medium_high` 30; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **128/128 published; 128/128 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **134** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **129** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **105** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 14; `policy_regulation` 5; `serving_system` 11; `standard` 2; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 70; `vendor_claim` 17; `reported_observation` 11; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 95; `medium_high` 30; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **134/134 published; 134/134 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 128 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 134 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -261,12 +261,15 @@ health, plan-expiry checks, and additive snapshots rather than silent rewrites.
 
 ### 14. Standards, regulation, export controls, and sovereign AI — **Missing to partial**
 
-**Present:** one standards entry and selected policy/market context.
+**Present:** dated BIS rule-lifecycle evidence; IndiaAI and EU sovereign-compute
+programs; Singapore datacenter-capacity policy; EU AI Act application dates; and Ultra
+Ethernet specification history. [`policy-standards-ledger.md`](policy-standards-ledger.md)
+separates proposals, enforcement, tenders, allocations, delivery, and operating capacity.
 
-**Missing:** comprehensive export-control chronology, sanctions, accelerator and
-interconnect restrictions, energy/water/permitting regulation, sovereign compute
-programs, procurement, data-residency constraints, and their effects on regional supply
-and workload placement.
+**Missing:** the operative U.S. replacement-rule matrix; comprehensive sanctions and
+transaction-level controls; China domestic policy/substitution; sovereign procurement
+beyond the initial EU/India cases; energy/water/permitting rules by jurisdiction;
+processor/site awards and delivered capacity; and adopted serving/KV/benchmark standards.
 
 **Proof needed for complete:** jurisdiction-by-jurisdiction primary sources with effective
 dates, affected hardware/services, implementation status, and later amendments.
@@ -277,7 +280,7 @@ dates, affected hardware/services, implementation status, and later amendments.
 |---|---|---|
 | Production measurement/observation | **16 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
 | Benchmark/synthetic | **11 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **64 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Official statements | **70 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
 | Vendor claims | **17 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **17 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
