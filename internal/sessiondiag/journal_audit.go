@@ -546,10 +546,12 @@ func readCodexJournal(path string, targets map[string]bool) (string, []journalEv
 			Timestamp string `json:"timestamp"`
 			Type      string `json:"type"`
 			Payload   struct {
-				Type      string `json:"type"`
-				ID        string `json:"id"`
-				SessionID string `json:"session_id"`
-				TurnID    string `json:"turn_id"`
+				Type      string          `json:"type"`
+				ID        string          `json:"id"`
+				SessionID string          `json:"session_id"`
+				TurnID    string          `json:"turn_id"`
+				Role      string          `json:"role"`
+				Content   json.RawMessage `json:"content"`
 			} `json:"payload"`
 		}
 		if err := json.Unmarshal(line, &row); err != nil {
@@ -566,29 +568,54 @@ func readCodexJournal(path string, targets map[string]bool) (string, []journalEv
 			}
 			continue
 		}
-		if !matched || row.Type != "event_msg" {
+		if !matched {
 			continue
 		}
 		turnID := strings.TrimSpace(row.Payload.TurnID)
-		if row.Payload.Type == "task_started" && turnID != "" {
+		if row.Type == "event_msg" && row.Payload.Type == "task_started" && turnID != "" {
 			currentTurn = turnID
 		}
-		if turnID == "" && (row.Payload.Type == "task_complete" || row.Payload.Type == "turn_aborted") {
+		kind, progress := codexProgressKind(row.Type, row.Payload.Type, row.Payload.Role, row.Payload.Content)
+		if turnID == "" && progress {
 			turnID = currentTurn
 		}
-		if turnID == "" || (row.Payload.Type != "task_started" && row.Payload.Type != "task_complete" && row.Payload.Type != "turn_aborted") {
+		if turnID == "" || !progress {
 			continue
 		}
 		at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(row.Timestamp))
 		if err != nil {
 			return identity, nil, matched, fmt.Errorf("%s: invalid timestamp on row %d: %w", path, lineNo, err)
 		}
-		cursors = append(cursors, journalEvidenceCursor{id: turnID, kind: row.Payload.Type, at: at.UTC(), path: path})
+		cursors = append(cursors, journalEvidenceCursor{id: turnID, kind: kind, at: at.UTC(), path: path})
 	}
 	if err := scanner.Err(); err != nil {
 		return identity, nil, matched, err
 	}
 	return identity, cursors, matched, nil
+}
+
+func codexProgressKind(rowType, payloadType, role string, content json.RawMessage) (string, bool) {
+	if rowType == "event_msg" {
+		switch payloadType {
+		case "task_complete", "turn_aborted":
+			return payloadType, true
+		}
+	}
+	if rowType != "response_item" {
+		return payloadType, false
+	}
+	switch payloadType {
+	case "function_call", "function_call_output":
+		return payloadType, true
+	case "message":
+		// Provider-authored assistant content is durable progress. Requiring a
+		// non-empty content payload excludes user instructions and empty envelopes.
+		trimmed := bytes.TrimSpace(content)
+		if role == "assistant" && len(trimmed) > 0 && string(trimmed) != "null" && string(trimmed) != "[]" {
+			return "assistant", true
+		}
+	}
+	return payloadType, false
 }
 
 func journalTextContent(raw json.RawMessage) string {
