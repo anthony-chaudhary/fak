@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 94,
+    "entry_count": 96,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -101,6 +101,7 @@
       "FineServe",
       "GitHub Copilot coding agent",
       "Google",
+      "Google / utility partners",
       "Google Cloud",
       "Google internal developer tools",
       "Groq",
@@ -3392,6 +3393,68 @@
       ],
       "fak_implications": [
         "Track commitment coverage, customer concentration, delivery, and recognition separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-data-center-demand-response-2025",
+      "category": "datacenter_physical",
+      "entity": "Google / utility partners",
+      "topic": [
+        "demand_response",
+        "grid",
+        "workload_mobility"
+      ],
+      "published_at": "2025-08-04",
+      "event_at": "2025-08-04",
+      "source_title": "How we’re making data centers more flexible to benefit power grids",
+      "source_url": "https://blog.google/innovation-and-ai/infrastructure-and-cloud/global-network/how-were-making-data-centers-more-flexible-to-benefit-power-grids/",
+      "source_kind": "official_engineering_release",
+      "evidence_class": "production_observation",
+      "confidence": "high",
+      "claim": "Google disclosed shifting or reducing machine-learning load during grid events and new utility agreements for demand response. ",
+      "quantified": {},
+      "assumptions": [
+        "Some machine-learning work can be deferred or moved without violating its deadline."
+      ],
+      "contradictions_or_limits": [
+        "The source does not identify workload classes, fraction shifted, SLO effect, or energy economics."
+      ],
+      "fak_implications": [
+        "Classify workloads by mobility/deadline and include grid events in scheduler scenarios."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "semi-analysis-delay-rebuttal-2026",
+      "category": "market_signal",
+      "entity": "SemiAnalysis",
+      "topic": [
+        "datacenter_delays",
+        "contradiction",
+        "methodology"
+      ],
+      "published_at": "2026-06-18",
+      "event_at": "2026-06-18",
+      "source_title": "Stop Saying Half of 2026 US Datacenter Capacity Is Delayed",
+      "source_url": "https://newsletter.semianalysis.com/p/stop-saying-half-of-2026-us-datacenter",
+      "source_kind": "industry_analysis",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "SemiAnalysis disputed the repeated claim that half of U.S. 2026 datacenter capacity was delayed, arguing that project states and denominators had been conflated.",
+      "quantified": {},
+      "assumptions": [
+        "Delay percentages require a named project roster and consistent capacity lifecycle."
+      ],
+      "contradictions_or_limits": [
+        "The analysis may use proprietary tracking and remains secondary evidence."
+      ],
+      "fak_implications": [
+        "Preserve claim and rebuttal; recompute only from project-level dates and state."
       ],
       "rumor": {
         "is_rumor": false

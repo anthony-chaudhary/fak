@@ -14,7 +14,8 @@ benchmark assumptions and explicitly bounds Zipfian, batching, cluster, and user
 claims. [`workload-parameters.md`](workload-parameters.md) records measured populations,
 parameters, and exact limits for replay and generation. [`startups-landscape.md`](startups-landscape.md) is the adjacent-provider taxonomy
 and watchlist. [`filings-ledger.md`](filings-ledger.md) normalizes hyperscaler capex,
-leases, asset mix, backlog, and accounting boundaries. [`refresh-protocol.md`](refresh-protocol.md) defines the online-search,
+leases, asset mix, backlog, and accounting boundaries. [`supply-chain-ledger.md`](supply-chain-ledger.md) tracks the
+power-to-goodput delivery pipeline and contradiction evidence. [`refresh-protocol.md`](refresh-protocol.md) defines the online-search,
 contradiction, and rumor lifecycle. The `slices/` directory is reserved for independently
 researched coverage ledgers.
 Empty or missing slices are coverage debt, not evidence that a category has no activity.
@@ -124,7 +125,7 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **94 dated entries** across frontier labs, hyperscalers,
+The current spine contains **96 dated entries** across frontier labs, hyperscalers,
 AI clouds, accelerators, serving systems, measured workload traces, workload models,
 physical capacity, supply chains, standards, market signals, and three explicitly labeled
 rumors. It is **not exhaustive yet**. The authoritative missing-work list is
@@ -135,7 +136,7 @@ Immediate next slices:
 1. finish the checked/unchecked [`slices/frontier-lab-census.md`](slices/frontier-lab-census.md), including Chinese and regional labs;
 2. extend the [`workload-parameters.md`](workload-parameters.md) ledger with missing production distributions;
 3. extend the [`filings-ledger.md`](filings-ledger.md) beyond the four largest U.S. hyperscalers;
-4. datacenter/power/cooling/network/supply-chain ledger;
+4. extend the [`supply-chain-ledger.md`](supply-chain-ledger.md) into a named site/vendor delivery census;
 5. startup, release, acquisition, failure, and rumor chronology;
 6. contradiction matrix and recurring validator.
 
