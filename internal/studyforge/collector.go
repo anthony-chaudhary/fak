@@ -41,6 +41,11 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		return Corpus{}, errors.New("owner and repository are required")
 	}
 	c.defaults()
+	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
+	checkpointEvery := req.CheckpointEvery
+	if req.Checkpoint != nil && checkpointEvery <= 0 {
+		checkpointEvery = 1
+	}
 	if req.Cutoff.IsZero() {
 		if req.Resume != nil {
 			req.Cutoff, _ = time.Parse(time.RFC3339Nano, req.Resume.Receipt.Cutoff)
@@ -51,20 +56,48 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 	}
 	req.Cutoff = req.Cutoff.UTC()
 	full := req.Owner + "/" + req.Repository
-	corpus := Corpus{Schema: CorpusSchema, Receipt: Receipt{Schema: ReceiptSchema, Repository: full, Cutoff: req.Cutoff.Format(time.RFC3339Nano), StartedAt: c.Now().UTC().Format(time.RFC3339Nano), Status: StatusPartial}}
+	expectedEndpoints := make(map[string]string, len(sourceSpecs))
+	for _, spec := range sourceSpecs {
+		expectedEndpoints[spec.name] = c.repoURL(req.Owner, req.Repository, spec.path)
+	}
+	corpus := Corpus{Schema: CorpusSchema, Receipt: Receipt{Schema: ReceiptSchema, Repository: full, Cutoff: req.Cutoff.Format(time.RFC3339Nano), APIBase: c.BaseURL, StartedAt: c.Now().UTC().Format(time.RFC3339Nano), Status: StatusPartial}}
 	if req.Resume != nil {
 		corpus = cloneCorpus(*req.Resume)
-		if err := validateResume(corpus, full, req.Cutoff); err != nil {
+		if err := validateResume(corpus, full, req.Cutoff, c.BaseURL, expectedEndpoints); err != nil {
 			return Corpus{}, err
 		}
+		corpus.Receipt.APIBase = c.BaseURL
 		corpus.Receipt.StartedAt = c.Now().UTC().Format(time.RFC3339Nano)
 		corpus.Receipt.CompletedAt = ""
+		corpus.Receipt.Status = StatusPartial
 	}
+
+	acceptedSinceCheckpoint := 0
+	persist := func(force bool) error {
+		if req.Checkpoint == nil || (!force && acceptedSinceCheckpoint < checkpointEvery) {
+			return nil
+		}
+		snapshot := cloneCorpus(corpus)
+		sortCorpus(&snapshot)
+		refreshChecksums(&snapshot)
+		if err := validateCheckpoint(snapshot); err != nil {
+			return fmt.Errorf("prepare checkpoint: %w", err)
+		}
+		if err := req.Checkpoint(snapshot); err != nil {
+			return fmt.Errorf("atomic checkpoint: %w", err)
+		}
+		acceptedSinceCheckpoint = 0
+		return nil
+	}
+
 	revision, api, err := c.resolveRevision(ctx, req.Owner, req.Repository)
 	corpus.Receipt.API = api
 	if err != nil {
 		corpus.Receipt.Status = StatusFailed
-		return corpus, err
+		corpus.Receipt.CompletedAt = c.Now().UTC().Format(time.RFC3339Nano)
+		sortCorpus(&corpus)
+		refreshChecksums(&corpus)
+		return corpus, errors.Join(err, persist(true))
 	}
 	if corpus.Receipt.Revision != "" && corpus.Receipt.Revision != revision {
 		return Corpus{}, fmt.Errorf("resume revision changed from %s to %s", corpus.Receipt.Revision, revision)
@@ -82,9 +115,32 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		}
 		records := recordsForSource(corpus.Records, spec.name)
 		other := recordsExceptSource(corpus.Records, spec.name)
-		updated, got, collectErr := c.collectSource(ctx, sr, records, req.Cutoff)
+		checkpointFailed := false
+		updated, got, collectErr := c.collectSource(ctx, sr, records, req.Cutoff, func(progress SourceReceipt, sourceRecords []Record) error {
+			corpus.Records = append(append([]Record(nil), other...), sourceRecords...)
+			upsertSource(&corpus.Receipt.Sources, progress)
+			sortCorpus(&corpus)
+			refreshChecksums(&corpus)
+			corpus.Receipt.Status = StatusPartial
+			corpus.Receipt.CompletedAt = ""
+			if completeSourceCount(corpus.Receipt.Sources) == len(SourceNames) {
+				corpus.Receipt.Status = StatusComplete
+				corpus.Receipt.CompletedAt = c.Now().UTC().Format(time.RFC3339Nano)
+			}
+			acceptedSinceCheckpoint++
+			if err := persist(false); err != nil {
+				checkpointFailed = true
+				return err
+			}
+			return nil
+		})
 		corpus.Records = append(other, got...)
 		upsertSource(&corpus.Receipt.Sources, updated)
+		if checkpointFailed {
+			sortCorpus(&corpus)
+			refreshChecksums(&corpus)
+			return corpus, fmt.Errorf("%s: %w", spec.name, collectErr)
+		}
 		if collectErr != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", spec.name, collectErr))
 		}
@@ -99,10 +155,15 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 	} else {
 		corpus.Receipt.Status = StatusPartial
 	}
-	if err := Validate(corpus); err != nil {
-		if len(failures) == 0 {
+	if len(failures) == 0 {
+		if err := Validate(corpus); err != nil {
 			return corpus, err
 		}
+	} else if err := validateCheckpoint(corpus); err != nil {
+		return corpus, errors.Join(errors.Join(failures...), err)
+	}
+	if err := persist(true); err != nil {
+		return corpus, errors.Join(errors.Join(failures...), err)
 	}
 	return corpus, errors.Join(failures...)
 }
@@ -153,7 +214,7 @@ func (c *Collector) resolveRevision(ctx context.Context, owner, repo string) (st
 	return commit.SHA, api, nil
 }
 
-func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records []Record, cutoff time.Time) (SourceReceipt, []Record, error) {
+func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records []Record, cutoff time.Time, checkpoint func(SourceReceipt, []Record) error) (SourceReceipt, []Record, error) {
 	next := sr.Endpoint
 	if len(sr.Pages) > 0 {
 		next = sr.Pages[len(sr.Pages)-1].Next
@@ -162,6 +223,10 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 		sr.Status = StatusComplete
 		sr.Failure = ""
 		return sr, records, nil
+	}
+	seenIDs := make(map[int64]bool, len(records))
+	for _, record := range records {
+		seenIDs[record.ID] = true
 	}
 	for next != "" {
 		body, hdr, status, err := c.get(ctx, next)
@@ -181,6 +246,20 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 			return sr, records, errors.New(sr.Failure)
 		}
 		pageNext := linkNext(hdr.Get("Link"))
+		if pageNext != "" {
+			if pageNext == next {
+				sr.Failure = "pagination repeated current next cursor"
+				sr.Status = StatusPartial
+				return sr, records, errors.New(sr.Failure)
+			}
+			for _, prior := range sr.Pages {
+				if pageNext == prior.URL {
+					sr.Failure = "pagination repeated an earlier next cursor"
+					sr.Status = StatusPartial
+					return sr, records, errors.New(sr.Failure)
+				}
+			}
+		}
 		page := PageReceipt{Number: len(sr.Pages) + 1, URL: next, ItemCount: len(raws), Checksum: digest(body), Next: pageNext, FetchedAt: c.Now().UTC().Format(time.RFC3339Nano), StatusCode: status}
 		fillAPIHeaders(&page.RequestID, &page.ETag, &page.RateLimit, &page.RateRemain, &page.RateReset, hdr)
 		pageRecords := make([]Record, 0, len(raws))
@@ -200,6 +279,12 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 				pageExcluded++
 				continue
 			}
+			if seenIDs[record.ID] {
+				sr.Failure = fmt.Sprintf("duplicate %s id %d across page boundary", sr.Name, record.ID)
+				sr.Status = StatusPartial
+				return sr, records, errors.New(sr.Failure)
+			}
+			seenIDs[record.ID] = true
 			pageRecords = append(pageRecords, record)
 		}
 		// Commit the page checkpoint only after every row normalized, so resume
@@ -210,6 +295,16 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 		sr.CutoffExcludedCount += pageExcluded
 		records = append(records, pageRecords...)
 		next = pageNext
+		if next == "" {
+			sr.Status, sr.Failure = StatusComplete, ""
+		} else {
+			sr.Status, sr.Failure = StatusPartial, ""
+		}
+		if checkpoint != nil {
+			if err := checkpoint(sr, records); err != nil {
+				return sr, records, err
+			}
+		}
 	}
 	sr.Status, sr.Failure = StatusComplete, ""
 	return sr, records, nil

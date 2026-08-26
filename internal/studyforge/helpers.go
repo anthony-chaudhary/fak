@@ -112,6 +112,11 @@ func recordDigest(rs []Record) string {
 	s := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(s[:])
 }
+func pageDigest(ps []PageReceipt) string {
+	b, _ := json.Marshal(ps)
+	s := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(s[:])
+}
 func refreshChecksums(c *Corpus) {
 	for i := range c.Receipt.Sources {
 		rs := recordsForSource(c.Records, c.Receipt.Sources[i].Name)
@@ -121,6 +126,7 @@ func refreshChecksums(c *Corpus) {
 			seen[r.ID] = true
 		}
 		c.Receipt.Sources[i].UniqueCount = len(seen)
+		c.Receipt.Sources[i].PageChecksum = pageDigest(c.Receipt.Sources[i].Pages)
 		c.Receipt.Sources[i].Checksum = recordDigest(rs)
 	}
 	c.Receipt.IndexChecksum = recordDigest(c.Records)

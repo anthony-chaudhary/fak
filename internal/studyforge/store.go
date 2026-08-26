@@ -17,7 +17,7 @@ func Read(path string) (Corpus, error) {
 	if e = json.Unmarshal(b, &c); e != nil {
 		return Corpus{}, fmt.Errorf("decode corpus: %w", e)
 	}
-	if e = Validate(c); e != nil && c.Receipt.Status == StatusComplete {
+	if e = validateCheckpoint(c); e != nil {
 		return Corpus{}, e
 	}
 	return c, nil
@@ -25,9 +25,13 @@ func Read(path string) (Corpus, error) {
 
 // Write atomically persists a deterministic indented corpus after validation.
 func Write(path string, c Corpus) error {
+	return writeCorpus(path, c, os.Rename)
+}
+
+func writeCorpus(path string, c Corpus, rename func(string, string) error) error {
 	sortCorpus(&c)
 	refreshChecksums(&c)
-	if e := Validate(c); e != nil && c.Receipt.Status == StatusComplete {
+	if e := validateCheckpoint(c); e != nil {
 		return e
 	}
 	b, e := json.MarshalIndent(c, "", "  ")
@@ -42,5 +46,5 @@ func Write(path string, c Corpus) error {
 	if e = os.WriteFile(tmp, b, 0600); e != nil {
 		return e
 	}
-	return os.Rename(tmp, path)
+	return rename(tmp, path)
 }

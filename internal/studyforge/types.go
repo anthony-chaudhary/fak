@@ -25,11 +25,15 @@ var SourceNames = []string{"issues", "pulls", "discussions", "releases", "labels
 
 // CaptureRequest declares one repository snapshot boundary. A partial prior corpus may
 // be supplied to resume at its first unfetched page without duplicating records.
+// Checkpoint receives canonical snapshots after each accepted page by default;
+// CheckpointEvery may raise that bounded interval to reduce write amplification.
 type CaptureRequest struct {
-	Owner      string
-	Repository string
-	Cutoff     time.Time
-	Resume     *Corpus
+	Owner           string
+	Repository      string
+	Cutoff          time.Time
+	Resume          *Corpus
+	Checkpoint      func(Corpus) error
+	CheckpointEvery int
 }
 
 // Collector configures GitHub REST collection. BaseURL defaults to api.github.com.
@@ -54,6 +58,7 @@ type Receipt struct {
 	Repository    string          `json:"repository"`
 	Revision      string          `json:"revision"`
 	Cutoff        string          `json:"cutoff"`
+	APIBase       string          `json:"api_base"`
 	StartedAt     string          `json:"started_at"`
 	CompletedAt   string          `json:"completed_at,omitempty"`
 	Status        string          `json:"status"`
@@ -73,6 +78,7 @@ type SourceReceipt struct {
 	UniqueCount         int           `json:"unique_count"`
 	ClassifiedPullCount int           `json:"classified_pull_count,omitempty"`
 	CutoffExcludedCount int           `json:"cutoff_excluded_count,omitempty"`
+	PageChecksum        string        `json:"page_checksum"`
 	Checksum            string        `json:"checksum"`
 	Failure             string        `json:"failure,omitempty"`
 }

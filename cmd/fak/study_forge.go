@@ -39,12 +39,13 @@ func runStudyForgeCapture(stdout, stderr io.Writer, args []string) int {
 	baseURL := fs.String("base-url", "https://api.github.com", "GitHub REST API base URL")
 	tokenEnv := fs.String("token-env", "GITHUB_TOKEN", "environment variable containing a read-only GitHub token")
 	retries := fs.Int("retries", 3, "maximum retry attempts for transient responses")
+	checkpointPages := fs.Int("checkpoint-pages", 1, "atomically checkpoint after this many accepted pages")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	parts := strings.Split(strings.TrimSpace(*repository), "/")
-	if fs.NArg() != 0 || len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.TrimSpace(*cutoffText) == "" || strings.TrimSpace(*out) == "" || *retries < 0 {
-		fmt.Fprintln(stderr, "usage: fak study-forge capture --repository owner/name --cutoff RFC3339 --out PATH [--resume]")
+	if fs.NArg() != 0 || len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.TrimSpace(*cutoffText) == "" || strings.TrimSpace(*out) == "" || *retries < 0 || *checkpointPages <= 0 {
+		fmt.Fprintln(stderr, "usage: fak study-forge capture --repository owner/name --cutoff RFC3339 --out PATH [--resume] [--checkpoint-pages N]")
 		return 2
 	}
 	cutoff, err := time.Parse(time.RFC3339, *cutoffText)
@@ -69,13 +70,13 @@ func runStudyForgeCapture(stdout, stderr io.Writer, args []string) int {
 	collector.MaxRetries = *retries
 	corpus, captureErr := collector.Capture(context.Background(), studyforge.CaptureRequest{
 		Owner: parts[0], Repository: parts[1], Cutoff: cutoff.UTC(), Resume: prior,
+		CheckpointEvery: *checkpointPages,
+		Checkpoint: func(corpus studyforge.Corpus) error {
+			return studyforge.Write(*out, corpus)
+		},
 	})
-	if err := studyforge.Write(*out, corpus); err != nil {
-		fmt.Fprintf(stderr, "study-forge: write corpus: %v\n", err)
-		return 1
-	}
 	if captureErr != nil {
-		fmt.Fprintf(stderr, "study-forge: partial corpus written to %s: %v\n", *out, captureErr)
+		fmt.Fprintf(stderr, "study-forge: capture stopped; checkpoint target %s: %v\n", *out, captureErr)
 		return 1
 	}
 	if err := studyforge.Validate(corpus); err != nil {
