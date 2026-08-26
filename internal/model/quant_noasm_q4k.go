@@ -2,8 +2,6 @@
 
 package model
 
-import "os"
-
 // quant_noasm_q4k.go — the resident-Q4_K decode dispatch for archs with NO SDOT/SIMD Q4_K kernel
 // (everything but arm64 NEON and amd64 AVX2). There is no SIMD Q4_K kernel here, BUT the SCALAR int8 reduction
 // (q4kReduceRowScalar) still beats the f32 path: it skips the 256-f32 per-super-block dequant and
@@ -12,21 +10,6 @@ import "os"
 // mixed-quant offloaded-expert lever (its Q4_K experts otherwise run the slow f32 dequant on amd64).
 // Default OFF (the path is approximate from activation quantization): the f32 GEMV stays the default
 // until a real-weights witness clears it. An AVX512 Q4_K reducer is the next phase.
-
-var q4kInt8Default = func() bool {
-	switch os.Getenv("FAK_KQ_INT8") {
-	case "1", "on", "true":
-		return true
-	}
-	return false
-}()
-
-func q4kSDOTEnabled() bool {
-	if q4kSDOTForce != 0 {
-		return q4kSDOTForce > 0
-	}
-	return q4kInt8Default
-}
 
 func q4kExtractOnceGemmEnabled() bool {
 	return false

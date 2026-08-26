@@ -3,31 +3,11 @@
 package model
 
 import (
-	"fmt"
 	"math"
 	"os"
 	"runtime"
 	"sync"
 )
-
-type mappedQ4KSpanRangeError struct {
-	Offset   int64
-	Length   int
-	FileSize int64
-	Reason   string
-}
-
-func (e *mappedQ4KSpanRangeError) Error() string {
-	return fmt.Sprintf("model: invalid mapped Q4_K span offset=%d length=%d file_size=%d: %s", e.Offset, e.Length, e.FileSize, e.Reason)
-}
-
-type mappedQ4KSpanUnavailableError struct {
-	GOOS string
-}
-
-func (e *mappedQ4KSpanUnavailableError) Error() string {
-	return fmt.Sprintf("model: mapped Q4_K spans unavailable on %s", e.GOOS)
-}
 
 // mappedQ4KSpanOwner preserves the platform-neutral API shape. Unsupported
 // platforms never construct one; callers receive mappedQ4KSpanUnavailableError.
