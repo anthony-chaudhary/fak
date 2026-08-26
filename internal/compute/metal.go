@@ -622,15 +622,9 @@ func (k *metalKV) Clone() KVStore {
 func (k *metalKV) Free() {
 	metalMu.Lock()
 	defer metalMu.Unlock()
-	free := func(d *mslice) {
+	releaseKVDeviceSlices(k.K, k.Kraw, k.V, &k.pos, func(d *mslice) {
 		releaseDeviceSlice(&d.ptr, &d.len, &d.cap, func(pointer unsafe.Pointer) { C.fmetal_free(pointer) })
-	}
-	for l := range k.K {
-		free(&k.K[l])
-		free(&k.Kraw[l])
-		free(&k.V[l])
-	}
-	k.pos = nil
+	})
 }
 
 func (k *metalKV) readDS(d *mslice) []float32 {

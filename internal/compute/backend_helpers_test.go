@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"slices"
 	"testing"
 	"unsafe"
 )
@@ -70,5 +71,37 @@ func TestReleaseDeviceSlice(t *testing.T) {
 	releaseDeviceSlice(&pointer, &length, &capacity, func(got unsafe.Pointer) { released = got })
 	if released != want || pointer != nil || length != 0 || capacity != 0 {
 		t.Fatalf("released=%p pointer=%p len=%d cap=%d", released, pointer, length, capacity)
+	}
+}
+
+func TestReleaseKVDeviceSlicesPreservesLayerOrderAndClearsPositions(t *testing.T) {
+	type deviceSlice struct {
+		name     string
+		released bool
+	}
+	keys := []deviceSlice{{name: "k0"}, {name: "k1"}}
+	rawKeys := []deviceSlice{{name: "raw0"}, {name: "raw1"}}
+	values := []deviceSlice{{name: "v0"}, {name: "v1"}}
+	positions := []int{4, 5}
+	var released []string
+
+	releaseKVDeviceSlices(keys, rawKeys, values, &positions, func(slice *deviceSlice) {
+		released = append(released, slice.name)
+		slice.released = true
+	})
+
+	wantOrder := []string{"k0", "raw0", "v0", "k1", "raw1", "v1"}
+	if !slices.Equal(released, wantOrder) {
+		t.Fatalf("release order = %v, want %v", released, wantOrder)
+	}
+	for _, group := range [][]deviceSlice{keys, rawKeys, values} {
+		for _, slice := range group {
+			if !slice.released {
+				t.Fatalf("slice %q was not released", slice.name)
+			}
+		}
+	}
+	if positions != nil {
+		t.Fatalf("positions = %v, want nil", positions)
 	}
 }
