@@ -62,7 +62,7 @@ Fold the existing maturity/session edits into **#7313**, validate only their exp
 - `fak console issues --state open --json`, captured 2026-08-18: 500 open; 19 P0; 127 P1; 146 orphan P0/P1; 259 missing priority.
 - [`docs/end-to-end-value-chain.md`](../end-to-end-value-chain.md) and [`docs/value-chain-audit.md`](../value-chain-audit.md): organization-defined outcomes, paired comparisons, shared setup charging, and absent-cost honesty.
 - [`docs/notes/LAMBDA-FAK-STRATEGIC-FIT-2026-08-18.md`](LAMBDA-FAK-STRATEGIC-FIT-2026-08-18.md): one provider-neutral managed-GPU adapter as the first external spine; no premature multi-cloud scheduler.
-- [`docs/research/graft-study-2026-08-18.md`](../research/graft-study-2026-08-18.md): borrow bounded structural retrieval through existing Go codegraph seams; reject the external Python/database stack.
+- [`docs/notes/graft-study-2026-08-18.md`](graft-study-2026-08-18.md): borrow bounded structural retrieval through existing Go codegraph seams; reject the external Python/database stack.
 - [`docs/notes/WIP-CHECKPOINT-LIFECYCLE-2026-08-18.md`](WIP-CHECKPOINT-LIFECYCLE-2026-08-18.md): current session durability semantics and the boundary between checkpoint protection and normal landing.
 - Live GitHub issue bodies and labels read on 2026-08-18. #6651 and #7192 were assigned `priority/P1` and the cache-value milestone; #7346 was filed with `priority/P1` in Generation G1.
 

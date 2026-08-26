@@ -89,7 +89,7 @@ Run the review from evidence in this order:
 ```bash
 fak nightrun score --json
 fak cachevalue report --since 2026-06-22 --json
-fak cachevalue review --since 2026-06-22 --date 2026-06-29 --source-markdown reviews/2026-06-29.md --append-ledger docs/cache-frontier/review-ledger.jsonl --markdown-out docs/cache-frontier/reviews/2026-06-29.md
+fak cachevalue review --since 2026-06-22 --date 2026-06-29 --source-markdown reviews/2026-06-29.md --append-ledger docs/cache-frontier/review-ledger.jsonl --markdown-out docs/notes/2026-06-29.md
 go run ./cmd/ctxdemo -bars
 go run ./cmd/ctxplandemo -selfcheck
 go run ./cmd/memqdemo
@@ -112,7 +112,7 @@ Write each new dated result under [`docs/cache-frontier/`](cache-frontier/README
 markdown note for humans and one appended `fak-cache-frontier-review/1` row in
 [`review-ledger.jsonl`](cache-frontier/review-ledger.jsonl) for future automation. The
 review command has a non-mutating `--json` form for inspecting the row first. The first
-entry is [`2026-06-29`](cache-frontier/reviews/2026-06-29.md), which records the current
+entry is [`2026-06-29`](notes/2026-06-29.md), which records the current
 thin Track-1 `run` evidence and the missing Track-2 provider-dollar ledger.
 
 ## Decision fences

@@ -42,7 +42,7 @@ go run ./cmd/fak cachevalue review \
   --date 2026-06-29 \
   --source-markdown reviews/2026-06-29.md \
   --append-ledger docs/cache-frontier/review-ledger.jsonl \
-  --markdown-out docs/cache-frontier/reviews/2026-06-29.md
+  --markdown-out docs/notes/2026-06-29.md
 ```
 
 Use `--json` without `--append-ledger` to inspect the row before mutating the
@@ -50,7 +50,7 @@ append-only ledger.
 
 ## Entries
 
-- [2026-06-29 cache-frontier review](reviews/2026-06-29.md)
+- [2026-06-29 cache-frontier review](../notes/2026-06-29.md)
 
 ## Findings
 

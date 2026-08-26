@@ -519,7 +519,7 @@ Run `fak disambiguation migration-self-test --json` to witness silent-removal re
 
 ## Projected-scale benchmark (#6327)
 
-`scale_benchmark_test.go` exercises deterministic generation plus exact, alias, and reverse queries at 4,096 valid entries. Every benchmark logs dataset size, tuned implementation baseline, OS/architecture and Go scope, and `OBSERVED` provenance; it reports machine-readable entry/provenance/baseline metrics as well. The dated observed run and exact reproduce command are captured in [`docs/benchmarks/DISAMBIGUATION-SCALE-2026-08-17.md`](../../docs/benchmarks/DISAMBIGUATION-SCALE-2026-08-17.md). These are scoped observations, not unsupported cross-hardware gains.
+`scale_benchmark_test.go` exercises deterministic generation plus exact, alias, and reverse queries at 4,096 valid entries. Every benchmark logs dataset size, tuned implementation baseline, OS/architecture and Go scope, and `OBSERVED` provenance; it reports machine-readable entry/provenance/baseline metrics as well. The dated observed run and exact reproduce command are captured in [`docs/notes/DISAMBIGUATION-SCALE-2026-08-17.md`](../../docs/notes/DISAMBIGUATION-SCALE-2026-08-17.md). These are scoped observations, not unsupported cross-hardware gains.
 
 ## Public-safe issue-contract suggestions (#6328)
 

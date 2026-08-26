@@ -130,7 +130,7 @@ Sources:
 - https://developers.openai.com/codex/config-reference
 - https://docs.anthropic.com/en/docs/claude-code/settings
 - https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot
-- `docs/research/agent-skill-portability-2026-08-14.md`
+- `docs/notes/agent-skill-portability-2026-08-14.md`
 - `docs/notes/UNIVERSAL-HARNESS-PROFILES-2026-07-01.md`
 
 ## Spine contract and honest boundaries

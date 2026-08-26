@@ -12,7 +12,7 @@ first — performance and cost, the no-key demo, and the one-command wrap.
 Nothing here is deprecated; it is narrower-audience or deep-dive material that
 earns a link from the front page rather than a place on it. The pre-restructure
 front page is archived at
-[README-2026-06-25-before-fresh-start.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/archive/README-2026-06-25-before-fresh-start.md).
+[README-2026-06-25-before-fresh-start.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/README-2026-06-25-before-fresh-start.md).
 
 Each claim still carries the same authority it did on the front page — every
 number traces to [BENCHMARK-AUTHORITY.md](https://github.com/anthony-chaudhary/fak/blob/main/BENCHMARK-AUTHORITY.md), and every

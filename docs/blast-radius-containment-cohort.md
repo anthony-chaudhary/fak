@@ -70,14 +70,14 @@ Each ticket lives in its own file under `docs/blast-radius-containment/`, carryi
 
 | Ticket | # | File | What it lands |
 |--------|---|------|----------------|
-| Epic | 2712 | [`epic-2712.md`](blast-radius-containment/epic-2712.md) | umbrella: recognize the shared failure once, broadcast it, hold only the affected agents, auto-release on a witnessed fix |
-| W1 spine | 2713 | [`w1-spine-2713.md`](blast-radius-containment/w1-spine-2713.md) | fleet-wide known-bad ledger with record and match (`internal/knownbad`) - the ledger every other ticket reads |
-| W2 recognize | 2714 | [`w2-recognize-2714.md`](blast-radius-containment/w2-recognize-2714.md) | cross-trace `FailureHash` correlation so a shared root cause is recognized once (`internal/guardrsi`) |
-| W3 estimate | 2715 | [`w3-estimate-2715.md`](blast-radius-containment/w3-estimate-2715.md) | blast radius as the import graph intersected with live leases (`internal/blastradius`) |
-| W4 scope-hold | 2716 | [`w4-scope-hold-2716.md`](blast-radius-containment/w4-scope-hold-2716.md) | hold only the intersecting issues, with the `BLOCKED_BY_KNOWN_BAD` reason (`internal/dispatchtick`) |
-| W5 elect fixer | 2717 | [`w5-elect-fixer-2717.md`](blast-radius-containment/w5-elect-fixer-2717.md) | elect exactly one fixer through an exclusive lease (`fak knownbad claim`) |
-| W6 auto-release | 2718 | [`w6-auto-release-2718.md`](blast-radius-containment/w6-auto-release-2718.md) | witness-gated auto-release of the held agents (`fak knownbad resolve`) |
-| W7 surface | 2719 | [`w7-surface-2719.md`](blast-radius-containment/w7-surface-2719.md) | the operator blast card: one cause, N affected, one fixing (`internal/blockerpost`) |
-| W8 bound | 2720 | [`w8-bound-2720.md`](blast-radius-containment/w8-bound-2720.md) | TTL and revoke so a stale known-bad entry cannot wedge the fleet (`internal/knownbad`) |
+| Epic | 2712 | [`epic-2712.md`](notes/epic-2712.md) | umbrella: recognize the shared failure once, broadcast it, hold only the affected agents, auto-release on a witnessed fix |
+| W1 spine | 2713 | [`w1-spine-2713.md`](notes/w1-spine-2713.md) | fleet-wide known-bad ledger with record and match (`internal/knownbad`) - the ledger every other ticket reads |
+| W2 recognize | 2714 | [`w2-recognize-2714.md`](notes/w2-recognize-2714.md) | cross-trace `FailureHash` correlation so a shared root cause is recognized once (`internal/guardrsi`) |
+| W3 estimate | 2715 | [`w3-estimate-2715.md`](notes/w3-estimate-2715.md) | blast radius as the import graph intersected with live leases (`internal/blastradius`) |
+| W4 scope-hold | 2716 | [`w4-scope-hold-2716.md`](notes/w4-scope-hold-2716.md) | hold only the intersecting issues, with the `BLOCKED_BY_KNOWN_BAD` reason (`internal/dispatchtick`) |
+| W5 elect fixer | 2717 | [`w5-elect-fixer-2717.md`](notes/w5-elect-fixer-2717.md) | elect exactly one fixer through an exclusive lease (`fak knownbad claim`) |
+| W6 auto-release | 2718 | [`w6-auto-release-2718.md`](notes/w6-auto-release-2718.md) | witness-gated auto-release of the held agents (`fak knownbad resolve`) |
+| W7 surface | 2719 | [`w7-surface-2719.md`](notes/w7-surface-2719.md) | the operator blast card: one cause, N affected, one fixing (`internal/blockerpost`) |
+| W8 bound | 2720 | [`w8-bound-2720.md`](notes/w8-bound-2720.md) | TTL and revoke so a stale known-bad entry cannot wedge the fleet (`internal/knownbad`) |
 
 Read them in ship order: W1 first (everything reads its ledger), then W2/W3, then the load-bearing W4/W5/W6, then W7/W8.
