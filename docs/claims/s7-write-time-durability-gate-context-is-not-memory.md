@@ -1,3 +1,8 @@
+---
+title: "fak write-time durability gate for context and memory"
+description: "fak classifies benign results by expected lifetime and gates durable recall/L3 promotion; lexical classification is warn-by-default, not a truth oracle."
+---
+
 # S7 write-time durability gate (context is not memory)
 
 [← Claims index](../../CLAIMS.md)
@@ -11,4 +16,3 @@
 - [STUB] Rung-2 bitemporal: `recall.Page` validity interval (`ValidFrom`/`ValidTo`) + an as-of read gate (`ErrExpired`) that makes `bounded` the first temporally-enforced class (the Zep/Graphiti + SQL:2011 spine). Tracked: #81.
 - [STUB] Rung-3 engine-integrated TTL: `kvmmu.Segment` TTL + `Context.Expire` over the bit-exact `model.KVCache.Evict`, so a turn/session span is forgotten on a clock the fact itself sets — bit-identical to never-having-seen-it for spans no later token attended (mid-context expiry is a coherent compaction, not never-saw). Tracked: #80.
 - [STUB] Dream-time durability consolidation (principled sleep-time promotion) over the rung-1 class signal. Tracked under the S7 epic #82; live child remap still needed.
-

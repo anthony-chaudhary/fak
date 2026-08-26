@@ -1,3 +1,8 @@
+---
+title: "fak prior-art posture: assembly, not novel primitives"
+description: "fak claims novelty in its fused, witness-gated agent-kernel assembly, not its individual mechanisms; an audit found 0 of 29 primitives novel."
+---
+
 # Prior-art posture
 
 [← Claims index](../../CLAIMS.md)

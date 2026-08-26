@@ -1,0 +1,107 @@
+{
+  "rows": [
+    {
+      "id": "issue9256-attention-prepare-prefill",
+      "canonical": "preparePrefillAttention (cache and output setup)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "preparePrefillAttention appends one layer's raw key, transformed key, and value panels to the KV cache, resolves that layer's sliding window, and allocates the zeroed attention output panel for the incoming prefill rows.",
+      "distinction": "It prepares cached inputs and output storage before attention math; it does not run the causal query-key and value-mixing loop performed by attnPrefillInto.",
+      "distinct_from": [
+        "x-attention-attnprefillinto",
+        "issue9256-attention-fill-scores",
+        "issue9256-attention-accumulate-values"
+      ],
+      "aliases": [],
+      "grounding": "preparePrefillAttention",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9256-attention-fill-scores",
+      "canonical": "fillAttentionScores (raw single-head score fill)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "fillAttentionScores writes scaled query-key dot products for one query head across a contiguous key-position range without applying softmax or mixing values.",
+      "distinction": "It produces raw scaled logits only; softmaxAttentionScores normalizes an existing score buffer, while preparePrefillAttention prepares cache and output storage.",
+      "distinct_from": [
+        "issue9256-attention-prepare-prefill",
+        "x-attention-softmaxattentionscores",
+        "issue9256-attention-fill-softmax",
+        "issue9256-attention-accumulate-values"
+      ],
+      "aliases": [],
+      "grounding": "fillAttentionScores",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9256-attention-fill-softmax",
+      "canonical": "fillSoftmaxAttentionScores (single-head score and softmax)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "fillSoftmaxAttentionScores fills one query head's scaled query-key scores and then normalizes that score row in place with softmax.",
+      "distinction": "It combines score generation and normalization for one head; fillAttentionScores leaves raw logits, and softmaxAttentionScores only normalizes an already-filled buffer.",
+      "distinct_from": [
+        "issue9256-attention-fill-scores",
+        "x-attention-softmaxattentionscores",
+        "issue9256-attention-fill-softmax-three"
+      ],
+      "aliases": [],
+      "grounding": "fillSoftmaxAttentionScores",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9256-attention-fill-softmax-three",
+      "canonical": "fillSoftmaxAttentionScores3 (three-head score and softmax)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "fillSoftmaxAttentionScores3 traverses the shared key range once through scoreDot3 for exactly three query heads and then normalizes the three resulting score rows independently.",
+      "distinction": "It is the three-query shared-key score path; fillSoftmaxAttentionScores handles one head, and attnFdot3SIMD is only the optional three-way dot-product kernel it may receive.",
+      "distinct_from": [
+        "issue9256-attention-fill-softmax",
+        "x-attention-attnfdot3simd"
+      ],
+      "aliases": [],
+      "grounding": "fillSoftmaxAttentionScores3",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9256-attention-accumulate-values",
+      "canonical": "accumulateAttentionValues (single-head value reduction)",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "accumulateAttentionValues performs the in-order weighted value-vector accumulation for one query head by applying each normalized attention score to the matching KV value head.",
+      "distinction": "It reduces values for one head after score normalization; fillAttentionScores generates logits, while accumulateAttentionGroup shares one value traversal across an entire GQA head group.",
+      "distinct_from": [
+        "issue9256-attention-fill-scores",
+        "issue9256-attention-prepare-prefill"
+      ],
+      "aliases": [],
+      "grounding": "accumulateAttentionValues",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

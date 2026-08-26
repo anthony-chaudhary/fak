@@ -1,3 +1,8 @@
+---
+title: "fak security substrate: kernel-enforced trust boundaries"
+description: "fak enforces provenance, information-flow, secret, and capability gates before model-proposed actions; the page states measured ceilings and caveats."
+---
+
 # Security substrate (the kernel stops believing the model)
 
 [← Claims index](../../CLAIMS.md)
@@ -12,4 +17,3 @@
 - [SHIPPED] Default dev-agent floor + the CICD pillars on the **real** decision path: `adjudicator.DevAgentPolicy()` denies the shared-history git mutations (push/merge/tag), bounds writes off the kernel/policy spine (a spine write is SELF_MODIFY→ESCALATE), and allows one witness-gated `ship_release`; a registered `shipgate` adjudicator (rank 40) lifts a ship call to `require-witness` so an **unwitnessed ship is refused** and a **git-corroborated ship is allowed**; `witness` gains a `clean:` (green-tree) claim. Deployable as `examples/dev-agent-policy.json` (round-trips through the manifest loader). Witness: `go test ./internal/shipgate ./internal/adjudicator ./internal/witness` — `TestDevAgentDefaultPath` drives the real defconfig chain (self-modify denied ESCALATE, unwitnessed ship refused, corroborated ship allowed, RequireApproval emitted) (issue #11).
 
 Honest ceiling, surfaced not hidden: the *detector* these drivers feed is ~100% evadable on a SOTA evasion battery and FP-prone on private real-transcript corpora. Detection is **deliberately non-load-bearing** — the structural guarantee is the capability floor + containment, which never run the detector; improving detection is additive, not the moat.
-

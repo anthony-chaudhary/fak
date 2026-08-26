@@ -107,17 +107,8 @@ func BranchDir(parentDir, branchDir string, opts BranchOptions) (Meta, error) {
 	// (2) The content-addressed parts, shared copy-on-write (hardlink, byte copy only as the
 	// fallback). image.json and session.json are excluded: image.json is re-minted below with
 	// the branch identity, and session.json was just written fresh for the branch's drive.
-	for _, name := range knownParts {
-		if name == SessionFile {
-			continue
-		}
-		src := filepath.Join(parentDir, name)
-		if _, statErr := os.Stat(src); statErr != nil {
-			continue // an optional part the parent does not carry
-		}
-		if err := shareOrCopy(src, filepath.Join(branchDir, name)); err != nil {
-			return Meta{}, fmt.Errorf("sessionimage: branch: share %s: %w", name, err)
-		}
+	if err := shareKnownParts(parentDir, branchDir, "branch", SessionFile); err != nil {
+		return Meta{}, err
 	}
 
 	// (3) The integrity index over the branch's parts (shared parts keep the parent's
@@ -167,6 +158,24 @@ func branchMigration(parentMeta Meta, opts BranchOptions, parentSHA string, now 
 		m.FromHost, m.ToHost = parentMeta.Host, opts.ToHost
 	}
 	return m
+}
+
+// shareKnownParts shares each present part from srcDir into dstDir, except excludedPart.
+// Missing optional parts are skipped, matching the bundle's sparse-part semantics.
+func shareKnownParts(srcDir, dstDir, operation, excludedPart string) error {
+	for _, name := range knownParts {
+		if name == excludedPart {
+			continue
+		}
+		src := filepath.Join(srcDir, name)
+		if _, statErr := os.Stat(src); statErr != nil {
+			continue
+		}
+		if err := shareOrCopy(src, filepath.Join(dstDir, name)); err != nil {
+			return fmt.Errorf("sessionimage: %s: share %s: %w", operation, name, err)
+		}
+	}
+	return nil
 }
 
 // shareOrCopy links src to dst so the two share one on-disk copy of the bytes (the
