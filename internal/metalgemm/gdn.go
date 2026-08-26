@@ -33,6 +33,7 @@ int mg_gdn_state_reset(int owner);
 int mg_gdn_state_snapshot(int owner, float *conv, int convElems, float *recurrent, int recurrentElems);
 void mg_gdn_state_release(int owner);
 int mg_gdn_live_buffers(void);
+uint64_t mg_gdn_current_allocated_size(void);
 */
 import "C"
 
@@ -321,3 +322,8 @@ func (s *GDNState) Close() {
 
 // GDNLiveBufferCount returns the number of currently owned persistent buffers.
 func GDNLiveBufferCount() int { return int(C.mg_gdn_live_buffers()) }
+
+// gdnCurrentAllocatedBytes is a native readback for the Darwin lifetime witness.
+// Keep it package-private: allocation policy remains owned by Metal, while the test
+// needs to distinguish completed transient resources from persistent GDN state.
+func gdnCurrentAllocatedBytes() uint64 { return uint64(C.mg_gdn_current_allocated_size()) }

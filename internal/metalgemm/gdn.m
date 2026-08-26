@@ -226,14 +226,16 @@ static id<MTLBuffer> mg_gdn_shared(const float *src, size_t count) {
 }
 
 static int mg_gdn_zero(id<MTLBuffer> conv, id<MTLBuffer> recurrent) {
-    id<MTLCommandBuffer> command = [gQueue commandBuffer];
-    id<MTLBlitCommandEncoder> encoder = [command blitCommandEncoder];
-    [encoder fillBuffer:conv range:NSMakeRange(0, conv.length) value:0];
-    [encoder fillBuffer:recurrent range:NSMakeRange(0, recurrent.length) value:0];
-    [encoder endEncoding];
-    [command commit];
-    [command waitUntilCompleted];
-    return command.status == MTLCommandBufferStatusCompleted;
+    @autoreleasepool {
+        id<MTLCommandBuffer> command = [gQueue commandBuffer];
+        id<MTLBlitCommandEncoder> encoder = [command blitCommandEncoder];
+        [encoder fillBuffer:conv range:NSMakeRange(0, conv.length) value:0];
+        [encoder fillBuffer:recurrent range:NSMakeRange(0, recurrent.length) value:0];
+        [encoder endEncoding];
+        [command commit];
+        [command waitUntilCompleted];
+        return command.status == MTLCommandBufferStatusCompleted;
+    }
 }
 
 int mg_gdn_state_new(int nK, int nV, int kHd, int vHd, int convKernel,
@@ -275,78 +277,80 @@ int mg_gdn_state_run(int owner,
                      int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps,
                      float *core, int injectPostSubmitFailure, mg_gdn_event *event) {
     mg_gdn_event_reset(event);
-    if (owner < 0 || owner >= MG_GDN_MAX_OWNERS || tokens < 1 || tokens > 64 ||
-        mixed == NULL || z == NULL || b == NULL || a == NULL || convW == NULL || aLog == NULL ||
-        dtBias == NULL || norm == NULL || core == NULL || eps <= 0) return 0;
-    MGGDNOwner slot;
-    @synchronized(gDev) { slot = gGDNOwners[owner]; }
-    if (slot.conv == NULL || slot.recurrent == NULL || slot.nK != nK || slot.nV != nV ||
-        slot.kHd != kHd || slot.vHd != vHd || slot.convKernel != convKernel) return 0;
-    id<MTLBuffer> convState = (__bridge id<MTLBuffer>)slot.conv;
-    id<MTLBuffer> recurrentState = (__bridge id<MTLBuffer>)slot.recurrent;
-    if (event != NULL) {
-        event->owned_buffers = 2;
-        event->private_state_buffers = (convState.storageMode == MTLStorageModePrivate) + (recurrentState.storageMode == MTLStorageModePrivate);
-        event->state_bytes = (uint64_t)convState.length + (uint64_t)recurrentState.length;
+    @autoreleasepool {
+        if (owner < 0 || owner >= MG_GDN_MAX_OWNERS || tokens < 1 || tokens > 64 ||
+            mixed == NULL || z == NULL || b == NULL || a == NULL || convW == NULL || aLog == NULL ||
+            dtBias == NULL || norm == NULL || core == NULL || eps <= 0) return 0;
+        MGGDNOwner slot;
+        @synchronized(gDev) { slot = gGDNOwners[owner]; }
+        if (slot.conv == NULL || slot.recurrent == NULL || slot.nK != nK || slot.nV != nV ||
+            slot.kHd != kHd || slot.vHd != vHd || slot.convKernel != convKernel) return 0;
+        id<MTLBuffer> convState = (__bridge id<MTLBuffer>)slot.conv;
+        id<MTLBuffer> recurrentState = (__bridge id<MTLBuffer>)slot.recurrent;
+        if (event != NULL) {
+            event->owned_buffers = 2;
+            event->private_state_buffers = (convState.storageMode == MTLStorageModePrivate) + (recurrentState.storageMode == MTLStorageModePrivate);
+            event->state_bytes = (uint64_t)convState.length + (uint64_t)recurrentState.length;
+        }
+
+        int keyDim = nK * kHd, valueDim = nV * vHd, convDim = 2 * keyDim + valueDim;
+        id<MTLBuffer> mixedB = mg_gdn_shared(mixed, (size_t)tokens * convDim);
+        id<MTLBuffer> zB = mg_gdn_shared(z, (size_t)tokens * valueDim);
+        id<MTLBuffer> bB = mg_gdn_shared(b, (size_t)tokens * nV);
+        id<MTLBuffer> aB = mg_gdn_shared(a, (size_t)tokens * nV);
+        id<MTLBuffer> convWB = mg_gdn_shared(convW, (size_t)convDim * convKernel);
+        id<MTLBuffer> aLogB = mg_gdn_shared(aLog, nV);
+        id<MTLBuffer> dtBiasB = mg_gdn_shared(dtBias, nV);
+        id<MTLBuffer> normB = mg_gdn_shared(norm, vHd);
+        id<MTLBuffer> convOutB = [gDev newBufferWithLength:(size_t)tokens * convDim * sizeof(float) options:MTLResourceStorageModePrivate];
+        id<MTLBuffer> qNormB = [gDev newBufferWithLength:(size_t)tokens * nK * kHd * sizeof(float) options:MTLResourceStorageModePrivate];
+        id<MTLBuffer> kNormB = [gDev newBufferWithLength:(size_t)tokens * nK * kHd * sizeof(float) options:MTLResourceStorageModePrivate];
+        id<MTLBuffer> coreB = [gDev newBufferWithLength:(size_t)tokens * valueDim * sizeof(float) options:MTLResourceStorageModeShared];
+        if (mixedB == nil || zB == nil || bB == nil || aB == nil || convWB == nil || aLogB == nil ||
+            dtBiasB == nil || normB == nil || convOutB == nil || qNormB == nil || kNormB == nil || coreB == nil) return 0;
+        if (event != NULL) event->panel_h2d_transfers = 8;
+
+        id<MTLCommandBuffer> command = [gQueue commandBuffer];
+        id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+        [encoder setComputePipelineState:gGDNConvPSO];
+        [encoder setBuffer:mixedB offset:0 atIndex:0]; [encoder setBuffer:convWB offset:0 atIndex:1];
+        [encoder setBuffer:convState offset:0 atIndex:2]; [encoder setBuffer:convOutB offset:0 atIndex:3];
+        [encoder setBytes:&tokens length:sizeof(tokens) atIndex:4]; [encoder setBytes:&convDim length:sizeof(convDim) atIndex:5];
+        [encoder setBytes:&convKernel length:sizeof(convKernel) atIndex:6];
+        [encoder dispatchThreads:MTLSizeMake((NSUInteger)convDim, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+
+        int qThreads = mg_gdn_threads(kHd);
+        [encoder setComputePipelineState:gGDNQKNormPSO];
+        [encoder setBuffer:convOutB offset:0 atIndex:0]; [encoder setBuffer:qNormB offset:0 atIndex:1]; [encoder setBuffer:kNormB offset:0 atIndex:2];
+        [encoder setBytes:&tokens length:sizeof(tokens) atIndex:3]; [encoder setBytes:&convDim length:sizeof(convDim) atIndex:4];
+        [encoder setBytes:&nK length:sizeof(nK) atIndex:5]; [encoder setBytes:&kHd length:sizeof(kHd) atIndex:6];
+        [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nK, (NSUInteger)tokens, 1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads, 1, 1)];
+        [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+
+        int vThreads = mg_gdn_threads(vHd);
+        [encoder setComputePipelineState:gGDNRecurrentPSO];
+        [encoder setBuffer:convOutB offset:0 atIndex:0]; [encoder setBuffer:qNormB offset:0 atIndex:1]; [encoder setBuffer:kNormB offset:0 atIndex:2];
+        [encoder setBuffer:zB offset:0 atIndex:3]; [encoder setBuffer:bB offset:0 atIndex:4]; [encoder setBuffer:aB offset:0 atIndex:5];
+        [encoder setBuffer:aLogB offset:0 atIndex:6]; [encoder setBuffer:dtBiasB offset:0 atIndex:7]; [encoder setBuffer:normB offset:0 atIndex:8];
+        [encoder setBuffer:recurrentState offset:0 atIndex:9]; [encoder setBuffer:coreB offset:0 atIndex:10];
+        [encoder setBytes:&tokens length:sizeof(tokens) atIndex:11]; [encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];
+        [encoder setBytes:&nK length:sizeof(nK) atIndex:13]; [encoder setBytes:&nV length:sizeof(nV) atIndex:14];
+        [encoder setBytes:&kHd length:sizeof(kHd) atIndex:15]; [encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];
+        [encoder setBytes:&eps length:sizeof(eps) atIndex:17];
+        [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
+        [encoder endEncoding];
+
+        if (event != NULL) { event->command_buffer = (uintptr_t)(__bridge void *)command; event->encoders = 1; }
+        [command commit];
+        if (event != NULL) event->committed = 1;
+        [command waitUntilCompleted];
+        if (event != NULL) event->completed_wait = command.status == MTLCommandBufferStatusCompleted;
+        if (command.status != MTLCommandBufferStatusCompleted || injectPostSubmitFailure) return -1;
+        memcpy(core, coreB.contents, (size_t)tokens * valueDim * sizeof(float));
+        if (event != NULL) event->output_d2h_transfers = 1;
+        return 1;
     }
-
-    int keyDim = nK * kHd, valueDim = nV * vHd, convDim = 2 * keyDim + valueDim;
-    id<MTLBuffer> mixedB = mg_gdn_shared(mixed, (size_t)tokens * convDim);
-    id<MTLBuffer> zB = mg_gdn_shared(z, (size_t)tokens * valueDim);
-    id<MTLBuffer> bB = mg_gdn_shared(b, (size_t)tokens * nV);
-    id<MTLBuffer> aB = mg_gdn_shared(a, (size_t)tokens * nV);
-    id<MTLBuffer> convWB = mg_gdn_shared(convW, (size_t)convDim * convKernel);
-    id<MTLBuffer> aLogB = mg_gdn_shared(aLog, nV);
-    id<MTLBuffer> dtBiasB = mg_gdn_shared(dtBias, nV);
-    id<MTLBuffer> normB = mg_gdn_shared(norm, vHd);
-    id<MTLBuffer> convOutB = [gDev newBufferWithLength:(size_t)tokens * convDim * sizeof(float) options:MTLResourceStorageModePrivate];
-    id<MTLBuffer> qNormB = [gDev newBufferWithLength:(size_t)tokens * nK * kHd * sizeof(float) options:MTLResourceStorageModePrivate];
-    id<MTLBuffer> kNormB = [gDev newBufferWithLength:(size_t)tokens * nK * kHd * sizeof(float) options:MTLResourceStorageModePrivate];
-    id<MTLBuffer> coreB = [gDev newBufferWithLength:(size_t)tokens * valueDim * sizeof(float) options:MTLResourceStorageModeShared];
-    if (mixedB == nil || zB == nil || bB == nil || aB == nil || convWB == nil || aLogB == nil ||
-        dtBiasB == nil || normB == nil || convOutB == nil || qNormB == nil || kNormB == nil || coreB == nil) return 0;
-    if (event != NULL) event->panel_h2d_transfers = 8;
-
-    id<MTLCommandBuffer> command = [gQueue commandBuffer];
-    id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
-    [encoder setComputePipelineState:gGDNConvPSO];
-    [encoder setBuffer:mixedB offset:0 atIndex:0]; [encoder setBuffer:convWB offset:0 atIndex:1];
-    [encoder setBuffer:convState offset:0 atIndex:2]; [encoder setBuffer:convOutB offset:0 atIndex:3];
-    [encoder setBytes:&tokens length:sizeof(tokens) atIndex:4]; [encoder setBytes:&convDim length:sizeof(convDim) atIndex:5];
-    [encoder setBytes:&convKernel length:sizeof(convKernel) atIndex:6];
-    [encoder dispatchThreads:MTLSizeMake((NSUInteger)convDim, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
-    [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
-
-    int qThreads = mg_gdn_threads(kHd);
-    [encoder setComputePipelineState:gGDNQKNormPSO];
-    [encoder setBuffer:convOutB offset:0 atIndex:0]; [encoder setBuffer:qNormB offset:0 atIndex:1]; [encoder setBuffer:kNormB offset:0 atIndex:2];
-    [encoder setBytes:&tokens length:sizeof(tokens) atIndex:3]; [encoder setBytes:&convDim length:sizeof(convDim) atIndex:4];
-    [encoder setBytes:&nK length:sizeof(nK) atIndex:5]; [encoder setBytes:&kHd length:sizeof(kHd) atIndex:6];
-    [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nK, (NSUInteger)tokens, 1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads, 1, 1)];
-    [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
-
-    int vThreads = mg_gdn_threads(vHd);
-    [encoder setComputePipelineState:gGDNRecurrentPSO];
-    [encoder setBuffer:convOutB offset:0 atIndex:0]; [encoder setBuffer:qNormB offset:0 atIndex:1]; [encoder setBuffer:kNormB offset:0 atIndex:2];
-    [encoder setBuffer:zB offset:0 atIndex:3]; [encoder setBuffer:bB offset:0 atIndex:4]; [encoder setBuffer:aB offset:0 atIndex:5];
-    [encoder setBuffer:aLogB offset:0 atIndex:6]; [encoder setBuffer:dtBiasB offset:0 atIndex:7]; [encoder setBuffer:normB offset:0 atIndex:8];
-    [encoder setBuffer:recurrentState offset:0 atIndex:9]; [encoder setBuffer:coreB offset:0 atIndex:10];
-    [encoder setBytes:&tokens length:sizeof(tokens) atIndex:11]; [encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];
-    [encoder setBytes:&nK length:sizeof(nK) atIndex:13]; [encoder setBytes:&nV length:sizeof(nV) atIndex:14];
-    [encoder setBytes:&kHd length:sizeof(kHd) atIndex:15]; [encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];
-    [encoder setBytes:&eps length:sizeof(eps) atIndex:17];
-    [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
-    [encoder endEncoding];
-
-    if (event != NULL) { event->command_buffer = (uintptr_t)(__bridge void *)command; event->encoders = 1; }
-    [command commit];
-    if (event != NULL) event->committed = 1;
-    [command waitUntilCompleted];
-    if (event != NULL) event->completed_wait = command.status == MTLCommandBufferStatusCompleted;
-    if (command.status != MTLCommandBufferStatusCompleted || injectPostSubmitFailure) return -1;
-    memcpy(core, coreB.contents, (size_t)tokens * valueDim * sizeof(float));
-    if (event != NULL) event->output_d2h_transfers = 1;
-    return 1;
 }
 
 int mg_gdn_state_reset(int owner) {
@@ -358,28 +362,30 @@ int mg_gdn_state_reset(int owner) {
 }
 
 int mg_gdn_state_snapshot(int owner, float *conv, int convElems, float *recurrent, int recurrentElems) {
-    if (owner < 0 || owner >= MG_GDN_MAX_OWNERS || recurrent == NULL || recurrentElems <= 0) return 0;
-    MGGDNOwner slot;
-    @synchronized(gDev) { slot = gGDNOwners[owner]; }
-    if (slot.conv == NULL || slot.recurrent == NULL) return 0;
-    int convDim = 2 * slot.nK * slot.kHd + slot.nV * slot.vHd;
-    int wantConv = (slot.convKernel - 1) * convDim;
-    int wantRecurrent = slot.nV * slot.kHd * slot.vHd;
-    if (convElems != wantConv || recurrentElems != wantRecurrent || (wantConv > 0 && conv == NULL)) return 0;
-    id<MTLBuffer> convRead = [gDev newBufferWithLength:MAX((size_t)4, (size_t)wantConv * sizeof(float)) options:MTLResourceStorageModeShared];
-    id<MTLBuffer> recurrentRead = [gDev newBufferWithLength:(size_t)wantRecurrent * sizeof(float) options:MTLResourceStorageModeShared];
-    if (convRead == nil || recurrentRead == nil) return 0;
-    id<MTLCommandBuffer> command = [gQueue commandBuffer];
-    id<MTLBlitCommandEncoder> encoder = [command blitCommandEncoder];
-    if (wantConv > 0) [encoder copyFromBuffer:(__bridge id<MTLBuffer>)slot.conv sourceOffset:0 toBuffer:convRead destinationOffset:0 size:(size_t)wantConv * sizeof(float)];
-    [encoder copyFromBuffer:(__bridge id<MTLBuffer>)slot.recurrent sourceOffset:0 toBuffer:recurrentRead destinationOffset:0 size:(size_t)wantRecurrent * sizeof(float)];
-    [encoder endEncoding];
-    [command commit];
-    [command waitUntilCompleted];
-    if (command.status != MTLCommandBufferStatusCompleted) return 0;
-    if (wantConv > 0) memcpy(conv, convRead.contents, (size_t)wantConv * sizeof(float));
-    memcpy(recurrent, recurrentRead.contents, (size_t)wantRecurrent * sizeof(float));
-    return 1;
+    @autoreleasepool {
+        if (owner < 0 || owner >= MG_GDN_MAX_OWNERS || recurrent == NULL || recurrentElems <= 0) return 0;
+        MGGDNOwner slot;
+        @synchronized(gDev) { slot = gGDNOwners[owner]; }
+        if (slot.conv == NULL || slot.recurrent == NULL) return 0;
+        int convDim = 2 * slot.nK * slot.kHd + slot.nV * slot.vHd;
+        int wantConv = (slot.convKernel - 1) * convDim;
+        int wantRecurrent = slot.nV * slot.kHd * slot.vHd;
+        if (convElems != wantConv || recurrentElems != wantRecurrent || (wantConv > 0 && conv == NULL)) return 0;
+        id<MTLBuffer> convRead = [gDev newBufferWithLength:MAX((size_t)4, (size_t)wantConv * sizeof(float)) options:MTLResourceStorageModeShared];
+        id<MTLBuffer> recurrentRead = [gDev newBufferWithLength:(size_t)wantRecurrent * sizeof(float) options:MTLResourceStorageModeShared];
+        if (convRead == nil || recurrentRead == nil) return 0;
+        id<MTLCommandBuffer> command = [gQueue commandBuffer];
+        id<MTLBlitCommandEncoder> encoder = [command blitCommandEncoder];
+        if (wantConv > 0) [encoder copyFromBuffer:(__bridge id<MTLBuffer>)slot.conv sourceOffset:0 toBuffer:convRead destinationOffset:0 size:(size_t)wantConv * sizeof(float)];
+        [encoder copyFromBuffer:(__bridge id<MTLBuffer>)slot.recurrent sourceOffset:0 toBuffer:recurrentRead destinationOffset:0 size:(size_t)wantRecurrent * sizeof(float)];
+        [encoder endEncoding];
+        [command commit];
+        [command waitUntilCompleted];
+        if (command.status != MTLCommandBufferStatusCompleted) return 0;
+        if (wantConv > 0) memcpy(conv, convRead.contents, (size_t)wantConv * sizeof(float));
+        memcpy(recurrent, recurrentRead.contents, (size_t)wantRecurrent * sizeof(float));
+        return 1;
+    }
 }
 
 void mg_gdn_state_release(int owner) {
@@ -401,4 +407,9 @@ int mg_gdn_live_buffers(void) {
         }
     }
     return live;
+}
+
+uint64_t mg_gdn_current_allocated_size(void) {
+    if (!mg_init()) return 0;
+    return (uint64_t)gDev.currentAllocatedSize;
 }
