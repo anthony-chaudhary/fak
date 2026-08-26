@@ -260,6 +260,80 @@ func TestAdd(t *testing.T) {
 	}
 }
 
+func TestValidateSelectsTrackedObjectiveCAndHeaderOverlays(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test; skipped under -short")
+	}
+	if runtime.GOOS != "darwin" {
+		t.Skip("Objective-C cgo integration witness requires Darwin")
+	}
+	cgoEnabled, err := exec.Command("go", "env", "CGO_ENABLED").Output()
+	if err != nil || strings.TrimSpace(string(cgoEnabled)) != "1" {
+		t.Skip("Objective-C cgo integration witness requires CGO_ENABLED=1")
+	}
+
+	repo, git := seedGitFixtureRepo(t)
+	const baseGo = `package p
+
+/*
+#include "p.h"
+int base_value(void);
+*/
+import "C"
+
+func Value() int { return int(C.base_value()) }
+`
+	const baseHeader = "#define P_VALUE 1\n"
+	const baseObjectiveC = "#include \"p.h\"\nint base_value(void) { return P_VALUE; }\n"
+	commitFiles(t, repo, git, "clean native package", map[string]string{
+		"go.mod": cleanGoMod,
+		"p/p.go": baseGo,
+		"p/p.h":  baseHeader,
+		"p/p.m":  baseObjectiveC,
+	})
+	t.Setenv("GOCACHE", t.TempDir())
+
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, filepath.FromSlash(rel)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	validateGreen := func(paths ...string) {
+		t.Helper()
+		argv := []string{"--root", repo, "--json", "--test-run", "^$"}
+		for _, path := range paths {
+			argv = append(argv, "--mine", path)
+		}
+		res, code, stderr := runValidateJSON(t, argv)
+		if code != 0 || !res.OK {
+			t.Fatalf("paths=%v code=%d stderr=%q result=%+v", paths, code, stderr, res)
+		}
+		if !validateContains(res.Tested, "gitfixture.test/p") {
+			t.Fatalf("paths=%v tested=%v; want owning package selected", paths, res.Tested)
+		}
+		for _, path := range paths {
+			if !validateContains(res.Overlays.Checked, path) {
+				t.Fatalf("paths=%v overlays=%+v; want %s checked", paths, res.Overlays, path)
+			}
+		}
+	}
+
+	write("p/p.m", "#include \"p.h\"\nint base_value(void) { return P_VALUE + 1; }\n")
+	validateGreen("p/p.m")
+	write("p/p.m", baseObjectiveC)
+
+	write("p/p.h", "#define P_VALUE 2\n")
+	validateGreen("p/p.h")
+	write("p/p.h", baseHeader)
+
+	write("p/p.go", strings.Replace(baseGo,
+		"int base_value(void);", "int base_value(void);\nint overlay_value(void);", 1)+
+		"\nfunc OverlayValue() int { return int(C.overlay_value()) }\n")
+	write("p/p.m", baseObjectiveC+"int overlay_value(void) { return P_VALUE + 2; }\n")
+	validateGreen("p/p.go", "p/p.m")
+}
+
 func TestValidateWSLIsolatedCheckoutPreservesRequestedGitIdentity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test; skipped under -short")

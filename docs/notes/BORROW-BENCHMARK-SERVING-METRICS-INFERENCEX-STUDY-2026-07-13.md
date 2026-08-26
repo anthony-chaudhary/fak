@@ -400,3 +400,27 @@ can prove task quality, lifecycle, cache/policy effects, and net-true resource c
 [#8774](https://github.com/anthony-chaudhary/fak/issues/8774), and
 [#8775](https://github.com/anthony-chaudhary/fak/issues/8775); refresh tracker
 [#8770](https://github.com/anthony-chaudhary/fak/issues/8770).
+
+## Exhaustive inventory refresh (2026-08-25)
+
+Issue [#9003](https://github.com/anthony-chaudhary/fak/issues/9003) refreshed this study against pinned revision [`0b0138fd7de0a6f927f9769b19d594d01f586107`](https://github.com/SemiAnalysisAI/InferenceX/commit/0b0138fd7de0a6f927f9769b19d594d01f586107) (commit timestamp `2026-08-24T03:33:43Z`). The machine-readable denominator is [`docs/research/inventory/semianalysisai-inferencex.json`](../research/inventory/semianalysisai-inferencex.json); its rendered companion is [`docs/research/inventory/semianalysisai-inferencex.md`](../research/inventory/semianalysisai-inferencex.md).
+
+### Complete source-class read-back
+
+- **Tree:** `fak study-inventory` walked all 1,280 non-`.git` files in 11 immediate subsystems: 1,145 runtime files, 34 tests/fixtures, 84 documentation files, and 361,845 text lines. The map pins representative paths for README/docs, architecture/design, runtime source, tests/fixtures, history metadata, and root plus subtree license/provenance.
+- **History, releases, and roadmap:** commit history was read through the pinned revision; the sole release was [`tilert-v0.1.5.post2-inferencex.1`](https://github.com/SemiAnalysisAI/InferenceX/releases/tag/tilert-v0.1.5.post2-inferencex.1). No canonical `ROADMAP` file exists, so prospective work was audited across repository TODOs and the open issue/PR surfaces rather than inferred from absence.
+- **GitHub denominator at the revision timestamp:** pagination retained records created by the cutoff and found 389 issues (103 open, 286 closed), 2,299 pull requests (52 open, 2,247 closed; 1,520 merged), all four discussions (all open, none answered), and one release. Commands and counts live in the inventory's `non_tree_study.github_surface` and registry `source_evidence`.
+- **License/provenance:** the root declares Apache-2.0 in `LICENSE`, `NOTICE`, and `README.md`; experimental/vendor subtrees preserve their own notices and licenses. Borrowing therefore remains idea/pattern level unless a later implementation performs file-level provenance review.
+- **FAK self-query:** candidate-specific `fak capabilities` queries covered benchmark accounting, artifact lineage, and agentic lifecycle. They found native benchmark receipts/authority, captured artifacts and module revisions, routing/trajectory/session-control surfaces; no query justified importing an external serving runtime.
+
+### Refreshed candidate decisions
+
+| Candidate | FAK decision | Durable owner / reason |
+|---|---|---|
+| Scope-versioned measured-power receipts | **Already tracked** | [#8773](https://github.com/anthony-chaudhary/fak/issues/8773) owns workload-window and deployment-scope binding. |
+| Client/server lifecycle join for agentic workloads | **Already tracked** | [#8774](https://github.com/anthony-chaudhary/fak/issues/8774) owns cross-boundary phase correlation. |
+| Quality-constrained full-response interactivity | **Already tracked** | [#8775](https://github.com/anthony-chaudhary/fak/issues/8775) owns judged-completion latency. |
+| InferenceX serving/runtime implementation | **Reject for product path** | Keep as benchmark/reference evidence only; adoption would violate FAK-native ownership of kernels, memory, scheduling, cache, adaptation, and operations. |
+| Artifact reuse and ingestion-integrity conventions | **Already owned** | Captured evidence, benchmark authority, and revisioned artifacts cover the reusable pattern; the refreshed denominator found no distinct missing primitive. |
+
+The exhaustive refresh therefore creates **no new follow-on**: all applicable gaps are deduplicated to #8773–#8775. The monitor row records the complete candidate matrix, completeness critic, self-query witness, and issue tracking so a later refresh can compare a pinned denominator instead of repeating an unbounded study.

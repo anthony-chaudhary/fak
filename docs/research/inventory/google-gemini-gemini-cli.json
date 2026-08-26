@@ -1,0 +1,863 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "google-gemini/gemini-cli",
+  "url": "https://github.com/google-gemini/gemini-cli",
+  "indexed_revision": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+  "observed_at": "2026-08-25T19:30:00-07:00",
+  "totals": {
+    "files": 2971,
+    "directories": 294,
+    "bytes": 86465928,
+    "runtime_files": 1450,
+    "test_files": 1110,
+    "docs_files": 204,
+    "text_lines": 770296
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "docs/CONTRIBUTING.md",
+        "docs/admin/enterprise-controls.md",
+        "docs/assets/connected_devtools.png",
+        "docs/assets/gemini-screenshot.png",
+        "docs/assets/monitoring-dashboard-logs.png",
+        "docs/assets/monitoring-dashboard-metrics.png",
+        "docs/assets/monitoring-dashboard-overview.png",
+        "docs/assets/release_patch.png",
+        "docs/assets/theme-ansi-dark.png",
+        "docs/assets/theme-ansi-light.png",
+        "docs/assets/theme-atom-one-dark.png"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "packages/sdk/SDK_DESIGN.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".allstar/branch_protection.yaml",
+        ".gcp/development-worker.yml",
+        ".gcp/release-docker.yml",
+        ".gemini/commands/code-guide.toml",
+        ".gemini/commands/core.toml",
+        ".gemini/commands/find-docs.toml",
+        ".gemini/commands/frontend.toml",
+        ".gemini/commands/full-context.toml",
+        ".gemini/commands/github/cleanup-back-to-main.toml",
+        ".gemini/commands/introspect.toml",
+        ".gemini/commands/oncall/pr-review.toml",
+        ".gemini/commands/prompt-suggest.toml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        "evals/test-helper.test.ts",
+        "integration-tests/acp-env-auth.test.ts",
+        "integration-tests/acp-telemetry.test.ts",
+        "integration-tests/api-resilience.test.ts",
+        "integration-tests/browser-agent-localhost.test.ts",
+        "integration-tests/browser-agent.test.ts",
+        "integration-tests/browser-policy.test.ts",
+        "integration-tests/checkpointing.test.ts",
+        "integration-tests/clipboard-linux.test.ts",
+        "integration-tests/concurrency-limit.test.ts",
+        "integration-tests/context-compress-interactive.test.ts",
+        "integration-tests/context-fidelity.test.ts"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".gcp/release-docker.yml",
+        ".github/workflows/release-change-tags.yml",
+        ".github/workflows/release-manual.yml",
+        ".github/workflows/release-nightly.yml",
+        ".github/workflows/release-notes.yml",
+        ".github/workflows/release-patch-0-from-comment.yml",
+        ".github/workflows/release-patch-1-create-pr.yml",
+        ".github/workflows/release-patch-2-trigger.yml",
+        ".github/workflows/release-patch-3-release.yml",
+        ".github/workflows/release-promote.yml",
+        ".github/workflows/release-rollback.yml",
+        ".github/workflows/release-sandbox.yml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/ISSUE_TEMPLATE/website_issue.yml",
+        ".github/pull_request_template.md"
+      ],
+      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "covered",
+      "evidence": [
+        "ROADMAP.md",
+        "docs/tools/todos.md",
+        "packages/cli/src/ui/components/messages/Todo.test.tsx",
+        "packages/cli/src/ui/components/messages/Todo.tsx",
+        "packages/cli/src/ui/components/messages/__snapshots__/Todo.test.tsx.snap",
+        "packages/core/src/tools/write-todos.test.ts",
+        "packages/core/src/tools/write-todos.ts",
+        "tools/gemini-cli-bot/metrics/scripts/backlog_age.ts"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "LICENSE",
+        "package.json",
+        "packages/a2a-server/package.json",
+        "packages/cli/package.json",
+        "packages/cli/src/commands/extensions/examples/mcp-server/package.json",
+        "packages/core/package.json",
+        "packages/devtools/package.json",
+        "packages/sdk/package.json",
+        "packages/test-utils/package.json",
+        "packages/vscode-ide-companion/LICENSE",
+        "packages/vscode-ide-companion/package.json",
+        "third_party/get-ripgrep/LICENSE"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "packages",
+      "files": 2295,
+      "directories": 173,
+      "bytes": 22009975,
+      "runtime_files": 1154,
+      "test_files": 1021,
+      "docs_files": 22,
+      "text_lines": 638157,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 1995
+        },
+        {
+          "language": "Config",
+          "files": 50
+        },
+        {
+          "language": "Docs",
+          "files": 22
+        },
+        {
+          "language": "JavaScript",
+          "files": 7
+        },
+        {
+          "language": "C#",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "packages/a2a-server/GEMINI.md",
+        "packages/a2a-server/README.md",
+        "packages/a2a-server/development-extension-rfc.md",
+        "packages/a2a-server/index.ts",
+        "packages/a2a-server/package.json",
+        "packages/a2a-server/src/agent/executor.test.ts",
+        "packages/a2a-server/src/agent/executor.ts",
+        "packages/a2a-server/src/agent/race-condition.test.ts"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 125,
+      "directories": 15,
+      "bytes": 4465757,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 125,
+      "text_lines": 37696,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 95
+        },
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "docs/CONTRIBUTING.md",
+        "docs/admin/enterprise-controls.md",
+        "docs/assets/connected_devtools.png",
+        "docs/assets/gemini-screenshot.png",
+        "docs/assets/monitoring-dashboard-logs.png",
+        "docs/assets/monitoring-dashboard-metrics.png",
+        "docs/assets/monitoring-dashboard-overview.png",
+        "docs/assets/release_patch.png"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "readme_docs",
+        "roadmap_todos"
+      ]
+    },
+    {
+      "path": "integration-tests",
+      "files": 120,
+      "directories": 2,
+      "bytes": 463241,
+      "runtime_files": 5,
+      "test_files": 48,
+      "docs_files": 0,
+      "text_lines": 9556,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 52
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "integration-tests/acp-env-auth.test.ts",
+        "integration-tests/acp-telemetry.test.ts",
+        "integration-tests/api-resilience.test.ts",
+        "integration-tests/browser-agent-localhost.test.ts",
+        "integration-tests/browser-agent.test.ts",
+        "integration-tests/browser-policy.test.ts",
+        "integration-tests/checkpointing.test.ts",
+        "integration-tests/clipboard-linux.test.ts"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "tools",
+      "files": 119,
+      "directories": 41,
+      "bytes": 588025,
+      "runtime_files": 72,
+      "test_files": 20,
+      "docs_files": 21,
+      "text_lines": 17822,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 49
+        },
+        {
+          "language": "TypeScript",
+          "files": 27
+        },
+        {
+          "language": "Docs",
+          "files": 21
+        },
+        {
+          "language": "Config",
+          "files": 15
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "tools/caretaker-agent/Dockerfile",
+        "tools/caretaker-agent/cloudrun/egress-service/Dockerfile",
+        "tools/caretaker-agent/cloudrun/egress-service/package-lock.json",
+        "tools/caretaker-agent/cloudrun/egress-service/package.json",
+        "tools/caretaker-agent/cloudrun/egress-service/src/actions/github.test.ts",
+        "tools/caretaker-agent/cloudrun/egress-service/src/actions/github.ts",
+        "tools/caretaker-agent/cloudrun/egress-service/src/app.test.ts",
+        "tools/caretaker-agent/cloudrun/egress-service/src/app.ts"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 83,
+      "directories": 3,
+      "bytes": 488533,
+      "runtime_files": 65,
+      "test_files": 17,
+      "docs_files": 0,
+      "text_lines": 16114,
+      "languages": [
+        {
+          "language": "JavaScript",
+          "files": 44
+        },
+        {
+          "language": "TypeScript",
+          "files": 32
+        },
+        {
+          "language": "Shell",
+          "files": 6
+        }
+      ],
+      "example_paths": [
+        "scripts/aggregate_evals.js",
+        "scripts/batch_triage.sh",
+        "scripts/build.js",
+        "scripts/build_binary.js",
+        "scripts/build_package.js",
+        "scripts/build_sandbox.js",
+        "scripts/build_vscode_companion.js",
+        "scripts/changed_prompt.js"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 73,
+      "directories": 16,
+      "bytes": 399123,
+      "runtime_files": 64,
+      "test_files": 0,
+      "docs_files": 1,
+      "text_lines": 8658,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 63
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Shell",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/ISSUE_TEMPLATE/website_issue.yml",
+        ".github/actions/calculate-vars/action.yml",
+        ".github/actions/create-pull-request/action.yml",
+        ".github/actions/download-mac-binaries/action.yml",
+        ".github/actions/npm-auth-token/action.yml",
+        ".github/actions/post-coverage-comment/action.yml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "open_closed_issues_prs_discussions",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".gemini",
+      "files": 46,
+      "directories": 25,
+      "bytes": 160552,
+      "runtime_files": 17,
+      "test_files": 0,
+      "docs_files": 28,
+      "text_lines": 3435,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 28
+        },
+        {
+          "language": "Config",
+          "files": 14
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".gemini/commands/code-guide.toml",
+        ".gemini/commands/core.toml",
+        ".gemini/commands/find-docs.toml",
+        ".gemini/commands/frontend.toml",
+        ".gemini/commands/full-context.toml",
+        ".gemini/commands/github/cleanup-back-to-main.toml",
+        ".gemini/commands/introspect.toml",
+        ".gemini/commands/oncall/pr-review.toml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "evals",
+      "files": 46,
+      "directories": 0,
+      "bytes": 280495,
+      "runtime_files": 44,
+      "test_files": 1,
+      "docs_files": 1,
+      "text_lines": 8571,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 44
+        },
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "evals/README.md",
+        "evals/answer-vs-act.eval.ts",
+        "evals/app-test-helper.ts",
+        "evals/ask_user.eval.ts",
+        "evals/auto_memory_contract.eval.ts",
+        "evals/auto_memory_modes.eval.ts",
+        "evals/automated-tool-use.eval.ts",
+        "evals/background_processes.eval.ts"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 24,
+      "directories": 17,
+      "bytes": 825810,
+      "runtime_files": 9,
+      "test_files": 0,
+      "docs_files": 5,
+      "text_lines": 22758,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 7
+        },
+        {
+          "language": "Docs",
+          "files": 5
+        },
+        {
+          "language": "JavaScript",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".prettierrc.json",
+        ".yamllint.yml",
+        "CONTRIBUTING.md",
+        "Dockerfile",
+        "GEMINI.md",
+        "LICENSE",
+        "Makefile",
+        "README.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "roadmap_todos",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "perf-tests",
+      "files": 12,
+      "directories": 0,
+      "bytes": 31955,
+      "runtime_files": 4,
+      "test_files": 1,
+      "docs_files": 1,
+      "text_lines": 943,
+      "languages": [
+        {
+          "language": "TypeScript",
+          "files": 3
+        },
+        {
+          "language": "Config",
+          "files": 2
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "perf-tests/README.md",
+        "perf-tests/baselines.json",
+        "perf-tests/globalSetup.ts",
+        "perf-tests/perf-usage.test.ts",
+        "perf-tests/tsconfig.json",
+        "perf-tests/vitest.config.ts"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "memory-tests",
+      "files": 10,
+      "directories": 0,
+      "bytes": 56460335,
+      "runtime_files": 5,
+      "test_files": 1,
+      "docs_files": 0,
+      "text_lines": 694,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 3
+        },
+        {
+          "language": "TypeScript",
+          "files": 3
+        }
+      ],
+      "example_paths": [
+        "memory-tests/baselines.json",
+        "memory-tests/globalSetup.ts",
+        "memory-tests/large-chat-session.json",
+        "memory-tests/memory-usage.test.ts",
+        "memory-tests/tsconfig.json",
+        "memory-tests/vitest.config.ts"
+      ],
+      "source_classes": [
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".gcp",
+      "files": 5,
+      "directories": 0,
+      "bytes": 12093,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 129,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".gcp/development-worker.yml",
+        ".gcp/release-docker.yml"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".vscode",
+      "files": 4,
+      "directories": 0,
+      "bytes": 4442,
+      "runtime_files": 4,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 160,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        ".vscode/extensions.json",
+        ".vscode/launch.json",
+        ".vscode/settings.json",
+        ".vscode/tasks.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "third_party",
+      "files": 4,
+      "directories": 2,
+      "bytes": 6198,
+      "runtime_files": 3,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 186,
+      "languages": [
+        {
+          "language": "JavaScript",
+          "files": 2
+        },
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "third_party/get-ripgrep/LICENSE",
+        "third_party/get-ripgrep/package.json",
+        "third_party/get-ripgrep/src/downloadRipGrep.js",
+        "third_party/get-ripgrep/src/index.js"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "sea",
+      "files": 2,
+      "directories": 0,
+      "bytes": 30495,
+      "runtime_files": 0,
+      "test_files": 1,
+      "docs_files": 0,
+      "text_lines": 799,
+      "languages": [
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "sea/sea-launch.test.js"
+      ],
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".allstar",
+      "files": 1,
+      "directories": 0,
+      "bytes": 14,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 1,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        ".allstar/branch_protection.yaml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".husky",
+      "files": 1,
+      "directories": 0,
+      "bytes": 273,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "schemas",
+      "files": 1,
+      "directories": 0,
+      "bytes": 238612,
+      "runtime_files": 1,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 4617,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "schemas/settings.schema.json"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    }
+  ],
+  "skipped_dirs": [
+    ".git",
+    "packages/core/vendor"
+  ],
+  "completeness_critic": "Exhaustive local tree map plus pinned GitHub history/release/issue/PR/discussion metadata, roadmap and license audit, FAK self-query, candidate adjudication, and issue tracking; skipped dependency/cache/control directories: .git, packages/core/vendor.",
+  "non_tree_study": {
+    "observed_at": "2026-08-25T19:30:00-07:00",
+    "source_cutoff": "Pinned tree revision 64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4 (2026-08-25T18:52:30Z); GitHub metadata observed 2026-08-25.",
+    "github_surface": {
+      "issues": {
+        "open": 599,
+        "closed": 13710,
+        "total": 14309
+      },
+      "pull_requests": {
+        "open": 264,
+        "closed_unmerged": 5727,
+        "merged": 6668,
+        "total": 12659
+      },
+      "discussions": {
+        "total": 662
+      },
+      "releases": 601,
+      "history": {
+        "commits_visible_at_pin": 6389,
+        "pinned_commit": "64b5b79a6dd89ea96e65cb761c23aae6c0b33ce4",
+        "pinned_tree": "95e04bcee2859ff1c997f3fc333609045011197b",
+        "commit_verified": true
+      },
+      "repository_metadata": {
+        "stars": 106686,
+        "forks": 14486,
+        "license": "Apache-2.0",
+        "default_branch": "main",
+        "last_push_at_check": "2026-08-26T01:07:54Z"
+      },
+      "method": "Pinned partial clone plus GitHub REST commit/repository/license/releases endpoints and GraphQL aggregate counts for open/closed issues, open/closed/merged pull requests, discussions, and releases. Tree history, ROADMAP.md, changelogs, tags, and remote refs were audited at the pinned revision."
+    },
+    "self_query_axes": [
+      {
+        "query": "fak capabilities \"provider session reset clear new session lifecycle event\"",
+        "result": "No exact indexed outcome; source-specific lifecycle behavior remains adapter evidence rather than a new generic kernel capability."
+      },
+      {
+        "query": "fak capabilities \"session checkpoint resume conversation persistence trace continuity\"",
+        "result": "Native portable-session, context-reuse, and live-session-control outcomes cover persistence and continuation; Gemini checkpoint/session features do not establish a distinct kernel gap."
+      },
+      {
+        "query": "fak capabilities \"MCP OAuth trust policy extensions hooks lifecycle security\"",
+        "result": "The native default-deny capability floor is the relevant owned seam; Gemini extension, hook, and MCP product surfaces are not a safer or more efficient replacement."
+      }
+    ],
+    "candidate_matrix": [
+      {
+        "candidate": "clear/new typed SessionEnd(Clear) -> new UUID -> resetChat -> SessionStart(Clear) lifecycle",
+        "source": [
+          "packages/cli/src/ui/commands/clearCommand.ts",
+          "packages/cli/src/ui/commands/clearCommand.test.tsx"
+        ],
+        "alternative": "fak provider-boundary adapter and session-boundary ledger",
+        "classification": "adaptation",
+        "disposition": "already_owned",
+        "reason": "FAK already adapted this typed seam in the provider-session-reset contract and first-class Gemini guard work (#8219); the refreshed pin confirms the behavior is still present. No source is copied."
+      },
+      {
+        "candidate": "checkpointing and resumable session management",
+        "source": [
+          "docs/cli/checkpointing.md",
+          "docs/cli/session-management.md",
+          "docs/cli/tutorials/session-management.md"
+        ],
+        "alternative": "fak portable-session images, recall, context reuse, and live-session control",
+        "classification": "inspiration",
+        "disposition": "reject",
+        "reason": "The upstream UI/session product surface does not add a kernel mechanism beyond FAK-owned persistence and continuation, and no matched performance or correctness witness demonstrates a gain."
+      },
+      {
+        "candidate": "hooks, extensions, and MCP integration stack",
+        "source": [
+          "docs/hooks/",
+          "docs/extensions/",
+          "docs/tools/mcp-server.md",
+          "packages/core/src/hooks/",
+          "packages/core/src/tools/mcp-client.ts"
+        ],
+        "alternative": "fak guarded adapters, MCP gateway, policy adjudicator, and capability floor",
+        "classification": "direct_port",
+        "disposition": "reject",
+        "reason": "This is a provider product integration layer, not a distinct performance-gate mechanism; direct adoption would duplicate FAK ownership and broaden policy surface without measured benefit."
+      }
+    ],
+    "issue_tracking": {
+      "study_issue": "https://github.com/anthony-chaudhary/fak/issues/8999",
+      "parent_issue": "https://github.com/anthony-chaudhary/fak/issues/8936",
+      "existing_follow_ons": [
+        "https://github.com/anthony-chaudhary/fak/issues/8220"
+      ],
+      "filed_borrows": [],
+      "reason": "The only source-specific candidate is already owned and shipped; live provider-boundary dogfood remains tracked by #8220. The exhaustive refresh found no distinct evidence-backed borrow requiring a new issue."
+    }
+  }
+}
