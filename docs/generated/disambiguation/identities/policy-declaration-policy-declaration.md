@@ -1,3 +1,8 @@
+---
+title: "policy declaration"
+description: "Canonical fak documentation for policy declaration, including its scope, nearest contrasts, and operational use."
+---
+
 # policy declaration
 
 **Meaning:** A declarative set of tool, argument, network, and resource rules loaded by the adjudicator; it states configured constraints but is not itself a decision for one call.

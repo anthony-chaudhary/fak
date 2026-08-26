@@ -1,3 +1,8 @@
+---
+title: "simulated evidence"
+description: "Canonical fak documentation for simulated evidence, including its scope, nearest contrasts, and operational use."
+---
+
 # simulated evidence
 
 **Meaning:** Stand-in data explicitly labeled SIMULATED; it can test a path but cannot be narrated as a witnessed real-world measurement.

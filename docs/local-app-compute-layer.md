@@ -1,3 +1,8 @@
+---
+title: "Ship local inference as an app capability, not a localhost server"
+description: "Architecture and operating contract for fak local applications, including browser, daemon, accelerator, security, and offline boundaries."
+---
+
 # Ship local inference as an app capability, not a localhost server
 
 **Status:** proposed product contract for issue [#9131](https://github.com/anthony-chaudhary/fak/issues/9131)

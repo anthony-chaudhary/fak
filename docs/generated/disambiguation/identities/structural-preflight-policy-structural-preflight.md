@@ -1,3 +1,8 @@
+---
+title: "structural preflight"
+description: "Canonical fak documentation for structural preflight, including its scope, nearest contrasts, and operational use."
+---
+
 # structural preflight
 
 **Meaning:** The local pre-dispatch fold over grammar and adjudicator rungs for one tool call, producing a verdict without executing the tool or asking a model to interpret intent.

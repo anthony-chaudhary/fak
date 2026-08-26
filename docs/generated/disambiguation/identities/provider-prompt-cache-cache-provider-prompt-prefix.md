@@ -1,3 +1,8 @@
+---
+title: "provider prompt cache"
+description: "Canonical fak documentation for provider prompt cache, including its scope, nearest contrasts, and operational use."
+---
+
 # provider prompt cache
 
 **Meaning:** An upstream provider-owned prompt-prefix reuse service observed as cache-read and cache-creation token accounting with provider TTL and pricing rules.

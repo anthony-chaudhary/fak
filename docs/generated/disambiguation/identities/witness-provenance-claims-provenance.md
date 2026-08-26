@@ -1,3 +1,8 @@
+---
+title: "witness provenance"
+description: "Canonical fak documentation for witness provenance, including its scope, nearest contrasts, and operational use."
+---
+
 # witness provenance
 
 **Meaning:** The closed label stating how a reported value was obtained: witnessed, observed, modeled, or simulated; it does not replace a reproduction witness.

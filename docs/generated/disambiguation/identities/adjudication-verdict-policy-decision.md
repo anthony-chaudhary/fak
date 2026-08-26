@@ -1,3 +1,8 @@
+---
+title: "adjudication verdict"
+description: "Canonical fak documentation for adjudication verdict, including its scope, nearest contrasts, and operational use."
+---
+
 # adjudication verdict
 
 **Meaning:** The typed per-call result emitted by the adjudication fold: allow, deny, transform, quarantine, require-witness, defer, or indeterminate, with a reason and deciding rung.

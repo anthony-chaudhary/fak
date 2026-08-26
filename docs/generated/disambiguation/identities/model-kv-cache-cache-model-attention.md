@@ -1,3 +1,8 @@
+---
+title: "model KV cache"
+description: "Canonical fak documentation for model KV cache, including its scope, nearest contrasts, and operational use."
+---
+
 # model KV cache
 
 **Meaning:** Kernel-owned per-layer attention key/value tensors indexed by token position and invalidated or rewritten when the model sequence changes.

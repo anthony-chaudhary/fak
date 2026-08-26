@@ -1,3 +1,8 @@
+---
+title: "runtime"
+description: "Canonical fak documentation for runtime, including its scope, nearest contrasts, and operational use."
+---
+
 # runtime
 
 **Meaning:** The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn.

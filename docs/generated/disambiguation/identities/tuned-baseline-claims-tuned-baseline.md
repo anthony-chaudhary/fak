@@ -1,3 +1,8 @@
+---
+title: "tuned baseline"
+description: "Canonical fak documentation for tuned baseline, including its scope, nearest contrasts, and operational use."
+---
+
 # tuned baseline
 
 **Meaning:** The best-practice alternative an operator would actually run, required as the decision-grade comparator for a performance headline.

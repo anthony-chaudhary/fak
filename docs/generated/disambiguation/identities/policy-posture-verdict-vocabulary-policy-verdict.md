@@ -1,3 +1,8 @@
+---
+title: "policy posture verdict"
+description: "Canonical fak documentation for policy posture verdict, including its scope, nearest contrasts, and operational use."
+---
+
 # policy posture verdict
 
 **Meaning:** The ALLOW or DENY result of folding compiled, environment, and organization authority over a policy amendment.

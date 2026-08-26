@@ -1,3 +1,8 @@
+---
+title: "fak CLI kernel"
+description: "Canonical fak documentation for fak CLI kernel, including its scope, nearest contrasts, and operational use."
+---
+
 # fak CLI kernel
 
 **Meaning:** The fak command-line product surface, named as a contrast target for the package-scoped kernel entry.

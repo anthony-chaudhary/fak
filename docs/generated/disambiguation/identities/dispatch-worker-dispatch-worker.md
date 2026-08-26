@@ -1,3 +1,8 @@
+---
+title: "dispatch worker"
+description: "Canonical fak documentation for dispatch worker, including its scope, nearest contrasts, and operational use."
+---
+
 # dispatch worker
 
 **Meaning:** One executing worker record with structured issue, lane, backend, and witnessed-result fields; its free-form output is untrusted narration.

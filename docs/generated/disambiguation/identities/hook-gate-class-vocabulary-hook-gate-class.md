@@ -1,3 +1,8 @@
+---
+title: "hook gate class"
+description: "Canonical fak documentation for hook gate class, including its scope, nearest contrasts, and operational use."
+---
+
 # hook gate class
 
 **Meaning:** A hook-runner classification declaring whether a gate mutates the index/worktree, intentionally uses a worktree, or is a tree-twin checker.
