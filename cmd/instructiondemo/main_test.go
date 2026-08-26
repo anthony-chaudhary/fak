@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/cmd/internal/democapture"
 	"github.com/anthony-chaudhary/fak/pkg/harnesskit"
 )
 
@@ -26,5 +27,8 @@ func TestSelfcheckCapturesStablePrefixAndDynamicTurn(t *testing.T) {
 	}
 	if got.Turns[0].Snapshot.Fragments[0].Content == got.Turns[1].Snapshot.Fragments[0].Content {
 		t.Fatal("turn-scoped content did not change")
+	}
+	if err := democapture.MatchMarkdown("EXAMPLE-OUTPUT.md", stdout.Bytes()); err != nil {
+		t.Fatal(err)
 	}
 }

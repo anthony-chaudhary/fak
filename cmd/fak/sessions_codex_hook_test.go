@@ -22,7 +22,31 @@ type codexProjectCommandHook struct {
 	StatusMessage  string `json:"statusMessage"`
 }
 
-func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
+func TestCodexLoopHookDefaultDirectAllowsWithoutDiagnosis(t *testing.T) {
+	t.Setenv(guardActiveEnv, "")
+	t.Setenv(codexLoopHookHardenedEnv, "")
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	home, sessionID := writeCodexHookSession(t, "openai")
+	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
+
+	original := codexLoopHookDiagnose
+	called := false
+	codexLoopHookDiagnose = func(io.Reader, string) (codexLoopDiagnosis, error) {
+		called = true
+		return codexLoopDiagnosis{ModelProvider: "openai"}, nil
+	}
+	t.Cleanup(func() { codexLoopHookDiagnose = original })
+
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("hook exit=%d stderr=%q", code, stderr.String())
+	}
+	if called || stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("called=%v stdout=%q stderr=%q, want byte-silent default allow without diagnosis", called, stdout.String(), stderr.String())
+	}
+}
+
+func TestCodexLoopHookHardenedBlocksActiveDirectContinuation(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
 	// An ambient FAK_GUARD_ACTIVE (set inside every `fak guard` session, so on any
 	// developer box but not on a bare CI runner) short-circuits the hook to
@@ -33,7 +57,7 @@ func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
 	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit","turn_id":"turn-next"}`
 
 	var stdout, stderr bytes.Buffer
-	code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home})
+	code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home})
 	if code != 0 {
 		t.Fatalf("hook exit = %d, want 0 with a JSON block decision; stderr=%s", code, stderr.String())
 	}
@@ -62,6 +86,23 @@ func TestCodexLoopHookBlocksActiveDirectContinuation(t *testing.T) {
 	}
 }
 
+func TestCodexLoopHookHardenedEnvironmentBlocksActiveDirectContinuation(t *testing.T) {
+	t.Setenv(guardActiveEnv, "")
+	t.Setenv(codexLoopHookHardenedEnv, "1")
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	home, sessionID := writeCodexHookSession(t, "openai")
+	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
+
+	var stdout, stderr bytes.Buffer
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		t.Fatalf("hook exit=%d stderr=%q", code, stderr.String())
+	}
+	var got codexLoopHookBlock
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil || got.Decision != "block" {
+		t.Fatalf("hardened environment did not block: err=%v stdout=%q", err, stdout.String())
+	}
+}
+
 func TestCodexLoopHookBlockWritesExactlyOneAuditWitness(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
 	t.Setenv(guardActiveEnv, "")
@@ -71,7 +112,7 @@ func TestCodexLoopHookBlockWritesExactlyOneAuditWitness(t *testing.T) {
 	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
 
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("hook exit = %d; stderr=%s", code, stderr.String())
 	}
 	var block codexLoopHookBlock
@@ -103,7 +144,7 @@ func TestCodexLoopHookDeterminismByteIdentical(t *testing.T) {
 	var outputs [2][]byte
 	for i := range outputs {
 		var stdout, stderr bytes.Buffer
-		if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+		if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 			t.Fatalf("run %d exit=%d stderr=%s", i, code, stderr.String())
 		}
 		outputs[i] = append([]byte(nil), stdout.Bytes()...)
@@ -153,7 +194,7 @@ func TestCodexLoopHookConcurrentAppendNeverAllowsDirectProvider(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var stdout, stderr bytes.Buffer
-			code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home})
+			code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home})
 			var block codexLoopHookBlock
 			if code != 0 || json.Unmarshal(stdout.Bytes(), &block) != nil || block.Decision != "block" {
 				errs <- fmt.Sprintf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -184,7 +225,7 @@ func TestCodexLoopHookAllowsGuardedAndExplicitOverride(t *testing.T) {
 			t.Setenv(codexLoopHookOverrideEnv, tc.override)
 			payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
 			var stdout, stderr bytes.Buffer
-			if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+			if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 				t.Fatalf("hook exit = %d, stderr=%s", code, stderr.String())
 			}
 			if stdout.Len() != 0 {
@@ -198,7 +239,8 @@ func TestCodexLoopHookAllowsGuardedAndExplicitOverride(t *testing.T) {
 // a session already wrapped by `fak guard` (which marks the child env with guardActiveEnv,
 // inherited by this hook subprocess) is allowed WITHOUT opening or reparsing the transcript
 // — even when the session's own model_provider would otherwise be diagnosed unguarded and
-// blocked (contrast TestCodexLoopHookBlocksActiveDirectContinuation with the same fixture).
+// blocked in hardened mode (contrast
+// TestCodexLoopHookHardenedBlocksActiveDirectContinuation with the same fixture).
 // This keeps the per-turn hook off the growing session file on the guarded dogfood path.
 func TestCodexLoopHookSpoofedFakProviderBlocksWithoutGuardWitness(t *testing.T) {
 	t.Setenv(codexLoopHookOverrideEnv, "")
@@ -206,7 +248,7 @@ func TestCodexLoopHookSpoofedFakProviderBlocksWithoutGuardWitness(t *testing.T) 
 	home, sessionID := writeCodexHookSession(t, "fak")
 	payload := `{"session_id":"` + sessionID + `"}`
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	var block codexLoopHookBlock
@@ -221,7 +263,7 @@ func TestCodexLoopHookGuardMarkerPersistsWitnessThenAllowsWithoutEnv(t *testing.
 	payload := `{"session_id":"` + sessionID + `"}`
 	t.Setenv(guardActiveEnv, "1")
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 || stdout.Len() != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 || stdout.Len() != 0 {
 		t.Fatalf("guarded first turn exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !codexGuardWitnessExists(home, sessionID) {
@@ -230,7 +272,7 @@ func TestCodexLoopHookGuardMarkerPersistsWitnessThenAllowsWithoutEnv(t *testing.
 	t.Setenv(guardActiveEnv, "")
 	stdout.Reset()
 	stderr.Reset()
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 || stdout.Len() != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 || stdout.Len() != 0 {
 		t.Fatalf("witnessed continuation exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -253,7 +295,7 @@ func TestCodexLoopHookSessionIdentifierAliases(t *testing.T) {
 				t.Setenv("CODEX_THREAD_ID", sessionID)
 			}
 			var stdout, stderr bytes.Buffer
-			if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(tc.payload(sessionID)), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+			if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(tc.payload(sessionID)), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 				t.Fatalf("hook exit = %d; stderr=%s", code, stderr.String())
 			}
 			var got codexLoopHookBlock
@@ -293,7 +335,7 @@ func TestCodexLoopHookLargeTranscriptUsesProviderProbeWithinBudget(t *testing.T)
 	payload := `{"session_id":"` + sessionID + `"}`
 	started := time.Now()
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("hook exit=%d stderr=%s", code, stderr.String())
 	}
 	if elapsed := time.Since(started); elapsed >= codexLoopHookBudget {
@@ -321,7 +363,7 @@ func TestCodexLoopHookGuardedMarkerSkipsReparse(t *testing.T) {
 
 	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("guarded marker path exit = %d, want allow (0); stderr=%s", code, stderr.String())
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
@@ -340,7 +382,7 @@ func TestCodexLoopHookRecoversPanicAllowSilent(t *testing.T) {
 	t.Cleanup(func() { codexLoopHookDiagnose = original })
 
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("panic path exit = %d, want allow (0)", code)
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
@@ -348,7 +390,10 @@ func TestCodexLoopHookRecoversPanicAllowSilent(t *testing.T) {
 	}
 }
 
-func TestCodexLoopHookTimesOutAllowSilent(t *testing.T) {
+func TestCodexLoopHookHardenedTimeoutBlocksWithTypedReason(t *testing.T) {
+	t.Setenv(guardActiveEnv, "")
+	t.Setenv(codexLoopHookHardenedEnv, "")
+	t.Setenv(codexLoopHookOverrideEnv, "")
 	home, sessionID := writeCodexHookSession(t, "openai")
 	payload := `{"session_id":"` + sessionID + `","hook_event_name":"UserPromptSubmit"}`
 
@@ -366,14 +411,35 @@ func TestCodexLoopHookTimesOutAllowSilent(t *testing.T) {
 
 	started := time.Now()
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", home}); code != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", home}); code != 0 {
 		t.Fatalf("timeout path exit = %d, want allow (0)", code)
 	}
 	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
 		t.Fatalf("timeout path took %s, want bounded well below the outer hook timeout", elapsed)
 	}
-	if stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("timeout path must be byte-silent: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	var block codexLoopHookBlock
+	if err := json.Unmarshal(stdout.Bytes(), &block); err != nil || block.Decision != "block" || !strings.Contains(block.Reason, codexLoopHookTimeoutReason) {
+		t.Fatalf("timeout path must emit the typed hardened block: err=%v stdout=%q", err, stdout.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("timeout block stderr=%q, want empty", stderr.String())
+	}
+}
+
+func TestCodexLoopHookTimeoutBlockRespectsScopedExceptions(t *testing.T) {
+	t.Setenv(codexLoopHookHardenedEnv, "1")
+	t.Setenv(guardActiveEnv, "1")
+	if codexLoopHookTimeoutMustBlock(nil) {
+		t.Fatal("guard-active child must not receive a hardened timeout block")
+	}
+	t.Setenv(guardActiveEnv, "")
+	t.Setenv(codexLoopHookOverrideEnv, "1")
+	if codexLoopHookTimeoutMustBlock(nil) {
+		t.Fatal("allow-direct environment override must suppress a hardened timeout block")
+	}
+	t.Setenv(codexLoopHookOverrideEnv, "")
+	if codexLoopHookTimeoutMustBlock([]string{"--hardened", "--allow-direct"}) {
+		t.Fatal("allow-direct flag must suppress a hardened timeout block")
 	}
 }
 
@@ -381,7 +447,7 @@ func TestCodexLoopHookUnreadableSessionAllowsSilently(t *testing.T) {
 	payload := `{"session_id":"missing-or-locked-session","hook_event_name":"UserPromptSubmit"}`
 
 	var stdout, stderr bytes.Buffer
-	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--codex-home", t.TempDir()}); code != 0 {
+	if code := runSessionsWithStdin(&stdout, &stderr, strings.NewReader(payload), []string{"codex-loop-hook", "--hardened", "--codex-home", t.TempDir()}); code != 0 {
 		t.Fatalf("unreadable session path exit = %d, want allow (0)", code)
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
@@ -398,7 +464,7 @@ func TestCodexLoopHookConfigWiresUserPromptSubmit(t *testing.T) {
 		"portable": h.Command,
 		"windows":  h.CommandWindows,
 	} {
-		for _, want := range []string{"fak sessions codex-loop-hook"} {
+		for _, want := range []string{"fak sessions codex-loop-hook", guardActiveEnv, codexLoopHookHardenedEnv} {
 			if !strings.Contains(command, want) {
 				t.Errorf("%s UserPromptSubmit command missing %q: %s", name, want, command)
 			}
@@ -409,22 +475,22 @@ func TestCodexLoopHookConfigWiresUserPromptSubmit(t *testing.T) {
 	}
 }
 
-func TestCodexLoopHookConfigAllowsSilentlyWhenFakIsStale(t *testing.T) {
+func TestCodexLoopHookConfigDefaultDirectDoesNotInvokeFak(t *testing.T) {
 	h := loadCodexProjectHook(t)
 	fakeDir := t.TempDir()
-	writeCodexHookFakeFak(t, fakeDir, true)
+	writeCodexHookFakeFak(t, fakeDir, false)
 
 	cmd := codexProjectHookCommand(t, h)
-	cmd.Env = append(os.Environ(), "PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd.Env = append(os.Environ(), guardActiveEnv+"=", codexLoopHookHardenedEnv+"=", "PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cmd.Stdin = strings.NewReader("{\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"do not send\"}\n")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("stale fak hook must fail open: %v; stdout=%s stderr=%s", err, stdout.String(), stderr.String())
+		t.Fatalf("default direct hook: %v; stdout=%s stderr=%s", err, stdout.String(), stderr.String())
 	}
 	if stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("stale fak allow must stay silent: stdout=%q stderr=%q", stdout.String(), stderr.String())
+		t.Fatalf("default direct hook invoked fak: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }
 
@@ -434,7 +500,7 @@ func TestCodexLoopHookConfigPreservesCurrentFakBlock(t *testing.T) {
 	writeCodexHookFakeFak(t, fakeDir, false)
 
 	cmd := codexProjectHookCommand(t, h)
-	cmd.Env = append(os.Environ(), "PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd.Env = append(os.Environ(), guardActiveEnv+"=", codexLoopHookHardenedEnv+"=1", "PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cmd.Stdin = strings.NewReader("{\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"do not send\"}\n")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -457,7 +523,7 @@ func TestCodexLoopHookConfigAllowsCurrentGuardedFak(t *testing.T) {
 	writeCodexHookAllowingFakeFak(t, fakeDir)
 
 	cmd := codexProjectHookCommand(t, h)
-	cmd.Env = append(os.Environ(), "PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cmd.Env = append(os.Environ(), guardActiveEnv+"=1", codexLoopHookHardenedEnv+"=", "PATH="+fakeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	cmd.Stdin = strings.NewReader("{\"hook_event_name\":\"UserPromptSubmit\",\"prompt\":\"send guarded turn\"}\n")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

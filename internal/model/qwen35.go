@@ -440,6 +440,15 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 	dtBias := m.tensor(p("linear_attn.dt_bias"))
 	normW := m.tensor(p("linear_attn.norm.weight"))
 
+	if core, used, err := s.tryQwen35MetalGDNDecode(l, mixed, zAll, bvec, avec, conv, aLog, dtBias, normW, eps); used {
+		if err != nil {
+			panic(err)
+		}
+		out := mat.mul(p("linear_attn.out_proj.weight"), mat.prep(core), H, valDim)
+		s.tapOp(l, "out", out)
+		return out
+	}
+
 	convOut := make([]float32, convDim)
 	t = s.phaseStart()
 	for c := 0; c < convDim; c++ {

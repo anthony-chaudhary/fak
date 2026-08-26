@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os/exec"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/cmd/internal/democapture"
 )
 
 func TestResultBudgetSelfcheck(t *testing.T) {
@@ -20,7 +22,7 @@ func TestResultBudgetSelfcheck(t *testing.T) {
 }
 
 func TestSelfcheckCapturedOutput(t *testing.T) {
-	cmd := exec.Command("go", "run", ".", "-selfcheck")
+	cmd := exec.Command("go", "run", ".", "-selfcheck", "-pretty")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("selfcheck: %v", err)
@@ -34,6 +36,9 @@ func TestSelfcheckCapturedOutput(t *testing.T) {
 	}
 	if err := validateReport(report); err != nil {
 		t.Fatalf("captured witness: %v\n%s", err, out)
+	}
+	if err := democapture.MatchMarkdown("EXAMPLE-OUTPUT.md", out); err != nil {
+		t.Fatal(err)
 	}
 }
 

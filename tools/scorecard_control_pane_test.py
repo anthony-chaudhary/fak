@@ -139,26 +139,7 @@ def test_operator_heaviness_scorecard_registered() -> None:
 # left 7 scorecards (incl. tooling_quality F/debt 66) out of the "universal" rank.
 # A *_scorecard.py whose metric is folded under a DIFFERENT script name (the go
 # native scorecards) or is intentionally standalone goes here with a reason.
-EXCLUDED_SCORECARDS: dict[str, str] = {
-    # The conflation/token-defaults/guard-rsi/dogfood/maturity/growth/support-maturity
-    # metrics ARE folded, but via `go run ./cmd/fak ...` (no python script); their
-    # python test/helper files (if any) are not the fold entry point.
-    "vcache_scorecard_gate.py": "a CI gate wrapper, not a portfolio debt scorecard",
-    "skill_slop_scorecard.py": "a per-file HARD admission gate for SKILL.md paths (#2911): "
-    "requires positional path args and emits no corpus *_debt integer, so it is a standalone "
-    "gate, not a bare-run portfolio-debt scorecard",
-    "behavior_contract_scorecard.py": "advisory testing-quality gate (#2900): emits "
-    "change_detector_debt and is fold-eligible, but registering it would require re-pinning "
-    "scorecard_baseline.json — register + pin on a green tree to fold it into the ratchet",
-    "commit_quality_scorecard.py": "the eventual commit-scoring superset (composes "
-    "subject-gradeability + stamp-bindability + on-lane into one commit_debt). Fold-eligible "
-    "(emits corpus.commit_debt + grade), BUT its kpi_stamp_on_lane reads working-tree "
-    "dos.toml / internal / cmd dirs and rides an in-flight internal_leaves fix, so its floor "
-    "can't be pinned honestly on a dirty tree. The clean git-log subject half is folded now "
-    "via commit_subject_coverage.py (SCORECARDS 'commit_subject'); register + pin this superset "
-    "on a green tree once internal_leaves lands, and drop the commit_subject row then (folding "
-    "both double-counts the subject KPI)",
-}
+EXCLUDED_SCORECARDS = scp.EXCLUDED_SCORECARDS
 
 
 def _registered_scripts() -> set[str]:
@@ -1063,3 +1044,23 @@ def test_legacy_baseline_without_detector_versions_remains_comparable(tmp_path: 
     folded = scp.fold([metric], legacy, workspace=str(tmp_path), commit="new")
     assert folded["trend"]["direction"] == "improved"
     assert folded["trend"]["version_changed"] == []
+
+
+def test_index_coverage_is_in_default_payload_and_render() -> None:
+    payload = scp.fold(full_metrics(), None, workspace=str(scp.repo_root()), commit="abc123")
+    coverage = payload["index_coverage"]
+    assert coverage["ok"] is True
+    assert coverage["unindexed_count"] == 0
+    assert coverage["discovered_count"] == coverage["registered_count"] + coverage["excluded_count"]
+    rendered = scp.render(payload)
+    assert "index coverage:" in rendered
+    assert "unindexed=0" in rendered
+
+
+def test_index_coverage_rejects_synthetic_unindexed_scorecard(tmp_path: Path) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "new_surface_scorecard.py").write_text("# scorecard\n", encoding="utf-8")
+    coverage = scp.scorecard_index_coverage(tmp_path)
+    assert coverage["ok"] is False
+    assert coverage["unindexed"] == ["new_surface_scorecard.py"]

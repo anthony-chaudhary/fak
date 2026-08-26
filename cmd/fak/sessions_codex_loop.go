@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +22,9 @@ import (
 const codexLoopSchema = "fak.sessions.codex_loop.v1"
 const codexLoopRecentSchema = "fak.sessions.codex_loop_recent.v1"
 const codexLoopHookOverrideEnv = "FAK_ALLOW_DIRECT_CODEX_CONTINUE"
+const codexLoopHookHardenedEnv = "FAK_CODEX_SUBMIT_HARDENED"
 const codexLoopHookAuditJournalEnv = "FAK_AUDIT_JOURNAL"
+const codexLoopHookTimeoutReason = "codex_hardened_submit_timeout"
 const codexLoopHookDefaultBudget = 500 * time.Millisecond
 const codexLoopLaunchMaxBytes int64 = 4 << 20
 const codexLoopLaunchPrefixBytes int64 = 256 << 10
@@ -313,11 +316,10 @@ func finishCodexLoopReport(stdout, stderr io.Writer, asJSON bool, payload any, r
 	return gateCode
 }
 
-// sessionsCodexLoopHook is the turn-boundary enforcement seam for #3023. Codex's
-// UserPromptSubmit hook fires before a prompt becomes the next model/tool turn and
-// carries the active session_id. Reuse the existing transcript diagnosis rather than
-// maintaining a second provider classifier: a direct provider is blocked with the same
-// typed reason the advisory `--fail-on unguarded` gate already reports.
+// sessionsCodexLoopHook is the opt-in turn-boundary seam for #3023 and #9234.
+// Guarded children use it for scoped first-prompt context; hardened mode additionally
+// reuses transcript diagnosis to block direct providers with the advisory gate's typed
+// reason. Ordinary direct Codex prompts return before reading stdin or the transcript.
 type codexLoopHookRunResult struct {
 	code   int
 	stdout []byte
@@ -376,8 +378,39 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 		}
 		return 0
 	case <-timer.C:
+		if codexLoopHookTimeoutMustBlock(argv) {
+			reason := codexLoopHookTimeoutReason + ": hardened mode could not finish the bounded direct-session diagnosis, so the prompt remains blocked; retry or use the intentional --allow-direct override"
+			if err := json.NewEncoder(stdout).Encode(codexLoopHookOutput{Decision: "block", Reason: reason}); err != nil {
+				return 1
+			}
+		}
 		return 0
 	}
+}
+
+func codexLoopHookTimeoutMustBlock(argv []string) bool {
+	if codexLoopHookOverrideEnabled(os.Getenv(guardActiveEnv)) {
+		return false
+	}
+	if codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookOverrideEnv)) || codexLoopHookBoolFlagEnabled(argv, "allow-direct") {
+		return false
+	}
+	return codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookHardenedEnv)) || codexLoopHookBoolFlagEnabled(argv, "hardened")
+}
+
+func codexLoopHookBoolFlagEnabled(argv []string, name string) bool {
+	flagName := "--" + name
+	for _, arg := range argv {
+		if arg == flagName {
+			return true
+		}
+		if !strings.HasPrefix(arg, flagName+"=") {
+			continue
+		}
+		enabled, err := strconv.ParseBool(strings.TrimPrefix(arg, flagName+"="))
+		return err == nil && enabled
+	}
+	return false
 }
 
 func codexSessionArtifactPath(codexHome, sessionID, dir, invalidMessage string) (string, error) {
@@ -557,13 +590,19 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	fs.SetOutput(stderr)
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
 	allowDirect := fs.Bool("allow-direct", false, "explicitly allow this intentional direct-provider continuation")
+	hardened := fs.Bool("hardened", false, "block an unguarded direct-provider continuation")
 	fs.Usage = func() {
-		fmt.Fprintf(stderr, "usage: fak sessions codex-loop-hook [--codex-home DIR] [--allow-direct] (or set %s=1)\n", codexLoopHookOverrideEnv)
+		fmt.Fprintf(stderr, "usage: fak sessions codex-loop-hook [--codex-home DIR] [--hardened] [--allow-direct] (or set %s=1 / %s=1)\n", codexLoopHookHardenedEnv, codexLoopHookOverrideEnv)
 	}
 	if code, done := parseFlagsRejectArgs(fs, argv, stderr); done {
 		return code
 	}
-	if *allowDirect || codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookOverrideEnv)) {
+	guardActive := codexLoopHookOverrideEnabled(os.Getenv(guardActiveEnv))
+	hardenedActive := *hardened || codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookHardenedEnv))
+	if !guardActive && !hardenedActive {
+		return 0
+	}
+	if !guardActive && (*allowDirect || codexLoopHookOverrideEnabled(os.Getenv(codexLoopHookOverrideEnv))) {
 		return 0
 	}
 	var in codexLoopHookInput
@@ -572,7 +611,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 		return 0
 	}
 	sessionID := codexLoopFirstNonEmpty(in.SessionID, in.ThreadID, in.ConversationID, os.Getenv("CODEX_THREAD_ID"))
-	if sessionID != "" && codexLoopHookOverrideEnabled(os.Getenv(guardActiveEnv)) {
+	if sessionID != "" && guardActive {
 		if err := writeCodexGuardWitness(*codexHome, sessionID); err != nil {
 			fmt.Fprintf(stderr, "fak sessions codex-loop-hook: persist guard witness: %v (allowing turn)\n", err)
 		}

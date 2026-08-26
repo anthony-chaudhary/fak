@@ -1000,3 +1000,4 @@ These reader-facing references complement the curated paths above. They are grou
 - [codebookmeta](docs/research/quantization/codebookmeta.md)
 
 - [`docs/notes/PROVIDER-CACHE-HINT-LIVE-WITNESS-2026-08-25.md`](docs/notes/PROVIDER-CACHE-HINT-LIVE-WITNESS-2026-08-25.md) — live provider cache-hint negotiation witness.
+- [`docs/notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md`](docs/notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md) — Qwen4 experimental support rollback watch and cutover evidence.

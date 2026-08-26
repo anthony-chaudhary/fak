@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/cmd/internal/democapture"
 )
 
 func TestSelfcheckCommand(t *testing.T) {
@@ -22,6 +24,9 @@ func TestSelfcheckCommand(t *testing.T) {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("output missing %q:\n%s", want, stdout.String())
 		}
+	}
+	if err := democapture.MatchMarkdown("EXAMPLE-OUTPUT.md", stdout.Bytes()); err != nil {
+		t.Fatal(err)
 	}
 }
 

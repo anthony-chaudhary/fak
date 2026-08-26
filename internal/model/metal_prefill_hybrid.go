@@ -106,6 +106,14 @@ func (b *metalQwen35GDNSequenceBackend) Qwen35GDNPreprojectedSequence(req Qwen35
 	return Qwen35GDNPreprojectedSequenceResult{Core: core, State: req.State}, nil
 }
 
+func (b *metalQwen35GDNSequenceBackend) SeedQwen35GDNAuxState(handles Qwen35GDNAuxState, conv, recurrent []float32) error {
+	state := b.state(handles)
+	if state == nil {
+		return fmt.Errorf("metalgemm: unknown GDN auxiliary-state owner")
+	}
+	return state.Seed(conv, recurrent)
+}
+
 func (b *metalQwen35GDNSequenceBackend) SnapshotQwen35GDNAuxState(handles Qwen35GDNAuxState) ([]float32, []float32, error) {
 	state := b.state(handles)
 	if state == nil {

@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -61,5 +60,3 @@ func runDiscovery(stdout, stderr io.Writer, args []string) int {
 	}
 	return 0
 }
-
-func cmdDiscovery(args []string) { os.Exit(runDiscovery(os.Stdout, os.Stderr, args)) }

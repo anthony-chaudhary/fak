@@ -159,6 +159,10 @@ func q8ResidentBytes(qt *q8Tensor) int64 {
 // runs the unbounded halW path, where the honest answer is "residency is whatever accumulated".
 type ExpertRingStats struct {
 	Enabled bool `json:"enabled"`
+	// Policy and PolicyGeneration identify the policy-local measurement epoch. The traffic and
+	// residency counters below remain cumulative across explicit policy swaps.
+	Policy           ExpertRingEvictPolicy `json:"policy"`
+	PolicyGeneration uint64                `json:"policy_generation"`
 	// BudgetBytes is the declared ceiling; ResidentBytes the instantaneous footprint; PeakBytes the
 	// high-water mark. PeakBytes <= BudgetBytes is the boundedness claim, and Evictions > 0 is what
 	// proves the bound was actually exercised rather than merely never reached.
@@ -240,18 +244,20 @@ func (s *Session) ExpertRing() ExpertRingStats {
 // a session that may not exist any more.
 func (r *pagedRing) stats() ExpertRingStats {
 	return ExpertRingStats{
-		Enabled:       true,
-		BudgetBytes:   r.budget(),
-		ResidentBytes: r.used(),
-		PeakBytes:     r.peakUsed(),
-		ResidentCount: r.residentCount(),
-		PageIns:       r.pageIn,
-		Hits:          r.hit,
-		Evictions:     r.evict,
-		Lookups:       r.lookups,
-		Refusals:      r.refused,
-		PageInBytes:   r.pageInBytes,
-		PinnedCount:   r.pins.Len(),
+		Enabled:          true,
+		Policy:           r.policy,
+		PolicyGeneration: r.policyGeneration,
+		BudgetBytes:      r.budget(),
+		ResidentBytes:    r.used(),
+		PeakBytes:        r.peakUsed(),
+		ResidentCount:    r.residentCount(),
+		PageIns:          r.pageIn,
+		Hits:             r.hit,
+		Evictions:        r.evict,
+		Lookups:          r.lookups,
+		Refusals:         r.refused,
+		PageInBytes:      r.pageInBytes,
+		PinnedCount:      r.pins.Len(),
 
 		Prefetched:       r.prefetched,
 		ActivatedExperts: r.activatedExperts,
