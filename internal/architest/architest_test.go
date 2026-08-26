@@ -701,6 +701,7 @@ var tier = map[string]int{
 	"nativefirst":                1, // stdlib-only native-engine substitution policy shared by CLI lint and commit gates.
 	"agentqueue":                 1, // stdlib-only deterministic desired-state planner for bounded agent populations (#8875).
 	"supervisionpolicy":          1, // stdlib-only typed fault-domain and bounded restart policy (#8909).
+	"projectionspine":            1, // stdlib-only disposable projection restart and session reattach spine (#8912).
 	"codexsession":               3, // local Codex app-server adapter projected into the public harness protocol (#8736).
 	"hostdiag":                   3,
 	"shellprov":                  1, // stdlib-only privacy-safe receipt primitive for fak-owned shell launch identity (#9086).
