@@ -417,42 +417,39 @@ kernel void q4k_gemm(device const uchar* W [[buffer(0)]],
     }
 }
 
-// q4k_gemm_mm: the SIMDGROUP-MATRIX (hardware MMA) variant of q4k_gemm. Same dequant staging into
-// threadgroup memory (wbuf[BM*32], xbuf[BN*32] for one 32-wide K sub-block), but the compute core
-// uses Apple's 8x8 simdgroup_float8x8 matrix units instead of the scalar outer-product micro-tile.
-// The scalar kernel saturates at ~1360 GFLOP/s = ~19% of the M3 Pro's ~7 TFLOP/s FP32 ceiling
-// because the inner loop is ALU/register-bound thread-serial FMA; the hardware MMA is the known
-// route to a large fraction of peak (llama.cpp's Metal mul_mm uses simdgroup_matrix_multiply-
-// _accumulate; SOTA route "borrow"). Layout: BM=BN=64 output tile, 256 threads = 8 simdgroups in a
-// 4(row)x2(col) grid; each simdgroup owns 16 rows x 32 cols = a 2x4 array of 8x8 accumulator tiles.
-// The K axis is walked one q4_k sub-block (32 weights) at a time = four 8-wide MMA steps. Bit-close
-// to the CPU f32 reference up to MMA accumulation order (held by TestMetalQ4KGemmMMMatchesCPU).
-#define Q4K_MM_SGROW 4  // simdgroups down the BM=64 rows -> each owns 64/4 = 16 rows (2 tiles)
-#define Q4K_MM_SGCOL 2  // simdgroups across the BN=64 cols -> each owns 64/2 = 32 cols (4 tiles)
-kernel void q4k_gemm_mm(device const uchar* W [[buffer(0)]],
-                        device const float* X [[buffer(1)]],
-                        device float*       Y [[buffer(2)]],
-                        constant int&    nblk [[buffer(3)]],
-                        constant int&     out [[buffer(4)]],
-                        constant int&       P [[buffer(5)]],
-                        constant int&      t0 [[buffer(6)]],
-                        constant int&      nt [[buffer(7)]],
-                        uint ob   [[threadgroup_position_in_grid]],
-                        uint lid  [[thread_index_in_threadgroup]],
-                        uint sgid [[simdgroup_index_in_threadgroup]]) {
+// q4k_gemm_mm32: the exact-P32 SIMDGROUP-MATRIX candidate. The old generic MMA tile had BN=64,
+// so an exact 32-token panel spent half its matrix work and half its accumulator storage on zero
+// columns. MM32 makes the output tile BM=64 x BN=32: all eight simdgroups contribute to live P32
+// columns, each owning 16 rows x 16 cols = a 2x2 array of 8x8 accumulators. The K axis still walks
+// one 32-wide q4_k sub-block at a time in four hardware-MMA steps. C-side selection is exact:
+// FAK_Q4K_MM requests this pipeline only for P=32; P31/P33 remain on q4k_gemm.
+#define Q4K_MM32_BN 32
+#define Q4K_MM32_SGROW 4  // simdgroups down BM=64 -> 16 rows (2 tiles) each
+#define Q4K_MM32_SGCOL 2  // simdgroups across BN=32 -> 16 cols (2 tiles) each
+kernel void q4k_gemm_mm32(device const uchar* W [[buffer(0)]],
+                          device const float* X [[buffer(1)]],
+                          device float*       Y [[buffer(2)]],
+                          constant int&    nblk [[buffer(3)]],
+                          constant int&     out [[buffer(4)]],
+                          constant int&       P [[buffer(5)]],
+                          constant int&      t0 [[buffer(6)]],
+                          constant int&      nt [[buffer(7)]],
+                          uint ob   [[threadgroup_position_in_grid]],
+                          uint lid  [[thread_index_in_threadgroup]],
+                          uint sgid [[simdgroup_index_in_threadgroup]]) {
     threadgroup float wbuf[Q4K_BM * 32]; // BM weight rows x one 32-wide sub-block, row-major [row][k] ld=32
-    threadgroup float xbuf[32 * Q4K_BN]; // one 32-wide sub-block x BN tokens, K-major [k][tok] ld=BN
+    threadgroup float xbuf[32 * Q4K_MM32_BN]; // one sub-block x 32 tokens, K-major [k][tok]
     int in = nblk * 256;
     int o0 = (int)ob * Q4K_BM;           // first output row this threadgroup owns
-    // This simdgroup's position in the 4x2 grid → its 16-row x 32-col output region.
-    int sgRow = (int)sgid / Q4K_MM_SGCOL; // 0..3
-    int sgCol = (int)sgid % Q4K_MM_SGCOL; // 0..1
+    // This simdgroup's position in the 4x2 grid -> its 16-row x 16-col output region.
+    int sgRow = (int)sgid / Q4K_MM32_SGCOL; // 0..3
+    int sgCol = (int)sgid % Q4K_MM32_SGCOL; // 0..1
     int rowBase = sgRow * 16;            // 0,16,32,48 within the BM tile
-    int colBase = sgCol * 32;            // 0 or 32 within the BN tile
-    // 2 row-tiles x 4 col-tiles = 8 accumulators of 8x8, C[out_row][token].
-    simdgroup_float8x8 acc[2][4];
+    int colBase = sgCol * 16;            // 0 or 16 within the exact-P32 tile
+    // 2 row-tiles x 2 col-tiles = 4 accumulators of 8x8, C[out_row][token].
+    simdgroup_float8x8 acc[2][2];
     for (int i = 0; i < 2; i++)
-        for (int j = 0; j < 4; j++) acc[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+        for (int j = 0; j < 2; j++) acc[i][j] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
     for (int sblk = 0; sblk < nblk; sblk++) {
         for (int sb = 0; sb < 8; sb++) {  // 8 q4_k sub-blocks of 32 per super-block
             for (int idx = (int)lid; idx < Q4K_BM * 32; idx += Q4K_TG) {
@@ -472,23 +469,21 @@ kernel void q4k_gemm_mm(device const uchar* W [[buffer(0)]],
                 }
                 wbuf[idx] = val; // [row][k], ld=32
             }
-            for (int idx = (int)lid; idx < 32 * Q4K_BN; idx += Q4K_TG) {
-                int k = idx / Q4K_BN, tk = idx % Q4K_BN; // K-major [k][tok], ld=BN
+            for (int idx = (int)lid; idx < 32 * Q4K_MM32_BN; idx += Q4K_TG) {
+                int k = idx / Q4K_MM32_BN, tk = idx % Q4K_MM32_BN;
                 xbuf[idx] = (tk < nt) ? X[(long)(t0 + tk) * in + (long)sblk * 256 + sb * 32 + k] : 0.0f;
             }
             threadgroup_barrier(mem_flags::mem_threadgroup);
-            // Walk the 32-wide K sub-block in four 8-wide MMA steps. wbuf[row][k] (ld=32) gives the
-            // A(row,k) operand; xbuf[k][tok] (ld=BN) gives the B(k,tok) operand directly (staged
-            // K-major, no transpose). C(row,tok) += A . B.
+            // Walk the 32-wide K sub-block in four 8-wide MMA steps. xbuf has exact ld=32.
             for (int kk = 0; kk < 32; kk += 8) {
-                simdgroup_float8x8 bmat[4];
-                for (int j = 0; j < 4; j++) {
-                    simdgroup_load(bmat[j], xbuf + kk * Q4K_BN + (colBase + j * 8), Q4K_BN);
+                simdgroup_float8x8 bmat[2];
+                for (int j = 0; j < 2; j++) {
+                    simdgroup_load(bmat[j], xbuf + kk * Q4K_MM32_BN + (colBase + j * 8), Q4K_MM32_BN);
                 }
                 for (int i = 0; i < 2; i++) {
                     simdgroup_float8x8 amat;
                     simdgroup_load(amat, wbuf + (rowBase + i * 8) * 32 + kk, 32);
-                    for (int j = 0; j < 4; j++) {
+                    for (int j = 0; j < 2; j++) {
                         simdgroup_multiply_accumulate(acc[i][j], amat, bmat[j], acc[i][j]);
                     }
                 }
@@ -496,20 +491,17 @@ kernel void q4k_gemm_mm(device const uchar* W [[buffer(0)]],
             threadgroup_barrier(mem_flags::mem_threadgroup);
         }
     }
-    // Store the 8 accumulator tiles to a threadgroup staging buffer, then write Y with bounds checks
-    // (out/nt may not be multiples of 8). Reuse wbuf as the store scratch (16 rows x 32 cols per sg
-    // fits, but sgs overlap wbuf — stage per simdgroup region into a dedicated tgroup buffer).
-    threadgroup float cbuf[Q4K_BM * Q4K_BN];
+    threadgroup float cbuf[Q4K_BM * Q4K_MM32_BN];
     for (int i = 0; i < 2; i++) {
-        for (int j = 0; j < 4; j++) {
+        for (int j = 0; j < 2; j++) {
             int r = rowBase + i * 8, c = colBase + j * 8;
-            simdgroup_store(acc[i][j], cbuf + r * Q4K_BN + c, Q4K_BN);
+            simdgroup_store(acc[i][j], cbuf + r * Q4K_MM32_BN + c, Q4K_MM32_BN);
         }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-    // Cooperative write-back: each thread strides the 64x64 tile.
-    for (int idx = (int)lid; idx < Q4K_BM * Q4K_BN; idx += Q4K_TG) {
-        int r = idx / Q4K_BN, c = idx % Q4K_BN;
+    // Cooperative write-back: each thread strides the exact 64x32 tile.
+    for (int idx = (int)lid; idx < Q4K_BM * Q4K_MM32_BN; idx += Q4K_TG) {
+        int r = idx / Q4K_MM32_BN, c = idx % Q4K_MM32_BN;
         int orow = o0 + r;
         int tcol = c;
         if (orow < out && tcol < nt) Y[(long)(t0 + tcol) * out + orow] = cbuf[idx];
@@ -612,9 +604,8 @@ kernel void q6k_gemm(device const uchar* W [[buffer(0)]],
 }
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
 static int gQ4KReady;
-static int gQ4KUseMM = 0; // 1 → prefer the simdgroup-matrix GEMM (mg_q4k_set_use_mm / FAK_Q4K_MM)
 
 // q4k_gemv_pso binds selection to an executed-kernel status. A vector request never falls back:
 // nil means the caller must return before allocating a command buffer or touching the output.
@@ -631,16 +622,23 @@ static id<MTLComputePipelineState> q4k_gemv_pso(int vectorized_mode, int* execut
     return psoQ4KGemvVectorized;
 }
 
-// mg_q4k_set_use_mm selects the batched-GEMM kernel: nonzero → the simdgroup-matrix q4k_gemm_mm when
-// its pipeline built, else the scalar-tile q4k_gemm. Gated so the proven scalar kernel stays default
-// until the MMA variant is A/B-proven faster on the target device.
-void mg_q4k_set_use_mm(int on) { gQ4KUseMM = on ? 1 : 0; }
-
-// q4k_gemm_pso returns the active batched-GEMM pipeline: the MMA variant only when explicitly enabled
-// AND its pipeline is present, otherwise the proven scalar kernel.
-static id<MTLComputePipelineState> q4k_gemm_pso(void) {
-    if (gQ4KUseMM && psoQ4KGemmMM != nil) return psoQ4KGemmMM;
-    return psoQ4KGemm;
+// q4k_gemm_pso binds exact shape selection to a typed executed identity. MM32 is eligible only for
+// P=32 and explicit mode=1. P31/P33 execute scalar even when the process opt-in is enabled. A
+// requested-but-unavailable MM32 candidate returns nil before scratch allocation, command-buffer
+// creation, dispatch, timing publication, or caller-output mutation. mode<0 is the deterministic
+// unavailable-candidate witness; production sends only 0/1.
+static id<MTLComputePipelineState> q4k_gemm_pso(int P, int mm_mode, int* executed, int* token_tile) {
+    *executed = 0;
+    *token_tile = 64;
+    if (P != 32 || mm_mode == 0) {
+        if (psoQ4KGemm == nil) return nil;
+        *executed = 1;
+        return psoQ4KGemm;
+    }
+    if (mm_mode != 1 || psoQ4KGemmMM32 == nil) return nil;
+    *executed = 2;
+    *token_tile = 32;
+    return psoQ4KGemmMM32;
 }
 
 static int q4k_init(void) {
@@ -656,9 +654,9 @@ static int q4k_init(void) {
         psoQ4KGemvMulti[n - 4] = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:name] error:&err];
     }
     psoQ4KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm"] error:&err];
-    // q4k_gemm_mm (simdgroup-matrix variant) is optional: if the MSL feature is unavailable or the
-    // pipeline fails to build, psoQ4KGemmMM stays nil and the dispatcher falls back to psoQ4KGemm.
-    psoQ4KGemmMM = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm_mm"] error:&err];
+    // q4k_gemm_mm32 is optional. Explicit P32 requests fail closed if this pipeline is unavailable;
+    // P31/P33 and default-off P32 dispatches retain the required scalar pipeline.
+    psoQ4KGemmMM32 = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_gemm_mm32"] error:&err];
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
     psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];
@@ -1416,16 +1414,19 @@ int mg_q4k_q8_gemv_group(const int* q4_wids, int nq4, const float* x, float* q4_
     }
 }
 
-// mg_q4k_gemm computes Y[P, out] = X[P, in] · W[wid]^T (batched prefill GEMM). f32 in/out,
-// row-major; Y must hold P*out floats. out_gpu_ms is nullable: when non-NULL it receives the
-// command buffer's on-GPU execution window (cb.GPUEndTime - cb.GPUStartTime, in ms), valid after
-// waitUntilCompleted returns — the true compute time excluding the CPU-side encode/commit/sync/H2D
-// round-trip. Callers passing NULL are unaffected (the profile path is opt-in).
-void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, mg_execution_event* event) {
+// mg_q4k_gemm computes Y[P, out] = X[P, in] · W[wid]^T and returns the exact executed identity:
+// 0=not executed, 1=scalar q4k_gemm, 2=exact-P32 q4k_gemm_mm32. Candidate selection happens before
+// scratch allocation or host copies, so an unavailable explicit MM32 request cannot dispatch or
+// mutate Y. out_gpu_ms is nullable and is written only after a completed dispatch.
+int mg_q4k_gemm(int wid, const float* X, int P, float* Y, int mm_mode, double* out_gpu_ms, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (wid < 0 || wid >= gNQ4 || P <= 0) return;
+    if (wid < 0 || wid >= gNQ4 || P <= 0) return 0;
     @autoreleasepool {
         Q4KW W = gQ4[wid];
+        int executed = 0;
+        int BN = 64;
+        id<MTLComputePipelineState> pso = q4k_gemm_pso(P, mm_mode, &executed, &BN);
+        if (pso == nil) return 0;
         q4k_grow_scratch((long)P * W.in, (long)P * W.out);
         id<MTLBuffer> wbuf = (__bridge id<MTLBuffer>)W.buf;
         id<MTLBuffer> xb = gQXBuf;
@@ -1437,14 +1438,13 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, m
         // (issue #1085). Grid.x = ceil(out/BM) row-blocks; the token axis is tiled into BN-wide
         // dispatches, all in ONE command buffer so launch overhead is paid once for the whole GEMM.
         const int BM = 64;  // output rows per threadgroup; must match Q4K_BM in the MSL source
-        const int BN = 64;  // token-tile width;            must match Q4K_BN in the MSL source
         const int TG = 256; // threads per threadgroup (TGX*TGY); must match Q4K_TG in the MSL source
         int rowBlocks = (W.out + BM - 1) / BM;
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:q4k_gemm_pso()];
+        [e setComputePipelineState:pso];
         [e setBuffer:wbuf offset:W.offset atIndex:0];
         [e setBuffer:xb   offset:0 atIndex:1];
         [e setBuffer:yb   offset:0 atIndex:2];
@@ -1472,6 +1472,7 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, m
 
         memcpy(Y, yb.contents, (size_t)P * W.out * 4);
         mg_execution_event_readback(event);
+        return executed;
     }
 }
 
@@ -1484,11 +1485,15 @@ void mg_q4k_gemm(int wid, const float* X, int P, float* Y, double* out_gpu_ms, m
 // offset yoff[i] (= P*Σ_{j<i} out_j; yoff[n] = total y elems). Every weight must share X's `in`.
 // out_gpu_ms is nullable: when non-NULL it receives the whole group's on-GPU execution window
 // (cb.GPUEndTime - cb.GPUStartTime, in ms), valid after waitUntilCompleted returns. NULL is inert.
-void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff,
-                       double* out_gpu_ms, mg_execution_event* event) {
+int mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Ycat, const int* yoff,
+                      int mm_mode, double* out_gpu_ms, mg_execution_event* event) {
     mg_execution_event_reset(event);
-    if (n <= 0 || P <= 0) return;
+    if (n <= 0 || P <= 0) return 0;
     @autoreleasepool {
+        int executed = 0;
+        int BN = 64;
+        id<MTLComputePipelineState> pso = q4k_gemm_pso(P, mm_mode, &executed, &BN);
+        if (pso == nil) return 0;
         int in = gQ4[wids[0]].in;
         long ytot = (long)yoff[n];
         q4k_grow_scratch((long)P * in, ytot);
@@ -1500,13 +1505,12 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
         // ONE command buffer. The BN token loop is issued per weight; the grid's row axis is the
         // weight's own out. Every dispatch reads the shared xb and writes into the weight's Y slot.
         const int BM = 64;  // must match Q4K_BM in the MSL source
-        const int BN = 64;  // must match Q4K_BN in the MSL source
         const int TG = 256; // must match Q4K_TG (TGX*TGY) in the MSL source
         id<MTLCommandBuffer> cb = [gQueue commandBuffer];
         mg_execution_event_command_buffer(event, cb);
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
         mg_execution_event_encoder(event, e);
-        [e setComputePipelineState:q4k_gemm_pso()];
+        [e setComputePipelineState:pso];
         [e setBuffer:xb offset:0 atIndex:1]; // shared X for the whole group
         [e setBytes:&P length:sizeof(int) atIndex:5];
         for (int i = 0; i < n; i++) {
@@ -1537,6 +1541,7 @@ void mg_q4k_gemm_group(const int* wids, int n, const float* X, int P, float* Yca
 
         memcpy(Ycat, yb.contents, (size_t)ytot * 4);
         mg_execution_event_readback(event);
+        return executed;
     }
 }
 

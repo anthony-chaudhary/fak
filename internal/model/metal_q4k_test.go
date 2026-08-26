@@ -507,61 +507,210 @@ func TestMetalGEMMGroupMatchesCPU(t *testing.T) {
 	}
 }
 
-// TestMetalQ4KGemmMMMatchesCPU is the correctness gate for the simdgroup-matrix (hardware MMA)
-// batched GEMM variant q4k_gemm_mm: with SetGEMMUseMM(true) the GEMM dispatch selects the MMA kernel,
-// which must match the CPU f32 q4kMatRowsRange reference to the same cosine>=0.9999 bound as the
-// scalar kernel. The MMA accumulation order differs from both the scalar kernel and the CPU, so this
-// pins that the different reduction stays within the f32 tolerance. Skips if the MMA pipeline did not
-// build (older Metal); the dispatcher then falls back to the scalar kernel and this is a no-op check.
-func TestMetalQ4KGemmMMMatchesCPU(t *testing.T) {
+// TestMetalQ4KGemmMM32SelectionAndParity pins the exact dispatch contract for the hardware-MMA
+// candidate: default-off P32 is scalar, FAK_Q4K_MM's SetGEMMUseMM opt-in selects MM32 only at exact
+// P32, and adjacent P31/P33 remain scalar. Both the single and grouped call paths report the same
+// typed requested/executed identity and stay within the CPU f32 oracle.
+func TestMetalQ4KGemmMM32SelectionAndParity(t *testing.T) {
 	if !metalgemm.Available() {
 		t.Skip("no Metal device available")
 	}
 	defer metalgemm.ResetQ4K()
-	metalgemm.SetGEMMUseMM(true)
 	t.Cleanup(func() { metalgemm.SetGEMMUseMM(false) })
-	cases := []struct{ out, in, P int }{
-		{1024, 1024, 8},
-		{2048, 1024, 22},
-		{17408, 5120, 53}, // real Qwen3.6-27B gate/up panel at the measured prefill P
-		{1024, 512, 300},  // two token tiles (256 + 44)
+	const (
+		out = 256
+		in  = 512
+	)
+	qt := randomQ4KTensor(out, in, 9202)
+	w := metalgemm.UploadQ4K(qt.raw, out, in)
+	if w == nil {
+		t.Fatal("UploadQ4K returned nil")
 	}
-	for _, c := range cases {
-		qt := randomQ4KTensor(c.out, c.in, 99)
-		X := randomVecF(c.P*c.in, 11)
-		ref := make([]float32, c.P*c.out)
-		for tIdx := 0; tIdx < c.P; tIdx++ {
-			row := make([]float32, c.out)
-			q4kMatRowsRange(qt, X[tIdx*c.in:(tIdx+1)*c.in], row, 0, c.out)
-			copy(ref[tIdx*c.out:(tIdx+1)*c.out], row)
+	qt2 := randomQ4KTensor(96, in, 9203)
+	w2 := metalgemm.UploadQ4K(qt2.raw, 96, in)
+	if w2 == nil {
+		t.Fatal("second UploadQ4K returned nil")
+	}
+	ws := []*metalgemm.Q4KWeight{w, w2}
+	scalar := metalgemm.Q4KGEMMIdentity{
+		Requested: metalgemm.Q4KGEMMExecutedScalar,
+		Executed:  metalgemm.Q4KGEMMExecutedScalar,
+	}
+	mm32 := metalgemm.Q4KGEMMIdentity{
+		Requested: metalgemm.Q4KGEMMExecutedMM32,
+		Executed:  metalgemm.Q4KGEMMExecutedMM32,
+	}
+
+	runSingle := func(P int, useMM bool, want metalgemm.Q4KGEMMIdentity) ([]float32, []float32) {
+		t.Helper()
+		metalgemm.SetGEMMUseMM(useMM)
+		X := randomVecF(P*in, int64(9202+P))
+		got := make([]float32, P*out)
+		observation := metalgemm.NewExecutionObservation(metalgemm.ExecutionQ4KGEMM)
+		identity := w.GEMMWithEvents(X, P, got, observation)
+		if identity != want {
+			t.Fatalf("single P=%d useMM=%t identity=%+v want %+v", P, useMM, identity, want)
 		}
-		w := metalgemm.UploadQ4K(qt.raw, c.out, c.in)
-		if w == nil {
-			t.Fatalf("UploadQ4K(%d,%d) returned nil", c.out, c.in)
+		snapshot, err := observation.Snapshot()
+		if err != nil {
+			t.Fatal(err)
 		}
-		got := make([]float32, c.P*c.out)
-		w.GEMM(X, c.P, got) // uses the MMA kernel because SetGEMMUseMM(true)
+		if len(snapshot.Events) != 1 {
+			t.Fatalf("P=%d useMM=%t events=%+v, want one dispatch", P, useMM, snapshot.Events)
+		}
+		event := snapshot.Events[0]
+		if !event.Committed || !event.CompletedWait || !event.HostReadback || event.Encoders != 1 {
+			t.Fatalf("P=%d useMM=%t lifecycle=%+v", P, useMM, event)
+		}
+		ref := make([]float32, P*out)
+		row := make([]float32, out)
+		for token := 0; token < P; token++ {
+			q4kMatRowsRange(qt, X[token*in:(token+1)*in], row, 0, out)
+			copy(ref[token*out:(token+1)*out], row)
+		}
 		cos, maxRel := cosineAndMaxRel(ref, got)
 		if cos < 0.9999 || maxRel > 5e-3 {
-			t.Errorf("q4k GEMM-MM [%d,%d]x%d: cosine=%.6f maxRel=%.4g (want cos>=0.9999, maxRel<=5e-3)", c.out, c.in, c.P, cos, maxRel)
-		} else {
-			t.Logf("q4k GEMM-MM [%d,%d]x%d: cosine=%.6f maxRel=%.4g OK", c.out, c.in, c.P, cos, maxRel)
+			t.Fatalf("single P=%d useMM=%t identity=%+v cosine=%.6f maxRel=%.4g", P, useMM, want, cos, maxRel)
 		}
-		metalgemm.ResetQ4K()
+		return X, got
 	}
+
+	runGroup := func(P int, useMM bool, want metalgemm.Q4KGEMMIdentity) {
+		t.Helper()
+		metalgemm.SetGEMMUseMM(useMM)
+		X := randomVecF(P*in, int64(9300+P))
+		observation := metalgemm.NewExecutionObservation(metalgemm.ExecutionQ4KGEMMGroup)
+		group, identity := metalgemm.GEMMGroupWithEventsIdentity(ws, X, P, observation)
+		if identity != want {
+			t.Fatalf("group P=%d useMM=%t identity=%+v want %+v", P, useMM, identity, want)
+		}
+		if len(group) != len(ws) {
+			t.Fatalf("group P=%d useMM=%t outputs=%d want %d", P, useMM, len(group), len(ws))
+		}
+		snapshot, err := observation.Snapshot()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Events) != 1 {
+			t.Fatalf("group P=%d useMM=%t events=%+v want one dispatch", P, useMM, snapshot.Events)
+		}
+		event := snapshot.Events[0]
+		if !event.Committed || !event.CompletedWait || !event.HostReadback || event.Encoders != 1 {
+			t.Fatalf("group P=%d useMM=%t lifecycle=%+v", P, useMM, event)
+		}
+		for i, wi := range ws {
+			single := make([]float32, P*wi.Out)
+			if identity := wi.GEMM(X, P, single); identity != want {
+				t.Fatalf("group P=%d useMM=%t single[%d] identity=%+v want %+v", P, useMM, i, identity, want)
+			}
+			for j := range single {
+				if math.Float32bits(group[i][j]) != math.Float32bits(single[j]) {
+					t.Fatalf("group P=%d useMM=%t output[%d][%d]=%g want single %g",
+						P, useMM, i, j, group[i][j], single[j])
+				}
+			}
+		}
+	}
+
+	runSingle(32, false, scalar)
+	runSingle(31, true, scalar)
+	X32, single32 := runSingle(32, true, mm32)
+	runSingle(33, true, scalar)
+
+	runGroup(32, false, scalar)
+	runGroup(31, true, scalar)
+	runGroup(32, true, mm32)
+	runGroup(33, true, scalar)
+
+	groupObservation := metalgemm.NewExecutionObservation(metalgemm.ExecutionQ4KGEMMGroup)
+	group, identity := metalgemm.GEMMGroupWithEventsIdentity(ws, X32, 32, groupObservation)
+	if identity != mm32 {
+		t.Fatalf("group replay P32 identity=%+v want %+v", identity, mm32)
+	}
+	for i := range single32 {
+		if math.Float32bits(group[0][i]) != math.Float32bits(single32[i]) {
+			t.Fatalf("group replay MM32 output[0][%d]=%g want single %g", i, group[0][i], single32[i])
+		}
+	}
+	t.Log("typed identities: single/group default-P32=scalar opt-in-P31=scalar opt-in-P32=mm32 opt-in-P33=scalar")
 }
 
-// BenchmarkMetalQ4KGemmMMvsScalar is the prefill-lever A/B: the simdgroup-matrix GEMM (q4k_gemm_mm)
-// vs the scalar register-tile GEMM (q4k_gemm) at the real Qwen3.6-27B gate/up shape [17408,5120],
-// P=53. The scalar kernel saturates at ~1360 GFLOP/s (~19% of the M3 Pro's ~7 TFLOP/s ceiling); the
-// MMA kernel should clear it materially if hardware matrix units are the win. GFLOP/s is reported for
-// both so the speedup (and whether it is worth flipping FAK_Q4K_MM on by default) is measured.
-func BenchmarkMetalQ4KGemmMMvsScalar(b *testing.B) {
+// TestMetalQ4KGemmMM32UnavailableDeclinesBeforeMutation exercises the native fail-closed seam
+// deterministically. A requested unavailable P32 candidate returns NotExecuted for single and
+// grouped selection with no command buffer and byte-for-byte untouched caller outputs.
+func TestMetalQ4KGemmMM32UnavailableDeclinesBeforeMutation(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+	const (
+		P    = 32
+		in   = 256
+		out  = 64
+		mark = float32(9202)
+	)
+	w := metalgemm.UploadQ4K(randomQ4KTensor(out, in, 9202).raw, out, in)
+	if w == nil {
+		t.Fatal("UploadQ4K returned nil")
+	}
+	X := randomVecF(P*in, 9202)
+	single := make([]float32, P*out)
+	for i := range single {
+		single[i] = mark
+	}
+	singleObservation := metalgemm.NewExecutionObservation(metalgemm.ExecutionQ4KGEMM)
+	mode := metalgemm.Q4KGEMMModeMM32Unavailable
+	wantIdentity := metalgemm.Q4KGEMMIdentityForMode(P, mode, metalgemm.Q4KGEMMNotExecuted)
+	if identity := w.GEMMWithEventsMode(X, P, single, singleObservation, mode); identity != wantIdentity {
+		t.Fatalf("unavailable single identity=%+v want %+v", identity, wantIdentity)
+	}
+	singleSnapshot, err := singleObservation.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(singleSnapshot.Events) != 0 {
+		t.Fatalf("unavailable single events=%+v want none", singleSnapshot.Events)
+	}
+	for i, v := range single {
+		if v != mark {
+			t.Fatalf("unavailable single mutated output[%d]=%g want %g", i, v, mark)
+		}
+	}
+
+	groupBacking := make([]float32, P*out)
+	for i := range groupBacking {
+		groupBacking[i] = mark
+	}
+	groupObservation := metalgemm.NewExecutionObservation(metalgemm.ExecutionQ4KGEMMGroup)
+	group, identity := metalgemm.GEMMGroupIntoWithEventsMode(
+		[]*metalgemm.Q4KWeight{w}, X, P, groupBacking, groupObservation, mode)
+	if identity != wantIdentity || group != nil {
+		t.Fatalf("unavailable group outputs=%v identity=%+v want nil/%+v", group, identity, wantIdentity)
+	}
+	groupSnapshot, err := groupObservation.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groupSnapshot.Events) != 0 {
+		t.Fatalf("unavailable group events=%+v want none", groupSnapshot.Events)
+	}
+	for i, v := range groupBacking {
+		if v != mark {
+			t.Fatalf("unavailable group mutated output[%d]=%g want %g", i, v, mark)
+		}
+	}
+	t.Log("unavailable MM32: single/group status=not-executed events=0 output=untouched")
+}
+
+// BenchmarkMetalQ4KGemmMM32vsScalar is the exact-P32 A/B for q4k_gemm_mm32 against q4k_gemm at
+// the real Qwen gate/up matrix shape. It remains opt-in evidence; this benchmark does not flip the
+// default.
+func BenchmarkMetalQ4KGemmMM32vsScalar(b *testing.B) {
 	if !metalgemm.Available() {
 		b.Skip("no Metal device available")
 	}
 	defer metalgemm.ResetQ4K()
-	out, in, P := 17408, 5120, 53
+	out, in, P := 17408, 5120, 32
 	qt := randomQ4KTensor(out, in, 1)
 	X := randomVecF(P*in, 2)
 	w := metalgemm.UploadQ4K(qt.raw, out, in)
