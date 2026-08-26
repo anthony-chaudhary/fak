@@ -1136,6 +1136,7 @@
         "cache_no_longer_verifies",
         "cache_read_at_fire",
         "cache_read_rate_ms_per_token",
+        "cache_read_receipt",
         "cache_reset_receipt",
         "CACHE_SCOPE",
         "cache_state_changed",

@@ -23,6 +23,10 @@ type FactorialCampaign struct {
 	OutcomeDigest          string          `json:"accepted_outcome_digest"`
 	Metric                 string          `json:"metric"`
 	OrderPolicy            string          `json:"order_policy"`
+	RandomSeed             int64           `json:"random_seed,omitempty"`
+	BootstrapSamples       int             `json:"bootstrap_samples,omitempty"`
+	ConfidenceLevel        float64         `json:"confidence_level,omitempty"`
+	MaterialityBound       float64         `json:"materiality_bound_percentage_points,omitempty"`
 	PromotionEvidence      string          `json:"promotion_evidence"`
 	DemotionEvidence       string          `json:"demotion_evidence"`
 	InvalidatingAssumption string          `json:"invalidating_assumption"`
@@ -39,13 +43,16 @@ type FactorialCell struct {
 }
 
 type FactorialReplicate struct {
-	Accepted      bool    `json:"accepted"`
-	OutcomeDigest string  `json:"outcome_digest"`
-	Work          float64 `json:"work"`
-	InputTokens   int64   `json:"input_tokens"`
-	CachedTokens  int64   `json:"cached_tokens"`
-	ResetReceipt  string  `json:"cache_reset_receipt"`
-	WarmupReceipt string  `json:"warmup_receipt,omitempty"`
+	Run                      int     `json:"run,omitempty"`
+	Order                    int     `json:"order,omitempty"`
+	Accepted                 bool    `json:"accepted"`
+	OutcomeDigest            string  `json:"outcome_digest"`
+	Work                     float64 `json:"work"`
+	InputTokens              int64   `json:"input_tokens"`
+	CachedTokens             int64   `json:"cached_tokens"`
+	ResetReceipt             string  `json:"cache_reset_receipt"`
+	WarmupReceipt            string  `json:"warmup_receipt,omitempty"`
+	AuthoritativeReadReceipt string  `json:"cache_read_receipt,omitempty"`
 }
 
 type FactorialReport struct {

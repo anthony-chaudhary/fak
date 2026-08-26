@@ -2,11 +2,11 @@
   "schema": "fak-ultracode-negative-control-campaign/1",
   "envelope": {
     "model": "qwen2.5:0.5b",
-    "runtime": "Ollama/llama.cpp",
+    "runtime": "Ollama 0.30.10/llama.cpp",
     "tokenizer": "qwen2.5",
     "task": "issue-8624-frozen-agentic-task",
     "cache_posture": "warm-prefix",
-    "campaign_version": "issue-8624-v1"
+    "campaign_version": "issue-8624-v1-negative-controls-v1"
   },
   "controls": [
     {
@@ -14,32 +14,72 @@
       "expected_verdict": "NO_GAIN",
       "expected_attribution": "none",
       "predeclared_before_run": true,
-      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
-      "observed": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"negative-controls/shuffled-role.json"}
+      "baseline": {
+        "accepted_outcome": "accepted-v1",
+        "input_tokens": 1641,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#shuffled-role/baseline"
+      },
+      "observed": {
+        "accepted_outcome": "accepted-v1",
+        "input_tokens": 1639,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#shuffled-role/observed"
+      }
     },
     {
       "name": "duplicated-context",
       "expected_verdict": "NO_GAIN",
       "expected_attribution": "none",
       "predeclared_before_run": true,
-      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
-      "observed": {"accepted_outcome":"accepted-v1","input_tokens":1300,"authoritative_usage":true,"source_receipt":"negative-controls/duplicated-context.json"}
+      "baseline": {
+        "accepted_outcome": "accepted-v1",
+        "input_tokens": 1641,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#duplicated-context/baseline"
+      },
+      "observed": {
+        "accepted_outcome": "accepted-v1",
+        "input_tokens": 3216,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#duplicated-context/observed"
+      }
     },
     {
       "name": "omitted-required-context",
       "expected_verdict": "ABSTAIN",
       "expected_attribution": "none",
       "predeclared_before_run": true,
-      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
-      "observed": {"accepted_outcome":"rejected-missing-requirement","input_tokens":700,"authoritative_usage":true,"source_receipt":"negative-controls/omitted-required-context.json"}
+      "baseline": {
+        "accepted_outcome": "accepted-v1",
+        "input_tokens": 1641,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#omitted-required-context/baseline"
+      },
+      "observed": {
+        "accepted_outcome": "rejected",
+        "input_tokens": 1605,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#omitted-required-context/observed"
+      }
     },
     {
       "name": "random-truncation",
       "expected_verdict": "ABSTAIN",
       "expected_attribution": "none",
       "predeclared_before_run": true,
-      "baseline": {"accepted_outcome":"accepted-v1","input_tokens":1000,"authoritative_usage":true,"source_receipt":"issue-8624/source-artifact.json#baseline"},
-      "observed": {"accepted_outcome":"rejected-truncated-instruction","input_tokens":650,"authoritative_usage":true,"source_receipt":"negative-controls/random-truncation.json"}
+      "baseline": {
+        "accepted_outcome": "accepted-v1",
+        "input_tokens": 1641,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#random-truncation/baseline"
+      },
+      "observed": {
+        "accepted_outcome": "rejected",
+        "input_tokens": 835,
+        "authoritative_usage": true,
+        "source_receipt": "testdata/source-artifact.json#random-truncation/observed"
+      }
     }
   ]
 }
