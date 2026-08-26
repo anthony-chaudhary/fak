@@ -1,0 +1,599 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "rdi-berkeley/agents-last-exam",
+  "url": "https://github.com/rdi-berkeley/agents-last-exam",
+  "indexed_revision": "0b6465b13c85b5a0a017d4c88bcf979a519a5e1f",
+  "observed_at": "2026-08-25T22:25:00Z",
+  "totals": {
+    "files": 1061,
+    "directories": 470,
+    "bytes": 27605074,
+    "runtime_files": 905,
+    "test_files": 56,
+    "docs_files": 87,
+    "text_lines": 209538
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "ale_run/agents/_assets/cua_mcp_server/README.md",
+        "ale_run/agents/_assets/vm_mcp_server/README.md",
+        "ale_run/agents/ale_claw/README.md",
+        "ale_run/agents/ale_claw/harness/context/README.md",
+        "ale_run/agents/ale_claw/harness/memory/README.md",
+        "ale_run/agents/ale_claw/harness/subagent/README.md",
+        "ale_run/agents/ale_claw/harness/tools/README.md",
+        "ale_run/agents/codex/README.md",
+        "ale_run/agents/cursor_cli/README.md",
+        "ale_run/agents/droid/README.md",
+        "ale_run/agents/forgecode/README.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "covered",
+      "evidence": [
+        "tasks/visual_media/inkscape_cultural_poster_design/main.py",
+        "tasks/visual_media/inkscape_cultural_poster_design/task_card.json"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        "ale_run/__main__.py",
+        "ale_run/agents/_assets/cua_mcp_server/package-lock.json",
+        "ale_run/agents/_assets/cua_mcp_server/package.json",
+        "ale_run/agents/_assets/cua_mcp_server/src/cua-client.js",
+        "ale_run/agents/_assets/cua_mcp_server/src/index.js",
+        "ale_run/agents/_assets/vm_mcp_server/package-lock.json",
+        "ale_run/agents/_assets/vm_mcp_server/package.json",
+        "ale_run/agents/_assets/vm_mcp_server/src/index.js",
+        "ale_run/agents/_assets/vm_mcp_server/src/vm-client.js",
+        "ale_run/agents/_bootstrap.py",
+        "ale_run/agents/ale_claw/__init__.py",
+        "ale_run/agents/ale_claw/config.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        "tasks/health_medicine/crf_sdtm_mapping_1/scripts/test_score_crf_sdtm_mapping.py",
+        "tasks/health_medicine/healthcare_tcga_luad_survival_kras/scripts/test_score_outputs.py",
+        "tests/ale_claw/test_agent_loop_logging.py",
+        "tests/ale_claw/test_analyze_image_tool.py",
+        "tests/ale_claw/test_cache_policy.py",
+        "tests/ale_claw/test_canonical_format.py",
+        "tests/ale_claw/test_coordinate_scaling.py",
+        "tests/ale_claw/test_exec_tool.py",
+        "tests/ale_claw/test_fs_backends.py",
+        "tests/ale_claw/test_fs_tools.py",
+        "tests/ale_claw/test_image_retention.py",
+        "tests/ale_claw/test_image_retention_modes.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "external_required",
+      "note": "requires forge API or exported issue/PR/discussion data; local tree scan cannot prove it"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "LICENSE",
+        "ale_run/agents/_assets/cua_mcp_server/package.json",
+        "ale_run/agents/_assets/vm_mcp_server/package.json",
+        "ale_run/agents/ale_claw/pyproject.toml",
+        "ale_run/agents/claude_code/pyproject.toml",
+        "ale_run/agents/codex/pyproject.toml",
+        "ale_run/agents/cursor_cli/pyproject.toml",
+        "ale_run/agents/droid/pyproject.toml",
+        "ale_run/agents/dummy/pyproject.toml",
+        "ale_run/agents/forgecode/pyproject.toml",
+        "ale_run/agents/gemini_cli/pyproject.toml",
+        "ale_run/agents/grok_build/pyproject.toml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "tasks",
+      "files": 545,
+      "directories": 320,
+      "bytes": 4934669,
+      "runtime_files": 541,
+      "test_files": 2,
+      "docs_files": 1,
+      "text_lines": 125464,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 371
+        },
+        {
+          "language": "Config",
+          "files": 170
+        },
+        {
+          "language": "Shell",
+          "files": 2
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "tasks/agriculture_env/__init__.py",
+        "tasks/agriculture_env/crop_rotation_d02/main.py",
+        "tasks/agriculture_env/crop_rotation_d02/scripts/score_outputs.py",
+        "tasks/agriculture_env/crop_rotation_d02/task_card.json",
+        "tasks/agriculture_env/ndvi_zonal_statistics_d02/main.py",
+        "tasks/agriculture_env/ndvi_zonal_statistics_d02/scripts/verify_outputs.py",
+        "tasks/agriculture_env/ndvi_zonal_statistics_d02/task_card.json",
+        "tasks/business_finance/__init__.py"
+      ],
+      "source_classes": [
+        "architecture_design",
+        "license_provenance",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "ale_run",
+      "files": 224,
+      "directories": 50,
+      "bytes": 2222056,
+      "runtime_files": 189,
+      "test_files": 0,
+      "docs_files": 33,
+      "text_lines": 56233,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 154
+        },
+        {
+          "language": "Docs",
+          "files": 33
+        },
+        {
+          "language": "Config",
+          "files": 22
+        },
+        {
+          "language": "Shell",
+          "files": 9
+        },
+        {
+          "language": "JavaScript",
+          "files": 4
+        }
+      ],
+      "example_paths": [
+        "ale_run/__main__.py",
+        "ale_run/agents/_assets/cua_mcp_server/README.md",
+        "ale_run/agents/_assets/cua_mcp_server/package-lock.json",
+        "ale_run/agents/_assets/cua_mcp_server/package.json",
+        "ale_run/agents/_assets/cua_mcp_server/src/cua-client.js",
+        "ale_run/agents/_assets/cua_mcp_server/src/index.js",
+        "ale_run/agents/_assets/vm_mcp_server/README.md",
+        "ale_run/agents/_assets/vm_mcp_server/package-lock.json"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "env",
+      "files": 153,
+      "directories": 77,
+      "bytes": 108039,
+      "runtime_files": 145,
+      "test_files": 0,
+      "docs_files": 8,
+      "text_lines": 1879,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 75
+        },
+        {
+          "language": "Shell",
+          "files": 70
+        },
+        {
+          "language": "Docs",
+          "files": 8
+        }
+      ],
+      "example_paths": [
+        "env/README.md",
+        "env/install_task_deps.sh",
+        "env/packages-linux/ambertools-23/install.sh",
+        "env/packages-linux/ambertools-23/meta.json",
+        "env/packages-linux/apptainer-1.3.0/install.sh",
+        "env/packages-linux/apptainer-1.3.0/meta.json",
+        "env/packages-linux/bedtools-2.31.1/install.sh",
+        "env/packages-linux/bedtools-2.31.1/meta.json"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "tests",
+      "files": 54,
+      "directories": 3,
+      "bytes": 676552,
+      "runtime_files": 0,
+      "test_files": 54,
+      "docs_files": 0,
+      "text_lines": 18083,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 54
+        }
+      ],
+      "example_paths": [
+        "tests/ale_claw/test_agent_loop_logging.py",
+        "tests/ale_claw/test_analyze_image_tool.py",
+        "tests/ale_claw/test_cache_policy.py",
+        "tests/ale_claw/test_canonical_format.py",
+        "tests/ale_claw/test_coordinate_scaling.py",
+        "tests/ale_claw/test_exec_tool.py",
+        "tests/ale_claw/test_fs_backends.py",
+        "tests/ale_claw/test_fs_tools.py"
+      ],
+      "source_classes": [
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 27,
+      "directories": 3,
+      "bytes": 199401,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 27,
+      "text_lines": 4163,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 3
+        },
+        {
+          "language": "JavaScript",
+          "files": 2
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "docs/ale-docs-site/README.md",
+        "docs/ale-docs-site/assets/app.js",
+        "docs/ale-docs-site/assets/nav.js",
+        "docs/ale-docs-site/assets/style.css",
+        "docs/ale-docs-site/index.html",
+        "docs/ale-docs-site/pages/add-agent.html",
+        "docs/ale-docs-site/pages/add-environment.html",
+        "docs/ale-docs-site/pages/add-task.html"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    },
+    {
+      "path": "configs",
+      "files": 22,
+      "directories": 2,
+      "bytes": 59031,
+      "runtime_files": 22,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 1306,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 22
+        }
+      ],
+      "example_paths": [
+        "configs/agents/ale_claw.yaml",
+        "configs/agents/claude_code.yaml",
+        "configs/agents/codex.yaml",
+        "configs/agents/cursor_cli.yaml",
+        "configs/agents/droid.yaml",
+        "configs/agents/dummy.yaml",
+        "configs/agents/forgecode.yaml",
+        "configs/agents/gemini_cli.yaml"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "selected_tasks",
+      "files": 16,
+      "directories": 2,
+      "bytes": 58166,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 16,
+      "text_lines": 1276,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 16
+        }
+      ],
+      "example_paths": [
+        "selected_tasks/ale_cli.txt",
+        "selected_tasks/cpu_unlicensed.txt",
+        "selected_tasks/docker_support.txt",
+        "selected_tasks/full/full-spectrum.txt",
+        "selected_tasks/full/last-exam.txt",
+        "selected_tasks/full/near-term.txt",
+        "selected_tasks/full/overall.txt",
+        "selected_tasks/full.txt"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 9,
+      "directories": 10,
+      "bytes": 37654,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 427,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 2
+        },
+        {
+          "language": "Docs",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "AGENTS.md",
+        "LICENSE",
+        "LICENSE-DATA",
+        "README.md",
+        "example_exp.yaml",
+        "pyproject.toml"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "scripts",
+      "files": 6,
+      "directories": 2,
+      "bytes": 32764,
+      "runtime_files": 6,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 707,
+      "languages": [
+        {
+          "language": "Shell",
+          "files": 5
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "scripts/aliyun/import_images.sh",
+        "scripts/aliyun/sync_task_data.sh",
+        "scripts/aws/import_images.sh",
+        "scripts/aws/sync_task_data.sh",
+        "scripts/fetch_task_data.sh",
+        "scripts/publish_qemu_images.py"
+      ],
+      "source_classes": [
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "assets",
+      "files": 3,
+      "directories": 0,
+      "bytes": 19274767,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    },
+    {
+      "path": "secret",
+      "files": 2,
+      "directories": 1,
+      "bytes": 1975,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 0,
+      "text_lines": 0
+    }
+  ],
+  "skipped_dirs": [
+    ".git",
+    "env/packages-linux/leap-cpu-torch/vendor"
+  ],
+  "completeness_critic": "local tree inventory walked every non-skipped regular file and grouped immediate subsystems; skipped dependency/cache/control directories: .git, env/packages-linux/leap-cpu-torch/vendor; classes checked absent in local tree: history_changelog_releases, roadmap_todos; still requires non-tree study artifacts: open_closed_issues_prs_discussions, fak_selfquery_witness, candidate_matrix, issue_tracking",
+  "non_tree_study": {
+    "observed_at": "2026-08-25T22:25:00Z",
+    "source_cutoff": "Pinned tree revision 0b6465b13c85b5a0a017d4c88bcf979a519a5e1f (2026-08-25T22:20:05Z); GitHub metadata observed 2026-08-25.",
+    "github_surface": {
+      "repository": {
+        "default_branch": "main",
+        "stars": 970,
+        "pushed_at": "2026-08-25T22:20:05Z",
+        "license": "Apache-2.0",
+        "archived": false
+      },
+      "issues": {
+        "total": 16,
+        "open": 8,
+        "closed": 8
+      },
+      "pull_requests": {
+        "total": 63,
+        "open": 14,
+        "closed_unmerged": 6,
+        "merged": 43
+      },
+      "discussions": {
+        "total": 0
+      },
+      "releases": 1,
+      "tags": 1,
+      "remote_branches_at_check": 35,
+      "commits_visible": 173,
+      "method": "GitHub REST repository/commit, paged issues, releases, tags, community profile, and GraphQL issues/pull requests/discussions; git history and all remote refs read from the pinned clone."
+    },
+    "history_and_roadmap": {
+      "release": "runtime-qe-bgw-6.7.0-4.0, published 2026-08-13",
+      "delta_from_prior_study": "Eight commits after 75a3f866: Octavus CLI harness integration, RGI MCR-1 scorer/path hardening, and one reverted evaluator-security merge.",
+      "open_signals": [
+        "upstream #75 CUA coordinate offset",
+        "upstream #68 boot-time dependency churn",
+        "upstream #26 disk requirements across providers",
+        "upstream #27 bulk origin-log transfer",
+        "upstream #7 cross-harness reasoning-effort configuration",
+        "14 open pull requests at observation"
+      ],
+      "tree_todos": "No dedicated roadmap file at the pinned revision; 23 TODO/FIXME matches were inspected as local implementation debt, while open forge items and remote feature branches carry the actionable roadmap."
+    },
+    "self_query_axes": [
+      {
+        "query": "fak capabilities \"artifact-scored professional-work benchmark hidden-reference grading typed trajectories timeout harness comparison\"",
+        "result": "Returned turn-tax, context-reuse, fleet-progress, and carry-forward surfaces, but no ALE-shaped benchmark capability."
+      },
+      {
+        "query": "fak capabilities \"benchmark entry external agent harness run receipt quality score operating envelope\"",
+        "result": "No matching capability; #8223 remains the owned benchmark-entry gap."
+      },
+      {
+        "query": "fak capabilities \"trajectory import artifact evaluator cross harness benchmark\"",
+        "result": "No matching capability; schema conformance remains owned by #6629 rather than a new ALE-specific subsystem."
+      }
+    ],
+    "candidate_matrix": [
+      {
+        "candidate": "Official ALE raw-vs-fak artifact-scored benchmark spine",
+        "source": [
+          "ale_run/orchestration/experiment_spec.py",
+          "ale_run/base_interface/lifecycle.py",
+          "ale_run/evaluation/"
+        ],
+        "alternative": "FAK benchmark catalog without an ALE entry",
+        "classification": "adaptation",
+        "disposition": "already_filed",
+        "issue": "https://github.com/anthony-chaudhary/fak/issues/8223",
+        "reason": "Still the smallest end-to-end borrow: upstream runner and hidden-reference grader remain authoritative while FAK owns launch, receipt, comparison, and operating-envelope evidence."
+      },
+      {
+        "candidate": "ALE-v1.0 typed trajectory fixture and loss accounting",
+        "source": [
+          "ale_run/base_interface/trajectory.py",
+          "tests/"
+        ],
+        "alternative": "FAK trajectory adapters and open ATIF v1.7 conformance work",
+        "classification": "adaptation",
+        "disposition": "already_owned",
+        "issue": "https://github.com/anthony-chaudhary/fak/issues/6629",
+        "reason": "Use ALE as an external fidelity fixture; do not fork another trajectory schema or duplicate the existing conformance issue."
+      },
+      {
+        "candidate": "Cross-harness agent/plugin catalog including Octavus CLI",
+        "source": [
+          "ale_run/agents/",
+          "ale_run/orchestration/factory.py",
+          "configs/agents/"
+        ],
+        "alternative": "FAK native guarded harness and worker lifecycle",
+        "classification": "inspiration",
+        "disposition": "reject",
+        "reason": "The catalog is useful benchmark social context, but importing deployers would add provider-specific shell/config code without improving FAK kernel ownership or evidence."
+      },
+      {
+        "candidate": "Provider sandbox lifecycle and bulk artifact transfer",
+        "source": [
+          "ale_run/orchestration/providers/",
+          "ale_run/base_interface/lifecycle.py",
+          "upstream issues #26 and #27"
+        ],
+        "alternative": "FAK fleet nodes, private comms bridge, and native receipt paths",
+        "classification": "inspiration",
+        "disposition": "reject",
+        "reason": "Borrow the operating-envelope questions into #8223, not ALE provider implementations; FAK must retain its sanctioned compute and evidence boundaries."
+      }
+    ],
+    "issue_tracking": {
+      "study_issue": "https://github.com/anthony-chaudhary/fak/issues/8990",
+      "parent_issue": "https://github.com/anthony-chaudhary/fak/issues/8936",
+      "live_follow_ons": [
+        "https://github.com/anthony-chaudhary/fak/issues/8223",
+        "https://github.com/anthony-chaudhary/fak/issues/6629"
+      ],
+      "new_follow_ons": [],
+      "reason": "The refresh found no unowned borrow: the benchmark spine and trajectory fixture are already tracked; newer harness/provider work is rejected as product-shell duplication."
+    }
+  }
+}

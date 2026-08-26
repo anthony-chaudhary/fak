@@ -1,0 +1,454 @@
+{
+  "schema": "fak-study-inventory-map/1",
+  "repository": "langchain-ai/langgraph",
+  "url": "https://github.com/langchain-ai/langgraph",
+  "indexed_revision": "f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+  "observed_at": "2026-08-25T00:00:00Z",
+  "totals": {
+    "files": 672,
+    "directories": 159,
+    "bytes": 13719867,
+    "runtime_files": 318,
+    "test_files": 237,
+    "docs_files": 33,
+    "text_lines": 198083
+  },
+  "source_classes": [
+    {
+      "class": "readme_docs",
+      "status": "covered",
+      "evidence": [
+        "README.md",
+        "docs/.gitignore",
+        "docs/generate_redirects.py",
+        "docs/llms.txt",
+        "docs/redirects.json",
+        "examples/README.md",
+        "examples/delta-channel-dump/README.md",
+        "libs/checkpoint-conformance/README.md",
+        "libs/checkpoint-postgres/README.md",
+        "libs/checkpoint-sqlite/README.md",
+        "libs/checkpoint/README.md",
+        "libs/cli/README.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "architecture_design",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "runtime_source",
+      "status": "covered",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/bug-report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/privileged.yml",
+        ".github/actions/uv_setup/action.yml",
+        ".github/dependabot.yml",
+        ".github/scripts/check_sdk_methods.py",
+        ".github/workflows/_lint.yml",
+        ".github/workflows/_test_langgraph.yml",
+        ".github/workflows/_test_release.yml",
+        ".github/workflows/baseline.yml",
+        ".github/workflows/bench.yml",
+        ".github/workflows/ci.yml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "tests_fixtures",
+      "status": "covered",
+      "evidence": [
+        ".github/scripts/run_langgraph_cli_test.py",
+        ".github/workflows/_integration_test.yml",
+        ".github/workflows/_sdk_integration_test.yml",
+        ".github/workflows/_test.yml",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_copy_thread.py",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_delete_for_runs.py",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_delete_thread.py",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_delta_channel_history.py",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_get_tuple.py",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_list.py",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_prune.py",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_put.py"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "history_changelog_releases",
+      "status": "covered",
+      "evidence": [
+        ".github/workflows/_test_release.yml",
+        ".github/workflows/release.yml",
+        "libs/checkpoint-conformance/langgraph/checkpoint/conformance/spec/test_delta_channel_history.py",
+        "libs/checkpoint-sqlite/tests/test_get_delta_channel_history.py",
+        "libs/sdk-py/CHANGELOG.md"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "open_closed_issues_prs_discussions",
+      "status": "partial",
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/bug-report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/privileged.yml",
+        ".github/PULL_REQUEST_TEMPLATE.md"
+      ],
+      "note": "local templates found; open/closed issue, PR, and discussion history still require GitHub or forge read-back"
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "note": "local tree scanned and no matching path was found"
+    },
+    {
+      "class": "license_provenance",
+      "status": "covered",
+      "evidence": [
+        "LICENSE",
+        "libs/checkpoint-conformance/pyproject.toml",
+        "libs/checkpoint-postgres/LICENSE",
+        "libs/checkpoint-postgres/pyproject.toml",
+        "libs/checkpoint-sqlite/LICENSE",
+        "libs/checkpoint-sqlite/pyproject.toml",
+        "libs/checkpoint/LICENSE",
+        "libs/checkpoint/pyproject.toml",
+        "libs/cli/LICENSE",
+        "libs/cli/examples/graph_prerelease_reqs/deps/additional_deps/pyproject.toml",
+        "libs/cli/examples/graph_prerelease_reqs/deps/zuper_deps/pyproject.toml",
+        "libs/cli/examples/graph_prerelease_reqs/pyproject.toml"
+      ],
+      "note": "local tree evidence found"
+    },
+    {
+      "class": "fak_selfquery_witness",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "candidate_matrix",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    },
+    {
+      "class": "completeness_critic",
+      "status": "covered",
+      "note": "generated by this inventory map's local tree walk; non-tree omissions remain named in the note"
+    },
+    {
+      "class": "issue_tracking",
+      "status": "external_required",
+      "note": "process artifact created by the study pass, not by the foreign repository tree"
+    }
+  ],
+  "subsystems": [
+    {
+      "path": "libs",
+      "files": 594,
+      "directories": 129,
+      "bytes": 11495814,
+      "runtime_files": 294,
+      "test_files": 233,
+      "docs_files": 22,
+      "text_lines": 192792,
+      "languages": [
+        {
+          "language": "Python",
+          "files": 446
+        },
+        {
+          "language": "Config",
+          "files": 65
+        },
+        {
+          "language": "Docs",
+          "files": 22
+        },
+        {
+          "language": "TypeScript",
+          "files": 7
+        },
+        {
+          "language": "JavaScript",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "libs/checkpoint/LICENSE",
+        "libs/checkpoint/Makefile",
+        "libs/checkpoint/README.md",
+        "libs/checkpoint/langgraph/cache/base/__init__.py",
+        "libs/checkpoint/langgraph/cache/memory/__init__.py",
+        "libs/checkpoint/langgraph/cache/redis/__init__.py",
+        "libs/checkpoint/langgraph/checkpoint/base/__init__.py",
+        "libs/checkpoint/langgraph/checkpoint/base/id.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "license_provenance",
+        "readme_docs",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": "examples",
+      "files": 39,
+      "directories": 20,
+      "bytes": 1984825,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 2,
+      "text_lines": 815,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 2
+        },
+        {
+          "language": "Python",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        "examples/README.md",
+        "examples/chatbot-simulation-evaluation/simulation_utils.py",
+        "examples/delta-channel-dump/README.md",
+        "examples/delta-channel-dump/dump.py"
+      ],
+      "source_classes": [
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": ".github",
+      "files": 28,
+      "directories": 6,
+      "bytes": 190538,
+      "runtime_files": 20,
+      "test_files": 4,
+      "docs_files": 2,
+      "text_lines": 3724,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 22
+        },
+        {
+          "language": "Docs",
+          "files": 2
+        },
+        {
+          "language": "Python",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".github/ISSUE_TEMPLATE/bug-report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/privileged.yml",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/THREAT_MODEL.md",
+        ".github/actions/uv_setup/action.yml",
+        ".github/dependabot.yml",
+        ".github/scripts/check_sdk_methods.py"
+      ],
+      "source_classes": [
+        "history_changelog_releases",
+        "open_closed_issues_prs_discussions",
+        "runtime_source",
+        "tests_fixtures"
+      ]
+    },
+    {
+      "path": ".",
+      "files": 7,
+      "directories": 4,
+      "bytes": 14072,
+      "runtime_files": 2,
+      "test_files": 0,
+      "docs_files": 3,
+      "text_lines": 278,
+      "languages": [
+        {
+          "language": "Docs",
+          "files": 3
+        },
+        {
+          "language": "Config",
+          "files": 2
+        }
+      ],
+      "example_paths": [
+        ".markdownlint.json",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "LICENSE",
+        "Makefile",
+        "README.md"
+      ],
+      "source_classes": [
+        "license_provenance",
+        "readme_docs",
+        "runtime_source"
+      ]
+    },
+    {
+      "path": "docs",
+      "files": 4,
+      "directories": 0,
+      "bytes": 34618,
+      "runtime_files": 0,
+      "test_files": 0,
+      "docs_files": 4,
+      "text_lines": 474,
+      "languages": [
+        {
+          "language": "Config",
+          "files": 1
+        },
+        {
+          "language": "Docs",
+          "files": 1
+        },
+        {
+          "language": "Python",
+          "files": 1
+        }
+      ],
+      "example_paths": [
+        "docs/.gitignore",
+        "docs/generate_redirects.py",
+        "docs/llms.txt",
+        "docs/redirects.json"
+      ],
+      "source_classes": [
+        "readme_docs"
+      ]
+    }
+  ],
+  "skipped_dirs": [
+    ".git"
+  ],
+  "completeness_critic": "exhaustive pinned tree map plus complete paged GitHub issue, pull-request, discussion, release, tag, branch, and local history read-back; fak self-query, candidate adjudication, and issue tracking are recorded under non_tree_study; skipped control directory: .git",
+  "non_tree_study": {
+    "observed_at": "2026-08-25T00:00:00-07:00",
+    "source_cutoff": "Pinned tree revision f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f (2026-08-20T07:02:48Z); GitHub metadata observed 2026-08-25.",
+    "github_surface": {
+      "issues": {
+        "total": 1534,
+        "open": 480,
+        "closed": 1054
+      },
+      "pull_requests": {
+        "total": 5642,
+        "open": 242,
+        "closed": 5400,
+        "merged": 3913
+      },
+      "discussions": {
+        "total": 0,
+        "open": 0,
+        "closed": 0
+      },
+      "releases": 560,
+      "tags": 731,
+      "branches_at_check": [
+        "ci/dependabot-dependency-root-coverage",
+        "deps/uv-lock-upgrade",
+        "elior/uv-workspace-member-manifests",
+        "langster/fix-dev-dependency-alerts",
+        "langster/remove-stale-debugger-pull",
+        "main",
+        "open-swe/jkb-55-safe-git-urls",
+        "open-swe/v3-replica-routing"
+      ],
+      "history": {
+        "commits_through_pin": 7045,
+        "pinned_commit": "f09cfe8ffc1eeffd68f4b628ed69c30f7cad229f",
+        "pinned_commit_time": "2026-08-20T07:02:48Z",
+        "latest_release_at_check": "sdk==0.4.3"
+      },
+      "method": "Exhaustive paged GitHub REST issues (including PR discrimination), pull requests, releases, tags, and branches; complete GraphQL discussion read-back; pinned clone history and refs. Counts describe the 2026-08-25 observation and the tree remains fixed at indexed_revision."
+    },
+    "self_query_axes": [
+      {
+        "query": "fak capabilities \"Pregel deterministic writes checkpoint lineage pending write idempotency selective resume independent effect proof\"",
+        "result": "Native live-control, context-reuse, and attribution surfaces were found; no result weakens fak independent effect proof into LangGraph pending-write persistence."
+      },
+      {
+        "query": "fak capabilities \"durable execution interrupt resume checkpoint recovery task writes concurrency\"",
+        "result": "Native session carry-forward, capability-floor, and context-reuse surfaces were found; issue #8490 already owns witnessed graph resume."
+      },
+      {
+        "query": "fak capabilities \"LangGraph graph orchestration state machine human in loop\"",
+        "result": "Native carry-forward, live control, turn-tax, fleet monitoring, and capability-floor surfaces were found; no separate graph-runtime import is justified."
+      }
+    ],
+    "candidate_matrix": [
+      {
+        "candidate": "deterministic Pregel task preparation and write ordering",
+        "source": [
+          "libs/langgraph/langgraph/pregel/_algo.py",
+          "libs/langgraph/langgraph/pregel/_loop.py",
+          "libs/langgraph/tests/test_pregel.py"
+        ],
+        "alternative": "fak typed task DAG, exact leases, and effect-successor receipts",
+        "classification": "adaptation",
+        "disposition": "already_owned",
+        "reason": "The original study already borrowed deterministic preparation and bounded scheduling while retaining stronger effect ownership; importing the graph runtime would duplicate fak orchestration."
+      },
+      {
+        "candidate": "checkpoint pending writes and selective resume",
+        "source": [
+          "libs/checkpoint/langgraph/checkpoint/base/__init__.py",
+          "libs/langgraph/langgraph/pregel/_loop.py",
+          "libs/langgraph/tests/test_pregel.py"
+        ],
+        "alternative": "witness-keyed resume from independent effect receipts",
+        "classification": "adaptation",
+        "disposition": "already_owned",
+        "reason": "Shipped follow-on #8490 owns witnessed selective graph resume. LangGraph pending writes remain persistence evidence, not independent proof that an external effect happened."
+      },
+      {
+        "candidate": "checkpoint lineage and per-node recovery observability",
+        "source": [
+          "libs/checkpoint/langgraph/checkpoint/base/__init__.py",
+          "libs/langgraph/langgraph/types.py",
+          "libs/langgraph/langgraph/pregel/main.py"
+        ],
+        "alternative": "fak graph-node context, lease, effect, and witness state",
+        "classification": "inspiration",
+        "disposition": "tracked",
+        "reason": "The useful remaining observability is already tracked by open issue #8334; this refresh adds evidence but no duplicate issue."
+      }
+    ],
+    "issue_tracking": {
+      "study_issue": "https://github.com/anthony-chaudhary/fak/issues/8996",
+      "parent_issue": "https://github.com/anthony-chaudhary/fak/issues/8936",
+      "existing_follow_ons": [
+        {
+          "issue": "https://github.com/anthony-chaudhary/fak/issues/8490",
+          "state": "closed",
+          "decision": "witnessed selective resume shipped"
+        },
+        {
+          "issue": "https://github.com/anthony-chaudhary/fak/issues/8334",
+          "state": "open",
+          "decision": "per-node context, lease, effect, and witness observability remains tracked"
+        },
+        {
+          "issue": "https://github.com/anthony-chaudhary/fak/issues/8168",
+          "state": "closed",
+          "decision": "paired value witness shipped"
+        }
+      ],
+      "filed_borrows": [],
+      "reason": "No unowned candidate survived source validation, fak self-query, and dedupe; the one live follow-on remains #8334."
+    }
+  }
+}
