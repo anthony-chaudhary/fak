@@ -35,8 +35,47 @@ func TestRunModelReadinessInventoryPassCarriesProvenance(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Verdict != modelaccept.Pass || len(got.Rows) != 1 || got.Rows[0].Artifact != "examples/acceptance.json" || got.Rows[0].ArtifactRevision != "internal/modelaccept@r1+gabc" {
+	if got.Verdict != modelaccept.Pass || len(got.Rows) != 1 || got.Rows[0].Artifact != "examples/acceptance.json" || got.Rows[0].ArtifactRevision != "internal/modelaccept@r1+gabc" || got.Semantics != nil {
 		t.Fatalf("inventory=%+v", got)
+	}
+}
+
+func TestRunModelReadinessInventoryExactLadderScopedHoldReadback(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "_witnesses", "issue-8623-qwen38-27b")
+	var out, errout bytes.Buffer
+	code := runModelReadinessInventory(&out, &errout, []string{
+		"--ladder-evidence-dir", dir,
+		"--artifact-revision", "docs@8cd6a82af97f",
+		"--expected-corpus", "qwen38-27b-semantic-answer-quality-v2",
+	})
+	if code != 4 {
+		t.Fatalf("exit=%d stderr=%s output=%s", code, errout.String(), out.String())
+	}
+	var got modelaccept.Inventory
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != modelaccept.Qwen38LadderInventorySchema || got.Verdict != modelaccept.Hold || len(got.Rows) != 1 || got.Rows[0].CapabilityGate != modelaccept.Hold || got.Rows[0].LadderEvidence == nil || got.Semantics == nil {
+		t.Fatalf("inventory=%+v", got)
+	}
+	evidence := got.Rows[0].LadderEvidence
+	if evidence.Model != "Qwen/Qwen3.8-27B" || evidence.Precision != "BF16" || evidence.Topology != "TP2" || evidence.Correctness.Trials != 3 || evidence.Correctness.BaselinePassed != 3 || evidence.Correctness.CandidatePassed != 3 || evidence.P95.BaselineMetric != 3378.019733 || evidence.P95.CandidateMetric != 376.181809 || evidence.P95.Improvement != 88.86383624923602 || len(evidence.ArtifactHashes) != 6 {
+		t.Fatalf("evidence=%+v", evidence)
+	}
+	passCells := 0
+	for _, cell := range got.Rows[0].ReadinessCells {
+		if cell.Status == modelaccept.ReadinessCellPass {
+			passCells++
+			if cell.ID != "arithmetic_latency" {
+				t.Fatalf("unsupported PASS cell=%+v", cell)
+			}
+		}
+	}
+	if passCells != 1 {
+		t.Fatalf("readiness cells=%+v", got.Rows[0].ReadinessCells)
+	}
+	if got.Semantics.Default == "" || got.Semantics.Replacement == "" || got.Semantics.Rollback == "" {
+		t.Fatalf("semantics=%+v", got.Semantics)
 	}
 }
 
@@ -56,6 +95,8 @@ func TestRunModelReadinessInventoryUsageAndStrictDecode(t *testing.T) {
 	}{
 		{"missing revision", []string{"--input", writeReadinessFixture(t)}},
 		{"bad as-of", []string{"--artifact-revision", "rev", "--as-of", "tomorrow"}},
+		{"manifest without ladder directory", []string{"--artifact-revision", "rev", "--ladder-manifest", "checksums.json"}},
+		{"ambiguous ladder and generic input", []string{"--artifact-revision", "rev", "--input", writeReadinessFixture(t), "--ladder-evidence-dir", "evidence"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, errout bytes.Buffer

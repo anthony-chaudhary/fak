@@ -138,6 +138,48 @@ func TestCollectDarwinMemorySnapshotRecollectsStartRace(t *testing.T) {
 	}
 }
 
+func TestCollectDarwinMemorySnapshotRecollectsMultiplePIDTransitions(t *testing.T) {
+	root := Proc{PID: 100, PPID: IntPtr(1), Name: "root", WSMB: IntPtr(11)}
+	exited := Proc{PID: 101, PPID: IntPtr(100), Name: "exited", WSMB: IntPtr(5)}
+	firstStart := Proc{PID: 102, PPID: IntPtr(100), Name: "first-start", WSMB: IntPtr(7)}
+	secondStart := Proc{PID: 103, PPID: IntPtr(100), Name: "second-start", WSMB: IntPtr(9)}
+	censuses := [][]Proc{
+		{root, exited},
+		{root, firstStart},
+		{root, secondStart},
+	}
+	relations := [][]Proc{
+		{root, firstStart},
+		{root, secondStart},
+		{root, secondStart},
+	}
+	censusCalls := 0
+	relationCalls := 0
+	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(100, func() ([]Proc, string) {
+		rows := censuses[censusCalls]
+		censusCalls++
+		return rows, ""
+	}, func() ([]Proc, string) {
+		rows := relations[relationCalls]
+		relationCalls++
+		return rows, ""
+	}, func(pid int) (bool, error) {
+		if pid != firstStart.PID && pid != secondStart.PID {
+			t.Fatalf("unexpected liveness probe pid=%d", pid)
+		}
+		return true, nil
+	})
+	if detail != "" {
+		t.Fatalf("multi-pid transition was not reconciled: detail=%q snapshot=%+v", detail, snapshot)
+	}
+	if censusCalls != 3 || relationCalls != 3 {
+		t.Fatalf("collections census=%d relations=%d, want two bounded recollections", censusCalls, relationCalls)
+	}
+	if snapshot.TreeBytes != 20<<20 || len(snapshot.Processes) != 2 || snapshot.Processes[1].PID != secondStart.PID {
+		t.Fatalf("reconciled snapshot=%+v", snapshot)
+	}
+}
+
 func TestCollectDarwinMemorySnapshotPersistentMissingRowsFailClosed(t *testing.T) {
 	root := Proc{PID: 100, PPID: IntPtr(1), Name: "root", WSMB: IntPtr(11)}
 	child := Proc{PID: 101, PPID: IntPtr(100), Name: "child", WSMB: IntPtr(7)}

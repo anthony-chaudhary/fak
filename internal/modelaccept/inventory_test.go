@@ -1,6 +1,9 @@
 package modelaccept
 
 import (
+	"encoding/json"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -101,5 +104,76 @@ func TestBuildInventoryUndeclaredRunFailsClosed(t *testing.T) {
 	got := BuildInventory(in, InventoryOptions{Artifact: "a", ArtifactRevision: "rev", AsOf: time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)})
 	if got.Verdict != Hold || len(got.Rows) != 1 || got.Rows[0].Model != "exact-a" || got.Rows[0].CapabilityGate != Hold {
 		t.Fatalf("undeclared run was silently accepted: %+v", got)
+	}
+}
+
+func TestReadinessInventoryExactLadderJoinIsScopedAndReadbackStable(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "_witnesses", "issue-8623-qwen38-27b")
+	got, admission := BuildQwen38LadderReadinessInventory(InventoryOptions{
+		ArtifactRevision: "docs@8cd6a82af97f",
+		ExpectedCorpusID: qwen38ExactCorpusID,
+	}, LadderEvidenceOptions{Directory: dir, Manifest: filepath.Join(dir, "checksums.json")})
+	if admission.Verdict != Pass || admission.Reason.Code != "" {
+		t.Fatalf("admission=%+v", admission)
+	}
+	if got.Schema != Qwen38LadderInventorySchema || got.Verdict != Hold || got.CorpusID != qwen38ExactCorpusID || len(got.Rows) != 1 {
+		t.Fatalf("inventory=%+v", got)
+	}
+	row := got.Rows[0]
+	if row.Model != qwen38ExactModel || row.Generation != qwen38ExactRevision || row.CapabilityGate != Hold || row.Samples != 3 || row.LadderEvidence == nil {
+		t.Fatalf("row=%+v", row)
+	}
+	evidence := row.LadderEvidence
+	if evidence.Precision != "BF16" || evidence.Topology != "TP2" || evidence.Runtime != "vLLM 0.27.1" || evidence.CapturedAt != "2026-08-22T14:12:32.298303-07:00" || row.DeclaredAt != evidence.CapturedAt || evidence.RuntimePair.BaselineSHA != qwen38ExactBaselineRuntime || evidence.RuntimePair.CandidateSHA != qwen38ExactCandidateRuntime || evidence.CorpusSHA256 != qwen38ExactCorpusSHA || evidence.EnvironmentSHA256 != qwen38ExactEnvironmentSHA || evidence.Correctness != (CorrectnessPair{BaselinePassed: 3, CandidatePassed: 3, Trials: 3}) || evidence.P95.BaselineMetric != qwen38ExactBaselineP95MS || evidence.P95.CandidateMetric != qwen38ExactCandidateP95MS || evidence.P95.Improvement != qwen38ExactImprovementPct || len(evidence.ArtifactHashes) != 6 {
+		t.Fatalf("evidence=%+v", evidence)
+	}
+	passCells := 0
+	for _, cell := range row.ReadinessCells {
+		if cell.Owner == "" || !strings.HasPrefix(cell.Owner, "https://github.com/anthony-chaudhary/fak/issues/") {
+			t.Fatalf("cell has no owning issue: %+v", cell)
+		}
+		if cell.Status == ReadinessCellPass {
+			passCells++
+			if cell.ID != "arithmetic_latency" {
+				t.Fatalf("unsupported cell passed: %+v", cell)
+			}
+		}
+		if cell.ID != "arithmetic_latency" && cell.Status != ReadinessCellHold && cell.Status != ReadinessCellUnwitnessed {
+			t.Fatalf("unsupported cell status=%+v", cell)
+		}
+	}
+	if len(row.ReadinessCells) != 8 || passCells != 1 {
+		t.Fatalf("readiness cells=%+v", row.ReadinessCells)
+	}
+	if got.Semantics == nil || !strings.Contains(got.Semantics.Default, "explicitly selected") || !strings.Contains(got.Semantics.Replacement, "code-pinned identity") || !strings.Contains(got.Semantics.Rollback, "no serving") {
+		t.Fatalf("semantics=%+v", got.Semantics)
+	}
+
+	captured, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var readback Inventory
+	if err := json.Unmarshal(captured, &readback); err != nil {
+		t.Fatal(err)
+	}
+	if readback.Verdict != Hold || len(readback.Rows) != 1 || readback.Rows[0].LadderEvidence == nil || readback.Rows[0].LadderEvidence.P95.Improvement != qwen38ExactImprovementPct {
+		t.Fatalf("captured readback=%+v", readback)
+	}
+}
+
+func TestReadinessInventoryExactLadderJoinCorpusMismatchFailsClosed(t *testing.T) {
+	dir := filepath.Join("..", "..", "docs", "_witnesses", "issue-8623-qwen38-27b")
+	got, admission := BuildQwen38LadderReadinessInventory(InventoryOptions{
+		ArtifactRevision: "docs@8cd6a82af97f",
+		ExpectedCorpusID: "proxy-corpus",
+	}, LadderEvidenceOptions{Directory: dir, Manifest: filepath.Join(dir, "checksums.json")})
+	if admission.Verdict != Hold || admission.Reason.Code != LadderEvidenceIdentityMismatch || len(got.Rows) != 1 || got.Rows[0].LadderEvidence != nil || got.Rows[0].CapabilityGate != Hold {
+		t.Fatalf("inventory=%+v admission=%+v", got, admission)
+	}
+	for _, cell := range got.Rows[0].ReadinessCells {
+		if cell.Status == ReadinessCellPass {
+			t.Fatalf("identity mismatch published PASS: %+v", cell)
+		}
 	}
 }

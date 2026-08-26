@@ -11,7 +11,7 @@ import (
 	"syscall"
 )
 
-const darwinMemorySnapshotAttempts = 2
+const darwinMemorySnapshotAttempts = 3
 
 func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 	snapshot, detail := collectDarwinMemorySnapshotWithCollectors(rootPID, CollectProcesses, CollectRelations, darwinProcessAlive)
@@ -23,8 +23,9 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 
 // collectDarwinMemorySnapshotWithCollectors bounds reconciliation of the two
 // independent ps snapshots. A child can start after the RSS census and appear
-// in the following relation census; one fresh pair closes that race. Collector
-// failures are not retried, and a second incomplete join remains fail-closed.
+// in the following relation census. Each bounded retry collects a wholly fresh
+// pair so successive PID transitions cannot mix epochs. Collector failures are
+// not retried, and a third incomplete join remains fail-closed.
 func collectDarwinMemorySnapshotWithCollectors(rootPID int, collectCensus, collectRelations func() ([]Proc, string), processAlive func(int) (bool, error)) (MemorySnapshot, string) {
 	var snapshot MemorySnapshot
 	for attempt := 0; attempt < darwinMemorySnapshotAttempts; attempt++ {
