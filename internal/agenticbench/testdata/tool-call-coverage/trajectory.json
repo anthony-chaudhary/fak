@@ -1,0 +1,6 @@
+[
+  {"call_id":"call-1","name":"Bash","observable":true},
+  {"call_id":"call-2","name":"GUI.Click","observable":true},
+  {"call_id":"call-3","name":"File.Write","observable":true},
+  {"call_id":"call-4","name":"GUI.Hidden","observable":false}
+]
