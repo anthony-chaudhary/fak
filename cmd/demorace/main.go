@@ -42,6 +42,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelladder"
@@ -198,10 +199,7 @@ func liveArmB(l *modelladder.Loaded, P, T, C, D, R int, emit emitter) (totalMS, 
 		tok := ids0[a]
 		for t := 0; t < T; t++ {
 			t1 := time.Now()
-			for d := 0; d < D; d++ {
-				s.Step(tok)
-				tok = (tok*48271 + 1) % vocab
-			}
+			tok = benchcli.DecodeLCG(s, tok, D, vocab)
 			dcAcc += ms(time.Since(t1))
 			if t < T-1 {
 				s.Prefill(lcgIDs(R, vocab, uint64(50000+t*1000+a*97))) // ingest ONLY the new result tokens

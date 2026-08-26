@@ -5,15 +5,24 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/fabricmap"
 )
 
 func main() {
-	selfcheck := flag.Bool("selfcheck", false, "run the built-in arbitrary-direction mapping proof")
-	manifest := flag.String("manifest", "", "JSON file containing graph and request")
-	flag.Parse()
+	os.Exit(run(os.Stdout, os.Stderr, os.Args[1:]))
+}
+
+func run(stdout, stderr io.Writer, args []string) int {
+	fs := flag.NewFlagSet("fabricmapdemo", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	selfcheck := fs.Bool("selfcheck", false, "run the built-in arbitrary-direction mapping proof")
+	manifest := fs.String("manifest", "", "JSON file containing graph and request")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	var input struct {
 		Graph   fabricmap.Graph   `json:"graph"`
 		Request fabricmap.Request `json:"request"`
@@ -24,27 +33,31 @@ func main() {
 	case *manifest != "":
 		data, err := os.ReadFile(*manifest)
 		if err != nil {
-			fatal(err)
+			return fail(stderr, err)
 		}
 		if err := json.Unmarshal(data, &input); err != nil {
-			fatal(err)
+			return fail(stderr, err)
 		}
 	default:
-		fmt.Fprintln(os.Stderr, "usage: fabricmapdemo -selfcheck | -manifest input.json")
-		os.Exit(2)
+		fmt.Fprintln(stderr, "usage: fabricmapdemo -selfcheck | -manifest input.json")
+		return 2
 	}
 	route, err := input.Graph.Plan(input.Request)
 	if err != nil {
-		fatal(err)
+		return fail(stderr, err)
 	}
-	data, _ := json.MarshalIndent(route, "", "  ")
-	fmt.Println(string(data))
+	data, err := json.MarshalIndent(route, "", "  ")
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintln(stdout, string(data))
 	if *selfcheck {
 		if len(route.Links) != 1 || route.Links[0].ID != "ssd-to-gpu-direct" {
-			fatal(fmt.Errorf("unexpected proof route"))
+			return fail(stderr, fmt.Errorf("unexpected proof route"))
 		}
-		fmt.Fprintln(os.Stderr, "PASS: L3 is a user label, and the directed L3 -> L1 CPU-bypass link was selected")
+		fmt.Fprintln(stderr, "PASS: L3 is a user label, and the directed L3 -> L1 CPU-bypass link was selected")
 	}
+	return 0
 }
 func proofInput() (in struct {
 	Graph   fabricmap.Graph   `json:"graph"`
@@ -58,4 +71,7 @@ func proofInput() (in struct {
 	in.Request = fabricmap.Request{From: "L3", To: "L1", AllowedCPUPaths: []string{"bypass"}, RequiredLinkLabels: map[string]string{"gpu-direct": "yes"}}
 	return in
 }
-func fatal(err error) { fmt.Fprintln(os.Stderr, "fabricmapdemo:", err); os.Exit(1) }
+func fail(stderr io.Writer, err error) int {
+	fmt.Fprintln(stderr, "fabricmapdemo:", err)
+	return 1
+}
