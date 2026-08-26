@@ -1092,6 +1092,16 @@
           "category": "incidental",
           "reason": "observed campaign receipt field, not a distinct cache mechanism",
           "token": "cache_reset_receipt"
+        },
+        {
+          "category": "incidental",
+          "reason": "Concrete Qwen swap codec function, not a new cache concept",
+          "token": "qwenhybridkvcachetohost"
+        },
+        {
+          "category": "incidental",
+          "reason": "Concrete Qwen swap restore codec function, not a new cache concept",
+          "token": "qwenhybridkvcachefromhost"
         }
       ],
       "id": "cache",
@@ -1335,6 +1345,8 @@
         "qwen38CacheKey",
         "qwen38_cache_campaign",
         "qwen38_cache_report",
+        "qwenhybridkvcachefromhost",
+        "qwenhybridkvcachetohost",
         "registerCacheLevers",
         "renderinkernelchatmlrequest",
         "replaceMicroCacheWitness",
@@ -1374,11 +1386,18 @@
       "tokens": []
     },
     {
-      "classifications": [],
+      "classifications": [
+        {
+          "category": "incidental",
+          "reason": "Private helper deriving configured full-attention layer indices, not a new attention concept",
+          "token": "qwenfullattentionlayers"
+        }
+      ],
       "id": "attention",
       "ignore": [
         "attentions",
         "attentive",
+        "qwenfullattentionlayers",
         "tattn"
       ],
       "known_tokens": [],
@@ -10404,6 +10423,21 @@
           "category": "incidental",
           "reason": "typed audit exclusion counter, not a provider support-maturity state",
           "token": "ExcludedUnsupportedProvider"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation type or receipt row; not a product maturity label.",
+          "token": "LimitSupport"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation type or receipt row; not a product maturity label.",
+          "token": "unsupportedFaultDomain"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private implementation type or receipt row; not a product maturity label.",
+          "token": "cgroupFaultDomain"
         }
       ],
       "exclude": [
@@ -10444,6 +10478,7 @@
         "KVQUANT_UNKNOWN_SCHEME",
         "KVQUANT_UNSUPPORTED_TRANSITION",
         "LadderMaturity",
+        "LimitSupport",
         "MISSING_ACHIEVED_MATURITY",
         "MaturityLabel",
         "MinSupport",
@@ -10533,6 +10568,7 @@
         "achievedMaturity",
         "backend_does_not_support_transition",
         "calendar_coverage",
+        "cgroupFaultDomain",
         "cmdLaunchParityCheck",
         "cmdManageParity",
         "compareParity",
@@ -10608,6 +10644,7 @@
         "targetcoverage",
         "topncoverage",
         "unsupported",
+        "unsupportedFaultDomain",
         "unsupported_activation",
         "unsupported_encoding",
         "unsupported_event_kinds",
