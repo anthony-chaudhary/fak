@@ -710,6 +710,7 @@ var tier = map[string]int{
 	"ultracodenegcontrol":        1,
 	"computetune":                1, // stdlib-only offline tuning decision primitive over replayable compute traces (#8608).
 	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
+	"ultracodedogfood":           1, // stdlib-only deterministic lifecycle-boundary witness evaluator (#8678).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

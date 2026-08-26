@@ -1112,6 +1112,11 @@
           "category": "incidental",
           "reason": "External normalized JSON provenance field; it reports authoritative runtime telemetry and does not name a fak cache concept.",
           "token": "runtime_cache_tokens"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture field naming the observed provider-cache evidence arm; it is not a new cache mechanism or reusable product concept.",
+          "token": "provider_cache_evidence"
         }
       ],
       "id": "cache",
@@ -1350,6 +1355,7 @@
         "prefixcachequeries",
         "promptcachehittokens",
         "promptcachemisstokens",
+        "provider_cache_evidence",
         "provider_cache_read_boundary",
         "provider_cache_usage_not_reported",
         "pycache",
@@ -5629,6 +5635,11 @@
           "category": "incidental",
           "reason": "One evaluated issue 8678 lifecycle boundary row.",
           "token": "LifecycleReportCell"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local evaluator function for one lifecycle witness; it is not a distinct session runtime concept.",
+          "token": "EvaluateLifecycleSession"
         }
       ],
       "id": "session-runtime",
@@ -5646,6 +5657,7 @@
         "CoveredSessions",
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
+        "EvaluateLifecycleSession",
         "FAK_SESSION_CLIENT_TOKEN",
         "FAK_SESSION_STATE",
         "FinalizeSessionMoveCheckpoint",
@@ -9288,6 +9300,11 @@
           "category": "incidental",
           "reason": "A fixture-local measurement label for the repository-side context arm, not a new context mechanism or product concept.",
           "token": "repository_context"
+        },
+        {
+          "category": "incidental",
+          "reason": "Fixture outcome flag for whether context survived compaction; it is not a new context mechanism.",
+          "token": "compaction_recovered"
         }
       ],
       "id": "context-ctx",
@@ -9335,6 +9352,7 @@
         "compactionThrashStreak",
         "compactionWitness",
         "compaction_checkpoint_conflation_rejected",
+        "compaction_recovered",
         "compactions",
         "context",
         "contextBucket",
