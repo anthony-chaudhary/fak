@@ -712,6 +712,7 @@ var tier = map[string]int{
 	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
 	"ultracodedogfood":           1, // stdlib-only deterministic lifecycle-boundary witness evaluator (#8678).
 	"archrank":                   3, // deterministic research-ranking method; no runtime kernel (#9145).
+	"qwenflashnext":              1, // stdlib-only pinned Flash-Next chat/channel/tool/stop contract (#9124).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
