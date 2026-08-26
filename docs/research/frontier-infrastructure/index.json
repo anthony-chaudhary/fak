@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 90,
+    "entry_count": 94,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -80,6 +80,8 @@
       "Alibaba Cloud / Aliyun",
       "Alibaba Cloud Tair",
       "Alibaba Qwen",
+      "Alphabet",
+      "Amazon",
       "Anthropic",
       "Anthropic / AWS",
       "Anthropic / Decart",
@@ -108,6 +110,7 @@
       "Large-scale training reliability study",
       "Leyline",
       "Meta",
+      "Microsoft",
       "Microsoft Research Mnemosyne",
       "MiniMax",
       "Mistral AI",
@@ -3237,6 +3240,158 @@
       ],
       "fak_implications": [
         "Replay turns, tools, failures, switches, compaction, and idle gaps; report request-weighted and token-weighted outcomes."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "alphabet-q2-2026-capex",
+      "category": "hyperscaler",
+      "entity": "Alphabet",
+      "topic": [
+        "capex",
+        "filings",
+        "capacity",
+        "backlog"
+      ],
+      "published_at": "2026-07-22",
+      "event_at": "2026-07-22",
+      "source_title": "Alphabet 2026 Q2 Earnings Call",
+      "source_url": "https://abc.xyz/investor/events/event-details/2026/2026-Q2-Earnings-Call-2026-GgTAq7Is0z/default.aspx",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Alphabet reported $44.9B Q2 capex, roughly 60% servers and 40% datacenters/networking within technical infrastructure, raised 2026 guidance to $195-205B, and described third-party capacity as a bridge during internal buildout.",
+      "quantified": {
+        "q2_capex_usd": 44900000000,
+        "technical_servers_share_pct_approx": 60,
+        "technical_datacenter_network_share_pct_approx": 40,
+        "2026_capex_guidance_low_usd": 195000000000,
+        "2026_capex_guidance_high_usd": 205000000000,
+        "cloud_backlog_usd": 514000000000
+      },
+      "assumptions": [
+        "AI capacity demand is large enough to use both owned and third-party supply while spending is accelerated."
+      ],
+      "contradictions_or_limits": [
+        "Company capex is not a clean AI-only or useful-capacity measure; backlog includes broad GCP and TPU-system agreements."
+      ],
+      "fak_implications": [
+        "Track ownership, asset mix, backlog duration, and delivered/monetized capacity separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "microsoft-fy26-q4-capex",
+      "category": "hyperscaler",
+      "entity": "Microsoft",
+      "topic": [
+        "capex",
+        "filings",
+        "capacity",
+        "backlog"
+      ],
+      "published_at": "2026-07-29",
+      "event_at": "2026-07-29",
+      "source_title": "Microsoft Fiscal Year 2026 Fourth Quarter Earnings Conference Call",
+      "source_url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Microsoft reported $41B quarterly capex, about two-thirds in short-lived CPU/GPU assets, $5.6B in finance leases mainly for large datacenter sites, and $678B commercial RPO while Azure demand exceeded capacity.",
+      "quantified": {
+        "quarter_capex_usd": 41000000000,
+        "short_lived_asset_share_pct_approx": 66.7,
+        "finance_leases_usd": 5600000000,
+        "cash_ppe_usd": 35800000000,
+        "commercial_rpo_usd": 678000000000,
+        "rpo_weighted_duration_years": 2.3
+      },
+      "assumptions": [
+        "Incoming supply must be allocated among cloud customers, first-party apps, R&D, and replacement."
+      ],
+      "contradictions_or_limits": [
+        "Capex combines AI/non-AI and finance leases create quarter timing differences."
+      ],
+      "fak_implications": [
+        "Normalize cash, lease, asset-life, allocation, and capacity states before comparing providers."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meta-q2-2026-capex",
+      "category": "hyperscaler",
+      "entity": "Meta",
+      "topic": [
+        "capex",
+        "filings",
+        "capacity",
+        "backlog"
+      ],
+      "published_at": "2026-07-29",
+      "event_at": "2026-07-29",
+      "source_title": "Meta Reports Second Quarter 2026 Results",
+      "source_url": "https://investor.atmeta.com/investor-news/press-release-details/2026/Meta-Reports-Second-Quarter-2026-Results/default.aspx",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Meta reported $31.08B Q2 capex including finance-lease principal and narrowed full-year 2026 guidance to $130-145B.",
+      "quantified": {
+        "q2_capex_including_finance_lease_principal_usd": 31080000000,
+        "2026_capex_guidance_low_usd": 130000000000,
+        "2026_capex_guidance_high_usd": 145000000000,
+        "q2_operating_cash_flow_usd": 31860000000,
+        "q2_free_cash_flow_usd": 784000000
+      },
+      "assumptions": [
+        "AI and core-business infrastructure investment can consume nearly all quarterly operating cash generation."
+      ],
+      "contradictions_or_limits": [
+        "Meta capex includes finance-lease principal and mixes AI with core business."
+      ],
+      "fak_implications": [
+        "Retain accounting definition and free-cash-flow boundary in cost comparisons."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "amazon-2026-capex-plan",
+      "category": "hyperscaler",
+      "entity": "Amazon",
+      "topic": [
+        "capex",
+        "filings",
+        "capacity",
+        "backlog"
+      ],
+      "published_at": "2026-04-09",
+      "event_at": "2026-04-09",
+      "source_title": "CEO Andy Jassy 2025 Letter to Shareholders",
+      "source_url": "https://www.aboutamazon.com/news/company-news/amazon-ceo-andy-jassy-2025-letter-to-shareholders",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Amazon said it planned roughly $200B of 2026 capex and that a substantial portion of AWS capex was supported by customer commitments and would monetize in 2027-2028.",
+      "quantified": {
+        "2026_capex_plan_usd_approx": 200000000000,
+        "monetization_start_year": 2027,
+        "monetization_end_year": 2028
+      },
+      "assumptions": [
+        "Long-lived customer commitments can underwrite capacity before revenue recognition."
+      ],
+      "contradictions_or_limits": [
+        "The total includes non-AWS investments and predates the reported Q2 increase to about $220B."
+      ],
+      "fak_implications": [
+        "Track commitment coverage, customer concentration, delivery, and recognition separately."
       ],
       "rumor": {
         "is_rumor": false
