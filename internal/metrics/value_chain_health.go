@@ -8,13 +8,14 @@ import (
 
 // ValueChainHealth folds an audit witness into adoption, evidence-failure, and economic-drift signals.
 type ValueChainHealth struct {
-	Grade         string
-	Candidate     string
-	Sessions      int
-	Turns         int64
-	FailureRate   float64
-	CostDriftPct  *float64
-	NamedEvidence []string
+	Grade              string
+	Candidate          string
+	Sessions           int
+	Turns              int64
+	FailureRate        float64
+	CostDriftPct       *float64
+	NamedEvidence      []string
+	InvocationOutcomes valuechain.OutcomeCounts
 }
 
 // ScoreValueChainHealth grades the non-default arm of a value-chain audit.
@@ -31,6 +32,7 @@ func ScoreValueChainHealth(report valuechain.Report) ValueChainHealth {
 
 	health.Candidate = report.Comparison.Candidate
 	health.CostDriftPct = report.Comparison.CostPerTurnDeltaPct
+	health.InvocationOutcomes = report.InvocationOutcomes
 	for _, arm := range report.Arms {
 		if arm.Arm != health.Candidate {
 			continue
@@ -68,8 +70,11 @@ func ScoreValueChainHealth(report valuechain.Report) ValueChainHealth {
 
 // RenderValueChainHealth emits the compact operator witness used by CI.
 func RenderValueChainHealth(health ValueChainHealth) string {
-	return fmt.Sprintf("Vertical value-chain health: %s\n- %s\n- %s\n- %s\n",
+	return fmt.Sprintf("Vertical value-chain health: %s\n- invocation_outcomes: success=%d refusal=%d error=%d\n- %s\n- %s\n- %s\n",
 		health.Grade,
+		health.InvocationOutcomes.Success,
+		health.InvocationOutcomes.Refusal,
+		health.InvocationOutcomes.Error,
 		health.NamedEvidence[0],
 		health.NamedEvidence[1],
 		health.NamedEvidence[2],
