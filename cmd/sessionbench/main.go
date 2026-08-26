@@ -260,10 +260,7 @@ func liveB(m *model.Model, quant, vocab, P, T, C, D, R int, metal bool) (prefixM
 		tok := ids0[a]
 		for t := 0; t < T; t++ {
 			t1 := time.Now()
-			for d := 0; d < D; d++ {
-				s.Step(tok)
-				tok = (tok*48271 + 1) % vocab
-			}
+			tok = benchcli.DecodeLCG(s, tok, D, vocab)
 			dc += time.Since(t1)
 			if t < T-1 {
 				rr := lcgIDs(R, vocab, uint64(50000+t*1000+a*97))

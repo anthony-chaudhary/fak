@@ -90,6 +90,7 @@ import (
 	"sync/atomic"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/shelltoken"
 	"github.com/anthony-chaudhary/fak/internal/witness"
 )
 
@@ -1038,51 +1039,24 @@ func isGitProgram(tok string) bool {
 // with a trailing .exe stripped (after the last / or \). Shared by isGitProgram
 // and isShellProgram.
 func programBasename(tok string) string {
-	b := tok
-	if k := strings.LastIndexAny(b, `/\`); k >= 0 {
-		b = b[k+1:]
-	}
-	b = strings.ToLower(b)
-	return strings.TrimSuffix(b, ".exe")
+	return shelltoken.ProgramBasename(tok)
 }
 
 // isAssign reports whether a token is a leading shell env assignment (NAME=...,
 // NAME a valid shell identifier). These precede the command word and must be
 // skipped to find it.
 func isAssign(t string) bool {
-	eq := strings.IndexByte(t, '=')
-	if eq <= 0 {
-		return false
-	}
-	for i := 0; i < eq; i++ {
-		ch := t[i]
-		ok := ch == '_' ||
-			(ch >= 'A' && ch <= 'Z') ||
-			(ch >= 'a' && ch <= 'z') ||
-			(i > 0 && ch >= '0' && ch <= '9')
-		if !ok {
-			return false
-		}
-	}
-	return true
+	return shelltoken.IsAssign(t)
 }
 
 // isShortCluster reports whether a token is a single-dash short-flag cluster
 // (`-f`, `-am`, `-fq`), distinct from a `--long` flag or a bare `-`/`--`.
-func isShortCluster(t string) bool { return len(t) >= 2 && t[0] == '-' && t[1] != '-' }
+func isShortCluster(t string) bool { return shelltoken.IsShortCluster(t) }
 
 // clusterHas reports whether a short-flag cluster contains the letter ch
 // (case-sensitive), scanning the cluster up to an attached `=value`.
 func clusterHas(token string, ch byte) bool {
-	for i := 1; i < len(token); i++ {
-		if token[i] == '=' {
-			break
-		}
-		if token[i] == ch {
-			return true
-		}
-	}
-	return false
+	return shelltoken.ClusterHas(token, ch)
 }
 
 // splitConfigKey splits a `git config` token into its key and (joined) value:

@@ -11,7 +11,13 @@ not a slide or a hand-entered savings table:
 - `microagent.ToolExec` routes both tool attempts through a real `kernel.Kernel` + `adjudicator.Adjudicator`, proving a denied refund never reaches the backend;
 - `microagent.EgressPolicy` allows the named API host and refuses an off-list destination before network I/O.
 
-No key, model, GPU, browser, subprocess, or network is needed.
+No key, model, GPU, browser, subprocess, or network is needed. Go 1.26 or newer
+is the only prerequisite. With the toolchain and module cache already available,
+the selfcheck completes in under one second (0.85 seconds in the captured Windows
+run); a cold toolchain download or first compile can take longer. The workload,
+scheduler timestamp, and inputs are fixed, so the reported counts and selfcheck
+verdict are deterministic. Success exits 0 and an invariant failure exits
+nonzero.
 
 ## Run the working spine
 
@@ -21,9 +27,14 @@ go run ./cmd/microfleetdemo -selfcheck
 go run ./cmd/microfleetdemo -json
 ```
 
-Representative deterministic output (byte counts come from the real encoded
-contexts and descriptors; token-turn counts use the demo's documented 4-byte
-estimator for both arms):
+The exact selfcheck transcript is in [EXAMPLE-OUTPUT.md](EXAMPLE-OUTPUT.md).
+
+## What you see
+
+The deterministic output keeps observed byte counts, compactions, scheduling,
+and gate verdicts separate from token-turn estimates. Byte counts come from the
+real encoded contexts and descriptors; token-turn counts use the demo's
+documented 4-byte estimator for both arms:
 
 ```text
 FAK MICROFLEET — one process, many tiny agents, every native gate
@@ -53,3 +64,8 @@ tool-floor, and egress rows are observed effects from the native implementations
 `-selfcheck` refuses success unless both reductions exceed 80%, the resident peak
 stays at four, all 20 overflow agents are parked, both tenant queues drain, and
 the denied action never dispatches.
+
+This demo does not claim provider quality, provider cost, live-model latency, or
+production fleet throughput. It proves only the fixed local corpus's native
+context, residency, scheduling, policy, and egress invariants. See the broader
+[micro-agent contract](../../docs/concepts/micro-agents.md).
