@@ -8,6 +8,7 @@ Registry rows must add `source_evidence` for any source class the map marks `par
 
 Current maps:
 
+- [`local-tensor-build.json`](local-tensor-build.json) — exhaustive machine map for the local TensorBuild snapshot at `snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288`.
 - [`langchain-ai-open-swe.json`](langchain-ai-open-swe.json) — machine map for `langchain-ai/open-swe` at `a6c360047186cc5b8afe3a74012a12bfc94ae7c7`.
 - [`langchain-ai-open-swe.md`](langchain-ai-open-swe.md) — human rendering of the same scan.
 

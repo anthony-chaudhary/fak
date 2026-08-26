@@ -204,12 +204,80 @@
       "status": "studied",
       "priority": 6,
       "why": "Local TensorBuild snapshot deeply studied for transferable identity, evidence-tier, artifact-reachability, operator-surface, disambiguation, and work-cost mechanisms; surviving gaps filed as #6874-#6876. Revision history and license remain unavailable, so concepts only were borrowed.",
-      "last_checked": "2026-08-15",
+      "last_checked": "2026-08-25",
       "checked_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
       "stars_at_check": 0,
       "last_push_at_check": "",
       "study_note": "docs/research/tensor-build-local-study-2026-08-15.md",
-      "refresh_issue": "#8985"
+      "refresh_issue": "#8985",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/local-tensor-build.json",
+        "indexed_revision": "snapshot-sha256:bf4dd9267f31dea48b925602e3d1326f65ca3a1e02d3062afecf414af1614288",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 18,
+        "candidate_count": 11,
+        "filed_issue_count": 3,
+        "completeness_critic": "exhaustive local snapshot map with raw-versus-indexed denominator; generated trees internal/build and internal/conn/web/dist are named; changelog, roadmap/TODO, license/provenance, unavailable forge/history surfaces, fak self-query, candidate dispositions, and issue tracking are explicit; no source license or attributable Git/forge history is available, so concepts only",
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "docs/research/tensor-build-local-study-2026-08-15.md#exhaustive-inventory-refresh-2026-08-25",
+              "C:/work/tb/tensor-build-main/.github/ISSUE_TEMPLATE/general-ticket.md",
+              "C:/work/tb/tensor-build-main/.github/PULL_REQUEST_TEMPLATE.md",
+              "docs/research/tensor-build-local-study-2026-08-15.md#issues-prs-and-discussions"
+            ],
+            "note": "Templates prove local workflow shape only. Issues, pull requests, discussions, and releases cannot be enumerated and are explicitly unavailable."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"engine identity backend implementation benchmark receipt evidence artifact reachability experiment results\"",
+              "fak capabilities \"agent human control parity work class token spend attribution\"",
+              "fak capabilities \"failed experiment ledger negative result candidate borrow issue tracking\""
+            ],
+            "note": "Candidate-specific self-query was replayed; combined artifact and negative-ledger axes had no direct match, while work-cost/control/cache/routing surfaces matched. Dedupe remains anchored to current issue states."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/local-tensor-build.json#non_tree_study.candidate_matrix",
+              "docs/research/tensor-build-local-study-2026-08-15.md#candidate-matrix-and-current-fak-witnesses"
+            ],
+            "note": "Eleven candidates were re-adjudicated; the refresh corrected the #6874-#6876 association and found no novel unowned borrow."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/8985",
+              "https://github.com/anthony-chaudhary/fak/issues/6874",
+              "https://github.com/anthony-chaudhary/fak/issues/6875",
+              "https://github.com/anthony-chaudhary/fak/issues/6876"
+            ],
+            "note": "#6874 is closed; #6875 and #6876 remain open. This refresh produced no new issue."
+          }
+        ],
+        "issue_refs": [
+          "#8985",
+          "#6874",
+          "#6875",
+          "#6876"
+        ]
+      }
     },
     {
       "repository": "strukto-ai/mirage",
