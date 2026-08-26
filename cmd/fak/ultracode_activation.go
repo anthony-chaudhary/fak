@@ -63,6 +63,7 @@ type ultracodeStatus struct {
 	Budget           orchestration.UltracodeEnvelopeReceipt `json:"budget"`
 	BudgetPhase      string                                 `json:"budget_phase"`
 	Workers          []ultracodeWorkerStatus                `json:"workers"`
+	Nodes            []ultracodeNodeStatus                  `json:"nodes"`
 }
 
 func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
@@ -122,6 +123,10 @@ func runUltracodeStatus(stdout, stderr io.Writer, argv []string) int {
 		status.Budget.Overrun, status.Budget.Admitted)
 	for _, worker := range status.Workers {
 		fmt.Fprintf(stdout, "  %-12s %-9s activation=%s raw=%s reason=%s age=%dms turns=%d/%d\n", worker.ChildID, worker.State, worker.ActivationVerdict, worker.Activation, worker.ActivationReason, worker.ActivationAgeMS, worker.TurnsCompleted, worker.TurnsStarted)
+	}
+	for _, node := range status.Nodes {
+		fmt.Fprintf(stdout, "  node %-12s parent=%s deps=%s role=%s access=%s worker=%s lease=%s budget=%s artifacts=%d effect=%s witness=%s reconcile=%s terminal=%s attention=%s\n",
+			node.NodeID, node.ParentID, strings.Join(node.Dependencies, ","), node.Role, node.Access, node.WorkerState, node.LeaseVerdict, formatUltracodeNodeBudget(node), len(node.ArtifactRefs), node.EffectState, node.WitnessState, node.ReconcileState, node.TerminalState, node.Attention)
 	}
 	return 0
 }
@@ -185,6 +190,7 @@ func projectUltracodeStatus(root string, receipt codexOrchestrationLaunchReceipt
 		State: runStatus.State, Outcome: runStatus.Outcome, Activation: coverage, Budget: budget,
 		BudgetPhase: ultracodeBudgetPhaseProvisional,
 		Workers:     make([]ultracodeWorkerStatus, 0, len(runStatus.Workers)),
+		Nodes:       projectUltracodeNodes(receipt, runStatus.Workers),
 	}
 	if receipt.Budget.Schema != orchestration.UltracodeEnvelopeReceiptSchema {
 		out.BudgetPhase = ultracodeBudgetPhaseMissing

@@ -152,6 +152,7 @@ type codexOrchestrationLaunchReceipt struct {
 	Budget            orchestration.UltracodeEnvelopeReceipt `json:"budget"`
 	Workload          *orchestrationWorkloadReceipt          `json:"workload,omitempty"`
 	EmptyUsagePolicy  *qwenEmptyUsagePolicyReceipt           `json:"empty_usage_policy,omitempty"`
+	Graph             *ultracodeNodeGraphReceipt             `json:"graph,omitempty"`
 }
 
 func orchestrationDegradationNames(items []orchestration.Degradation) []string {
@@ -251,7 +252,7 @@ func launchCodexOrchestrationWorkersWithProfiles(home, sessionID, requestedProfi
 		RequestedProfile: requestedProfile, ResolvedProfile: string(resolution.Resolved.Profile),
 		WorkClass: string(resolution.Resolved.WorkClass), CapabilityProfile: capabilityProfile,
 		Degradations: orchestrationDegradationNames(resolution.Degradations), Workers: []codexOrchestrationWorkerLaunch{},
-		Activations: []ultracodebench.ActivationReceipt{},
+		Activations: []ultracodebench.ActivationReceipt{}, Graph: &ultracodeNodeGraphReceipt{Plan: &resolution.Resolved},
 	}
 	if resolution.Resolved.Profile != orchestration.ProfileUltracode || resolution.Resolved.Budget.MaxWorkers <= 1 {
 		receipt.Status = "declined"
