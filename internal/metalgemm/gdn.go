@@ -260,23 +260,35 @@ func (s *GDNState) run(panel GDNPanel, injectPostSubmitFailure bool) ([]float32,
 	return nil, accounting, false, &GDNDeclinedError{Reason: "native validation refused owner or geometry"}
 }
 
-// Reset zeros both persistent buffers without changing their identities.
 // Seed replaces the resident convolution and recurrent state before a decode
 // operation is submitted. Shape validation happens before the native owner is
 // touched, so callers can decline unsupported geometry without mutation.
 func (s *GDNState) Seed(conv, recurrent []float32) error {
-	if s == nil || s.owner == 0 {
-		return fmt.Errorf("metalgemm: GDN state is closed")
+	if s == nil {
+		return &GDNDeclinedError{Reason: "nil owner"}
 	}
-	if len(conv) != s.convElems || len(recurrent) != s.recurrentElems {
-		return fmt.Errorf("metalgemm: GDN seed shape conv/recurrent=%d/%d, want %d/%d", len(conv), len(recurrent), s.convElems, s.recurrentElems)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return &GDNDeclinedError{Reason: "owner is closed"}
 	}
-	if C.mg_gdn_state_seed(s.owner, gdnF32(conv), C.int(len(conv)), gdnF32(recurrent), C.int(len(recurrent))) != 1 {
-		return fmt.Errorf("metalgemm: seed GDN state failed")
+	wantConv := (s.geometry.ConvKernel - 1) * s.geometry.convDim()
+	wantRecurrent := s.geometry.NumValueHeads * s.geometry.KeyHeadDim * s.geometry.ValueHeadDim
+	if len(conv) != wantConv || len(recurrent) != wantRecurrent {
+		return &GDNDeclinedError{Reason: fmt.Sprintf("seed conv/recurrent elements=%d/%d, want %d/%d", len(conv), len(recurrent), wantConv, wantRecurrent)}
+	}
+	var convPtr *C.float
+	if len(conv) > 0 {
+		convPtr = gdnF32(conv)
+	}
+	if C.mg_gdn_state_seed(s.owner, convPtr, C.int(len(conv)), gdnF32(recurrent), C.int(len(recurrent))) != 1 {
+		s.releaseLocked()
+		return &GDNPostSubmitError{Reason: "state seed failed"}
 	}
 	return nil
 }
 
+// Reset zeros both persistent buffers without changing their identities.
 func (s *GDNState) Reset() error {
 	if s == nil {
 		return &GDNDeclinedError{Reason: "nil owner"}
