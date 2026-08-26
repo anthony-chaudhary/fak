@@ -3,10 +3,10 @@
   "source": "INDEX.md curated lexical docs",
   "coverage": "curated_docs_only",
   "questions": 24,
-  "successes": 3,
-  "top_k_rate": 0.125,
+  "successes": 15,
+  "top_k_rate": 0.625,
   "total_results": 120,
-  "rendered_bytes": 11805,
+  "rendered_bytes": 7932,
   "cases": [
     {
       "id": "shared-tree-validation",
@@ -18,13 +18,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 772,
+      "rendered_bytes": 534,
       "top_paths": [
-        "docs/notes/SHARED-TRUNK-VS-PER-AGENT-ISOLATION-2026-06-25.md",
-        "docs/notes/RESEARCH-DURABLE-SESSION-STATE-SHARED-MEMORY-2026-07-01.md",
         "docs/notes/SHARED-TRUNK-COMPILE-INTEGRITY-GAP-2026-07-06.md",
+        "docs/notes/SHARED-TRUNK-VS-PER-AGENT-ISOLATION-2026-06-25.md",
         "docs/notes/WORKTREE-LAND-MERGE-RECONCILIATION-2026-07-10.md",
-        "docs/notes/ULTRACODE-WORKFLOW-PROOF-HARNESS-2026-07-01.md"
+        "docs/notes/CONCEPT-AGENT-FRICTION-COMPLAINT-CHANNELS-2026-06-29.md",
+        "docs/notes/DESKTOP-SLOWNESS-MAINTENANCE-2026-06-28.md"
       ]
     },
     {
@@ -38,13 +38,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 655,
+      "rendered_bytes": 419,
       "top_paths": [
-        "docs/notes/SHARED-CLONE-INTEGRATION-PASS-2026-06-29.md",
         "docs/notes/DECISIONS-AUDIT-LOG-2026-06-26.md",
-        "docs/notes/RESEARCH-cot-training-gains-agents-triage-2026-06-27.md",
         "docs/notes/IN-FLIGHT-REPAIR-SANCTIONED-SIDESTEP-2026-07-15.md",
-        "docs/adoption/install-paths.md"
+        "docs/notes/RESEARCH-cot-training-gains-agents-triage-2026-06-27.md",
+        "docs/notes/SHARED-CLONE-INTEGRATION-PASS-2026-06-29.md",
+        "CLAIMS.md"
       ]
     },
     {
@@ -55,15 +55,16 @@
         "docs/native-inference-goal.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 642,
+      "rendered_bytes": 291,
       "top_paths": [
+        "docs/native-inference-goal.md",
+        "docs/fak-vs-alternatives-comparison.md",
+        "docs/performance.md",
         "docs/adoption/compare/matrix.md",
-        "docs/adoption/compare/vs-serving-engines.md",
-        "docs/notes/GLM52-CPU-LLAMACPP-BASELINE-2026-06-29.md",
-        "docs/notes/GLM52-FAK-NATIVE-CPU-SERVE-MEMORY-WEDGE-2026-06-27.md",
-        "docs/notes/GLM52-NATIVE-THROUGHPUT-AND-BENCHMARK-PLAN-2026-06-25.md"
+        "experiments/qwen36/token3-drift-investigation-2026-06-28.md"
       ]
     },
     {
@@ -74,15 +75,16 @@
         "docs/fleet-compute-nodes.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 580,
+      "rendered_bytes": 334,
       "top_paths": [
-        "docs/notes/GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md",
+        "docs/fleet-compute-nodes.md",
         "docs/notes/BLACKWELL-NVL72-READINESS-MAP-2026-06-29.md",
-        "docs/fak/neo-cloud-deploy.md",
-        "docs/explainers/what-is-a-cuda-kernel.md",
-        "docs/notes/AFFORDABLE-HARDWARE-AGENT-FLEETS-2026-06-28.md"
+        "docs/notes/GLM52-DGX-THEORETICAL-CEILING-2026-07-06.md",
+        "docs/benchmarks/GPU-QWEN-RESULTS.md",
+        "internal/compute/cuda_arch.txt"
       ]
     },
     {
@@ -93,15 +95,16 @@
         "docs/private-comms-channel.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 560,
+      "rendered_bytes": 385,
       "top_paths": [
-        "docs/notes/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md",
-        "docs/notes/LIVECODEBENCH-SMOKE-GPU-SERVER-2026-08-05.md",
-        "docs/notes/L4-INKERNEL-SERVE-AND-CONCURRENCY-FIX-2026-06-25.md",
+        "docs/private-comms-channel.md",
+        "docs/benchmarks/GPU-QWEN-RESULTS.md",
         "docs/notes/GPU-SERVER-CROSS-ENGINE-DATA-2026-06-25.md",
-        "GPU.md"
+        "docs/notes/GPU-SERVER-OVERNIGHT-PLAN-2026-06-28.md",
+        "docs/notes/LIVECODEBENCH-SMOKE-GPU-SERVER-2026-08-05.md"
       ]
     },
     {
@@ -115,13 +118,13 @@
       "success": true,
       "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 590,
+      "rendered_bytes": 332,
       "top_paths": [
         "docs/spine-first-defaults.md",
+        "keep_allowlist.txt",
         "docs/notes/SELF-FEATURE-QUERY-SPINE-2026-06-30.md",
-        "docs/notes/L3REGIONBACKEND-CHILD-B-DESIGN-55-2026-06-28.md",
-        "docs/notes/MANAGED-CACHE-PROVING-GROUND-2026-07-03.md",
-        "docs/notes/native-harness-progress-tracking-1315.md"
+        "docs/notes/EPIC-CLOSEOUT-METHOD-2026-06-29.md",
+        "docs/notes/HARNESS-HOST-COMPONENTS-2026-08-20.md"
       ]
     },
     {
@@ -132,15 +135,16 @@
         "docs/generated-output-defaults.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 320,
+      "rendered_bytes": 234,
       "top_paths": [
-        "docs/generated/verb-surface.md",
-        "docs/generated/disambiguation/canonical-terms.md",
-        "docs/generated/disambiguation/contrast-index.md",
-        "docs/marketing/README.md",
-        "docs/adoption/compare/matrix.md"
+        "docs/generated-output-defaults.md",
+        "llms-terms.txt",
+        "docs/quality/output-quality-regression-runbook.md",
+        "keep_allowlist.txt",
+        "llms-updates.txt"
       ]
     },
     {
@@ -151,15 +155,16 @@
         "docs/ci/ci-spec-change-migration.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 408,
+      "rendered_bytes": 368,
       "top_paths": [
+        "docs/ci/ci-spec-change-migration.md",
         "docs/notes/DECISION-fak-dos-hook-boundary-2026-07-07.md",
         "docs/notes/SESSION-LIFECYCLE-IS-SERVING-ADMISSION-2026-06-26.md",
-        "docs/provider-cost-reconciliation.md",
-        "docs/branch-regime.md",
-        "docs/ticket-scope.md"
+        "CONTRIBUTING.md",
+        "docs/provider-cost-reconciliation.md"
       ]
     },
     {
@@ -172,13 +177,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 499,
+      "rendered_bytes": 433,
       "top_paths": [
         "docs/observability/trajectory-control.md",
         "docs/notes/TRAJECTORY-CONTROL-SCORE-ANYTHING-2026-07-03.md",
         "docs/notes/VERIFIED-RESUME-PACKET-CHECKPOINT-2026-06-26.md",
-        "docs/_witnesses/issue-8494/trajectory-audit-2026-08-21.md",
-        "docs/adoption/stories/cache-cliff.md"
+        "docs/explainers/frozen-trajectory-cache-cliff.md",
+        "docs/_witnesses/issue-8494/trajectory-audit-2026-08-21.md"
       ]
     },
     {
@@ -189,15 +194,16 @@
         "docs/integrations/opencode.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 285,
+      "rendered_bytes": 236,
       "top_paths": [
-        "docs/integrations/codex-mcp-warning.md",
-        "docs/integrations/dos-decisions.md",
-        "docs/integrations/harness-classification.md",
-        "docs/integrations/harness-composition.md",
-        "docs/integrations/harness-derive.md"
+        "docs/integrations/opencode.md",
+        "docs/integrations/amp.md",
+        "docs/integrations/codex-memories.md",
+        "docs/integrations/gemini-cli.md",
+        "docs/fak/agent-integration-architecture.md"
       ]
     },
     {
@@ -208,15 +214,16 @@
         "docs/cli-reference.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 300,
+      "rendered_bytes": 223,
       "top_paths": [
-        "docs/standards/agent-grammar.md",
-        "docs/explainers/context-shedding.md",
-        "docs/fak/neo-cloud-deploy.md",
-        "docs/sota/README.md",
-        "docs/explainers/what-is-a-cuda-kernel.md"
+        "docs/cli-reference.md",
+        "docs/vendor/neo-cloud-reference-architecture.md",
+        "keep_allowlist.txt",
+        "docs/glossary.md",
+        "docs/fak/neo-cloud-deploy.md"
       ]
     },
     {
@@ -229,13 +236,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 707,
+      "rendered_bytes": 546,
       "top_paths": [
+        "docs/industry-scorecard/security.md",
         "docs/adoption/troubleshooting-first-run.md",
         "docs/notes/RESEARCH-mcp-security-hub-offensive-tooling-triage-2026-06-29.md",
         "docs/notes/RESEARCH-out-of-band-injection-defense-taxonomy-triage-2026-06-26.md",
-        "docs/notes/RESEARCH-sharelock-multitool-threshold-poisoning-triage-2026-06-26.md",
-        "docs/explainers/default-deny-vs-classifier.md"
+        "docs/notes/RESEARCH-sharelock-multitool-threshold-poisoning-triage-2026-06-26.md"
       ]
     },
     {
@@ -249,13 +256,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 455,
+      "rendered_bytes": 308,
       "top_paths": [
         "docs/notes/CONCEPT-STUDY-DEEPWIKI-2026-07-11.md",
+        "docs/PRODUCT-STATUS.md",
         "docs/notes/CONCEPT-DOS-READINESS-VERDICT-LADDER-2026-06-26.md",
-        "docs/EXECUTIVE-ROLLUP.md",
         "docs/supported/features.md",
-        "docs/adoption/launch-kit.md"
+        "docs/EXECUTIVE-ROLLUP.md"
       ]
     },
     {
@@ -269,12 +276,12 @@
       "success": true,
       "rank": 2,
       "result_count": 5,
-      "rendered_bytes": 266,
+      "rendered_bytes": 197,
       "top_paths": [
         "docs/adoption/launch-kit.md",
         "BENCHMARK-AUTHORITY.md",
-        "BENCHMARK-AUTHORITY.md",
-        "docs/explainers/context-shedding.md",
+        "SECURITY.md",
+        "docs/native-inference-goal.md",
         "docs/EXECUTIVE-ROLLUP.md"
       ]
     },
@@ -286,15 +293,16 @@
         "docs/ROLLBACK.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 493,
+      "rendered_bytes": 394,
       "top_paths": [
+        "docs/ROLLBACK.md",
         "docs/notes/DECISION-fak-dos-hook-boundary-2026-07-07.md",
-        "docs/notes/MODELOPS-TOP3-DOGFOOD-2026-07-15.md",
+        "docs/notes/EPIC-CLOSEOUT-METHOD-2026-06-29.md",
         "docs/notes/FUSION-REFCOUNT-GC-FOR-THE-AGENT-LOOP-2026-06-25.md",
-        "docs/notes/native-harness-progress-tracking-1315.md",
-        "docs/spine-first-defaults.md"
+        "docs/notes/MODELOPS-TOP3-DOGFOOD-2026-07-15.md"
       ]
     },
     {
@@ -305,15 +313,16 @@
         "docs/releases-channel.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 681,
+      "rendered_bytes": 426,
       "top_paths": [
+        "docs/releases-channel.md",
+        "docs/blockers-channel.md",
         "docs/notes/GENERATION-RELEASE-READINESS-CONTRACT-2026-08-16.md",
-        "docs/notes/RESEARCH-agent-privacy-data-centric-survey-triage-2026-06-27.md",
         "docs/notes/MANAGED-CACHE-PROVING-GROUND-2026-07-03.md",
-        "docs/notes/SLACK-CONTROL-FOUNDATION-2026-07-02.md",
-        "docs/notes/WORKER-UNIT-CONSERVATION-BACKLOG-2026-07-02.md"
+        "docs/notes/RESEARCH-agent-privacy-data-centric-survey-triage-2026-06-27.md"
       ]
     },
     {
@@ -324,15 +333,16 @@
         "docs/problems-we-solve.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 5,
       "result_count": 5,
-      "rendered_bytes": 671,
+      "rendered_bytes": 438,
       "top_paths": [
+        "docs/notes/CONCEPT-STUDY-DSD-DYNAMIC-SPEC-DECODE-2026-07-10.md",
+        "docs/notes/CONCEPT-STUDY-SPECDECODE-2026-07-10.md",
         "docs/notes/CONCEPT-STUDY-VLLM-DSD-WITNESSED-2026-07-11.md",
-        "docs/notes/BLACKWELL-NVL72-READINESS-MAP-2026-06-29.md",
-        "docs/notes/CONCEPT-STUDY-DEEPWIKI-2026-07-11.md",
-        "docs/notes/RESEARCH-DURABLE-SESSION-STATE-SHARED-MEMORY-2026-07-01.md",
-        "docs/fak/concept-glossary.md"
+        "docs/notes/study-vllm-dynamic-sd-borrow-2026-07-10.md",
+        "docs/problems-we-solve.md"
       ]
     },
     {
@@ -346,13 +356,13 @@
       "success": true,
       "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 361,
+      "rendered_bytes": 270,
       "top_paths": [
         "docs/supported/features.md",
+        "STATUS.md",
         "docs/notes/SESSION-CACHE-SAVINGS-ABLATION-2026-06-29.md",
         "docs/notes/track-d-agent-framework-parity-tracking-304.md",
-        "docs/milestones/STATUS.md",
-        "docs/dev-status-checkpoints.md"
+        "CLAIMS.md"
       ]
     },
     {
@@ -363,15 +373,16 @@
         "docs/repro-packet.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 384,
+      "rendered_bytes": 177,
       "top_paths": [
-        "docs/explainers/agent-runtime.md",
+        "docs/repro-packet.md",
         "docs/adoption/concept-card.md",
+        "docs/adoption/pitch-ladder.md",
         "docs/i18n/README.md",
-        "docs/adoption/casts/README.md",
-        "docs/notes/CONCEPT-STUDY-HEADROOM-2026-07-08.md"
+        "docs/i18n/hi/README.md"
       ]
     },
     {
@@ -384,13 +395,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 353,
+      "rendered_bytes": 237,
       "top_paths": [
-        "AGENTS.md",
-        "docs/explainers/engineering-is-building-loops.md",
-        "docs/adoption/compare/vs-routers.md",
-        "docs/adoption/good-first-tasks.md",
-        "docs/adoption/launch-kit.md"
+        "docs/fak/deployment-guide.md",
+        "docs/operator-control-plane.md",
+        "docs/operator-steerability-prs.md",
+        "docs/explainers/agent-runtime.md",
+        "docs/generation.md"
       ]
     },
     {
@@ -403,13 +414,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 454,
+      "rendered_bytes": 265,
       "top_paths": [
+        "docs/vendor/neo-cloud-reference-architecture.md",
         "docs/fak/neo-cloud-deploy.md",
+        "internal/compute/cuda_arch.txt",
         "docs/supported/models.md",
-        "docs/notes/D-006-TOOL-ECOSYSTEM-ARCH-FIT-243-2026-06-28.md",
-        "docs/notes/RESEARCH-agenticos-intent-os-triage-2026-06-26.md",
-        "docs/fak/in-kernel-model.md"
+        "docs/explainers/one-binary-one-surface.md"
       ]
     },
     {
@@ -422,13 +433,13 @@
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 391,
+      "rendered_bytes": 392,
       "top_paths": [
+        "docs/notes/CONCEPT-STUDY-DEEPAGENTS-2026-07-10.md",
         "docs/notes/study-openshell-borrow-scout-2026-07-10.md",
-        "docs/fak/in-kernel-model.md",
-        "docs/explainers/what-is-a-cuda-kernel.md",
+        "docs/notes/study-puppetmaster-borrow-scout-2026-07-10.md",
         "docs/dos-kernel-transfer-playbook.md",
-        "docs/extension-seams.md"
+        "docs/new-model-playbook.md"
       ]
     },
     {
@@ -439,15 +450,16 @@
         "LEARNING-PATH.md"
       ],
       "top_k": 5,
-      "success": false,
+      "success": true,
+      "rank": 1,
       "result_count": 5,
-      "rendered_bytes": 348,
+      "rendered_bytes": 194,
       "top_paths": [
-        "docs/LEARNING-SCORECARD.md",
-        "docs/adoption/install-paths.md",
+        "LEARNING-PATH.md",
         "docs/learning-observation.md",
-        "docs/fak/neo-cloud-deploy.md",
-        "docs/adoption/compare/vs-serving-engines.md"
+        "docs/LEARNING-SCORECARD.md",
+        "docs/native-inference-goal.md",
+        "INDEX.md"
       ]
     },
     {
@@ -455,19 +467,21 @@
       "category": "docs",
       "query": "wiki freshness structure verify",
       "owners": [
-        "docs/wiki.md",
-        "internal/wiki/doc.go"
+        "internal/wiki/doc.go",
+        "internal/wiki/structure.go",
+        "internal/wiki/freshness.go",
+        "internal/wiki/verify.go"
       ],
       "top_k": 5,
       "success": false,
       "result_count": 5,
-      "rendered_bytes": 630,
+      "rendered_bytes": 299,
       "top_paths": [
         "docs/notes/CONCEPT-STUDY-DEEPWIKI-2026-07-11.md",
+        "docs/fak-vs-alternatives-comparison.md",
+        "docs/PRODUCT-STATUS.md",
         "docs/adoption/compare/matrix.md",
-        "docs/notes/2026-07-10-kernelwiki-study.md",
-        "docs/notes/context-safety-dos-refusal-tokens-1217.md",
-        "docs/notes/context-safety-rederivation-checker-1217.md"
+        "docs/notes/CLAUDECODE-STUDY-2026-07-10.md"
       ]
     }
   ]

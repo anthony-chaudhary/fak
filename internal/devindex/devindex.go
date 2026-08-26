@@ -92,9 +92,10 @@ type Claim struct {
 // Doc is one entry of the curated doc map (INDEX.md): a human title, the path or
 // URL it points at, and the one-line blurb that follows it.
 type Doc struct {
-	Title string `json:"title"`
-	Path  string `json:"path"`
-	Blurb string `json:"blurb,omitempty"`
+	Title   string   `json:"title"`
+	Path    string   `json:"path"`
+	Blurb   string   `json:"blurb,omitempty"`
+	Sources []string `json:"sources,omitempty"`
 	// Approx marks a doc returned by the trigram fuzzy fallback (#3925) — a near-miss
 	// on the title/path/blurb rather than an exact substring hit. Omitted on exact hits.
 	Approx bool `json:"approx,omitempty"`
@@ -162,8 +163,10 @@ func Load(root string) (*Catalog, error) {
 		c.parseTiers(string(tiers))
 	}
 
-	if idx, err := os.ReadFile(filepath.Join(root, "INDEX.md")); err == nil {
-		c.parseDocs(string(idx))
+	for _, source := range []string{"INDEX.md", "llms.txt", "README.md", "AGENTS.md"} {
+		if idx, err := os.ReadFile(filepath.Join(root, source)); err == nil {
+			c.parseDocsFrom(source, string(idx))
+		}
 	}
 	if gen, err := os.ReadFile(filepath.Join(root, "docs", "generation.md")); err == nil {
 		c.Generations = parseGenerations(string(gen))
@@ -408,8 +411,15 @@ var docLineRE = regexp.MustCompile(`^\s*[-*]\s*\[(.+?)\]\(([^)]+)\)\s*(?:[—–
 // bullets are taken; prose lines are skipped. Titles keep their text minus
 // surrounding backticks.
 func (c *Catalog) parseDocs(text string) {
+	c.parseDocsFrom("INDEX.md", text)
+}
+
+func (c *Catalog) parseDocsFrom(source, text string) {
 	seen := map[string]bool{}
 	for _, raw := range strings.Split(text, "\n") {
+		for _, linked := range markdownLinkedDocs(raw, source) {
+			c.mergeDoc(linked)
+		}
 		m := docLineRE.FindStringSubmatch(raw)
 		if m == nil {
 			continue
@@ -422,8 +432,74 @@ func (c *Catalog) parseDocs(text string) {
 			continue
 		}
 		seen[title+"\x00"+path] = true
-		c.Docs = append(c.Docs, Doc{Title: title, Path: path, Blurb: strings.TrimSpace(m[3])})
+		blurb := strings.TrimSpace(m[3])
+		merged := false
+		for i := range c.Docs {
+			if normPath(c.Docs[i].Path) != normPath(path) {
+				continue
+			}
+			if !containsString(c.Docs[i].Sources, source) {
+				c.Docs[i].Sources = append(c.Docs[i].Sources, source)
+			}
+			if c.Docs[i].Blurb == "" && blurb != "" {
+				c.Docs[i].Blurb = blurb
+			}
+			merged = true
+			break
+		}
+		if !merged {
+			c.Docs = append(c.Docs, Doc{Title: title, Path: path, Blurb: blurb, Sources: []string{source}})
+		}
+		for _, extraPath := range markdownInlinePaths(raw) {
+			c.mergeDoc(Doc{Title: pathTitle(extraPath), Path: extraPath, Blurb: blurb, Sources: []string{source}})
+		}
 	}
+}
+
+var inlineCodePathRE = regexp.MustCompile("`((?:docs/)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\\.(?:md|txt))`")
+var anyMarkdownLinkRE = regexp.MustCompile(`\[[^]]+\]\(([^)]+\.(?:md|txt))(?:#[^)]+)?\)`)
+
+func markdownLinkedDocs(line, source string) []Doc {
+	var docs []Doc
+	for _, match := range anyMarkdownLinkRE.FindAllStringSubmatch(line, -1) {
+		path := match[1]
+		if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+			continue
+		}
+		docs = append(docs, Doc{Title: pathTitle(path), Path: path, Blurb: strings.TrimSpace(strings.ReplaceAll(line, "`", "")), Sources: []string{source}})
+	}
+	return docs
+}
+
+func markdownInlinePaths(line string) []string {
+	var paths []string
+	for _, match := range inlineCodePathRE.FindAllStringSubmatch(line, -1) {
+		paths = append(paths, match[1])
+	}
+	for _, match := range anyMarkdownLinkRE.FindAllStringSubmatch(line, -1) {
+		paths = append(paths, match[1])
+	}
+	return paths
+}
+
+func pathTitle(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return strings.ReplaceAll(strings.ReplaceAll(base, "-", " "), "_", " ")
+}
+
+func (c *Catalog) mergeDoc(candidate Doc) {
+	for i := range c.Docs {
+		if normPath(c.Docs[i].Path) != normPath(candidate.Path) {
+			continue
+		}
+		for _, source := range candidate.Sources {
+			if !containsString(c.Docs[i].Sources, source) {
+				c.Docs[i].Sources = append(c.Docs[i].Sources, source)
+			}
+		}
+		return
+	}
+	c.Docs = append(c.Docs, candidate)
 }
 
 // claimTagRE matches a real ledger claim line: `- [TAG] prose`. The legend lines
@@ -830,6 +906,11 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 			}
 		}
 		if score > 0 {
+			// Multi-term intent can use canonicality to break close ties. Preserve
+			// the established single-term title/path weights exactly.
+			if len(toks) > 1 {
+				score += canonicalDocBonus(d)
+			}
 			hits = append(hits, scored{d: d, s: score, coverage: coverage})
 		}
 	}
@@ -863,6 +944,20 @@ func (c *Catalog) SearchDocs(query string) []Doc {
 		out[i] = h.d
 	}
 	return out
+}
+
+func canonicalDocBonus(d Doc) int {
+	bonus := 2 * len(d.Sources)
+	p := strings.ToLower(normPath(d.Path))
+	switch {
+	case strings.HasPrefix(p, "docs/notes/"), strings.HasPrefix(p, "docs/_witnesses/"), strings.HasPrefix(p, "docs/generated/"):
+		bonus -= 3
+	case !strings.Contains(p, "/"):
+		bonus += 3
+	case strings.Count(p, "/") == 1:
+		bonus += 2
+	}
+	return bonus
 }
 
 // fuzzyDocs is SearchDocs' near-miss fallback: trigram similarity over each doc's
@@ -910,4 +1005,13 @@ func tokens(q string) []string {
 func normPath(path string) string {
 	p := strings.ReplaceAll(path, "\\", "/")
 	return strings.TrimPrefix(p, "./")
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
