@@ -79,6 +79,13 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	if len(claudeChurn) != 1 || claudeChurn[0].Target != "fixture.go" || claudeChurn[0].Count != 2 || claudeChurn[0].Intervention != QwenMutationObserveReproFirst {
 		t.Fatalf("Claude churn events = %+v, want one attributed observe-only fixture.go run", claudeChurn)
 	}
+	var jsonl bytes.Buffer
+	if err := WriteAuditJSONL(&jsonl, result); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jsonl.String(), "\"kind\":\"mutation_churn\"") || !strings.Contains(jsonl.String(), "\"Target\":\"fixture.go\"") {
+		t.Fatalf("audit JSONL missing queryable attributed churn row: %s", jsonl.String())
+	}
 	var rendered bytes.Buffer
 	if err := WriteAuditMarkdown(&rendered, result); err != nil {
 		t.Fatal(err)

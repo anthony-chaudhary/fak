@@ -634,6 +634,15 @@ func WriteAuditJSONL(w io.Writer, result AuditResult) error {
 	for _, row := range result.Transcripts {
 		rows = append(rows, row)
 	}
+	for _, transcript := range result.Transcripts {
+		for _, churn := range transcript.MutationChurnEvents {
+			rows = append(rows, struct {
+				Schema string `json:"schema"`
+				Kind   string `json:"kind"`
+				QwenMutationChurn
+			}{AuditSchema, "mutation_churn", churn})
+		}
+	}
 	for _, row := range result.Bottlenecks {
 		rows = append(rows, row)
 	}
