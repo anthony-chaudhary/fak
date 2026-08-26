@@ -114,6 +114,14 @@ func resolveTranscriptPath(w fleetmon.PlanWorker, home string) string {
 	return ""
 }
 
+func readFleetTranscript(w fleetmon.PlanWorker, home string) fleetmon.TranscriptSignal {
+	path := resolveTranscriptPath(w, home)
+	if path == "" {
+		return fleetmon.TranscriptSignal{}
+	}
+	return fleetmon.ReadTranscript(path)
+}
+
 func fleetUserHome() string {
 	if h := os.Getenv("FLEET_USER_HOME"); h != "" {
 		return h
@@ -307,11 +315,7 @@ func runFleetMonitor(stdout, stderr io.Writer, argv []string) int {
 	var samples []fleetmon.WorkerSample
 	newState := fleetState{Generated: now.UTC().Format(time.RFC3339), Workers: map[string]fleetStateRow{}}
 	for _, w := range workers {
-		tPath := resolveTranscriptPath(w, *home)
-		sig := fleetmon.TranscriptSignal{}
-		if tPath != "" {
-			sig = fleetmon.ReadTranscript(tPath)
-		}
+		sig := readFleetTranscript(w, *home)
 		disp, action := registryMatch(reg, w)
 		ev := fleetmon.WorkerEvidence{
 			Issue:            w.Issue,
@@ -542,11 +546,7 @@ func runFleetFold(stdout, stderr io.Writer, argv []string) int {
 
 	var rows []fleetmon.LedgerRow
 	for _, w := range plan.Workers {
-		tPath := resolveTranscriptPath(w, *home)
-		sig := fleetmon.TranscriptSignal{}
-		if tPath != "" {
-			sig = fleetmon.ReadTranscript(tPath)
-		}
+		sig := readFleetTranscript(w, *home)
 		in := fleetmon.FoldInput{RunID: plan.RunID, Worker: w, Transcript: sig, ProcessScanError: collectErr, Now: now}
 		if w.PID > 0 && collectErr == "" {
 			alive := live[w.PID]
