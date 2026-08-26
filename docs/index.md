@@ -200,6 +200,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 | **How named context is loaded, filtered, cached, and backed by call snapshots** | [Context as a variable](explainers/context-as-a-variable.md) |
 | **Why a cache-hit % isn't the whole story** | [Context signal-to-noise](explainers/context-signal-to-noise.md) |
 | **How fak runs the agent as nested loops** | [Engineering is building loops](explainers/engineering-is-building-loops.md) |
+| **How agent lifecycle, model, and fleet scale differ** | [Agent scale hierarchy](concepts/agent-scale-hierarchy.md) — macro, baseline, sub-agent, and micro |
 | **What a micro agent is, and when to use one** | [Micro agents](concepts/micro-agents.md) — definition, lifecycle, limits, and a no-key example |
 | **How agent fleets coordinate workers safely** | [Fleet concepts](concepts/fleet.md) — workers, lanes, leases, seats, monitoring, and independent witnesses |
 | **Why a loader can pass every shape/dtype check and still be wrong** | [Semantic transform contracts](explainers/loader-semantic-transform-contracts.md) — the tensor-meaning defect class and the contract that catches it |
