@@ -59,10 +59,10 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 
 	if len(result.ToolErrorFamilies) > 0 {
 		out.WriteString("\n## Tool error families\n\n")
-		out.WriteString("| Family | Count | First event | Last event | Tokens |\n")
-		out.WriteString("|---|---:|---:|---:|---:|\n")
+		out.WriteString("| Family | Calls | Accounted tokens | Repeated failures | Mutation churn | First event | Last event |\n")
+		out.WriteString("|---|---:|---:|---:|---:|---:|---:|\n")
 		for _, family := range result.ToolErrorFamilies {
-			fmt.Fprintf(&out, "| %s | %d | %d | %d | %d |\n", family.Family, family.Count, family.FirstIndex, family.LastIndex, family.Tokens)
+			fmt.Fprintf(&out, "| %s | %d | %d | %d | %d | %d | %d |\n", family.Family, family.Count, family.Tokens, family.RepeatedFailures, family.MutationChurn, family.FirstIndex, family.LastIndex)
 		}
 	}
 

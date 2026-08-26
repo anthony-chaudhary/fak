@@ -31,7 +31,7 @@ func TestAuditIntegratesToolErrorFamilies(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []QwenToolErrorFamily{
-		{Family: "permission", Count: 2, FirstIndex: 2, LastIndex: 6},
+		{Family: "permission", Count: 2, FirstIndex: 2, LastIndex: 6, RepeatedFailures: 1},
 		{Family: "timeout", Count: 1, FirstIndex: 4, LastIndex: 4},
 	}
 	if !reflect.DeepEqual(result.ToolErrorFamilies, want) {
@@ -51,7 +51,7 @@ func TestAuditIntegratesToolErrorFamilies(t *testing.T) {
 	if err := WriteAuditMarkdown(&markdown, result); err != nil {
 		t.Fatal(err)
 	}
-	wantTable := "| Family | Count | First event | Last event | Tokens |\n|---|---:|---:|---:|---:|\n| permission | 2 | 2 | 6 | 0 |\n| timeout | 1 | 4 | 4 | 0 |"
+	wantTable := "| Family | Calls | Accounted tokens | Repeated failures | Mutation churn | First event | Last event |\n|---|---:|---:|---:|---:|---:|---:|\n| permission | 2 | 0 | 1 | 0 | 2 | 6 |\n| timeout | 1 | 0 | 0 | 0 | 4 | 4 |"
 	if !strings.Contains(markdown.String(), wantTable) {
 		t.Fatalf("Markdown missing ranked tool-error table:\n%s", markdown.String())
 	}

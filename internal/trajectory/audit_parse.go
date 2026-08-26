@@ -26,22 +26,23 @@ type auditToolCall struct {
 }
 
 type auditParseState struct {
-	row             AuditTranscriptRow
-	models          map[string]struct{}
-	calls           map[string]auditToolCall
-	seenCalls       map[string]struct{}
-	failureCounts   map[string]int
-	mutationCounts  map[string]int
-	hookDurations   []int64
-	claudeUsageByID map[string]AuditTokens
-	codexRawTotal   *auditCodexRawTokens
-	codexCompleted  AuditTokens
-	codexVersion    string
-	codexResetArmed bool
-	usageSeen       int
-	usageExact      int
-	usageDuplicates int
-	toolErrorEvents []QwenToolErrorEvent
+	row                   AuditTranscriptRow
+	models                map[string]struct{}
+	calls                 map[string]auditToolCall
+	seenCalls             map[string]struct{}
+	failureCounts         map[string]int
+	mutationCounts        map[string]int
+	hookDurations         []int64
+	claudeUsageByID       map[string]AuditTokens
+	codexRawTotal         *auditCodexRawTokens
+	codexCompleted        AuditTokens
+	codexVersion          string
+	codexResetArmed       bool
+	usageSeen             int
+	usageExact            int
+	usageDuplicates       int
+	toolErrorEvents       []QwenToolErrorEvent
+	toolErrorAttributions []qwenToolErrorAttribution
 }
 
 type auditCodexRawTokens struct {
@@ -134,6 +135,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 			state.row.MutationChurn += count - 1
 		}
 	}
+	applyQwenToolErrorAttribution(state.toolErrorEvents, state.toolErrorAttributions, state.mutationCounts)
 	state.row.HookP95MS = auditPercentile(state.hookDurations, 95)
 	if source == AuditSourceCodex && state.codexRawTotal != nil {
 		state.row.UsageRecords++
@@ -406,12 +408,13 @@ func parseCodexResponseItem(payload map[string]any, line int, rel string, state 
 func auditRecordToolFailure(state *auditParseState, call auditToolCall, output any, line int) {
 	state.row.ToolErrors++
 	content := auditText(output)
-	state.toolErrorEvents = append(state.toolErrorEvents, QwenToolErrorEvent{Content: content, Index: line})
 	name := call.name
 	if name == "" {
 		name = "unknown"
 	}
 	signature := name + "\x00" + call.args + "\x00" + auditNormalizedHead(content, 200)
+	state.toolErrorEvents = append(state.toolErrorEvents, QwenToolErrorEvent{Content: content, Index: line})
+	state.toolErrorAttributions = append(state.toolErrorAttributions, qwenToolErrorAttribution{failureKey: signature, mutationTarget: call.target})
 	state.failureCounts[signature]++
 }
 

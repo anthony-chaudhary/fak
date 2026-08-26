@@ -275,6 +275,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Qwen tool-error family re-audit (#8700)](docs/notes/ISSUE-8700-QWEN-TOOL-ERROR-FAMILIES-2026-08-26.md) -- auto-indexed dated note.
 - [Mac guard dogfood readout — 2026-08-25](docs/notes/MAC-GUARD-DOGFOOD-2026-08-25.md) — installed-trunk Codex shell witness for Darwin session journaling, child-tree monitoring, gateway compatibility, and the filed residual defect ledger.
 - [Portable fast mode: provider, model, and agent latency controls](docs/notes/CONCEPT-PORTABLE-FAST-MODE-2026-08-25.md) -- official-source and FAK-gap map behind #8959, #8960-#8963, and #8975, with typed requested/realized speed, quality-constrained routing, adaptive agent width, and net time-to-accepted-outcome witnesses.
 - [Speculators study: DSpark confidence, P-EAGLE parallel drafting, and alias-drift guards](docs/notes/CONCEPT-STUDY-SPECULATORS-2026-08-25.md) -- pinned vLLM Speculators study; filed #8938, #8939, and #8940 after deduping #8258, #5154, #4202, and #3197.
