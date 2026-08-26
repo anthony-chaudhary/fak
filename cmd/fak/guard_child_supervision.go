@@ -152,7 +152,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			}
 			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
-			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted)
+			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
 			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		case runErr = <-wait:
@@ -341,7 +341,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
-			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted)
+			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
 			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		case guardChildCompleted:
@@ -672,11 +672,24 @@ func guardClassifyChildCrash(runErr error, childState *os.ProcessState) (class s
 }
 
 func appendGuardChildExitWitness(j *journal.Journal, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time) journal.Row {
+	return appendGuardChildExitWitnessWithReason(j, agentName, traceID, runErr, state, started, "")
+}
+
+// appendGuardChildExitWitnessWithReason lets a supervisor-owned termination
+// carry its stable typed cause directly. Resource-monitor errors are synthetic
+// supervisor errors rather than *exec.ExitError values, so routing them through
+// the ordinary process-exit classifier would otherwise produce a blank reason.
+func appendGuardChildExitWitnessWithReason(j *journal.Journal, agentName, traceID string, runErr error, state *os.ProcessState, started time.Time, reasonClass string) journal.Row {
 	if j == nil {
 		return journal.Row{}
 	}
 	class, exitCode := journal.CrashCleanExit, 0
-	if runErr != nil {
+	if reasonClass = strings.TrimSpace(reasonClass); reasonClass != "" {
+		class = reasonClass
+		if state != nil {
+			exitCode = state.ExitCode()
+		}
+	} else if runErr != nil {
 		class, exitCode, _ = guardClassifyChildCrash(runErr, state)
 	}
 	lastHook := ""
