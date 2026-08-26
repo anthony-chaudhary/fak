@@ -22,15 +22,16 @@ func collectMemorySnapshot(rootPID int) (MemorySnapshot, bool, string) {
 }
 
 // collectDarwinMemorySnapshotWithCollectors bounds reconciliation of the two
-// independent ps snapshots. A child can start after the RSS census and appear
-// in the following relation census. Each bounded retry collects a wholly fresh
-// pair so successive PID transitions cannot mix epochs. Collector failures are
-// not retried, and a third incomplete join remains fail-closed.
+// independent ps snapshots. Each attempt establishes ownership first, then
+// samples RSS: later starts are outside that ownership epoch and are picked up
+// by the next poll instead of appearing as owned processes with no RSS row.
+// Collector failures are not retried, and a third incomplete join remains
+// fail-closed.
 func collectDarwinMemorySnapshotWithCollectors(rootPID int, collectCensus, collectRelations func() ([]Proc, string), processAlive func(int) (bool, error)) (MemorySnapshot, string) {
 	var snapshot MemorySnapshot
 	for attempt := 0; attempt < darwinMemorySnapshotAttempts; attempt++ {
-		census, censusErr := collectCensus()
 		relations, relationErr := collectRelations()
+		census, censusErr := collectCensus()
 		var joinErr string
 		var recollect bool
 		snapshot, joinErr, recollect = joinDarwinMemorySnapshotForCollection(rootPID, census, relations, processAlive)
