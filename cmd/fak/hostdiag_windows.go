@@ -34,6 +34,11 @@ func gatherHostdiagEvents(since time.Duration) ([]hostdiag.ResourceEvent, error)
 	if err := json.Unmarshal(output, &events); err != nil {
 		return nil, fmt.Errorf("parse resource diagnostics: %w", err)
 	}
+	for i := range events {
+		if events[i].EventID == 2004 && events[i].Name == "LOW_VIRTUAL_MEMORY" {
+			events[i].Culprits = hostdiag.ParseLowVirtualMemoryCulprits(events[i].Message)
+		}
+	}
 	return events, nil
 }
 
@@ -47,6 +52,10 @@ $rows += @(Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='W
     $report=''; if($msg -match '(?im)^Report Id:\s*([^\r\n]+)'){ $report=$Matches[1].Trim() }
     [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='RADAR_PRE_LEAK_64';report_id=$report;app='fak.exe';message=$msg}
   }
+})
+$rows += @(Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Microsoft-Windows-Resource-Exhaustion-Detector';Id=2004;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
+  $msg=[string]$_.Message
+  [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name='LOW_VIRTUAL_MEMORY';report_id='';app='';message=$msg}
 })
 $rows += @(Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Resource-Exhaustion-Resolver/Operational';Id=1014,1015;StartTime=$since} -ErrorAction SilentlyContinue | ForEach-Object {
   [pscustomobject]@{time_ms=[int64]([DateTimeOffset]$_.TimeCreated).ToUnixTimeMilliseconds();source=[string]$_.ProviderName;windows_event_id=[int]$_.Id;record_id=[string]$_.RecordId;event_name=('RESOURCE_EXHAUSTION_'+[string]$_.Id);report_id='';app='';message=[string]$_.Message}

@@ -3,6 +3,7 @@ package hostdiag
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,31 +34,58 @@ type ProcessSample struct {
 	ThreadCount     uint32 `json:"thread_count,omitempty"`
 }
 
+type ResourceCulprit struct {
+	Image string `json:"image"`
+	PID   int    `json:"pid"`
+	Bytes uint64 `json:"bytes"`
+}
+
+var lowVirtualMemoryCulpritRE = regexp.MustCompile(`(?i)([a-z0-9_.-]+\.exe)\s+\((\d+)\)\s+consumed\s+(\d+)\s+bytes`)
+
+// ParseLowVirtualMemoryCulprits extracts the typed process rows present in the
+// English Event 2004 rendering. An empty result is intentional: callers retain
+// the event itself when Windows renders a localized or otherwise unfamiliar message.
+func ParseLowVirtualMemoryCulprits(message string) []ResourceCulprit {
+	matches := lowVirtualMemoryCulpritRE.FindAllStringSubmatch(message, -1)
+	culprits := make([]ResourceCulprit, 0, len(matches))
+	for _, match := range matches {
+		pid, pidErr := strconv.Atoi(match[2])
+		bytes, bytesErr := strconv.ParseUint(match[3], 10, 64)
+		if pidErr != nil || bytesErr != nil {
+			continue
+		}
+		culprits = append(culprits, ResourceCulprit{Image: match[1], PID: pid, Bytes: bytes})
+	}
+	return culprits
+}
+
 type ResourceEvent struct {
-	TimeMS   int64  `json:"time_ms"`
-	Source   string `json:"source"`
-	EventID  int    `json:"windows_event_id"`
-	RecordID string `json:"record_id,omitempty"`
-	Name     string `json:"event_name"`
-	ReportID string `json:"report_id,omitempty"`
-	App      string `json:"app,omitempty"`
-	Message  string `json:"message,omitempty"`
+	TimeMS   int64             `json:"time_ms"`
+	Source   string            `json:"source"`
+	EventID  int               `json:"windows_event_id"`
+	RecordID string            `json:"record_id,omitempty"`
+	Name     string            `json:"event_name"`
+	ReportID string            `json:"report_id,omitempty"`
+	App      string            `json:"app,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Culprits []ResourceCulprit `json:"culprits,omitempty"`
 }
 
 type Correlation struct {
-	Schema        string          `json:"schema"`
-	CorrelationID string          `json:"correlation_id"`
-	TimeMS        int64           `json:"time_ms"`
-	TimeUTC       string          `json:"time_utc"`
-	Source        string          `json:"source"`
-	WindowsID     int             `json:"windows_event_id"`
-	EventName     string          `json:"event_name"`
-	ReportID      string          `json:"report_id,omitempty"`
-	App           string          `json:"app,omitempty"`
-	Status        string          `json:"status"`
-	Reason        string          `json:"reason"`
-	Candidates    []ProcessSample `json:"candidates,omitempty"`
-	Observational bool            `json:"observational"`
+	Schema        string            `json:"schema"`
+	CorrelationID string            `json:"correlation_id"`
+	TimeMS        int64             `json:"time_ms"`
+	TimeUTC       string            `json:"time_utc"`
+	Source        string            `json:"source"`
+	WindowsID     int               `json:"windows_event_id"`
+	EventName     string            `json:"event_name"`
+	ReportID      string            `json:"report_id,omitempty"`
+	App           string            `json:"app,omitempty"`
+	Culprits      []ResourceCulprit `json:"culprits,omitempty"`
+	Status        string            `json:"status"`
+	Reason        string            `json:"reason"`
+	Candidates    []ProcessSample   `json:"candidates,omitempty"`
+	Observational bool              `json:"observational"`
 }
 
 func NewProcessSample(at time.Time, pid int, started time.Time, executable, executableSHA, buildRevision, commandClass, session string, privateBytes, workingSetBytes uint64, handles, threads uint32) ProcessSample {
@@ -88,11 +116,11 @@ func ClassifyCommand(commandLine string) string {
 
 func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool) {
 	name := strings.ToUpper(strings.TrimSpace(event.Name))
-	if event.TimeMS <= 0 || !(name == "RADAR_PRE_LEAK_64" || event.EventID == 1014 || event.EventID == 1015) {
+	if event.TimeMS <= 0 || !(name == "RADAR_PRE_LEAK_64" || name == "LOW_VIRTUAL_MEMORY" || event.EventID == 1014 || event.EventID == 1015 || event.EventID == 2004) {
 		return Correlation{}, false
 	}
 	app := strings.TrimSpace(event.App)
-	if app != "" && !strings.EqualFold(app, "fak.exe") {
+	if name != "LOW_VIRTUAL_MEMORY" && event.EventID != 2004 && app != "" && !strings.EqualFold(app, "fak.exe") {
 		return Correlation{}, false
 	}
 	candidates := make([]ProcessSample, 0)
@@ -118,7 +146,7 @@ func Correlate(event ResourceEvent, samples []ProcessSample) (Correlation, bool)
 		status, reason = "ambiguous", "multiple durable fak process census rows span the event time"
 	}
 	key := strings.Join([]string{strconv.FormatInt(event.TimeMS, 10), strings.ToLower(event.Source), itoa(event.EventID), strings.ToLower(event.RecordID), strings.ToLower(event.ReportID), name}, "|")
-	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
+	return Correlation{Schema: CorrelationSchema, CorrelationID: "corr-" + digest(key), TimeMS: event.TimeMS, TimeUTC: time.UnixMilli(event.TimeMS).UTC().Format(time.RFC3339Nano), Source: event.Source, WindowsID: event.EventID, EventName: name, ReportID: event.ReportID, App: app, Culprits: append([]ResourceCulprit(nil), event.Culprits...), Status: status, Reason: reason, Candidates: candidates, Observational: true}, true
 }
 
 func digest(value string) string {

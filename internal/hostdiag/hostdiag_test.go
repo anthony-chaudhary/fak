@@ -33,6 +33,39 @@ func TestCorrelateIdentifiedAndAmbiguous(t *testing.T) {
 	}
 }
 
+func TestParseLowVirtualMemoryCulprits(t *testing.T) {
+	message := `The following programs consumed the most virtual memory: pwsh.exe (48308) consumed 277440532480 bytes, pwsh.exe (43544) consumed 222151114752 bytes, and worker-host.exe (38344) consumed 210724044800 bytes.`
+	want := []ResourceCulprit{{Image: "pwsh.exe", PID: 48308, Bytes: 277440532480}, {Image: "pwsh.exe", PID: 43544, Bytes: 222151114752}, {Image: "worker-host.exe", PID: 38344, Bytes: 210724044800}}
+	got := ParseLowVirtualMemoryCulprits(message)
+	if len(got) != len(want) {
+		t.Fatalf("got=%+v want=%+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("culprit[%d]=%+v want=%+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseLowVirtualMemoryCulpritsUnknownRendering(t *testing.T) {
+	if got := ParseLowVirtualMemoryCulprits("Speicherwarnung: unbekanntes lokalisiertes Format"); len(got) != 0 {
+		t.Fatalf("got=%+v want empty", got)
+	}
+	event := ResourceEvent{TimeMS: 1000, EventID: 2004, Name: "LOW_VIRTUAL_MEMORY", Message: "unparsed rendering"}
+	got, ok := Correlate(event, nil)
+	if !ok || got.Status != "historical_unresolved" || len(got.Culprits) != 0 {
+		t.Fatalf("event was not retained: got=%+v ok=%v", got, ok)
+	}
+}
+
+func TestCorrelateRetainsLowVirtualMemoryCulprits(t *testing.T) {
+	event := ResourceEvent{TimeMS: 1000, Source: "Microsoft-Windows-Resource-Exhaustion-Detector", EventID: 2004, RecordID: "9", Name: "LOW_VIRTUAL_MEMORY", Culprits: []ResourceCulprit{{Image: "pwsh.exe", PID: 48308, Bytes: 277441708032}, {Image: "pwsh.exe", PID: 43544, Bytes: 222151004160}}}
+	got, ok := Correlate(event, nil)
+	if !ok || got.Status != "historical_unresolved" || len(got.Culprits) != 2 || got.Culprits[0].Bytes != 277441708032 || !got.Observational {
+		t.Fatalf("got=%+v ok=%v", got, ok)
+	}
+}
+
 func TestCorrelateRejectsUnrelated(t *testing.T) {
 	for _, event := range []ResourceEvent{{TimeMS: 1, EventID: 1001, Name: "APPCRASH", App: "fak.exe"}, {TimeMS: 1, EventID: 1001, Name: "RADAR_PRE_LEAK_64", App: "other.exe"}, {Name: "RADAR_PRE_LEAK_64", App: "fak.exe"}} {
 		if _, ok := Correlate(event, nil); ok {
