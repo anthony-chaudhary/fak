@@ -1,0 +1,52 @@
+{
+  "schema": "fak-ultracode-complexity-crossover/1",
+  "campaign_version": "issue8674-qwen0.5b-v1",
+  "model": "qwen2.5:0.5b@a8b0c5157701",
+  "runtime": "Ollama/llama.cpp on fak-realmodel",
+  "tokenizer": "qwen2",
+  "cache_posture": "cold/warm API calls; API exposes evaluated prompt tokens but no authoritative prefix-hit count, therefore prefix_read_tokens=0",
+  "rungs": [
+    {
+      "number": 1,
+      "name": "independent lookup",
+      "verdict": "EQUAL_OUTCOME_GAIN",
+      "scope_avoided_tokens": 3780,
+      "prefix_read_tokens": 0,
+      "compared_cells": 16
+    },
+    {
+      "number": 2,
+      "name": "single-file constrained lookup",
+      "verdict": "EQUAL_OUTCOME_GAIN",
+      "scope_avoided_tokens": 3780,
+      "prefix_read_tokens": 0,
+      "compared_cells": 16
+    },
+    {
+      "number": 3,
+      "name": "cross-file read-only join",
+      "verdict": "ABSTAIN",
+      "reason": "scoped outcome failed frozen check or diverged from full context (missing-context failure)",
+      "scope_avoided_tokens": 0,
+      "prefix_read_tokens": 0,
+      "compared_cells": 16
+    },
+    {
+      "number": 4,
+      "name": "cross-file dependent diagnosis",
+      "verdict": "ABSTAIN",
+      "reason": "scoped outcome failed frozen check or diverged from full context (missing-context failure)",
+      "scope_avoided_tokens": 0,
+      "prefix_read_tokens": 0,
+      "compared_cells": 16
+    }
+  ],
+  "last_equal_outcome_rung": 2,
+  "first_failure_rung": 3,
+  "stopped_after_rung": 4,
+  "failure_mode": "scoped outcome failed frozen check or diverged from full context (missing-context failure)",
+  "replay_command": "go test ./internal/ultracodebench -run TestIssue8674ArtifactReplay -count=1",
+  "promotion_evidence": "repeat on a second model/runtime and observe the crossover within one rung before promotion to gen/now",
+  "demotion_evidence": "retire this campaign if replay changes any frozen full-context outcome or authoritative telemetry becomes unavailable",
+  "invalidating_assumption": "the synthetic dependency ladder predicts crossover behavior for repository tasks"
+}
