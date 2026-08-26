@@ -2,7 +2,84 @@
 
 package metalgemm
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
+
+func TestQ4KGEMMGroupIntoAliasesSuppliedBackingAndMatchesAllocating(t *testing.T) {
+	if !Available() {
+		t.Skip("no Metal device available")
+	}
+	defer ResetQ4K()
+
+	const (
+		in = 256
+		P  = 3
+	)
+	outs := []int{64, 32}
+	ws := make([]*Q4KWeight, len(outs))
+	for i, out := range outs {
+		ws[i] = UploadQ4K(q4kTestRaw(out, in, uint64(0x9102+i)), out, in)
+		if ws[i] == nil {
+			t.Fatalf("UploadQ4K[%d] returned nil", i)
+		}
+	}
+	X := make([]float32, P*in)
+	for i := range X {
+		X[i] = float32(i%17-8) * 0.03125
+	}
+	want := GEMMGroup(ws, X, P)
+	if want == nil {
+		t.Fatal("allocating GEMMGroup returned nil")
+	}
+
+	need := P * (outs[0] + outs[1])
+	const guard = float32(91.02)
+	backing := make([]float32, need+4)
+	for i := need; i < len(backing); i++ {
+		backing[i] = guard
+	}
+	observation := NewExecutionObservation(ExecutionQ4KGEMMGroup)
+	got := GEMMGroupIntoWithEvents(ws, X, P, backing, observation)
+	if got == nil {
+		t.Fatal("GEMMGroupIntoWithEvents returned nil")
+	}
+	if _, err := observation.Snapshot(); err != nil {
+		t.Fatalf("execution observation: %v", err)
+	}
+	if &got[0][0] != &backing[0] || &got[1][0] != &backing[P*outs[0]] {
+		t.Fatal("returned group slices do not alias the supplied backing at their declared offsets")
+	}
+	for i := range got {
+		if len(got[i]) != len(want[i]) || cap(got[i]) != len(got[i]) {
+			t.Fatalf("group[%d] len/cap=%d/%d want %d/%d", i, len(got[i]), cap(got[i]), len(want[i]), len(want[i]))
+		}
+		for j := range got[i] {
+			if math.Float32bits(got[i][j]) != math.Float32bits(want[i][j]) {
+				t.Fatalf("group[%d][%d] bits=%08x want %08x", i, j, math.Float32bits(got[i][j]), math.Float32bits(want[i][j]))
+			}
+		}
+	}
+	for i := need; i < len(backing); i++ {
+		if backing[i] != guard {
+			t.Fatalf("guard[%d]=%g want %g", i-need, backing[i], guard)
+		}
+	}
+
+	short := make([]float32, need-1)
+	for i := range short {
+		short[i] = guard
+	}
+	if got := GEMMGroupInto(ws, X, P, short); got != nil {
+		t.Fatalf("undersized supplied buffer returned %d groups, want nil", len(got))
+	}
+	for i, v := range short {
+		if v != guard {
+			t.Fatalf("undersized buffer mutated at %d: %g", i, v)
+		}
+	}
+}
 
 func TestMixedQ4KQ8Observation(t *testing.T) {
 	if !Available() {

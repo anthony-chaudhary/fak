@@ -13,9 +13,16 @@ package model
 
 import (
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
+)
+
+const (
+	q4kMLPOutputSlabMaxTokens = 512
+	q4kMLPOutputSlabMaxBytes  = 71_303_168
+	q4kMLPOutputSlabMaxFloats = q4kMLPOutputSlabMaxBytes / 4
 )
 
 var (
@@ -139,6 +146,42 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 		})
 	} else {
 		s.metalExecution(metalgemm.ExecutionQ4KGEMMGroup, func(observation *metalgemm.ExecutionObservation) {
+			if q4kMLPOutputSlabSelected(names, pos, P) {
+				need := 0
+				for _, w := range ws {
+					if w.Out > (q4kMLPOutputSlabMaxFloats-need)/P {
+						need = q4kMLPOutputSlabMaxFloats + 1
+						break
+					}
+					need += P * w.Out
+				}
+				if need <= q4kMLPOutputSlabMaxFloats {
+					slab := s.q4kMLPOutputSlab
+					allocated := cap(slab) < need
+					if allocated {
+						slab = make([]float32, need)
+					} else {
+						slab = slab[:need]
+					}
+					grouped = metalgemm.GEMMGroupIntoWithEvents(ws, Xf, P, slab, observation)
+					if grouped != nil {
+						// Do not publish new backing into Session until the synchronous Metal call
+						// has completed and returned its aliases.
+						s.q4kMLPOutputSlab = slab
+						stats := &s.q4kMLPOutputSlabStats
+						stats.Calls++
+						if allocated {
+							stats.Allocations++
+						} else {
+							stats.Reuses++
+						}
+						if highWater := uint64(len(slab)) * 4; highWater > stats.HighWaterBytes {
+							stats.HighWaterBytes = highWater
+						}
+					}
+					return
+				}
+			}
 			grouped = metalgemm.GEMMGroupWithEvents(ws, Xf, P, observation)
 		})
 	}
@@ -157,6 +200,21 @@ func (s *Session) q4kGemmGroupDispatch(names []string, Xf []float32, P int) [][]
 	// Ungrouped members (Q8/Q6_K minority, or a declined upload) stay nil; the caller fills them
 	// via its per-weight proj so the panel-quantized Q8 path is reused unchanged.
 	return out
+}
+
+// q4kMLPOutputSlabSelected narrows experimental reuse to an exact same-layer gate/up pair. The
+// feature remains default-off pending the #9102 Mac KEEP gate; every other group and panel keeps
+// GEMMGroupWithEvents' call-owned allocation.
+func q4kMLPOutputSlabSelected(names []string, pos []int, P int) bool {
+	if os.Getenv("FAK_Q4K_GATEUP_SLAB") != "1" || P <= 1 || P > q4kMLPOutputSlabMaxTokens || len(names) != 2 || len(pos) != 2 || pos[0] != 0 || pos[1] != 1 {
+		return false
+	}
+	const gateSuffix = "mlp.gate_proj.weight"
+	const upSuffix = "mlp.up_proj.weight"
+	if !strings.HasSuffix(names[0], gateSuffix) || !strings.HasSuffix(names[1], upSuffix) {
+		return false
+	}
+	return strings.TrimSuffix(names[0], gateSuffix) == strings.TrimSuffix(names[1], upSuffix)
 }
 
 // q8GemmDispatch is the prefill-GEMM twin for the Q8-minority projections in the resident-Q4_K

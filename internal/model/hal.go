@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
@@ -78,6 +79,12 @@ func (s *Session) Close() {
 		return
 	}
 	s.closeOnce.Do(func() {
+		if stats := s.q4kMLPOutputSlabStats; stats.Calls != 0 {
+			fmt.Fprintf(os.Stderr, "{\"schema\":%q,\"engine\":\"fak-native\",\"backend\":\"metal\",\"quant\":\"q4_k\",\"calls\":%d,\"allocations\":%d,\"reuses\":%d,\"high_water_bytes\":%d}\n",
+				q4kMLPOutputSlabReceiptSchema, stats.Calls, stats.Allocations, stats.Reuses, stats.HighWaterBytes)
+		}
+		// The grouped-Q4_K readback slab is session-owned even on the legacy (Backend=nil) path.
+		s.q4kMLPOutputSlab = nil
 		s.closeQwen35GDNSequence()
 		// Sequence auxiliary state can be owned by a native capability even when
 		// Backend is nil, so its teardown is outside the compute-HAL branch.
