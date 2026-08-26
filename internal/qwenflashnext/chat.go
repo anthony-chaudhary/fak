@@ -68,7 +68,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 			}
 			b.WriteString(content + IMEnd + "\n")
 		}
-	} else if reasoningInstructions != "" {
+	} else if reasoningInstructions != "" && opts.ReasoningEffort != "" {
 		fmt.Fprintf(&b, "%ssystem\n%s%s\n", IMStart, reasoningInstructions, IMEnd)
 	}
 
@@ -79,8 +79,8 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 			break
 		}
 	}
-	if lastQueryIndex < 0 {
-		return "", errors.New("no user query found in messages")
+	if lastQueryIndex < 0 && len(messages) > 0 {
+		lastQueryIndex = 0
 	}
 
 	for i := firstMessage; i < len(messages); i++ {
@@ -93,7 +93,7 @@ func Render(messages []Message, opts RenderOptions) (string, error) {
 			fmt.Fprintf(&b, "%suser\n%s%s\n", IMStart, content, IMEnd)
 		case "assistant":
 			fmt.Fprintf(&b, "%sassistant\n", IMStart)
-			if opts.PreserveThinking || i > lastQueryIndex {
+			if message.ReasoningContent != "" && (opts.EnableThinking || opts.PreserveThinking) {
 				fmt.Fprintf(&b, "<think>\n%s\n</think>\n\n", strings.TrimSpace(message.ReasoningContent))
 			}
 			b.WriteString(content)
