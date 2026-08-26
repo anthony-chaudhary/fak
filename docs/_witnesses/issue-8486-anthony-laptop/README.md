@@ -1,6 +1,12 @@
+---
+title: "Anthony laptop native CUDA benchmark baseline — issue #8486"
+description: "Scrubbed three-trial fak-native CUDA benchmark receipt for a Windows laptop, with throughput, VRAM, power, temperature, and stated evidence gaps."
+---
 # Anthony laptop baseline — issue #8486
 
 This directory is the scrubbed public projection of a real authenticated laptop run. Private bridge coordinates, accounts, addresses, device identifiers, and raw logs remain in the authorized companion evidence store.
+
+The witnessed public result is [`baseline.json`](baseline.json): three successful fak-native CUDA trials with throughput, VRAM, power, temperature, engine identity, and explicit receipt limitations.
 
 ## Rerun
 

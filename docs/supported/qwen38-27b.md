@@ -1,10 +1,12 @@
 ---
-title: "Qwen3.8-27B"
-description: "Tracking epic: 8011"
+title: "Qwen3.8-27B native inference support and acceptance evidence"
+description: "Supported Qwen3.8-27B aliases, native Metal and CUDA execution boundaries, acceptance status, and links to captured benchmark evidence."
 ---
 # Qwen3.8-27B
 
 Tracking epic: [#8011](https://github.com/anthony-chaudhary/fak/issues/8011)
+
+Captured product proof: [Qwen3.8-27B acceptance evidence](../_witnesses/issue-8623-qwen38-27b/README.md) records the admitted model identity, native engine path, benchmark envelope, and remaining limitations.
 
 Qwen3.8-27B has exact built-in aliases. An alias is a launch identity, not a
 claim that every target machine has passed acceptance:
