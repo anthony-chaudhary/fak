@@ -16,15 +16,41 @@ package model
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
 	"os"
+	"strings"
 	"testing"
 	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
+
+type q4kMLPOutputSlabTestReceipt struct {
+	Schema         string `json:"schema"`
+	Engine         string `json:"engine"`
+	Backend        string `json:"backend"`
+	Quant          string `json:"quant"`
+	Calls          uint64 `json:"calls"`
+	Allocations    uint64 `json:"allocations"`
+	Reuses         uint64 `json:"reuses"`
+	HighWaterBytes uint64 `json:"high_water_bytes"`
+}
+
+func parseQ4KMLPOutputSlabTestReceipt(t *testing.T, line string) q4kMLPOutputSlabTestReceipt {
+	t.Helper()
+	line = strings.TrimSpace(line)
+	var receipt q4kMLPOutputSlabTestReceipt
+	if err := json.Unmarshal([]byte(line), &receipt); err != nil {
+		t.Fatalf("decode gate/up slab receipt %q: %v", line, err)
+	}
+	if receipt.Schema != q4kMLPOutputSlabReceiptSchema || receipt.Engine != "fak-native" || receipt.Backend != "metal" || receipt.Quant != "q4_k" {
+		t.Fatalf("gate/up slab receipt identity = %+v", receipt)
+	}
+	return receipt
+}
 
 // randomQ4KTensor builds an [out,in] resident q4_k tensor from deterministic pseudo-random
 // super-block bytes. Any byte pattern is a valid q4_k block (the dequant is total), so the CPU
@@ -879,5 +905,237 @@ func TestMetalQ4KSingleRowGemmDispatchMatchesGEMM(t *testing.T) {
 	}
 	for i := range names {
 		assertClose(names[i], gotGroup[i], want[i])
+	}
+}
+
+func TestMetalQ4KMLPOutputSlabReuseIsolationLifecycleAndFallback(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+
+	const (
+		in = 256
+		P  = 3
+	)
+	names := []string{
+		"blk.0.mlp.gate_proj.weight",
+		"blk.0.mlp.up_proj.weight",
+	}
+	m := &Model{q4kw: make(map[string]*q4kTensor)}
+	for i, name := range names {
+		m.q4kw[name] = randomQ4KTensor(64, in, int64(9102+i))
+	}
+	X := randomVecF(P*in, 9102)
+
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	controlSession := m.NewSession()
+	controlSession.MetalQ4K = true
+	control := controlSession.q4kGemmGroupDispatch(names, X, P)
+	if control == nil {
+		t.Fatal("allocating control group returned nil")
+	}
+	if controlSession.q4kMLPOutputSlab != nil {
+		t.Fatal("default-off control retained a gate/up slab")
+	}
+	controlCopy := make([][]float32, len(control))
+	for i := range control {
+		controlCopy[i] = append([]float32(nil), control[i]...)
+	}
+
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "1")
+	candidateSession := m.NewSession()
+	candidateSession.MetalQ4K = true
+	var stable *float32
+	for call := 0; call < 65; call++ { // 64 compute-layer equivalents, then the next chunk's first layer.
+		got := candidateSession.q4kGemmGroupDispatch(names, X, P)
+		if got == nil {
+			t.Fatalf("candidate call %d returned nil", call)
+		}
+		if call == 0 {
+			stable = &got[0][0]
+		} else if &got[0][0] != stable {
+			t.Fatalf("candidate call %d backing=%p want stable %p", call, &got[0][0], stable)
+		}
+		for i := range got {
+			for j := range got[i] {
+				if math.Float32bits(got[i][j]) != math.Float32bits(controlCopy[i][j]) {
+					t.Fatalf("call %d group[%d][%d] bits=%08x want allocating %08x", call, i, j,
+						math.Float32bits(got[i][j]), math.Float32bits(controlCopy[i][j]))
+				}
+			}
+			cpu := q4kGemm(m.q4kw[names[i]], X, P)
+			cos, maxRel := cosineAndMaxRel(got[i], cpu)
+			if cos < 0.9999 || maxRel > 0.05 {
+				t.Fatalf("call %d group[%d] vs CPU cosine=%g maxRel=%g", call, i, cos, maxRel)
+			}
+		}
+	}
+	if len(candidateSession.q4kMLPOutputSlab) != P*128 || cap(candidateSession.q4kMLPOutputSlab) != P*128 {
+		t.Fatalf("candidate slab len/cap=%d/%d want %d/%d", len(candidateSession.q4kMLPOutputSlab), cap(candidateSession.q4kMLPOutputSlab), P*128, P*128)
+	}
+	if got, want := candidateSession.q4kMLPOutputSlabStats, (q4kMLPOutputSlabStats{Calls: 65, Allocations: 1, Reuses: 64, HighWaterBytes: P * 128 * 4}); got != want {
+		t.Fatalf("candidate slab stats = %+v, want %+v", got, want)
+	}
+
+	isolationSession := m.NewSession()
+	isolationSession.MetalQ4K = true
+	isolated := isolationSession.q4kGemmGroupDispatch(names, X, P)
+	if isolated == nil {
+		t.Fatal("isolated session group returned nil")
+	}
+	if &isolated[0][0] == stable {
+		t.Fatal("two sessions share gate/up slab backing")
+	}
+
+	receipt := parseQ4KMLPOutputSlabTestReceipt(t, captureStderr(t, candidateSession.Close))
+	if receipt.Calls != 65 || receipt.Allocations != 1 || receipt.Reuses != 64 || receipt.HighWaterBytes != P*128*4 {
+		t.Fatalf("candidate close receipt = %+v", receipt)
+	}
+	if candidateSession.q4kMLPOutputSlab != nil {
+		t.Fatal("Session.Close retained gate/up slab")
+	}
+	if got := captureStderr(t, controlSession.Close); got != "" {
+		t.Fatalf("default-off Session.Close wrote %q", got)
+	}
+	_ = captureStderr(t, isolationSession.Close)
+
+	largeSession := m.NewSession()
+	largeSession.MetalQ4K = true
+	largeP := q4kMLPOutputSlabMaxTokens + 1
+	large := largeSession.q4kGemmGroupDispatch(names, randomVecF(largeP*in, 9103), largeP)
+	if large == nil {
+		t.Fatal("P>512 allocating fallback returned nil")
+	}
+	if largeSession.q4kMLPOutputSlab != nil {
+		t.Fatal("P>512 fallback retained a slab")
+	}
+	largeSession.Close()
+
+	unsupportedNames := []string{"blk.0.self_attn.q_proj.weight", "blk.0.self_attn.v_proj.weight"}
+	for i, name := range unsupportedNames {
+		m.q4kw[name] = randomQ4KTensor(32, in, int64(9200+i))
+	}
+	unsupportedSession := m.NewSession()
+	unsupportedSession.MetalQ4K = true
+	unsupported := unsupportedSession.q4kGemmGroupDispatch(unsupportedNames, X, P)
+	if unsupported == nil {
+		t.Fatal("unsupported-group allocating fallback returned nil")
+	}
+	if unsupportedSession.q4kMLPOutputSlab != nil {
+		t.Fatal("unsupported group retained a gate/up slab")
+	}
+	unsupportedSession.Close()
+}
+
+func TestMetalQ4KMLPOutputSlabProductionPrefillReusesAcrossLayersAndChunks(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("no Metal device available")
+	}
+	defer metalgemm.ResetQ4K()
+
+	cfg := qwen35HybridQ4KTestCfg()
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajority(t, m, cfg)
+	first := []int{3, 7, 11, 5, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61}
+	second := []int{67, 71, 73, 79, 83, 89, 97}
+
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	control := m.NewSession()
+	control.Q4K = true
+	control.MetalQ4K = true
+	wantFirst := control.Prefill(first)
+	wantSecond := control.Prefill(second)
+	if control.q4kMLPOutputSlabStats != (q4kMLPOutputSlabStats{}) {
+		t.Fatalf("default-off production prefill stats = %+v", control.q4kMLPOutputSlabStats)
+	}
+
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "1")
+	candidate := m.NewSession()
+	candidate.Q4K = true
+	candidate.MetalQ4K = true
+	gotFirst := candidate.Prefill(first)
+	if got, want := candidate.q4kMLPOutputSlabStats, (q4kMLPOutputSlabStats{Calls: 4, Allocations: 1, Reuses: 3, HighWaterBytes: uint64(len(first) * cfg.IntermediateSize * 2 * 4)}); got != want {
+		t.Fatalf("first production chunk stats = %+v, want %+v", got, want)
+	}
+	stable := &candidate.q4kMLPOutputSlab[0]
+	gotSecond := candidate.Prefill(second)
+	if &candidate.q4kMLPOutputSlab[0] != stable {
+		t.Fatal("second production prefill chunk replaced the session slab backing")
+	}
+	if got, want := candidate.q4kMLPOutputSlabStats, (q4kMLPOutputSlabStats{Calls: 8, Allocations: 1, Reuses: 7, HighWaterBytes: uint64(len(first) * cfg.IntermediateSize * 2 * 4)}); got != want {
+		t.Fatalf("two production chunks stats = %+v, want %+v", got, want)
+	}
+	if candidate.q4kHybridPrefillChunks != 2 || candidate.q4kHybridPrefillLastBase != len(first) {
+		t.Fatalf("production prefill marker = (chunks=%d base=%d), want (2,%d)", candidate.q4kHybridPrefillChunks, candidate.q4kHybridPrefillLastBase, len(first))
+	}
+	assertFloat32BitsEqual(t, "production slab first-chunk logits", gotFirst, wantFirst)
+	assertFloat32BitsEqual(t, "production slab second-chunk logits", gotSecond, wantSecond)
+	assertKVCacheQuantCloseTol(t, "production slab chunked cache", control.Cache, candidate.Cache, prefillQ4KKTol(), prefillQ4KVTol())
+	assertLinearAttnCacheQuantClose(t, "production slab chunked linear cache", control.Cache.linear, candidate.Cache.linear)
+
+	if got := captureStderr(t, control.Close); got != "" {
+		t.Fatalf("default-off production Session.Close wrote %q", got)
+	}
+	receipt := parseQ4KMLPOutputSlabTestReceipt(t, captureStderr(t, candidate.Close))
+	if receipt.Calls != 8 || receipt.Allocations != 1 || receipt.Reuses != 7 || receipt.HighWaterBytes != uint64(len(first)*cfg.IntermediateSize*2*4) {
+		t.Fatalf("production close receipt = %+v", receipt)
+	}
+}
+
+func TestQ4KMLPOutputSlabCloseDefaultOffIsSilent(t *testing.T) {
+	s := (&Model{}).NewSession()
+	if got := captureStderr(t, s.Close); got != "" {
+		t.Fatalf("default-off close wrote %q", got)
+	}
+}
+
+func TestQ4KMLPOutputSlabCloseReceiptIsStructured(t *testing.T) {
+	s := (&Model{}).NewSession()
+	s.q4kMLPOutputSlab = make([]float32, 32)
+	s.q4kMLPOutputSlabStats = q4kMLPOutputSlabStats{Calls: 64, Allocations: 1, Reuses: 63, HighWaterBytes: q4kMLPOutputSlabMaxBytes}
+	receipt := parseQ4KMLPOutputSlabTestReceipt(t, captureStderr(t, s.Close))
+	if receipt.Calls != 64 || receipt.Allocations != 1 || receipt.Reuses != 63 || receipt.HighWaterBytes != q4kMLPOutputSlabMaxBytes {
+		t.Fatalf("P=512 one-chunk receipt = %+v", receipt)
+	}
+	if s.q4kMLPOutputSlab != nil {
+		t.Fatal("close receipt retained slab backing")
+	}
+}
+
+func TestQwen38MLPOutputSlabExactAllocationArithmetic(t *testing.T) {
+	const (
+		computeLayers    = int64(64)
+		panelTokens      = int64(512)
+		promptTokens     = int64(32_800)
+		intermediate     = int64(17_408)
+		outputsPerLayer  = int64(2)
+		bytesPerFloat32  = int64(4)
+		wantSlabBytes    = int64(71_303_168)
+		wantTraversal    = int64(4_563_402_752)
+		wantTrafficBytes = int64(292_342_988_800)
+		gib              = int64(1 << 30)
+	)
+	slabBytes := panelTokens * intermediate * outputsPerLayer * bytesPerFloat32
+	if slabBytes != wantSlabBytes {
+		t.Fatalf("P=512 gate/up bytes=%d want %d", slabBytes, wantSlabBytes)
+	}
+	if slabBytes != q4kMLPOutputSlabMaxBytes {
+		t.Fatalf("runtime slab cap=%d want exact checkpoint bytes %d", q4kMLPOutputSlabMaxBytes, slabBytes)
+	}
+	if full, tail := promptTokens/panelTokens, promptTokens%panelTokens; full != 64 || tail != 32 {
+		t.Fatalf("P=32800 decomposition=%d full + %d tail, want 64 + 32", full, tail)
+	}
+	traversalBytes := computeLayers * slabBytes
+	if traversalBytes != wantTraversal || traversalBytes*4 != 17*gib {
+		t.Fatalf("64-layer full-chunk traffic=%d bytes, want %d bytes (4.25 GiB)", traversalBytes, wantTraversal)
+	}
+	trafficBytes := computeLayers * promptTokens * intermediate * outputsPerLayer * bytesPerFloat32
+	if trafficBytes != wantTrafficBytes {
+		t.Fatalf("64-layer P=32800 allocation traffic=%d want %d", trafficBytes, wantTrafficBytes)
+	}
+	if trafficBytes*64 != 17_425*gib {
+		t.Fatalf("64-layer P=32800 allocation traffic=%d bytes, want exactly 272.265625 GiB (272.266 rounded)", trafficBytes)
 	}
 }

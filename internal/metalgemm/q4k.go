@@ -567,6 +567,49 @@ func (w *Q4KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation 
 	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
 }
 
+// GEMMGroupIntoWithEvents runs one batched prefill GEMM per weight in ws — all reading the SAME
+// activation panel X[P, In] — and places the concatenated results in ycat. Returned slices alias
+// ycat and stay valid only until its owner reuses that backing. The Metal command buffer is
+// committed and synchronously completed before any aliases are returned. It returns nil without
+// dispatching when shapes are invalid or ycat is too small.
+func GEMMGroupIntoWithEvents(ws []*Q4KWeight, X []float32, P int, ycat []float32, observation *ExecutionObservation) [][]float32 {
+	n := len(ws)
+	const maxCInt = int(^uint32(0) >> 1)
+	if n == 0 || P <= 0 || P > maxCInt || ws[0] == nil || ws[0].In <= 0 || len(X)/P < ws[0].In {
+		return nil
+	}
+	in := ws[0].In
+	wids := make([]C.int, n)
+	yoff := make([]C.int, n+1) // yoff[i] = P*Σ_{j<i} out_j (element offset of weight i's [P,out_i] block)
+	off := 0
+	for i, w := range ws {
+		if w == nil || w.id < 0 || w.In != in || w.Out <= 0 || w.Out > (maxCInt-off)/P {
+			return nil
+		}
+		wids[i] = w.id
+		yoff[i] = C.int(off)
+		off += P * w.Out
+	}
+	if len(ycat) < off {
+		return nil
+	}
+	ycat = ycat[:off]
+	yoff[n] = C.int(off)
+	var gpuMs C.double
+	var event C.mg_execution_event
+	C.mg_q4k_gemm_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
+		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &gpuMs, &event)
+	recordQ4KEvent(observation, &event)
+	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
+
+	// Publish aliases only after the synchronous native call above has completed successfully.
+	out := make([][]float32, n)
+	for i := range ws {
+		out[i] = ycat[int(yoff[i]):int(yoff[i+1]):int(yoff[i+1])]
+	}
+	return out
+}
+
 // GEMMGroup runs one batched prefill GEMM per weight in ws — all reading the SAME activation panel
 // X[P, In] (shared) — in a SINGLE Metal command buffer, returning one [P*Out_i] result slice per
 // weight (token-major, Y[t*Out_i + o]). Every weight must share X's In. It is the prefill twin of
@@ -576,37 +619,20 @@ func (w *Q4KWeight) GEMMWithEvents(X []float32, P int, Y []float32, observation 
 // on a shape mismatch or empty input, so the caller falls back to per-weight GEMM.
 func GEMMGroupWithEvents(ws []*Q4KWeight, X []float32, P int, observation *ExecutionObservation) [][]float32 {
 	n := len(ws)
-	if n == 0 || P <= 0 || ws[0] == nil || len(X) < P*ws[0].In {
+	const maxCInt = int(^uint32(0) >> 1)
+	if n == 0 || P <= 0 || P > maxCInt || ws[0] == nil || ws[0].In <= 0 || len(X)/P < ws[0].In {
 		return nil
 	}
 	in := ws[0].In
-	wids := make([]C.int, n)
-	yoff := make([]C.int, n+1) // yoff[i] = P*Σ_{j<i} out_j (element offset of weight i's [P,out_i] block)
 	off := 0
-	for i, w := range ws {
-		if w == nil || w.id < 0 || w.In != in {
+	for _, w := range ws {
+		if w == nil || w.id < 0 || w.In != in || w.Out <= 0 || w.Out > (maxCInt-off)/P {
 			return nil
 		}
-		wids[i] = w.id
-		yoff[i] = C.int(off)
 		off += P * w.Out
 	}
-	yoff[n] = C.int(off)
 	ycat := make([]float32, off)
-	var gpuMs C.double
-	var event C.mg_execution_event
-	C.mg_q4k_gemm_group(&wids[0], C.int(n), (*C.float)(unsafe.Pointer(&X[0])), C.int(P),
-		(*C.float)(unsafe.Pointer(&ycat[0])), &yoff[0], &gpuMs, &event)
-	recordQ4KEvent(observation, &event)
-	lastGEMMGPUMs.Store(math.Float64bits(float64(gpuMs)))
-	out := make([][]float32, n)
-	o := 0
-	for i, w := range ws {
-		sz := P * w.Out
-		out[i] = ycat[o : o+sz : o+sz]
-		o += sz
-	}
-	return out
+	return GEMMGroupIntoWithEvents(ws, X, P, ycat, observation)
 }
 
 // ID returns the backend handle for this matrix.
@@ -664,4 +690,9 @@ func GEMVGroup(ws []*Q4KWeight, x []float32) [][]float32  { return GEMVGroupWith
 func (w *Q4KWeight) GEMM(X []float32, P int, Y []float32) { w.GEMMWithEvents(X, P, Y, nil) }
 func GEMMGroup(ws []*Q4KWeight, X []float32, P int) [][]float32 {
 	return GEMMGroupWithEvents(ws, X, P, nil)
+}
+
+// GEMMGroupInto is GEMMGroupIntoWithEvents without execution observation.
+func GEMMGroupInto(ws []*Q4KWeight, X []float32, P int, ycat []float32) [][]float32 {
+	return GEMMGroupIntoWithEvents(ws, X, P, ycat, nil)
 }
