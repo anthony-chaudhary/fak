@@ -65,6 +65,7 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 		gr.GraphReset()
 	}
 	s := &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor), modelWeightsHeld: true}
+	s.initMixedQKV()
 	if m.Cfg.IsQwen35Hybrid() {
 		// ValidateBackendForwardPath already proved this exact structural capability and
 		// path identity before KV or weight allocation.
@@ -85,6 +86,7 @@ func (s *Session) Close() {
 		}
 		// The grouped-Q4_K readback slab is session-owned even on the legacy (Backend=nil) path.
 		s.q4kMLPOutputSlab = nil
+		s.mixedQKV = mixedQKVSession{}
 		s.closeQwen35GDNSequence()
 		// Sequence auxiliary state can be owned by a native capability even when
 		// Backend is nil, so its teardown is outside the compute-HAL branch.

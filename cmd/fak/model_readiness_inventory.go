@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modelaccept"
@@ -19,6 +20,8 @@ func runModelReadinessInventory(stdout, stderr io.Writer, args []string) int {
 	artifact := fs.String("artifact", "", "provenance path recorded in inventory (defaults to --input)")
 	revision := fs.String("artifact-revision", "", "required immutable module@rev provenance")
 	expectedCorpus := fs.String("expected-corpus", "", "required corpus ID when set")
+	ladderDir := fs.String("ladder-evidence-dir", "", "explicit immutable Qwen3.8 ladder evidence directory")
+	ladderManifest := fs.String("ladder-manifest", "", "ladder checksum manifest (defaults to <ladder-evidence-dir>/checksums.json)")
 	asOfText := fs.String("as-of", "", "inventory time in RFC3339 (defaults to current UTC time)")
 	maxAge := fs.Duration("max-evidence-age", 30*24*time.Hour, "maximum acceptance evidence age")
 	if err := fs.Parse(args); err != nil {
@@ -44,6 +47,24 @@ func runModelReadinessInventory(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 		asOf = parsed
+	}
+	if *ladderManifest != "" && *ladderDir == "" {
+		fmt.Fprintln(stderr, "fak model readiness-inventory: --ladder-manifest requires --ladder-evidence-dir")
+		return 2
+	}
+	if *ladderDir != "" {
+		if *input != "-" {
+			fmt.Fprintln(stderr, "fak model readiness-inventory: --input and --ladder-evidence-dir are mutually exclusive")
+			return 2
+		}
+		manifest := *ladderManifest
+		if manifest == "" {
+			manifest = filepath.Join(*ladderDir, "checksums.json")
+		}
+		out, _ := modelaccept.BuildQwen38LadderReadinessInventory(modelaccept.InventoryOptions{
+			Artifact: *artifact, ArtifactRevision: *revision, ExpectedCorpusID: *expectedCorpus,
+		}, modelaccept.LadderEvidenceOptions{Directory: *ladderDir, Manifest: manifest})
+		return writeModelReadinessInventory(stdout, stderr, out)
 	}
 
 	var r io.Reader = os.Stdin
@@ -81,6 +102,10 @@ func runModelReadinessInventory(stdout, stderr io.Writer, args []string) int {
 		Artifact: artifactPath, ArtifactRevision: *revision, ExpectedCorpusID: *expectedCorpus,
 		AsOf: asOf, MaxEvidenceAge: *maxAge,
 	})
+	return writeModelReadinessInventory(stdout, stderr, out)
+}
+
+func writeModelReadinessInventory(stdout, stderr io.Writer, out modelaccept.Inventory) int {
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(out); err != nil {

@@ -249,7 +249,7 @@ func recordGuardSessionStartIdentityFor(traceID, sessionID, provider, source str
 	// row would put that second in front of the write, so a hook killed mid-census would lose
 	// a join it used to record. Ordering keeps the older guarantee strictly ahead of the newer
 	// one.
-	_ = appendJSONL(path, row)
+	_ = resume.AppendIdentityRow(filepath.Dir(path), row)
 
 	// The driver process this hook is running under, when it can be WITNESSED (0 when it
 	// cannot). This is the only moment on the host where the transcript UUID is known and the
@@ -263,7 +263,7 @@ func recordGuardSessionStartIdentityFor(traceID, sessionID, provider, source str
 	if pid > 0 {
 		row.TS = time.Now().UTC().Format(time.RFC3339)
 		row.PID = pid
-		_ = appendJSONL(path, row)
+		_ = resume.AppendIdentityRow(filepath.Dir(path), row)
 	}
 	return pid
 }

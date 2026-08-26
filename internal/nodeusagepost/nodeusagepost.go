@@ -38,9 +38,6 @@
 package nodeusagepost
 
 import (
-	"os"
-	"strings"
-
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
 )
@@ -70,15 +67,7 @@ var (
 // both. It falls back ONLY to the scoreboard token, never to the lab SLACK_BOT_TOKEN
 // (scoreboard.ResolveToken already refuses that fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_NODE_USAGE_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the node-usage channel id from FAK_NODE_USAGE_CHANNEL, then a
@@ -86,13 +75,5 @@ func ResolveToken() string {
 // caller can require an explicit --channel (the real id is never a tracked default)
 // rather than silently posting to #scoreboard.
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_NODE_USAGE_CHANNEL"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveCICDReportChannel()
+	return slackenv.Resolve(channelEnvs[0], scoreboard.ResolveCICDReportChannel)
 }

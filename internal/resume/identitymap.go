@@ -29,10 +29,14 @@ package resume
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/flock"
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 )
 
@@ -137,6 +141,49 @@ func FoldIdentityDriverPIDs(rows []IdentityRow) map[string]int {
 // would evaporate. This file is append-only and never swept.
 func IdentityLedgerPath(regDir string) string {
 	return filepath.Join(regDir, "resume_identity.jsonl")
+}
+
+// AppendIdentityRow serializes one complete identity row under an inter-process
+// sidecar lock. Identity producers are short-lived concurrent hooks; locking the
+// ledger itself would interfere with readers on Windows, so the lock is disjoint.
+func AppendIdentityRow(regDir string, row IdentityRow) error {
+	path := IdentityLedgerPath(regDir)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	lockPath := path + ".lock"
+	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err = flock.TryLock(lock)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, flock.ErrLockBusy) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("identity ledger lock timeout: %s", lockPath)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer flock.Unlock(lock)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(raw)
+	return err
 }
 
 // LoadIdentity reads the append-only identity store and folds it — through the pure

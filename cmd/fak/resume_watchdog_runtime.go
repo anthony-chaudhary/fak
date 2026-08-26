@@ -675,7 +675,7 @@ func rwRefreshResumeIdentity(regDir string, p resume.WatchdogPlanRow) {
 	if account == "" {
 		account = strings.TrimSpace(p.Account)
 	}
-	_ = appendJSONL(resume.IdentityLedgerPath(regDir), resume.IdentityRow{
+	_ = resume.AppendIdentityRow(regDir, resume.IdentityRow{
 		TS:       rwNowISO(),
 		UUID:     uuid,
 		Trace:    rwLoadIdentity(regDir)[uuid], // carry the known trace; "" = a half row the fold skips

@@ -103,6 +103,32 @@ func TestCommittedLadderEvidencePassesAndTamperFailsClosed(t *testing.T) {
 	}
 }
 
+func TestReadinessInventoryLadderTamperPublishesNoArithmeticPass(t *testing.T) {
+	source := filepath.Join("..", "..", "docs", "_witnesses", "issue-8623-qwen38-27b")
+	dir := cloneLadderEvidenceFixture(t, source)
+	rawPath := filepath.Join(dir, "raw-run.json")
+	raw, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[len(raw)-1] ^= 1
+	if err := os.WriteFile(rawPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, admission := BuildQwen38LadderReadinessInventory(InventoryOptions{ArtifactRevision: "docs@8cd6a82af97f"}, LadderEvidenceOptions{
+		Directory: dir,
+		Manifest:  filepath.Join(dir, "checksums.json"),
+	})
+	if admission.Verdict != Hold || admission.Reason.Code != LadderEvidenceChecksumMismatch || admission.Reason.Path != "raw-run.json" || len(got.Rows) != 1 || got.Rows[0].LadderEvidence != nil {
+		t.Fatalf("inventory=%+v admission=%+v", got, admission)
+	}
+	for _, cell := range got.Rows[0].ReadinessCells {
+		if cell.Status == ReadinessCellPass {
+			t.Fatalf("tampered evidence published PASS: %+v", cell)
+		}
+	}
+}
+
 func assertCommittedLadderSemantics(t *testing.T, dir string) {
 	t.Helper()
 	type result struct {

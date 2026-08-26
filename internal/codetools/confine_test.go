@@ -2,6 +2,7 @@ package codetools
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -35,6 +36,45 @@ func TestResolveAcceptsPathsInsideTheRoot(t *testing.T) {
 		if !within(ts.root, got.Abs) {
 			t.Fatalf("resolve(%q) = %q, outside the root %q", in, got.Abs, ts.root)
 		}
+	}
+}
+
+func TestTargetOfPreservesRequiredAndOptionalPathSemantics(t *testing.T) {
+	ts, _ := newTestToolset(t)
+	tests := []struct {
+		name string
+		tool string
+		args any
+		want string
+	}{
+		{"read", ToolRead, ReadArgs{FilePath: "sub/input.txt"}, "sub/input.txt"},
+		{"write", ToolWrite, WriteArgs{FilePath: "sub/output.txt", Mode: "create"}, "sub/output.txt"},
+		{"edit", ToolEdit, EditArgs{FilePath: "sub/edit.txt", OldString: "old", ExpectedVersion: "v1"}, "sub/edit.txt"},
+		{"bash cwd", ToolBash, BashArgs{Command: "pwd", Cwd: "sub"}, "sub"},
+		{"bash root", ToolBash, BashArgs{Command: "pwd"}, ""},
+		{"grep path", ToolGrep, GrepArgs{Pattern: "needle", Path: "sub"}, "sub"},
+		{"grep root", ToolGrep, GrepArgs{Pattern: "needle"}, ""},
+		{"glob path", ToolGlob, GlobArgs{Pattern: "*.go", Path: "sub"}, "sub"},
+		{"glob root", ToolGlob, GlobArgs{Pattern: "*.go"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, refusal := ts.targetOf(tt.tool, body)
+			if refusal != nil {
+				t.Fatalf("targetOf refused: %v", refusal)
+			}
+			if got != filepath.ToSlash(tt.want) {
+				t.Fatalf("targetOf = %q, want %q", got, filepath.ToSlash(tt.want))
+			}
+		})
+	}
+
+	if _, refusal := ts.targetOf(ToolRead, []byte(`{}`)); refusal == nil || refusal.Code != CodeMalformed {
+		t.Fatalf("empty required path refusal = %v, want %s", refusal, CodeMalformed)
 	}
 }
 

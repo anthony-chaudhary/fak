@@ -170,7 +170,7 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 
 ### Bounded microagents construct harnesses
 
-- [`docs/research/microagents-to-harnesses-2026-08-18.md`](docs/research/microagents-to-harnesses-2026-08-18.md) — doctrine and captured `go run ./cmd/microharnessdemo -selfcheck` witness for 1–3-turn, receipt-only child composition under the existing host admission floor.
+- [`docs/notes/microagents-to-harnesses-2026-08-18.md`](docs/notes/microagents-to-harnesses-2026-08-18.md) — doctrine and captured `go run ./cmd/microharnessdemo -selfcheck` witness for 1–3-turn, receipt-only child composition under the existing host admission floor.
 ## Operating the agent fleet
 
 - **[Daily lock-aware Git hygiene](docs/releases/issue-5592-daily-lock-aware-git-hygiene-2026-08-08.md)** — fetch, lock, commit, push, and reconcile safely on shared trunk.
@@ -275,6 +275,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Qwen3.8 upstream runtime, tool, context, and cache support map](docs/notes/qwen38-upstream-support-map-2026-08-26.md) -- source-pinned runtime capability map, fak disposition, stale policy, and follow-on checks for the first-class Qwen3.8-27B path.
+- [QWEN38-FLASH-NEXT execution index](docs/notes/QWEN38-FLASH-NEXT-EPIC-INDEX-2026-08-26.md) -- auto-indexed dated note.
 - [Qwen3.8-Flash-Next source-pinned study](docs/notes/CONCEPT-STUDY-QWEN38-FLASH-NEXT-2026-08-26.md) -- architecture, runtime contract, fak-native seam map, durable receipt, and filed implementation packets.
 - [Qwen tool-error family re-audit (#8700)](docs/notes/ISSUE-8700-QWEN-TOOL-ERROR-FAMILIES-2026-08-26.md) -- auto-indexed dated note.
 - [Mac guard dogfood readout — 2026-08-25](docs/notes/MAC-GUARD-DOGFOOD-2026-08-25.md) — installed-trunk Codex shell witness for Darwin session journaling, child-tree monitoring, gateway compatibility, and the filed residual defect ledger.

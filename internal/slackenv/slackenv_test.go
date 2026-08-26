@@ -127,3 +127,25 @@ func TestLookupUnset(t *testing.T) {
 		t.Fatalf("unset Resolved should still carry the key it tried: got %q", got.Key)
 	}
 }
+
+func TestResolvePrefersLookupAndKeepsFallbackLazy(t *testing.T) {
+	t.Setenv("FAK_X_TOKEN", "env-value")
+	called := false
+	got := Resolve("FAK_X_TOKEN", func() string {
+		called = true
+		return "fallback"
+	})
+	if got != "env-value" || called {
+		t.Fatalf("Resolve() = %q, fallback called=%v; want env-value without fallback", got, called)
+	}
+}
+
+func TestResolveFallsBackOnlyWhenUnset(t *testing.T) {
+	t.Setenv("FAK_X_TOKEN", "")
+	if got := Resolve("FAK_X_TOKEN", func() string { return "fallback" }); got != "fallback" {
+		t.Fatalf("Resolve() = %q, want fallback", got)
+	}
+	if got := Resolve("FAK_X_TOKEN", nil); got != "" {
+		t.Fatalf("Resolve() with nil fallback = %q, want empty", got)
+	}
+}

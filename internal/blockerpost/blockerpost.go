@@ -51,7 +51,6 @@
 package blockerpost
 
 import (
-	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -127,15 +126,7 @@ var (
 // both. It falls back ONLY to the scoreboard token, never to the lab SLACK_BOT_TOKEN
 // (scoreboard.ResolveToken already refuses that fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_BLOCKERS_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the blockers channel id from FAK_BLOCKERS_CHANNEL, then a
@@ -145,13 +136,5 @@ func ResolveToken() string {
 // blocker to #scoreboard whenever an operator has sourced .env.slack.local. Blockers
 // owns its own default, so the surface lands in #blockers with zero config.
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_BLOCKERS_CHANNEL"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveCICDReportChannel()
+	return slackenv.Resolve(channelEnvs[0], scoreboard.ResolveCICDReportChannel)
 }

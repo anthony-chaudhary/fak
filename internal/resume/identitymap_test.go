@@ -2,9 +2,11 @@ package resume
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
@@ -400,5 +402,37 @@ func assertMapEqual(t *testing.T, label string, got, want map[string]string) {
 		if gv, ok := got[k]; !ok || gv != wv {
 			t.Fatalf("%s[%q] = %q (present=%v), want %q", label, k, gv, ok, wv)
 		}
+	}
+}
+
+func TestAppendIdentityRowSerializesConcurrentWriters(t *testing.T) {
+	dir := t.TempDir()
+	const writers = 64
+	var wg sync.WaitGroup
+	errCh := make(chan error, writers)
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			errCh <- AppendIdentityRow(dir, IdentityRow{UUID: fmt.Sprintf("u-%d", i), Trace: fmt.Sprintf("t-%d", i)})
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, invalid, err := LoadIdentityRowsStrict(dir)
+	if err != nil || invalid != 0 || len(rows) != writers {
+		t.Fatalf("rows=%d invalid=%d err=%v", len(rows), invalid, err)
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if seen[row.UUID] {
+			t.Fatalf("duplicate %s", row.UUID)
+		}
+		seen[row.UUID] = true
 	}
 }

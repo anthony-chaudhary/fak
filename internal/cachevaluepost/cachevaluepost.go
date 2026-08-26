@@ -47,9 +47,6 @@
 package cachevaluepost
 
 import (
-	"os"
-	"strings"
-
 	"github.com/anthony-chaudhary/fak/internal/cachevaluereport"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 	"github.com/anthony-chaudhary/fak/internal/slackenv"
@@ -110,15 +107,7 @@ func FoldTwoTrack(report cachevaluereport.TwoTrackReport) Card {
 // falls back ONLY to the scoreboard token, never to the lab SLACK_BOT_TOKEN
 // (scoreboard.ResolveToken already refuses that cross-workspace fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_CACHEVALUE_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the cache-value channel id from FAK_CACHEVALUE_CHANNEL, then a
@@ -129,13 +118,5 @@ func ResolveToken() string {
 // cache-value card along — the cache surface moves only when FAK_CACHEVALUE_CHANNEL says
 // so. The surface owns its own default, so it lands with zero config.
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_CACHEVALUE_CHANNEL"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveCICDReportChannel()
+	return slackenv.Resolve(channelEnvs[0], scoreboard.ResolveCICDReportChannel)
 }

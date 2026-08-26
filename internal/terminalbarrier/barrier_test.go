@@ -64,6 +64,44 @@ func TestCapturedMixedForestPauseReplaceRestoreReady(t *testing.T) {
 	}
 }
 
+func TestLifecycleRequestsKeepOneTransactionEnvelope(t *testing.T) {
+	now := time.Date(2026, 8, 11, 23, 30, 0, 0, time.UTC)
+	deadline := now.Add(time.Minute)
+	var requests []lifecycleadapter.Request
+	adapter := lifecycleadapter.Custom(lifecycleadapter.CapabilityDocument{
+		Protocol: lifecycleadapter.ProtocolVersion, AdapterKind: "recording",
+		Operations: []lifecycleadapter.Operation{
+			lifecycleadapter.Prepare, lifecycleadapter.Pause, lifecycleadapter.Checkpoint,
+			lifecycleadapter.Resume, lifecycleadapter.Readiness,
+		},
+		ApplicationCheckpoint: true,
+	}, func(_ context.Context, request lifecycleadapter.Request) lifecycleadapter.Result {
+		requests = append(requests, request)
+		result := lifecycleadapter.Result{State: lifecycleadapter.ResultCompleted, ReadbackRef: "member:readback"}
+		if request.Operation == lifecycleadapter.Checkpoint {
+			result.CheckpointRef = "checkpoint:1"
+		}
+		return result
+	})
+	forest := Forest{ID: "forest", Authority: "guard:root", Generation: 9, Members: []Member{{ID: "member", Generation: 7, Active: true, Adapter: adapter}}}
+	report := Coordinator{Bus: fleetbus.LifecycleDirBus{Root: t.TempDir()}, Actuator: &fakeActuator{}, Now: func() time.Time { return now }}.Replace(context.Background(), true, forest, "tx-envelope", deadline)
+	if report.Verdict != "READY" {
+		t.Fatalf("report = %+v", report)
+	}
+	wantOperations := []lifecycleadapter.Operation{
+		lifecycleadapter.Prepare, lifecycleadapter.Pause, lifecycleadapter.Checkpoint,
+		lifecycleadapter.Resume, lifecycleadapter.Readiness,
+	}
+	if len(requests) != len(wantOperations) {
+		t.Fatalf("requests = %+v, want %d operations", requests, len(wantOperations))
+	}
+	for i, request := range requests {
+		if request.Operation != wantOperations[i] || request.TransactionID != "tx-envelope" || request.ForestID != "forest" || request.MemberID != "member" || request.Generation != 7 || !request.Deadline.Equal(deadline) {
+			t.Errorf("request %d = %+v, want operation %s with stable envelope", i, request, wantOperations[i])
+		}
+	}
+}
+
 func TestMonitorLineNamesTransactionAndReadback(t *testing.T) {
 	now := time.Now().UTC()
 	deadline := now.Add(time.Minute)

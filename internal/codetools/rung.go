@@ -109,75 +109,46 @@ func (t *Toolset) targetOf(tool string, body []byte) (string, *Refusal) {
 	switch tool {
 	case ToolRead:
 		var a ReadArgs
-		if r := decodeArgs(body, &a); r != nil {
-			return "", r
-		}
-		if r := a.Validate(); r != nil {
-			return "", r
-		}
-		res, r := t.resolve(a.FilePath)
-		return res.Rel, r
+		return decodeTarget(t, body, &a, func() string { return a.FilePath })
 	case ToolWrite:
 		var a WriteArgs
-		if r := decodeArgs(body, &a); r != nil {
-			return "", r
-		}
-		if r := a.Validate(); r != nil {
-			return "", r
-		}
-		res, r := t.resolve(a.FilePath)
-		return res.Rel, r
+		return decodeTarget(t, body, &a, func() string { return a.FilePath })
 	case ToolEdit:
 		var a EditArgs
-		if r := decodeArgs(body, &a); r != nil {
-			return "", r
-		}
-		if r := a.Validate(); r != nil {
-			return "", r
-		}
-		res, r := t.resolve(a.FilePath)
-		return res.Rel, r
+		return decodeTarget(t, body, &a, func() string { return a.FilePath })
 	case ToolBash:
 		var a BashArgs
-		if r := decodeArgs(body, &a); r != nil {
-			return "", r
-		}
-		if r := a.Validate(); r != nil {
-			return "", r
-		}
-		if a.Cwd == "" {
-			return "", nil
-		}
-		res, r := t.resolve(a.Cwd)
-		return res.Rel, r
+		return decodeTarget(t, body, &a, func() string { return a.Cwd })
 	case ToolGrep:
 		var a GrepArgs
-		if r := decodeArgs(body, &a); r != nil {
-			return "", r
-		}
-		if r := a.Validate(); r != nil {
-			return "", r
-		}
-		if a.Path == "" {
-			return "", nil
-		}
-		res, r := t.resolve(a.Path)
-		return res.Rel, r
+		return decodeTarget(t, body, &a, func() string { return a.Path })
 	case ToolGlob:
 		var a GlobArgs
-		if r := decodeArgs(body, &a); r != nil {
-			return "", r
-		}
-		if r := a.Validate(); r != nil {
-			return "", r
-		}
-		if a.Path == "" {
-			return "", nil
-		}
-		res, r := t.resolve(a.Path)
-		return res.Rel, r
+		return decodeTarget(t, body, &a, func() string { return a.Path })
 	}
 	return "", refuse(CodeMalformed, "unknown tool "+tool)
+}
+
+type validToolArgs interface {
+	Validate() *Refusal
+}
+
+// decodeTarget keeps every path-bearing tool on the same decode -> validate -> resolve
+// path. Empty optional operands (Bash cwd and Grep/Glob path) deliberately address the
+// workspace root without calling resolve; required operands are rejected by Validate.
+func decodeTarget[A validToolArgs](t *Toolset, body []byte, args A, path func() string) (string, *Refusal) {
+	if r := decodeArgs(body, args); r != nil {
+		return "", r
+	}
+	if r := args.Validate(); r != nil {
+		return "", r
+	}
+	target := path()
+	if target == "" {
+		return "", nil
+	}
+	res, r := t.resolve(target)
+	return res.Rel, r
 }
 
 // deny renders a Refusal as a kernel Verdict. The local code rides Meta so an operator
