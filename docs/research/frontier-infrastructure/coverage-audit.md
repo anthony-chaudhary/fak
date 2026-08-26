@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **123** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **118** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **95** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 9; `serving_system` 11; `standard` 1; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 61; `vendor_claim` 17; `reported_observation` 9; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 86; `medium_high` 28; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **123/123 published; 123/123 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **128** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **123** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **99** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **11** | `accelerator_platform` 3; `ai_cloud` 5; `datacenter_physical` 17; `frontier_lab` 41; `hyperscaler` 16; `market_signal` 14; `serving_system` 11; `standard` 1; `supply_chain` 9; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 64; `vendor_claim` 17; `reported_observation` 11; `production_measurement` 8; `production_observation` 8; `benchmark_measurement` 7; `analyst_estimate` 5; `synthetic_experiment` 4; `rumor` 3; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 89; `medium_high` 30; `medium` 6; `low` 3. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **128/128 published; 128/128 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All three are low-confidence and carry rumor metadata; complete resolution histories are absent. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 123 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 128 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -220,10 +220,14 @@ product launches, and selected acquisitions/partnerships appear in
 [`startups-landscape.md`](startups-landscape.md) and
 [`market-chronology.md`](market-chronology.md).
 
-**Missing or biased:** the sample is launch- and funding-heavy. Failures, shutdowns,
-acquihires, distressed financing, deployment cancellations, missed roadmaps, customer
-concentration, revenue/profitability, and category-complete coverage across routers,
-KV systems, power, cooling, networking, and modular datacenters are sparse.
+**Present:** Untether AI supplies a shutdown, engineering-team transfer, support
+termination, and bankruptcy case. Replicate, SchedMD, and Groq supply distinct platform
+acquisition, scheduler acquisition, and IP-license/talent-transfer cases.
+
+**Missing or biased:** the sample remains launch- and funding-heavy. More failures,
+shutdowns, acquihires, distressed financing, deployment cancellations, missed roadmaps,
+customer concentration, revenue/profitability, and category-complete coverage across
+routers, KV systems, power, cooling, networking, and modular datacenters are sparse.
 
 **Proof needed for complete:** a declared startup universe with founded/launch/funding/
 deployment/acquisition/failure states and periodic resolution checks.
@@ -233,8 +237,10 @@ deployment/acquisition/failure states and periodic resolution checks.
 **Present:** **3** rumor entries are explicitly labeled with origin/provenance fields and
 kept out of factual capacity totals.
 
+**Present:** each current rumor now has an explicit open/unverified status, last-check date, and expiry.
+
 **Missing:** complete original-source lineage, circular-republication detection,
-independent corroboration graph, claim-fragment matching, expiry dates, and later
+independent corroboration graph, claim-fragment matching, and later
 confirmed/refuted/partially-confirmed outcomes.
 
 **Proof needed for complete:** a rumor state machine and dated resolution history.
@@ -271,9 +277,9 @@ dates, affected hardware/services, implementation status, and later amendments.
 |---|---|---|
 | Production measurement/observation | **16 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
 | Benchmark/synthetic | **11 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **61 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Official statements | **64 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
 | Vendor claims | **17 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
-| Analyst/reported evidence | **15 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
+| Analyst/reported evidence | **17 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **3 entries** | Watch-only until independently corroborated or resolved. |
 
 ## Preserved explicit gaps

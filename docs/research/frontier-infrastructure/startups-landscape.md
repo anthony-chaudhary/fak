@@ -40,3 +40,28 @@ material claims belong in [`index.json`](index.json) with a dated source.
 5. Calling every GPU lessor a differentiated cloud or every chip startup deployed.
 6. Treating multiple articles copied from one leak as independent rumor corroboration.
 7. Ignoring private debt, take-or-pay contracts, and power-delivery risk.
+
+## Lifecycle outcomes beyond funding and launches
+
+| Company / asset | Initial category | Observed outcome | What survives | What failed or changed |
+|---|---|---|---|---|
+| Untether AI | In-memory/RISC-V AI accelerator | Shutdown, engineering-team transfer to AMD, later bankruptcy | Engineering talent may continue inside AMD. | Standalone company and product support ended; reported liabilities exceeded assets. |
+| Replicate | Hosted model execution/API | Joined Cloudflare | Brand and API were promised to continue; model execution primitives gain network/platform integration. | Independent ownership; transaction economics and long-term product boundary are undisclosed. |
+| SchedMD / Slurm | Cluster scheduling/workload management | Acquired by NVIDIA | Slurm is promised to remain open source and vendor-neutral. | Independent vendor governance; neutrality must be observed, not assumed. |
+| Groq IP/team | Inference accelerator/cloud | Non-exclusive NVIDIA license plus reported key-talent transfer | Groq remained operational; licensing was not described as a full acquisition. | Independent roadmap, staffing, and competitive boundary may change. |
+
+### Failure and acquisition extraction contract
+
+For each future event, record separately:
+
+```text
+legal entity / team / IP / product / customer contracts / support / brand
+announced / signed / closed / integrated / discontinued / bankrupt
+transaction value / assets / liabilities / runway if public
+customer migration and compatibility path
+open-source governance and hardware neutrality
+later outcome check
+```
+
+Do not label an acquihire, IP license, minority investment, product acquisition, or
+bankruptcy as a full-company acquisition unless the source says so.

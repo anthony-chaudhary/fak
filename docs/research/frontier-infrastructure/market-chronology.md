@@ -86,3 +86,25 @@ and cooling startups, and generation/datacenter developers.
 5. License, talent transfer, and partnership are not synonymous with acquisition.
 6. Product retirement, cancellation, and failure remain in the chronology; do not delete them.
 7. Repeated articles based on one source are one rumor origin, not corroboration.
+
+## Acquisition, shutdown, and support-continuity additions
+
+| Date | Entity / event | Lifecycle outcome | Infrastructure lesson | Open verification |
+|---|---|---|---|---|
+| 2025-06-05 | Untether AI team joins AMD; company shuts down | Engineering-team transfer; speedAI and imAIgine support discontinued | Team, IP, product, and support can separate in an acquihire. | Full IP/asset disposition and customer migration outcomes. |
+| 2025-10-14 | Untether AI bankruptcy filing | Legal/financial failure after shutdown | Reported ~$25M assets versus >$128M unsecured liabilities; funding raised did not produce durable operations. | Lifetime revenue, deployed systems, and AMD consideration. |
+| 2025-11-17 | Replicate joins Cloudflare | Platform acquisition with announced brand/API continuity | Model-hosting primitives are consolidating into network/developer platforms. | Transaction value, GPU/traffic economics, and observed integration milestones. |
+| 2025-12-15 | NVIDIA acquires SchedMD | Scheduler vendor acquired; Slurm promised to remain open and vendor-neutral | Scheduling/governance is a strategic cluster control point. | Post-acquisition release governance and cross-hardware neutrality. |
+| 2025-12 / disclosed 2026-02-25 | NVIDIA–Groq non-exclusive license | IP license plus reported talent transfer; Groq remains operational | Consolidation does not require buying the legal entity. | Price, IP scope, staff transfer, support, and product-roadmap effects. |
+
+## Rumor state at this snapshot
+
+| Rumor | Current state | Last checked | Expiry | Resolution rule |
+|---|---|---:|---:|---|
+| NVIDIA AI-server price-hike notice | Open / unverified | 2026-08-26 | 2026-11-30 | Confirm only with NVIDIA/customer primary evidence or multiple genuinely independent reports. |
+| Anthropic–Decart infrastructure talks | Open / unverified | 2026-08-26 | 2026-11-30 | A later Anthropic infrastructure deal is not confirmation unless Decart and the claim terms match. |
+| OpenAI datacenter leadership/strategy report | Open / unverified | 2026-08-26 | 2026-11-30 | Separate personnel departure confirmation from inferred strategic impact. |
+
+Expiry means **remove from active architectural assumptions**, not delete history. A
+later check must mark each claim `confirmed`, `partially_confirmed`, `refuted`, or
+`expired_unresolved`, with exact claim fragments and sources.

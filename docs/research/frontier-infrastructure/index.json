@@ -1,7 +1,7 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T17:28:00-07:00",
-  "issue": 9304,
+  "updated_at": "2026-08-26T17:44:00-07:00",
+  "issue": 9305,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -54,7 +54,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 123,
+    "entry_count": 128,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -100,6 +100,7 @@
       "ByteDance Seed",
       "CacheRoute",
       "Chutes production trace study",
+      "Cloudflare / Replicate",
       "Cohere",
       "CoreWeave",
       "CoreWeave / Nebius / Cerebras",
@@ -132,6 +133,7 @@
       "NVIDIA / Groq",
       "NVIDIA / HBM suppliers",
       "NVIDIA / Lumentum",
+      "NVIDIA / SchedMD",
       "NVIDIA DSX",
       "NVIDIA Dynamo",
       "Nebius Group",
@@ -159,6 +161,8 @@
       "TraceLab coding-agent corpus",
       "U.S. AI datacenter pipeline",
       "U.S. datacenter sector",
+      "Untether AI",
+      "Untether AI / AMD",
       "Vertiv",
       "Z.ai / Zhipu AI",
       "llm-d / Google",
@@ -1329,7 +1333,11 @@
       "rumor": {
         "is_rumor": true,
         "origin": "industry reporting relayed by Tom's Hardware",
-        "corroboration": "memory-price pressure is broadly reported, but the specific NVIDIA customer notice remains unconfirmed here"
+        "corroboration": "memory-price pressure is broadly reported, but the specific NVIDIA customer notice remains unconfirmed here",
+        "status": "open_unverified",
+        "last_checked_at": "2026-08-26",
+        "expires_at": "2026-11-30",
+        "resolution": "No primary confirmation or refutation recorded as of the last check."
       }
     },
     {
@@ -2507,7 +2515,11 @@
       "rumor": {
         "is_rumor": true,
         "origin": "Bloomberg reporting summarized in Bloomberg Technology video",
-        "corroboration": "Multiple later outlets repeated the report, but independent sourcing is not established in this ledger."
+        "corroboration": "Multiple later outlets repeated the report, but independent sourcing is not established in this ledger.",
+        "status": "open_unverified",
+        "last_checked_at": "2026-08-26",
+        "expires_at": "2026-11-30",
+        "resolution": "No primary confirmation or refutation recorded as of the last check."
       }
     },
     {
@@ -2540,7 +2552,11 @@
       "rumor": {
         "is_rumor": true,
         "origin": "Wall Street Journal reporting",
-        "corroboration": "No independent primary confirmation of the full strategic interpretation is recorded."
+        "corroboration": "No independent primary confirmation of the full strategic interpretation is recorded.",
+        "status": "open_unverified",
+        "last_checked_at": "2026-08-26",
+        "expires_at": "2026-11-30",
+        "resolution": "No primary confirmation or refutation recorded as of the last check."
       }
     },
     {
@@ -4578,6 +4594,182 @@
       "fak_implications": [
         "Represent sample, qualification, and mass-production states explicitly.",
         "Do not benchmark future HBM performance as installed hardware."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "replicate-cloudflare-acquisition-2025",
+      "category": "market_signal",
+      "entity": "Cloudflare / Replicate",
+      "topic": [
+        "acquisition",
+        "inference_platform",
+        "model_hosting",
+        "edge_inference"
+      ],
+      "published_at": "2025-11-17",
+      "event_at": "2025-11-17",
+      "source_title": "Replicate is joining Cloudflare",
+      "source_url": "https://replicate.com/blog/replicate-cloudflare",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Replicate announced it was joining Cloudflare while remaining a distinct brand and keeping its API and existing models running, with planned integration into Cloudflare’s developer platform and network.",
+      "quantified": {},
+      "assumptions": [
+        "Model-hosting and inference abstractions may consolidate into global developer/network platforms."
+      ],
+      "contradictions_or_limits": [
+        "The announcement does not disclose transaction value, profitability, traffic, GPU fleet, customer concentration, or integration milestones.",
+        "Product-continuity promises are plans until later service evidence confirms them."
+      ],
+      "fak_implications": [
+        "Track acquisition outcome separately from announced API continuity and later integration.",
+        "Expect routing/hosting layers to bundle network, state, storage, and inference."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-schedmd-acquisition-2025",
+      "category": "market_signal",
+      "entity": "NVIDIA / SchedMD",
+      "topic": [
+        "acquisition",
+        "scheduler",
+        "slurm",
+        "open_source",
+        "cluster_management"
+      ],
+      "published_at": "2025-12-15",
+      "event_at": "2025-12-15",
+      "source_title": "NVIDIA Acquires Open-Source Workload Management Provider SchedMD",
+      "source_url": "https://blogs.nvidia.com/blog/nvidia-acquires-schedmd/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "NVIDIA acquired SchedMD, the developer of Slurm, and said Slurm would continue as open-source, vendor-neutral software for HPC and AI workload management.",
+      "quantified": {},
+      "assumptions": [
+        "Cluster scheduling and policy are strategic infrastructure control points, not commodity glue."
+      ],
+      "contradictions_or_limits": [
+        "The transaction value and future governance/control mechanisms are undisclosed.",
+        "A vendor-neutral commitment is an official promise whose implementation must be observed over time."
+      ],
+      "fak_implications": [
+        "Track scheduler governance, interoperability, and release behavior after acquisition.",
+        "Preserve hardware-neutral scheduling interfaces in fak-native paths."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-groq-license-2025",
+      "category": "market_signal",
+      "entity": "NVIDIA / Groq",
+      "topic": [
+        "licensing",
+        "talent_transfer",
+        "inference_accelerator",
+        "startup_lifecycle"
+      ],
+      "published_at": "2026-02-25",
+      "event_at": "2025-12-31",
+      "source_title": "NVIDIA Announces Financial Results for Fourth Quarter and Fiscal 2026",
+      "source_url": "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-fourth-quarter-and-fiscal-2026",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "NVIDIA disclosed a non-exclusive licensing agreement with Groq to accelerate AI inference at global scale; public reporting separately described key Groq engineering talent joining NVIDIA while Groq remained operational.",
+      "quantified": {},
+      "assumptions": [
+        "Infrastructure consolidation can occur through IP licensing and talent transfer without a full-company acquisition."
+      ],
+      "contradictions_or_limits": [
+        "The official disclosure does not state price, licensed IP scope, staff count, product roadmap, or effect on Groq Cloud.",
+        "Reported talent-transfer details are not independently quantified in the official filing."
+      ],
+      "fak_implications": [
+        "Represent licensing, hiring, acquisition, and continued independent operation as separate lifecycle events.",
+        "Recheck product support and roadmap rather than labeling the company simply acquired."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "untether-ai-shutdown-amd-2025",
+      "category": "market_signal",
+      "entity": "Untether AI / AMD",
+      "topic": [
+        "shutdown",
+        "acquihire",
+        "product_discontinuation",
+        "accelerator_startup"
+      ],
+      "published_at": "2025-06-05",
+      "event_at": "2025-06-05",
+      "source_title": "Untether AI Team Acquired by AMD, Product Support Discontinued",
+      "source_url": "https://www.hpcwire.com/off-the-wire/untether-ai-team-acquired-by-amd-product-support-discontinued/",
+      "source_kind": "industry_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "Untether AI shut down, its engineering team joined AMD, and support for speedAI products and the imAIgine SDK ended.",
+      "quantified": {},
+      "assumptions": [
+        "Large funding and working silicon do not remove commercialization, ecosystem, and capital-continuity risk for accelerator startups."
+      ],
+      "contradictions_or_limits": [
+        "The report does not establish the full asset/IP disposition or transaction terms.",
+        "An engineering-team transfer is not a product acquisition or continuity guarantee."
+      ],
+      "fak_implications": [
+        "Include product-support termination and migration cost in accelerator-platform risk.",
+        "Track team, IP, product, support, and legal-entity outcomes separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "untether-ai-bankruptcy-2025",
+      "category": "market_signal",
+      "entity": "Untether AI",
+      "topic": [
+        "bankruptcy",
+        "failure",
+        "liabilities",
+        "funding_risk",
+        "accelerator_startup"
+      ],
+      "published_at": "2025-10-27",
+      "event_at": "2025-10-14",
+      "source_title": "Untether AI files for bankruptcy following AMD acquihire",
+      "source_url": "https://betakit.com/untether-ai-files-for-bankruptcy-following-amd-acquihire/",
+      "source_kind": "credible_reporting",
+      "evidence_class": "reported_observation",
+      "confidence": "medium_high",
+      "claim": "Bankruptcy filings reported after Untether’s shutdown showed nearly $25M in assets and just over $128M in unsecured liabilities, with lack of working capital or funding cited as the cause.",
+      "quantified": {
+        "assets_usd_approx": 25000000,
+        "unsecured_liabilities_usd_gt": 128000000,
+        "deficiency_usd": 103600000
+      },
+      "assumptions": [
+        "Capital intensity and funding continuity can terminate an accelerator product despite prior fundraising and engineering progress."
+      ],
+      "contradictions_or_limits": [
+        "Figures are from reported bankruptcy documents rather than an issuer earnings statement.",
+        "The filing does not quantify lifetime product revenue, deployed chips, customer migration cost, or AMD transaction consideration."
+      ],
+      "fak_implications": [
+        "Track runway, liabilities, support continuity, and customer exit plans in alternative-hardware adoption.",
+        "Funding raised is not evidence of durable operations."
       ],
       "rumor": {
         "is_rumor": false
