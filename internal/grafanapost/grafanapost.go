@@ -70,15 +70,7 @@ var (
 // token, NEVER to the lab SLACK_BOT_TOKEN (scoreboard.ResolveToken already refuses
 // that cross-workspace fall-through).
 func ResolveToken() string {
-	for _, e := range tokenEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_GRAFANA_TOKEN"); v != "" {
-		return v
-	}
-	return scoreboard.ResolveToken()
+	return slackenv.Resolve(tokenEnvs[0], scoreboard.ResolveToken)
 }
 
 // ResolveChannel returns the #grafana channel id from FAK_GRAFANA_CHANNEL, then a
@@ -88,15 +80,7 @@ func ResolveToken() string {
 // the surface whenever an operator sources .env.slack.local. The surface owns its own
 // default, so it lands with zero config.
 func ResolveChannel() string {
-	for _, e := range channelEnvs {
-		if v := strings.TrimSpace(os.Getenv(e)); v != "" {
-			return v
-		}
-	}
-	if v := slackenv.FileValue("FAK_GRAFANA_CHANNEL"); v != "" {
-		return v
-	}
-	return ChannelDefault
+	return slackenv.Resolve(channelEnvs[0], func() string { return ChannelDefault })
 }
 
 // Categories an operator may tag a Link with. They drive the rollup grouping and the
