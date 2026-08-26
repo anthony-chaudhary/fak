@@ -32,7 +32,7 @@ func TestStudyInvocationPersistsAndFreshSearchFindsDecision(t *testing.T) {
 	}
 	out.Reset()
 	errout.Reset()
-	if code := runStudy(&out, &errout, []string{"search", "survives fresh", "--store", store}); code != 0 {
+	if code := runStudy(&out, &errout, []string{"search", "--store", store, "survives fresh"}); code != 0 {
 		t.Fatalf("search=%d stderr=%s", code, errout.String())
 	}
 	var matches []study.Match

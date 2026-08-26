@@ -101,7 +101,7 @@ func runStudySearch(out, errw io.Writer, args []string) int {
 	}
 	limit := fs.Int("limit", 20, "maximum results")
 	if fs.Parse(args) != nil || fs.NArg() != 1 {
-		fmt.Fprintln(errw, "usage: fak study search QUERY [--limit N] [--store PATH]")
+		fmt.Fprintln(errw, "usage: fak study search [--limit N] [--store PATH] QUERY")
 		return 2
 	}
 	matches, e := study.Search(*store, fs.Arg(0), *limit)
