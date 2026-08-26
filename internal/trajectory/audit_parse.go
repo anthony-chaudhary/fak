@@ -120,6 +120,11 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	denominator.DuplicateUsageRecords += state.usageDuplicates
 	denominator.UsageRecordsApplied += state.row.UsageRecords
 
+	state.row.usageByID = make(map[string]AuditTokens, len(state.claudeUsageByID))
+	for id, usage := range state.claudeUsageByID {
+		state.row.usageByID[id] = usage
+	}
+
 	state.row.Models = make([]string, 0, len(state.models))
 	for model := range state.models {
 		state.row.Models = append(state.row.Models, model)
