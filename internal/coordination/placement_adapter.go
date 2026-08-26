@@ -2,8 +2,6 @@ package coordination
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
@@ -400,7 +398,7 @@ func projectPlacementCandidate(source PlacementSourceCandidate, capturedAt, now 
 		if len(tenant) == 0 {
 			return PlacementCandidate{}, false
 		}
-		tenantIDs = append(tenantIDs, stablePlacementID("tenant", tenant))
+		tenantIDs = append(tenantIDs, stableCoordinationID("tenant", tenant))
 	}
 	sort.Strings(tenantIDs)
 	if hasDuplicatePlacementLabel(tenantIDs) {
@@ -414,7 +412,7 @@ func projectPlacementCandidate(source PlacementSourceCandidate, capturedAt, now 
 		}
 	}
 	return PlacementCandidate{
-		StableID: stablePlacementID("candidate", source.Identity), Generation: source.Generation,
+		StableID: stableCoordinationID("candidate", source.Identity), Generation: source.Generation,
 		Kind: source.Kind, Region: source.Region, FailureDomain: source.FailureDomain,
 		DataBoundary: source.DataBoundary, EligibleTenantIDs: tenantIDs, Accelerators: accelerators,
 		Models: models, Available: source.Available, Provenance: source.Provenance,
@@ -542,9 +540,9 @@ func (a *PlacementAdapter) Plan(observation PlacementObservation, request Placem
 		planningNow.Sub(observation.CapturedAt) <= a.maxAge
 	pinID := ""
 	if len(request.OperatorPin) != 0 {
-		pinID = stablePlacementID("candidate", request.OperatorPin)
+		pinID = stableCoordinationID("candidate", request.OperatorPin)
 	}
-	tenantID := stablePlacementID("tenant", request.TenantIdentity)
+	tenantID := stableCoordinationID("tenant", request.TenantIdentity)
 	selected := -1
 	pinFound, pinEligible := false, false
 	for _, observedCandidate := range observation.Candidates {
@@ -760,7 +758,7 @@ func (a *PlacementAdapter) finishPlacementPlan(plan PlacementPlan, request Place
 	}
 	plan.Lease = PlacementLease{WorkloadID: plan.WorkloadID, ValidUntil: validUntil}
 	plan.Lease.ID = makePlacementLeaseID(plan)
-	plan.Lease.IdempotencyKey = stablePlacementID("idempotency", []byte(plan.Lease.ID))
+	plan.Lease.IdempotencyKey = stableCoordinationID("idempotency", []byte(plan.Lease.ID))
 	plan.ID = makePlacementPlanID(plan)
 	fingerprint := placementPlanFingerprint(plan)
 	a.stateMu.Lock()
@@ -878,10 +876,10 @@ func validPlacementApplyStatus(status PlacementApplyStatus) bool {
 
 func (a *PlacementAdapter) validProducedPlacementPlanLocked(plan PlacementPlan) bool {
 	if plan.ID == "" || plan.ID != makePlacementPlanID(plan) || plan.Lease.ID != makePlacementLeaseID(plan) ||
-		plan.Lease.IdempotencyKey != stablePlacementID("idempotency", []byte(plan.Lease.ID)) ||
-		plan.Lease.WorkloadID != plan.WorkloadID || !validStablePlacementID(plan.RequestID, "request") ||
-		!validStablePlacementID(plan.WorkloadID, "workload") || !validStablePlacementID(plan.Lease.ID, "lease") ||
-		!validStablePlacementID(plan.Lease.IdempotencyKey, "idempotency") {
+		plan.Lease.IdempotencyKey != stableCoordinationID("idempotency", []byte(plan.Lease.ID)) ||
+		plan.Lease.WorkloadID != plan.WorkloadID || !validStableCoordinationID(plan.RequestID, "request") ||
+		!validStableCoordinationID(plan.WorkloadID, "workload") || !validStableCoordinationID(plan.Lease.ID, "lease") ||
+		!validStableCoordinationID(plan.Lease.IdempotencyKey, "idempotency") {
 		return false
 	}
 	want, ok := a.plans[plan.ID]
@@ -952,10 +950,10 @@ func (a *PlacementAdapter) SelfCheck(ctx context.Context, request PlacementReque
 }
 
 func placementRequestIDs(request PlacementRequest, policy PlacementRankingPolicy) (requestID, workloadID string) {
-	workloadID = stablePlacementID("workload", request.WorkloadIdentity)
+	workloadID = stableCoordinationID("workload", request.WorkloadIdentity)
 	pinID := ""
 	if len(request.OperatorPin) != 0 {
-		pinID = stablePlacementID("candidate", request.OperatorPin)
+		pinID = stableCoordinationID("candidate", request.OperatorPin)
 	}
 	reference := struct {
 		WorkloadID    string                 `json:"workloadId"`
@@ -967,12 +965,12 @@ func placementRequestIDs(request PlacementRequest, policy PlacementRankingPolicy
 		PinID         string                 `json:"pinId"`
 		RankingPolicy PlacementRankingPolicy `json:"rankingPolicy"`
 	}{
-		WorkloadID: workloadID, TenantID: stablePlacementID("tenant", request.TenantIdentity),
+		WorkloadID: workloadID, TenantID: stableCoordinationID("tenant", request.TenantIdentity),
 		Region: request.Region, Accelerator: request.Accelerator, Model: request.Model,
 		Boundary: request.MaximumDataBoundary, PinID: pinID, RankingPolicy: policy,
 	}
 	encoded, _ := json.Marshal(reference)
-	return stablePlacementID("request", encoded), workloadID
+	return stableCoordinationID("request", encoded), workloadID
 }
 
 func makePlacementObservationID(observation PlacementObservation) string {
@@ -982,7 +980,7 @@ func makePlacementObservationID(observation PlacementObservation) string {
 	if err != nil {
 		return ""
 	}
-	return stablePlacementID("observation", encoded)
+	return stableCoordinationID("observation", encoded)
 }
 
 func makePlacementLeaseID(plan PlacementPlan) string {
@@ -1000,7 +998,7 @@ func makePlacementLeaseID(plan PlacementPlan) string {
 		ValidUntil: plan.Lease.ValidUntil, Fallback: plan.UsesFallback,
 	}
 	encoded, _ := json.Marshal(reference)
-	return stablePlacementID("lease", encoded)
+	return stableCoordinationID("lease", encoded)
 }
 
 func makePlacementPlanID(plan PlacementPlan) string {
@@ -1010,7 +1008,7 @@ func makePlacementPlanID(plan PlacementPlan) string {
 	if err != nil {
 		return ""
 	}
-	return stablePlacementID("placement", encoded)
+	return stableCoordinationID("placement", encoded)
 }
 
 func placementPlanFingerprint(plan PlacementPlan) string {
@@ -1018,19 +1016,5 @@ func placementPlanFingerprint(plan PlacementPlan) string {
 	if err != nil {
 		return ""
 	}
-	return stablePlacementID("planfp", encoded)
-}
-
-func stablePlacementID(prefix string, identity []byte) string {
-	sum := sha256.Sum256(identity)
-	return prefix + "_" + hex.EncodeToString(sum[:16])
-}
-
-func validStablePlacementID(value, prefix string) bool {
-	wantPrefix := prefix + "_"
-	if !strings.HasPrefix(value, wantPrefix) || len(value) != len(wantPrefix)+32 {
-		return false
-	}
-	_, err := hex.DecodeString(value[len(wantPrefix):])
-	return err == nil
+	return stableCoordinationID("planfp", encoded)
 }

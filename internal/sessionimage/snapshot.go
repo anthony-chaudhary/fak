@@ -14,7 +14,7 @@ package sessionimage
 // shares session.json copy-on-write verbatim (nothing re-keyed), where BranchDir writes a
 // fresh drive re-keyed to the branch id. Everything else — the content-addressed sharing
 // that makes the capture cheap (hardlink, byte copy as the fallback) and the read-only
-// treatment of the source — is identical, and both reuse this file's shareOrCopy helper.
+// treatment of the source — is identical, and both reuse the shared part-copy helper.
 //
 // # What is captured, what is shared, what is untouched
 //
@@ -79,14 +79,8 @@ func SnapshotDir(srcDir, destDir string, opts SnapshotOptions) (Meta, error) {
 
 	// Share every part copy-on-write, INCLUDING session.json: a checkpoint preserves the drive
 	// verbatim (same id), so — unlike a branch — nothing is re-keyed or written fresh here.
-	for _, name := range knownParts {
-		s := filepath.Join(srcDir, name)
-		if _, statErr := os.Stat(s); statErr != nil {
-			continue // an optional part the source does not carry
-		}
-		if err := shareOrCopy(s, filepath.Join(destDir, name)); err != nil {
-			return Meta{}, fmt.Errorf("sessionimage: snapshot: share %s: %w", name, err)
-		}
+	if err := shareKnownParts(srcDir, destDir, "snapshot", ""); err != nil {
+		return Meta{}, err
 	}
 
 	// The integrity index over the snapshot's parts (shared parts keep the source's digests —
