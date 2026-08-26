@@ -35,7 +35,7 @@ func TestStudyImportCommandDryRun(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &ledger); err != nil {
 		t.Fatal(err)
 	}
-	if ledger.Attempted != 1 || ledger.Candidate != 1 {
+	if ledger.Attempted != 1 || ledger.Eligible != 1 {
 		t.Fatalf("unexpected ledger: %+v", ledger)
 	}
 }
