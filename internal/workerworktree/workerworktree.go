@@ -35,10 +35,12 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -781,11 +783,63 @@ func CountPathsOutsideTrees(changed, trees []string) int {
 	return outside
 }
 
+func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) ([]string, error) {
+	args := []string{"ls-files", "--cached", "--others", "--exclude-standard", "--"}
+	args = append(args, requested...)
+	rc, out := run(git, wtPath, args)
+	if rc != 0 {
+		return nil, fmt.Errorf("could not expand declared land paths — fail open")
+	}
+	candidates := strings.Fields(out)
+	if len(candidates) > 0 {
+		addArgs := []string{"add", "-N", "--"}
+		addArgs = append(addArgs, candidates...)
+		if rc, _ := run(git, wtPath, addArgs); rc != 0 {
+			return nil, fmt.Errorf("could not expose untracked land paths — fail open")
+		}
+	}
+	rc, changedOut := run(git, wtPath, []string{"diff", "--name-only", diffRef})
+	if rc != 0 {
+		return nil, fmt.Errorf("could not inspect declared land paths — fail open")
+	}
+	changed := strings.Fields(changedOut)
+	expanded := make([]string, 0, len(changed))
+	seen := make(map[string]bool)
+	for _, req := range requested {
+		matched := false
+		cleanReq := strings.TrimSuffix(filepath.ToSlash(filepath.Clean(req)), "/")
+		for _, name := range changed {
+			cleanName := filepath.ToSlash(filepath.Clean(name))
+			if cleanName == cleanReq || strings.HasPrefix(cleanName, cleanReq+"/") {
+				matched = true
+				if !seen[cleanName] {
+					seen[cleanName] = true
+					expanded = append(expanded, cleanName)
+				}
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("declared land path %q contributes no changed file — refusing partial land", req)
+		}
+	}
+	sort.Strings(expanded)
+	return expanded, nil
+}
 func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) Result {
 	cfg := newLandConfig(opts)
 	diffRef := baseSHA
 	if diffRef == "" {
 		diffRef = "HEAD"
+	}
+	// Make untracked descendants visible to git diff, then collapse directory
+	// declarations to the exact changed files they own. The resulting list is the
+	// single pathset used by commit, readback, and post-CAS sync.
+	if len(paths) > 0 {
+		var err error
+		paths, err = expandLandPaths(wtPath, diffRef, paths, git)
+		if err != nil {
+			return Result{OK: false, Reason: err.Error()}
+		}
 	}
 	rc, diff := run(git, wtPath, []string{"diff", diffRef})
 	if rc != 0 {

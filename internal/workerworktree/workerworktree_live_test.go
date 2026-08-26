@@ -98,3 +98,54 @@ func TestLiveEndToEnd(t *testing.T) {
 		t.Fatalf("worktree still present after reap: %d", n)
 	}
 }
+
+func TestLiveLandNewDirectoryContentsAtomically(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	t.Setenv(IsolatedLandEnv, "1")
+	repo := t.TempDir()
+	run := func(dir string, args ...string) string {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	run(repo, "init", "-q", "-b", "main")
+	run(repo, "config", "user.email", "e2e@test")
+	run(repo, "config", "user.name", "e2e")
+	run(repo, "config", "commit.gpgsign", "false")
+	os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644)
+	run(repo, "add", "base.txt")
+	run(repo, "commit", "-q", "-m", "base")
+	base := TrunkHeadSHA(repo, nil)
+	res := Prepare(repo, "workerworktree", "9129", base, t.TempDir(), nil)
+	if !res.OK {
+		t.Fatalf("prepare: %+v", res)
+	}
+	dir := filepath.Join(res.Path, "proof", "nested")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "witness.txt"), []byte("atomic\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg := filepath.Join(res.Path, "message.txt")
+	os.WriteFile(msg, []byte("fix(workerworktree): atomic directory (#9129) (fak workerworktree)\n"), 0o644)
+	land := Land(repo, res.Path, base, msg, []string{"proof"}, nil, nil)
+	if !land.OK || !land.Committed {
+		t.Fatalf("land: %+v", land)
+	}
+	for _, check := range [][]string{{"show", "HEAD:proof/nested/witness.txt"}, {"show", ":proof/nested/witness.txt"}} {
+		if got := run(repo, check...); got != "atomic\n" {
+			t.Fatalf("git %v = %q", check, got)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(repo, "proof", "nested", "witness.txt"))
+	if err != nil || string(got) != "atomic\n" {
+		t.Fatalf("worktree witness = %q, %v", got, err)
+	}
+}
