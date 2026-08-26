@@ -37,6 +37,7 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // generation-count histogram (counts) is built from THIS turn's decode loop only —
 // it is sized to the logits vocab on first use and never persists across turns.
 func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
+	p.qwen35MetalGDNExecuted.Store(false)
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -162,6 +163,21 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		s.Metal = true
 		s.MetalQ4K = p.q4k
 	}
+	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() && cachedLogits == nil {
+		if matched != 0 {
+			err = &model.UnsupportedGDNPreprojectedSequenceError{
+				Path:   model.Qwen35MetalGDNSequenceForwardPath,
+				Reason: "native sequence requires a fresh prompt; restored host prefix state cannot initialize resident owners",
+			}
+			return
+		}
+		if err = s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+			return
+		}
+		// The historical CPU-session path otherwise has no close requirement. The
+		// candidate owns native state, so bind cleanup even when prefill panics.
+		defer s.Close()
+	}
 
 	// 1b) RECORD this turn's cache decision (#1538, inkernel_turntax.go). This is the seam the
 	// turn-tax planner is defined on: the lookup has run and every servability/trust gate above
@@ -205,6 +221,14 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	}
 	if err = ctx.Err(); err != nil {
 		return
+	}
+	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
+		var executed bool
+		executed, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
+		if err != nil {
+			return
+		}
+		p.qwen35MetalGDNExecuted.Store(executed)
 	}
 
 	// 3) Snapshot the full-prompt KV (before decode mutates s.Cache) and cache it under a
