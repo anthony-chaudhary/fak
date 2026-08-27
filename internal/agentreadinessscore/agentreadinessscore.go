@@ -225,26 +225,29 @@ var frontierUnits = map[string]int{
 // ---- compiled regexes (mirror the Python module-level patterns) -------------------
 
 var (
-	claimLineRe   = regexp.MustCompile(`^\s*- \[`)
-	bracketSlotRe = regexp.MustCompile(`<[^>]+>`)
-	envSlotRe     = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}$`)
-	proofPolicyRe = regexp.MustCompile(`--policy\s+(\S+)`)
-	identityRe    = regexp.MustCompile(`(?i)\bfak\b[^.\n]{0,60}?\b(?:is\b[^.\n]{0,80}?(?:kernel|firewall|gate|gateway|proxy|binary)|(?:lets|helps|enables)\s+you\b[^.\n]{0,120}?(?:agent|context|model|tool|permission))`)
-	reasonRe      = regexp.MustCompile(`(?m)^\[reasons\.([A-Z][A-Z0-9_]+)\]`)
-	verbTokenRe   = regexp.MustCompile(`^([a-z][a-z0-9-]+)`)
-	inlineCodeRe  = regexp.MustCompile("`([^`]+)`")
-	goDirectiveRe = regexp.MustCompile(`(?m)^go\s+\d+\.\d+`)
-	goVersDocRe   = regexp.MustCompile(`(?i)go\s*1\.\d+`)
-	linkRe        = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
-	fenceRe       = regexp.MustCompile("^(```|~~~)")
-	caseRe        = regexp.MustCompile(`^\s*case\s+(.+):`)
-	quotedRe      = regexp.MustCompile(`"([^"]+)"`)
-	wsHashRe      = regexp.MustCompile(`\s+#\s`)
-	wsRe          = regexp.MustCompile(`\s+`)
-	cdRe          = regexp.MustCompile(`^cd\s+(\S+)`)
-	segSepRe      = regexp.MustCompile(`&&|\|\||;|\||\s--\s`)
-	promptRe      = regexp.MustCompile(`^[\$>]\s+`)
-	envPrefixRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=\S*\s+`)
+	claimLineRe          = regexp.MustCompile(`^\s*- \[`)
+	bracketSlotRe        = regexp.MustCompile(`<[^>]+>`)
+	envSlotRe            = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}$`)
+	proofPolicyRe        = regexp.MustCompile(`--policy\s+(\S+)`)
+	identityDefinitionRe = regexp.MustCompile(`(?i)\bfak\b.{0,80}\b(?:is|acts as|serves as)\b.{0,120}\b(?:agent\s+kernel|kernel|firewall|gate|gateway|proxy|binary|runtime|boundary)\b`)
+	identityEnableRe     = regexp.MustCompile(`(?i)\bfak\b.{0,80}\b(?:lets|helps|enables)\s+(?:you\s+)?(?:run|configure|manage|guard|route|build)\b.{0,120}\b(?:agent|task|context|model|tool|permission)\b`)
+	identityTaskConfigRe = regexp.MustCompile(`(?i)\bfak\b.{0,80}\bgives\b.{0,40}\b(?:task|agent)s?\b.{0,60}\b(?:configuration|policy|profile)\b`)
+	identityBoundaryRe   = regexp.MustCompile(`(?i)\b(?:one|a|the)\s+boundary\b.{0,80}\b(?:manages|handles|routes|records)\b.{0,160}\b(?:context|models?|tools?|permissions?|record)\b`)
+	reasonRe             = regexp.MustCompile(`(?m)^\[reasons\.([A-Z][A-Z0-9_]+)\]`)
+	verbTokenRe          = regexp.MustCompile(`^([a-z][a-z0-9-]+)`)
+	inlineCodeRe         = regexp.MustCompile("`([^`]+)`")
+	goDirectiveRe        = regexp.MustCompile(`(?m)^go\s+\d+\.\d+`)
+	goVersDocRe          = regexp.MustCompile(`(?i)go\s*1\.\d+`)
+	linkRe               = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	fenceRe              = regexp.MustCompile("^(```|~~~)")
+	caseRe               = regexp.MustCompile(`^\s*case\s+(.+):`)
+	quotedRe             = regexp.MustCompile(`"([^"]+)"`)
+	wsHashRe             = regexp.MustCompile(`\s+#\s`)
+	wsRe                 = regexp.MustCompile(`\s+`)
+	cdRe                 = regexp.MustCompile(`^cd\s+(\S+)`)
+	segSepRe             = regexp.MustCompile(`&&|\|\||;|\||\s--\s`)
+	promptRe             = regexp.MustCompile(`^[\$>]\s+`)
+	envPrefixRe          = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=\S*\s+`)
 )
 
 // ---------------------------------------------------------------------------
@@ -457,21 +460,109 @@ func findInstallOneliner(texts map[string]string) (bool, string) {
 	return false, ""
 }
 
+type identityEvidence struct {
+	Doc       string
+	Line      int
+	Statement string
+}
+
+type identityParagraph struct {
+	Line int
+	Text string
+}
+
 func findIdentity(texts map[string]string) (present, missing []string) {
-	present, missing = []string{}, []string{}
+	evidence, missing := findIdentityEvidence(texts)
+	present = make([]string, 0, len(evidence))
+	for _, match := range evidence {
+		present = append(present, match.Doc)
+	}
+	return present, missing
+}
+
+func findIdentityEvidence(texts map[string]string) (matches []identityEvidence, missing []string) {
 	for _, doc := range identityDocs {
-		lines := strings.Split(texts[doc], "\n")
-		if len(lines) > identityHeadLines {
-			lines = lines[:identityHeadLines]
+		matched := false
+		for _, paragraph := range identityParagraphs(texts[doc]) {
+			statement := normalizeIdentityText(paragraph.Text)
+			if !identityStatementMatches(statement) {
+				continue
+			}
+			matches = append(matches, identityEvidence{Doc: doc, Line: paragraph.Line, Statement: boundedIdentityStatement(statement)})
+			matched = true
+			break
 		}
-		head := strings.Join(lines, "\n")
-		if identityRe.MatchString(head) {
-			present = append(present, doc)
-		} else {
+		if !matched {
 			missing = append(missing, doc)
 		}
 	}
-	return present, missing
+	return matches, missing
+}
+
+// identityParagraphs keeps the ordinary near-the-top bound, but also admits the
+// first prose under an explicitly named identity heading. This lets a command-dense
+// AGENTS.md put operational rules first without making its "What this project is"
+// section invisible to the readiness gate.
+func identityParagraphs(text string) []identityParagraph {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	paragraphs := []identityParagraph{}
+	parts := []string{}
+	startLine := 0
+	eligible := false
+	inIdentitySection := false
+	flush := func() {
+		if eligible && len(parts) > 0 {
+			paragraphs = append(paragraphs, identityParagraph{Line: startLine, Text: strings.Join(parts, " ")})
+		}
+		parts = parts[:0]
+		startLine = 0
+		eligible = false
+	}
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			flush()
+			inIdentitySection = identityHeading(strings.TrimSpace(strings.TrimLeft(trimmed, "#")))
+			continue
+		}
+		if trimmed == "" {
+			flush()
+			continue
+		}
+		if len(parts) == 0 {
+			startLine = i + 1
+			eligible = startLine <= identityHeadLines || inIdentitySection
+		}
+		parts = append(parts, trimmed)
+	}
+	flush()
+	return paragraphs
+}
+
+func identityHeading(heading string) bool {
+	heading = strings.ToLower(normalizeIdentityText(heading))
+	return heading == "what this project is" || heading == "what fak is" || heading == "about fak" || heading == "fak identity"
+}
+
+func normalizeIdentityText(text string) string {
+	replacer := strings.NewReplacer("**", "", "__", "", "*", "", "_", "", "`", "")
+	return strings.Join(strings.Fields(replacer.Replace(text)), " ")
+}
+
+func identityStatementMatches(statement string) bool {
+	if identityDefinitionRe.MatchString(statement) || identityEnableRe.MatchString(statement) {
+		return true
+	}
+	return identityTaskConfigRe.MatchString(statement) && identityBoundaryRe.MatchString(statement)
+}
+
+func boundedIdentityStatement(statement string) string {
+	const maxRunes = 180
+	runes := []rune(statement)
+	if len(runes) <= maxRunes {
+		return statement
+	}
+	return string(runes[:maxRunes-1]) + "…"
 }
 
 func untaggedClaims(claimsText string, present bool) []string {
@@ -821,21 +912,42 @@ func kpiLLMSMap(llmsPresent, llmsFullPresent bool) KPI {
 }
 
 func kpiIdentityStatement(presentIn, missingFrom []string) KPI {
+	evidence := make([]identityEvidence, 0, len(presentIn))
+	for _, doc := range presentIn {
+		evidence = append(evidence, identityEvidence{Doc: doc, Statement: "recognized identity statement"})
+	}
+	return kpiIdentityStatementWithEvidence(evidence, missingFrom)
+}
+
+func kpiIdentityStatementWithEvidence(evidence []identityEvidence, missingFrom []string) KPI {
 	defects := []string{}
 	for _, doc := range missingFrom {
-		defects = append(defects, "no plain-English statement of what fak is or does near the top of "+doc+" — add a quotable one-liner")
+		defects = append(defects, "no quotable fak identity in the first "+strconv.Itoa(identityHeadLines)+" lines or under a named identity heading in "+doc+" — state what fak is or does")
+	}
+	presentIn := make([]string, 0, len(evidence))
+	matched := make([]string, 0, len(evidence))
+	for _, match := range evidence {
+		presentIn = append(presentIn, match.Doc)
+		location := match.Doc
+		if match.Line > 0 {
+			location += ":" + strconv.Itoa(match.Line)
+		}
+		matched = append(matched, location+" "+strconv.Quote(match.Statement))
 	}
 	score := 100
 	var detail string
 	if len(missingFrom) == 0 {
-		detail = "identity resolves near the top of all " + strconv.Itoa(len(identityDocs)) + " orientation docs (" + strings.Join(presentIn, ", ") + ")"
+		detail = "identity resolves in all " + strconv.Itoa(len(identityDocs)) + " orientation docs: " + strings.Join(matched, "; ")
 	} else {
 		score = int(math.RoundToEven(100 * float64(len(presentIn)) / float64(len(identityDocs))))
 		pres := strings.Join(presentIn, ", ")
 		if pres == "" {
 			pres = "none"
 		}
-		detail = "identity missing from " + strings.Join(missingFrom, ", ") + " (present in " + pres + ")"
+		detail = "identity missing from " + strings.Join(missingFrom, ", ") + " (matched: " + pres + ")"
+		if len(matched) > 0 {
+			detail += ": " + strings.Join(matched, "; ")
+		}
 	}
 	return KPI{"identity_statement", "discover", score, detail, defects, []string{}}
 }
