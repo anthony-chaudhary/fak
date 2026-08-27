@@ -244,6 +244,18 @@ MW, requested MW, probability-adjusted MW, contracted MW, upgrade-ready MW, ener
 and metered load separately. A forecast is evidence of planning pressure, not evidence that
 the datacenter, substation, generation, or transmission upgrade exists.
 
+## Cooling and prefabricated delivery additions
+
+| Evidence date | Supplier / footprint | Observed state | Quantified evidence | Missing delivery join |
+|---|---|---|---|---|
+| 2025-11-17 | Modine / Airedale, Franklin WI | 155,000-square-foot cooling factory opened within a four-site U.S. expansion | $100M multi-site program; >300 jobs targeted by March 2026; about 430 employees within three years | Qualified unit/thermal-MW output, yield, backlog allocation, shipment, site acceptance, commissioning, supported live IT MW |
+| 2026-05-26 | Modine / Airedale, undisclosed strategic customer | Long-term capacity reservation with upfront customer funding | >$4B of products reserved for 2027-2029; $165M upfront cash | Customer identity, product mix, annual units/thermal MW, factory allocation, shipment, site, commissioning, live load |
+| 2025-11-06 | Schneider Electric prefabricated pod | Shipping pre-designed and pre-assembled modular product | Supports high-density pods rated to 1MW+ with liquid-cooling and electrical distribution options | Shipped units, customer/site, accepted rating, assembly/commissioning date, measured thermal performance, live IT MW |
+
+The lifecycle is intentionally asymmetric: an opened factory outranks an investment plan; a
+capacity reservation outranks a non-binding forecast; a shipping module outranks a reference
+design. None equals accepted equipment, commissioned cooling, or live critical IT load.
+
 ### Electrical delivery chain
 
 ```text

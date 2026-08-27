@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9317,
+  "latest_slice_issue": 9325,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 201,
+    "entry_count": 204,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -160,6 +160,7 @@
       "Microsoft Research Phi",
       "MiniMax",
       "Mistral AI",
+      "Modine / Airedale",
       "Moonshot AI",
       "Multi-tenant prefix-cache admission study",
       "NAVER Cloud",
@@ -7799,6 +7800,122 @@
       ],
       "fak_implications": [
         "Measure KV-transfer bytes/time, topology, prefill/decode utilization, stranded capacity, queueing, SLO attainment, and end-to-end goodput before selecting disaggregation."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "modine-us-cooling-expansion-franklin-2025",
+      "category": "supply_chain",
+      "entity": "Modine / Airedale",
+      "topic": [
+        "data center cooling",
+        "manufacturing expansion",
+        "factory opening",
+        "lifecycle"
+      ],
+      "published_at": "2025-11-17",
+      "event_at": "2025-11-17",
+      "source_title": "Modine Expands Data Center Cooling Capacity with Opening of New Facility in Franklin, Wisconsin",
+      "source_url": "https://www.prnewswire.com/news-releases/modine-expands-data-center-cooling-capacity-with-opening-of-new-facility-in-franklin-wisconsin-302614862.html",
+      "source_kind": "company-authored release distributed by PR Newswire",
+      "evidence_class": "opened manufacturing facility",
+      "confidence": "high for opened facility and announced staffing; low for output delivered to customer sites",
+      "claim": "Modine opened a 155,000-square-foot Franklin, Wisconsin manufacturing facility within its $100M four-site U.S. Airedale cooling expansion, targeting more than 300 new jobs by March 2026 and about 430 employees within three years.",
+      "quantified": {
+        "facility_square_feet": 155000,
+        "multi_site_investment_usd": 100000000,
+        "jobs_target_by_march_2026_gt": 300,
+        "employees_expected_within_three_years_approx": 430,
+        "us_sites_in_expansion": 4
+      },
+      "assumptions": [
+        "An opened factory is stronger lifecycle evidence than an announced investment but remains upstream of qualified output, customer shipment, site acceptance, commissioning, and live IT load."
+      ],
+      "contradictions_or_limits": [
+        "No annual unit, tonnage, thermal-MW, yield, backlog allocation, shipment, customer-site acceptance, or commissioned cooling capacity is disclosed.",
+        "Job targets and floor area are not cooling throughput."
+      ],
+      "fak_implications": [
+        "Track cooling factories from announcement through opening, staffing, qualified production, shipment, acceptance, commissioning, and supported live IT MW."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "modine-airedale-4b-capacity-lta-2026",
+      "category": "market_signal",
+      "entity": "Modine / Airedale",
+      "topic": [
+        "cooling backlog",
+        "capacity agreement",
+        "customer concentration",
+        "manufacturing expansion"
+      ],
+      "published_at": "2026-05-26",
+      "event_at": "2026-05-26",
+      "source_title": "Modine Announces Landmark $4 Billion Long-Term Capacity Agreement through 2029 with Strategic Data Center Customer for Airedale by Modine Cooling Solutions",
+      "source_url": "https://www.prnewswire.com/news-releases/modine-announces-landmark-4-billion-long-term-capacity-agreement-through-2029-with-strategic-data-center-customer-for-airedale-by-modine-cooling-solutions-302779610.html",
+      "source_kind": "company-authored release distributed by PR Newswire",
+      "evidence_class": "contracted supply-capacity reservation",
+      "confidence": "high for disclosed agreement; low for future product delivery",
+      "claim": "Modine agreed to reserve capacity for more than $4B of Airedale cooling products for one strategic data-center customer during 2027-2029 and received $165M upfront to support capacity investment and related expenditures.",
+      "quantified": {
+        "reserved_product_value_usd_gt": 4000000000,
+        "delivery_start_year": 2027,
+        "delivery_end_year": 2029,
+        "upfront_customer_cash_usd": 165000000,
+        "named_customers": 0
+      },
+      "assumptions": [
+        "A long-term capacity agreement and upfront payment are stronger than non-binding demand but remain earlier than manufactured, shipped, accepted, commissioned, or operating cooling capacity."
+      ],
+      "contradictions_or_limits": [
+        "The customer, product mix, annual schedule, unit/thermal-MW quantities, cancellation/shortfall terms, factory allocation, and site destinations are undisclosed.",
+        "Contract value is price-based and cannot be converted directly into cooling MW or live IT MW."
+      ],
+      "fak_implications": [
+        "Carry customer concentration, reserved factory capacity, upfront funding, delivery schedule, product mix, shipment, site acceptance, and commissioned thermal load separately."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "schneider-prefab-pod-shipping-2025",
+      "category": "supply_chain",
+      "entity": "Schneider Electric",
+      "topic": [
+        "prefabricated modular data center",
+        "liquid cooling",
+        "shipping product",
+        "high-density racks"
+      ],
+      "published_at": "2025-11-06",
+      "event_at": "2025-11-06",
+      "source_title": "Schneider Electric Launches New Data Center Solutions to Meet Challenges of High-Density AI and Accelerated Compute Applications",
+      "source_url": "https://www.se.com/ww/en/about-us/newsroom/news/press-releases/schneider-electric-launches-new-data-center-solutions-to-meet-challenges-of-high-density-ai-and-accelerated-compute-applications-68432e8baaaf82b041044f06/",
+      "source_kind": "vendor product and shipping announcement",
+      "evidence_class": "shipping modular product",
+      "confidence": "high for product availability; low for installed fleet",
+      "claim": "Schneider Electric said its prefabricated EcoStruxure pod data center was shipping pre-designed and pre-assembled, supporting high-density pods rated to 1MW and above with liquid cooling, busway, cabling, containment, InRow, or rear-door heat-exchanger options.",
+      "quantified": {
+        "pod_supported_power_mw_min": 1
+      },
+      "assumptions": [
+        "Shipping product availability is later than a reference design but does not establish customer delivery, site commissioning, accepted thermal performance, or live IT MW."
+      ],
+      "contradictions_or_limits": [
+        "No shipped-unit count, customer, factory output, site, acceptance date, commissioning receipt, density distribution, or live load is disclosed.",
+        "The 1MW+ rating is a supported design envelope, not a measured operating population."
+      ],
+      "fak_implications": [
+        "Separate reference design, order, factory integration, shipment, site assembly, commissioning, and accepted/live capacity for modular data halls."
       ],
       "rumor": {
         "is_rumor": false,
