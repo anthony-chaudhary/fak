@@ -104,11 +104,12 @@ type InKernelPlanner struct {
 	// follow-up (internal/model/batch.go), not a correctness fix.
 	devMu sync.Mutex
 
-	coalesceMu        sync.Mutex
-	coalesceReady     []*inKernelCoalesceRequest
-	coalesceRunning   bool
-	coalesceReadyHook func()
-	coalesceBatchHook func(int)
+	coalesceMu         sync.Mutex
+	coalesceReady      []*inKernelCoalesceRequest
+	coalesceRunning    bool
+	coalesceReadyHook  func()
+	coalesceBatchHook  func(int)
+	coalesceSharedHook func(panels int, macs int64)
 
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
