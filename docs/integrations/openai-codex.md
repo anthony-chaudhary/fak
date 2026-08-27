@@ -133,7 +133,7 @@ fak manage --split off ... -- codex --dangerously-bypass-approvals-and-sandbox e
 
 ### UserPromptSubmit modes
 
-The checked-in `.codex/hooks.json` and the default installer are permissive. Codex still
+The capability floor is explicit: the checked-in `.codex/hooks.json` and the default installer are permissive, while guarded children and operators who deliberately select hardened mode receive submit-time enforcement. Codex still
 evaluates the manifest's tiny shell selector, but an ordinary direct prompt starts no
 `fak` process, inspects no session transcript, emits no context, and returns no block
 envelope. The selector invokes `fak` only for a child marked `FAK_GUARD_ACTIVE=1` or an

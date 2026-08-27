@@ -174,6 +174,7 @@ fak manage claude           # short: fak m claude; or: fak manage --provider ope
 - **Token-efficiency field map:** [Awesome Token Efficiency](awesome-token-efficiency.md) — prompt caching, context engineering, KV-cache reduction, serving, and agent-layer methods with loss/fidelity and fak-status labels.
 | If you want… | Read |
 |---|---|
+| **Codex UserPromptSubmit modes, capability floor, and installer/runtime verbs** | [OpenAI Codex integration — UserPromptSubmit modes](integrations/openai-codex.md#userpromptsubmit-modes) |
 | **The principles fak is built to satisfy** | [Charter](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/CHARTER.md) |
 | **What changed recently** | [Witnessed recent changes](whats-new.md) — generated from authoritative commits, issues, claims, and module versions; freshness-bounded and grouped for humans |
 | **Structured-output decoding SOTA + fak's ride-mode surface (#907)** | [Research note](https://github.com/anthony-chaudhary/fak/blob/main/docs/notes/RESEARCH-structured-output-decoding-2026-06-26.md) |
