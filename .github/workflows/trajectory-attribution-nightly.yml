@@ -1,0 +1,107 @@
+name: trajectory attribution nightly
+
+# Raw Claude/Codex transcripts are host-local private data. This workflow runs
+# the Go audit at the source on explicitly labelled self-hosted local/fleet
+# runners and uploads only fak-trajectory-attribution-receipt/1 JSON. Stock
+# runners are deliberately not used. A provisioned runner's bare checkout has
+# no implied corpus: absent named roots produce an honest no_data receipt with
+# root_present=false, never a fleet-coverage claim.
+on:
+  schedule:
+    # Daily 10:03 UTC, clear of the existing 09:xx signal feeds.
+    - cron: "3 10 * * *"
+  workflow_dispatch:
+    inputs:
+      local_claude_root:
+        description: "Explicit Claude projects root on the local audit runner"
+        type: string
+        required: false
+      local_codex_root:
+        description: "Explicit Codex sessions root on the local audit runner"
+        type: string
+        required: false
+      fleet_claude_root:
+        description: "Explicit Claude projects root on the fleet audit runner"
+        type: string
+        required: false
+      fleet_codex_root:
+        description: "Explicit Codex sessions root on the fleet audit runner"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trajectory-attribution-nightly
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: ${{ matrix.corpus }} source-side receipt
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - corpus: local
+            runner_label: fak-local
+            configured_claude_root: ${{ vars.FAK_TRAJECTORY_LOCAL_CLAUDE_ROOT }}
+            configured_codex_root: ${{ vars.FAK_TRAJECTORY_LOCAL_CODEX_ROOT }}
+            dispatched_claude_root: ${{ inputs.local_claude_root }}
+            dispatched_codex_root: ${{ inputs.local_codex_root }}
+          - corpus: fleet
+            runner_label: fak-fleet
+            configured_claude_root: ${{ vars.FAK_TRAJECTORY_FLEET_CLAUDE_ROOT }}
+            configured_codex_root: ${{ vars.FAK_TRAJECTORY_FLEET_CODEX_ROOT }}
+            dispatched_claude_root: ${{ inputs.fleet_claude_root }}
+            dispatched_codex_root: ${{ inputs.fleet_codex_root }}
+    runs-on: [self-hosted, trajectory-audit, "${{ matrix.runner_label }}"]
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The workflow-entrypoint witness uses a populated bounded fixture, so a green
+      # self-test cannot be satisfied by an empty runner home.
+      - name: populated workflow-entrypoint and injected-budget witnesses
+        run: go test ./internal/trajectory ./cmd/fak -run AttributionNightly
+
+      - name: run bounded source-side audit
+        # The final `||` values are deliberately missing sentinel roots. They
+        # make an unconfigured/bare checkout report no_data/root_present=false
+        # without platform-specific shell setup or a fallback to $HOME.
+        env:
+          FAK_TRAJECTORY_BUDGET: configs/trajectory-attribution-nightly.v1.json
+          FAK_TRAJECTORY_CORPUS: ${{ matrix.corpus }}
+          FAK_TRAJECTORY_CLAUDE_ROOT: ${{ matrix.dispatched_claude_root || matrix.configured_claude_root || format('{0}/trajectory-source-unconfigured/claude', runner.temp) }}
+          FAK_TRAJECTORY_CODEX_ROOT: ${{ matrix.dispatched_codex_root || matrix.configured_codex_root || format('{0}/trajectory-source-unconfigured/codex', runner.temp) }}
+          FAK_TRAJECTORY_RECEIPT: trajectory-attribution-receipt.json
+        run: bash .github/scripts/trajectory-attribution-nightly.sh
+
+      - name: receipt to step summary
+        if: always()
+        shell: bash
+        run: |
+          echo "## trajectory attribution (${{ matrix.corpus }})" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f trajectory-attribution-receipt.json ]]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat trajectory-attribution-receipt.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No receipt was published; inspect the failed audit step.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: upload scrubbed receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trajectory-attribution-${{ matrix.corpus }}
+          path: trajectory-attribution-receipt.json
+          if-no-files-found: warn
+          retention-days: 30
