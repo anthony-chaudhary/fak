@@ -1,0 +1,193 @@
+{
+  "schema": "fak-upstream-dedup-map/1",
+  "repository": "llm-d/llm-d",
+  "cutoff": "2026-08-27T10:00:00Z",
+  "search_receipt": {
+    "full_issue_export_count": 1000,
+    "full_issue_export_sha256": "79d4955cf9361923df50737c91193a33a64657897b6eaa12dff37ccc13821533",
+    "commands": [
+      "gh issue list --state all --limit 1000 --json number,title,state,body",
+      "candidate-specific gh issue list --state all --search <mechanism>",
+      "gh issue view <matched-number> --json number,title,state,body,url"
+    ],
+    "limitation": "GitHub caps the local export at 1,000 rows; targeted title/body searches were run for every candidate family."
+  },
+  "required_named_ticket_coverage": [
+    29,
+    37,
+    1678,
+    2242,
+    2243,
+    3143,
+    3144,
+    3145,
+    3199,
+    3310,
+    3312,
+    3316,
+    3317,
+    3366,
+    3413,
+    3419,
+    3887,
+    3888,
+    3900,
+    4296,
+    4303,
+    4588,
+    5288,
+    5289,
+    5293,
+    6082,
+    8016,
+    8017,
+    8667,
+    9148
+  ],
+  "entries": [
+    {
+      "candidate": "C01",
+      "disposition": "INTEGRATE",
+      "matched_issue": 3887,
+      "outcome": "deduplicated",
+      "reason": "Use the shipped pluggable scorer registry; do not add a second router."
+    },
+    {
+      "candidate": "C02",
+      "disposition": "INTEGRATE",
+      "matched_issue": 4303,
+      "outcome": "deduplicated",
+      "reason": "Build on the fleet prefix directory and native prefix comparison, preserving fak ownership."
+    },
+    {
+      "candidate": "C03",
+      "disposition": "INTEGRATE",
+      "matched_issue": 3888,
+      "outcome": "deduplicated",
+      "reason": "Existing open TTL provisional-entry spine is the exact gap."
+    },
+    {
+      "candidate": "C04",
+      "disposition": "INTEGRATE",
+      "matched_issue": 5288,
+      "outcome": "deduplicated",
+      "reason": "Closed FAK issue already captured the portable suffix-only contract."
+    },
+    {
+      "candidate": "C05",
+      "disposition": "INTEGRATE",
+      "matched_issue": 5293,
+      "outcome": "deduplicated",
+      "reason": "Closed kvtransport work already owns this mechanism."
+    },
+    {
+      "candidate": "C06",
+      "disposition": "ADAPT",
+      "matched_issue": 37,
+      "outcome": "deduplicated",
+      "reason": "Existing external P/D orchestration and governed KV-transport bridge is the direct seam; #4296 remains parent."
+    },
+    {
+      "candidate": "C07",
+      "disposition": "WATCH",
+      "matched_issue": 3310,
+      "outcome": "deduplicated",
+      "reason": "Existing NIXL/Mooncake transport research plus #3316/#3317 and #5289 cover connector-specific follow-through."
+    },
+    {
+      "candidate": "C08",
+      "disposition": "INTEGRATE",
+      "matched_issue": 3144,
+      "outcome": "deduplicated",
+      "reason": "Existing LMCache CacheGen/tiered-offload study is the tighter match."
+    },
+    {
+      "candidate": "C09",
+      "disposition": "INTEGRATE",
+      "matched_issue": 4588,
+      "outcome": "deduplicated",
+      "reason": "Existing modelroute latency-signal issue is the direct dedup."
+    },
+    {
+      "candidate": "C10",
+      "disposition": "INTEGRATE",
+      "matched_issue": 2242,
+      "outcome": "deduplicated",
+      "reason": "Existing SLO/goodput P/D planner owns sizing and typed early rejection."
+    },
+    {
+      "candidate": "C11",
+      "disposition": "ADAPT",
+      "matched_issue": 9385,
+      "outcome": "filed_new_gap",
+      "reason": "Targeted dedup found adjacent pieces but no end-to-end native queued/admitted/in-flight overload contract; filed #9385."
+    },
+    {
+      "candidate": "C12",
+      "disposition": "ADAPT",
+      "matched_issue": 9386,
+      "outcome": "filed_new_gap",
+      "reason": "Targeted dedup found generic supervision but no accelerator serving-state quarantine/readiness contract; filed #9386."
+    },
+    {
+      "candidate": "C13",
+      "disposition": "INTEGRATE",
+      "matched_issue": 8667,
+      "outcome": "deduplicated",
+      "reason": "Existing dashboard/observability portfolio is the right seam; retain trace propagation as a contract."
+    },
+    {
+      "candidate": "C14",
+      "disposition": "WATCH",
+      "matched_issue": 9148,
+      "outcome": "deduplicated",
+      "reason": "Promising evidence model, but upstream is proposal-stage and FAK already has topology/communication benchmark work."
+    },
+    {
+      "candidate": "C15",
+      "disposition": "INTEGRATE",
+      "matched_issue": 2242,
+      "outcome": "deduplicated",
+      "reason": "Dedup to the SLO/goodput P/D planner; do not import cluster-product policy."
+    },
+    {
+      "candidate": "C16",
+      "disposition": "REJECT",
+      "matched_issue": 1678,
+      "outcome": "deduplicated",
+      "reason": "Portable model selection exists; importing Kubernetes Gateway API would create double routing."
+    },
+    {
+      "candidate": "C17",
+      "disposition": "WATCH",
+      "matched_issue": null,
+      "outcome": "watch_no_ticket",
+      "reason": "Useful for offline workloads but not yet a higher-priority agent-serving gap; revisit with a concrete native batch demand witness."
+    },
+    {
+      "candidate": "C18",
+      "disposition": "REJECT",
+      "matched_issue": 8016,
+      "outcome": "deduplicated",
+      "reason": "FAK already defines the ownership boundary; adopting llm-d as the non-Kubernetes control plane would surrender fak-native orchestration."
+    },
+    {
+      "candidate": "C19",
+      "disposition": "REJECT",
+      "matched_issue": 8016,
+      "outcome": "deduplicated",
+      "reason": "Upstream marks it superseded; FAK should not copy a retired product API."
+    },
+    {
+      "candidate": "C20",
+      "disposition": "WATCH",
+      "matched_issue": 1678,
+      "outcome": "deduplicated",
+      "reason": "Retain as operating-envelope evidence; file only when a fak-native workload witness exposes a concrete gap."
+    }
+  ],
+  "new_issue_numbers": [
+    9385,
+    9386
+  ]
+}
