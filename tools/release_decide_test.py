@@ -219,6 +219,7 @@ class ReleaseDecideTest(unittest.TestCase):
         verdict = rd.decide(window, min_interval_hours=6)
         self.assertEqual(verdict["decision"], "hold")
         self.assertIn("CI_BASE_RED", verdict["blockers"])
+        self.assertIn("fak release status --json", verdict["reason"])
         self.assertNotIn("TOO_SOON", verdict["blockers"])
 
     def test_debounce_not_added_when_nothing_to_ship(self) -> None:
@@ -321,13 +322,27 @@ class ReleaseDecideTest(unittest.TestCase):
         rd = load()
         # A red fast subset holds the cut even if the whole ci.yml hasn't
         # concluded — the fast subset caught a real regression. #1374.
+        selected = {
+            "status": "red",
+            "workflow": "renamed-fast.yml",
+            "latest_trunk_ci": {
+                "database_id": 33047582124,
+                "head_sha": "c222c119",
+                "conclusion": "failure",
+            },
+        }
         verdict = rd.decide(payload(
             ci_on_head={"status": "none"},
-            ci_fast={"status": "red"},
+            ci_fast=selected,
         ))
         self.assertEqual(verdict["decision"], "hold")
         self.assertIn("CI_BASE_RED", verdict["blockers"])
         self.assertEqual(verdict["ci_source"], "fast")
+        self.assertEqual(verdict["ci_signal"], selected)
+        self.assertEqual(
+            verdict["ci_signal"]["latest_trunk_ci"]["database_id"],
+            33047582124,
+        )
         self.assertIn("ci-fast.yml", verdict["reason"])
 
     def test_fail_safe_falls_back_to_whole_ci_when_fast_missing(self) -> None:
@@ -338,6 +353,7 @@ class ReleaseDecideTest(unittest.TestCase):
         self.assertEqual(missing["decision"], "hold")
         self.assertIn("CI_BASE_RED", missing["blockers"])
         self.assertEqual(missing["ci_source"], "whole")
+        self.assertEqual(missing["ci_signal"], {"status": "red"})
 
         # An indecisive (unknown/none) fast signal is NOT trusted: fall back to
         # the whole ci.yml signal rather than treat the fast run as a verdict.

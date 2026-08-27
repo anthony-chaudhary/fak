@@ -460,6 +460,12 @@ def decide(payload: dict, *, min_substantive: int = 1, force: bool = False,
         # decisive) or "whole" (the -race-inclusive ci.yml, the fail-safe). #1374.
         # A "+ancestor" suffix means the green-ancestor tolerance cleared it. #2655.
         "ci_source": ci_source,
+        # Carry the exact signal selected above into the verdict.  Consumers that
+        # diagnose CI_BASE_RED must use this object rather than re-selecting from
+        # a later release_context snapshot (or querying "latest" again).
+        # Additive to fleet-release-decision/1: blockers and existing fields keep
+        # their contract while older verdicts remain readable by context fallback.
+        "ci_signal": ci_signal,
         # True when the CI gate was cleared by a green ANCESTOR within the churn
         # window rather than a decisively-green exact-HEAD run (#2655).
         "ci_ancestor_relaxed": ci_ancestor_relaxed,
@@ -508,9 +514,11 @@ def _blocker_reason(blocker: str, last_tag: str | None, sig: dict,
         "VERSION_DRIFT": "version markers disagree",
         "VERSION_BEHIND_REACHABLE_TAG": tag_drift.get("reason") or "VERSION is behind the reachable release tag",
         "CI_BASE_RED": (
-            f"latest decisive main {ci_label} run is red; if it broke at the build "
-            f"step, run `fak trunk-build-probe` to check whether committed "
-            f"HEAD is missing a forgotten `git add` (and which file to stage to green it)"
+            f"latest decisive main {ci_label} run is red; run "
+            f"`fak release status --json` to decompose that exact run into typed "
+            f"stage/package/test work units. For a build-stage failure, then run "
+            f"`fak trunk-build-probe` to check whether committed HEAD is missing a "
+            f"forgotten `git add` (and which file to stage to green it)"
         ),
         "CI_BASE_NONE": f"no decisive completed main {ci_label} run is available",
         "CI_STATE_UNKNOWN": "CI state is unknown and --require-ci-green was set",

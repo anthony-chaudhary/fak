@@ -24,7 +24,9 @@
 package releasestatus
 
 import (
+	"bufio"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -112,8 +114,235 @@ type StableTag struct {
 // CIDiagnosis is the ci.yml failure classification slice the fold consumes for the
 // CI_BASE_RED next-action branch (kind=="fix_ci_billing" when billing was detected).
 type CIDiagnosis struct {
-	Action string `json:"action"`
-	Detail string `json:"detail"`
+	Status      string       `json:"status,omitempty"`
+	Kind        string       `json:"kind,omitempty"`
+	Stage       string       `json:"stage,omitempty"`
+	Action      string       `json:"action,omitempty"`
+	Detail      string       `json:"detail,omitempty"`
+	Reproducer  []string     `json:"reproducer_argv,omitempty"`
+	Workflow    string       `json:"workflow,omitempty"`
+	Run         CIRun        `json:"run,omitempty"`
+	Primary     *CICause     `json:"primary,omitempty"`
+	Causes      []CICause    `json:"causes"`
+	WorkUnits   []CIWorkUnit `json:"work_units"`
+	Summary     CISummary    `json:"summary"`
+	FailedSteps []string     `json:"failed_steps"`
+}
+
+// CIRun identifies the exact Actions run selected by release_decide's effective
+// CI signal. Diagnosis must never silently switch to a newer or differently named
+// workflow run.
+type CIRun struct {
+	DatabaseID int64  `json:"database_id,omitempty"`
+	HeadSHA    string `json:"head_sha,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Conclusion string `json:"conclusion,omitempty"`
+}
+
+type CICause struct {
+	Kind       string   `json:"kind"`
+	Stage      string   `json:"stage"`
+	Action     string   `json:"action"`
+	Package    string   `json:"package,omitempty"`
+	Test       string   `json:"test,omitempty"`
+	Step       string   `json:"step,omitempty"`
+	Detail     string   `json:"detail"`
+	Reproducer []string `json:"reproducer_argv,omitempty"`
+}
+
+// CIWorkUnit is one independently dispatchable failing Go package. Argv uses the
+// host-aware fak test front door and a literal argv vector (never shell quoting).
+type CIWorkUnit struct {
+	Package string   `json:"package"`
+	Tests   []string `json:"tests"`
+	Argv    []string `json:"argv"`
+}
+
+type CISummary struct {
+	PackageCount  int `json:"package_count"`
+	TestCount     int `json:"test_count"`
+	WorkUnitCount int `json:"work_unit_count"`
+}
+
+var (
+	goFailTestRE = regexp.MustCompile(`--- FAIL: ([^\s(]+)`)
+	goFailPkgRE  = regexp.MustCompile(`(?:^|[\t ])FAIL[\t ]+(\S+)(?:\s|$)`)
+	billingRE    = regexp.MustCompile(`(?i)(payments?\s+have\s+failed|spending\s+limit|billing\s*(?:&|and)\s*plans)`)
+)
+
+type ciStepClass struct {
+	Kind       string
+	Stage      string
+	Action     string
+	Reproducer []string
+}
+
+var ciStepClasses = []struct {
+	Terms []string
+	Class ciStepClass
+}{
+	{[]string{"checkout"}, ciStepClass{"checkout", "bootstrap", "repair_checkout", nil}},
+	{[]string{"setup-go", "set up go", "toolchain", "install go"}, ciStepClass{"setup_toolchain", "bootstrap", "repair_toolchain", []string{"go", "version"}}},
+	{[]string{"checksum"}, ciStepClass{"checksum", "supply_chain", "fix_checksum", []string{"bash", ".github/scripts/verify-release-checksums_test.sh"}}},
+	{[]string{"gofmt", "format check"}, ciStepClass{"gofmt", "static_analysis", "fix_gofmt", []string{"gofmt", "-l", "."}}},
+	{[]string{"go vet", " vet", "vet "}, ciStepClass{"vet", "static_analysis", "fix_vet", []string{"fak-dev", "buildcheck", "--vet"}}},
+	{[]string{"architest", "architecture test", "architecture gate"}, ciStepClass{"architest", "architecture", "fix_architecture", []string{"fak", "test", "./internal/architest", "--", "-count=1"}}},
+	{[]string{"-race", "race test", "race gate"}, ciStepClass{"race", "dynamic_analysis", "fix_race", []string{"fak", "test", "race"}}},
+	{[]string{"cache", "artifact", "upload", "download"}, ciStepClass{"cache_artifact", "dependencies", "retry_ci", nil}},
+	{[]string{"go test", "unit test", "tests"}, ciStepClass{"go_test", "test", "fix_ci", []string{"fak", "test", "./...", "--", "-count=1"}}},
+	{[]string{"build", "compile"}, ciStepClass{"build", "compile", "fix_build", []string{"fak-dev", "buildcheck"}}},
+	{[]string{"claim"}, ciStepClass{"claims", "claims", "fix_claims", []string{"fak", "test", "./internal/claimcheck", "--", "-count=1"}}},
+	{[]string{"leak-scan", "leakage", "security", "secret", "credential"}, ciStepClass{"leakage_security", "security", "fix_security", nil}},
+	{[]string{"generated drift", "generated file", "freshness", "generated"}, ciStepClass{"generated_drift", "generated", "regenerate", nil}},
+	{[]string{"dos ", "dos-", "witness"}, ciStepClass{"dos_witness", "witness", "repair_witness", nil}},
+	{[]string{"hygiene", "lint", "python tool gate", "godfile"}, ciStepClass{"hygiene", "hygiene", "fix_hygiene", nil}},
+	{[]string{"timed out", "timeout"}, ciStepClass{"timed_out", "execution", "retry_ci", nil}},
+	{[]string{"set up job", "startup"}, ciStepClass{"startup_failure", "runner", "retry_ci", nil}},
+}
+
+// ClassifyCIFailedStep is a closed, ordered classification. Unknown names stay
+// explicitly unknown instead of silently acquiring a guessed reproducer.
+func ClassifyCIFailedStep(step string) (kind, stage, action string, reproducer []string) {
+	lower := " " + strings.ToLower(strings.TrimSpace(step)) + " "
+	for _, row := range ciStepClasses {
+		if row.Class.Kind == "race" && strings.Contains(lower, "no -race") {
+			continue
+		}
+		if row.Class.Kind == "cache_artifact" && strings.Contains(lower, "uncached") {
+			continue
+		}
+		for _, term := range row.Terms {
+			if strings.Contains(lower, term) {
+				return row.Class.Kind, row.Class.Stage, row.Class.Action, append([]string(nil), row.Class.Reproducer...)
+			}
+		}
+	}
+	return "unknown", "unknown", "inspect_ci", nil
+}
+
+// DiagnoseCIFailure deterministically turns failed Go-test logs into bounded,
+// package-owned work. Non-Go failures retain the failed-step cause and produce no
+// invented package command.
+func DiagnoseCIFailure(workflow string, run CIRun, failedSteps []string, failedLog string) CIDiagnosis {
+	steps := uniqueSorted(failedSteps)
+	units := ParseGoTestWorkUnits(failedLog)
+	causes := make([]CICause, 0, len(units)+len(steps))
+	testCount := 0
+	for _, unit := range units {
+		testCount += len(unit.Tests)
+		detail := fmt.Sprintf("%d failing test(s) in %s", len(unit.Tests), unit.Package)
+		cause := CICause{Kind: "go_test_package", Stage: "test", Action: "fix_ci", Package: unit.Package, Detail: detail, Reproducer: append([]string(nil), unit.Argv...)}
+		if len(unit.Tests) > 0 {
+			cause.Test = unit.Tests[0]
+		}
+		causes = append(causes, cause)
+	}
+	for _, step := range steps {
+		kind, stage, action, argv := ClassifyCIFailedStep(step)
+		causes = append(causes, CICause{Kind: kind, Stage: stage, Action: action, Step: step, Detail: "workflow step failed: " + step, Reproducer: argv})
+	}
+	status, kind, stage, action := "undifferentiated", "unknown", "unknown", "inspect_ci"
+	detail := workflow + " is red, but no named failed step or Go test failure was available"
+	var reproducer []string
+	if len(units) > 0 {
+		status, kind, stage, action = "diagnosed", "go_test_failure", "test", "fix_ci"
+		detail = fmt.Sprintf("%d package(s), %d unique test(s) failed in %s", len(units), testCount, workflow)
+		reproducer = append([]string(nil), units[0].Argv...)
+	} else if len(steps) > 0 {
+		kind, stage, action, reproducer = ClassifyCIFailedStep(steps[0])
+		status = "diagnosed"
+		detail = workflow + " is red at step(s): " + strings.Join(steps, "; ")
+	}
+	conclusion := strings.ToLower(strings.TrimSpace(run.Conclusion))
+	if conclusion == "timed_out" {
+		status, kind, stage, action, reproducer = "diagnosed", "timed_out", "execution", "retry_ci", nil
+		detail = workflow + " timed out before completing; retry the exact run, then split the slow stage if it repeats"
+	} else if conclusion == "startup_failure" {
+		status, kind, stage, action, reproducer = "diagnosed", "startup_failure", "runner", "retry_ci", nil
+		detail = workflow + " failed before jobs started; inspect runner admission and workflow startup annotations"
+	}
+	// Billing is operator-owned and takes precedence only for GitHub's account
+	// admission phrases. Test names such as TestBilling and TestPayment are code,
+	// not evidence that the Actions account is blocked.
+	if billingRE.MatchString(failedLog) {
+		status, kind, stage, action, reproducer = "diagnosed", "billing", "account_admission", "fix_ci_billing", nil
+		detail = "GitHub Actions did not run " + workflow + " because account billing, payments, or spending limits need operator attention"
+	}
+	var primary *CICause
+	if len(causes) > 0 {
+		first := causes[0]
+		primary = &first
+	}
+	return CIDiagnosis{Status: status, Kind: kind, Stage: stage, Action: action, Detail: detail, Reproducer: reproducer, Workflow: workflow, Run: run, Primary: primary, Causes: causes, WorkUnits: units, Summary: CISummary{PackageCount: len(units), TestCount: testCount, WorkUnitCount: len(units)}, FailedSteps: steps}
+}
+
+// ParseGoTestWorkUnits accepts ordinary `go test` text (including GitHub log
+// prefixes), associates each run of --- FAIL lines with its following FAIL package
+// summary, deduplicates retries/matrix legs, and returns stable lexical output.
+func ParseGoTestWorkUnits(logText string) []CIWorkUnit {
+	byPackage := map[string]map[string]bool{}
+	pending := []string{}
+	s := bufio.NewScanner(strings.NewReader(logText))
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		if i := strings.Index(line, "--- FAIL: "); i >= 0 {
+			if m := goFailTestRE.FindStringSubmatch(line[i:]); len(m) == 2 {
+				pending = append(pending, m[1])
+			}
+		}
+		// The live gh log shape prefixes rows with job, step, and timestamp fields,
+		// e.g. "job<TAB>UNKNOWN STEP<TAB>...Z FAIL<TAB>github.com/...".
+		m := goFailPkgRE.FindStringSubmatch(line)
+		if len(m) != 2 || len(pending) == 0 {
+			continue
+		}
+		pkg := m[1]
+		if !strings.Contains(pkg, "/") && pkg != "." {
+			continue
+		}
+		if byPackage[pkg] == nil {
+			byPackage[pkg] = map[string]bool{}
+		}
+		for _, test := range pending {
+			byPackage[pkg][test] = true
+		}
+		pending = nil
+	}
+	packages := make([]string, 0, len(byPackage))
+	for pkg := range byPackage {
+		packages = append(packages, pkg)
+	}
+	sort.Strings(packages)
+	out := make([]CIWorkUnit, 0, len(packages))
+	for _, pkg := range packages {
+		tests := make([]string, 0, len(byPackage[pkg]))
+		for test := range byPackage[pkg] {
+			tests = append(tests, test)
+		}
+		sort.Strings(tests)
+		parts := make([]string, len(tests))
+		for i, test := range tests {
+			parts[i] = regexp.QuoteMeta(test)
+		}
+		pattern := "^(?:" + strings.Join(parts, "|") + ")$"
+		out = append(out, CIWorkUnit{Package: pkg, Tests: tests, Argv: []string{"fak", "test", pkg, "--", "-count=1", "-run", pattern}})
+	}
+	return out
+}
+
+func uniqueSorted(values []string) []string {
+	set := map[string]bool{}
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			set[value] = true
+		}
+	}
+	out := make([]string, 0, len(set))
+	for value := range set {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // CadenceText is the release-cadence.yml posture: whether the file is present and
@@ -723,6 +952,9 @@ func foldNextAction(decision Decision, stable StableSummary, dirty DirtySummary,
 	if contains(blockers, "CI_BASE_RED") {
 		if ci.Action == "fix_ci_billing" {
 			return NextAction{Kind: "fix_ci_billing", Detail: ci.Detail}
+		}
+		if ci.Summary.PackageCount > 0 {
+			return NextAction{Kind: "fix_ci", Detail: fmt.Sprintf("%d package(s), %d unique test(s) failed in %s; run `fak release status --json` for dispatchable work_units", ci.Summary.PackageCount, ci.Summary.TestCount, ci.Workflow)}
 		}
 		return NextAction{Kind: "fix_ci", Detail: "fix current main ci.yml failure before cutting a release"}
 	}
