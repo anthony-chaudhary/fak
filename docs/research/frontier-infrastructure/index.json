@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9320,
+  "latest_slice_issue": 9317,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 197,
+    "entry_count": 201,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -119,6 +119,7 @@
       "CoreWeave / Nebius / Cerebras",
       "Data Center Watch",
       "DeepSeek",
+      "DistServe",
       "Eaton",
       "European Commission / EuroHPC",
       "European Union / AI Office",
@@ -186,6 +187,7 @@
       "OpenRouter",
       "Operator-level LLM autoscaling study",
       "Oracle",
+      "Orca",
       "PJM Interconnection",
       "Parrot serving study",
       "Robust KV cache management study",
@@ -196,6 +198,7 @@
       "SageServe production-trace study",
       "Sakana AI",
       "Samsung Electronics",
+      "Sarathi-Serve",
       "Sarvam AI",
       "Schneider Electric",
       "Schneider Electric / NVIDIA",
@@ -232,6 +235,7 @@
       "Xiaomi MiMo",
       "Z.ai / Zhipu AI",
       "llm-d / Google",
+      "vLLM / PagedAttention",
       "xAI",
       "xAI Grok 3"
     ],
@@ -7640,6 +7644,161 @@
       "fak_implications": [
         "Benchmark end-to-end useful completion with non-LLM latency, sandbox memory, idle residency, state transfer, retries, and tool calls included.",
         "Schedule by task/component affinity rather than treating every agent step as one homogeneous LLM request."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "orca-iteration-scheduling-2022",
+      "category": "serving_system",
+      "entity": "Orca",
+      "topic": [
+        "iteration-level scheduling",
+        "selective batching",
+        "distributed inference",
+        "queueing"
+      ],
+      "published_at": "2022-07-11",
+      "event_at": "2022-07-11",
+      "source_title": "Orca: A Distributed Serving System for Transformer-Based Generative Models",
+      "source_url": "https://www.usenix.org/conference/osdi22/presentation/yu",
+      "source_kind": "peer-reviewed systems paper",
+      "evidence_class": "controlled benchmark",
+      "confidence": "high within evaluated hardware/models/workloads",
+      "claim": "Orca replaces request-level static batching with iteration-level scheduling and selective batching so completed requests leave and new requests join between decoding iterations; it reports up to 36.9x throughput over FasterTransformer at the same latency on its largest evaluated model.",
+      "quantified": {
+        "reported_throughput_improvement_x_up_to": 36.9,
+        "largest_evaluated_model_parameters_billion": 175
+      },
+      "assumptions": [
+        "Iteration-level admission helps when request lengths differ and decoding iterations expose regular scheduling points."
+      ],
+      "contradictions_or_limits": [
+        "The maximum is against a 2022 FasterTransformer baseline and is not a modern vLLM/SGLang/Dynamo comparison.",
+        "Gain depends on model, tensor/pipeline parallelism, arrival rate, sequence lengths, latency target, and batching implementation."
+      ],
+      "fak_implications": [
+        "Carry admission cadence, active sequence count, batch composition, completed-sequence removal, and per-iteration overhead in serving receipts."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "vllm-pagedattention-2023",
+      "category": "serving_system",
+      "entity": "vLLM / PagedAttention",
+      "topic": [
+        "KV cache",
+        "memory management",
+        "continuous batching",
+        "serving throughput"
+      ],
+      "published_at": "2023-10-24",
+      "event_at": "2023-10-24",
+      "source_title": "Efficient Memory Management for Large Language Model Serving with PagedAttention",
+      "source_url": "https://arxiv.org/abs/2309.06180",
+      "source_kind": "peer-reviewed systems paper",
+      "evidence_class": "controlled benchmark with production workload trace",
+      "confidence": "high within evaluated models/hardware/traces",
+      "claim": "vLLM introduces PagedAttention and block-based KV memory management to reduce fragmentation and enable flexible KV sharing, reporting 2-4x throughput over FasterTransformer and Orca at comparable latency.",
+      "quantified": {
+        "reported_throughput_improvement_x_range": [
+          2,
+          4
+        ],
+        "evaluated_gpu_types": [
+          "NVIDIA A100 40GB",
+          "NVIDIA A10G 24GB"
+        ]
+      },
+      "assumptions": [
+        "KV paging helps when variable sequence lengths and memory fragmentation constrain batch concurrency."
+      ],
+      "contradictions_or_limits": [
+        "The reported range is against 2023 implementations and depends on block size, model, GPU memory, workload trace, sampling, and latency envelope.",
+        "Paged KV memory does not remove compute, transfer, admission fairness, or multi-tenant responsibility constraints."
+      ],
+      "fak_implications": [
+        "Track useful KV bytes, reserved bytes, fragmentation, block-table overhead, sharing, eviction, and batch concurrency separately."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "sarathi-chunked-prefill-2024",
+      "category": "serving_system",
+      "entity": "Sarathi-Serve",
+      "topic": [
+        "chunked prefill",
+        "stall-free batching",
+        "goodput",
+        "prefill decode interference"
+      ],
+      "published_at": "2024-07-10",
+      "event_at": "2024-07-10",
+      "source_title": "Taming Throughput-Latency Tradeoff in LLM Inference with Sarathi-Serve",
+      "source_url": "https://www.usenix.org/conference/osdi24/presentation/agrawal",
+      "source_kind": "peer-reviewed systems paper",
+      "evidence_class": "controlled benchmark",
+      "confidence": "high within evaluated models/hardware/SLOs",
+      "claim": "Sarathi-Serve uses chunked prefills and stall-free batching to reduce prefill/decode interference, reporting up to 2.6x higher serving capacity than vLLM on a single A100 for Mistral-7B and up to 6.3x higher capacity than Orca for Falcon-180B on 64 A100 GPUs.",
+      "quantified": {
+        "mistral7b_single_a100_capacity_improvement_vs_vllm_x_up_to": 2.6,
+        "falcon180b_64xa100_capacity_improvement_vs_orca_x_up_to": 6.3,
+        "falcon180b_64xa100_capacity_improvement_vs_vllm_x_up_to": 4.3
+      },
+      "assumptions": [
+        "Chunk size trades TTFT against decode stalls and must be selected under an explicit workload and SLO."
+      ],
+      "contradictions_or_limits": [
+        "Capacity gains span different model/cluster envelopes and must not be merged into one universal factor.",
+        "The prototype and baselines are versioned research implementations; transfer, scheduler, and fairness overheads remain workload-specific."
+      ],
+      "fak_implications": [
+        "Benchmark chunk-size sweeps with TTFT, TPOT, throughput, fairness, and prefill/decode interference under the same trace."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "distserve-pd-disaggregation-2024",
+      "category": "serving_system",
+      "entity": "DistServe",
+      "topic": [
+        "prefill decode disaggregation",
+        "goodput",
+        "resource allocation",
+        "SLO"
+      ],
+      "published_at": "2024-07-10",
+      "event_at": "2024-07-10",
+      "source_title": "DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving",
+      "source_url": "https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin",
+      "source_kind": "peer-reviewed systems paper",
+      "evidence_class": "controlled benchmark",
+      "confidence": "high within evaluated models/hardware/workloads/SLOs",
+      "claim": "DistServe places prefill and decode on separate GPU groups and optimizes parallelism and allocation independently; across its evaluated workloads it serves up to 7.4x more requests or meets 12.6x tighter SLOs than the compared systems.",
+      "quantified": {
+        "reported_request_rate_improvement_x_up_to": 7.4,
+        "reported_slo_tightening_x_up_to": 12.6
+      },
+      "assumptions": [
+        "Disaggregation helps when prefill/decode interference and independent scaling outweigh KV-transfer and stranded-capacity costs."
+      ],
+      "contradictions_or_limits": [
+        "The paper reports benchmark maxima, not universal break-even thresholds; results depend on input/output geometry, TTFT/TPOT targets, model, GPU topology, network, and allocation granularity.",
+        "Later hybrid-PD evidence shows aggregation or hybrid placement can win other SLO/workload envelopes."
+      ],
+      "fak_implications": [
+        "Measure KV-transfer bytes/time, topology, prefill/decode utilization, stranded capacity, queueing, SLO attainment, and end-to-end goodput before selecting disaggregation."
       ],
       "rumor": {
         "is_rumor": false,

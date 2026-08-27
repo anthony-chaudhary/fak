@@ -113,6 +113,20 @@ Public sources still do not adequately reveal:
 Until these are measured, benchmark sweeps must expose the assumption ranges rather than
 present one guessed distribution as “the frontier workload.”
 
+## Foundational serving mechanism matrix
+
+| Mechanism | Helps when | Costs / break-even variables | Bounded evidence |
+|---|---|---|---|
+| Iteration-level scheduling and selective batching | decode lengths differ and completed sequences should leave immediately | scheduler cadence, kernel shape changes, active-sequence churn, fairness | Orca reports up to 36.9x over its 2022 FasterTransformer baseline on the largest evaluated model |
+| Paged KV memory | variable sequence lengths create fragmentation and cap batch concurrency | block-table overhead, block size, useful/reserved bytes, eviction and sharing policy | vLLM reports 2-4x over its 2023 FasterTransformer/Orca baselines at comparable latency |
+| Chunked prefill and stall-free batching | long prefills stall decode and TTFT/TPOT must be balanced | chunk size, launch overhead, TTFT, TPOT, throughput, preemption, fairness | Sarathi-Serve reports up to 2.6x capacity for Mistral-7B on one A100 and 6.3x vs Orca for Falcon-180B on 64 A100s |
+| Prefill/decode disaggregation | phase interference and independent scaling exceed KV-transfer and stranded-capacity cost | input/output mix, TTFT/TPOT targets, transfer bytes/time, topology, allocation granularity | DistServe reports up to 7.4x request rate or 12.6x tighter SLO in its evaluated envelope |
+| Hybrid aggregation/disaggregation | workload and SLO regimes change over time | reconfiguration, routing, placement, cache state, estimator error | TaiChi reports aggregation, disaggregation, or hybrid can each win different envelopes |
+
+These are historical mechanism witnesses, not stackable universal multipliers. Re-run each
+comparison against current fak-native kernels and the same model, quality, hardware, trace,
+SLO, topology, and accounting boundary.
+
 ## Serving and cluster mechanism envelope
 
 | Mechanism | Evidence now indexed | When it may help | Required counter-evidence before defaulting |
