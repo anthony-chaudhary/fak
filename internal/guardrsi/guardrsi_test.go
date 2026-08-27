@@ -99,6 +99,30 @@ func TestOperationalRowsAreClassifiedAndQualityNeutral(t *testing.T) {
 	}
 }
 
+func TestUpstreamBadRequestIsProviderOutcomeNotUnknownVerdict(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"verdict": "ALLOW", "kind": "DECIDE", "tool": "Read"},
+		{"kind": "UPSTREAM_BAD_REQUEST", "reason": "scrubbed provider detail"},
+		{"kind": "NOVEL_CONTROL"},
+	})
+	fold := FoldRows([]string{p})
+	if fold.ProviderOutcomeRows != 1 {
+		t.Fatalf("ProviderOutcomeRows = %d, want 1", fold.ProviderOutcomeRows)
+	}
+	if got := fold.ByProviderOutcomeKind["UPSTREAM_BAD_REQUEST"]; got != 1 {
+		t.Fatalf("ByProviderOutcomeKind[UPSTREAM_BAD_REQUEST] = %d, want 1", got)
+	}
+	if got := fold.ByVerdict["UPSTREAM_BAD_REQUEST"]; got != 0 {
+		t.Fatalf("ByVerdict[UPSTREAM_BAD_REQUEST] = %d, want 0; provider outcomes are not decision verdicts", got)
+	}
+	if fold.UnknownVerdict != 1 || fold.ByVerdict["NOVEL_CONTROL"] != 1 {
+		t.Fatalf("fold = %+v, want only NOVEL_CONTROL classified as unknown", fold)
+	}
+	if got, want := VerdictQuality(fold), 50.0; got != want {
+		t.Fatalf("quality = %v, want %v; provider outcomes must not dilute the verdict denominator", got, want)
+	}
+}
+
 func TestUnexplainedBlockLowersQuality(t *testing.T) {
 	p := writeJournal(t, []map[string]any{
 		{"verdict": "ALLOW", "kind": "DECIDE"},
