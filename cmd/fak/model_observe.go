@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
@@ -150,9 +151,15 @@ func runModelObserveBandwidthCollect(args []string) error {
 	nvidiaDevice := fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0")
 	amdDevice := fs.String("amd-device", "", "AMD device index, BDF, or UUID; empty probes AMD device 0 after NVIDIA")
 	nvidiaNCUCSV := fs.String("nvidia-ncu-csv", "", "import Nsight Compute raw CSV instead of sampling the host")
+	hostCounterImport := fs.String("host-counter-import", "", "import host DRAM controller counters instead of live sampling")
+	hostCounterFormat := fs.String("host-counter-format", "auto", "host counter format: auto, generic-json, perf-json, or perf-csv")
+	hostCounterProvider := fs.String("host-counter-provider", "", "provider that produced the host controller counters")
+	hostCounterScope := fs.String("host-counter-scope", "", "host counter scope: system, socket, or controller")
+	hostCounterScopeID := fs.String("host-counter-scope-id", "", "socket/controller scope identifier")
+	hostCounterBytesPerEvent := fs.Uint64("host-counter-bytes-per-event", 0, "explicit byte conversion for perf event counters")
 	profileDevice := fs.String("device", "", "profiled NVIDIA device name or UUID (required with --nvidia-ncu-csv)")
-	captureStart := fs.String("capture-start", "", "profile capture start time in RFC3339 (required with --nvidia-ncu-csv)")
-	captureEnd := fs.String("capture-end", "", "profile capture end time in RFC3339 (required with --nvidia-ncu-csv)")
+	captureStart := fs.String("capture-start", "", "import capture start time in RFC3339")
+	captureEnd := fs.String("capture-end", "", "import capture end time in RFC3339")
 	measureRoofline := fs.Bool("measure-host-roofline", false, "benchmark and record sustainable host-memory bandwidth")
 	rooflineBytes := fs.Uint64("roofline-bytes", 64<<20, "host roofline benchmark working set")
 	rooflineTrials := fs.Int("roofline-trials", 5, "host roofline benchmark trial count")
@@ -189,9 +196,29 @@ func runModelObserveBandwidthCollect(args []string) error {
 		}
 	})
 	if *nvidiaNCUCSV != "" {
-		for _, incompatible := range []string{"count", "interval", "measured-gb-s", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"} {
+		for _, incompatible := range []string{"count", "interval", "measured-gb-s", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold", "host-counter-import", "host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event"} {
 			if visited[incompatible] {
 				return fmt.Errorf("--%s cannot be combined with --nvidia-ncu-csv", incompatible)
+			}
+		}
+	}
+	if *hostCounterImport != "" {
+		for _, incompatible := range []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"} {
+			if visited[incompatible] {
+				return fmt.Errorf("--%s cannot be combined with --host-counter-import", incompatible)
+			}
+		}
+		if strings.TrimSpace(*hostCounterProvider) == "" {
+			return fmt.Errorf("--host-counter-provider is required with --host-counter-import")
+		}
+		if strings.TrimSpace(*hostCounterScope) == "" {
+			return fmt.Errorf("--host-counter-scope is required with --host-counter-import")
+		}
+	}
+	if *hostCounterImport == "" {
+		for _, importOnly := range []string{"host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event"} {
+			if visited[importOnly] {
+				return fmt.Errorf("--%s requires --host-counter-import", importOnly)
 			}
 		}
 	}
@@ -226,7 +253,42 @@ func runModelObserveBandwidthCollect(args []string) error {
 	}
 	var collection modelperfobs.BandwidthCollection
 	var err error
-	if *nvidiaNCUCSV != "" {
+	if *hostCounterImport != "" {
+		var started, ended time.Time
+		if *captureStart != "" {
+			started, err = time.Parse(time.RFC3339, *captureStart)
+			if err != nil {
+				return fmt.Errorf("--capture-start must be RFC3339: %w", err)
+			}
+		}
+		if *captureEnd != "" {
+			ended, err = time.Parse(time.RFC3339, *captureEnd)
+			if err != nil {
+				return fmt.Errorf("--capture-end must be RFC3339: %w", err)
+			}
+		}
+		if (*captureStart == "") != (*captureEnd == "") {
+			return fmt.Errorf("--capture-start and --capture-end must be supplied together")
+		}
+		in, openErr := os.Open(*hostCounterImport)
+		if openErr != nil {
+			return openErr
+		}
+		defer in.Close()
+		importOptions := modelperfobs.HostControllerImportOptions{
+			Format: modelperfobs.HostCounterImportFormat(*hostCounterFormat), Provider: strings.TrimSpace(*hostCounterProvider),
+			Scope:            modelperfobs.HostControllerScope{Kind: strings.TrimSpace(*hostCounterScope), ID: strings.TrimSpace(*hostCounterScopeID)},
+			CaptureStartedAt: started, CaptureEndedAt: ended, Phase: o.Phase, Shape: o.Shape,
+			TheoreticalGBS: o.TheoreticalGBS, MeasuredHostGBS: o.MeasuredSustainableGBS,
+		}
+		if visited["host-counter-bytes-per-event"] {
+			importOptions.PerfBytesPerEvent = hostCounterBytesPerEvent
+		}
+		collection, err = modelperfobs.ImportHostControllerCounters(in, importOptions)
+		if err != nil {
+			return err
+		}
+	} else if *nvidiaNCUCSV != "" {
 		started, err := time.Parse(time.RFC3339, *captureStart)
 		if err != nil {
 			return fmt.Errorf("--capture-start must be RFC3339: %w", err)
@@ -385,6 +447,7 @@ func modelObserveUsage() string {
 		"       fak model-observe bandwidth --input FILE [--output FILE --pretty=true]\n" +
 		"       fak model-observe bandwidth collect --measure-host-roofline [--roofline-sweep --roofline-threads N --roofline-knee-threshold 0.9]\n" +
 		"       fak model-observe bandwidth collect --nvidia-ncu-csv FILE --device DEVICE --capture-start RFC3339 --capture-end RFC3339 --phase PHASE --shape SHAPE [--device-roofline-gb-s N]\n" +
+		"       fak model-observe bandwidth collect --host-counter-import FILE --host-counter-provider PROVIDER --host-counter-scope system|socket|controller [--host-counter-scope-id ID --host-counter-format FORMAT --capture-start RFC3339 --capture-end RFC3339]\n" +
 		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
 		"       fak model-observe cache-state-bench --verify FILE"
 }

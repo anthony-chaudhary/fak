@@ -1,0 +1,38 @@
+{
+  "schema": "fak-host-controller-counter-import/1",
+  "provider": "linux-perf-intel-imc",
+  "scope": {"kind": "socket", "id": "0"},
+  "capture": {
+    "started_at": "2026-08-27T10:00:00Z",
+    "ended_at": "2026-08-27T10:00:00.1Z"
+  },
+  "counters": [
+    {
+      "direction": "read",
+      "event": "uncore_imc_0/cas_count_read/",
+      "unit": "events",
+      "bytes_per_event": 64,
+      "counter_width_bits": 48,
+      "scope": {"kind": "socket", "id": "0"},
+      "running_ratio": 0.99,
+      "snapshots": [
+        {"captured_at": "2026-08-27T10:00:00Z", "value": 100},
+        {"captured_at": "2026-08-27T10:00:00.1Z", "value": 1000100, "reset_observed": false}
+      ]
+    },
+    {
+      "direction": "write",
+      "event": "uncore_imc_0/cas_count_write/",
+      "unit": "events",
+      "bytes_per_event": 64,
+      "counter_width_bits": 48,
+      "scope": {"kind": "socket", "id": "0"},
+      "time_enabled_ns": 100000000,
+      "time_running_ns": 95000000,
+      "snapshots": [
+        {"captured_at": "2026-08-27T10:00:00Z", "value": 50},
+        {"captured_at": "2026-08-27T10:00:00.1Z", "value": 500050, "reset_observed": false}
+      ]
+    }
+  ]
+}
