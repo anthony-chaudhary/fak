@@ -66,18 +66,41 @@ func splitSteerUnitArg(argv []string) (string, []string) {
 	return "", argv
 }
 
-func finishSteerUnitArg(fs *flag.FlagSet, unitArg, usage string, stderr io.Writer) (string, bool) {
-	if unitArg == "" && fs.NArg() == 1 {
-		unitArg = strings.TrimSpace(fs.Arg(0))
-	} else if fs.NArg() != 0 {
-		fmt.Fprintln(stderr, usage)
-		return "", false
+// steerActorCommand owns the common attributable flag contract while leaving each
+// verb free to register its own flags and help wording.
+type steerActorCommand struct {
+	*flag.FlagSet
+	argv    []string
+	unitArg string
+	label   string
+	stderr  io.Writer
+	actor   *string
+}
+
+func newSteerActorCommand(label string, stderr io.Writer, argv []string, unitArg, action string) *steerActorCommand {
+	fs := flag.NewFlagSet(label, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cmd := &steerActorCommand{FlagSet: fs, argv: argv, unitArg: unitArg, label: label, stderr: stderr}
+	cmd.actor = fs.String("by", "", "who "+action+" (default: git config user.name; the row must be attributable)")
+	return cmd
+}
+
+func (cmd *steerActorCommand) parseUnit(usage string) (string, int) {
+	if !parseFlags(cmd.FlagSet, cmd.argv) {
+		return "", 2
+	}
+	unitArg := cmd.unitArg
+	if unitArg == "" && cmd.NArg() == 1 {
+		unitArg = strings.TrimSpace(cmd.Arg(0))
+	} else if cmd.NArg() != 0 {
+		fmt.Fprintln(cmd.stderr, usage)
+		return "", 2
 	}
 	if unitArg == "" {
-		fmt.Fprintln(stderr, usage)
-		return "", false
+		fmt.Fprintln(cmd.stderr, usage)
+		return "", 2
 	}
-	return unitArg, true
+	return unitArg, 0
 }
 
 func steerActor(root, requested string) string {
@@ -89,18 +112,42 @@ func steerActor(root, requested string) string {
 	return who
 }
 
-func resolveSteerUnit(root, base, head, leaf string) (*steerpr.Unit, map[string]any, error) {
+func resolveSteerUnit(root, base, head, leaf, label string, stderr io.Writer) (*steerpr.Unit, bool) {
 	view, err := buildSteerPRsView(root, base, head)
 	if err != nil {
-		return nil, nil, err
+		fmt.Fprintf(stderr, "%s: %v\n", label, err)
+		return nil, false
 	}
 	units, _ := view["units"].([]steerpr.Unit)
 	for i := range units {
 		if units[i].Leaf == leaf {
-			return &units[i], view, nil
+			return &units[i], true
 		}
 	}
-	return nil, view, nil
+	fmt.Fprintf(stderr, "%s: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
+		label, leaf, releaseStatusString(view["range"]))
+	return nil, false
+}
+
+func (cmd *steerActorCommand) resolveUnit(usage string, base, head *string, unbound string) (*steerpr.Unit, string, string, int) {
+	unitArg, code := cmd.parseUnit(usage)
+	if code != 0 {
+		return nil, "", "", code
+	}
+	root := steerRoot()
+	unit, ok := resolveSteerUnit(root, *base, *head, unitArg, cmd.label, cmd.stderr)
+	if !ok {
+		return nil, "", "", 1
+	}
+	if unbound != "" && len(unit.Resolves) == 0 {
+		fmt.Fprintf(cmd.stderr, unbound, unitArg)
+		return nil, "", "", 1
+	}
+	return unit, root, steerActor(root, *cmd.actor), 0
+}
+
+func (cmd *steerActorCommand) actorName(root string) string {
+	return steerActor(root, *cmd.actor)
 }
 
 func appendAndWriteSteerRecord[T any](stdout, stderr io.Writer, label string, rec T, appendRecord func() error) (int, bool) {
@@ -251,34 +298,15 @@ func runSteerAck(stdout, stderr io.Writer, argv []string) int {
 	// The unit name may come before the flags (`fak steer ack gateway --note x`)
 	// or after them; accept both.
 	unitArg, argv := splitSteerUnitArg(argv)
-	fs := flag.NewFlagSet("fak steer ack", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	by := fs.String("by", "", "who looked (default: git config user.name; the row must be attributable)")
-	note := fs.String("note", "", "optional note recorded with the ack")
-	base := fs.String("base", "", "range base ref (default: origin/<release_branch>)")
-	head := fs.String("head", "", "range head ref (default: <release_source> tip)")
-	if !parseFlags(fs, argv) {
-		return 2
-	}
+	ackFlags := newSteerActorCommand("fak steer ack", stderr, argv, unitArg, "looked")
+	note := ackFlags.String("note", "", "optional note recorded with the ack")
+	base := ackFlags.String("base", "", "range base ref (default: origin/<release_branch>)")
+	head := ackFlags.String("head", "", "range head ref (default: <release_source> tip)")
 	const usage = "usage: fak steer ack <unit> [--by WHO] [--note TEXT] [--base REF] [--head REF]"
-	var ok bool
-	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
-		return 2
+	unit, root, who, code := ackFlags.resolveUnit(usage, base, head, "")
+	if code != 0 {
+		return code
 	}
-
-	root := steerRoot()
-	unit, view, err := resolveSteerUnit(root, *base, *head, unitArg)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak steer ack: %v\n", err)
-		return 1
-	}
-	if unit == nil {
-		fmt.Fprintf(stderr, "fak steer ack: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
-			unitArg, releaseStatusString(view["range"]))
-		return 1
-	}
-
-	who := steerActor(root, *by)
 	ack, err := steerpr.NewAck(unit.Leaf, who, steerpr.UnitSHAs(*unit), *note, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer ack: %v\n", err)
@@ -314,34 +342,15 @@ var steerRedirectFile = ghSteerRedirectFollowUp
 func runSteerRedirect(stdout, stderr io.Writer, argv []string) int {
 	// The unit name may come before the flags or after them; accept both.
 	unitArg, argv := splitSteerUnitArg(argv)
-	fs := flag.NewFlagSet("fak steer redirect", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	note := fs.String("m", "", "the steer note: where the intent's next tick should aim (required)")
-	by := fs.String("by", "", "who is steering (default: git config user.name; the row must be attributable)")
-	base := fs.String("base", "", "range base ref (default: origin/<release_branch>)")
-	head := fs.String("head", "", "range head ref (default: <release_source> tip)")
-	if !parseFlags(fs, argv) {
-		return 2
-	}
+	redirectFlags := newSteerActorCommand("fak steer redirect", stderr, argv, unitArg, "is steering")
+	note := redirectFlags.String("m", "", "the steer note: where the intent's next tick should aim (required)")
+	base := redirectFlags.String("base", "", "range base ref (default: origin/<release_branch>)")
+	head := redirectFlags.String("head", "", "range head ref (default: <release_source> tip)")
 	const usage = `usage: fak steer redirect <unit> -m "<steer note>" [--by WHO] [--base REF] [--head REF]`
-	var ok bool
-	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
-		return 2
+	unit, root, who, code := redirectFlags.resolveUnit(usage, base, head, "")
+	if code != 0 {
+		return code
 	}
-
-	root := steerRoot()
-	unit, view, err := resolveSteerUnit(root, *base, *head, unitArg)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak steer redirect: %v\n", err)
-		return 1
-	}
-	if unit == nil {
-		fmt.Fprintf(stderr, "fak steer redirect: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
-			unitArg, releaseStatusString(view["range"]))
-		return 1
-	}
-
-	who := steerActor(root, *by)
 	bound := ""
 	if len(unit.Resolves) > 0 {
 		// The unit's closure-grade binding: the follow-up reopens/annotates it
