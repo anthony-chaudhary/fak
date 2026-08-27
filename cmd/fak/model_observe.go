@@ -143,12 +143,13 @@ func runModelObserveBandwidthCollect(args []string) error {
 	logicalBytes := fs.Uint64("logical-bytes", 0, "logical software bytes")
 	physicalReadBytes := fs.Uint64("physical-read-bytes", 0, "software physical read bytes; not a DRAM counter")
 	physicalWriteBytes := fs.Uint64("physical-write-bytes", 0, "software physical write bytes; not a DRAM counter")
+	nvidiaDevice := fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0")
 	output := fs.String("output", "", "write collection JSON to this path")
 	pretty := fs.Bool("pretty", true, "indent JSON output")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape)}
+	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice)}
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "theoretical-gb-s":

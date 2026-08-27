@@ -41,6 +41,7 @@ type CollectionOptions struct {
 	LogicalBytes           *uint64
 	PhysicalSoftwareRead   *uint64
 	PhysicalSoftwareWrite  *uint64
+	NVIDIADevice           NVIDIADeviceSelector
 }
 type BandwidthCollection struct {
 	Schema       string                `json:"schema"`
@@ -87,12 +88,23 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		if err != nil {
 			return BandwidthCollection{}, err
 		}
+		device, err := collectNVIDIADeviceSnapshot(ctx, o.NVIDIADevice)
+		if err != nil {
+			return BandwidthCollection{}, err
+		}
 		collector = snap.collector
 		av.PhysicalMemory = av.PhysicalMemory || snap.availability.PhysicalMemory
 		av.ProcessMemory = av.ProcessMemory || snap.availability.ProcessMemory
 		av.ProcessIO = av.ProcessIO || snap.availability.ProcessIO
-		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
-		if snap.host.PhysicalTotalBytes != nil && snap.host.PhysicalAvailableBytes != nil && *snap.host.PhysicalTotalBytes >= *snap.host.PhysicalAvailableBytes {
+		av.DeviceCounters = av.DeviceCounters || device.available
+		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Device: device.device, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
+		if device.available {
+			collector = snap.collector + "+" + device.collector
+			s.Capacity = device.capacity
+			s.Provenance.Device = device.provenanceDevice
+			s.Provenance.Collector = collector
+		}
+		if !device.available && snap.host.PhysicalTotalBytes != nil && snap.host.PhysicalAvailableBytes != nil && *snap.host.PhysicalTotalBytes >= *snap.host.PhysicalAvailableBytes {
 			u := *snap.host.PhysicalTotalBytes - *snap.host.PhysicalAvailableBytes
 			s.Capacity.TotalBytes = cloneU64(snap.host.PhysicalTotalBytes)
 			s.Capacity.UsedBytes = &u

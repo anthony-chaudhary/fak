@@ -69,12 +69,13 @@ type RequestSignals struct {
 }
 
 type DeviceSignals struct {
-	CoreClockMHz       *float64 `json:"core_clock_mhz,omitempty"`
-	MemoryClockMHz     *float64 `json:"memory_clock_mhz,omitempty"`
-	PowerWatts         *float64 `json:"power_watts,omitempty"`
-	TemperatureC       *float64 `json:"temperature_c,omitempty"`
-	ComputeUtilization *float64 `json:"compute_utilization,omitempty"`
-	Throttling         *bool    `json:"throttling,omitempty"`
+	CoreClockMHz                *float64 `json:"core_clock_mhz,omitempty"`
+	MemoryClockMHz              *float64 `json:"memory_clock_mhz,omitempty"`
+	PowerWatts                  *float64 `json:"power_watts,omitempty"`
+	TemperatureC                *float64 `json:"temperature_c,omitempty"`
+	ComputeUtilization          *float64 `json:"compute_utilization,omitempty"`
+	MemoryControllerUtilization *float64 `json:"memory_controller_utilization,omitempty"`
+	Throttling                  *bool    `json:"throttling,omitempty"`
 }
 
 type CapacitySignals struct {
@@ -212,7 +213,7 @@ func ClassifyBottleneck(s BandwidthSample) Bottleneck {
 	if atLeast(s.Transfer.Utilization, .85) {
 		return BottleneckTransfer
 	}
-	if atLeast(s.Live.Utilization, .85) {
+	if atLeast(s.Live.Utilization, .85) || atLeast(s.Device.MemoryControllerUtilization, .85) {
 		return BottleneckMemory
 	}
 	if atLeast(s.Device.ComputeUtilization, .85) {
@@ -227,7 +228,7 @@ func ObserveTrigger(state TriggerState, cfg TriggerConfig, s BandwidthSample) Tr
 	} else {
 		state.SymptomStreak = 0
 	}
-	resource := maxAvailable(s.Live.Utilization, s.Transfer.Utilization, s.Capacity.Utilization, s.Device.ComputeUtilization)
+	resource := maxAvailable(s.Live.Utilization, s.Transfer.Utilization, s.Capacity.Utilization, s.Device.ComputeUtilization, s.Device.MemoryControllerUtilization)
 	if resource != nil && *resource >= cfg.ResourceUtilization {
 		state.ResourceStreak++
 	} else {
