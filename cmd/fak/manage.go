@@ -15,5 +15,17 @@ func cmdManage(argv []string) {
 		cmdLaunchParityCheck(argv[1:])
 		return
 	}
-	cmdManageCommand("manage", argv)
+	dispatchManageLaunch(argv, cmdCodex, func(args []string) { cmdManageCommand("manage", args) })
+}
+
+// dispatchManageLaunch keeps the convenient bare managed-Codex spelling on the
+// dedicated launcher, where freshness admission and Codex-specific setup are
+// already proven. Any flags, delimiter, or child arguments retain the generic
+// manage contract rather than being reinterpreted here.
+func dispatchManageLaunch(argv []string, codex func([]string), generic func([]string)) {
+	if len(argv) == 1 && argv[0] == "codex" {
+		codex(nil)
+		return
+	}
+	generic(argv)
 }

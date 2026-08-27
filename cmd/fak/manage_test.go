@@ -52,3 +52,36 @@ func TestManageDispatchAliasesShareHandler(t *testing.T) {
 		t.Fatalf("legacy guard compatibility dispatch missing")
 	}
 }
+
+func TestManageBareCodexUsesDedicatedLauncher(t *testing.T) {
+	var dedicated bool
+	var generic []string
+	dispatchManageLaunch([]string{"codex"}, func(args []string) {
+		dedicated = true
+		if len(args) != 0 {
+			t.Fatalf("dedicated args = %v, want none", args)
+		}
+	}, func(args []string) { generic = args })
+	if !dedicated || generic != nil {
+		t.Fatalf("dedicated = %v, generic = %v", dedicated, generic)
+	}
+}
+
+func TestManageCodexWithExplicitArgumentsStaysGeneric(t *testing.T) {
+	for _, argv := range [][]string{
+		{"--", "codex"},
+		{"codex", "exec", "task"},
+		{"--provider", "openai", "--", "codex"},
+	} {
+		t.Run(strings.Join(argv, "_"), func(t *testing.T) {
+			var dedicated bool
+			var generic []string
+			dispatchManageLaunch(argv, func([]string) { dedicated = true }, func(args []string) {
+				generic = append([]string(nil), args...)
+			})
+			if dedicated || strings.Join(generic, "\x00") != strings.Join(argv, "\x00") {
+				t.Fatalf("dedicated = %v, generic = %v, want %v", dedicated, generic, argv)
+			}
+		})
+	}
+}
