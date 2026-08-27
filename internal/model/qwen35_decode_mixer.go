@@ -20,7 +20,7 @@ type qwen35MetalDecodeMixer interface {
 // path untouched. An accepted error releases every resident owner and is returned
 // to the caller, which must fail closed instead of replaying host projections.
 func (s *Session) tryQwen35MetalDecodeMixer(layer int, xn []float32) ([]float32, qwen35DecodeMixerReceipt, bool, error) {
-	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted {
+	if s == nil || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted || s.tapActive != nil && s.tapActive.ops {
 		return nil, qwen35DecodeMixerReceipt{}, false, nil
 	}
 	mixer, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalDecodeMixer)

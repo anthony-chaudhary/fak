@@ -10,8 +10,6 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
-	"github.com/anthony-chaudhary/fak/internal/loopmgr"
-	"github.com/anthony-chaudhary/fak/internal/rehydrate"
 )
 
 var ErrUnauthenticatedEvent = errors.New("bgloop: unauthenticated wake event")
@@ -24,7 +22,7 @@ type Event struct {
 }
 
 type WakeRequest struct {
-	Job       loopmgr.Job
+	Job       Job
 	Cause     string
 	DueAt     time.Time
 	Principal string
@@ -32,24 +30,30 @@ type WakeRequest struct {
 
 type EventScheduler struct {
 	RegistryPath string
-	Gate         *rehydrate.Gate
+	Gate         RehydrationGate
+	Store        RegistryStore
 	Clock        Clock
 	JitterWindow time.Duration
 	Admit        func(context.Context, WakeRequest) (func(), error)
-	Fire         func(context.Context, loopmgr.Job) error
+	Fire         func(context.Context, Job) error
 }
 
-func (s EventScheduler) DeliverEvent(ctx context.Context, event Event) (rehydrate.Admission, error) {
+func (s EventScheduler) DeliverEvent(ctx context.Context, event Event) (Admission, error) {
 	if !event.SignatureVerified || strings.TrimSpace(event.Principal) == "" {
-		return rehydrate.Admission{}, ErrUnauthenticatedEvent
+		return Admission{}, ErrUnauthenticatedEvent
 	}
-	registry, err := loopmgr.LoadRegistry(s.RegistryPath)
+	if s.Store == nil {
+		return Admission{}, errors.New("bgloop: nil registry store")
+	}
+	if s.Gate == nil {
+		return Admission{}, errors.New("bgloop: nil rehydration gate")
+	}
+	job, ok, err := s.Store.LookupArmed(s.RegistryPath, event.JobID)
 	if err != nil {
-		return rehydrate.Admission{}, err
+		return Admission{}, err
 	}
-	job, ok := registry.Get(event.JobID)
-	if !ok || !job.State.Armed() {
-		return rehydrate.Admission{}, fmt.Errorf("bgloop: dormant job %q is not armed", event.JobID)
+	if !ok {
+		return Admission{}, fmt.Errorf("bgloop: dormant job %q is not armed", event.JobID)
 	}
 	admission := s.Gate.Admit(ctx, event.Horizon)
 	if !admission.Admitted {
@@ -75,6 +79,9 @@ func (s EventScheduler) DeliverEvent(ctx context.Context, event Event) (rehydrat
 }
 
 func (s EventScheduler) ScheduleWakeCohort(jobIDs []string, wakeAt time.Time) ([]time.Time, error) {
+	if s.Store == nil {
+		return nil, errors.New("bgloop: nil registry store")
+	}
 	if len(jobIDs) == 0 {
 		return nil, nil
 	}
@@ -91,7 +98,7 @@ func (s EventScheduler) ScheduleWakeCohort(jobIDs []string, wakeAt time.Time) ([
 	})
 	seen := make(map[string]struct{}, len(ids))
 	deadlines := make([]time.Time, 0, len(ids))
-	durable, err := NewDurableScheduler(s.RegistryPath, s.clock(), func(context.Context, loopmgr.Job) error { return nil })
+	durable, err := NewDurableScheduler(s.RegistryPath, s.clock(), s.Store, func(context.Context, Job) error { return nil })
 	if err != nil {
 		return nil, err
 	}

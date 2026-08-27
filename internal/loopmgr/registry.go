@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anthony-chaudhary/fak/internal/bgloop"
 	"github.com/anthony-chaudhary/fak/internal/parentdir"
 	"os"
 	"sort"
@@ -269,4 +270,91 @@ func (r Registry) ArmedJobs() []Job {
 		}
 	}
 	return out
+}
+
+// BGLoopStore adapts the loop registry to bgloop's lower-tier persistence seam.
+type BGLoopStore struct{}
+
+func (BGLoopStore) Validate(path string) error {
+	_, err := LoadRegistry(path)
+	return err
+}
+
+func (BGLoopStore) LookupArmed(path, jobID string) (bgloop.Job, bool, error) {
+	r, err := LoadRegistry(path)
+	if err != nil {
+		return nil, false, err
+	}
+	job, ok := r.Get(jobID)
+	if !ok || !job.State.Armed() {
+		return nil, false, nil
+	}
+	return job, true, nil
+}
+
+func (BGLoopStore) SetWake(path, jobID string, at time.Time, duty bgloop.DutyCycle, updatedAt time.Time) error {
+	r, err := LoadRegistry(path)
+	if err != nil {
+		return err
+	}
+	job, ok := r.Get(jobID)
+	if !ok {
+		return fmt.Errorf("unknown loop job %q", jobID)
+	}
+	job.WakeAtUnixNano = at.UTC().UnixNano()
+	if duty == nil {
+		job.Duty = nil
+	} else {
+		d, ok := duty.(*DutyCycle)
+		if !ok {
+			return fmt.Errorf("job %q: incompatible duty cycle %T", jobID, duty)
+		}
+		job.Duty = d
+	}
+	job.UpdatedUnixNano = updatedAt.UTC().UnixNano()
+	r.Jobs[jobID] = job
+	return SaveRegistry(path, r)
+}
+
+func (BGLoopStore) ArmedWakes(path string) ([]bgloop.StoredWake, error) {
+	r, err := LoadRegistry(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]bgloop.StoredWake, 0)
+	for _, job := range r.ArmedJobs() {
+		var at time.Time
+		if job.WakeAtUnixNano != 0 {
+			at = time.Unix(0, job.WakeAtUnixNano)
+		}
+		var duty bgloop.DutyCycle
+		if job.Duty != nil {
+			duty = job.Duty
+		}
+		out = append(out, bgloop.StoredWake{Job: job, WakeAt: at, Duty: duty})
+	}
+	return out, nil
+}
+
+func (BGLoopStore) MoveWake(path, jobID string, at, updatedAt time.Time) error {
+	r, err := LoadRegistry(path)
+	if err != nil {
+		return err
+	}
+	job, ok := r.Get(jobID)
+	if !ok {
+		return fmt.Errorf("unknown loop job %q", jobID)
+	}
+	if at.IsZero() {
+		job.WakeAtUnixNano = 0
+	} else {
+		job.WakeAtUnixNano = at.UTC().UnixNano()
+	}
+	job.UpdatedUnixNano = updatedAt.UTC().UnixNano()
+	r.Jobs[jobID] = job
+	return SaveRegistry(path, r)
+}
+
+func (BGLoopStore) ClearWake(path, jobID string, updatedAt time.Time) error {
+	return BGLoopStore{}.MoveWake(path, jobID, time.Time{}, updatedAt)
 }

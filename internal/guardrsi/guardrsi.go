@@ -47,15 +47,25 @@ var KnownOperationalKinds = map[string]bool{
 	"CONFIG_SWAP": true, "RESTART_HOP": true, "CAPABILITY_GRANT": true,
 }
 
+// KnownProviderOutcomeKinds are provider-turn outcomes, not kernel decision
+// verdicts or guard lifecycle events. The fold reports them on their own axis and
+// excludes them from verdict quality so a typed upstream response cannot become a
+// false unknown-verdict honesty hole.
+var KnownProviderOutcomeKinds = map[string]bool{
+	"UPSTREAM_BAD_REQUEST": true,
+}
+
 type Fold struct {
-	TotalRows         int            `json:"total_rows"`
-	ByVerdict         map[string]int `json:"by_verdict"`
-	ByReason          map[string]int `json:"by_reason"`
-	OperationalRows   int            `json:"operational_rows"`
-	ByOperationalKind map[string]int `json:"by_operational_kind"`
-	UnknownVerdict    int            `json:"unknown_verdict"`
-	BlankReasonOnDeny int            `json:"blank_reason_on_deny"`
-	WitnesslessBlock  int            `json:"witnessless_block"`
+	TotalRows             int            `json:"total_rows"`
+	ByVerdict             map[string]int `json:"by_verdict"`
+	ByReason              map[string]int `json:"by_reason"`
+	OperationalRows       int            `json:"operational_rows"`
+	ByOperationalKind     map[string]int `json:"by_operational_kind"`
+	ProviderOutcomeRows   int            `json:"provider_outcome_rows"`
+	ByProviderOutcomeKind map[string]int `json:"by_provider_outcome_kind"`
+	UnknownVerdict        int            `json:"unknown_verdict"`
+	BlankReasonOnDeny     int            `json:"blank_reason_on_deny"`
+	WitnesslessBlock      int            `json:"witnessless_block"`
 	// ChildCrash counts CHILD_CRASH rows: a supervised child (the wrapped agent, or
 	// guard itself) died abnormally — a signal, an OOM kill, or a non-zero exit. A
 	// crash is the WORST honesty hole a session can carry (the guard front door
@@ -170,7 +180,7 @@ func DiagnoseAuditGap(root string) string {
 }
 
 func FoldRows(paths []string) Fold {
-	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}, ByOperationalKind: map[string]int{}, ByCrashClass: map[string]int{}, ByRateLimitClass: map[string]int{}}
+	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}, ByOperationalKind: map[string]int{}, ByProviderOutcomeKind: map[string]int{}, ByCrashClass: map[string]int{}, ByRateLimitClass: map[string]int{}}
 	for _, path := range paths {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -190,6 +200,12 @@ func FoldRows(paths []string) Fold {
 				fold.TotalRows++
 				fold.OperationalRows++
 				fold.ByOperationalKind[kind]++
+				continue
+			}
+			if KnownProviderOutcomeKinds[kind] {
+				fold.TotalRows++
+				fold.ProviderOutcomeRows++
+				fold.ByProviderOutcomeKind[kind]++
 				continue
 			}
 			// A CHILD_CRASH row is not a kernel decision — the wrapped child died
@@ -264,7 +280,7 @@ func childRateLimitExitClass(row map[string]any) (string, bool) {
 }
 
 func VerdictQuality(f Fold) float64 {
-	verdictRows := f.TotalRows - f.OperationalRows
+	verdictRows := f.TotalRows - f.OperationalRows - f.ProviderOutcomeRows
 	if verdictRows <= 0 {
 		return 0
 	}

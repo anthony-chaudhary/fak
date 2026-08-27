@@ -814,6 +814,7 @@ func runLeaserefAcquire(stdout, stderr io.Writer, argv []string) int {
 	out := fencedResult{Verdict: v}
 	if v.OK {
 		out.Record = &rec
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceAcquire, rec)
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "acquire")
 }
@@ -862,6 +863,7 @@ func runLeaserefRenew(stdout, stderr io.Writer, argv []string) int {
 	out := fencedResult{Verdict: v}
 	if v.OK {
 		out.Record = &rec
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRenew, rec)
 	}
 	return emitLeaserefOutcome(stdout, stderr, out, v.OK, "renew")
 }

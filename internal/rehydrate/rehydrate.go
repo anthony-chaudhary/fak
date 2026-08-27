@@ -64,6 +64,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/anthony-chaudhary/fak/internal/bgloop"
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
 )
 
@@ -270,4 +271,15 @@ func (g *Gate) Admit(ctx context.Context, h dormancy.Horizon) Admission {
 		}
 	}
 	return adm
+}
+
+// BGLoopGate adapts Gate to bgloop's lower-tier admission seam.
+type BGLoopGate struct{ Gate *Gate }
+
+func (g BGLoopGate) Admit(ctx context.Context, horizon dormancy.Horizon) bgloop.Admission {
+	if g.Gate == nil {
+		return bgloop.Admission{RefusedBy: "rehydrate", Detail: "nil gate"}
+	}
+	a := g.Gate.Admit(ctx, horizon)
+	return bgloop.Admission{Admitted: a.Admitted, RefusedBy: string(a.RefusedBy), Detail: a.Detail}
 }
