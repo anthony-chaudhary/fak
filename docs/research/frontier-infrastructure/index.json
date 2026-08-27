@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9367,
+  "latest_slice_issue": 9370,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 237,
+    "entry_count": 241,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -118,6 +118,7 @@
       "BurstGPT v1.1",
       "ByteDance Seed",
       "CacheRoute",
+      "Chatbot Arena",
       "Chutes production trace study",
       "Cloudflare / Replicate",
       "Cohere",
@@ -161,6 +162,7 @@
       "Johnson Controls",
       "Kakao",
       "LG AI Research",
+      "LMSYS-Chat-1M",
       "Lambda",
       "Large-scale training reliability study",
       "Leyline",
@@ -211,6 +213,7 @@
       "OpenAI / Oracle / Related Digital / DTE",
       "OpenAI / Oracle / SoftBank",
       "OpenAI / Stargate",
+      "OpenAssistant Conversations",
       "OpenRouter",
       "Operator-level LLM autoscaling study",
       "Oracle",
@@ -265,6 +268,7 @@
       "Vertiv",
       "WEKA",
       "WebArena",
+      "WildChat",
       "WorkArena / BrowserGym",
       "Xiaomi MiMo",
       "Z.ai / Zhipu AI",
@@ -9213,6 +9217,154 @@
       ],
       "fak_implications": [
         "Computer-use planners should account for multimodal observations, action latency, application state, setup/reset, and cross-app dependencies."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "lmsys-chat-1m-2023",
+      "category": "workload_trace",
+      "entity": "LMSYS-Chat-1M",
+      "topic": [
+        "conversation_trace",
+        "multilingual",
+        "model_mix"
+      ],
+      "published_at": "2023-09-21",
+      "event_at": "2023-09-21",
+      "source_title": "LMSYS-Chat-1M: A Large-Scale Real-World LLM Conversation Dataset",
+      "source_url": "https://arxiv.org/abs/2309.11998",
+      "source_kind": "research_paper",
+      "evidence_class": "public_conversation_trace",
+      "confidence": "high",
+      "claim": "LMSYS-Chat-1M contains one million public-user conversations with 25 state-of-the-art LLMs collected from the Vicuna demo and Chatbot Arena between April and August 2023; the released records include conversation turns, model identity, timestamp, language, and anonymized user identifiers.",
+      "quantified": {
+        "conversations": 1000000,
+        "models": 25,
+        "collection_start": "2023-04",
+        "collection_end": "2023-08"
+      },
+      "assumptions": [
+        "Conversation count, message/turn count, anonymized user ID, language, timestamp, and model response are distinct fields and denominators."
+      ],
+      "contradictions_or_limits": [
+        "Public opt-in demo/Arena traffic is not provider-wide production, billing, enterprise/API, or geography-representative traffic.",
+        "An anonymized user identifier is not a verified person, tenant, household, or stable cross-platform identity."
+      ],
+      "fak_implications": [
+        "Conversation planners should preserve turn and model geometry while treating public-chat sampling bias separately from production arrivals."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "wildchat-1m-2024",
+      "category": "workload_trace",
+      "entity": "WildChat",
+      "topic": [
+        "conversation_trace",
+        "geography",
+        "language",
+        "toxicity"
+      ],
+      "published_at": "2024-05-02",
+      "event_at": "2024-05-02",
+      "source_title": "WildChat: 1M ChatGPT Interaction Logs in the Wild",
+      "source_url": "https://arxiv.org/abs/2405.01470",
+      "source_kind": "research_paper",
+      "evidence_class": "public_conversation_trace",
+      "confidence": "high",
+      "claim": "WildChat releases one million conversations comprising about 2.5 million user and ChatGPT turns, collected from more than 68,000 anonymized users, with timestamps, inferred country and language metadata, and in-the-wild content including toxic and jailbreak interactions.",
+      "quantified": {
+        "conversations": 1000000,
+        "turns_approx": 2500000,
+        "anonymized_users_min": 68000
+      },
+      "assumptions": [
+        "User counts derive from anonymized identifiers; inferred country and language are attributes with classification/error boundaries."
+      ],
+      "contradictions_or_limits": [
+        "The public free-access chatbot population is self-selected and not a ChatGPT-wide or provider billing/API census.",
+        "IP-derived identity/country does not equal unique person, citizenship, residence, tenant, or stable user across address changes."
+      ],
+      "fak_implications": [
+        "Geographic workload models can use country-local timestamps as bounded samples but must not promote them to universal regional demand weights."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "chatbot-arena-preference-2024",
+      "category": "workload_trace",
+      "entity": "Chatbot Arena",
+      "topic": [
+        "human_preference",
+        "conversation_trace",
+        "model_routing"
+      ],
+      "published_at": "2024-03-07",
+      "event_at": "2024-03-07",
+      "source_title": "Chatbot Arena: An Open Platform for Evaluating LLMs by Human Preference",
+      "source_url": "https://arxiv.org/abs/2403.04132",
+      "source_kind": "research_paper",
+      "evidence_class": "public_preference_trace",
+      "confidence": "high",
+      "claim": "Chatbot Arena reports an open pairwise-evaluation platform with more than 240,000 votes from over 90,000 users across more than 50 models by the paper snapshot, linking conversation prompts and randomized model pairs to user preference outcomes.",
+      "quantified": {
+        "votes_min": 240000,
+        "users_min": 90000,
+        "models_min": 50
+      },
+      "assumptions": [
+        "Votes, users, conversations, prompts, model appearances, and pairwise comparisons are different denominators."
+      ],
+      "contradictions_or_limits": [
+        "Arena users and votes are self-selected and not production request share, spend, token share, user retention, or model demand.",
+        "Repeated votes and changing model rosters prevent treating vote count as unique users or stationary traffic."
+      ],
+      "fak_implications": [
+        "Preference-routing evidence should preserve pair, prompt, timestamp, voter identity boundary, and repeated-observation structure."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "openassistant-conversations-2023",
+      "category": "workload_trace",
+      "entity": "OpenAssistant Conversations",
+      "topic": [
+        "conversation_tree",
+        "multilingual",
+        "human_annotation"
+      ],
+      "published_at": "2023-04-14",
+      "event_at": "2023-04-14",
+      "source_title": "OpenAssistant Conversations — Democratizing Large Language Model Alignment",
+      "source_url": "https://arxiv.org/abs/2304.07327",
+      "source_kind": "research_paper",
+      "evidence_class": "crowdsourced_conversation_dataset",
+      "confidence": "high",
+      "claim": "OpenAssistant Conversations released 161,443 messages in 35 languages, organized into 66,497 conversation trees with 461,292 quality ratings from more than 13,500 volunteers, exposing branching dialogue and annotation geometry rather than one linear request stream.",
+      "quantified": {
+        "messages": 161443,
+        "languages": 35,
+        "conversation_trees": 66497,
+        "quality_ratings": 461292,
+        "volunteers_min": 13500
+      },
+      "assumptions": [
+        "A conversation tree can branch into multiple paths; trees, messages, paths, annotations, and volunteers are distinct counts."
+      ],
+      "contradictions_or_limits": [
+        "Crowdsourced alignment collection is not organic production traffic, arrival timing, user retention, provider geography, or service demand.",
+        "Volunteer and language composition reflects project recruitment and annotation workflow."
+      ],
+      "fak_implications": [
+        "Conversation-state models should support branching histories and multiple ratings without flattening them into independent sessions."
       ],
       "rumor": {
         "is_rumor": false

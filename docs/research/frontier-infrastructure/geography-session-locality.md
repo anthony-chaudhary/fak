@@ -5,6 +5,15 @@ request origin, serving region, local time, WAN routing, sovereignty, and KV/ses
 affinity. Those variables are related, but no source supports treating them as one
 universal regional-demand distribution.
 
+## Public-chat geography and session sources (#9370)
+
+| Source | Geography/session fields | Safe use | Hard limit |
+|---|---|---|---|
+| LMSYS-Chat-1M | Timestamp, language, anonymized user ID, turns, model | Conversation/turn geometry and temporal sampling within the public platform | No verified country or provider-wide population. |
+| WildChat | Timestamp, inferred country/language, anonymized IP-derived user, turns | Bounded country-local diurnal and multilingual analysis | Self-selected public traffic; IP identity/country errors and no billing denominator. |
+| Chatbot Arena | Pairwise votes, users, prompts/conversations, model pairs | Preference and repeated-pair sampling | Votes are not request share or model demand. |
+| OpenAssistant | Languages, branching trees, messages, ratings, volunteers | Multilingual branching-state and annotation workload | Crowdsourced collection, not organic sessions or geography. |
+
 ## Evidence matrix
 
 | Source | Population and window | Geography / time variable | Measured parameters | Session / locality mechanism | Limits and missing fields |

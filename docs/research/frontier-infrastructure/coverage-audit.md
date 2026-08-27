@@ -101,6 +101,14 @@ non-coding agent workloads. Totals are **237 entries**, **232 unique URLs**, and
 labels**. Production browser/desktop trajectories, action and tool-call histograms, session
 durations, observation bytes, reset costs, escalation rates, and user populations remain missing.
 
+## Issue #9370 delta
+
+Issue #9370 adds four source-population records with direct conversation, turn/message, user-ID,
+language, country, timestamp, preference-vote, tree, and annotation boundaries. Totals are
+**241 entries**, **236 unique URLs**, and **204 entity labels**. Provider-wide tenant/user
+denominators, billing/API segmentation, stable identities, verified geography, and production
+session/arrival distributions remain missing.
+
 ## Status vocabulary
 
 | Status | Meaning |

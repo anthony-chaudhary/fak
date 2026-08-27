@@ -29,6 +29,14 @@ The benchmark task/instance counts are designed evaluation populations, not user
 arrival, turn-count, action-count, or tool-frequency distributions. No Zipf or other universal
 popularity law follows from these benchmarks; production trajectory telemetry remains required.
 
+## Public conversation denominator boundary (#9370)
+
+The new datasets expose real or crowdsourced conversation geometry but do not identify one
+universal user or popularity distribution. Anonymized/IP-derived users are not verified people;
+votes are not conversations; messages are not sessions; branches are not independent arrivals;
+language and inferred country are not tenant or spend shares. Any Zipf, geographic, session,
+turn-count, or model-demand claim still requires an explicit fitted population and collection bias.
+
 ## Distribution assumptions
 
 | Dimension | Convenient but weak default | Evidence-backed expectation | Benchmark requirement |

@@ -77,6 +77,14 @@ URLs**, and **200 entity labels**. Task counts, generated instances, websites, t
 tags, observations, actions, turns, users, sessions, and production arrivals remain separate
 denominators; benchmark success is not a production workload distribution.
 
+## Latest slice: public conversation populations (#9370)
+
+Four direct population records add LMSYS-Chat-1M, WildChat, Chatbot Arena preferences, and
+OpenAssistant conversation trees. The corpus now contains **241 entries**, **236 unique source
+URLs**, and **204 entity labels**. Conversations, messages/turns, trees, paths, votes, users or
+anonymized IDs, languages, countries, timestamps, model appearances, and production requests
+remain separate denominators; public and crowdsourced datasets are not provider-wide traffic.
+
 ## Result first
 
 The initial evidence already rejects several convenient defaults:

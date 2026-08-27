@@ -35,6 +35,15 @@ popularity, fixed token lengths.” The source-level claims and limitations rema
 | GAIA | 466 questions; 355 web, 154 coding, 138 multimodal, 129 diverse-file tags | Tags overlap; route by capability composition rather than summed counts. |
 | OSWorld | 369 real-computer tasks across 3 operating systems | Budget screenshots/state, GUI/CLI actions, files, apps, evaluators, and resets. |
 
+## Public conversation populations (#9370)
+
+| Dataset | Bounded population | Denominator boundary |
+|---|---|---|
+| LMSYS-Chat-1M | 1M conversations, 25 models, April-August 2023 | Public Vicuna/Arena opt-in traffic, not provider-wide production. |
+| WildChat | 1M conversations, ~2.5M turns, >68k anonymized users | IP-derived user/country fields are not verified people or universal regional weights. |
+| Chatbot Arena | >240k votes, >90k users, >50 models | Votes/users/model appearances are different and self-selected. |
+| OpenAssistant | 161,443 messages, 35 languages, 66,497 trees, 461,292 ratings, >13,500 volunteers | Branching crowdsourced alignment data, not an arrival stream. |
+
 ## Trace populations
 
 | Trace | Population and window | Scale | Directly observed fields | Boundary |
