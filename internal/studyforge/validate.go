@@ -284,9 +284,6 @@ func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords 
 			return fmt.Errorf("non_atomic_delta %s crawl window is invalid", name)
 		}
 	}
-	if err := validateNonAtomicDeltaPolicy(delta.Policy); err != nil {
-		return err
-	}
 	legacyExactShape := delta.EvidenceMode == "" &&
 		(delta.IdentityBasis == identityBasisCaptured || delta.IdentityBasis == identityBasisLegacyProjection) &&
 		delta.Overlap != nil && delta.OnlyInMixed != nil && delta.OnlyInDedicated != nil &&
@@ -296,8 +293,14 @@ func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords 
 	}
 	switch delta.EvidenceMode {
 	case NonAtomicDeltaEvidenceModeExactIdentity:
+		if err := validateNonAtomicDeltaPolicy(delta.Policy, NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference, true); err != nil {
+			return err
+		}
 		return validateExactNonAtomicDelta(r, issues, pullRecords, delta, requireComplete, legacyExactShape)
 	case NonAtomicDeltaEvidenceModeLegacyCountOnly:
+		if err := validateNonAtomicDeltaPolicy(delta.Policy, NonAtomicDeltaPolicyMetricEndpointCardinalityDelta, false); err != nil {
+			return err
+		}
 		return validateLegacyCountOnlyNonAtomicDelta(r, issues, pullRecords, delta, requireComplete)
 	default:
 		return fmt.Errorf("non_atomic_delta has invalid evidence_mode %q", delta.EvidenceMode)
@@ -306,7 +309,8 @@ func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords 
 
 func validateExactNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []Record, delta NonAtomicDeltaEvidence, requireComplete, legacyShape bool) error {
 	validBasis := delta.IdentityBasis == identityBasisCaptured || delta.IdentityBasis == identityBasisLegacyProjection
-	explicitProvenance := delta.EvidenceReason == "" &&
+	identityAvailabilityConsistent := delta.IdentitySetsAvailable == nil || *delta.IdentitySetsAvailable
+	explicitProvenance := identityAvailabilityConsistent && delta.EvidenceReason == "" &&
 		delta.MixedEvidence == CrossEndpointEvidenceExactIdentities &&
 		delta.DedicatedEvidence == CrossEndpointEvidenceExactIdentities &&
 		delta.RelationEvidence == CrossEndpointEvidenceExactIdentities
@@ -375,6 +379,10 @@ func validateExactNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []
 	if delta.MixedCount != len(issues.ClassifiedPullIdentities) || delta.DedicatedCount != len(dedicated) || *delta.OverlapCount != len(delta.Overlap) || *delta.OnlyInMixedCount != len(delta.OnlyInMixed) || *delta.OnlyInDedicatedCount != len(delta.OnlyInDedicated) || !validBounds {
 		return errors.New("non_atomic_delta counts contradict identity sets")
 	}
+	wantCardinalityDelta := absNonNegativeDifference(delta.MixedCount, delta.DedicatedCount)
+	if delta.ObservedEndpointCardinalityDelta != nil && *delta.ObservedEndpointCardinalityDelta != wantCardinalityDelta {
+		return errors.New("non_atomic_delta observed endpoint-cardinality delta contradicts counts")
+	}
 	accepted := len(delta.OnlyInMixed) <= delta.Policy.MaxOnlyInMixed && len(delta.OnlyInDedicated) <= delta.Policy.MaxOnlyInDedicated && total <= delta.Policy.MaxTotal
 	wantVerdict := NonAtomicDeltaVerdictRejected
 	if accepted {
@@ -394,7 +402,7 @@ func validateExactNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []
 }
 
 func validateLegacyCountOnlyNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []Record, delta NonAtomicDeltaEvidence, requireComplete bool) error {
-	if delta.IdentityBasis != identityBasisLegacyCountOnly || delta.EvidenceReason != legacyCountOnlyReason ||
+	if delta.IdentitySetsAvailable == nil || *delta.IdentitySetsAvailable || delta.IdentityBasis != identityBasisLegacyCountOnly || delta.EvidenceReason != legacyCountOnlyReason ||
 		delta.MixedEvidence != CrossEndpointEvidenceExactCountOnly ||
 		delta.DedicatedEvidence != CrossEndpointEvidenceExactIdentities ||
 		delta.RelationEvidence != CrossEndpointEvidenceUnavailable {
@@ -413,34 +421,42 @@ func validateLegacyCountOnlyNonAtomicDelta(r Receipt, issues SourceReceipt, pull
 	if delta.MixedCount != issues.ClassifiedPullCount || delta.DedicatedCount != len(dedicated) {
 		return errors.New("legacy count-only non_atomic_delta counts contradict endpoint evidence")
 	}
-	lower := delta.MixedCount - delta.DedicatedCount
-	if lower < 0 {
-		lower = -lower
+	if delta.MixedCount < 0 || delta.DedicatedCount < 0 {
+		return errors.New("legacy count-only non_atomic_delta endpoint counts must be non-negative")
+	}
+	lower := absNonNegativeDifference(delta.MixedCount, delta.DedicatedCount)
+	if delta.ObservedEndpointCardinalityDelta == nil {
+		return errors.New("legacy count-only non_atomic_delta observed endpoint-cardinality delta is missing")
+	}
+	if *delta.ObservedEndpointCardinalityDelta != lower {
+		return errors.New("legacy count-only non_atomic_delta observed endpoint-cardinality delta contradicts counts")
+	}
+	if delta.MixedCount > int(^uint(0)>>1)-delta.DedicatedCount {
+		return errors.New("legacy count-only non_atomic_delta possible symmetric-difference upper bound overflows")
 	}
 	upper := delta.MixedCount + delta.DedicatedCount
 	if delta.SymmetricDifferenceLowerBound != lower || delta.SymmetricDifferenceUpperBound != upper {
 		return errors.New("legacy count-only non_atomic_delta symmetric-difference bounds contradict counts")
 	}
-	minimumOnlyMixed := max(delta.MixedCount-delta.DedicatedCount, 0)
-	minimumOnlyDedicated := max(delta.DedicatedCount-delta.MixedCount, 0)
-	wantVerdict := NonAtomicDeltaVerdictCompatibleUnproven
-	if lower > delta.Policy.MaxTotal || minimumOnlyMixed > delta.Policy.MaxOnlyInMixed || minimumOnlyDedicated > delta.Policy.MaxOnlyInDedicated {
-		wantVerdict = NonAtomicDeltaVerdictRejected
-	} else if upper <= delta.Policy.MaxTotal && delta.MixedCount <= delta.Policy.MaxOnlyInMixed && delta.DedicatedCount <= delta.Policy.MaxOnlyInDedicated {
+	wantVerdict := NonAtomicDeltaVerdictRejected
+	if lower <= delta.Policy.MaxTotal {
 		wantVerdict = NonAtomicDeltaVerdictAccepted
 	}
 	if delta.Verdict != wantVerdict || delta.Accepted != (wantVerdict == NonAtomicDeltaVerdictAccepted) {
-		return errors.New("legacy count-only non_atomic_delta verdict contradicts its bounds and policy")
+		return errors.New("legacy count-only non_atomic_delta verdict contradicts its observed endpoint-cardinality delta and policy")
 	}
 	if wantVerdict != NonAtomicDeltaVerdictAccepted && (requireComplete || r.Status == StatusComplete) {
-		return fmt.Errorf("legacy count-only non_atomic_delta is %s: symmetric_difference=%d..%d", wantVerdict, lower, upper)
+		return fmt.Errorf("legacy count-only non_atomic_delta is rejected: endpoint_cardinality_delta=%d limit=%d", lower, delta.Policy.MaxTotal)
 	}
 	return nil
 }
 
-func validateNonAtomicDeltaPolicy(policy NonAtomicDeltaPolicy) error {
+func validateNonAtomicDeltaPolicy(policy NonAtomicDeltaPolicy, metric NonAtomicDeltaPolicyMetric, allowLegacyMissingMetric bool) error {
 	if policy.Type != NonAtomicDeltaPolicyType || policy.MaxOnlyInMixed < 0 || policy.MaxOnlyInDedicated < 0 || policy.MaxTotal < 0 || policy.MaxOnlyInMixed > DefaultNonAtomicDeltaLimit || policy.MaxOnlyInDedicated > DefaultNonAtomicDeltaLimit || policy.MaxTotal > DefaultNonAtomicDeltaLimit {
 		return errors.New("non_atomic_delta acceptance policy is missing or exceeds the repository bound")
+	}
+	if policy.Metric != metric && !(allowLegacyMissingMetric && policy.Metric == "") {
+		return fmt.Errorf("non_atomic_delta policy metric %q does not match evidence mode", policy.Metric)
 	}
 	return nil
 }

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestLegacyObservedCheckpointResumesAfter532IssueAnd348PullPagesWithoutRefetch(t *testing.T) {
+func TestLegacyObservedCheckpointResumesAfter532IssueAnd355PullPagesWithoutRefetch(t *testing.T) {
 	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	var (
 		mu    sync.Mutex
@@ -23,12 +23,16 @@ func TestLegacyObservedCheckpointResumesAfter532IssueAnd348PullPagesWithoutRefet
 		mu.Unlock()
 		switch r.URL.Path {
 		case "/repos/acme/widget/pulls":
-			if r.URL.Query().Get("page") != "349" {
+			if r.URL.Query().Get("page") != "356" {
 				t.Errorf("unexpected pulls refetch: %s", r.URL.RequestURI())
 				http.Error(w, "unexpected refetch", http.StatusConflict)
 				return
 			}
-			fmt.Fprint(w, `[]`)
+			ids := make([]int64, 51)
+			for i := range ids {
+				ids[i] = int64(200001 + i)
+			}
+			writeRows(w, ids, false)
 		case "/repos/acme/widget/discussions", "/repos/acme/widget/releases", "/repos/acme/widget/labels", "/repos/acme/widget/milestones":
 			fmt.Fprint(w, `[]`)
 		default:
@@ -49,27 +53,30 @@ func TestLegacyObservedCheckpointResumesAfter532IssueAnd348PullPagesWithoutRefet
 	resumed, err := collector.Capture(context.Background(), CaptureRequest{
 		Owner: "acme", Repository: "widget", Cutoff: cutoff, Resume: &checkpoint,
 	})
-	if err == nil || !strings.Contains(err.Error(), "compatible but unproven") {
-		t.Fatalf("Capture error = %v, want typed count-only partial", err)
+	if err != nil {
+		t.Fatalf("Capture error = %v", err)
 	}
-	if resumed.Receipt.Status != StatusPartial {
-		t.Fatalf("resumed status = %q, want partial", resumed.Receipt.Status)
+	if resumed.Receipt.Status != StatusComplete {
+		t.Fatalf("resumed status = %q, want complete", resumed.Receipt.Status)
 	}
 	delta := resumed.Receipt.NonAtomicDelta
-	if delta == nil || delta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly || delta.MixedCount != 35528 || delta.DedicatedCount != 34800 || delta.SymmetricDifferenceLowerBound != 728 || delta.SymmetricDifferenceUpperBound != 70328 || delta.Verdict != NonAtomicDeltaVerdictCompatibleUnproven {
+	if delta == nil || delta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly || delta.IdentitySetsAvailable == nil || *delta.IdentitySetsAvailable || delta.MixedCount != 35528 || delta.DedicatedCount != 35551 || pointedInt(delta.ObservedEndpointCardinalityDelta) != 23 || delta.SymmetricDifferenceLowerBound != 23 || delta.SymmetricDifferenceUpperBound != 71079 || delta.Policy.Metric != NonAtomicDeltaPolicyMetricEndpointCardinalityDelta || delta.Verdict != NonAtomicDeltaVerdictAccepted || !delta.Accepted {
 		t.Fatalf("count-only evidence = %+v", delta)
+	}
+	if err := Validate(resumed); err != nil {
+		t.Fatalf("completed legacy resume did not validate: %v", err)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if calls["/repos/acme/widget/pulls?page=349"] != 1 {
-		t.Fatalf("pull page 349 calls = %d, want 1", calls["/repos/acme/widget/pulls?page=349"])
+	if calls["/repos/acme/widget/pulls?page=356"] != 1 {
+		t.Fatalf("pull page 356 calls = %d, want 1", calls["/repos/acme/widget/pulls?page=356"])
 	}
 	for uri := range calls {
 		if strings.HasPrefix(uri, "/repos/acme/widget/issues") {
 			t.Fatalf("resume refetched one of 532 completed issue pages: %s", uri)
 		}
-		if strings.HasPrefix(uri, "/repos/acme/widget/pulls") && uri != "/repos/acme/widget/pulls?page=349" {
-			t.Fatalf("resume refetched one of 348 completed pull pages: %s", uri)
+		if strings.HasPrefix(uri, "/repos/acme/widget/pulls") && uri != "/repos/acme/widget/pulls?page=356" {
+			t.Fatalf("resume refetched one of 355 completed pull pages: %s", uri)
 		}
 	}
 }
@@ -81,12 +88,12 @@ func observedLegacyCheckpointForTest(baseURL string, cutoff time.Time) Corpus {
 	fetchedAt := cutoff.Format(time.RFC3339Nano)
 
 	issuesPages := observedPagesForTest(issuesEndpoint, repositoryURL+"/issues?page=", 532, 53134, "", fetchedAt)
-	pullsPages := observedPagesForTest(pullsEndpoint, repositoryURL+"/pulls?page=", 348, 34800, repositoryURL+"/pulls?page=349", fetchedAt)
-	records := make([]Record, 0, 17606+34800)
+	pullsPages := observedPagesForTest(pullsEndpoint, repositoryURL+"/pulls?page=", 355, 35500, repositoryURL+"/pulls?page=356", fetchedAt)
+	records := make([]Record, 0, 17606+35500)
 	for i := 1; i <= 17606; i++ {
 		records = append(records, Record{Source: "issues", Kind: "issue", ID: int64(i), Number: i})
 	}
-	for i := 1; i <= 34800; i++ {
+	for i := 1; i <= 35500; i++ {
 		records = append(records, Record{Source: "pulls", Kind: "pull", ID: int64(100000 + i), Number: i, NodeID: fmt.Sprintf("PR_%d", i)})
 	}
 	corpus := Corpus{
@@ -107,7 +114,7 @@ func observedLegacyCheckpointForTest(baseURL string, cutoff time.Time) Corpus {
 				},
 				{
 					Name: "pulls", Endpoint: pullsEndpoint, Status: StatusPartial,
-					CrawlStartedAt: fetchedAt, Pages: pullsPages, FetchedCount: 34800,
+					CrawlStartedAt: fetchedAt, Pages: pullsPages, FetchedCount: 35500,
 				},
 			},
 			API: []APIReceipt{

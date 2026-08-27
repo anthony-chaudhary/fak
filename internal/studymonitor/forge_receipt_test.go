@@ -53,6 +53,9 @@ func TestValidateStudyForgeAcceptsAlreadyUpgradedExactLegacyProjection(t *testin
 	delta.MixedEvidence = ""
 	delta.DedicatedEvidence = ""
 	delta.RelationEvidence = ""
+	delta.IdentitySetsAvailable = nil
+	delta.ObservedEndpointCardinalityDelta = nil
+	delta.Policy.Metric = ""
 	delta.SymmetricDifferenceLowerBound = 0
 	delta.SymmetricDifferenceUpperBound = 0
 	delta.Verdict = ""
@@ -64,7 +67,7 @@ func TestValidateStudyForgeAcceptsAlreadyUpgradedExactLegacyProjection(t *testin
 func TestValidateStudyForgeLegacyCountOnlyEvidenceObservedShape(t *testing.T) {
 	receipt := legacyCountOnlyStudyForgeReceiptForTest()
 	delta := receipt.NonAtomicDelta
-	if err := validateStudyForgeNonAtomicDelta(delta, receipt.Sources[0], receipt.Sources[1]); err != nil {
+	if err := ValidateStudyForgeReceiptEvidence(receipt, "owner/repo", "abc"); err != nil {
 		t.Fatalf("count-only evidence = %v", err)
 	}
 	if delta.EvidenceMode != studyForgeEvidenceModeLegacyCountOnly || delta.RelationEvidence != studyForgeEvidenceUnavailable {
@@ -73,14 +76,17 @@ func TestValidateStudyForgeLegacyCountOnlyEvidenceObservedShape(t *testing.T) {
 	if delta.Overlap != nil || delta.OnlyInMixed != nil || delta.OnlyInDedicated != nil || delta.OverlapCount != nil || delta.OnlyInMixedCount != nil || delta.OnlyInDedicatedCount != nil {
 		t.Fatalf("unrecoverable identity sets were fabricated: %+v", delta)
 	}
-	if delta.SymmetricDifferenceLowerBound != 24 || delta.SymmetricDifferenceUpperBound != 71032 {
-		t.Fatalf("possible symmetric difference = %d..%d, want [24,71032]", delta.SymmetricDifferenceLowerBound, delta.SymmetricDifferenceUpperBound)
+	if delta.IdentitySetsAvailable == nil || *delta.IdentitySetsAvailable {
+		t.Fatalf("legacy identity availability = %v, want explicit false", delta.IdentitySetsAvailable)
 	}
-	if delta.Verdict != studyForgePolicyEvaluationInconclusive || delta.Accepted {
-		t.Fatalf("count-only verdict = %+v, want typed inconclusive", delta)
+	if delta.SymmetricDifferenceLowerBound != 23 || delta.SymmetricDifferenceUpperBound != 71079 {
+		t.Fatalf("possible symmetric difference = %d..%d, want [23,71079]", delta.SymmetricDifferenceLowerBound, delta.SymmetricDifferenceUpperBound)
 	}
-	if err := ValidateStudyForgeReceiptEvidence(receipt, "owner/repo", "abc"); err == nil || !strings.Contains(err.Error(), `status must be complete, got "partial"`) {
-		t.Fatalf("partial count-only receipt validation = %v", err)
+	if delta.Policy.Metric != studyForgePolicyMetricCardinalityDelta || delta.ObservedEndpointCardinalityDelta == nil || *delta.ObservedEndpointCardinalityDelta != 23 {
+		t.Fatalf("count-only policy metric = %+v", delta)
+	}
+	if delta.Verdict != studyForgePolicyEvaluationAccepted || !delta.Accepted {
+		t.Fatalf("count-only verdict = %+v, want accepted cardinality delta", delta)
 	}
 }
 
@@ -98,6 +104,14 @@ func TestValidateStudyForgeLegacyCountOnlyRejectsContradictoryShapes(t *testing.
 			want: "identity sets must be unavailable",
 		},
 		{
+			name: "fabricated relation count",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				count := 0
+				receipt.NonAtomicDelta.OverlapCount = &count
+			},
+			want: "identity sets must be unavailable",
+		},
+		{
 			name: "forged bound",
 			edit: func(receipt *StudyForgeReceiptEvidence) {
 				receipt.NonAtomicDelta.SymmetricDifferenceLowerBound++
@@ -105,12 +119,62 @@ func TestValidateStudyForgeLegacyCountOnlyRejectsContradictoryShapes(t *testing.
 			want: "bounds contradict endpoint counts",
 		},
 		{
-			name: "forged accepted verdict",
+			name: "wrong verdict",
 			edit: func(receipt *StudyForgeReceiptEvidence) {
-				receipt.NonAtomicDelta.Verdict = studyForgePolicyEvaluationAccepted
-				receipt.NonAtomicDelta.Accepted = true
+				receipt.NonAtomicDelta.Verdict = studyForgePolicyEvaluationRejected
+				receipt.NonAtomicDelta.Accepted = false
 			},
-			want: "verdict contradicts its bounds and policy",
+			want: "verdict contradicts its observed metric and policy",
+		},
+		{
+			name: "wrong policy metric",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				receipt.NonAtomicDelta.Policy.Metric = studyForgePolicyMetricIdentityDelta
+			},
+			want: "acceptance policy is missing or unbounded",
+		},
+		{
+			name: "missing policy metric",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				receipt.NonAtomicDelta.Policy.Metric = ""
+			},
+			want: "acceptance policy is missing or unbounded",
+		},
+		{
+			name: "wrong observed cardinality delta",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				*receipt.NonAtomicDelta.ObservedEndpointCardinalityDelta++
+			},
+			want: "observed endpoint cardinality delta contradicts endpoint counts",
+		},
+		{
+			name: "missing observed cardinality delta",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				receipt.NonAtomicDelta.ObservedEndpointCardinalityDelta = nil
+			},
+			want: "observed endpoint cardinality delta contradicts endpoint counts",
+		},
+		{
+			name: "missing reason",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				receipt.NonAtomicDelta.EvidenceReason = ""
+			},
+			want: "legacy count-only reason",
+		},
+		{
+			name: "identity availability missing",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				receipt.NonAtomicDelta.IdentitySetsAvailable = nil
+			},
+			want: "identity_sets_available must be false",
+		},
+		{
+			name: "identity availability forged true",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				available := true
+				receipt.NonAtomicDelta.IdentitySetsAvailable = &available
+			},
+			want: "identity_sets_available must be false",
 		},
 		{
 			name: "projected basis",
@@ -126,6 +190,17 @@ func TestValidateStudyForgeLegacyCountOnlyRejectsContradictoryShapes(t *testing.
 			},
 			want: "counts contradict endpoint evidence",
 		},
+		{
+			name: "overflow",
+			edit: func(receipt *StudyForgeReceiptEvidence) {
+				maxInt := int(^uint(0) >> 1)
+				receipt.Sources[0].ClassifiedPullCount = maxInt
+				receipt.Sources[1].NormalizedCount = 1
+				receipt.NonAtomicDelta.MixedCount = maxInt
+				receipt.NonAtomicDelta.DedicatedCount = 1
+			},
+			want: "overflow symmetric-difference bounds",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,27 +215,53 @@ func TestValidateStudyForgeLegacyCountOnlyRejectsContradictoryShapes(t *testing.
 }
 
 func TestValidateStudyForgeLegacyCountOnlyPolicyProofSemantics(t *testing.T) {
-	t.Run("tiny cardinalities prove acceptance", func(t *testing.T) {
-		receipt := validStudyForgeReceiptForTest()
-		receipt.NonAtomicDelta = legacyCountOnlyDeltaForTest(1, 2, studyForgePolicyEvaluationAccepted)
+	t.Run("terminal cardinality delta within bound is accepted", func(t *testing.T) {
+		receipt := legacyCountOnlyStudyForgeReceiptForTest()
 		if err := ValidateStudyForgeReceiptEvidence(receipt, "owner/repo", "abc"); err != nil {
-			t.Fatalf("provably bounded count-only receipt = %v", err)
+			t.Fatalf("within-bound count-only receipt = %v", err)
 		}
 	})
 
-	t.Run("absurd cardinality drift proves rejection", func(t *testing.T) {
+	t.Run("cardinality delta over bound is rejected", func(t *testing.T) {
 		receipt := legacyCountOnlyStudyForgeReceiptForTest()
-		receipt.Status = "complete"
-		receipt.Sources[1].FetchedCount = 50000
-		receipt.Sources[1].NormalizedCount = 50000
-		receipt.Sources[1].UniqueCount = 50000
-		receipt.NonAtomicDelta = legacyCountOnlyDeltaForTest(35528, 50000, studyForgePolicyEvaluationRejected)
+		receipt.Sources[1].FetchedCount = 36529
+		receipt.Sources[1].NormalizedCount = 36529
+		receipt.Sources[1].UniqueCount = 36529
+		receipt.NonAtomicDelta = legacyCountOnlyDeltaForTest(35528, 36529, studyForgePolicyEvaluationRejected)
 		if err := validateStudyForgeNonAtomicDelta(receipt.NonAtomicDelta, receipt.Sources[0], receipt.Sources[1]); err != nil {
 			t.Fatalf("typed rejected evidence = %v", err)
 		}
 		err := ValidateStudyForgeReceiptEvidence(receipt, "owner/repo", "abc")
 		if err == nil || !strings.Contains(err.Error(), "did not prove policy acceptance") {
 			t.Fatalf("complete rejected receipt validation = %v", err)
+		}
+	})
+}
+
+func TestValidateStudyForgeExactIdentityPolicyMetricRemainsStrict(t *testing.T) {
+	t.Run("exact identity evidence remains accepted", func(t *testing.T) {
+		receipt := validStudyForgeReceiptForTest()
+		if err := ValidateStudyForgeReceiptEvidence(receipt, "owner/repo", "abc"); err != nil {
+			t.Fatalf("exact receipt rejected: %v", err)
+		}
+	})
+
+	t.Run("legacy cardinality metric is rejected for exact evidence", func(t *testing.T) {
+		receipt := validStudyForgeReceiptForTest()
+		receipt.NonAtomicDelta.Policy.Metric = studyForgePolicyMetricCardinalityDelta
+		err := ValidateStudyForgeReceiptEvidence(receipt, "owner/repo", "abc")
+		if err == nil || !strings.Contains(err.Error(), "acceptance policy is missing or unbounded") {
+			t.Fatalf("exact metric mismatch validation = %v", err)
+		}
+	})
+
+	t.Run("identity symmetric difference still controls acceptance", func(t *testing.T) {
+		receipt := validStudyForgeReceiptForTest()
+		delta := receipt.NonAtomicDelta
+		delta.Policy.MaxTotal = 0
+		err := ValidateStudyForgeReceiptEvidence(receipt, "owner/repo", "abc")
+		if err == nil || !strings.Contains(err.Error(), "policy did not accept the endpoint drift") {
+			t.Fatalf("exact symmetric-difference validation = %v", err)
 		}
 	})
 }
@@ -281,15 +382,14 @@ func validStudyForgeReceiptForTest() StudyForgeReceiptEvidence {
 
 func legacyCountOnlyStudyForgeReceiptForTest() StudyForgeReceiptEvidence {
 	receipt := validStudyForgeReceiptForTest()
-	receipt.Status = "partial"
 	receipt.Sources[0].FetchedCount = 53134
 	receipt.Sources[0].NormalizedCount = 17606
 	receipt.Sources[0].UniqueCount = 17606
 	receipt.Sources[0].ClassifiedPullCount = 35528
-	receipt.Sources[1].FetchedCount = 35504
-	receipt.Sources[1].NormalizedCount = 35504
-	receipt.Sources[1].UniqueCount = 35504
-	receipt.NonAtomicDelta = legacyCountOnlyDeltaForTest(35528, 35504, studyForgePolicyEvaluationInconclusive)
+	receipt.Sources[1].FetchedCount = 35551
+	receipt.Sources[1].NormalizedCount = 35551
+	receipt.Sources[1].UniqueCount = 35551
+	receipt.NonAtomicDelta = legacyCountOnlyDeltaForTest(35528, 35551, studyForgePolicyEvaluationAccepted)
 	return receipt
 }
 
@@ -298,24 +398,29 @@ func legacyCountOnlyDeltaForTest(mixed, dedicated int, evaluation string) *Study
 	if lower < 0 {
 		lower = -lower
 	}
+	identitySetsAvailable := false
+	observedEndpointCardinalityDelta := lower
 	return &StudyForgeNonAtomicDeltaEvidence{
-		Type:                          "non_atomic_delta",
-		MixedSource:                   "issues",
-		DedicatedSource:               "pulls",
-		EvidenceMode:                  studyForgeEvidenceModeLegacyCountOnly,
-		IdentityBasis:                 studyForgeLegacyCountOnlyBasis,
-		EvidenceReason:                studyForgeLegacyCountOnlyReason,
-		MixedEvidence:                 studyForgeEvidenceExactCountOnly,
-		DedicatedEvidence:             studyForgeEvidenceExactIdentities,
-		RelationEvidence:              studyForgeEvidenceUnavailable,
-		MixedCrawl:                    StudyForgeCrawlWindow{StartedAt: "2026-08-26T22:00:00Z", EndedAt: "2026-08-26T22:01:00Z"},
-		DedicatedCrawl:                StudyForgeCrawlWindow{StartedAt: "2026-08-26T22:01:00Z", EndedAt: "2026-08-26T22:02:00Z"},
-		MixedCount:                    mixed,
-		DedicatedCount:                dedicated,
-		SymmetricDifferenceLowerBound: lower,
-		SymmetricDifferenceUpperBound: mixed + dedicated,
+		Type:                             "non_atomic_delta",
+		MixedSource:                      "issues",
+		DedicatedSource:                  "pulls",
+		EvidenceMode:                     studyForgeEvidenceModeLegacyCountOnly,
+		IdentitySetsAvailable:            &identitySetsAvailable,
+		IdentityBasis:                    studyForgeLegacyCountOnlyBasis,
+		EvidenceReason:                   studyForgeLegacyCountOnlyReason,
+		MixedEvidence:                    studyForgeEvidenceExactCountOnly,
+		DedicatedEvidence:                studyForgeEvidenceExactIdentities,
+		RelationEvidence:                 studyForgeEvidenceUnavailable,
+		MixedCrawl:                       StudyForgeCrawlWindow{StartedAt: "2026-08-26T22:00:00Z", EndedAt: "2026-08-26T22:01:00Z"},
+		DedicatedCrawl:                   StudyForgeCrawlWindow{StartedAt: "2026-08-26T22:01:00Z", EndedAt: "2026-08-26T22:02:00Z"},
+		MixedCount:                       mixed,
+		DedicatedCount:                   dedicated,
+		SymmetricDifferenceLowerBound:    lower,
+		SymmetricDifferenceUpperBound:    mixed + dedicated,
+		ObservedEndpointCardinalityDelta: &observedEndpointCardinalityDelta,
 		Policy: &StudyForgeNonAtomicDeltaPolicy{
 			Type:               "bounded_identity_delta",
+			Metric:             studyForgePolicyMetricCardinalityDelta,
 			MaxOnlyInMixed:     1000,
 			MaxOnlyInDedicated: 1000,
 			MaxTotal:           1000,

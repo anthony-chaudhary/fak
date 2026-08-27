@@ -15,6 +15,8 @@ const (
 
 func intPointer(value int) *int { return &value }
 
+func boolPointer(value bool) *bool { return &value }
+
 func identityFromRecord(record Record) CrossEndpointIdentity {
 	return CrossEndpointIdentity{ID: record.ID, Number: record.Number, NodeID: record.NodeID}
 }
@@ -57,9 +59,10 @@ func backfillCrawlWindow(source *SourceReceipt) {
 	}
 }
 
-func defaultNonAtomicDeltaPolicy() NonAtomicDeltaPolicy {
+func defaultNonAtomicDeltaPolicy(metric NonAtomicDeltaPolicyMetric) NonAtomicDeltaPolicy {
 	return NonAtomicDeltaPolicy{
 		Type:               NonAtomicDeltaPolicyType,
+		Metric:             metric,
 		MaxOnlyInMixed:     DefaultNonAtomicDeltaLimit,
 		MaxOnlyInDedicated: DefaultNonAtomicDeltaLimit,
 		MaxTotal:           DefaultNonAtomicDeltaLimit,
@@ -92,15 +95,13 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 	}
 
 	if corpus.Receipt.NonAtomicDelta != nil && corpus.Receipt.NonAtomicDelta.EvidenceMode == NonAtomicDeltaEvidenceModeLegacyCountOnly {
-		reconcileLegacyCountOnlyDelta(corpus, *issues, *pulls)
-		switch corpus.Receipt.NonAtomicDelta.Verdict {
-		case NonAtomicDeltaVerdictAccepted:
-			return nil
-		case NonAtomicDeltaVerdictRejected:
-			return fmt.Errorf("legacy count-only non_atomic_delta rejected: symmetric_difference_lower_bound=%d limit=%d", corpus.Receipt.NonAtomicDelta.SymmetricDifferenceLowerBound, corpus.Receipt.NonAtomicDelta.Policy.MaxTotal)
-		default:
-			return fmt.Errorf("legacy count-only non_atomic_delta is compatible but unproven: symmetric_difference=%d..%d limit=%d", corpus.Receipt.NonAtomicDelta.SymmetricDifferenceLowerBound, corpus.Receipt.NonAtomicDelta.SymmetricDifferenceUpperBound, corpus.Receipt.NonAtomicDelta.Policy.MaxTotal)
+		if err := reconcileLegacyCountOnlyDelta(corpus, *issues, *pulls); err != nil {
+			return err
 		}
+		if !corpus.Receipt.NonAtomicDelta.Accepted {
+			return fmt.Errorf("legacy count-only non_atomic_delta rejected: endpoint_cardinality_delta=%d limit=%d", *corpus.Receipt.NonAtomicDelta.ObservedEndpointCardinalityDelta, corpus.Receipt.NonAtomicDelta.Policy.MaxTotal)
+		}
+		return nil
 	}
 	basis := identityBasisCaptured
 	if corpus.Receipt.NonAtomicDelta != nil && corpus.Receipt.NonAtomicDelta.IdentityBasis == identityBasisLegacyProjection {
@@ -142,7 +143,9 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 			onlyDedicated = append(onlyDedicated, identity)
 		}
 	}
-	policy := defaultNonAtomicDeltaPolicy()
+	// Exact receipts retain their established bounded_identity_delta policy
+	// shape. The typed metric is required only for the legacy count-only mode.
+	policy := defaultNonAtomicDeltaPolicy("")
 	accepted := len(onlyMixed) <= policy.MaxOnlyInMixed && len(onlyDedicated) <= policy.MaxOnlyInDedicated && len(onlyMixed)+len(onlyDedicated) <= policy.MaxTotal
 	corpus.Receipt.NonAtomicDelta = &NonAtomicDeltaEvidence{
 		Type:                          NonAtomicDeltaType,
@@ -175,43 +178,50 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 	return nil
 }
 
-func reconcileLegacyCountOnlyDelta(corpus *Corpus, issues, pulls SourceReceipt) {
+func reconcileLegacyCountOnlyDelta(corpus *Corpus, issues, pulls SourceReceipt) error {
 	mixedCount := issues.ClassifiedPullCount
 	dedicatedCount := len(recordsForSource(corpus.Records, "pulls"))
-	lower := mixedCount - dedicatedCount
-	if lower < 0 {
-		lower = -lower
+	if mixedCount < 0 || dedicatedCount < 0 {
+		return fmt.Errorf("legacy count-only non_atomic_delta endpoint counts must be non-negative: mixed=%d dedicated=%d", mixedCount, dedicatedCount)
+	}
+	lower := absNonNegativeDifference(mixedCount, dedicatedCount)
+	if mixedCount > int(^uint(0)>>1)-dedicatedCount {
+		return fmt.Errorf("legacy count-only non_atomic_delta possible symmetric-difference upper bound overflows: mixed=%d dedicated=%d", mixedCount, dedicatedCount)
 	}
 	upper := mixedCount + dedicatedCount
-	policy := defaultNonAtomicDeltaPolicy()
-	minimumOnlyMixed := max(mixedCount-dedicatedCount, 0)
-	minimumOnlyDedicated := max(dedicatedCount-mixedCount, 0)
-	verdict := NonAtomicDeltaVerdictCompatibleUnproven
-	if lower > policy.MaxTotal || minimumOnlyMixed > policy.MaxOnlyInMixed || minimumOnlyDedicated > policy.MaxOnlyInDedicated {
-		verdict = NonAtomicDeltaVerdictRejected
-	} else if upper <= policy.MaxTotal && mixedCount <= policy.MaxOnlyInMixed && dedicatedCount <= policy.MaxOnlyInDedicated {
-		verdict = NonAtomicDeltaVerdictAccepted
-	}
+	policy := defaultNonAtomicDeltaPolicy(NonAtomicDeltaPolicyMetricEndpointCardinalityDelta)
+	accepted := lower <= policy.MaxTotal
+	verdict := map[bool]string{true: NonAtomicDeltaVerdictAccepted, false: NonAtomicDeltaVerdictRejected}[accepted]
 	corpus.Receipt.NonAtomicDelta = &NonAtomicDeltaEvidence{
-		Type:                          NonAtomicDeltaType,
-		MixedSource:                   "issues",
-		DedicatedSource:               "pulls",
-		EvidenceMode:                  NonAtomicDeltaEvidenceModeLegacyCountOnly,
-		EvidenceReason:                legacyCountOnlyReason,
-		IdentityBasis:                 identityBasisLegacyCountOnly,
-		MixedEvidence:                 CrossEndpointEvidenceExactCountOnly,
-		DedicatedEvidence:             CrossEndpointEvidenceExactIdentities,
-		RelationEvidence:              CrossEndpointEvidenceUnavailable,
-		MixedCrawl:                    CrawlWindow{StartedAt: issues.CrawlStartedAt, EndedAt: issues.CrawlEndedAt},
-		DedicatedCrawl:                CrawlWindow{StartedAt: pulls.CrawlStartedAt, EndedAt: pulls.CrawlEndedAt},
-		MixedCount:                    mixedCount,
-		DedicatedCount:                dedicatedCount,
-		SymmetricDifferenceLowerBound: lower,
-		SymmetricDifferenceUpperBound: upper,
-		Policy:                        policy,
-		Verdict:                       verdict,
-		Accepted:                      verdict == NonAtomicDeltaVerdictAccepted,
+		Type:                             NonAtomicDeltaType,
+		MixedSource:                      "issues",
+		DedicatedSource:                  "pulls",
+		EvidenceMode:                     NonAtomicDeltaEvidenceModeLegacyCountOnly,
+		EvidenceReason:                   legacyCountOnlyReason,
+		IdentitySetsAvailable:            boolPointer(false),
+		IdentityBasis:                    identityBasisLegacyCountOnly,
+		MixedEvidence:                    CrossEndpointEvidenceExactCountOnly,
+		DedicatedEvidence:                CrossEndpointEvidenceExactIdentities,
+		RelationEvidence:                 CrossEndpointEvidenceUnavailable,
+		MixedCrawl:                       CrawlWindow{StartedAt: issues.CrawlStartedAt, EndedAt: issues.CrawlEndedAt},
+		DedicatedCrawl:                   CrawlWindow{StartedAt: pulls.CrawlStartedAt, EndedAt: pulls.CrawlEndedAt},
+		MixedCount:                       mixedCount,
+		DedicatedCount:                   dedicatedCount,
+		ObservedEndpointCardinalityDelta: intPointer(lower),
+		SymmetricDifferenceLowerBound:    lower,
+		SymmetricDifferenceUpperBound:    upper,
+		Policy:                           policy,
+		Verdict:                          verdict,
+		Accepted:                         accepted,
 	}
+	return nil
+}
+
+func absNonNegativeDifference(a, b int) int {
+	if a >= b {
+		return a - b
+	}
+	return b - a
 }
 
 // upgradeLegacyMixedPullEvidence performs the one-way pre-#9314 migration.
@@ -247,7 +257,9 @@ func upgradeLegacyMixedPullEvidence(corpus *Corpus) (bool, error) {
 	for i := range upgraded.Receipt.Sources {
 		backfillCrawlWindow(&upgraded.Receipt.Sources[i])
 	}
-	reconcileLegacyCountOnlyDelta(&upgraded, upgraded.Receipt.Sources[issuesIndex], upgraded.Receipt.Sources[pullsIndex])
+	if err := reconcileLegacyCountOnlyDelta(&upgraded, upgraded.Receipt.Sources[issuesIndex], upgraded.Receipt.Sources[pullsIndex]); err != nil {
+		return false, err
+	}
 	*corpus = upgraded
 	return true, nil
 }

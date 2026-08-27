@@ -33,6 +33,9 @@ const (
 	NonAtomicDeltaEvidenceModeExactIdentity   = "exact_identity"
 	NonAtomicDeltaEvidenceModeLegacyCountOnly = "legacy_count_only"
 
+	NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference NonAtomicDeltaPolicyMetric = "exact_identity_symmetric_difference"
+	NonAtomicDeltaPolicyMetricEndpointCardinalityDelta         NonAtomicDeltaPolicyMetric = "endpoint_cardinality_delta"
+
 	CrossEndpointEvidenceExactIdentities = "exact_identities"
 	CrossEndpointEvidenceExactCountOnly  = "exact_count_only"
 	CrossEndpointEvidenceUnavailable     = "unavailable"
@@ -41,6 +44,10 @@ const (
 	NonAtomicDeltaVerdictRejected           = "rejected"
 	NonAtomicDeltaVerdictCompatibleUnproven = "compatible_unproven"
 )
+
+// NonAtomicDeltaPolicyMetric names the observation to which a receipt's
+// declared acceptance bound is applied.
+type NonAtomicDeltaPolicyMetric string
 
 // SourceNames is the stable collection and receipt order.
 var SourceNames = []string{"issues", "pulls", "discussions", "releases", "labels", "milestones"}
@@ -127,44 +134,50 @@ type CrawlWindow struct {
 }
 
 // NonAtomicDeltaPolicy is the declared, deterministic acceptance envelope.
-// All three bounds must hold; a zero value is a real zero-tolerance policy.
+// Exact identity evidence applies all three bounds to its proven relation.
+// Legacy count-only evidence applies MaxTotal to its endpoint-cardinality
+// delta; the unavailable relation cannot honestly be tested against set bounds.
 type NonAtomicDeltaPolicy struct {
-	Type               string `json:"type"`
-	MaxOnlyInMixed     int    `json:"max_only_in_mixed"`
-	MaxOnlyInDedicated int    `json:"max_only_in_dedicated"`
-	MaxTotal           int    `json:"max_total"`
+	Type               string                     `json:"type"`
+	Metric             NonAtomicDeltaPolicyMetric `json:"metric,omitempty"`
+	MaxOnlyInMixed     int                        `json:"max_only_in_mixed"`
+	MaxOnlyInDedicated int                        `json:"max_only_in_dedicated"`
+	MaxTotal           int                        `json:"max_total"`
 }
 
 // NonAtomicDeltaEvidence reconciles two authoritative endpoint traversals
 // without pretending they were an atomic snapshot. Exact-identity evidence
 // carries non-nil identity sets and counts. The one legacy count-only mode
-// carries nil set/count fields plus conservative symmetric-difference bounds,
+// carries nil relation set/count fields plus an observed endpoint-cardinality
+// delta. Its conservative symmetric-difference range is informational only,
 // so unavailable identities cannot be confused with proven-empty sets.
 type NonAtomicDeltaEvidence struct {
-	Type                          string                  `json:"type"`
-	MixedSource                   string                  `json:"mixed_source"`
-	DedicatedSource               string                  `json:"dedicated_source"`
-	EvidenceMode                  string                  `json:"evidence_mode"`
-	EvidenceReason                string                  `json:"evidence_reason,omitempty"`
-	IdentityBasis                 string                  `json:"identity_basis"`
-	MixedEvidence                 string                  `json:"mixed_evidence"`
-	DedicatedEvidence             string                  `json:"dedicated_evidence"`
-	RelationEvidence              string                  `json:"relation_evidence"`
-	MixedCrawl                    CrawlWindow             `json:"mixed_crawl"`
-	DedicatedCrawl                CrawlWindow             `json:"dedicated_crawl"`
-	MixedCount                    int                     `json:"mixed_count"`
-	DedicatedCount                int                     `json:"dedicated_count"`
-	OverlapCount                  *int                    `json:"overlap_count"`
-	OnlyInMixedCount              *int                    `json:"only_in_mixed_count"`
-	OnlyInDedicatedCount          *int                    `json:"only_in_dedicated_count"`
-	Overlap                       []CrossEndpointIdentity `json:"overlap"`
-	OnlyInMixed                   []CrossEndpointIdentity `json:"only_in_mixed"`
-	OnlyInDedicated               []CrossEndpointIdentity `json:"only_in_dedicated"`
-	SymmetricDifferenceLowerBound int                     `json:"symmetric_difference_lower_bound"`
-	SymmetricDifferenceUpperBound int                     `json:"symmetric_difference_upper_bound"`
-	Policy                        NonAtomicDeltaPolicy    `json:"policy"`
-	Verdict                       string                  `json:"verdict"`
-	Accepted                      bool                    `json:"accepted"`
+	Type                             string                  `json:"type"`
+	MixedSource                      string                  `json:"mixed_source"`
+	DedicatedSource                  string                  `json:"dedicated_source"`
+	EvidenceMode                     string                  `json:"evidence_mode"`
+	EvidenceReason                   string                  `json:"evidence_reason,omitempty"`
+	IdentitySetsAvailable            *bool                   `json:"identity_sets_available,omitempty"`
+	IdentityBasis                    string                  `json:"identity_basis"`
+	MixedEvidence                    string                  `json:"mixed_evidence"`
+	DedicatedEvidence                string                  `json:"dedicated_evidence"`
+	RelationEvidence                 string                  `json:"relation_evidence"`
+	MixedCrawl                       CrawlWindow             `json:"mixed_crawl"`
+	DedicatedCrawl                   CrawlWindow             `json:"dedicated_crawl"`
+	MixedCount                       int                     `json:"mixed_count"`
+	DedicatedCount                   int                     `json:"dedicated_count"`
+	ObservedEndpointCardinalityDelta *int                    `json:"observed_endpoint_cardinality_delta,omitempty"`
+	OverlapCount                     *int                    `json:"overlap_count"`
+	OnlyInMixedCount                 *int                    `json:"only_in_mixed_count"`
+	OnlyInDedicatedCount             *int                    `json:"only_in_dedicated_count"`
+	Overlap                          []CrossEndpointIdentity `json:"overlap"`
+	OnlyInMixed                      []CrossEndpointIdentity `json:"only_in_mixed"`
+	OnlyInDedicated                  []CrossEndpointIdentity `json:"only_in_dedicated"`
+	SymmetricDifferenceLowerBound    int                     `json:"symmetric_difference_lower_bound"`
+	SymmetricDifferenceUpperBound    int                     `json:"symmetric_difference_upper_bound"`
+	Policy                           NonAtomicDeltaPolicy    `json:"policy"`
+	Verdict                          string                  `json:"verdict"`
+	Accepted                         bool                    `json:"accepted"`
 }
 
 // PageReceipt binds a page body digest to its pagination and API evidence.
