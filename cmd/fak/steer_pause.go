@@ -19,7 +19,6 @@ package main
 // view (a unit that dissolved while paused must still be releasable).
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"time"
@@ -33,41 +32,17 @@ import (
 func runSteerPause(stdout, stderr io.Writer, argv []string) int {
 	// The unit name may come before the flags or after them; accept both.
 	unitArg, argv := splitSteerUnitArg(argv)
-	fs := flag.NewFlagSet("fak steer pause", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	note := fs.String("m", "", "optional reason recorded with the hold (why the spend should stop)")
-	by := fs.String("by", "", "who is pausing (default: git config user.name; the row must be attributable)")
-	base := fs.String("base", "", "range base ref (default: origin/<release_branch>)")
-	head := fs.String("head", "", "range head ref (default: <release_source> tip)")
-	if !parseFlags(fs, argv) {
-		return 2
-	}
+	pauseFlags := newSteerActorCommand("fak steer pause", stderr, argv, unitArg, "is pausing")
+	note := pauseFlags.String("m", "", "optional reason recorded with the hold (why the spend should stop)")
+	base := pauseFlags.String("base", "", "range base ref (default: origin/<release_branch>)")
+	head := pauseFlags.String("head", "", "range head ref (default: <release_source> tip)")
 	const usage = `usage: fak steer pause <unit> [-m "<reason>"] [--by WHO] [--base REF] [--head REF]`
-	var ok bool
-	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
-		return 2
+	unit, root, who, code := pauseFlags.resolveUnit(usage, base, head,
+		"fak steer pause: unit %q binds no issue (#N), so the dispatch loop would have nothing to hold — `fak steer redirect` can still re-aim it\n")
+	if code != 0 {
+		return code
 	}
 
-	root := steerRoot()
-	unit, view, err := resolveSteerUnit(root, *base, *head, unitArg)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak steer pause: %v\n", err)
-		return 1
-	}
-	if unit == nil {
-		fmt.Fprintf(stderr, "fak steer pause: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
-			unitArg, releaseStatusString(view["range"]))
-		return 1
-	}
-	if len(unit.Resolves) == 0 {
-		// The dispatch loop holds work by issue number; a unit that binds no
-		// issue leaves the hold nothing to land on. Refusing (rather than
-		// ledgering a no-op) keeps every ledgered pause a real hold.
-		fmt.Fprintf(stderr, "fak steer pause: unit %q binds no issue (#N), so the dispatch loop would have nothing to hold — `fak steer redirect` can still re-aim it\n", unitArg)
-		return 1
-	}
-
-	who := steerActor(root, *by)
 	rec, err := steerpr.NewPause(unit.Leaf, who, *note, unit.Resolves[0], time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer pause: %v\n", err)
@@ -94,16 +69,11 @@ func runSteerPause(stdout, stderr io.Writer, argv []string) int {
 // silent starvation leak the verb pair exists to prevent.
 func runSteerResume(stdout, stderr io.Writer, argv []string) int {
 	unitArg, argv := splitSteerUnitArg(argv)
-	fs := flag.NewFlagSet("fak steer resume", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	by := fs.String("by", "", "who is releasing (default: git config user.name; the row must be attributable)")
-	if !parseFlags(fs, argv) {
-		return 2
-	}
+	resumeFlags := newSteerActorCommand("fak steer resume", stderr, argv, unitArg, "is releasing")
 	const usage = `usage: fak steer resume <unit> [--by WHO]`
-	var ok bool
-	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
-		return 2
+	unitArg, code := resumeFlags.parseUnit(usage)
+	if code != 0 {
+		return code
 	}
 
 	root := steerRoot()
@@ -112,7 +82,7 @@ func runSteerResume(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak steer resume: %q is not paused — nothing to release\n", unitArg)
 		return 1
 	}
-	who := steerActor(root, *by)
+	who := resumeFlags.actorName(root)
 	rec, err := steerpr.NewResume(unitArg, who, held.Issue, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "fak steer resume: %v\n", err)

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 
@@ -32,6 +33,32 @@ func withSteerFakes(t *testing.T, log string, feat steerpr.Verdict) {
 	releasePRPlanGit = prPlanFakeGit(log)
 	steerPRsVerdicts = steerFakeVerdicts(feat)
 	t.Cleanup(func() { releasePRPlanGit, steerPRsVerdicts = origGit, origVerdicts })
+}
+
+func TestSteerActorFlagHelpPreservesCommandWording(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(io.Writer, io.Writer, []string) int
+		want string
+	}{
+		{name: "comment", run: runSteerComment, want: "who is annotating"},
+		{name: "pause", run: runSteerPause, want: "who is pausing"},
+		{name: "resume", run: runSteerResume, want: "who is releasing"},
+		{name: "ack", run: runSteerAck, want: "who looked"},
+		{name: "redirect", run: runSteerRedirect, want: "who is steering"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if code := tt.run(&stdout, &stderr, []string{"--help"}); code != 2 {
+				t.Fatalf("help exit = %d, want 2", code)
+			}
+			want := tt.want + " (default: git config user.name; the row must be attributable)"
+			if !strings.Contains(stderr.String(), want) {
+				t.Fatalf("help missing %q:\n%s", want, stderr.String())
+			}
+		})
+	}
 }
 
 // An unwitnessed member floors its whole unit to RESIDUAL (the worst member
