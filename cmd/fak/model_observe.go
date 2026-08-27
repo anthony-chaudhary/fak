@@ -157,6 +157,12 @@ func runModelObserveBandwidthCollect(args []string) error {
 	hostCounterScope := fs.String("host-counter-scope", "", "host counter scope: system, socket, or controller")
 	hostCounterScopeID := fs.String("host-counter-scope-id", "", "socket/controller scope identifier")
 	hostCounterBytesPerEvent := fs.Uint64("host-counter-bytes-per-event", 0, "explicit byte conversion for perf event counters")
+	appleMemoryImport := fs.String("apple-memory-import", "", "import normalized Apple unified-memory counters instead of live sampling")
+	appleMemoryFormat := fs.String("apple-memory-format", "auto", "Apple memory counter format: auto or generic-json")
+	appleMemoryProvider := fs.String("apple-memory-provider", "", "provider that produced the normalized Apple memory counters")
+	appleMemoryProviderVersion := fs.String("apple-memory-provider-version", "", "exact Apple memory counter provider/tool version")
+	appleMemoryScope := fs.String("apple-memory-scope", "", "Apple memory counter scope: system or package")
+	appleMemoryInterval := fs.Duration("apple-memory-interval", 0, "explicit Apple counter capture interval; must match the artifact")
 	profileDevice := fs.String("device", "", "profiled NVIDIA device name or UUID (required with --nvidia-ncu-csv)")
 	captureStart := fs.String("capture-start", "", "import capture start time in RFC3339")
 	captureEnd := fs.String("capture-end", "", "import capture end time in RFC3339")
@@ -196,14 +202,14 @@ func runModelObserveBandwidthCollect(args []string) error {
 		}
 	})
 	if *nvidiaNCUCSV != "" {
-		for _, incompatible := range []string{"count", "interval", "measured-gb-s", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold", "host-counter-import", "host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event"} {
+		for _, incompatible := range []string{"count", "interval", "measured-gb-s", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold", "host-counter-import", "host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event", "apple-memory-import", "apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"} {
 			if visited[incompatible] {
 				return fmt.Errorf("--%s cannot be combined with --nvidia-ncu-csv", incompatible)
 			}
 		}
 	}
 	if *hostCounterImport != "" {
-		for _, incompatible := range []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"} {
+		for _, incompatible := range []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold", "apple-memory-import", "apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"} {
 			if visited[incompatible] {
 				return fmt.Errorf("--%s cannot be combined with --host-counter-import", incompatible)
 			}
@@ -219,6 +225,32 @@ func runModelObserveBandwidthCollect(args []string) error {
 		for _, importOnly := range []string{"host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event"} {
 			if visited[importOnly] {
 				return fmt.Errorf("--%s requires --host-counter-import", importOnly)
+			}
+		}
+	}
+	if *appleMemoryImport != "" {
+		for _, incompatible := range []string{"count", "interval", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "amd-device", "nvidia-ncu-csv", "device", "device-roofline-gb-s", "host-counter-import", "host-counter-format", "host-counter-provider", "host-counter-scope", "host-counter-scope-id", "host-counter-bytes-per-event", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"} {
+			if visited[incompatible] {
+				return fmt.Errorf("--%s cannot be combined with --apple-memory-import", incompatible)
+			}
+		}
+		if strings.TrimSpace(*appleMemoryProvider) == "" {
+			return fmt.Errorf("--apple-memory-provider is required with --apple-memory-import")
+		}
+		if strings.TrimSpace(*appleMemoryProviderVersion) == "" {
+			return fmt.Errorf("--apple-memory-provider-version is required with --apple-memory-import")
+		}
+		if strings.TrimSpace(*appleMemoryScope) == "" {
+			return fmt.Errorf("--apple-memory-scope is required with --apple-memory-import")
+		}
+		if visited["apple-memory-interval"] && *appleMemoryInterval <= 0 {
+			return fmt.Errorf("--apple-memory-interval must be positive")
+		}
+	}
+	if *appleMemoryImport == "" {
+		for _, importOnly := range []string{"apple-memory-format", "apple-memory-provider", "apple-memory-provider-version", "apple-memory-scope", "apple-memory-interval"} {
+			if visited[importOnly] {
+				return fmt.Errorf("--%s requires --apple-memory-import", importOnly)
 			}
 		}
 	}
@@ -253,7 +285,39 @@ func runModelObserveBandwidthCollect(args []string) error {
 	}
 	var collection modelperfobs.BandwidthCollection
 	var err error
-	if *hostCounterImport != "" {
+	if *appleMemoryImport != "" {
+		var started, ended time.Time
+		if *captureStart != "" {
+			started, err = time.Parse(time.RFC3339, *captureStart)
+			if err != nil {
+				return fmt.Errorf("--capture-start must be RFC3339: %w", err)
+			}
+		}
+		if *captureEnd != "" {
+			ended, err = time.Parse(time.RFC3339, *captureEnd)
+			if err != nil {
+				return fmt.Errorf("--capture-end must be RFC3339: %w", err)
+			}
+		}
+		if (*captureStart == "") != (*captureEnd == "") {
+			return fmt.Errorf("--capture-start and --capture-end must be supplied together")
+		}
+		in, openErr := os.Open(*appleMemoryImport)
+		if openErr != nil {
+			return openErr
+		}
+		defer in.Close()
+		collection, err = modelperfobs.ImportAppleMemoryCounters(in, modelperfobs.AppleMemoryImportOptions{
+			Format: modelperfobs.AppleMemoryImportFormat(*appleMemoryFormat), Provider: strings.TrimSpace(*appleMemoryProvider),
+			ProviderVersion:  strings.TrimSpace(*appleMemoryProviderVersion),
+			Scope:            modelperfobs.AppleMemoryScope{Kind: strings.TrimSpace(*appleMemoryScope)},
+			CaptureStartedAt: started, CaptureEndedAt: ended, Interval: *appleMemoryInterval,
+			Phase: o.Phase, Shape: o.Shape, TheoreticalGBS: o.TheoreticalGBS, MeasuredHostGBS: o.MeasuredSustainableGBS,
+		})
+		if err != nil {
+			return err
+		}
+	} else if *hostCounterImport != "" {
 		var started, ended time.Time
 		if *captureStart != "" {
 			started, err = time.Parse(time.RFC3339, *captureStart)
@@ -448,6 +512,7 @@ func modelObserveUsage() string {
 		"       fak model-observe bandwidth collect --measure-host-roofline [--roofline-sweep --roofline-threads N --roofline-knee-threshold 0.9]\n" +
 		"       fak model-observe bandwidth collect --nvidia-ncu-csv FILE --device DEVICE --capture-start RFC3339 --capture-end RFC3339 --phase PHASE --shape SHAPE [--device-roofline-gb-s N]\n" +
 		"       fak model-observe bandwidth collect --host-counter-import FILE --host-counter-provider PROVIDER --host-counter-scope system|socket|controller [--host-counter-scope-id ID --host-counter-format FORMAT --capture-start RFC3339 --capture-end RFC3339]\n" +
+		"       fak model-observe bandwidth collect --apple-memory-import FILE --apple-memory-provider PROVIDER --apple-memory-provider-version VERSION --apple-memory-scope system|package [--apple-memory-format generic-json --apple-memory-interval DURATION --capture-start RFC3339 --capture-end RFC3339]\n" +
 		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
 		"       fak model-observe cache-state-bench --verify FILE"
 }

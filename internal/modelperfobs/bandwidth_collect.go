@@ -106,6 +106,7 @@ type BandwidthCollection struct {
 	RooflineMeasurement    *RooflineMeasurement    `json:"roofline_measurement,omitempty"`
 	ProfileReceipt         *NVIDIAProfileReceipt   `json:"profile_receipt,omitempty"`
 	HostControllerArtifact *HostControllerArtifact `json:"host_controller_artifact,omitempty"`
+	AppleMemoryArtifact    *AppleMemoryArtifact    `json:"apple_memory_artifact,omitempty"`
 }
 type hostSnapshot struct {
 	at           time.Time
