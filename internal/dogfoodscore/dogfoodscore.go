@@ -79,27 +79,11 @@ var SuccessClaimRe = regexp.MustCompile(
 // not an error, so it must NOT match here.
 var stopErrorRe = regexp.MustCompile(`(?i)Stop hook (error|feedback:.*(No stderr output|exit (status |code )?[1-9]|non-zero))`)
 
-// KPIResult is one graded criterion. Mirrors guardrsi.KPIResult so the two
-// scorecards render and fold identically.
-type KPIResult struct {
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	Hard   bool   `json:"hard"`
-	Weight int    `json:"weight"`
-	Axis   string `json:"axis"`
-	Passed bool   `json:"passed"`
-	Detail string `json:"detail"`
-}
+// KPIResult aliases the shared binary criterion shape while preserving this package's API.
+type KPIResult = scorecard.BinaryResult
 
-type KPIPayload struct {
-	KPI     string   `json:"kpi"`
-	Group   string   `json:"group"`
-	Score   int      `json:"score"`
-	Value   float64  `json:"value"`
-	Detail  string   `json:"detail"`
-	Defects []string `json:"defects"`
-	Soft    []string `json:"soft"`
-}
+// KPIPayload aliases the shared stable JSON projection while preserving this package's API.
+type KPIPayload = scorecard.BinaryPayload
 
 // ConflationHit is one transcript turn that claimed success over a reported Stop-hook
 // error. The evidence is non-forgeable: both strings come from the same transcript.
@@ -594,51 +578,10 @@ func stopHealthDetail(ev Evidence) string {
 		strconv.Itoa(ev.StopMarkers) + " total marker(s), max consecutive " + strconv.Itoa(ev.MaxConsecutive)
 }
 
-// axisWeights turns the two-axis (wiring 0.4 / honesty 0.6) composite this card has always
-// computed into a single flat per-KPI weight table pkg/scorecard.Fold can consume directly.
-// Fold's weightedMean is one-level (Σ w*score / Σ w); this card's composite is two-level
-// (an axis share of an in-axis weighted mean). Rescaling each KPI's own weight by
-// axisShare/axisTotal makes the two arithmetically identical: Σ w'*score / Σ w' reduces to
-// axisShareA*axisScoreA + axisShareB*axisScoreB when Σ w' across each axis equals axisShare.
-func axisWeights(rows []KPIResult, axisShare float64) map[string]float64 {
-	total := 0
-	for _, r := range rows {
-		total += r.Weight
-	}
-	out := map[string]float64{}
-	if total == 0 {
-		return out
-	}
-	for _, r := range rows {
-		out[r.Key] = axisShare * float64(r.Weight) / float64(total)
-	}
-	return out
-}
-
-// toKPI maps one wiring/honesty KPIResult onto the shared kernel's scorecard.KPI: 100 on pass,
-// 0 on fail, with the failure recorded as a HARD Defect or a SOFT signal per r.Hard -- the same
-// split kpiPayloads used before the port. extra carries synthetic defects piggybacked onto this
-// KPI (used only for no_narration_conflation, to keep the multi-turn debt count unchanged).
-func toKPI(r KPIResult, extra []string) scorecard.KPI {
-	k := scorecard.KPI{Key: r.Key, Group: r.Axis, Detail: r.Detail}
-	if r.Passed {
-		k.Score = 100
-	} else if r.Hard {
-		k.Defects = []string{r.Key + ": " + r.Detail}
-	} else {
-		k.Soft = []string{r.Key + ": " + r.Detail}
-	}
-	k.Defects = append(k.Defects, extra...)
-	return k
-}
-
 // Build runs the score against real evidence.
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
-	root, _ := filepath.Abs(opts.Root)
-	if root == "" {
-		root = opts.Root
-	}
+	root := scorecard.WorkspaceRoot(opts.Root)
 	t := loadTree(root)
 	ev := scanConflation(opts)
 	markerHealth(Options{Root: root, Now: opts.Now, ClaudeHome: opts.ClaudeHome, WindowHours: opts.WindowHours}, &ev)
@@ -649,9 +592,9 @@ func Build(opts Options) ScorecardPayload {
 	chain := chainResults(ev.Chain, DefaultChainWindowHours)
 	all := append(append(append([]KPIResult{}, wiring...), honesty...), chain...)
 
-	wScore := axisScore(wiring)
-	hScore := axisScore(honesty)
-	cScore := axisScore(chain)
+	wScore := scorecard.BinaryAxisScore(wiring)
+	hScore := scorecard.BinaryAxisScore(honesty)
+	cScore := scorecard.BinaryAxisScore(chain)
 	// A host with no packet evidence is honestly UNSCORED on the chain (see
 	// chain.go): the axis drops out of the composite entirely, so a fresh clone
 	// (the CI ratchet runner) folds bit-identically to the pre-chain card.
@@ -671,31 +614,13 @@ func Build(opts Options) ScorecardPayload {
 		extraConflation = append(extraConflation, "no_narration_conflation: additional conflation turn beyond the first")
 	}
 
-	weights := map[string]float64{}
-	for k, v := range axisWeights(wiring, wShare) {
-		weights[k] = v
-	}
-	for k, v := range axisWeights(honesty, hShare) {
-		weights[k] = v
-	}
-	for k, v := range axisWeights(chain, cShare) {
-		weights[k] = v
-	}
-
-	kpis := make([]scorecard.KPI, 0, len(all))
-	for _, r := range wiring {
-		kpis = append(kpis, toKPI(r, nil))
-	}
-	for _, r := range honesty {
-		var extra []string
-		if r.Key == "no_narration_conflation" {
-			extra = extraConflation
-		}
-		kpis = append(kpis, toKPI(r, extra))
-	}
-	for _, r := range chain {
-		kpis = append(kpis, toKPI(r, nil))
-	}
+	kpis, weights := scorecard.ProjectBinary(all, map[string]float64{
+		"wiring":  wShare,
+		"honesty": hShare,
+		"chain":   cShare,
+	}, map[string][]string{
+		"no_narration_conflation": extraConflation,
+	})
 
 	var hardFail []KPIResult
 	for _, r := range all {
@@ -764,7 +689,7 @@ func Build(opts Options) ScorecardPayload {
 		NextAction: p.NextAction,
 		Workspace:  root,
 		Corpus:     p.Corpus,
-		KPIs:       kpiPayloads(all),
+		KPIs:       scorecard.BinaryPayloads(all),
 		Wiring:     wiring,
 		Honesty:    honesty,
 		Chain:      chain,
@@ -873,37 +798,6 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
 	return KPIResult{Key: key, Axis: axis, Hard: hard, Weight: weight, Label: label, Passed: passed, Detail: detail}
-}
-
-func axisScore(rows []KPIResult) int {
-	total, got := 0, 0
-	for _, r := range rows {
-		total += r.Weight
-		if r.Passed {
-			got += r.Weight
-		}
-	}
-	if total == 0 {
-		return 0
-	}
-	return int(math.Round(100 * float64(got) / float64(total)))
-}
-
-func kpiPayloads(rows []KPIResult) []KPIPayload {
-	out := make([]KPIPayload, 0, len(rows))
-	for _, r := range rows {
-		k := KPIPayload{KPI: r.Key, Group: r.Axis, Detail: r.Detail}
-		if r.Passed {
-			k.Score = 100
-			k.Value = 1
-		} else if r.Hard {
-			k.Defects = []string{r.Key + ": " + r.Detail}
-		} else {
-			k.Soft = []string{r.Key + ": " + r.Detail}
-		}
-		out = append(out, k)
-	}
-	return out
 }
 
 func scorecardLine(r KPIResult) string {

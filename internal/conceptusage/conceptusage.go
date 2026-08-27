@@ -79,27 +79,11 @@ var (
 	bindRe  = regexp.MustCompile(`(?i)^\w+(\([^)]*\))?!?:\s*(add|fix|implement|wire|port|extract|split|map|gate|fail|kill|pin|hoist|declare|resolve|exclude|treat|close|fold|route|enforce|attest|witness|cancel)\b`)
 )
 
-// KPIResult is one graded criterion. Identical shape to dogfoodscore.KPIResult so the
-// two scorecards render and fold the same way.
-type KPIResult struct {
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	Hard   bool   `json:"hard"`
-	Weight int    `json:"weight"`
-	Axis   string `json:"axis"`
-	Passed bool   `json:"passed"`
-	Detail string `json:"detail"`
-}
+// KPIResult aliases the shared binary criterion shape while preserving this package's API.
+type KPIResult = scorecard.BinaryResult
 
-type KPIPayload struct {
-	KPI     string   `json:"kpi"`
-	Group   string   `json:"group"`
-	Score   int      `json:"score"`
-	Value   float64  `json:"value"`
-	Detail  string   `json:"detail"`
-	Defects []string `json:"defects"`
-	Soft    []string `json:"soft"`
-}
+// KPIPayload aliases the shared stable JSON projection while preserving this package's API.
+type KPIPayload = scorecard.BinaryPayload
 
 // Evidence is the raw, re-derived-from-disk corpus the KPIs read. Exported so a caller
 // (the verb, a test) can inspect exactly what was counted.
@@ -424,56 +408,22 @@ func witnessResults(ev Evidence) []KPIResult {
 
 // ---- fold -------------------------------------------------------------------------
 
-// axisKPIs converts this card's KPIResult rows into shared-kernel scorecard.KPI rows for
-// one axis, scaling each KPI's own int Weight by axisWeight/axisTotalWeight so that
-// scorecard.Fold's overall weighted mean (Sigma(w*score)/Sigma(w) across usage+witness
-// together) reproduces exactly usageAxisWeight*uScore + witnessAxisWeight*wScore -- the
-// same two-axis composite this card has always reported, now computed by the shared
-// fold instead of a bespoke axisScore. A HARD fail becomes exactly one Defect (so
-// Fold's debt = Sigma(len(Defects)) equals the legacy hard-fail count); a SOFT fail
-// becomes exactly one Soft entry, which Fold never counts as debt.
-func axisKPIs(rows []KPIResult, axisWeight float64, weights map[string]float64) []scorecard.KPI {
-	total := 0
-	for _, r := range rows {
-		total += r.Weight
-	}
-	out := make([]scorecard.KPI, 0, len(rows))
-	for _, r := range rows {
-		score := 0.0
-		if r.Passed {
-			score = 100.0
-		}
-		k := scorecard.KPI{Key: r.Key, Group: r.Axis, Score: score, Detail: r.Detail}
-		k.Defects, k.Soft = resultFindings(r)
-		out = append(out, k)
-		w := float64(r.Weight)
-		if total > 0 {
-			w = axisWeight * float64(r.Weight) / float64(total)
-		}
-		weights[r.Key] = w
-	}
-	return out
-}
-
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
-	root, _ := filepath.Abs(opts.Root)
-	if root == "" {
-		root = opts.Root
-	}
+	root := scorecard.WorkspaceRoot(opts.Root)
 	ev := gatherEvidence(opts)
 
 	usage := usageResults(ev)
 	witness := witnessResults(ev)
 	all := append(append([]KPIResult{}, usage...), witness...)
 
-	// weights is keyed by KPI Key (each key is unique across both axes) with a value
-	// scaled so scorecard.Fold's weighted mean reproduces the usage/witness axis blend.
-	weights := map[string]float64{}
-	kpis := append(axisKPIs(usage, usageAxisWeight, weights), axisKPIs(witness, witnessAxisWeight, weights)...)
+	kpis, weights := scorecard.ProjectBinary(all, map[string]float64{
+		"usage":   usageAxisWeight,
+		"witness": witnessAxisWeight,
+	}, nil)
 
-	uScore := axisScore(usage)
-	wScore := axisScore(witness)
+	uScore := scorecard.BinaryAxisScore(usage)
+	wScore := scorecard.BinaryAxisScore(witness)
 
 	var hardFail []KPIResult
 	for _, r := range all {
@@ -532,7 +482,7 @@ func Build(opts Options) ScorecardPayload {
 		NextAction: p.NextAction,
 		Workspace:  p.Workspace,
 		Corpus:     p.Corpus,
-		KPIs:       kpiPayloads(all),
+		KPIs:       scorecard.BinaryPayloads(all),
 		Usage:      usage,
 		Witness:    witness,
 		Evidence:   ev,
@@ -632,45 +582,9 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 
 // ---- small helpers (mirror dogfoodscore idiom) ------------------------------------
 
-func axisScore(rows []KPIResult) int {
-	total, got := 0, 0
-	for _, r := range rows {
-		total += r.Weight
-		if r.Passed {
-			got += r.Weight
-		}
-	}
-	if total == 0 {
-		return 0
-	}
-	return int(math.Round(100 * float64(got) / float64(total)))
-}
-
-func kpiPayloads(rows []KPIResult) []KPIPayload {
-	out := make([]KPIPayload, 0, len(rows))
-	for _, r := range rows {
-		k := KPIPayload{KPI: r.Key, Group: r.Axis, Detail: r.Detail}
-		if r.Passed {
-			k.Score = 100
-			k.Value = 1
-		}
-		k.Defects, k.Soft = resultFindings(r)
-		out = append(out, k)
-	}
-	return out
-}
-
-// resultFindings owns the hard/soft projection shared by every scorecard view.
-// Passed results carry no finding; failed results appear in exactly one channel.
 func resultFindings(r KPIResult) (defects, soft []string) {
-	if r.Passed {
-		return nil, nil
-	}
-	finding := []string{r.Key + ": " + r.Detail}
-	if r.Hard {
-		return finding, nil
-	}
-	return nil, finding
+	kpi := scorecard.BinaryKPI(r)
+	return kpi.Defects, kpi.Soft
 }
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
