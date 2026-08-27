@@ -13,7 +13,7 @@ unbounded workers × M tool calls = the thread/handle sprawl that makes a 32c bo
 129k-thread llama-cli runaway proc_resource_guard.py was written for).
 
 This module is the read-only gate that closes that hole. It answers ONE question
-— ``SPAWN_OK`` or a typed ``REFUSE_*`` — by composing three INDEPENDENT checks,
+— ``SPAWN_OK`` or a typed ``REFUSE_*`` — by composing four INDEPENDENT checks,
 ALL of which must pass:
 
   1. host_safe       proc_resource_guard.py is CLEAN (no runaway/orphan flagged)
@@ -43,6 +43,9 @@ ALL of which must pass:
                      breadcrumb makes it visible before it leases a lane)) — the
                      MAX so neither a stale lease nor an unleased orphan can hide
                      capacity
+  4. commit_headroom on Windows, the same GetPerformanceInfo counters and exact
+                     reserve boundary as the running child guard are healthy
+                     before a lease or child is created
 
 The bound is the whole DoS proof: with the gate in front of every spawn, the
 live worker population is provably ≤ cap, so the per-session hook pressure is
@@ -57,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import ctypes
 import datetime as dt
 import functools
 import json
@@ -95,6 +99,10 @@ REFUSE_INSPECT = "REFUSE_INSPECT"    # a check could not run (fail-safe → refu
 REFUSE_WEEKLY_CAPPED = "REFUSE_WEEKLY_CAPPED"  # routed account hit a weekly-limit 429; cooling until reset (#2610)
 REFUSE_FAK_BIN_STALE = "REFUSE_FAK_BIN_STALE"
 REFUSE_FAK_BIN_PROVENANCE = "REFUSE_FAK_BIN_PROVENANCE"
+REFUSE_SYSTEM_COMMIT_HEADROOM = "REFUSE_SYSTEM_COMMIT_HEADROOM"
+
+SYSTEM_COMMIT_HEADROOM_REASON = "SYSTEM_COMMIT_HEADROOM"
+DEFAULT_SYSTEM_COMMIT_HEADROOM_BYTES = 16 << 30
 
 def _env_pos_int(name: str, default: int) -> int:
     """A positive-int env override, falling back to ``default`` on unset/garbage.
@@ -129,6 +137,84 @@ def _env_pos_int(name: str, default: int) -> int:
 # change; the Go tick (internal/dispatchtick.DefaultMaxWorkers) reads the same knob.
 DEFAULT_MAX_WORKERS = _env_pos_int("FAK_MAX_WORKERS", 20)
 DEFAULT_CODEX_OAUTH_SESSIONS = _env_pos_int("FAK_CODEX_OAUTH_SESSIONS", 10)
+
+
+def required_system_commit_headroom_bytes() -> int:
+    """Return the running guard's positive-MiB system commit reserve."""
+    raw = os.environ.get("FAK_SYSTEM_COMMIT_HEADROOM_MB", "").strip()
+    if not raw.isdecimal():
+        return DEFAULT_SYSTEM_COMMIT_HEADROOM_BYTES
+    mb = int(raw)
+    if mb == 0 or mb > ((1 << 64) - 1) >> 20:
+        return DEFAULT_SYSTEM_COMMIT_HEADROOM_BYTES
+    return mb << 20
+
+
+def evaluate_system_commit_headroom(*, system_bytes: int, system_limit: int,
+                                    required_bytes: int) -> dict[str, Any]:
+    """Side-effect-free mirror of procguard.EvaluateSystemCommitHeadroom.
+
+    The JSON shape is deliberately metric-named so launch receipts cannot confuse
+    operating-system commit with free physical RAM.
+    """
+    observed = max(0, system_limit - system_bytes)
+    supported = system_limit > 0
+    refuse = supported and required_bytes > 0 and observed <= required_bytes
+    return {
+        "supported": supported,
+        "ok": not refuse,
+        "reason": SYSTEM_COMMIT_HEADROOM_REASON if refuse else "",
+        "observed_bytes": observed,
+        "required_bytes": required_bytes,
+        "system_commit_bytes": system_bytes,
+        "system_commit_limit": system_limit,
+    }
+
+
+def _windows_system_commit_snapshot() -> tuple[int, int]:
+    """Read the same GetPerformanceInfo counters as procguard's Windows guard."""
+    class PerformanceInformation(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.c_size_t),
+            ("commit_total", ctypes.c_size_t),
+            ("commit_limit", ctypes.c_size_t),
+            ("commit_peak", ctypes.c_size_t),
+            ("physical_total", ctypes.c_size_t),
+            ("physical_available", ctypes.c_size_t),
+            ("system_cache", ctypes.c_size_t),
+            ("kernel_total", ctypes.c_size_t),
+            ("kernel_paged", ctypes.c_size_t),
+            ("kernel_nonpaged", ctypes.c_size_t),
+            ("page_size", ctypes.c_size_t),
+            ("handle_count", ctypes.c_uint32),
+            ("process_count", ctypes.c_uint32),
+            ("thread_count", ctypes.c_uint32),
+        ]
+    info = PerformanceInformation()
+    info.cb = ctypes.sizeof(info)
+    get_performance_info = ctypes.WinDLL("psapi.dll", use_last_error=True).GetPerformanceInfo
+    get_performance_info.argtypes = [ctypes.POINTER(PerformanceInformation), ctypes.c_uint32]
+    get_performance_info.restype = ctypes.c_int
+    if not get_performance_info(ctypes.byref(info), info.cb):
+        raise OSError(ctypes.get_last_error(), "GetPerformanceInfo failed")
+    return int(info.commit_total * info.page_size), int(info.commit_limit * info.page_size)
+
+
+def system_commit_headroom_check() -> dict[str, Any]:
+    """Collect and evaluate launch-time system commit headroom without side effects."""
+    required = required_system_commit_headroom_bytes()
+    if os.name != "nt":
+        return {"supported": False, "ok": True, "reason": "",
+                "observed_bytes": 0, "required_bytes": required,
+                "system_commit_bytes": 0, "system_commit_limit": 0}
+    try:
+        used, limit = _windows_system_commit_snapshot()
+    except (OSError, AttributeError, ValueError) as exc:
+        return {"supported": True, "ok": False, "error": str(exc),
+                "reason": "", "observed_bytes": 0, "required_bytes": required,
+                "system_commit_bytes": 0, "system_commit_limit": 0}
+    return evaluate_system_commit_headroom(system_bytes=used, system_limit=limit,
+                                           required_bytes=required)
 
 # A live dispatch worker's command line carries this marker (dispatch_worker.py
 # launches `claude -p ... /dos-kernel:dos-dispatch-loop --lane X`). Used to count
@@ -1938,7 +2024,7 @@ def host_resources() -> dict[str, Any]:
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
              max_threads: int | None = None) -> dict[str, Any]:
-    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         host_f = pool.submit(host_check, root, max_threads=max_threads)
         acct_f = pool.submit(account_check, root, work_kind=work_kind, product=product)
         kern_f = pool.submit(kernel_alive, root)
@@ -1950,6 +2036,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         # pool because it is pure I/O (stat + one bounded `version` per distinct
         # build) and must not add serial latency to the spawn path.
         fak_bin_f = pool.submit(fak_bin_provenance, root)
+        commit_headroom_f = pool.submit(system_commit_headroom_check)
         host = host_f.result()
         acct = acct_f.result()
         kern = kern_f.result()
@@ -1968,6 +2055,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         except Exception as exc:  # noqa: BLE001 — provenance NEVER decides a verdict
             fak_bin = {"schema": FAK_BIN_PROVENANCE_SCHEMA, "error": str(exc),
                        "resolvers": {}, "agree": True, "dirty": []}
+        try:
+            commit_headroom = commit_headroom_f.result()
+        except Exception as exc:  # noqa: BLE001 - telemetry uncertainty fails closed on Windows
+            commit_headroom = {"supported": os.name == "nt", "ok": False,
+                               "error": str(exc), "reason": "",
+                               "observed_bytes": 0,
+                               "required_bytes": required_system_commit_headroom_bytes(),
+                               "system_commit_bytes": 0, "system_commit_limit": 0}
     host_cap_info = host_capacity(**host_res)
     host_cap = host_cap_info.get("host_cap")
 
@@ -2072,6 +2167,17 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         reason = ("managed worker identity is ambiguous: "
                   + ", ".join(reasons)
                   + "; inspect the named sidecar(s) before growing the fleet")
+    elif commit_headroom.get("supported") and commit_headroom.get("error"):
+        verdict = REFUSE_INSPECT
+        reason = ("system commit headroom inspection failed: "
+                  + str(commit_headroom.get("error")))
+    elif commit_headroom.get("supported") and not commit_headroom.get("ok"):
+        verdict = REFUSE_SYSTEM_COMMIT_HEADROOM
+        reason = (
+            f"{SYSTEM_COMMIT_HEADROOM_REASON}: observed "
+            f"{commit_headroom.get('observed_bytes')} bytes is at/below required "
+            f"{commit_headroom.get('required_bytes')} bytes; run "
+            "`fak recover SYSTEM_COMMIT_HEADROOM` for the bounded recovery route")
     elif not host["safe"]:
         verdict = REFUSE_HOST
         reason = (f"host resource guard flagged {host['flagged']} process(es): "
@@ -2145,6 +2251,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         "kernel": kern,
         "os_worker_procs": alive_proc,
         "worker_identity": worker_identity,
+        "system_commit_headroom": commit_headroom,
     }
 
 

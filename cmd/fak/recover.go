@@ -176,6 +176,7 @@ func runRecover(stdout, stderr io.Writer, argv []string) int {
 var emittedRecoveryReasons = []string{
 	"COMMITTED_RED", "CONCEPT_ADMISSION", "CONCEPT_FRESHNESS", "ISSUE_NOT_DISPATCH_LEAF",
 	"ISSUE_UNROUTED", "LOCK_BUSY", "PATHSPEC_RACE", "REQUIRE_WITNESS",
+	"SYSTEM_COMMIT_HEADROOM",
 }
 
 func recoveryPlans(trunk string) map[string]recoveryPlan {
@@ -189,7 +190,12 @@ func recoveryPlans(trunk string) map[string]recoveryPlan {
 func treeRecoveryPlans(trunk string) map[string]recoveryPlan {
 	originTrunk := "origin/" + trunk
 	return map[string]recoveryPlan{
-		"REQUIRE_WITNESS":         {Reason: "REQUIRE_WITNESS", Summary: "the claimed effect has no independently inspectable witness", Notes: []string{"capture the failure-class witness (test, render, live read-back, or dos verify) and retry with that artifact; do not self-certify the effect"}},
+		"REQUIRE_WITNESS": {Reason: "REQUIRE_WITNESS", Summary: "the claimed effect has no independently inspectable witness", Notes: []string{"capture the failure-class witness (test, render, live read-back, or dos verify) and retry with that artifact; do not self-certify the effect"}},
+		"SYSTEM_COMMIT_HEADROOM": {Reason: "SYSTEM_COMMIT_HEADROOM", Summary: "the host's operating-system commit reserve is at or below the managed-worker safety floor", Notes: []string{
+			"let an in-flight managed worker finish, then rerun dispatch preflight so the host is measured again",
+			"if the pressure persists, move the next worker to another sanctioned fleet node or add host commit capacity through the operator's normal OS change process",
+			"do not lower FAK_SYSTEM_COMMIT_HEADROOM_MB, terminate unrelated processes, or add launch retries to route around the refusal",
+		}},
 		"PATHSPEC_RACE":           {Reason: "PATHSPEC_RACE", Summary: "a peer changed the index while the path-scoped commit was being sealed", Steps: []recoveryStep{{Argv: []string{"git", "show", "--stat", "--oneline", "HEAD"}, Summary: "inspect the intact commit and verify which paths landed"}}, Notes: []string{"do not amend or force-push; if an extra peer path landed, report the intact commit and let its owner reconcile it"}, Executable: true},
 		"COMMITTED_RED":           {Reason: "COMMITTED_RED", Summary: "the committed tip fails its isolated build or formatting gate", Steps: []recoveryStep{{Argv: []string{"fak", "ci-preflight"}, Summary: "reproduce the committed-tip failure outside the peer-dirty tree"}}, Notes: []string{"fix the committed failure before attempting another commit or push"}, Executable: true},
 		"LOCK_BUSY":               {Reason: "LOCK_BUSY", Summary: "another committer owns the serialized index lock", Steps: []recoveryStep{{Argv: []string{"fak", "commit", "--reclaim-stale-index-lock"}, Summary: "reclaim only when the recorded owner is proven stale"}}, Notes: []string{"if the owner is live, wait and retry; never delete the lock by hand"}, Executable: true},
