@@ -16,6 +16,7 @@ description: "Index of fak research notes and captured stage witnesses, with the
 ## Active focus
 
 - [Related-system inventory maps](inventory/) — pinned local-checkout maps generated with `fak study-inventory` before deep `study-repo` borrowing, so broad source coverage has a concrete denominator.
+- [vLLM forge-corpus classification at the August 26, 2026 cutoff](vllm-classification-2026-08-26/) — `fak study-classify` turns a validated `study-forge` corpus into a checksum-bound full per-record artifact plus a bounded cluster index. Keep the full output in allocated scratch and commit only the compact index when it is useful. Cluster relationships mean shared rule evidence only; the classifier does not fabricate unavailable upstream links. See the [CLI contract](../cli-reference.md#fak-study-classify).
 
 - [Structured session intent](../notes/structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
 

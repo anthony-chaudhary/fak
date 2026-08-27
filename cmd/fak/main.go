@@ -684,6 +684,9 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 	case "study-forge":
 		// Deterministic REST census for forge-history evidence.
 		os.Exit(runStudyForge(os.Stdout, os.Stderr, args))
+	case "study-classify":
+		// Deterministic dispositions and mechanism clusters over a forge corpus.
+		os.Exit(runStudyClassify(os.Stdout, os.Stderr, args))
 	case "customization-index":
 		os.Exit(runCustomizationIndex(os.Stdout, os.Stderr, args))
 	case "idea-scout":

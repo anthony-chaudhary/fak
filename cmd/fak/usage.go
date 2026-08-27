@@ -364,6 +364,14 @@ const usageCoreText = `usage:
                  the owning lane/tree, architest tier, owning go test target, expected
                  (fak <leaf>) stamp, and any live refs/fak/locks lease that overlaps
                  the tree. This is the one-command orientation path before editing.)
+  fak study-classify classify --corpus PATH --out PATH --index-out PATH [--related-limit N] [--json]
+  fak study-classify validate --classification PATH --corpus PATH
+  fak study-classify validate-index --index PATH --classification PATH --corpus PATH
+  fak study-classify schema
+                (deterministically classify every validated study-forge record into
+                 one primary disposition and evidence-backed mechanism clusters.
+                 Keep the full per-record output in scratch; --index-out is the
+                 bounded, commit-sized cluster index. Exit 0 valid, 2 usage, 1 invalid.)
 `
 
 const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]

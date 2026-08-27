@@ -393,6 +393,7 @@ concurrent = [
   "hostdiag",
   "ultracodenegcontrol",
   "systembaseline",
+  "studyclass",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -549,6 +550,7 @@ autopick = [
   "hostdiag",
   "ultracodenegcontrol",
   "systembaseline",
+  "studyclass",
   # new-leaf:lane
 ]
 
@@ -1165,6 +1167,7 @@ valuechain = ["internal/valuechain/**"]
 hostdiag = ["internal/hostdiag/**"]
 ultracodenegcontrol = ["internal/ultracodenegcontrol/**"]
 systembaseline = ["internal/systembaseline/**"]
+studyclass = ["internal/studyclass/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

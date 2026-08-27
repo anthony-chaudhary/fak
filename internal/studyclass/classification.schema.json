@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fak.dev/schemas/studyclass-output-1.schema.json",
+  "title": "fak studyclass full classification output v1",
+  "type": "object",
+  "required": ["schema", "rules", "relationship_policy", "input", "records_checksum", "clusters_checksum", "summary", "records", "clusters"],
+  "properties": {
+    "schema": {"const": "fak-studyclass-output/1"},
+    "rules": {"const": "fak-studyclass-rules/1"},
+    "relationship_policy": {"const": "explicit_field_or_text_evidence_only"},
+    "input": {"$ref": "#/$defs/input"},
+    "records_checksum": {"$ref": "#/$defs/digest"},
+    "clusters_checksum": {"$ref": "#/$defs/digest"},
+    "summary": {"$ref": "#/$defs/summary"},
+    "records": {"type": "array", "items": {"$ref": "#/$defs/classification"}},
+    "clusters": {"type": "array", "items": {"$ref": "#/$defs/cluster"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "disposition": {"enum": ["merged_landed", "open_proposal", "regression_bug", "duplicate", "support_question", "stale_superseded", "closed_unmerged", "release_metadata_noncandidate"]},
+    "mechanism": {"enum": ["architecture_runtime", "scheduling_batching", "kv_cache", "kernels_compilation", "speculative_decoding", "distributed_parallelism", "memory_residency", "model_backend_hardware", "apis_tool_calling_structured_output", "observability_operations", "reliability_security", "tests_ci_docs", "explicit_non_candidate"]},
+    "confidence": {"enum": ["high", "medium", "low"]},
+    "state": {"enum": ["open", "closed", "none"]},
+    "source": {"enum": ["issues", "pulls", "discussions", "releases", "labels", "milestones"]},
+    "kind": {"enum": ["issue", "pull", "discussion", "release", "label", "milestone"]},
+    "input": {
+      "type": "object",
+      "required": ["raw_sha256", "index_checksum", "repository", "revision", "cutoff", "cutoff_mode", "post_cutoff_updated_records", "record_count"],
+      "properties": {
+        "raw_sha256": {"$ref": "#/$defs/digest"},
+        "index_checksum": {"$ref": "#/$defs/digest"},
+        "repository": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "minLength": 1},
+        "cutoff": {"type": "string", "format": "date-time"},
+        "cutoff_mode": {"const": "created_at_inclusive_non_atomic_observation"},
+        "post_cutoff_updated_records": {"type": "integer", "minimum": 0},
+        "record_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["rule", "field", "signal"],
+      "properties": {
+        "rule": {"type": "string", "minLength": 1},
+        "field": {"type": "string", "minLength": 1},
+        "signal": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "dates": {
+      "type": "object",
+      "properties": {
+        "created": {"type": "string", "format": "date-time"},
+        "updated": {"type": "string", "format": "date-time"},
+        "closed": {"type": "string", "format": "date-time"},
+        "merged": {"type": "string", "format": "date-time"},
+        "published": {"type": "string", "format": "date-time"}
+      },
+      "additionalProperties": false
+    },
+    "mechanism_match": {
+      "type": "object",
+      "required": ["name", "confidence", "evidence"],
+      "properties": {
+        "name": {"$ref": "#/$defs/mechanism"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "additionalProperties": false
+    },
+    "classification": {
+      "type": "object",
+      "required": ["identity", "source", "kind", "id", "state", "dates", "disposition", "confidence", "disposition_evidence", "mechanisms"],
+      "properties": {
+        "identity": {"type": "string", "pattern": "^[a-z]+:[1-9][0-9]*$"},
+        "source": {"$ref": "#/$defs/source"},
+        "kind": {"$ref": "#/$defs/kind"},
+        "id": {"type": "integer", "minimum": 1},
+        "node_id": {"type": "string", "minLength": 1},
+        "number": {"type": "integer", "minimum": 1},
+        "url": {"type": "string", "format": "uri"},
+        "labels": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "state": {"$ref": "#/$defs/state"},
+        "dates": {"$ref": "#/$defs/dates"},
+        "merged": {"type": "boolean"},
+        "disposition": {"$ref": "#/$defs/disposition"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "disposition_evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}},
+        "mechanisms": {"type": "array", "items": {"$ref": "#/$defs/mechanism_match"}}
+      },
+      "additionalProperties": false
+    },
+    "identity_ref": {
+      "type": "object",
+      "required": ["identity", "source", "kind", "id", "state", "dates", "disposition", "confidence", "evidence"],
+      "properties": {
+        "identity": {"type": "string", "pattern": "^[a-z]+:[1-9][0-9]*$"},
+        "source": {"$ref": "#/$defs/source"},
+        "kind": {"$ref": "#/$defs/kind"},
+        "id": {"type": "integer", "minimum": 1},
+        "node_id": {"type": "string", "minLength": 1},
+        "number": {"type": "integer", "minimum": 1},
+        "url": {"type": "string", "format": "uri"},
+        "labels": {"type": "array", "items": {"type": "string", "minLength": 1}},
+        "state": {"$ref": "#/$defs/state"},
+        "dates": {"$ref": "#/$defs/dates"},
+        "disposition": {"$ref": "#/$defs/disposition"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "evidence": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/evidence"}}
+      },
+      "additionalProperties": false
+    },
+    "cluster": {
+      "type": "object",
+      "required": ["key", "mechanism", "rule", "signal", "actionable", "confidence", "representative", "related"],
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "mechanism": {"$ref": "#/$defs/mechanism"},
+        "rule": {"type": "string", "minLength": 1},
+        "signal": {"type": "string", "minLength": 1},
+        "actionable": {"type": "boolean"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "representative": {"$ref": "#/$defs/identity_ref"},
+        "related": {"type": "array", "items": {"$ref": "#/$defs/identity_ref"}}
+      },
+      "additionalProperties": false
+    },
+    "count_map": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "summary": {
+      "type": "object",
+      "required": ["record_count", "cluster_count", "by_source", "by_disposition", "by_mechanism", "by_state", "by_confidence"],
+      "properties": {
+        "record_count": {"type": "integer", "minimum": 0},
+        "cluster_count": {"type": "integer", "minimum": 0},
+        "by_source": {"$ref": "#/$defs/count_map"},
+        "by_disposition": {"$ref": "#/$defs/count_map"},
+        "by_mechanism": {"$ref": "#/$defs/count_map"},
+        "by_state": {"$ref": "#/$defs/count_map"},
+        "by_confidence": {"$ref": "#/$defs/count_map"}
+      },
+      "additionalProperties": false
+    }
+  }
+}
