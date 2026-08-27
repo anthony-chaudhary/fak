@@ -1,0 +1,1284 @@
+{
+  "schema": "fak-local-inference-platform-inventory/1",
+  "issue": 9573,
+  "title": "Representative 64/128 GB local inference platforms",
+  "as_of_date": "2026-08-27",
+  "observed_at": "2026-08-27T16:13:41-07:00",
+  "scope": {
+    "centrality": "Enabling",
+    "for": "operators supplying hardware bounds to internal/modelperfobs.LongContextEstimatorInput",
+    "problem": "vendor memory labels, shared-memory semantics, peak bandwidth, measured bandwidth, power, software maturity, and dated price observations are otherwise easy to conflate",
+    "today": "the repository has machine catalogs and a long-context estimator, but no compact dated purchase-class inventory joining those facts",
+    "better_because": "each decision datum is source-addressable and typed as measured, official_spec_derived, analytically_derived, or assumption_speculative",
+    "witness": "this JSON plus the rendered README and dated note",
+    "not_a_claim": "These are hardware inputs and evidence bounds, not measured fak-native Qwen3.8 or GLM-5.3 performance."
+  },
+  "provenance_classes": {
+    "measured": "Direct observation or third-party measurement under a named configuration; measurement scope is preserved.",
+    "official_spec_derived": "Direct official vendor specification or arithmetic conversion of an official specification.",
+    "analytically_derived": "Transparent arithmetic or classification derived from cited inputs.",
+    "assumption_speculative": "Explicit planning assumption that must be replaced by a local observation before a performance claim."
+  },
+  "unit_conventions": {
+    "GB": "decimal, 1000000000 bytes, used for bandwidth and vendor price-sheet labels unless a source explicitly says otherwise",
+    "GiB": "binary, 1073741824 bytes",
+    "capacity_normalization": "Vendor DRAM capacity labels are retained verbatim as marketed GB. estimator_physical_memory_bytes normalizes one labeled GB as one GiB-sized DRAM capacity because these products are assembled from binary-capacity DRAM devices; that normalization is analytically_derived, not a quoted vendor byte count.",
+    "bandwidth": "bytes per second; advertised values are ceilings, not sustainable inference rates",
+    "price": "nominal US dollars before tax, shipping, support upgrades, and missing components unless noted"
+  },
+  "estimator_mapping": {
+    "usable_memory_bytes": "platform.memory.conservative_usable_inference_memory_bytes",
+    "bandwidth_bytes_per_second": "No platform-wide range is manufactured. Use platform.bandwidth.sustainable_measured_bytes_per_second only when its measurement scope matches the workload; otherwise collect a workload-specific lower and upper bound.",
+    "compute_flops": "The inventory records format capability and any cited peak, but does not fabricate a cross-format compute range. Match precision, sparsity, batch, and kernel support before supplying compute_flops.",
+    "efficiency_fraction": "Not inventoried; it is workload/backend-specific and must remain an explicit estimator assumption or measurement."
+  },
+  "sources": [
+    {
+      "id": "framework_desktop_config_2026_08_27",
+      "authority": "authoritative",
+      "publisher": "Framework Computer",
+      "title": "Configure Framework Desktop DIY Edition (AMD Ryzen AI Max 300 Series)",
+      "url": "https://frame.work/products/desktop-diy-amd-aimax300/configuration/new",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "configuration system choices and prices for Max+ 395 64GB and 128GB",
+      "platform_context": "United States storefront, DIY Edition, storage/OS/fan/cable not selected",
+      "refresh_trigger": "price, availability, or configuration change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "commercial configurations",
+        "marketed memory",
+        "US list price"
+      ]
+    },
+    {
+      "id": "framework_strix_halo_deep_dive_2025_03_12",
+      "authority": "authoritative",
+      "publisher": "Framework Computer",
+      "title": "Framework Desktop Deep Dive: Ryzen AI Max",
+      "url": "https://community.frame.work/t/framework-desktop-deep-dive-ryzen-ai-max/66002",
+      "source_event_at": "2025-03-12",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "256-bit LPDDR5x-8000, 256 GB/s, GPU-addressable memory, 120 W sustained/140 W boost",
+      "platform_context": "Framework Desktop Ryzen AI Max+ 395",
+      "refresh_trigger": "new BIOS, memory-allocation guidance, or board revision",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "advertised bandwidth",
+        "GPU-addressable-memory boundary",
+        "power envelope"
+      ]
+    },
+    {
+      "id": "amd_ryzen_ai_max_395_specs",
+      "authority": "authoritative",
+      "publisher": "AMD",
+      "title": "AMD Ryzen AI Max+ 395",
+      "url": "https://www.amd.com/en/products/processors/laptop/ryzen/ai-300-series/amd-ryzen-ai-max-plus-395.html",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "processor, Radeon 8060S, 40 CUs, 256-bit LPDDR5x, 128 GB maximum, LPDDR5x-8000, PCIe 4.0",
+      "platform_context": "Ryzen AI Max+ 395 / Strix Halo",
+      "refresh_trigger": "AMD specification revision",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "memory architecture",
+        "compute units",
+        "host connectivity"
+      ]
+    },
+    {
+      "id": "amd_strix_halo_ai_article_2025_06_03",
+      "authority": "authoritative",
+      "publisher": "AMD",
+      "title": "AMD Ryzen AI Max+395: A Leap Forward in Generative AI Performance with Consumer PC",
+      "url": "https://www.amd.com/en/developer/resources/technical-articles/2025/amd-ryzen-ai-max-395--a-leap-forward-in-generative-ai-performanc.html",
+      "source_event_at": "2025-06-03",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "128 GB unified memory and up to 112 GB allocatable by the GPU",
+      "platform_context": "AMD reference/ASUS test configuration; allocation is not a Framework-specific guarantee",
+      "refresh_trigger": "driver or memory-allocation policy change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "upper allocation boundary",
+        "unified-memory semantics"
+      ]
+    },
+    {
+      "id": "amd_halo_developer_platform_specs_2026",
+      "authority": "authoritative",
+      "publisher": "AMD",
+      "title": "AMD Ryzen AI Halo Developer Platform with Ryzen AI Max+ 395 processor",
+      "url": "https://www.amd.com/en/products/processors/desktops/ryzen/ryzen-ai-halo/ryzen-ai-max-plus-395.html",
+      "source_event_at": "2026",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "128 GB LPDDR5x, 256 GB/s, 60 FP16 TFLOPS, 120 W, 10 GbE, Linux or Windows",
+      "platform_context": "AMD reference developer platform; compute peak is not a Framework measurement",
+      "refresh_trigger": "platform specification or ROCm support update",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "format capability",
+        "reference compute peak",
+        "ROCm maturity context"
+      ]
+    },
+    {
+      "id": "level1techs_strix_halo_measurement_2025_07_22",
+      "authority": "third_party",
+      "publisher": "Level1Techs",
+      "title": "Strix Halo (Ryzen AI Max+ 395) LLM Benchmark Results",
+      "url": "https://forum.level1techs.com/t/strix-halo-ryzen-ai-max-395-llm-benchmark-results/233796",
+      "source_event_at": "2025-07-22",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "experimental",
+      "anchor": "pre-production Framework Desktop, approximately 215 GB/s maximum GPU memory bandwidth",
+      "platform_context": "128 GB LPDDR5x-8000, Linux 6.15.x, ROCm 7 nightly and Vulkan/llama.cpp tests",
+      "refresh_trigger": "production BIOS, stable ROCm release, or rerun on fak-native engine",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "third-party sustainable GPU memory-bandwidth evidence",
+        "software-maturity caveat"
+      ]
+    },
+    {
+      "id": "apple_mac_studio_m5_specs_2026_08_25",
+      "authority": "authoritative",
+      "publisher": "Apple",
+      "title": "Mac Studio - Technical Specifications",
+      "url": "https://www.apple.com/mac-studio/specs/",
+      "source_event_at": "2026-08-25",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "proposed/open",
+      "anchor": "M5 Max 40-core GPU, 614 GB/s, 64/128 GB unified memory, Thunderbolt 5, 10GbE, 480 W maximum continuous power",
+      "platform_context": "announced and available for preorder; customer availability starts 2026-09-22",
+      "refresh_trigger": "shipping reviews or Apple specification revision",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "memory",
+        "advertised bandwidth",
+        "interconnect",
+        "power ceiling",
+        "availability status"
+      ]
+    },
+    {
+      "id": "apple_mac_studio_newsroom_2026_08_25",
+      "authority": "authoritative",
+      "publisher": "Apple",
+      "title": "Apple introduces new Mac Studio with M5 Max and M5 Ultra",
+      "url": "https://www.apple.com/newsroom/2026/08/apple-introduces-new-mac-studio-with-m5-max-and-m5-ultra/",
+      "source_event_at": "2026-08-25",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "proposed/open",
+      "anchor": "M5 Max base price and 2026-09-22 availability",
+      "platform_context": "United States pricing",
+      "refresh_trigger": "general availability or price change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "base price",
+        "preorder status"
+      ]
+    },
+    {
+      "id": "apple_mac_studio_m5_64_1tb_store_2026_08_27",
+      "authority": "authoritative",
+      "publisher": "Apple",
+      "title": "Buy Mac Studio, M5 Max Chip, 18-core CPU, 40-core GPU, 64GB memory, 1TB storage",
+      "url": "https://www.apple.com/shop/buy-mac/mac-studio/m5-max-chip-18-core-cpu-40-core-gpu-64gb-memory-1tb-storage",
+      "source_event_at": "2026-08-25",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "proposed/open",
+      "anchor": "dynamic storefront payload exposed SKU MHQJ4 and a 3,799 USD full price",
+      "platform_context": "US preorder, M5 Max 40-core GPU, 64 GB memory, 1 TB storage",
+      "refresh_trigger": "Apple storefront price or configuration change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "official configured-price anchor"
+      ]
+    },
+    {
+      "id": "mlx_head_2026_08_27",
+      "authority": "authoritative",
+      "publisher": "MLX team / Apple Machine Learning Research",
+      "title": "MLX: An array framework for Apple silicon",
+      "url": "https://github.com/ml-explore/mlx",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "Git HEAD 5269ba911246bb7b98bd9537dd5419bdcf5b865f; README and package tree",
+      "platform_context": "Apple silicon machine-learning framework",
+      "refresh_trigger": "MLX release or Apple-silicon backend change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "Apple local-inference software maturity",
+        "Apple-silicon compute-format tooling context"
+      ]
+    },
+    {
+      "id": "appleinsider_m5_studio_pricing_2026_08_26",
+      "authority": "third_party",
+      "publisher": "AppleInsider",
+      "title": "M5 Max Mac Studio vs. M4 Max Mac Studio: Faster, more expensive",
+      "url": "https://appleinsider.com/articles/26/08/26/m5-max-mac-studio-vs-m4-max-mac-studio-faster-more-expensive",
+      "source_event_at": "2026-08-26",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "proposed/open",
+      "anchor": "current US configure-to-order deltas for 40-core GPU, 64 GB, 128 GB, and storage",
+      "platform_context": "preorder configuration pricing; 128 GB exact total is analytically reconstructed",
+      "refresh_trigger": "Apple storefront price or configuration change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "128 GB configured-price derivation"
+      ]
+    },
+    {
+      "id": "nvidia_dgx_spark_specs_2026_08_27",
+      "authority": "authoritative",
+      "publisher": "NVIDIA",
+      "title": "NVIDIA DGX Spark",
+      "url": "https://www.nvidia.com/en-us/products/workstations/dgx-spark/",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "128 GB coherent LPDDR5x, 273 GB/s, FP4 sparse peak, 140 W GB10 TDP, 240 W supply, 10GbE and 200 Gbps ConnectX-7",
+      "platform_context": "DGX Spark Founders Edition",
+      "refresh_trigger": "DGX OS, firmware, specification, or price change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "architecture",
+        "memory",
+        "bandwidth",
+        "compute formats",
+        "power",
+        "network",
+        "software stack"
+      ]
+    },
+    {
+      "id": "storagereview_halo_spark_2026_07_06",
+      "authority": "third_party",
+      "publisher": "StorageReview",
+      "title": "AMD Ryzen AI Halo Review: A Dual-OS, 200B-Parameter Desktop Takes On the DGX Spark",
+      "url": "https://www.storagereview.com/review/amd-ryzen-ai-halo-review-a-dual-os-200b-parameter-desktop-takes-on-the-dgx-spark",
+      "source_event_at": "2026-07-06",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "experimental",
+      "anchor": "CPU STREAM Copy/Scale/Triad/Add results for AMD Halo and DGX Spark",
+      "platform_context": "host-memory STREAM, not a GPU inference bandwidth capture",
+      "refresh_trigger": "GPU memory-counter or fak-native inference capture",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "measured host-memory bandwidth context",
+        "measurement-scope limitation"
+      ]
+    },
+    {
+      "id": "dgx_spark_price_report_2026_08_12",
+      "authority": "third_party",
+      "publisher": "IntuitionLabs",
+      "title": "NVIDIA DGX Spark Review: $4,699 Price & Benchmarks",
+      "url": "https://intuitionlabs.ai/articles/nvidia-dgx-spark-review",
+      "source_event_at": "2026-08-12",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "reported February 2026 list-price increase to 4,699 USD",
+      "platform_context": "US Founders Edition price report; NVIDIA Marketplace was not reachable during validation",
+      "refresh_trigger": "NVIDIA Marketplace price becomes directly reachable or price changes",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "current reported list price"
+      ]
+    },
+    {
+      "id": "bestbuy_dgx_spark_listing_2026_08_27",
+      "authority": "third_party",
+      "publisher": "Best Buy",
+      "title": "DGX Spark - NVIDIA GB10 Grace Blackwell Superchip, 128 GB LPDDR5X, 4TB NVMe",
+      "url": "https://www.bestbuy.com/product/dgx-spark-nvidia-gb10-grace-blackwell-superchip-128-gb-lpddr5x-arm-processor-4tb-nvme-m-2-ssd-storage-gold/JXF2C4R2TS",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "in-stock observed street price of 5,299.99 USD",
+      "platform_context": "US retail listing; transient promotion and availability may change",
+      "refresh_trigger": "retailer price or inventory change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "street price"
+      ]
+    },
+    {
+      "id": "dell_precision_7875_config_2026_08_27",
+      "authority": "authoritative",
+      "publisher": "Dell",
+      "title": "Precision 7875 Tower Workstation",
+      "url": "https://www.dell.com/en-us/shop/cty/pdp/spd/precision-t7875-workstation",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "7975WX, Ubuntu 24.04, 8x16 GB DDR5-5200 ECC, RTX A400, no storage, 10GbE, 1,350 W chassis, 19,897.33 USD",
+      "platform_context": "US order code xctopt7875mtusai_vp",
+      "refresh_trigger": "Dell configuration or price change",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "CPU/high-memory configuration",
+        "price",
+        "network",
+        "power",
+        "memory population"
+      ]
+    },
+    {
+      "id": "amd_threadripper_platform_specs_2026_08_27",
+      "authority": "authoritative",
+      "publisher": "AMD",
+      "title": "AMD Ryzen Threadripper Processors for Desktop Workstations",
+      "url": "https://www.amd.com/en/products/processors/workstations/ryzen-threadripper.html",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "WRX90 eight-channel memory platform and Threadripper PRO 7000 WX support",
+      "platform_context": "WRX90 / Threadripper PRO workstation platform",
+      "refresh_trigger": "platform specification revision",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "memory-channel architecture",
+        "capacity class"
+      ]
+    },
+    {
+      "id": "llama_cpp_head_2026_08_27",
+      "authority": "third_party",
+      "publisher": "ggml-org",
+      "title": "llama.cpp",
+      "url": "https://github.com/ggml-org/llama.cpp",
+      "source_event_at": null,
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "released/shipped",
+      "anchor": "Git HEAD e70802a01f03f0ed31a26338a5664796f3824371; README and CPU backend tree",
+      "platform_context": "cross-platform quantized local-inference reference; not a fak-native engine",
+      "refresh_trigger": "backend release, architecture support change, or fak-native parity rerun",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "broad CPU quantized-inference compatibility context"
+      ]
+    },
+    {
+      "id": "aec_threadripper_memory_measurement_2024_02_01",
+      "authority": "third_party",
+      "publisher": "AEC Magazine",
+      "title": "Review: AMD Ryzen Threadripper 7000 Series",
+      "url": "https://aecmag.com/workstations/in-depth-review-amd-ryzen-threadripper-7000-series/",
+      "source_event_at": "2024-02-01",
+      "observed_at": "2026-08-27T16:13:41-07:00",
+      "accessed_date": "2026-08-27",
+      "source_state": "experimental",
+      "anchor": "206.1 GB/s SiSoft Sandra on a comparable 32-core Threadripper PRO system with eight DDR5-5200 RDIMMs",
+      "platform_context": "HP Z6 G5A, not the inventoried Dell chassis; context only",
+      "refresh_trigger": "same-Dell STREAM or hardware-counter capture",
+      "license_disposition": "INSPIRE-ONLY",
+      "used_for": [
+        "comparable-topology measured bandwidth context"
+      ]
+    }
+  ],
+  "platforms": [
+    {
+      "platform_id": "framework-desktop-strix-halo-64",
+      "priority": 1,
+      "category": "amd_strix_halo",
+      "identity": {
+        "product": {
+          "value": "Framework Desktop DIY Edition, Ryzen AI Max+ 395, 64GB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        },
+        "commercial_status": {
+          "value": "shipping; storefront stated ships within 5 business days when observed",
+          "provenance_class": "measured",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        }
+      },
+      "memory": {
+        "architecture": {
+          "value": "256-bit LPDDR5x-8000 shared system memory used by CPU and Radeon 8060S iGPU; not discrete VRAM",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "amd_ryzen_ai_max_395_specs"
+          ]
+        },
+        "marketed_physical_memory": {
+          "value": 64,
+          "unit": "vendor-labeled GB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        },
+        "estimator_physical_memory_bytes": {
+          "value": 68719476736,
+          "equivalent_gib": 64,
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        },
+        "conservative_usable_inference_memory_bytes": {
+          "min": 51539607552,
+          "max": 55834574848,
+          "equivalent_gib": {
+            "min": 48,
+            "max": 52
+          },
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "amd_strix_halo_ai_article_2025_06_03"
+          ],
+          "reserve_accounting": "Reserve 12-16 GiB for OS, display, drivers, runtime workspaces, allocator fragmentation, and non-model processes. Re-measure per OS/backend."
+        },
+        "gpu_addressable_limit": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "amd_strix_halo_ai_article_2025_06_03"
+          ],
+          "limitation": "The cited 96/112 GB allocation statements apply to 128 GB systems and do not establish a portable 64 GB limit."
+        }
+      },
+      "bandwidth": {
+        "advertised_bytes_per_second": {
+          "value": 256000000000,
+          "display": "256 GB/s",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12"
+          ]
+        },
+        "sustainable_measured_bytes_per_second": {
+          "value": 215000000000,
+          "display": "approximately 215 GB/s maximum GPU memory bandwidth",
+          "provenance_class": "measured",
+          "source_ids": [
+            "level1techs_strix_halo_measurement_2025_07_22"
+          ],
+          "measurement_scope": "pre-production 128 GB Framework Desktop GPU memory-bandwidth probe; transfer to the 64 GB production SKU is plausible but not directly measured"
+        },
+        "estimator_ready_range": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "level1techs_strix_halo_measurement_2025_07_22"
+          ],
+          "limitation": "One maximum-bandwidth point is not a defensible workload lower/upper range."
+        }
+      },
+      "compute": {
+        "capabilities": {
+          "value": [
+            "Radeon 8060S, 40 RDNA 3.5 compute units",
+            "AVX-512-capable Zen 5 CPU",
+            "FP16 matrix capability; AMD reference platform cites 60 FP16 TFLOPS",
+            "XDNA 2 NPU up to 50 TOPS"
+          ],
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "amd_ryzen_ai_max_395_specs",
+            "amd_halo_developer_platform_specs_2026"
+          ],
+          "limitation": "NPU TOPS and reference FP16 peaks are not LLM throughput predictions and are not Framework measurements."
+        }
+      },
+      "power": {
+        "envelope": {
+          "value": {
+            "processor_sustained_w": 120,
+            "processor_boost_w": 140,
+            "power_supply_w": 400
+          },
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "framework_desktop_config_2026_08_27"
+          ],
+          "limitation": "No measured wall-power inference trace is inventoried."
+        }
+      },
+      "interconnect_network": {
+        "value": [
+          "5 GbE",
+          "Wi-Fi 7",
+          "2x USB4 40 Gbps",
+          "PCIe 4.0 host lanes; no discrete-GPU slot intended for model-memory expansion"
+        ],
+        "provenance_class": "official_spec_derived",
+        "source_ids": [
+          "framework_desktop_config_2026_08_27",
+          "framework_strix_halo_deep_dive_2025_03_12",
+          "amd_ryzen_ai_max_395_specs"
+        ]
+      },
+      "software_maturity": {
+        "rating": "developing",
+        "value": "Linux and Windows are supported; ROCm support exists for the Halo developer platform, while production Framework evidence still spans ROCm nightly and Vulkan paths. Validate the exact model, quantization, kernel, and OS before assuming parity with CUDA or Metal.",
+        "provenance_class": "analytically_derived",
+        "source_ids": [
+          "amd_halo_developer_platform_specs_2026",
+          "level1techs_strix_halo_measurement_2025_07_22"
+        ],
+        "refresh_trigger": "stable ROCm release and fak-native gfx1151 receipt"
+      },
+      "price": {
+        "list": {
+          "amount": 1959,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "measured",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ],
+          "configuration_boundary": "DIY system selection only; no primary storage, OS, CPU fan, power cable, tiles, or optional ports included."
+        },
+        "street": {
+          "amount": null,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "No defensible like-for-like completed-system street price was captured."
+        }
+      }
+    },
+    {
+      "platform_id": "framework-desktop-strix-halo-128",
+      "priority": 2,
+      "category": "amd_strix_halo",
+      "identity": {
+        "product": {
+          "value": "Framework Desktop DIY Edition, Ryzen AI Max+ 395, 128GB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        },
+        "commercial_status": {
+          "value": "shipping; storefront stated ships within 5 business days when observed",
+          "provenance_class": "measured",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        }
+      },
+      "memory": {
+        "architecture": {
+          "value": "256-bit LPDDR5x-8000 shared system memory used by CPU and Radeon 8060S iGPU; not 128 GB of discrete VRAM",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "amd_ryzen_ai_max_395_specs"
+          ]
+        },
+        "marketed_physical_memory": {
+          "value": 128,
+          "unit": "vendor-labeled GB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        },
+        "estimator_physical_memory_bytes": {
+          "value": 137438953472,
+          "equivalent_gib": 128,
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ]
+        },
+        "conservative_usable_inference_memory_bytes": {
+          "min": 98784247808,
+          "max": 111669149696,
+          "equivalent_gib": {
+            "min": 92,
+            "max": 104
+          },
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "amd_strix_halo_ai_article_2025_06_03"
+          ],
+          "reserve_accounting": "Reserve 24-36 GiB for OS, display, drivers, runtime workspaces, allocator fragmentation, and the gap between physical/shared memory and GPU-addressable policy. Windows documentation cites up to 96 GB dedicated; AMD cites up to 112 GB allocatable on a 128 GB reference system."
+        },
+        "gpu_addressable_limit": {
+          "value": {
+            "framework_windows_dedicated_gb": 96,
+            "amd_reference_allocatable_gb": 112
+          },
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "amd_strix_halo_ai_article_2025_06_03"
+          ],
+          "limitation": "Dedicated/allocatable graphics memory is a policy boundary inside shared memory, not additional VRAM."
+        }
+      },
+      "bandwidth": {
+        "advertised_bytes_per_second": {
+          "value": 256000000000,
+          "display": "256 GB/s",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12"
+          ]
+        },
+        "sustainable_measured_bytes_per_second": {
+          "value": 215000000000,
+          "display": "approximately 215 GB/s maximum GPU memory bandwidth",
+          "provenance_class": "measured",
+          "source_ids": [
+            "level1techs_strix_halo_measurement_2025_07_22"
+          ],
+          "measurement_scope": "pre-production 128 GB Framework Desktop GPU memory-bandwidth probe"
+        },
+        "host_stream_context": {
+          "value": {
+            "copy_bytes_per_second": 145363000000,
+            "scale_bytes_per_second": 110611000000,
+            "triad_bytes_per_second": 107105000000,
+            "add_bytes_per_second": 107022000000
+          },
+          "provenance_class": "measured",
+          "source_ids": [
+            "storagereview_halo_spark_2026_07_06"
+          ],
+          "measurement_scope": "AMD reference Halo CPU STREAM; not Framework GPU inference bandwidth and not an estimator substitute"
+        },
+        "estimator_ready_range": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "level1techs_strix_halo_measurement_2025_07_22"
+          ],
+          "limitation": "Collect workload-specific fak-native lower/upper bandwidth before using the estimator for throughput."
+        }
+      },
+      "compute": {
+        "capabilities": {
+          "value": [
+            "Radeon 8060S, 40 RDNA 3.5 compute units",
+            "AVX-512-capable Zen 5 CPU",
+            "FP16 matrix capability; AMD reference platform cites 60 FP16 TFLOPS",
+            "XDNA 2 NPU up to 50 TOPS"
+          ],
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "amd_ryzen_ai_max_395_specs",
+            "amd_halo_developer_platform_specs_2026"
+          ],
+          "limitation": "TOPS and reference FP16 peaks are not token-throughput predictions."
+        }
+      },
+      "power": {
+        "envelope": {
+          "value": {
+            "processor_sustained_w": 120,
+            "processor_boost_w": 140,
+            "power_supply_w": 400
+          },
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "framework_strix_halo_deep_dive_2025_03_12",
+            "framework_desktop_config_2026_08_27"
+          ],
+          "limitation": "No measured wall-power inference trace is inventoried."
+        }
+      },
+      "interconnect_network": {
+        "value": [
+          "5 GbE",
+          "Wi-Fi 7",
+          "2x USB4 40 Gbps",
+          "PCIe 4.0 host lanes; no high-bandwidth multi-accelerator fabric"
+        ],
+        "provenance_class": "official_spec_derived",
+        "source_ids": [
+          "framework_desktop_config_2026_08_27",
+          "framework_strix_halo_deep_dive_2025_03_12",
+          "amd_ryzen_ai_max_395_specs"
+        ]
+      },
+      "software_maturity": {
+        "rating": "developing",
+        "value": "Capacity is commercially differentiated, but the software path remains more version-sensitive than CUDA or Apple MLX/Metal. ROCm and Vulkan results must name OS, driver, backend, and kernel set.",
+        "provenance_class": "analytically_derived",
+        "source_ids": [
+          "amd_halo_developer_platform_specs_2026",
+          "level1techs_strix_halo_measurement_2025_07_22"
+        ],
+        "refresh_trigger": "stable ROCm release and fak-native gfx1151 receipt"
+      },
+      "price": {
+        "list": {
+          "amount": 3449,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "measured",
+          "source_ids": [
+            "framework_desktop_config_2026_08_27"
+          ],
+          "configuration_boundary": "DIY system selection only; no primary storage, OS, CPU fan, power cable, tiles, or optional ports included."
+        },
+        "street": {
+          "amount": null,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "No defensible like-for-like completed-system street price was captured."
+        }
+      }
+    },
+    {
+      "platform_id": "apple-mac-studio-m5-max-128",
+      "priority": 3,
+      "category": "apple_unified_memory",
+      "identity": {
+        "product": {
+          "value": "Apple Mac Studio, M5 Max 18-core CPU/40-core GPU, 128GB unified memory, 1TB SSD",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ]
+        },
+        "commercial_status": {
+          "value": "preorder on 2026-08-27; customer availability announced for 2026-09-22",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25",
+            "apple_mac_studio_newsroom_2026_08_25"
+          ]
+        }
+      },
+      "memory": {
+        "architecture": {
+          "value": "Apple unified memory shared by CPU, GPU, and media/Neural Engine blocks; not discrete VRAM",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ]
+        },
+        "marketed_physical_memory": {
+          "value": 128,
+          "unit": "vendor-labeled GB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ]
+        },
+        "estimator_physical_memory_bytes": {
+          "value": 137438953472,
+          "equivalent_gib": 128,
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ]
+        },
+        "conservative_usable_inference_memory_bytes": {
+          "min": 103079215104,
+          "max": 115964116992,
+          "equivalent_gib": {
+            "min": 96,
+            "max": 108
+          },
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ],
+          "reserve_accounting": "Reserve 20-32 GiB for macOS, display, Metal/MLX allocations, runtime workspaces, compression/swap avoidance, and other processes. No shipping M5 Max 128 GB pressure trace existed on the as-of date."
+        },
+        "gpu_addressable_limit": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ],
+          "limitation": "Unified memory is not a promise that every byte is simultaneously available to one Metal process."
+        }
+      },
+      "bandwidth": {
+        "advertised_bytes_per_second": {
+          "value": 614000000000,
+          "display": "614 GB/s",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ]
+        },
+        "sustainable_measured_bytes_per_second": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "The configuration was a preorder and not yet generally available on 2026-08-27; no defensible shipping-system sustainable bandwidth measurement was found."
+        },
+        "estimator_ready_range": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "Do not substitute 614 GB/s as a sustained lower bound."
+        }
+      },
+      "compute": {
+        "capabilities": {
+          "value": [
+            "40-core Apple GPU with Neural Accelerators and hardware ray tracing",
+            "16-core Neural Engine",
+            "Metal and MLX software paths for floating-point and quantized local inference"
+          ],
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25",
+            "mlx_head_2026_08_27"
+          ],
+          "limitation": "Apple does not publish a directly comparable LLM TOPS/TFLOPS figure for this configuration in the cited specification."
+        }
+      },
+      "power": {
+        "envelope": {
+          "value": {
+            "system_max_continuous_w": 480
+          },
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_specs_2026_08_25"
+          ],
+          "limitation": "This is the system electrical ceiling, not SoC TDP or measured inference draw."
+        }
+      },
+      "interconnect_network": {
+        "value": [
+          "10 GbE",
+          "4x rear Thunderbolt 5 up to 120 Gbps",
+          "Wi-Fi 7",
+          "no external discrete-GPU support"
+        ],
+        "provenance_class": "official_spec_derived",
+        "source_ids": [
+          "apple_mac_studio_m5_specs_2026_08_25"
+        ]
+      },
+      "software_maturity": {
+        "rating": "mature_for_single_node_local_inference",
+        "value": "Metal and MLX provide a cohesive Apple-silicon path with broad local-inference tooling, but CUDA-only kernels and Linux-first serving stacks do not transfer directly. M5-specific maturity remained unmeasured before general availability.",
+        "provenance_class": "analytically_derived",
+        "source_ids": [
+          "apple_mac_studio_m5_specs_2026_08_25",
+          "mlx_head_2026_08_27"
+        ],
+        "refresh_trigger": "shipping M5 Max MLX/Metal and fak-native receipts"
+      },
+      "price": {
+        "list": {
+          "amount": 5399,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "apple_mac_studio_m5_64_1tb_store_2026_08_27",
+            "appleinsider_m5_studio_pricing_2026_08_26"
+          ],
+          "derivation": "3,799 official 64 GB/1 TB SKU + (2,000 reported 128 GB memory delta - 400 reported 64 GB memory delta) = 5,399.",
+          "limitation": "The exact 128 GB total was reconstructed from current configuration deltas because the dynamic Apple page did not expose a stable quoted total in the text fetch."
+        },
+        "street": {
+          "amount": null,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "No street price exists before general availability."
+        }
+      }
+    },
+    {
+      "platform_id": "nvidia-dgx-spark-128",
+      "priority": 4,
+      "category": "nvidia_compact_appliance",
+      "identity": {
+        "product": {
+          "value": "NVIDIA DGX Spark Founders Edition, GB10, 128GB, 4TB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ]
+        },
+        "commercial_status": {
+          "value": "shipping; third-party US retail listing observed in stock",
+          "provenance_class": "measured",
+          "source_ids": [
+            "bestbuy_dgx_spark_listing_2026_08_27"
+          ]
+        }
+      },
+      "memory": {
+        "architecture": {
+          "value": "128 GB LPDDR5x coherent unified system memory shared by the Grace CPU and Blackwell GPU; not 128 GB of discrete GDDR/HBM VRAM",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ]
+        },
+        "marketed_physical_memory": {
+          "value": 128,
+          "unit": "vendor-labeled GB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ]
+        },
+        "estimator_physical_memory_bytes": {
+          "value": 137438953472,
+          "equivalent_gib": 128,
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ]
+        },
+        "conservative_usable_inference_memory_bytes": {
+          "min": 111669149696,
+          "max": 120259084288,
+          "equivalent_gib": {
+            "min": 104,
+            "max": 112
+          },
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ],
+          "reserve_accounting": "Reserve 16-24 GiB for DGX OS, display/headless services, CUDA context, runtime workspaces, allocator fragmentation, and monitoring."
+        },
+        "gpu_addressable_limit": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ],
+          "limitation": "Coherent unified memory does not make the entire pool free for model weights and KV."
+        }
+      },
+      "bandwidth": {
+        "advertised_bytes_per_second": {
+          "value": 273000000000,
+          "display": "273 GB/s",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ]
+        },
+        "sustainable_measured_bytes_per_second": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "No GPU inference-path sustainable memory-bandwidth measurement with counters was found."
+        },
+        "host_stream_context": {
+          "value": {
+            "copy_bytes_per_second": 123730000000,
+            "scale_bytes_per_second": 128970000000,
+            "triad_bytes_per_second": 121433000000,
+            "add_bytes_per_second": 122815000000
+          },
+          "provenance_class": "measured",
+          "source_ids": [
+            "storagereview_halo_spark_2026_07_06"
+          ],
+          "measurement_scope": "CPU STREAM host-memory results; not GPU inference effective bandwidth"
+        },
+        "estimator_ready_range": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "Do not use CPU STREAM as a GPU decode bandwidth range."
+        }
+      },
+      "compute": {
+        "capabilities": {
+          "value": [
+            "Blackwell GPU with fifth-generation Tensor Cores",
+            "up to 1 PFLOP FP4 using sparsity",
+            "CUDA, cuDNN, TensorRT, NIM, containers, and DGX OS",
+            "20-core Arm CPU"
+          ],
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ],
+          "limitation": "The FP4 figure uses sparsity and is not a token-throughput prediction or a dense BF16 equivalent."
+        }
+      },
+      "power": {
+        "envelope": {
+          "value": {
+            "gb10_tdp_w": 140,
+            "power_supply_w": 240
+          },
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "nvidia_dgx_spark_specs_2026_08_27"
+          ],
+          "limitation": "No matched wall-power inference trace is inventoried."
+        }
+      },
+      "interconnect_network": {
+        "value": [
+          "10 GbE RJ-45",
+          "ConnectX-7 at up to 200 Gbps",
+          "Wi-Fi 7",
+          "vendor-supported multi-Spark connectivity"
+        ],
+        "provenance_class": "official_spec_derived",
+        "source_ids": [
+          "nvidia_dgx_spark_specs_2026_08_27"
+        ]
+      },
+      "software_maturity": {
+        "rating": "mature_cuda_stack_with_new_architecture_caveats",
+        "value": "DGX OS ships the NVIDIA AI stack and local workflow playbooks, which lowers setup friction. GB10/SM121 remains newer than mainstream datacenter CUDA targets, so model/kernel support and container architecture must still be checked.",
+        "provenance_class": "analytically_derived",
+        "source_ids": [
+          "nvidia_dgx_spark_specs_2026_08_27"
+        ],
+        "refresh_trigger": "DGX OS/CUDA/container release or fak-native GB10 receipt"
+      },
+      "price": {
+        "list": {
+          "amount": 4699,
+          "currency": "USD",
+          "price_date": "2026-08-12",
+          "provenance_class": "measured",
+          "source_ids": [
+            "dgx_spark_price_report_2026_08_12"
+          ],
+          "limitation": "Reported current NVIDIA list price; direct NVIDIA Marketplace fetch timed out during validation."
+        },
+        "street": {
+          "amount": 5299.99,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "measured",
+          "source_ids": [
+            "bestbuy_dgx_spark_listing_2026_08_27"
+          ],
+          "limitation": "One retailer observation; price and stock are volatile."
+        }
+      }
+    },
+    {
+      "platform_id": "dell-precision-7875-threadripper-pro-128",
+      "priority": 5,
+      "category": "cpu_high_memory",
+      "identity": {
+        "product": {
+          "value": "Dell Precision 7875 Tower, Threadripper PRO 7975WX, 128GB DDR5 ECC, Ubuntu 24.04, RTX A400, no storage",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ]
+        },
+        "commercial_status": {
+          "value": "shipping/configurable",
+          "provenance_class": "measured",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ]
+        }
+      },
+      "memory": {
+        "architecture": {
+          "value": "8x16 GB DDR5-5200 ECC RDIMM across the Threadripper PRO/WRX90 eight-channel memory platform; CPU-attached memory, not VRAM",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27",
+            "amd_threadripper_platform_specs_2026_08_27"
+          ]
+        },
+        "marketed_physical_memory": {
+          "value": 128,
+          "unit": "vendor-labeled GB",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ]
+        },
+        "estimator_physical_memory_bytes": {
+          "value": 137438953472,
+          "equivalent_gib": 128,
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ]
+        },
+        "conservative_usable_inference_memory_bytes": {
+          "min": 115964116992,
+          "max": 124554051584,
+          "equivalent_gib": {
+            "min": 108,
+            "max": 116
+          },
+          "provenance_class": "assumption_speculative",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ],
+          "reserve_accounting": "Reserve 12-20 GiB for Ubuntu, page cache, model runtime, thread stacks, workspaces, and services. A memory-mapped CPU engine can shift pressure between resident and cached pages, so capture actual RSS/commit."
+        },
+        "gpu_addressable_limit": {
+          "value": 4294967296,
+          "unit": "bytes of discrete RTX A400 VRAM",
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ],
+          "limitation": "The 4 GB A400 is a display/entry GPU and does not turn the 128 GB CPU memory into CUDA VRAM."
+        }
+      },
+      "bandwidth": {
+        "advertised_bytes_per_second": {
+          "value": 332800000000,
+          "display": "332.8 GB/s theoretical pin bandwidth",
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27",
+            "amd_threadripper_platform_specs_2026_08_27"
+          ],
+          "derivation": "8 channels x 5,200,000,000 transfers/s x 8 bytes/transfer."
+        },
+        "sustainable_measured_bytes_per_second": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "No same-Dell sustainable memory-bandwidth capture was found."
+        },
+        "comparable_topology_context": {
+          "value": 206100000000,
+          "display": "206.1 GB/s SiSoft Sandra",
+          "provenance_class": "measured",
+          "source_ids": [
+            "aec_threadripper_memory_measurement_2024_02_01"
+          ],
+          "measurement_scope": "different OEM chassis with a comparable 32-core Threadripper PRO and eight DDR5-5200 RDIMMs; context only"
+        },
+        "estimator_ready_range": {
+          "value": null,
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "The comparable-system result cannot establish this Dell's lower/upper range."
+        }
+      },
+      "compute": {
+        "capabilities": {
+          "value": [
+            "32-core/64-thread Zen 4 Threadripper PRO 7975WX",
+            "software quantized CPU inference",
+            "RTX A400 with 4 GB GDDR6 is not sized for the inventoried 128 GB model-residency role"
+          ],
+          "provenance_class": "analytically_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27",
+            "llama_cpp_head_2026_08_27"
+          ],
+          "limitation": "No defensible low-precision CPU FLOPS or token-rate peak is supplied."
+        }
+      },
+      "power": {
+        "envelope": {
+          "value": {
+            "cpu_tdp_w": 350,
+            "configured_chassis_power_supply_w": 1350
+          },
+          "provenance_class": "official_spec_derived",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ],
+          "limitation": "The PSU rating is a chassis capacity, not wall draw; no inference power trace is inventoried."
+        }
+      },
+      "interconnect_network": {
+        "value": [
+          "10 GbE plus 1 GbE",
+          "PCIe Gen5 x16 expansion",
+          "multiple additional PCIe Gen4/Gen5 slots",
+          "no accelerator fabric in the inventoried configuration"
+        ],
+        "provenance_class": "official_spec_derived",
+        "source_ids": [
+          "dell_precision_7875_config_2026_08_27"
+        ]
+      },
+      "software_maturity": {
+        "rating": "broad_cpu_compatibility_lower_acceleration",
+        "value": "Ubuntu/x86-64 has broad CPU-runtime compatibility and avoids accelerator-memory ceilings. The trade is substantially lower low-precision acceleration than modern GPU paths, and the small A400 does not change that capacity boundary.",
+        "provenance_class": "analytically_derived",
+        "source_ids": [
+          "dell_precision_7875_config_2026_08_27",
+          "llama_cpp_head_2026_08_27"
+        ],
+        "refresh_trigger": "same-system fak-native CPU memory-bandwidth and completed-job receipt"
+      },
+      "price": {
+        "list": {
+          "amount": 19897.33,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "measured",
+          "source_ids": [
+            "dell_precision_7875_config_2026_08_27"
+          ],
+          "configuration_boundary": "Official selected configuration includes Ubuntu, RTX A400 and 128 GB ECC memory but explicitly no storage."
+        },
+        "street": {
+          "amount": null,
+          "currency": "USD",
+          "price_date": "2026-08-27",
+          "provenance_class": "assumption_speculative",
+          "source_ids": [],
+          "limitation": "No like-for-like reseller street price was captured."
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Shared or unified system memory is not discrete VRAM. Capacity available to one inference process is lower than installed memory and depends on OS, driver, display, runtime, and allocator policy.",
+    "Advertised bandwidth is a physical or architectural peak. Host STREAM, GPU microbenchmarks, and inference effective bandwidth are different measurements.",
+    "A single measured maximum does not establish the lower/upper BandwidthBytesPerSec range required by the estimator.",
+    "TOPS/PFLOPS figures depend on precision, sparsity, accumulation, shape, and software support; they are not throughput predictions.",
+    "Prices are configuration- and date-specific and exclude tax. Framework and Dell configurations omit components explicitly noted in their price boundaries.",
+    "The Apple M5 Max row was a preorder on the as-of date, so sustainable measurements and street price are intentionally null.",
+    "No row is a measured fak-native Qwen3.8 or GLM-5.3 performance result. Final API-versus-local decisions require quality-qualified completed-job cost and completion time, including failed, retried, setup, queueing, and power costs."
+  ]
+}

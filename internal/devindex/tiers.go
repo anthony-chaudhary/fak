@@ -377,6 +377,7 @@ var verbTiers = map[string]VerbTier{
 	"tasks":                         TierDev,
 	"test":                          TierDev,
 	"tier-calibrate":                TierDev,
+	"thought-check":                 TierDev,
 	"token-defaults-scorecard":      TierDev,
 	"token-profile":                 TierDev,
 	"tool-coverage-audit":           TierDev,
