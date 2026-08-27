@@ -492,6 +492,7 @@ type CacheAwarePolicy struct {
 	skew        SkewThreshold
 	tierEnabled bool
 	tierWeights TierWeights
+	decode      decodeFootprintRouteState
 }
 
 // NewCacheAwarePolicy builds the policy over a residency index (a fresh one is created
@@ -507,7 +508,7 @@ func NewCacheAwarePolicy(index *PrefixResidencyIndex, skew SkewThreshold) *Cache
 	if skew.RelLoad < 1 {
 		skew.RelLoad = def.RelLoad
 	}
-	return &CacheAwarePolicy{index: index, skew: skew}
+	return &CacheAwarePolicy{index: index, skew: skew, decode: newDecodeFootprintRouteState(DefaultDecodeFootprintConfig())}
 }
 
 // WithTierWeightedOverlap enables live tier-aware credit. Invalid weights fail closed;
@@ -578,24 +579,28 @@ func (p *CacheAwarePolicy) pickWorker(workers []string, prefix []string, ext fun
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	pick := p.chooseWorkerLocked(workers, prefix, ext)
+
+	hit = p.index.Overlap(pick, prefix) == len(prefix)
+	p.index.Observe(pick, prefix)
+	return pick, hit, true
+}
+
+func (p *CacheAwarePolicy) chooseWorkerLocked(workers []string, prefix []string, ext func(string) int) string {
 	loc := p.localityTarget(workers, prefix, ext)
 	bal := p.balanceTarget(workers, ext)
 
 	maxL, minL := p.loadRange(workers, ext)
 	skewed := maxL-minL >= p.skew.AbsLoad && float64(maxL) >= p.skew.RelLoad*float64(mathx.MaxInt(minL, 1))
-
-	pick := loc
 	if skewed {
 		// Balancing threshold crossed: drop locality, route by load alone so
 		// shared-prefix traffic stops herding onto the hot holder.
-		pick = bal
-	} else if p.score(bal, prefix, ext) > p.score(loc, prefix, ext) {
-		pick = bal
+		return bal
 	}
-
-	hit = p.index.Overlap(pick, prefix) == len(prefix)
-	p.index.Observe(pick, prefix)
-	return pick, hit, true
+	if p.score(bal, prefix, ext) > p.score(loc, prefix, ext) {
+		return bal
+	}
+	return loc
 }
 
 // localityTarget is the worker holding the longest resident overlap with prefix; ties

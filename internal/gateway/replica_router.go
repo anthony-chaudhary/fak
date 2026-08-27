@@ -65,15 +65,48 @@ type ReplicaRouter struct {
 }
 
 type reservedPlannerReplica struct {
-	replica     PlannerReplica
-	reservation *fleetReservation
-	prefix      []string
+	replica        PlannerReplica
+	reservation    *fleetReservation
+	prefix         []string
+	decode         *decodeFootprintReservation
+	decodeDecision DecodeFootprintRouteDecision
 }
 
 func (r reservedPlannerReplica) Release() {
+	if r.decode != nil {
+		r.decode.releaseOnce("released")
+	}
 	if r.reservation != nil {
 		r.reservation.Release()
 	}
+}
+
+func (r reservedPlannerReplica) finish(ctx context.Context, comp *agent.Completion, err error, stream bool) {
+	if r.decode != nil {
+		if comp != nil {
+			r.decode.reconcileObserved(comp.Usage.CompletionTokens)
+		}
+		reason := "completion"
+		switch {
+		case (ctx != nil && ctx.Err() != nil) || errors.Is(err, context.Canceled):
+			reason = "cancellation"
+		case stream && err == nil:
+			reason = "stream_completion"
+		case err != nil:
+			reason = "error"
+		}
+		r.decode.releaseOnce(reason)
+	}
+	if r.reservation != nil {
+		r.reservation.Release()
+	}
+}
+
+func (r reservedPlannerReplica) currentDecodeDecision() (DecodeFootprintRouteDecision, bool) {
+	if r.decode == nil {
+		return DecodeFootprintRouteDecision{}, false
+	}
+	return r.decode.decisionSnapshot()
 }
 
 // NewReplicaRouter builds a static, in-process planner fleet. It is intentionally
@@ -203,7 +236,7 @@ func (r *ReplicaRouter) pickDistinctReplica(primary string) (PlannerReplica, boo
 	return PlannerReplica{}, false
 }
 func (r *ReplicaRouter) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	route, err := r.reserveForMessages(messages)
+	route, err := r.reserveForMessages(messages, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -218,11 +251,11 @@ func (r *ReplicaRouter) Complete(ctx context.Context, messages []agent.Message, 
 	return r.completeHedged(ctx, route, messages, tools, opts...)
 }
 
-func (r *ReplicaRouter) completeReserved(ctx context.Context, route reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	defer route.Release()
+func (r *ReplicaRouter) completeReserved(ctx context.Context, route reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+	defer func() { route.finish(ctx, comp, err, false) }()
 	tried := make(map[string]struct{}, len(r.replicas))
 	for {
-		comp, err := route.replica.Planner.Complete(ctx, messages, tools, opts...)
+		comp, err = route.replica.Planner.Complete(ctx, messages, tools, opts...)
 		if err == nil {
 			return comp, nil
 		}
@@ -230,7 +263,7 @@ func (r *ReplicaRouter) completeReserved(ctx context.Context, route reservedPlan
 			return nil, err
 		}
 		tried[route.replica.Name] = struct{}{}
-		next, retargetErr := r.retargetReserved(route.reservation, route.prefix, tried)
+		next, retargetErr := r.retargetReserved(route.reservation, route.decode, route.prefix, tried)
 		if retargetErr != nil {
 			if errors.Is(retargetErr, ErrNoWorkerForModel) {
 				return nil, retargetErr
@@ -238,6 +271,9 @@ func (r *ReplicaRouter) completeReserved(ctx context.Context, route reservedPlan
 			return nil, fmt.Errorf("%w: every admissible worker failed: %w", ErrNoHealthyWorker, err)
 		}
 		route.replica = next
+		if decision, ok := route.currentDecodeDecision(); ok {
+			route.decodeDecision = decision
+		}
 	}
 }
 
@@ -264,37 +300,68 @@ func (r *ReplicaRouter) StreamingSupported() bool {
 	return true
 }
 
-func (r *ReplicaRouter) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	route, err := r.reserveForMessages(messages)
+func (r *ReplicaRouter) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (comp *agent.Completion, err error) {
+	route, err := r.reserveForMessages(messages, opts)
 	if err != nil {
 		return nil, err
 	}
-	defer route.Release()
+	defer func() { route.finish(ctx, comp, err, true) }()
 	repl := route.replica
 	sp, ok := repl.Planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return nil, agent.ErrStreamingUnsupported
 	}
-	return sp.CompleteStream(ctx, sink, messages, tools, opts...)
+	comp, err = sp.CompleteStream(ctx, sink, messages, tools, opts...)
+	return comp, err
 }
 
-func (r *ReplicaRouter) reserveForMessages(messages []agent.Message) (reservedPlannerReplica, error) {
+func (r *ReplicaRouter) reserveForMessages(messages []agent.Message, opts []agent.SampleOpt) (reservedPlannerReplica, error) {
 	var prefix []string
 	if r != nil && r.policy != nil {
 		prefix = prefixSegments(messages)
 	}
-	return r.reserve(prefix, nil)
+	return r.reserveWithDecode(prefix, nil, decodeFootprintRouteRequest{ExpectedOutputTokens: sampleMaxTokens(opts)})
 }
 
 func (r *ReplicaRouter) reserve(prefix []string, skip map[string]struct{}) (reservedPlannerReplica, error) {
-	return r.reserveOnEngine(prefix, skip, "")
+	return r.reserveWithDecode(prefix, skip, decodeFootprintRouteRequest{})
 }
 
 func (r *ReplicaRouter) reserveOnEngine(prefix []string, skip map[string]struct{}, engine EngineKind) (reservedPlannerReplica, error) {
+	return r.reserveOnEngineWithDecode(prefix, skip, engine, decodeFootprintRouteRequest{})
+}
+
+func (r *ReplicaRouter) reserveWithDecode(prefix []string, skip map[string]struct{}, req decodeFootprintRouteRequest) (reservedPlannerReplica, error) {
+	return r.reserveOnEngineWithDecode(prefix, skip, "", req)
+}
+
+func (r *ReplicaRouter) reserveOnEngineWithDecode(prefix []string, skip map[string]struct{}, engine EngineKind, req decodeFootprintRouteRequest) (reservedPlannerReplica, error) {
 	if r == nil || len(r.replicas) == 0 {
 		return reservedPlannerReplica{}, ErrReplicaRouterEmpty
 	}
 	if r.membership == nil {
+		candidates := r.replicas
+		if len(skip) > 0 {
+			candidates = make([]PlannerReplica, 0, len(r.replicas))
+			for _, repl := range r.replicas {
+				if _, excluded := skip[repl.Name]; !excluded {
+					candidates = append(candidates, repl)
+				}
+			}
+		}
+		if len(candidates) == 0 {
+			return reservedPlannerReplica{}, ErrReplicaRouterEmpty
+		}
+		if policy, ok := r.policy.(decodeFootprintPickPolicy); ok {
+			if repl, booking, picked := policy.reserveDecodeFootprint(candidates, prefix, nil, nil, req); picked {
+				booking.setIdentity(engine, r.model)
+				decision, _ := booking.decisionSnapshot()
+				return reservedPlannerReplica{replica: repl, prefix: prefix, decode: booking, decodeDecision: decision}, nil
+			}
+		}
+		if len(skip) > 0 {
+			return reservedPlannerReplica{replica: candidates[0], prefix: prefix}, nil
+		}
 		repl, err := r.pick(prefix)
 		return reservedPlannerReplica{replica: repl, prefix: prefix}, err
 	}
@@ -304,27 +371,38 @@ func (r *ReplicaRouter) reserveOnEngine(prefix []string, skip map[string]struct{
 		byName[repl.Name] = repl
 		allowed[repl.Name] = struct{}{}
 	}
-	reservation, err := r.membership.reserveForModel(r.model, engine, allowed, skip, r.reservationPicker(prefix, byName))
+	var booking *decodeFootprintReservation
+	reservation, err := r.membership.reserveForModel(r.model, engine, allowed, skip, r.reservationPicker(prefix, byName, req, nil, &booking))
 	if err != nil {
+		if booking != nil {
+			booking.releaseOnce("booking_failure")
+		}
 		return reservedPlannerReplica{}, err
 	}
 	workerID := reservation.WorkerID()
 	repl, ok := byName[workerID]
 	if !ok {
 		reservation.Release()
+		if booking != nil {
+			booking.releaseOnce("booking_failure")
+		}
 		return reservedPlannerReplica{}, ErrNoHealthyWorker
 	}
-	return reservedPlannerReplica{replica: repl, reservation: reservation, prefix: prefix}, nil
+	if booking != nil {
+		booking.setIdentity(reservation.Engine(), r.model)
+	}
+	decision, _ := booking.decisionSnapshot()
+	return reservedPlannerReplica{replica: repl, reservation: reservation, prefix: prefix, decode: booking, decodeDecision: decision}, nil
 }
 
-func (r *ReplicaRouter) retargetReserved(reservation *fleetReservation, prefix []string, skip map[string]struct{}) (PlannerReplica, error) {
+func (r *ReplicaRouter) retargetReserved(reservation *fleetReservation, booking *decodeFootprintReservation, prefix []string, skip map[string]struct{}) (PlannerReplica, error) {
 	byName := make(map[string]PlannerReplica, len(r.replicas))
 	allowed := make(map[string]struct{}, len(r.replicas))
 	for _, repl := range r.replicas {
 		byName[repl.Name] = repl
 		allowed[repl.Name] = struct{}{}
 	}
-	workerID, err := reservation.Retarget(r.model, allowed, skip, r.reservationPicker(prefix, byName))
+	workerID, err := reservation.Retarget(r.model, allowed, skip, r.reservationPicker(prefix, byName, decodeFootprintRouteRequest{}, booking, nil))
 	if err != nil {
 		return PlannerReplica{}, err
 	}
@@ -333,13 +411,17 @@ func (r *ReplicaRouter) retargetReserved(reservation *fleetReservation, prefix [
 		reservation.Release()
 		return PlannerReplica{}, ErrNoHealthyWorker
 	}
+	if booking != nil {
+		booking.setIdentity(reservation.Engine(), r.model)
+	}
 	return repl, nil
 }
 
-func (r *ReplicaRouter) reservationPicker(prefix []string, byName map[string]PlannerReplica) fleetReservationPick {
-	return func(statuses []WorkerStatus) (string, bool) {
+func (r *ReplicaRouter) reservationPicker(prefix []string, byName map[string]PlannerReplica, req decodeFootprintRouteRequest, existing *decodeFootprintReservation, capture **decodeFootprintReservation) fleetReservationPick {
+	return func(statuses []WorkerStatus) (fleetReservationPickResult, bool) {
 		candidates := make([]PlannerReplica, 0, len(statuses))
 		inflight := make(map[string]int, len(statuses))
+		bookedOutput := make(map[string]int, len(statuses))
 		for _, status := range statuses {
 			repl, ok := byName[status.Spec.ID]
 			if !ok {
@@ -347,19 +429,52 @@ func (r *ReplicaRouter) reservationPicker(prefix []string, byName map[string]Pla
 			}
 			candidates = append(candidates, repl)
 			inflight[repl.Name] = status.Inflight
+			bookedOutput[repl.Name] = status.BookedOutputBlocks
 		}
 		if len(candidates) == 0 {
-			return "", false
+			return fleetReservationPickResult{}, false
+		}
+		if policy, ok := r.policy.(decodeFootprintPickPolicy); ok {
+			load := func(name string) int { return inflight[name] }
+			booked := func(name string) int { return bookedOutput[name] }
+			var chosen PlannerReplica
+			var booking *decodeFootprintReservation
+			var picked bool
+			if existing != nil {
+				chosen, picked = policy.retargetDecodeFootprint(existing, candidates, prefix, load, booked)
+			} else {
+				chosen, booking, picked = policy.reserveDecodeFootprint(candidates, prefix, load, booked, req)
+			}
+			if picked {
+				if capture != nil {
+					*capture = booking
+				}
+				if _, valid := inflight[chosen.Name]; valid {
+					return fleetReservationPickResult{workerID: chosen.Name, bookedOutputBlocks: bookingBlocks(booking, existing)}, true
+				}
+				if booking != nil {
+					booking.releaseOnce("booking_failure")
+				}
+			}
 		}
 		if r.policy != nil {
 			if chosen, ok := r.policy.Pick(candidates, prefix, func(name string) int { return inflight[name] }); ok {
 				if _, valid := inflight[chosen.Name]; valid {
-					return chosen.Name, true
+					return fleetReservationPickResult{workerID: chosen.Name}, true
 				}
 			}
 		}
-		return r.roundRobinCandidate(inflight)
+		workerID, ok := r.roundRobinCandidate(inflight)
+		return fleetReservationPickResult{workerID: workerID}, ok
 	}
+}
+
+func bookingBlocks(created, existing *decodeFootprintReservation) int {
+	booking := created
+	if booking == nil {
+		booking = existing
+	}
+	return booking.bookedBlocks()
 }
 
 func (r *ReplicaRouter) roundRobinCandidate(candidates map[string]int) (string, bool) {

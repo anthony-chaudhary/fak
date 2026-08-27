@@ -47,7 +47,7 @@ type DecodeFootprintInputs struct {
 // blocks the request is still expected to grow, after discounting. It returns 0
 // on any degenerate input so a malformed hint can never inflate a worker's load.
 func anticipatedRemainderBlocks(in DecodeFootprintInputs) int {
-	if in.ExpectedOutputTokens <= 0 || in.BlockTokens <= 0 {
+	if in.ExpectedOutputTokens <= 0 || in.GeneratedTokens < 0 || in.BlockTokens <= 0 {
 		return 0
 	}
 	scale := in.Scale
@@ -61,9 +61,15 @@ func anticipatedRemainderBlocks(in DecodeFootprintInputs) int {
 	if remaining <= 0 {
 		return 0
 	}
-	// ceil(remaining / blockTokens): a partial trailing block still costs a whole
-	// block of decode KV.
-	rawBlocks := (remaining + in.BlockTokens - 1) / in.BlockTokens
+	// ceil(remaining / blockTokens), written without an addition that can
+	// overflow when the caller supplies a very large token count.
+	rawBlocks := remaining / in.BlockTokens
+	if remaining%in.BlockTokens != 0 {
+		rawBlocks++
+	}
+	if scale >= 1 {
+		return rawBlocks
+	}
 	scaled := int(float64(rawBlocks) * scale)
 	if scaled < 0 {
 		return 0
@@ -98,7 +104,11 @@ func AnticipatedDecodeBytes(in DecodeFootprintInputs) int {
 	if in.BlockBytes <= 0 {
 		return 0
 	}
-	return anticipatedRemainderBlocks(in) * in.BlockBytes
+	blocks := anticipatedRemainderBlocks(in)
+	if blocks > maxIntValue()/in.BlockBytes {
+		return maxIntValue()
+	}
+	return blocks * in.BlockBytes
 }
 
 // EffectiveLoadWithDecodeFootprint composes the anticipatory decode-footprint
@@ -111,5 +121,20 @@ func EffectiveLoadWithDecodeFootprint(base int, in DecodeFootprintInputs) int {
 	if base < 0 {
 		base = 0
 	}
-	return base + AnticipatedDecodeBlocks(in)
+	return saturatingNonnegativeAdd(base, AnticipatedDecodeBlocks(in))
 }
+
+func saturatingNonnegativeAdd(a, b int) int {
+	if a < 0 {
+		a = 0
+	}
+	if b < 0 {
+		b = 0
+	}
+	if a > maxIntValue()-b {
+		return maxIntValue()
+	}
+	return a + b
+}
+
+func maxIntValue() int { return int(^uint(0) >> 1) }

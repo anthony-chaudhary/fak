@@ -145,7 +145,7 @@ func (fm *FleetMembershipMetrics) renderTransitions(b *strings.Builder) {
 
 // renderWorkerGauges writes the live per-worker state from a Snapshot: current
 // health (one line for the state the worker is in), admissibility, draining, and
-// in-flight count. A drained worker that has already been removed is absent from
+// in-flight count and anticipated decode blocks. A drained worker that has already been removed is absent from
 // snap, so its gauges drop while its transition counters persist.
 func renderWorkerGauges(b *strings.Builder, snap []WorkerStatus) {
 	writeHelpType(b, "fak_gateway_fleet_worker_health",
@@ -176,6 +176,10 @@ func renderWorkerGauges(b *strings.Builder, snap []WorkerStatus) {
 	writeWorkerGauge(b, "fak_gateway_fleet_worker_inflight",
 		"In-flight requests acquired against the worker (drain waits for this to reach zero before removal).",
 		snap, func(b *strings.Builder, w WorkerStatus) { writeInt(b, w.Inflight) })
+
+	writeWorkerGauge(b, "fak_gateway_fleet_worker_booked_output_blocks",
+		"Anticipated decode-output blocks currently booked against the worker by live route reservations.",
+		snap, func(b *strings.Builder, w WorkerStatus) { writeInt(b, w.BookedOutputBlocks) })
 }
 
 // writeWorkerGauge emits one HELP/TYPE header for `name` followed by a single
