@@ -271,10 +271,7 @@ type ScorecardPayload struct {
 // roll up the distribution + the ladder-skip debt + the next-work backlog.
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
-	root, _ := filepath.Abs(opts.Root)
-	if root == "" {
-		root = opts.Root
-	}
+	root := scorecard.WorkspaceRoot(opts.Root)
 	factsFn := opts.facts
 	if factsFn == nil {
 		factsFn = gatherFacts

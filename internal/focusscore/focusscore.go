@@ -60,17 +60,8 @@ const (
 	breadthWeight     = 0.40
 )
 
-// KPIResult is one graded criterion, same shape as loopscore.KPIResult so the three cards
-// render and fold the same way.
-type KPIResult struct {
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	Hard   bool   `json:"hard"`
-	Weight int    `json:"weight"`
-	Axis   string `json:"axis"`
-	Passed bool   `json:"passed"`
-	Detail string `json:"detail"`
-}
+// KPIResult aliases the shared binary criterion shape while preserving this package's API.
+type KPIResult = scorecard.BinaryResult
 
 // Evidence is the raw, re-derived-from-disk corpus the KPIs read. Every field is a
 // fleet-wide tally over the folded objective tree + its per-objective curve signals.
@@ -112,16 +103,8 @@ type ScorecardPayload struct {
 	Evidence    Evidence       `json:"evidence"`
 }
 
-// KPIPayload is the local JSON shape (identical to loopscore.KPIPayload).
-type KPIPayload struct {
-	KPI     string   `json:"kpi"`
-	Group   string   `json:"group"`
-	Score   int      `json:"score"`
-	Value   float64  `json:"value"`
-	Detail  string   `json:"detail"`
-	Defects []string `json:"defects"`
-	Soft    []string `json:"soft"`
-}
+// KPIPayload aliases the shared stable JSON projection while preserving this package's API.
+type KPIPayload = scorecard.BinaryPayload
 
 // Options pins the inputs and clock so the score is deterministic for tests.
 type Options struct {
@@ -278,61 +261,21 @@ func focusDebt(ev Evidence) int {
 	return ev.ExcessWIP + ev.Drift + ev.Stall + ev.DetourOverrun + ev.CalibrationDebt
 }
 
-// toKPI converts one KPIResult into a scorecard.KPI (100/0 per row, HARD→Defect,
-// SOFT→Soft). The Defect text is only used for the reason line; the headline debt is the
-// magnitude-counted focusDebt stamped into ExtraCorpus, not len(Defects).
-func toKPI(r KPIResult) scorecard.KPI {
-	k := scorecard.KPI{Key: r.Key, Group: r.Axis, Detail: r.Detail}
-	if r.Passed {
-		k.Score = 100
-	} else if r.Hard {
-		k.Defects = []string{r.Key + ": " + r.Detail}
-	} else {
-		k.Soft = []string{r.Key + ": " + r.Detail}
-	}
-	return k
-}
-
-// kpiWeights derives the shared kernel's per-KPI weight from each row's within-axis Weight
-// scaled by its axis's top-level weight — reproducing the two-level weighted mean as a
-// single weighted mean over all rows (identical technique to loopscore.kpiWeights).
-func kpiWeights(all []KPIResult) map[string]float64 {
-	axisWeightSum := map[string]float64{}
-	for _, r := range all {
-		axisWeightSum[r.Axis] += float64(r.Weight)
-	}
-	w := make(map[string]float64, len(all))
-	for _, r := range all {
-		sum := axisWeightSum[r.Axis]
-		if sum == 0 {
-			continue
-		}
-		w[r.Key] = axisWeights[r.Axis] * float64(r.Weight) / sum
-	}
-	return w
-}
-
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
-	root, _ := filepath.Abs(opts.Root)
-	if root == "" {
-		root = opts.Root
-	}
+	root := scorecard.WorkspaceRoot(opts.Root)
 	ev := gatherEvidence(opts)
 
 	convergence := convergenceResults(ev)
 	breadth := breadthResults(ev)
 	all := append(append([]KPIResult{}, convergence...), breadth...)
 
-	cScore := axisScore(convergence)
-	bScore := axisScore(breadth)
+	cScore := scorecard.BinaryAxisScore(convergence)
+	bScore := scorecard.BinaryAxisScore(breadth)
 	composite := int(math.Round(convergenceWeight*float64(cScore) + breadthWeight*float64(bScore)))
 	grade := scorecard.GradeStd(float64(composite))
 
-	kpis := make([]scorecard.KPI, len(all))
-	for i, r := range all {
-		kpis[i] = toKPI(r)
-	}
+	kpis, weights := scorecard.ProjectBinary(all, axisWeights, nil)
 
 	debt := focusDebt(ev)
 	ok := debt == 0
@@ -352,7 +295,7 @@ func Build(opts Options) ScorecardPayload {
 		next = "converge worst-first: " + worstFirstNext(ev)
 	}
 
-	p := scorecard.Fold(Schema, kpis, DebtKey, kpiWeights(all), scorecard.Messages{
+	p := scorecard.Fold(Schema, kpis, DebtKey, weights, scorecard.Messages{
 		Grade:           func(float64) string { return grade },
 		Finding:         finding,
 		FindingClean:    finding,
@@ -401,7 +344,7 @@ func Build(opts Options) ScorecardPayload {
 		NextAction:  p.NextAction,
 		Workspace:   root,
 		Corpus:      p.Corpus,
-		KPIs:        kpiPayloads(all),
+		KPIs:        scorecard.BinaryPayloads(all),
 		Convergence: convergence,
 		Breadth:     breadth,
 		Evidence:    ev,
@@ -534,29 +477,6 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 }
 
 // ---- small helpers (mirror loopscore idiom) ---------------------------------------
-
-func axisScore(rows []KPIResult) int {
-	total, got := 0, 0
-	for _, r := range rows {
-		total += r.Weight
-		if r.Passed {
-			got += r.Weight
-		}
-	}
-	if total == 0 {
-		return 0
-	}
-	return int(math.Round(100 * float64(got) / float64(total)))
-}
-
-func kpiPayloads(rows []KPIResult) []KPIPayload {
-	out := make([]KPIPayload, 0, len(rows))
-	for _, r := range rows {
-		sk := toKPI(r)
-		out = append(out, KPIPayload{KPI: sk.Key, Group: sk.Group, Score: int(sk.Score), Value: scorecard.Round3(scorecard.ValueFromScore(sk.Score)), Detail: sk.Detail, Defects: sk.Defects, Soft: sk.Soft})
-	}
-	return out
-}
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
 	return KPIResult{Key: key, Label: label, Hard: hard, Weight: weight, Axis: axis, Passed: passed, Detail: detail}
