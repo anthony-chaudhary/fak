@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/systembaseline"
@@ -35,6 +37,11 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	outPath := fs.String("out", "", "write attachment result privately to FILE instead of stdout")
 	capacityReceiptPath := fs.String("capacity-receipt", "", "validate the #8971 no-FAK_Q4K_FREE_CPU native Metal capacity receipt FILE")
 	capacityPlan := fs.Bool("capacity-plan", false, "emit the bounded #8971 no-FAK_Q4K_FREE_CPU capture contract without touching hardware")
+	frontdoorMD := fs.Bool("frontdoor-md", false, "emit the generated Qwen3.8 README front-door block")
+	checkDoc := fs.Bool("check-doc", false, "fail when committed Qwen3.8 front-door blocks drift or pass review")
+	writeDoc := fs.Bool("write-doc", false, "regenerate committed Qwen3.8 front-door blocks")
+	asOf := fs.String("as-of", "", "publication date YYYY-MM-DD (default: today UTC; front-door modes only)")
+	workspace := fs.String("workspace", "", "workspace root for --check-doc/--write-doc")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -67,9 +74,11 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if *capacityPlan {
 		modeCount++
 	}
+	modeCount += boolCount(*frontdoorMD, *checkDoc, *writeDoc)
 	attachMode := set["attach-receipt"] || set["system-baseline"]
-	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") || (set["capacity-receipt"] && *capacityReceiptPath == "") || (attachMode && (*attachReceiptPath == "" || *attachBaselinePath == "")) || (set["out"] && !attachMode) {
-		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --attach-receipt RECEIPT --system-baseline ATTESTATION [--out FILE] | --capacity-plan | --capacity-receipt FILE]")
+	frontdoorMode := *frontdoorMD || *checkDoc || *writeDoc
+	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") || (set["capacity-receipt"] && *capacityReceiptPath == "") || (attachMode && (*attachReceiptPath == "" || *attachBaselinePath == "")) || (set["out"] && !attachMode) || (set["as-of"] && !frontdoorMode) || (set["workspace"] && !(*checkDoc || *writeDoc)) {
+		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --attach-receipt RECEIPT --system-baseline ATTESTATION [--out FILE] | --capacity-plan | --capacity-receipt FILE | --frontdoor-md [--as-of DATE] | (--check-doc|--write-doc) [--as-of DATE] [--workspace DIR]]")
 		return 2
 	}
 
@@ -83,6 +92,32 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	if err := nativeperf.Validate(graph); err != nil {
 		fmt.Fprintf(stderr, "fak native-performance: %v\n", err)
 		return 1
+	}
+	if frontdoorMode {
+		date := time.Now().UTC()
+		if *asOf != "" {
+			parsed, err := time.Parse(time.DateOnly, *asOf)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak native-performance: --as-of must be YYYY-MM-DD: %v\n", err)
+				return 2
+			}
+			date = parsed
+		}
+		snapshot, err := nativeperf.BuildFrontDoorSnapshot(graph, date)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: front-door snapshot: %v\n", err)
+			return 1
+		}
+		if *frontdoorMD {
+			block, err := nativeperf.FrontDoorBlock(snapshot, nativeperf.FrontDoorSurfaceREADME)
+			if err != nil {
+				fmt.Fprintf(stderr, "fak native-performance: front-door markdown: %v\n", err)
+				return 1
+			}
+			fmt.Fprintln(stdout, block)
+			return 0
+		}
+		return runNativePerformanceFrontDoorDocs(stdout, stderr, *workspace, snapshot, *writeDoc)
 	}
 	if set["capacity-receipt"] {
 		data, err := os.ReadFile(*capacityReceiptPath)
@@ -150,6 +185,68 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 		return 0
 	}
 	renderNativePerformance(stdout, graph)
+	return 0
+}
+
+type nativePerformanceFrontDoorDoc struct {
+	path    string
+	surface string
+}
+
+var nativePerformanceFrontDoorDocs = []nativePerformanceFrontDoorDoc{
+	{path: "README.md", surface: nativeperf.FrontDoorSurfaceREADME},
+	{path: "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md", surface: nativeperf.FrontDoorSurfaceIndex},
+	{path: "docs/benchmarks/QWEN38-27B-LATEST.md", surface: nativeperf.FrontDoorSurfaceLatest},
+}
+
+func runNativePerformanceFrontDoorDocs(stdout, stderr io.Writer, workspace string, snapshot nativeperf.FrontDoorSnapshot, write bool) int {
+	root := workspace
+	if root == "" {
+		root = findRepoRoot(".")
+	} else if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	stale := false
+	for _, spec := range nativePerformanceFrontDoorDocs {
+		path := filepath.Join(root, filepath.FromSlash(spec.path))
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: read %s: %v\n", path, err)
+			return 1
+		}
+		expected, err := nativeperf.FrontDoorBlock(snapshot, spec.surface)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: render %s: %v\n", spec.path, err)
+			return 1
+		}
+		got, ok := nativeperf.ExtractFrontDoorBlock(string(raw))
+		if !write {
+			if !ok || got != expected {
+				fmt.Fprintf(stdout, "STALE  %s: run `fak native-performance --write-doc`\n", spec.path)
+				stale = true
+			} else {
+				fmt.Fprintf(stdout, "OK  %s Qwen3.8 front-door block is fresh\n", spec.path)
+			}
+			continue
+		}
+		if ok && got == expected {
+			fmt.Fprintf(stdout, "%s Qwen3.8 front-door block already fresh; no change\n", spec.path)
+			continue
+		}
+		next, err := nativeperf.SpliceFrontDoorBlock(string(raw), expected)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance --write-doc: %s: %v\n", spec.path, err)
+			return 1
+		}
+		if err := os.WriteFile(path, []byte(next), 0o644); err != nil {
+			fmt.Fprintf(stderr, "fak native-performance --write-doc: write %s: %v\n", spec.path, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "wrote %s Qwen3.8 front-door block\n", spec.path)
+	}
+	if stale {
+		return 1
+	}
 	return 0
 }
 

@@ -1,0 +1,72 @@
+package cloudhandoff
+
+import (
+	"errors"
+	"testing"
+)
+
+func base() (Policy, Request) {
+	return Policy{Eligible: true, Consent: ConsentPreapproved, Destinations: []string{"vendor"}, AllowedTriggers: []Trigger{TriggerUnsupported, TriggerDeadline, TriggerQuality, TriggerPressure, TriggerFault, TriggerUser}}, Request{OperationID: "op-7", Trigger: TriggerFault, Data: []DataClass{{Name: "prompt"}}, DestinationClass: "vendor", Consequence: "provider billing", Alternatives: []string{"retry local", "cancel"}, Payload: []byte("work")}
+}
+func TestAuthorityTriggersAndAttribution(t *testing.T) {
+	p, r := base()
+	for _, trigger := range p.AllowedTriggers {
+		b := New()
+		r.Trigger = trigger
+		sent := false
+		receipt, err := b.Handoff(p, r, nil, func(pkg Package) error {
+			sent = true
+			if pkg.OperationID != r.OperationID || pkg.Schema != Schema {
+				t.Fatal("operation identity lost")
+			}
+			return nil
+		}, Attempt{Engine: "fak-native", Location: "local", Outcome: "failed"})
+		if err != nil || !sent || !receipt.RemoteCompleted || receipt.LocalCompleted {
+			t.Fatalf("trigger=%s receipt=%+v err=%v", trigger, receipt, err)
+		}
+		if len(b.Events()) != 3 || b.Events()[0].State != "proposed" || b.Events()[1].State != "approved" || b.Events()[2].State != "completed" {
+			t.Fatalf("events=%+v", b.Events())
+		}
+	}
+}
+func TestAskNeverLocalBoundaryAndFailure(t *testing.T) {
+	p, r := base()
+	p.Consent = ConsentAsk
+	b := New()
+	sent := false
+	receipt, err := b.Handoff(p, r, func(Event) bool { return false }, func(Package) error { sent = true; return nil }, Attempt{Engine: "fak-native", Location: "local", Outcome: "quality_reject"})
+	if !errors.Is(err, ErrDenied) || sent || receipt.Terminal != "denied" {
+		t.Fatalf("denial receipt=%+v err=%v sent=%v", receipt, err, sent)
+	}
+	p.Consent = ConsentNever
+	if _, err = b.Handoff(p, r, nil, func(Package) error { sent = true; return nil }, Attempt{}); !errors.Is(err, ErrDenied) {
+		t.Fatal(err)
+	}
+	p.Consent = ConsentPreapproved
+	r.Data = []DataClass{{Name: "medical", LocalRequired: true}}
+	before := sent
+	if _, err = b.Handoff(p, r, nil, func(Package) error { sent = true; return nil }, Attempt{}); !errors.Is(err, ErrDenied) || sent != before {
+		t.Fatal("local-required data escaped")
+	}
+	r.Data = []DataClass{{Name: "prompt"}}
+	receipt, err = b.Handoff(p, r, nil, func(Package) error { return errors.New("offline") }, Attempt{Engine: "fak-native", Location: "local", Outcome: "runtime_fault"})
+	if !errors.Is(err, ErrRemote) || receipt.Terminal != "failed" || receipt.RemoteCompleted || receipt.LocalCompleted {
+		t.Fatalf("failure receipt=%+v err=%v", receipt, err)
+	}
+	events := b.Events()
+	if events[len(events)-1].State != "failed" {
+		t.Fatal("missing failed event")
+	}
+}
+func TestEligibilityTriggerAndDestinationDeny(t *testing.T) {
+	p, r := base()
+	tests := []func(*Policy, *Request){func(p *Policy, _ *Request) { p.Eligible = false }, func(p *Policy, r *Request) { r.Trigger = "unknown" }, func(_ *Policy, r *Request) { r.DestinationClass = "other" }}
+	for _, mutate := range tests {
+		pp, rr := p, r
+		mutate(&pp, &rr)
+		called := false
+		if _, err := New().Handoff(pp, rr, nil, func(Package) error { called = true; return nil }, Attempt{}); !errors.Is(err, ErrDenied) || called {
+			t.Fatalf("err=%v called=%v", err, called)
+		}
+	}
+}
