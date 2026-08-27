@@ -205,6 +205,26 @@ per wall-clock minute. Required comparisons are tuned sequential, tuned provider
 batching, and the fak micro-context path. The two headline dimensions are reported
 separately—single critical-path usability and aggregate useful throughput.
 
+## Activation-boundary experiment (2026-08-26)
+
+**Question.** Does the smallest shipped micro-collapse unit justify agent semantics, or does a simpler task/kernel abstraction explain the observed behavior?
+
+**Method.** Run the deterministic offline witness:
+
+```bash
+fak micro collapse --calls 3 --payload-bytes 2048 --json
+```
+
+The observed `fak-micro-collapse/1` receipt reported `verdict=PASS`, `calls=3`, `allowed=3`, `denied=0`, `intermediate_tokens=1663`, `folded_tokens=15`, `saved_tokens=1648`, and `journal_rows=3`. Apply the [activation-bounded threshold](../concepts/micro-agents.md#activation-bounded-agent-threshold) to the smallest child contribution, not to the enclosing pipeline.
+
+| Candidate | Objective | State/budget bound | Attribution | Identity-specific control | Receipt | Decision |
+|---|---:|---:|---:|---:|---:|---|
+| Raw activation/token contribution | No | Yes, tensor shape/schedule | No | No | No | Compute primitive |
+| Kernel or batched stage | Named operation, not an independent success condition | Yes | Stage-level only | Enclosing-stage only | Aggregate counters | Kernel/task primitive |
+| One governed collapse child call | Pipeline-assigned operation | Call bound | Journal-row attribution | Allow/deny before execution, but no independent mid-call cancel or replacement | Journal row | Bounded task/tool call |
+| Future activation-bounded agent | Required | Required | Required | Required while siblings continue | Required five-field receipt | Agent only after a witnessed pass |
+
+**Conclusion.** The experiment does not promote activations—or the current collapse child—to agents. The current receipt proves useful bounded accounting, but it does not prove an independent objective, persistent state boundary, or identity-specific cancellation/replacement. The cheaper and more precise abstraction is a governed task/tool call over kernel primitives. This conclusion is falsifiable: a future run crosses the threshold only when its receipt names all five requirements and a test cancels or replaces one candidate identity while sibling work continues and remains attributable. Until then this remains Research/Peripheral rather than a runtime architecture commitment.
 ## Issue map
 
 Epic: [#5785](https://github.com/anthony-chaudhary/fak/issues/5785) (P0, G0).
