@@ -43,6 +43,45 @@ type CacheEvent struct {
 	Outcome      cachemeta.KVTransferOutcome
 	FaultReason  string
 	BytesMoved   int64
+
+	// VisibilityAction plus stable source/event identity opt into logical-block
+	// consolidation. Identity-less events retain the historical publish-every-
+	// event behavior for old callers.
+	VisibilityAction cachemeta.CacheVisibilityAction
+	SourceID         string
+	EventID          string
+	EventSequence    uint64
+	LogicalBlock     cachemeta.CacheLogicalBlockKey
+
+	// RoutingReceipt records the engine/model route that produced this event.
+	// Native witnesses use NativeCacheEventRoutingReceipt; no implicit fallback
+	// is inferred by the recorder.
+	RoutingReceipt CacheEventRoutingReceipt
+}
+
+// CacheEventRoutingReceipt is the explicit route attached to a published cache
+// visibility transition. Fallback is "none" for a route that may not silently
+// switch engines.
+type CacheEventRoutingReceipt struct {
+	Engine   string `json:"engine"`
+	Model    string `json:"model"`
+	Fallback string `json:"fallback"`
+}
+
+const (
+	cacheEventNativeEngine = "fak_native"
+	cacheEventNativeModel  = "Qwen3.8"
+	cacheEventNoFallback   = "none"
+)
+
+// NativeCacheEventRoutingReceipt returns the required native cache-event route:
+// fak's own engine, Qwen3.8, and explicitly no fallback (including llama.cpp).
+func NativeCacheEventRoutingReceipt() CacheEventRoutingReceipt {
+	return CacheEventRoutingReceipt{
+		Engine:   cacheEventNativeEngine,
+		Model:    cacheEventNativeModel,
+		Fallback: cacheEventNoFallback,
+	}
 }
 
 // toTransfer projects a CacheEvent onto the cachemeta.KVTransfer shape so the single
@@ -73,8 +112,11 @@ func (ev CacheEvent) toTransfer() cachemeta.KVTransfer {
 // whole point of this seam is that a failed restore is observable, never a silent
 // recompute.
 type CacheEventResult struct {
-	Entry   cachemeta.Entry
-	Verdict cachemeta.LookupVerdict
+	Entry       cachemeta.Entry
+	Verdict     cachemeta.LookupVerdict
+	Published   bool
+	Suppression cachemeta.CacheEventSuppression
+	Receipt     CacheEventRoutingReceipt
 }
 
 // SilentRecompute reports whether folding this result as "just recompute it" would
@@ -110,6 +152,15 @@ type CacheEventMetrics struct {
 	// (#1945). overflowEvents counts how many events landed here.
 	overflowEvents uint64
 	overflow       cacheEventAgg
+
+	// Logical visibility counters are separate from normalized transfer totals:
+	// suppressed inputs never enter the published event totals above.
+	suppressedDuplicateReplay uint64
+	suppressedReorderedReplay uint64
+	suppressedProducer        uint64
+	suppressedRemove          uint64
+	unknownEvents             uint64
+	stateBoundSuppressions    uint64
 }
 
 // maxCacheEventKeys bounds byKey's cardinality. Direction (offload/restore/route/
@@ -190,6 +241,29 @@ func (mx *CacheEventMetrics) observe(e cachemeta.Entry, v cachemeta.LookupVerdic
 	}
 }
 
+func (mx *CacheEventMetrics) observeSuppression(reason cachemeta.CacheEventSuppression) {
+	if mx == nil || reason == cachemeta.CacheEventNotSuppressed {
+		return
+	}
+	mx.mu.Lock()
+	defer mx.mu.Unlock()
+	switch reason {
+	case cachemeta.CacheEventDuplicateReplay:
+		mx.suppressedDuplicateReplay++
+	case cachemeta.CacheEventReorderedReplay:
+		mx.suppressedReorderedReplay++
+	case cachemeta.CacheEventDuplicateProducer:
+		mx.suppressedProducer++
+	case cachemeta.CacheEventSourceStillResident:
+		mx.suppressedRemove++
+	case cachemeta.CacheEventUnknown:
+		mx.unknownEvents++
+	case cachemeta.CacheEventStateBound:
+		mx.unknownEvents++
+		mx.stateBoundSuppressions++
+	}
+}
+
 // CacheEventSnapshot is an immutable read of the metric surface, safe to render
 // without holding the lock.
 type CacheEventSnapshot struct {
@@ -211,6 +285,13 @@ type CacheEventSnapshot struct {
 	OverflowEvents      uint64
 	OverflowBytesMoved  int64
 	OverflowTokensMoved int64
+
+	SuppressedDuplicateReplay uint64
+	SuppressedReorderedReplay uint64
+	SuppressedProducer        uint64
+	SuppressedRemove          uint64
+	UnknownEvents             uint64
+	StateBoundSuppressions    uint64
 }
 
 // CacheEventRow is one (direction, outcome, to_tier, memory_class) bucket.
@@ -244,6 +325,12 @@ func (mx *CacheEventMetrics) Snapshot() CacheEventSnapshot {
 	s.OverflowEvents = mx.overflowEvents
 	s.OverflowBytesMoved = mx.overflow.bytesMoved
 	s.OverflowTokensMoved = mx.overflow.tokensMoved
+	s.SuppressedDuplicateReplay = mx.suppressedDuplicateReplay
+	s.SuppressedReorderedReplay = mx.suppressedReorderedReplay
+	s.SuppressedProducer = mx.suppressedProducer
+	s.SuppressedRemove = mx.suppressedRemove
+	s.UnknownEvents = mx.unknownEvents
+	s.StateBoundSuppressions = mx.stateBoundSuppressions
 	s.Rows = make([]CacheEventRow, 0, len(mx.byKey))
 	for k, agg := range mx.byKey {
 		s.Rows = append(s.Rows, CacheEventRow{
@@ -323,6 +410,18 @@ func (s CacheEventSnapshot) Prometheus() string {
 	b.WriteString("fak_engine_cache_keys_capped " + boolGauge(s.KeysCapped) + "\n")
 	help("fak_engine_cache_event_overflow_total", "Cache events folded into the overflow bucket because a new (direction, outcome, to_tier, memory_class) key would exceed the bound.", "counter")
 	b.WriteString("fak_engine_cache_event_overflow_total " + utoa(s.OverflowEvents) + "\n")
+	help("fak_engine_cache_suppressed_duplicate_replay_total", "Exact source event replays suppressed before cache visibility publication.", "counter")
+	b.WriteString("fak_engine_cache_suppressed_duplicate_replay_total " + utoa(s.SuppressedDuplicateReplay) + "\n")
+	help("fak_engine_cache_suppressed_reordered_replay_total", "Older source events suppressed before cache visibility publication.", "counter")
+	b.WriteString("fak_engine_cache_suppressed_reordered_replay_total " + utoa(s.SuppressedReorderedReplay) + "\n")
+	help("fak_engine_cache_suppressed_producer_total", "Additional source STORE events suppressed while a logical block was already visible.", "counter")
+	b.WriteString("fak_engine_cache_suppressed_producer_total " + utoa(s.SuppressedProducer) + "\n")
+	help("fak_engine_cache_suppressed_remove_total", "Source REMOVE events suppressed while another source still held the logical block.", "counter")
+	b.WriteString("fak_engine_cache_suppressed_remove_total " + utoa(s.SuppressedRemove) + "\n")
+	help("fak_engine_cache_unknown_event_total", "Malformed, impossible, or state-bound cache visibility events suppressed as unknown.", "counter")
+	b.WriteString("fak_engine_cache_unknown_event_total " + utoa(s.UnknownEvents) + "\n")
+	help("fak_engine_cache_consolidator_state_bound_total", "New logical-block events suppressed because the consolidator reached its explicit state bound.", "counter")
+	b.WriteString("fak_engine_cache_consolidator_state_bound_total " + utoa(s.StateBoundSuppressions) + "\n")
 	return b.String()
 }
 
@@ -352,19 +451,48 @@ func writeCacheBreakdown(b *strings.Builder, name string, rows []CacheEventRow, 
 // fans the entry out to an observer sink (e.g. a structured logger). Safe for
 // concurrent use.
 type CacheEventRecorder struct {
-	metrics *CacheEventMetrics
+	metrics      *CacheEventMetrics
+	consolidator *cachemeta.CacheEventConsolidator
 
 	mu   sync.Mutex
 	sink func(cachemeta.Entry, cachemeta.LookupVerdict)
 }
 
+const defaultCacheEventConsolidatorBlocks = 65536
+
 // NewCacheEventRecorder returns a recorder with its own metric surface.
 func NewCacheEventRecorder() *CacheEventRecorder {
-	return &CacheEventRecorder{metrics: NewCacheEventMetrics()}
+	return NewCacheEventRecorderWithConsolidator(cachemeta.NewCacheEventConsolidator(defaultCacheEventConsolidatorBlocks))
+}
+
+// NewCacheEventRecorderWithConsolidator installs an explicitly sized or restored
+// consolidator. A nil consolidator preserves the legacy publish-every-event path.
+func NewCacheEventRecorderWithConsolidator(consolidator *cachemeta.CacheEventConsolidator) *CacheEventRecorder {
+	return &CacheEventRecorder{metrics: NewCacheEventMetrics(), consolidator: consolidator}
+}
+
+// RestoreCacheEventRecorder restores deterministic consolidation state into a
+// fresh recorder. Metrics begin at zero; consolidation counters/state continue
+// from the supplied bootstrap document.
+func RestoreCacheEventRecorder(state cachemeta.CacheEventConsolidatorState) (*CacheEventRecorder, error) {
+	consolidator, err := cachemeta.RestoreCacheEventConsolidator(state)
+	if err != nil {
+		return nil, err
+	}
+	return NewCacheEventRecorderWithConsolidator(consolidator), nil
 }
 
 // Metrics returns the recorder's metric surface for scraping.
 func (r *CacheEventRecorder) Metrics() *CacheEventMetrics { return r.metrics }
+
+// Consolidator returns the recorder's source-aware visibility state machine for
+// deterministic snapshot/bootstrap. It may be nil on an explicit legacy recorder.
+func (r *CacheEventRecorder) Consolidator() *cachemeta.CacheEventConsolidator {
+	if r == nil {
+		return nil
+	}
+	return r.consolidator
+}
 
 // SetSink installs an observer called with every normalized (entry, verdict). It is
 // for fan-out only (logging/tracing); it does not change the verdict.
@@ -378,18 +506,62 @@ func (r *CacheEventRecorder) SetSink(fn func(cachemeta.Entry, cachemeta.LookupVe
 // returns the entry plus its typed verdict. The verdict makes a failed restore/load
 // a typed MISS/FAULT — the caller must honor that rather than silently recomputing.
 func (r *CacheEventRecorder) Record(ev CacheEvent, opts ...cachemeta.Option) CacheEventResult {
+	if ev.VisibilityAction != "" {
+		opts = append(opts, cachemeta.WithLabel("visibility_action", string(ev.VisibilityAction)))
+	}
+	if ev.SourceID != "" {
+		opts = append(opts,
+			cachemeta.WithLabel("source_id", ev.SourceID),
+			cachemeta.WithLabel("event_id", ev.EventID),
+			cachemeta.WithLabel("event_sequence", utoa(ev.EventSequence)),
+		)
+	}
+	if ev.LogicalBlock.Version != "" {
+		opts = append(opts,
+			cachemeta.WithLabel("logical_block_key_version", ev.LogicalBlock.Version),
+			cachemeta.WithLabel("logical_block_digest", ev.LogicalBlock.Digest),
+		)
+	}
+	if ev.RoutingReceipt.Engine != "" {
+		opts = append(opts,
+			cachemeta.WithLabel("routing_engine", ev.RoutingReceipt.Engine),
+			cachemeta.WithLabel("routing_model", ev.RoutingReceipt.Model),
+			cachemeta.WithLabel("routing_fallback", ev.RoutingReceipt.Fallback),
+		)
+	}
 	entry := cachemeta.FromKVTransfer(ev.toTransfer(), opts...)
 	verdict := cachemeta.KVTransferVerdict(entry)
+	published := true
+	var suppression cachemeta.CacheEventSuppression
 	if r != nil {
-		r.metrics.observe(entry, verdict)
+		if ev.VisibilityAction != "" && r.consolidator != nil {
+			decision := r.consolidator.Consolidate(cachemeta.CacheVisibilityEvent{
+				Identity: cachemeta.CacheSourceEventID{SourceID: ev.SourceID, EventID: ev.EventID, Sequence: ev.EventSequence},
+				Block:    ev.LogicalBlock,
+				Action:   ev.VisibilityAction,
+			})
+			published = decision.Publish
+			suppression = decision.Suppression
+		}
+		if published {
+			r.metrics.observe(entry, verdict)
+		} else {
+			r.metrics.observeSuppression(suppression)
+		}
 		r.mu.Lock()
 		sink := r.sink
 		r.mu.Unlock()
-		if sink != nil {
+		if published && sink != nil {
 			sink(entry, verdict)
 		}
 	}
-	return CacheEventResult{Entry: entry, Verdict: verdict}
+	return CacheEventResult{
+		Entry:       entry,
+		Verdict:     verdict,
+		Published:   published,
+		Suppression: suppression,
+		Receipt:     ev.RoutingReceipt,
+	}
 }
 
 func promLabel(s string) string {

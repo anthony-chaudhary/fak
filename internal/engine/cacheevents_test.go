@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -27,6 +28,9 @@ func TestCacheEventRecorderNormalizesIntoCacheEntryStream(t *testing.T) {
 		BytesMoved: 1 << 20,
 		Outcome:    cachemeta.KVTransferOK,
 	})
+	if !off.Published {
+		t.Fatalf("legacy identity-less event was suppressed: %+v", off)
+	}
 	if off.Entry.Plane != cachemeta.PlaneKVTransfer || off.Entry.ID.MediaType != cachemeta.MediaKVSpan {
 		t.Fatalf("offload not on the kv_transfer plane: %+v", off.Entry)
 	}
@@ -213,5 +217,181 @@ func TestCacheEventRecorderSinkFanout(t *testing.T) {
 	rec.Record(engine.CacheEvent{Direction: cachemeta.KVRestore, Outcome: cachemeta.KVTransferMissed})
 	if len(seen) != 2 || seen[0] != cachemeta.LookupHit || seen[1] != cachemeta.LookupMiss {
 		t.Fatalf("sink did not observe the stream: %+v", seen)
+	}
+}
+
+func TestCacheEventRecorderConsolidatesNativeLogicalVisibility(t *testing.T) {
+	rec := engine.NewCacheEventRecorderWithConsolidator(cachemeta.NewCacheEventConsolidator(4))
+	receipt := engine.NativeCacheEventRoutingReceipt()
+	if receipt.Engine != "fak_native" || receipt.Model != "Qwen3.8" || receipt.Fallback != "none" {
+		t.Fatalf("native routing receipt = %+v, want fak_native/Qwen3.8/no fallback", receipt)
+	}
+
+	block := cachemeta.NewCacheLogicalBlockKey("Qwen3.8", "qwen-tokenizer", "block-native")
+	event := func(sourceID, eventID string, sequence uint64, action cachemeta.CacheVisibilityAction) engine.CacheEvent {
+		direction := cachemeta.KVRestore
+		fromTier, toTier := cachemeta.TierDRAM, cachemeta.TierHBM
+		if action == cachemeta.CacheVisibilityRemove {
+			direction = cachemeta.KVOffload
+			fromTier, toTier = cachemeta.TierHBM, cachemeta.TierUnknown
+		}
+		return engine.CacheEvent{
+			Direction:        direction,
+			SpanDigest:       block.Digest,
+			ModelID:          block.ModelID,
+			TokenizerID:      block.TokenizerID,
+			FromTier:         fromTier,
+			ToTier:           toTier,
+			Outcome:          cachemeta.KVTransferOK,
+			VisibilityAction: action,
+			SourceID:         sourceID,
+			EventID:          eventID,
+			EventSequence:    sequence,
+			LogicalBlock:     block,
+			RoutingReceipt:   receipt,
+		}
+	}
+
+	var published int
+	rec.SetSink(func(_ cachemeta.Entry, _ cachemeta.LookupVerdict) { published++ })
+
+	firstStore := rec.Record(event("source-a", "a-store", 1, cachemeta.CacheVisibilityStore))
+	if !firstStore.Published || firstStore.Receipt.Engine != "fak_native" || firstStore.Receipt.Model != "Qwen3.8" {
+		t.Fatalf("first native STORE result = %+v, want published fak_native/Qwen3.8 receipt", firstStore)
+	}
+	for label, want := range map[string]string{
+		"routing_engine":            "fak_native",
+		"routing_model":             "Qwen3.8",
+		"routing_fallback":          "none",
+		"source_id":                 "source-a",
+		"event_id":                  "a-store",
+		"event_sequence":            "1",
+		"logical_block_key_version": cachemeta.CacheLogicalBlockKeyVersion,
+		"logical_block_digest":      "block-native",
+	} {
+		if got := firstStore.Entry.Labels[label]; got != want {
+			t.Fatalf("first native STORE label %q = %q, want %q", label, got, want)
+		}
+	}
+
+	secondStore := rec.Record(event("source-b", "b-store", 1, cachemeta.CacheVisibilityStore))
+	if secondStore.Published || secondStore.Suppression != cachemeta.CacheEventDuplicateProducer {
+		t.Fatalf("second native STORE result = %+v, want duplicate-producer suppression", secondStore)
+	}
+	firstRemove := rec.Record(event("source-a", "a-remove", 2, cachemeta.CacheVisibilityRemove))
+	if firstRemove.Published || firstRemove.Suppression != cachemeta.CacheEventSourceStillResident {
+		t.Fatalf("first native REMOVE result = %+v, want source-still-resident suppression", firstRemove)
+	}
+	finalRemove := rec.Record(event("source-b", "b-remove", 2, cachemeta.CacheVisibilityRemove))
+	if !finalRemove.Published {
+		t.Fatalf("final native REMOVE result = %+v, want published", finalRemove)
+	}
+
+	snapshot := rec.Metrics().Snapshot()
+	if snapshot.Events != 2 || snapshot.SuppressedProducer != 1 || snapshot.SuppressedRemove != 1 {
+		t.Fatalf("consolidated recorder metrics = %+v, want 2 published and two typed suppressions", snapshot)
+	}
+	if published != 2 {
+		t.Fatalf("sink publications = %d, want first STORE and final REMOVE only", published)
+	}
+}
+
+func nativeVisibilityEvent(source, event string, sequence uint64, action cachemeta.CacheVisibilityAction) engine.CacheEvent {
+	ev := engine.CacheEvent{
+		Direction:        cachemeta.KVRestore,
+		SpanDigest:       "block-1",
+		ModelID:          "Qwen3.8",
+		TokenizerID:      "qwen3",
+		ToTier:           cachemeta.TierHBM,
+		Owner:            "native-router",
+		Outcome:          cachemeta.KVTransferOK,
+		VisibilityAction: action,
+		SourceID:         source,
+		EventID:          event,
+		EventSequence:    sequence,
+		LogicalBlock:     cachemeta.NewCacheLogicalBlockKey("Qwen3.8", "qwen3", "block-1"),
+		RoutingReceipt:   engine.NativeCacheEventRoutingReceipt(),
+	}
+	if action == cachemeta.CacheVisibilityRemove {
+		ev.Direction = cachemeta.KVOffload
+		ev.FromTier = cachemeta.TierHBM
+		ev.ToTier = cachemeta.TierUnknown
+	}
+	return ev
+}
+
+func TestCacheEventRecorderNativeVisibilityThroughFinalRemove(t *testing.T) {
+	rec := engine.NewCacheEventRecorder()
+	var visible []cachemeta.Entry
+	rec.SetSink(func(entry cachemeta.Entry, _ cachemeta.LookupVerdict) {
+		visible = append(visible, entry)
+	})
+
+	storeA := rec.Record(nativeVisibilityEvent("rank-0", "a/store", 1, cachemeta.CacheVisibilityStore))
+	storeB := rec.Record(nativeVisibilityEvent("rank-1", "b/store", 1, cachemeta.CacheVisibilityStore))
+	removeA := rec.Record(nativeVisibilityEvent("rank-0", "a/remove", 2, cachemeta.CacheVisibilityRemove))
+	removeB := rec.Record(nativeVisibilityEvent("rank-1", "b/remove", 2, cachemeta.CacheVisibilityRemove))
+	if !storeA.Published || storeB.Published || removeA.Published || !removeB.Published {
+		t.Fatalf("logical visibility decisions = storeA:%+v storeB:%+v removeA:%+v removeB:%+v", storeA, storeB, removeA, removeB)
+	}
+	if len(visible) != 2 {
+		t.Fatalf("sink saw %d events, want first STORE and final REMOVE only: %+v", len(visible), visible)
+	}
+	if visible[0].Labels["source_id"] != "rank-0" || visible[1].Labels["source_id"] != "rank-1" {
+		t.Fatalf("published source identities missing: %+v", visible)
+	}
+	if visible[0].Labels["logical_block_key_version"] != cachemeta.CacheLogicalBlockKeyVersion {
+		t.Fatalf("versioned logical-block key missing: %+v", visible[0].Labels)
+	}
+	if visible[0].Labels["visibility_action"] != "store" || visible[1].Labels["visibility_action"] != "remove" {
+		t.Fatalf("published logical edges are not explicit: %+v", visible)
+	}
+
+	receiptJSON, err := json.Marshal(storeA.Receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := string(receiptJSON)
+	for _, want := range []string{`"engine":"fak_native"`, `"model":"Qwen3.8"`, `"fallback":"none"`} {
+		if !strings.Contains(receipt, want) {
+			t.Fatalf("native-routing receipt missing %q: %s", want, receipt)
+		}
+	}
+	if strings.Contains(strings.ToLower(receipt), "llama") {
+		t.Fatalf("native-routing receipt contains a forbidden llama fallback: %s", receipt)
+	}
+
+	snap := rec.Metrics().Snapshot()
+	if snap.Events != 2 || snap.SuppressedProducer != 1 || snap.SuppressedRemove != 1 {
+		t.Fatalf("published/suppressed metrics = %+v", snap)
+	}
+	prom := snap.Prometheus()
+	for _, want := range []string{
+		"fak_engine_cache_events_total 2",
+		"fak_engine_cache_suppressed_producer_total 1",
+		"fak_engine_cache_suppressed_remove_total 1",
+	} {
+		if !strings.Contains(prom, want) {
+			t.Fatalf("Prometheus output missing %q:\n%s", want, prom)
+		}
+	}
+}
+
+func TestCacheEventRecorderCompatibilityAndUnknownCounters(t *testing.T) {
+	rec := engine.NewCacheEventRecorder()
+	legacy := rec.Record(engine.CacheEvent{Direction: cachemeta.KVRestore, Outcome: cachemeta.KVTransferOK})
+	if !legacy.Published {
+		t.Fatalf("identity-less legacy event must remain pass-through: %+v", legacy)
+	}
+	unknown := rec.Record(engine.CacheEvent{
+		Direction:        cachemeta.KVRestore,
+		Outcome:          cachemeta.KVTransferOK,
+		VisibilityAction: cachemeta.CacheVisibilityStore,
+	})
+	if unknown.Published || unknown.Suppression != cachemeta.CacheEventUnknown {
+		t.Fatalf("unidentified visibility event = %+v, want unknown suppression", unknown)
+	}
+	if got := rec.Metrics().Snapshot().UnknownEvents; got != 1 {
+		t.Fatalf("UnknownEvents = %d, want 1", got)
 	}
 }

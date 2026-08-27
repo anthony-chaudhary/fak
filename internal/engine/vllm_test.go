@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 )
 
 func TestVLLMEngineIsRegisteredLifecycleDriver(t *testing.T) {
@@ -169,6 +170,76 @@ func TestVLLMKVEventSubscriptionFeedsResidencyAndCacheMetrics(t *testing.T) {
 	snap := rec.Metrics().Snapshot()
 	if snap.Events != 3 || snap.Hits != 3 {
 		t.Fatalf("cache event metrics not fed by KV events: %+v", snap)
+	}
+}
+
+func TestVLLMKVEventVisibilityConsolidatesSourcesThroughFinalRemove(t *testing.T) {
+	rec := NewCacheEventRecorder()
+	idx := NewPrefixResidencyIndex()
+	batch := func(source, eventID string, sequence uint64, typ string) VLLMKVEventBatch {
+		return VLLMKVEventBatch{
+			TS:       float64(sequence),
+			SourceID: source,
+			EventID:  eventID,
+			Sequence: sequence,
+			Events: []VLLMKVEvent{{
+				Type:        typ,
+				BlockHashes: []any{"shared-block"},
+				BlockSize:   16,
+				Medium:      "GPU",
+			}},
+		}
+	}
+
+	storeA := RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, batch("rank-0", "a/store", 1, "BlockStored"))
+	storeB := RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, batch("rank-1", "b/store", 1, "BlockStored"))
+	removeA := RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, batch("rank-0", "a/remove", 2, "BlockRemoved"))
+	removeB := RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, batch("rank-1", "b/remove", 2, "BlockRemoved"))
+	if len(storeA) != 1 || len(storeB) != 1 || len(removeA) != 1 || len(removeB) != 1 {
+		t.Fatalf("one block must lower to one decision: %d/%d/%d/%d", len(storeA), len(storeB), len(removeA), len(removeB))
+	}
+	if !storeA[0].Published || storeB[0].Published || removeA[0].Published || !removeB[0].Published {
+		t.Fatalf("vLLM visibility decisions = storeA:%+v storeB:%+v removeA:%+v removeB:%+v", storeA[0], storeB[0], removeA[0], removeB[0])
+	}
+	if storeA[0].Entry.Labels["source_id"] != "rank-0" || storeA[0].Entry.Labels["event_id"] == "" {
+		t.Fatalf("stable source/event identity was not attached: %+v", storeA[0].Entry.Labels)
+	}
+	if storeA[0].Entry.Labels["logical_block_key_version"] != cachemeta.CacheLogicalBlockKeyVersion {
+		t.Fatalf("logical block key was not versioned: %+v", storeA[0].Entry.Labels)
+	}
+	if snap := rec.Metrics().Snapshot(); snap.Events != 2 || snap.SuppressedProducer != 1 || snap.SuppressedRemove != 1 {
+		t.Fatalf("real vLLM visibility path did not consolidate: %+v", snap)
+	}
+}
+
+func TestVLLMAllBlocksClearedWaitsForFinalSource(t *testing.T) {
+	rec := NewCacheEventRecorder()
+	idx := NewPrefixResidencyIndex()
+	store := func(source string) VLLMKVEventBatch {
+		return VLLMKVEventBatch{
+			SourceID: source,
+			EventID:  source + "/store",
+			Sequence: 1,
+			Events:   []VLLMKVEvent{{Type: "BlockStored", BlockHashes: []any{"shared-block"}, BlockSize: 16}},
+		}
+	}
+	clear := func(source string) VLLMKVEventBatch {
+		return VLLMKVEventBatch{
+			SourceID: source,
+			EventID:  source + "/clear",
+			Sequence: 2,
+			Events:   []VLLMKVEvent{{Type: "AllBlocksCleared"}},
+		}
+	}
+	RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, store("rank-0"))
+	RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, store("rank-1"))
+	first := RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, clear("rank-0"))
+	final := RecordVLLMKVEventBatch("worker", "Qwen3.8", "qwen3", idx, rec, clear("rank-1"))
+	if len(first) != 1 || first[0].Published || first[0].Suppression != cachemeta.CacheEventSourceStillResident {
+		t.Fatalf("first source clear = %+v, want suppressed remove", first)
+	}
+	if len(final) != 1 || !final[0].Published || final[0].Entry.Labels["visibility_action"] != "remove" {
+		t.Fatalf("final source clear = %+v, want published REMOVE", final)
 	}
 }
 

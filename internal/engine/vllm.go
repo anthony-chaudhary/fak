@@ -473,6 +473,9 @@ type VLLMKVEventBatch struct {
 	TS               float64        `json:"ts"`
 	Events           []VLLMKVEvent  `json:"events"`
 	DataParallelRank *int           `json:"data_parallel_rank,omitempty"`
+	SourceID         string         `json:"source_id,omitempty"`
+	EventID          string         `json:"event_id,omitempty"`
+	Sequence         uint64         `json:"sequence,omitempty"`
 	WorkerID         string         `json:"worker_id,omitempty"`
 	ModelID          string         `json:"model_id,omitempty"`
 	TokenizerID      string         `json:"tokenizer_id,omitempty"`
@@ -486,6 +489,8 @@ type VLLMKVEvent struct {
 	Type                         string          `json:"type,omitempty"`
 	Event                        string          `json:"event,omitempty"`
 	Kind                         string          `json:"kind,omitempty"`
+	EventID                      string          `json:"event_id,omitempty"`
+	Sequence                     uint64          `json:"sequence,omitempty"`
 	BlockHashes                  []any           `json:"block_hashes,omitempty"`
 	ParentBlockHash              any             `json:"parent_block_hash,omitempty"`
 	TokenIDs                     []int           `json:"token_ids,omitempty"`
@@ -684,14 +689,14 @@ func RecordVLLMKVEventBatch(worker, model, tokenizer string, idx *PrefixResidenc
 		at = time.Unix(int64(sec), int64(frac*1e9))
 	}
 	var out []CacheEventResult
-	for _, ev := range batch.Events {
+	for eventIndex, ev := range batch.Events {
 		typ := ev.eventType()
 		switch typ {
 		case "BlockStored":
 			if idx != nil {
 				idx.Store(worker, ev.residencyRecords(worker, model, tokenizer, at)...)
 			}
-			out = append(out, recordPerBlock(rec, ev.hashDigests(), CacheEvent{
+			out = append(out, recordVLLMBlocks(rec, batch, ev, eventIndex, worker, ev.hashDigests(), CacheEvent{
 				Direction:    cachemeta.KVRestore,
 				Tokens:       ev.tokensPerBlock(),
 				ModelID:      model,
@@ -700,12 +705,12 @@ func RecordVLLMKVEventBatch(worker, model, tokenizer string, idx *PrefixResidenc
 				ToTier:       vllmMediumTier(ev.Medium),
 				Owner:        "vllm:" + worker,
 				Outcome:      cachemeta.KVTransferOK,
-			})...)
+			}, cachemeta.CacheVisibilityStore)...)
 		case "BlockRemoved":
 			if idx != nil {
 				idx.Remove(worker, ev.hashDigests()...)
 			}
-			out = append(out, recordPerBlock(rec, ev.hashDigests(), CacheEvent{
+			out = append(out, recordVLLMBlocks(rec, batch, ev, eventIndex, worker, ev.hashDigests(), CacheEvent{
 				Direction:    cachemeta.KVOffload,
 				Tokens:       ev.tokensPerBlock(),
 				ModelID:      model,
@@ -715,27 +720,98 @@ func RecordVLLMKVEventBatch(worker, model, tokenizer string, idx *PrefixResidenc
 				ToTier:       cachemeta.TierUnknown,
 				Owner:        "vllm:" + worker,
 				Outcome:      cachemeta.KVTransferOK,
-			})...)
+			}, cachemeta.CacheVisibilityRemove)...)
 		case "AllBlocksCleared":
 			if idx != nil {
 				idx.Clear(worker)
 			}
 			if rec != nil {
-				out = append(out, rec.Record(CacheEvent{
-					Direction:    cachemeta.KVOffload,
-					SpanDigest:   "vllm-clear:" + worker,
-					ModelID:      model,
-					TokenizerID:  tokenizer,
-					PositionMode: cachemeta.PositionPrefixAligned,
-					FromTier:     cachemeta.TierHBM,
-					ToTier:       cachemeta.TierUnknown,
-					Owner:        "vllm:" + worker,
-					Outcome:      cachemeta.KVTransferOK,
-				}))
+				if consolidator := rec.Consolidator(); consolidator != nil {
+					keys := consolidator.PresentBlocksForSource(vllmCacheEventSourceID(batch, worker))
+					digests := make([]string, 0, len(keys))
+					for _, key := range keys {
+						digests = append(digests, key.Digest)
+					}
+					out = append(out, recordVLLMBlocks(rec, batch, ev, eventIndex, worker, digests, CacheEvent{
+						Direction:    cachemeta.KVOffload,
+						ModelID:      model,
+						TokenizerID:  tokenizer,
+						PositionMode: cachemeta.PositionPrefixAligned,
+						FromTier:     cachemeta.TierHBM,
+						ToTier:       cachemeta.TierUnknown,
+						Owner:        "vllm:" + worker,
+						Outcome:      cachemeta.KVTransferOK,
+					}, cachemeta.CacheVisibilityRemove)...)
+				} else {
+					// An explicitly legacy recorder retains the historical synthetic
+					// source-clear marker rather than source-aware per-block edges.
+					out = append(out, rec.Record(CacheEvent{
+						Direction:    cachemeta.KVOffload,
+						SpanDigest:   "vllm-clear:" + worker,
+						ModelID:      model,
+						TokenizerID:  tokenizer,
+						PositionMode: cachemeta.PositionPrefixAligned,
+						FromTier:     cachemeta.TierHBM,
+						ToTier:       cachemeta.TierUnknown,
+						Owner:        "vllm:" + worker,
+						Outcome:      cachemeta.KVTransferOK,
+					}))
+				}
 			}
 		}
 	}
 	return out
+}
+
+// recordVLLMBlocks attaches an explicit stable source/event identity and the
+// versioned logical-block key before the event reaches CacheEventRecorder's
+// visibility consolidator. Native array batches without bridge-provided IDs get
+// deterministic identities derived from their timestamp, event position, kind,
+// and digest; bridges should provide SourceID/EventID/Sequence when reconnects
+// can replay batches with changed framing.
+func recordVLLMBlocks(rec *CacheEventRecorder, batch VLLMKVEventBatch, ev VLLMKVEvent, eventIndex int, worker string, digests []string, base CacheEvent, action cachemeta.CacheVisibilityAction) []CacheEventResult {
+	if rec == nil {
+		return nil
+	}
+	sourceID := vllmCacheEventSourceID(batch, worker)
+	sequence := ev.Sequence
+	if sequence == 0 {
+		sequence = batch.Sequence
+	}
+	if sequence == 0 && batch.TS > 0 {
+		sequence = uint64(batch.TS * 1e9)
+	}
+	eventPrefix := strings.TrimSpace(ev.EventID)
+	if eventPrefix == "" {
+		eventPrefix = strings.TrimSpace(batch.EventID)
+	}
+	if eventPrefix == "" {
+		eventPrefix = "ts:" + strconv.FormatFloat(batch.TS, 'g', -1, 64)
+	}
+
+	out := make([]CacheEventResult, 0, len(digests))
+	for blockIndex, digest := range digests {
+		base.SpanDigest = digest
+		base.VisibilityAction = action
+		base.SourceID = sourceID
+		base.EventID = fmt.Sprintf("%s/event:%08d/block:%08d/%s/%s", eventPrefix, eventIndex, blockIndex, ev.eventType(), digest)
+		base.EventSequence = sequence
+		base.LogicalBlock = cachemeta.NewCacheLogicalBlockKey(base.ModelID, base.TokenizerID, digest)
+		out = append(out, rec.Record(base))
+	}
+	return out
+}
+
+func vllmCacheEventSourceID(batch VLLMKVEventBatch, worker string) string {
+	sourceID := strings.TrimSpace(batch.SourceID)
+	if sourceID != "" {
+		return sourceID
+	}
+	sourceID = worker
+	if batch.DataParallelRank != nil {
+		sourceID += "/dp:" + strconv.Itoa(*batch.DataParallelRank)
+	}
+	return sourceID
 }
 
 // recordPerBlock records one cache event per block digest, stamping each digest
