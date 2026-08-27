@@ -13,6 +13,11 @@ financial or site lifecycles, or a resolved rumor history. “Exhaustive” rema
 operating method—explicit taxonomy, dated evidence, and visible gaps—not a claim that
 the open web has a finite or fully enumerated boundary.
 
+Issue #9323 adds the first direct regional-demand row: OpenRouter reports weekly
+continent-level spend over more than 100T production tokens, while SkyLB/SkyWalker is
+deepened with six-country diurnal and session-locality evidence. Spend remains distinct
+from requests, tokens, users, tenants, and serving-region load.
+
 Issue #9340 deepened three production traces without changing corpus counts. FineServe,
 ServeGen, and the one-year Chutes trace now parameterize model/task arrivals, client
 concentration, multimodal prompt sizes, reasoning-budget tails, user/model cadence,

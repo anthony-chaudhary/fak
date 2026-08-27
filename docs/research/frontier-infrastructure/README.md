@@ -130,11 +130,11 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **187 dated entries**, **182 unique source URLs**, and
-**154 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
+The current spine contains **188 dated entries**, **183 unique source URLs**, and
+**155 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
-and **2 explicit rumors**. FineServe, ServeGen, and the one-year Chutes trace now
-provide source-bounded production parameters, while confidence intervals, geography,
+and **2 explicit rumors**. FineServe, ServeGen, the one-year Chutes trace, OpenRouter geography, and
+SkyLB/SkyWalker now provide source-bounded production parameters, while confidence intervals, geography,
 retries, speculative acceptance, session/tool-call distributions, and comparable
 denominators remain explicit gaps. It is broad, but it is not entity-complete. The
 requirement-level verdict is in [`coverage-audit.md`](coverage-audit.md); the detailed
@@ -143,7 +143,7 @@ missing slices remain machine-readable under `coverage.explicit_gaps` in `index.
 Immediate next slices:
 
 1. finish the checked/unchecked [`slices/frontier-lab-census.md`](slices/frontier-lab-census.md), including Chinese and regional labs;
-2. extend the [`workload-parameters.md`](workload-parameters.md) ledger with missing production distributions;
+2. extend [`workload-parameters.md`](workload-parameters.md) and [`geography-session-locality.md`](geography-session-locality.md) with direct provider tenant/timezone/session distributions;
 3. extend the [`filings-ledger.md`](filings-ledger.md) beyond the four largest U.S. hyperscalers;
 4. extend the [`supply-chain-ledger.md`](supply-chain-ledger.md) into a named site/vendor delivery census;
 5. expand the [`market-chronology.md`](market-chronology.md) with startup failures, cancellations, and resolved rumors;

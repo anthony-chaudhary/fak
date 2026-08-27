@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9340,
+  "latest_slice_issue": 9323,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 187,
+    "entry_count": 188,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -179,6 +179,7 @@
       "OpenAI / Oracle / Related Digital / DTE",
       "OpenAI / Oracle / SoftBank",
       "OpenAI / Stargate",
+      "OpenRouter",
       "Operator-level LLM autoscaling study",
       "Oracle",
       "Parrot serving study",
@@ -6067,17 +6068,29 @@
       "source_kind": "preprint",
       "evidence_class": "benchmark_measurement",
       "confidence": "medium_high",
-      "claim": "SkyWalker analyzes six-country WildChat demand and reports region-specific diurnal peaks, then evaluates cross-region routing that aggregates complementary demand while preserving session/user prefix locality through consistent hashing or a prefix trie.",
+      "claim": "SkyLB/SkyWalker maps WildChat demand from six countries into region-specific diurnal curves and evaluates cross-region routing that aggregates complementary peaks while preserving prefix locality; the system reports 1.12-2.06x higher throughput, 1.74-6.30x lower latency, and 25% lower serving cost than evaluated baselines.",
       "quantified": {
-        "countries_analyzed": 6
+        "countries_analyzed": 6,
+        "throughput_improvement_x_range": [
+          1.12,
+          2.06
+        ],
+        "latency_reduction_x_range": [
+          1.74,
+          6.3
+        ],
+        "serving_cost_reduction_fraction": 0.25,
+        "round_robin_peak_kv_memory_imbalance_x": 2.64
       },
       "assumptions": [
         "Geographic demand can shift by local time, creating temporal capacity complementarity across regions.",
-        "Cross-region balancing must trade WAN latency and policy constraints against utilization and prefix reuse."
+        "Cross-region balancing must trade WAN latency and policy constraints against utilization and prefix reuse.",
+        "Session locality is represented by prefix-aware routing; it is not a disclosed production session-length distribution."
       ],
       "contradictions_or_limits": [
-        "WildChat geography is not a provider production trace and may not represent paid/API/enterprise traffic.",
-        "Benchmark gains depend on region mix, network latency, residency rules, reserved capacity, and cache state."
+        "WildChat contains opt-in public chatbot traffic rather than a provider production billing/API population; the six-country mapping is an evaluation input, not a universal geography law.",
+        "The paper reports system-level benchmark gains, not confidence intervals for country demand or tenant concentration.",
+        "Benchmark gains depend on region mix, network latency, residency rules, reserved capacity, model/SLO envelope, and cache state."
       ],
       "fak_implications": [
         "Add region, timezone, session/user affinity, WAN latency, and data-locality constraints to replay.",
@@ -7215,6 +7228,54 @@
       ],
       "rumor": {
         "is_rumor": false
+      }
+    },
+    {
+      "id": "openrouter-100t-geography-2026",
+      "category": "workload_trace",
+      "entity": "OpenRouter",
+      "topic": [
+        "production workload",
+        "geography",
+        "regional demand",
+        "language mix"
+      ],
+      "published_at": "2026-01-15",
+      "event_at": "2026-01-15",
+      "source_title": "State of AI: An Empirical 100 Trillion Token Study with OpenRouter",
+      "source_url": "https://arxiv.org/html/2601.10088v1",
+      "source_kind": "paper with provider production data",
+      "evidence_class": "measured provider production trace",
+      "confidence": "high for the disclosed OpenRouter population; low for extrapolation to all providers",
+      "claim": "OpenRouter analyzed more than 100T production tokens across tasks, geographies, and time; weekly spend was globally distributed, with North America below half for most observed weeks, Europe in the mid-teens to low twenties, and Asia rising from about 13% to 31%.",
+      "quantified": {
+        "tokens_gt": 100000000000000,
+        "north_america_weekly_spend_share_max_for_most_periods": 0.5,
+        "europe_weekly_spend_share_range_approx": [
+          0.15,
+          0.22
+        ],
+        "asia_weekly_spend_share_start_approx": 0.13,
+        "asia_weekly_spend_share_end_approx": 0.31,
+        "english_token_share_min": 0.8,
+        "simplified_chinese_token_share_approx": 0.05
+      },
+      "assumptions": [
+        "Regional spend share is a billing/economic demand measure, not request share, token share, user share, or physical serving-region load.",
+        "The source supports time-varying regional benchmark weights rather than one permanent geography mix."
+      ],
+      "contradictions_or_limits": [
+        "The paper does not disclose comparable request, user, tenant, timezone, or serving-region denominators by geography.",
+        "OpenRouter traffic is developer- and marketplace-skewed; spend shares depend on model price mix and cannot be treated as raw compute demand.",
+        "No confidence intervals or universal geographic distribution are reported."
+      ],
+      "fak_implications": [
+        "Parameterize geography by metric and epoch; do not convert spend share into request or token share.",
+        "Keep language, billing geography, request origin, serving region, sovereignty, WAN latency, and model-price mix as separate fields."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
       }
     }
   ]
