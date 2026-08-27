@@ -72,6 +72,14 @@ U.S. cancellation cohort. Totals are **218 entries**, **213 unique URLs**, and *
 labels**. More shutdowns, bankruptcies, power denials, and commissioned-capacity failures
 remain open.
 
+## Issue #9364 delta
+
+Issue #9364 adds four regulator/utility records that join large-load rules to named or typed
+loads: one rejected co-location amendment, two approved large-load tariffs, and one named
+generation/transmission approval. Totals are **222 entries**, **217 unique URLs**, and **185
+entity labels**. Direct queue-position, construction, commissioning, delivered-energy, and
+site-level utilization receipts remain incomplete.
+
 ## Status vocabulary
 
 | Status | Meaning |

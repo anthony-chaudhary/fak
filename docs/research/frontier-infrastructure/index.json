@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9363,
+  "latest_slice_issue": 9364,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 218,
+    "entry_count": 222,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -75,6 +75,7 @@
     ],
     "entities": [
       "01.AI",
+      "AEP Ohio data-center tariff",
       "AI Singapore SEA-LION",
       "AI datacenter power architecture research",
       "AI optical interconnect sector",
@@ -125,10 +126,12 @@
       "Data Center Watch",
       "DeepSeek",
       "DistServe",
+      "Dominion Energy Virginia GS-5",
       "Eaton",
       "Equinix Metal",
       "European Commission / EuroHPC",
       "European Union / AI Office",
+      "FERC / Susquehanna-Amazon co-location",
       "FineServe",
       "Fireworks AI",
       "GE Vernova / Crusoe",
@@ -168,6 +171,7 @@
       "Meituan MTGenRec",
       "Meituan MTServe",
       "Meta",
+      "Meta Laidley / Entergy Louisiana",
       "Microsoft",
       "Microsoft Azure / Splitwise",
       "Microsoft Research Mnemosyne",
@@ -8492,6 +8496,165 @@
       ],
       "fak_implications": [
         "Capacity models need stage-weighted cancellation hazards and should not assign equal MW or probability to every announced project."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "ferc-susquehanna-colocation-rejection-2024",
+      "category": "policy_regulation",
+      "entity": "FERC / Susquehanna-Amazon co-location",
+      "topic": [
+        "colocation",
+        "interconnection_agreement",
+        "regulatory_rejection"
+      ],
+      "published_at": "2024-11-01",
+      "event_at": "2024-11-01",
+      "source_title": "Order Rejecting Amended Interconnection Service Agreement, ER24-2172-000",
+      "source_url": "https://www.ferc.gov/sites/default/files/2024-11/20241101-3061_ER24-2172-000.pdf",
+      "source_kind": "regulator_order",
+      "evidence_class": "official_regulatory_decision",
+      "confidence": "high",
+      "claim": "FERC rejected without prejudice an amended PJM interconnection service agreement that would have increased co-located load at the Susquehanna nuclear site from 300 MW to 480 MW, finding the applicants had not met their burden under the proposed non-conforming arrangement.",
+      "quantified": {
+        "existing_colocated_load_mw": 300,
+        "proposed_colocated_load_mw": 480,
+        "proposed_increment_mw": 180
+      },
+      "assumptions": [
+        "The order concerns the amended interconnection agreement and allocation/treatment of an expanded behind-the-meter load."
+      ],
+      "contradictions_or_limits": [
+        "Rejection without prejudice is not a permanent ban, site shutdown, or finding that Amazon cannot source power elsewhere.",
+        "The proposed 180 MW increment is not installed or live IT capacity and must not be counted as delivered load."
+      ],
+      "fak_implications": [
+        "Power ledgers must carry regulator approval state and distinguish co-location proposals from energized service."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "aep-ohio-data-center-tariff-2025",
+      "category": "policy_regulation",
+      "entity": "AEP Ohio data-center tariff",
+      "topic": [
+        "large_load_tariff",
+        "minimum_demand",
+        "collateral"
+      ],
+      "published_at": "2025-07-09",
+      "event_at": "2025-07-09",
+      "source_title": "Data Center Tariff",
+      "source_url": "https://www.aepohio.com/company/about/rates/data-center-tariff/",
+      "source_kind": "utility_tariff",
+      "evidence_class": "approved_tariff",
+      "confidence": "high",
+      "claim": "AEP Ohio’s approved Schedule DCT applies enhanced study, contract, minimum-demand, collateral, and exit obligations to new data-center loads above 25 MW; the initial term is a ramp of up to four years plus eight years, with billing demand generally bounded by an 85% floor.",
+      "quantified": {
+        "threshold_kw": 25000,
+        "maximum_ramp_years": 4,
+        "post_ramp_contract_years": 8,
+        "maximum_initial_term_years": 12,
+        "minimum_demand_fraction_max": 0.85,
+        "collateral_fraction_of_term_minimum_charges": 0.5,
+        "prior_requests_mw": 30000
+      },
+      "assumptions": [
+        "The tariff converts requests into stronger financial commitments but does not prove energization or actual consumption."
+      ],
+      "contradictions_or_limits": [
+        "Minimum billing demand is a financial obligation, not measured utilization, energy consumption, or live IT load.",
+        "Infrastructure timing remains contingent on utility and PJM studies and construction; contracted capacity can come online progressively."
+      ],
+      "fak_implications": [
+        "Queue forecasts should weight binding collateralized tariff contracts differently from uncommitted load-study requests."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "dominion-gs5-large-load-tariff-2025",
+      "category": "policy_regulation",
+      "entity": "Dominion Energy Virginia GS-5",
+      "topic": [
+        "large_load_tariff",
+        "minimum_demand",
+        "collateral"
+      ],
+      "published_at": "2025-11-25",
+      "event_at": "2025-11-25",
+      "source_title": "Virginia SCC Final Order, PUR-2025-00058",
+      "source_url": "https://www.scc.virginia.gov/docketsearch/DOCS/89g601!.PDF",
+      "source_kind": "regulator_order",
+      "evidence_class": "official_regulatory_decision",
+      "confidence": "high",
+      "claim": "Virginia’s SCC approved Dominion’s GS-5 class effective January 1, 2027 for contiguous-site loads of at least 25 MW and at least 75% load factor, with 14-year contracts, up to four years of ramp, $1.5M/MW collateral before credit reductions, and minimum demand charges of 85% for distribution/transmission and 60% for generation.",
+      "quantified": {
+        "effective_at": "2027-01-01",
+        "threshold_mw": 25,
+        "minimum_load_factor": 0.75,
+        "contract_years": 14,
+        "maximum_ramp_years": 4,
+        "minimum_annual_ramp_fraction": 0.2,
+        "collateral_usd_per_mw": 1500000,
+        "maximum_collateral_credit_reduction_fraction": 0.7,
+        "minimum_distribution_demand_fraction": 0.85,
+        "minimum_transmission_demand_fraction": 0.85,
+        "minimum_generation_demand_fraction": 0.6
+      },
+      "assumptions": [
+        "GS-5 is a customer-class and cost-allocation framework, not one named data-center service agreement."
+      ],
+      "contradictions_or_limits": [
+        "Contracted and minimum-billed demand are not actual load, utilization, or energized capacity.",
+        "The order separately directs a transparent large-load interconnection-queue proceeding; tariff eligibility does not guarantee queue completion."
+      ],
+      "fak_implications": [
+        "Capacity ledgers should separate tariff commitment, queue readiness, collateral, cost recovery, energization, and actual load."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meta-laidley-lpsc-power-approval-2025",
+      "category": "datacenter_physical",
+      "entity": "Meta Laidley / Entergy Louisiana",
+      "topic": [
+        "named_site_power",
+        "generation_approval",
+        "transmission_approval"
+      ],
+      "published_at": "2025-08-20",
+      "event_at": "2025-08-20",
+      "source_title": "LPSC Business and Executive Session Transcript, Docket U-37425",
+      "source_url": "https://www.lpsc.louisiana.gov/docs/transcripts/August-20-2025-BE.pdf",
+      "source_kind": "regulator_transcript",
+      "evidence_class": "official_regulatory_approval",
+      "confidence": "high",
+      "claim": "Louisiana regulators approved the settlement path for Entergy resources serving Meta subsidiary Laidley’s Richland Parish hyperscale project: three combined-cycle turbines totaling 2,262 MW, a new 500-kV line, substations, and upgrades.",
+      "quantified": {
+        "approved_generators": 3,
+        "approved_generation_mw": 2262,
+        "generator_capacity_mw_each": 754,
+        "transmission_voltage_kv": 500,
+        "commission_vote_for": 4,
+        "commission_vote_against": 1
+      },
+      "assumptions": [
+        "The approval authorizes generation and transmission development for a named customer project; construction and energization follow separately."
+      ],
+      "contradictions_or_limits": [
+        "Approved generation nameplate is not live IT MW, campus compute power, delivered annual energy, or schedulable accelerator capacity.",
+        "The record does not prove completion, commissioning, availability, fuel delivery, or Meta’s eventual realized load."
+      ],
+      "fak_implications": [
+        "Named-site power records should preserve regulator approval, generation nameplate, transmission scope, construction, commissioning, and delivered-load states separately."
       ],
       "rumor": {
         "is_rumor": false

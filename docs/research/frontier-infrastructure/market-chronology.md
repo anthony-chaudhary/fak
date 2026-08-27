@@ -15,6 +15,15 @@ announced/future products, reported negotiations, and unconfirmed rumors.
 | 2025-10-14 | Untether AI entered bankruptcy, retained from the existing corpus record. | Accelerator-startup insolvency, not a chip-capacity decrement. |
 | 2025 full year | Heatmap found 25 opposition-linked U.S. cancellations, 21 in the second half. | Bounded heterogeneous cohort, not homogeneous MW. |
 
+## Named grid chronology (#9364)
+
+| Date | Outcome | Lifecycle state |
+|---|---|---|
+| 2024-11-01 | FERC rejected the Susquehanna 300-to-480 MW amended co-location agreement without prejudice. | Regulatory rejection of an amendment, not permanent site denial. |
+| 2025-07-09 | PUCO approved AEP Ohio’s data-center tariff. | Financially stronger queue/contract terms, not energized load. |
+| 2025-08-20 | LPSC approved the Meta/Laidley generation and transmission settlement path. | Named project power approval, before construction and commissioning. |
+| 2025-11-25 | Virginia SCC approved Dominion GS-5 effective 2027. | Customer-class tariff and cost allocation, not one site interconnection. |
+
 ## 2026 chronology
 
 | Date | Entity/event | Type and state | Infrastructure expectation | Evidence caveat |

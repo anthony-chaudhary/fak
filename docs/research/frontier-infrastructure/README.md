@@ -43,6 +43,15 @@ semiconductor-project cancellation and delay, one named data-center withdrawal, 
 impairment, withdrawal, cancellation, delay, operating shutdown, and lost live MW remain
 distinct states.
 
+## Latest slice: named grid and utility outcomes (#9364)
+
+Four records connect large-load policy to service reality: FERC’s rejection of the
+Susquehanna 300-to-480 MW co-location amendment, AEP Ohio’s collateralized data-center
+tariff, Dominion’s GS-5 large-load class, and LPSC approval of 2,262 MW plus 500-kV
+transmission for Meta’s named Louisiana project. The corpus now contains **222 entries**,
+**217 unique source URLs**, and **185 entity labels**. Tariff, contract, collateral, queue,
+regulatory approval, construction, energization, actual load, and live IT MW remain distinct.
+
 ## Result first
 
 The initial evidence already rejects several convenient defaults:

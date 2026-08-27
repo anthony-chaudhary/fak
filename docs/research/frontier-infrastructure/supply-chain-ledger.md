@@ -13,6 +13,15 @@ and named Google withdrawal further show why investment, permitting, constructio
 commissioning, and live output require separate survival states. None alone measures lost
 qualified wafers, shipped accelerators, or operating IT MW.
 
+## Named grid and large-load commitments (#9364)
+
+| Record | Typed state | What it does not prove |
+|---|---|---|
+| FERC Susquehanna | 300-to-480 MW amended co-location agreement rejected without prejudice | Permanent denial, shutdown, or lost live IT MW. |
+| AEP Ohio DCT | >25 MW class; up to 12 years; collateral and generally 85% minimum billing floor | Energization, actual draw, or utilization. |
+| Dominion GS-5 | >=25 MW and >=75% load factor class; 14 years; $1.5M/MW collateral; 85%/85%/60% minimum charges | Queue completion or one named project’s operation. |
+| Meta Laidley / Entergy | 2,262 MW generation and 500-kV transmission path approved for a named project | Completed construction, delivered energy, or compute MW. |
+
 ## Capacity lifecycle
 
 | State | Minimum evidence |
