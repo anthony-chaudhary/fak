@@ -13,10 +13,8 @@ package main
 // distinct-arg update_plan burst is classified OK, not LOOP, so it files nothing.
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/dogfoodissues"
@@ -179,12 +177,7 @@ func runCodexLoopSyncIssues(stdout, stderr io.Writer, r codexLoopRecentReport, a
 	var existing []dogfoodissues.Issue
 	switch {
 	case strings.TrimSpace(opt.ExistingJSON) != "":
-		b, err := os.ReadFile(opt.ExistingJSON)
-		if err != nil {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: %v\n", err)
-			return 2
-		}
-		if err := json.Unmarshal(b, &existing); err != nil {
+		if err := readJSONFileInto(opt.ExistingJSON, &existing); err != nil {
 			fmt.Fprintf(stderr, "fak sessions codex-loop: --existing-json must contain a JSON list: %v\n", err)
 			return 2
 		}
