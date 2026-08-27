@@ -297,17 +297,22 @@ func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string,
 func selfUpdateGateRunner(ctx context.Context, dir, name string, args ...string) (string, bool) {
 	percent := 0
 	operation := ""
+	phase := selfUpdatePhase("")
 	switch {
 	case name == "go" && len(args) > 0 && args[0] == "build":
 		percent, operation = 55, "building fak candidate"
+		phase = selfUpdatePhaseBuild
 	case name == "go" && len(args) > 0 && args[0] == "vet":
 		percent, operation = 70, "vetting fak candidate"
-	case len(args) == 1 && args[0] == "version":
+		phase = selfUpdatePhaseVet
+	case len(args) >= 1 && args[0] == "version":
 		percent, operation = 78, "smoke-verifying fak candidate"
+		phase = selfUpdatePhaseSmoke
 	}
 	if percent == 0 {
 		return selfinstall.RealRunner(ctx, dir, name, args...)
 	}
+	startSelfUpdatePhase(phase)
 	stopHeartbeat := startSelfUpdateHeartbeat(percent, operation)
 	out, ok := selfinstall.RealRunner(ctx, dir, name, args...)
 	stopHeartbeat()
@@ -373,8 +378,10 @@ func selfUpdateTransactionDetail(err error, rollbackErrors []error) string {
 // only an exit code cannot answer "when did the fleet binary last actually advance?".
 func emitSelfUpdateOutcome(cause selfUpdateOutcome, target, detail string) {
 	finishSelfUpdateProgress(cause)
+	timing := finishSelfUpdateTiming()
+	reportSelfUpdateTiming(timing)
 	if selfUpdateJSON != nil {
-		receipt := newSelfUpdateReceipt(cause, target, detail)
+		receipt := newSelfUpdateReceiptWithTiming(cause, target, detail, timing)
 		_ = json.NewEncoder(selfUpdateJSON).Encode(receipt)
 		selfUpdateJSON = nil
 		return
@@ -423,8 +430,10 @@ func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshn
 		return
 	}
 	finishSelfUpdateProgress(outcomeCheckOnly)
+	timing := finishSelfUpdateTiming()
+	reportSelfUpdateTiming(timing)
 	posture := classifySelfUpdateCheck(freshness, hotCopiesConverged)
-	receipt := newSelfUpdateReceipt(outcomeCheckOnly, target, detail)
+	receipt := newSelfUpdateReceiptWithTiming(outcomeCheckOnly, target, detail, timing)
 	receipt.Status = string(posture.Status)
 	receipt.NextCommand = posture.NextCommand
 	_ = json.NewEncoder(selfUpdateJSON).Encode(receipt)
@@ -448,11 +457,93 @@ type selfUpdateReceipt struct {
 	RestartRequired bool                      `json:"restart_required"`
 	NextCommand     string                    `json:"next_command"`
 	Handoff         *selfUpdateHandoffReceipt `json:"handoff,omitempty"`
+	TotalMS         int64                     `json:"total_ms"`
+	PhaseMS         selfUpdatePhaseMS         `json:"phase_ms"`
 }
 
 type selfUpdateReceiptTarget struct {
 	Role string `json:"role"`
 	Path string `json:"path"`
+}
+
+// selfUpdatePhaseMS is a fixed-shape object rather than a map so receipt consumers always see
+// the same phase vocabulary, including zeroes for phases an early exit did not reach.
+type selfUpdatePhaseMS struct {
+	Check     int64 `json:"check"`
+	Lock      int64 `json:"lock"`
+	Cleanup   int64 `json:"cleanup"`
+	Prepare   int64 `json:"prepare"`
+	Companion int64 `json:"companion"`
+	Build     int64 `json:"build"`
+	Vet       int64 `json:"vet"`
+	Smoke     int64 `json:"smoke"`
+	Install   int64 `json:"install"`
+	Verify    int64 `json:"verify"`
+	Handoff   int64 `json:"handoff"`
+}
+
+type selfUpdatePhase string
+
+const (
+	selfUpdatePhaseCheck     selfUpdatePhase = "check"
+	selfUpdatePhaseLock      selfUpdatePhase = "lock"
+	selfUpdatePhaseCleanup   selfUpdatePhase = "cleanup"
+	selfUpdatePhasePrepare   selfUpdatePhase = "prepare"
+	selfUpdatePhaseCompanion selfUpdatePhase = "companion"
+	selfUpdatePhaseBuild     selfUpdatePhase = "build"
+	selfUpdatePhaseVet       selfUpdatePhase = "vet"
+	selfUpdatePhaseSmoke     selfUpdatePhase = "smoke"
+	selfUpdatePhaseInstall   selfUpdatePhase = "install"
+	selfUpdatePhaseVerify    selfUpdatePhase = "verify"
+	selfUpdatePhaseHandoff   selfUpdatePhase = "handoff"
+)
+
+var selfUpdatePhaseOrder = [...]selfUpdatePhase{
+	selfUpdatePhaseCheck,
+	selfUpdatePhaseLock,
+	selfUpdatePhaseCleanup,
+	selfUpdatePhasePrepare,
+	selfUpdatePhaseCompanion,
+	selfUpdatePhaseBuild,
+	selfUpdatePhaseVet,
+	selfUpdatePhaseSmoke,
+	selfUpdatePhaseInstall,
+	selfUpdatePhaseVerify,
+	selfUpdatePhaseHandoff,
+}
+
+func (p *selfUpdatePhaseMS) set(phase selfUpdatePhase, value int64) {
+	switch phase {
+	case selfUpdatePhaseCheck:
+		p.Check = value
+	case selfUpdatePhaseLock:
+		p.Lock = value
+	case selfUpdatePhaseCleanup:
+		p.Cleanup = value
+	case selfUpdatePhasePrepare:
+		p.Prepare = value
+	case selfUpdatePhaseCompanion:
+		p.Companion = value
+	case selfUpdatePhaseBuild:
+		p.Build = value
+	case selfUpdatePhaseVet:
+		p.Vet = value
+	case selfUpdatePhaseSmoke:
+		p.Smoke = value
+	case selfUpdatePhaseInstall:
+		p.Install = value
+	case selfUpdatePhaseVerify:
+		p.Verify = value
+	case selfUpdatePhaseHandoff:
+		p.Handoff = value
+	}
+}
+
+type selfUpdateTimingSnapshot struct {
+	totalMS       int64
+	phaseMS       selfUpdatePhaseMS
+	dominantPhase selfUpdatePhase
+	dominantMS    int64
 }
 
 var selfUpdateProgress io.Writer = os.Stderr
@@ -464,6 +555,24 @@ var selfUpdateReceiptTargets []selfUpdateReceiptTarget
 var selfUpdateReceiptAttempted int
 var selfUpdateReceiptChanged int
 var selfUpdateReceiptHandoff *selfUpdateHandoffReceipt
+
+// selfUpdateTimingNow is the deterministic wall-clock seam for timing receipts. It is kept
+// separate from outcome timestamps and cleanup-age decisions so tests can control cost
+// attribution without changing production semantics elsewhere in the command.
+var selfUpdateTimingNow = time.Now
+
+type selfUpdateTimingTracker struct {
+	sync.Mutex
+	initialized  bool
+	finished     bool
+	started      time.Time
+	phaseStarted time.Time
+	active       selfUpdatePhase
+	elapsed      map[selfUpdatePhase]time.Duration
+	snapshot     selfUpdateTimingSnapshot
+}
+
+var selfUpdateTimingState selfUpdateTimingTracker
 
 var selfUpdateProgressState struct {
 	sync.Mutex
@@ -484,6 +593,82 @@ var selfUpdateHeartbeatWait = func(stop <-chan struct{}, interval time.Duration)
 	case <-stop:
 		return false
 	}
+}
+
+func beginSelfUpdateTiming() {
+	now := selfUpdateTimingNow()
+	selfUpdateTimingState.Lock()
+	selfUpdateTimingState.initialized = true
+	selfUpdateTimingState.finished = false
+	selfUpdateTimingState.started = now
+	selfUpdateTimingState.phaseStarted = now
+	selfUpdateTimingState.active = selfUpdatePhaseCheck
+	selfUpdateTimingState.elapsed = make(map[selfUpdatePhase]time.Duration, len(selfUpdatePhaseOrder))
+	selfUpdateTimingState.snapshot = selfUpdateTimingSnapshot{}
+	selfUpdateTimingState.Unlock()
+}
+
+// startSelfUpdatePhase closes the previous phase and starts the named one. Re-entering a phase
+// accumulates its duration, which lets "prepare" cover both worktree preparation and the later
+// target census without inventing an unstable one-off phase name.
+func startSelfUpdatePhase(phase selfUpdatePhase) {
+	now := selfUpdateTimingNow()
+	selfUpdateTimingState.Lock()
+	defer selfUpdateTimingState.Unlock()
+	if !selfUpdateTimingState.initialized || selfUpdateTimingState.finished {
+		return
+	}
+	selfUpdateTimingState.recordActive(now)
+	selfUpdateTimingState.active = phase
+}
+
+func (s *selfUpdateTimingTracker) recordActive(now time.Time) {
+	if s.active != "" && !now.Before(s.phaseStarted) {
+		s.elapsed[s.active] += now.Sub(s.phaseStarted)
+	}
+	s.phaseStarted = now
+}
+
+func finishSelfUpdateTiming() selfUpdateTimingSnapshot {
+	now := selfUpdateTimingNow()
+	selfUpdateTimingState.Lock()
+	defer selfUpdateTimingState.Unlock()
+	if !selfUpdateTimingState.initialized {
+		return selfUpdateTimingSnapshot{}
+	}
+	if selfUpdateTimingState.finished {
+		return selfUpdateTimingState.snapshot
+	}
+	selfUpdateTimingState.recordActive(now)
+
+	var phaseMS selfUpdatePhaseMS
+	dominant := selfUpdatePhaseOrder[0]
+	dominantDuration := selfUpdateTimingState.elapsed[dominant]
+	for _, phase := range selfUpdatePhaseOrder {
+		elapsed := selfUpdateTimingState.elapsed[phase]
+		phaseMS.set(phase, elapsed.Milliseconds())
+		if elapsed > dominantDuration {
+			dominant = phase
+			dominantDuration = elapsed
+		}
+	}
+	total := time.Duration(0)
+	if !now.Before(selfUpdateTimingState.started) {
+		total = now.Sub(selfUpdateTimingState.started)
+	}
+	selfUpdateTimingState.snapshot = selfUpdateTimingSnapshot{
+		totalMS:       total.Milliseconds(),
+		phaseMS:       phaseMS,
+		dominantPhase: dominant,
+		dominantMS:    dominantDuration.Milliseconds(),
+	}
+	selfUpdateTimingState.finished = true
+	return selfUpdateTimingState.snapshot
+}
+
+func reportSelfUpdateTiming(timing selfUpdateTimingSnapshot) {
+	fmt.Fprintf(selfUpdateProgress, "self-update: timing total_ms=%d dominant_phase=%s dominant_ms=%d\n",
+		timing.totalMS, timing.dominantPhase, timing.dominantMS)
 }
 
 // reportSelfUpdateProgress emits a useful current operation with an honest overall estimate.
@@ -557,6 +742,7 @@ func beginSelfUpdateOutput(enabled bool) {
 	selfUpdateReceiptAttempted = 0
 	selfUpdateReceiptChanged = 0
 	selfUpdateReceiptHandoff = nil
+	beginSelfUpdateTiming()
 	if enabled {
 		selfUpdateJSON = os.Stdout
 	}
@@ -571,6 +757,10 @@ func randomSelfUpdateCorrelationID() string {
 }
 
 func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUpdateReceipt {
+	return newSelfUpdateReceiptWithTiming(cause, target, detail, selfUpdateTimingSnapshot{})
+}
+
+func newSelfUpdateReceiptWithTiming(cause selfUpdateOutcome, target, detail string, timing selfUpdateTimingSnapshot) selfUpdateReceipt {
 	status := "current"
 	rollbackStatus := "not_attempted"
 	restartRequired := false
@@ -614,6 +804,7 @@ func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUp
 		OldRevision: optionalRevision(selfUpdateReceiptOldRevision), NewRevision: optionalRevision(selfUpdateReceiptNewRevision),
 		Targets: targets, Attempted: selfUpdateReceiptAttempted, Changed: selfUpdateReceiptChanged, RollbackStatus: rollbackStatus,
 		RollbackErrors: rollbackErrors, RestartRequired: restartRequired, NextCommand: nextCommand, Handoff: selfUpdateReceiptHandoff,
+		TotalMS: timing.totalMS, PhaseMS: timing.phaseMS,
 	}
 }
 
