@@ -27,7 +27,7 @@ int mg_graph_read(void *graph, void *result, float *dst, int n);
 int mg_graph_read_pack(void *graph, void **results, const int *sizes, int count, float *dst, int total);
 void mg_graph_free(void *graph);
 void *mg_graph_xf_buffer(void *graph);
-void *mg_qwen35_graph_norm(void *graph, void *input, const float *weight, int width, float eps, int gain1p, int last_only);
+void *mg_qwen35_graph_norm(void *graph, void *input, const float *weight, int rows, int width, float eps, int gain1p, int last_only);
 int mg_qwen35_graph_add(void *graph, void *x, void *y, int n);
 int mg_qwen35_graph_swiglu(void *graph, void *gate, void *up, int n);
 int mg_qwen35_graph_split(void *graph, void *src, int qwidth, int hd, void **q, void **gate);
@@ -237,18 +237,22 @@ func (g *ProjectionGraph) EncodeQ8From(w *Q8Weight, input *QuantizedGraphResult)
 	return g.add(C.mg_graph_encode_q8_from(g.ptr, C.int(w.id), input.q, input.d, C.int(input.elems)), w.Out)
 }
 
-func (g *ProjectionGraph) qwenP32Input(input *GraphResult, width int) error {
+func (g *ProjectionGraph) qwenInput(input *GraphResult, rows, width int) error {
 	if err := g.open(); err != nil {
 		return err
 	}
-	if g.p != 32 || input == nil || input.graph != g || input.ptr == nil || input.p != 32 || input.out != width {
-		return fmt.Errorf("metalgemm: Qwen graph requires owned P32 width=%d input", width)
+	if rows <= 0 || g.p != rows || input == nil || input.graph != g || input.ptr == nil || input.p != rows || input.out != width {
+		return fmt.Errorf("metalgemm: Qwen graph requires owned P=%d width=%d input", rows, width)
 	}
 	return nil
 }
 
+func (g *ProjectionGraph) qwenP32Input(input *GraphResult, width int) error {
+	return g.qwenInput(input, 32, width)
+}
+
 func (g *ProjectionGraph) RMSNorm(input *GraphResult, weight []float32, eps float32, gain1p bool) (*GraphResult, error) {
-	if err := g.qwenP32Input(input, len(weight)); err != nil || eps <= 0 {
+	if err := g.qwenInput(input, g.p, len(weight)); err != nil || eps <= 0 {
 		if err == nil {
 			err = errors.New("metalgemm: invalid Qwen RMSNorm epsilon")
 		}
@@ -258,7 +262,7 @@ func (g *ProjectionGraph) RMSNorm(input *GraphResult, weight []float32, eps floa
 	if gain1p {
 		gain = 1
 	}
-	ptr := C.mg_qwen35_graph_norm(g.ptr, input.ptr, (*C.float)(unsafe.Pointer(&weight[0])), C.int(len(weight)), C.float(eps), gain, 0)
+	ptr := C.mg_qwen35_graph_norm(g.ptr, input.ptr, (*C.float)(unsafe.Pointer(&weight[0])), C.int(g.p), C.int(len(weight)), C.float(eps), gain, 0)
 	return g.add(ptr, len(weight))
 }
 
@@ -273,7 +277,7 @@ func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps 
 	if gain1p {
 		gain = 1
 	}
-	ptr := C.mg_qwen35_graph_norm(g.ptr, input.ptr, (*C.float)(unsafe.Pointer(&weight[0])), C.int(len(weight)), C.float(eps), gain, 1)
+	ptr := C.mg_qwen35_graph_norm(g.ptr, input.ptr, (*C.float)(unsafe.Pointer(&weight[0])), 32, C.int(len(weight)), C.float(eps), gain, 1)
 	if ptr == nil {
 		return nil, errors.New("metalgemm: Qwen final RMSNorm encode failed")
 	}
@@ -282,7 +286,7 @@ func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps 
 }
 
 func (g *ProjectionGraph) AddInPlace(dst, src *GraphResult) error {
-	if dst == nil || src == nil || dst.graph != g || src.graph != g || dst.ptr == nil || src.ptr == nil || dst.p != src.p || dst.out != src.out || dst.p != 32 {
+	if dst == nil || src == nil || dst.graph != g || src.graph != g || dst.ptr == nil || src.ptr == nil || dst.p != src.p || dst.out != src.out || dst.p != g.p || dst.p <= 0 {
 		return errors.New("metalgemm: invalid Qwen residual operands")
 	}
 	if C.mg_qwen35_graph_add(g.ptr, dst.ptr, src.ptr, C.int(dst.p*dst.out)) == 0 {
@@ -293,10 +297,10 @@ func (g *ProjectionGraph) AddInPlace(dst, src *GraphResult) error {
 }
 
 func (g *ProjectionGraph) SwiGLUInPlace(gate, up *GraphResult) error {
-	if gate == nil || up == nil || gate.graph != g || up.graph != g || gate.ptr == nil || up.ptr == nil || gate.p != 32 || up.p != 32 || gate.out != up.out {
+	if gate == nil || up == nil || gate.graph != g || up.graph != g || gate.ptr == nil || up.ptr == nil || gate.p != g.p || up.p != g.p || gate.p <= 0 || gate.out != up.out {
 		return errors.New("metalgemm: invalid Qwen SwiGLU operands")
 	}
-	if C.mg_qwen35_graph_swiglu(g.ptr, gate.ptr, up.ptr, C.int(32*gate.out)) == 0 {
+	if C.mg_qwen35_graph_swiglu(g.ptr, gate.ptr, up.ptr, C.int(g.p*gate.out)) == 0 {
 		return errors.New("metalgemm: Qwen SwiGLU encode failed")
 	}
 	g.encoders++

@@ -642,6 +642,19 @@ func (s *Session) blockStep(l, qpos int, x, cos, sin []float32, mat matKernel) [
 	}
 	if cfg.isLinearAttnLayer(l) {
 		s.recordQwen35LayerGraph(l, true)
+		if _, resident := mat.(sessionQ4KKernel); resident {
+			if out, _, accepted, err := s.tryQwen35MetalDecodeBlock(l, x); accepted {
+				if err != nil {
+					panic(err)
+				}
+				invokeResidualHook(cfg, l, out)
+				if tap := s.tapActive; tap != nil {
+					tap.applySteer(l, qpos, out)
+					tap.dumpLayer(l, layerKindLabel(cfg, l), out)
+				}
+				return out
+			}
+		}
 		out := runBlock(func(xn []float32) []float32 {
 			return s.linearAttnStep(l, xn, mat)
 		})
