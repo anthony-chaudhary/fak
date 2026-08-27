@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9331,
+  "latest_slice_issue": 9334,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 175,
+    "entry_count": 187,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -72,6 +72,7 @@
       "workload_trace"
     ],
     "entities": [
+      "01.AI",
       "AI Singapore SEA-LION",
       "AI datacenter power architecture research",
       "AI optical interconnect sector",
@@ -130,6 +131,7 @@
       "Google DeepMind",
       "Google internal developer tools",
       "Groq",
+      "HUMAIN / SDAIA",
       "HeteroScale production study",
       "Hitachi Energy",
       "Huawei Cloud Pangu",
@@ -138,6 +140,7 @@
       "IndiaAI Mission",
       "International Energy Agency",
       "Johnson Controls",
+      "Kakao",
       "LG AI Research",
       "Lambda",
       "Large-scale training reliability study",
@@ -145,6 +148,7 @@
       "Lightmatter",
       "LiquidStack / Trane Technologies",
       "MBZUAI / G42 Institute of Foundation Models",
+      "MBZUAI / Inception / Cerebras / Petuum",
       "Marvell / Celestial AI",
       "Meta",
       "Microsoft",
@@ -165,6 +169,7 @@
       "NVIDIA DSX",
       "NVIDIA Dynamo",
       "NVIDIA Dynamo Planner",
+      "NVIDIA Nemotron",
       "Nebius Group",
       "OpenAI",
       "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
@@ -178,19 +183,25 @@
       "Oracle",
       "Parrot serving study",
       "Robust KV cache management study",
+      "SDAIA / IBM",
+      "SK Telecom",
       "SK hynix",
       "SMetric agent scheduling study",
       "SageServe production-trace study",
       "Sakana AI",
+      "Samsung Electronics",
       "Sarvam AI",
       "Schneider Electric / NVIDIA",
       "Sea AI Lab",
       "SemiAnalysis",
+      "SenseTime",
       "ServeGen production study",
+      "Shanghai AI Laboratory / InternLM",
       "Siemens Energy",
       "Siemens Energy / Start Campus",
       "Singapore IMDA",
       "SkyWalker cross-region study",
+      "StepFun",
       "TIE scheduling study",
       "TSMC",
       "TaiChi serving study",
@@ -210,6 +221,7 @@
       "VAST Data / NVIDIA / CoreWeave",
       "Vertiv",
       "WEKA",
+      "Xiaomi MiMo",
       "Z.ai / Zhipu AI",
       "llm-d / Google",
       "xAI",
@@ -6624,6 +6636,508 @@
       "fak_implications": [
         "Record storage/memory tier, checkpoint and agent-state path, capacity, bandwidth, latency, topology, failure, and workload.",
         "Benchmark end-to-end training/inference/task completion with data movement included."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "samsung-gauss2-internal-deployment-2024",
+      "category": "frontier_lab",
+      "entity": "Samsung Electronics",
+      "topic": [
+        "model_architecture",
+        "serving",
+        "enterprise_workload",
+        "adoption"
+      ],
+      "published_at": "2024-11-21",
+      "event_at": "2024-11-21",
+      "source_title": "Samsung Electronics Hosts Samsung Developer Conference Korea 2024, Unveils Its Improved Gen AI Model",
+      "source_url": "https://news.samsung.com/global/samsung-electronics-hosts-samsung-developer-conference-korea-2024-unveils-its-improved-gen-ai-model",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Samsung said Gauss2 shipped in Compact, Balanced, and Supreme variants; Supreme used mixture-of-experts, while internal Gauss services had reached about 60% of DX software developers and call-center summarization use.",
+      "quantified": {
+        "model_variants": 3,
+        "supported_languages_min": 9,
+        "supported_languages_max": 14,
+        "claimed_processing_speed_multiple_min": 1.5,
+        "claimed_processing_speed_multiple_max": 3,
+        "dx_software_developer_usage_share": 0.6,
+        "code_i_monthly_usage_growth_multiple": 4
+      },
+      "assumptions": [
+        "A first-party model portfolio spans constrained on-device execution, balanced cloud use, and a larger MoE service tier.",
+        "Internal coding, office, and call-center workloads are distinct production demand classes rather than one generic chat distribution."
+      ],
+      "contradictions_or_limits": [
+        "The 1.5-3x speed range is Samsung's comparison with unnamed leading open-source models, not a neutral matched serving benchmark.",
+        "Developer share and usage growth do not reveal requests, tokens, concurrency, latency, hardware, or external-customer traffic.",
+        "Planned product integration is not evidence of shipped consumer deployment."
+      ],
+      "fak_implications": [
+        "Model workload envelopes should distinguish on-device, employee cloud, coding, and call-center paths.",
+        "Treat internal adoption counts as evidence of workload existence, not a request or token distribution."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "skt-ax4-model-and-adot-deployment-2025",
+      "category": "frontier_lab",
+      "entity": "SK Telecom",
+      "topic": [
+        "model_release",
+        "serving",
+        "korean_language",
+        "enterprise_workload"
+      ],
+      "published_at": "2025-07-24",
+      "event_at": "2025-07-24",
+      "source_title": "SK Telecom Unveils Proprietary Standard Large Language Model A.X 3.1",
+      "source_url": "https://news.sktelecom.com/en/2035",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "SK Telecom described a dual model strategy: from-scratch A.X 3.1 and continual-pretrained A.X 4.0, whose standard and light variants were open-sourced and whose model had been applied to the A. call-summarization service since May 2025.",
+      "quantified": {
+        "claimed_korean_token_efficiency_gain_vs_gpt4o": 0.33,
+        "kmmlu_score": 78.3,
+        "click_score": 85.7
+      },
+      "assumptions": [
+        "Korean-language tokenization efficiency can materially change capacity and cost relative to English-centric token accounting.",
+        "One operator may serve from-scratch sovereign models and adapted open-weight models as separate product tiers."
+      ],
+      "contradictions_or_limits": [
+        "The 33% token-efficiency result and benchmark scores are company-reported tests, not independently reproduced serving measurements.",
+        "Application to call summarization establishes a production use case but gives no request volume, latency, hardware, batching, or user distribution.",
+        "Open-source availability is not evidence of external adoption."
+      ],
+      "fak_implications": [
+        "Track tokenizer-specific token expansion and model lineage when comparing regional serving cost.",
+        "Separate model release, internal service application, and measured production traffic."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "kakao-kanana-family-report-2025",
+      "category": "frontier_lab",
+      "entity": "Kakao",
+      "topic": [
+        "model_release",
+        "training",
+        "open_source",
+        "model_family"
+      ],
+      "published_at": "2025-02-27",
+      "event_at": "2025-02-27",
+      "source_title": "Kakao publishes Kanana language-model technical report",
+      "source_url": "https://www.kakaocorp.com/page/detail/11481",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Kakao published a Kanana technical report spanning models from 2.1B to 32.5B parameters and released the 2.1B-parameter Kanana Nano model as open source.",
+      "quantified": {
+        "minimum_parameters": 2100000000,
+        "maximum_parameters": 32500000000,
+        "kanana_nano_parameters": 2100000000,
+        "claimed_training_cost_reduction_min": 0.5
+      },
+      "assumptions": [
+        "A product lab can maintain a multi-size model family spanning an on-device-scale open model and larger internally trained models."
+      ],
+      "contradictions_or_limits": [
+        "The greater-than-50% training-cost reduction is Kakao's comparison with similar-size models, not neutral normalized cost accounting.",
+        "A technical report and open model release do not establish production deployment, serving traffic, cluster size, or active-user demand."
+      ],
+      "fak_implications": [
+        "Keep model-family release evidence separate from service adoption and workload-distribution evidence.",
+        "Use the technical report as the source for training parameters rather than inferring production characteristics from model size."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "sensetime-sensenova5-moE-context-2024",
+      "category": "frontier_lab",
+      "entity": "SenseTime",
+      "topic": [
+        "model_release",
+        "mixture_of_experts",
+        "context_length",
+        "training_data",
+        "deployment"
+      ],
+      "published_at": "2024-04-25",
+      "event_at": "2024-04-23",
+      "source_title": "SenseTime releases cloud-device-edge full-stack model matrix and upgrades SenseNova 5.0",
+      "source_url": "https://www.sensetime.com/cn/news/51167729/",
+      "source_kind": "official_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "SenseTime said SenseNova 5.0 used a mixture-of-experts architecture, trained on more than 10TB of token data, supported roughly 200K effective inference context, and sat in a cloud-device-edge product matrix with named finance and automotive integrations.",
+      "quantified": {
+        "training_corpus_tb_tokens_min": 10,
+        "effective_context_tokens_approx": 200000,
+        "major_version_ordinal": 5
+      },
+      "assumptions": [
+        "A model provider can partition one family across cloud, device, and edge deployment envelopes.",
+        "Long-context and multimodal enterprise workloads include cross-document extraction, summarization, finance, and in-vehicle interaction."
+      ],
+      "contradictions_or_limits": [
+        "The source's GPT-4 Turbo comparisons, training-volume wording, and 200K effective-context claim are vendor-reported rather than independently reproduced.",
+        "Named integrations do not disclose traffic, hardware, batching, latency, availability, or user distributions.",
+        "TB of tokens is the source's unit and is not normalized to an exact token count."
+      ],
+      "fak_implications": [
+        "Preserve effective context separately from maximum advertised context and production prevalence.",
+        "Represent cloud, device, and edge execution as distinct operating envelopes."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "xiaomi-mimo-v2-pro-api-2026",
+      "category": "frontier_lab",
+      "entity": "Xiaomi MiMo",
+      "topic": [
+        "model_release",
+        "mixture_of_experts",
+        "context_length",
+        "api_pricing",
+        "agent_workload"
+      ],
+      "published_at": "2026-06-29",
+      "event_at": "2026-06-29",
+      "source_title": "Xiaomi MiMo-V2-Pro: Flagship Foundation Model towards Maximum Reasoning Capability",
+      "source_url": "https://mimo.mi.com/docs/en-US/news/previous-news/v2-pro-release",
+      "source_kind": "official_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Xiaomi released MiMo-V2-Pro as a greater-than-1T-total, 42B-active hybrid-attention model with a 1M-token context window and a public API whose price doubled above 256K input context.",
+      "quantified": {
+        "active_parameters": 42000000000,
+        "context_tokens": 1000000,
+        "global_to_sliding_attention_ratio": "1:7",
+        "api_input_usd_per_million_tokens_up_to_256k": 1,
+        "api_output_usd_per_million_tokens_up_to_256k": 3,
+        "api_input_usd_per_million_tokens_256k_to_1m": 2,
+        "api_output_usd_per_million_tokens_256k_to_1m": 6,
+        "total_parameters_min_exclusive": 1000000000000
+      },
+      "assumptions": [
+        "Agentic and coding demand can include contexts far beyond 256K, with a provider pricing a separate long-context tier.",
+        "Sparse activation and hybrid attention are used to constrain inference cost at trillion-parameter scale."
+      ],
+      "contradictions_or_limits": [
+        "Architecture, benchmark ranking, and internal-engineer comparisons are Xiaomi claims, not neutral matched measurements.",
+        "API availability and price do not establish request mix, context prevalence, latency, batching, or capacity.",
+        "The page's most-recent update date is later than the stated model release date."
+      ],
+      "fak_implications": [
+        "Model long-context cost as a tiered workload rather than assuming flat per-token economics.",
+        "Keep total parameters, active parameters, attention window, API availability, and production traffic separate."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "nvidia-nemotron3-ultra-training-2026",
+      "category": "frontier_lab",
+      "entity": "NVIDIA Nemotron",
+      "topic": [
+        "model_architecture",
+        "training",
+        "mixture_of_experts",
+        "quantization",
+        "long_context"
+      ],
+      "published_at": "2026-06-09",
+      "event_at": "2026-06-09",
+      "source_title": "Nemotron 3 Ultra: Open, Efficient Mixture-of-Experts Hybrid Mamba-Transformer Model for Agentic Reasoning",
+      "source_url": "https://research.nvidia.com/labs/nemotron/files/NVIDIA-Nemotron-3-Ultra-Technical-Report.pdf",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "NVIDIA documented Nemotron 3 Ultra as a 550B-total, 55B-active hybrid Mamba-attention MoE with 108 layers, 512 experts per MoE layer and top-22 routing, pretrained with NVFP4 on 20T text tokens before a 1M-token context extension.",
+      "quantified": {
+        "total_parameters": 550000000000,
+        "active_parameters": 55000000000,
+        "layers": 108,
+        "model_dimension": 8192,
+        "experts_per_layer": 512,
+        "active_experts": 22,
+        "mtp_layers": 2,
+        "training_ablation_checkpoints_tokens": [
+          5000000000000,
+          10000000000000,
+          16000000000000
+        ],
+        "bf16_ablation_continuation_tokens": 74000000000,
+        "fresh_code_tokens": 173000000000,
+        "pretraining_tokens": 20000000000000,
+        "context_tokens": 1000000
+      },
+      "assumptions": [
+        "Frontier first-party model development can use low-precision training, sparse expert activation, Mamba-attention hybrids, and multi-token prediction together.",
+        "Training-health validation includes precision-switched continuation branches at multiple token checkpoints."
+      ],
+      "contradictions_or_limits": [
+        "The report's benchmark results are author measurements; they do not establish production traffic, serving SLOs, or third-party deployment prevalence.",
+        "Checkpoint ablations and fresh-code corpus size are not the same denominator as total pretraining tokens.",
+        "Open weights and recipes do not imply independent reproducibility at the original compute scale."
+      ],
+      "fak_implications": [
+        "Preserve active versus total parameters and low-precision training mode in model envelopes.",
+        "Use precision-switched checkpoint continuations as a prior-art pattern for training-health witnesses, not as serving evidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "mbzuai-k2-nanda-model-program-2025",
+      "category": "frontier_lab",
+      "entity": "MBZUAI / Inception / Cerebras / Petuum",
+      "topic": [
+        "model_release",
+        "open_source",
+        "regional_language",
+        "training"
+      ],
+      "published_at": "2025-01-21",
+      "event_at": "2024-12-31",
+      "source_title": "Making MBZUAI the Stanford of the Middle East",
+      "source_url": "https://mbzuai.ac.ae/news/making-mbzuai-the-stanford-of-the-middle-east/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "MBZUAI's 2024 review said its foundation-model program released NANDA with Inception and Cerebras, launched LLM360 for fully open training artifacts, and collaborated with Petuum on the 65B-parameter K2-65B model.",
+      "quantified": {
+        "k2_parameters": 65000000000,
+        "specialized_models_released": 5
+      },
+      "assumptions": [
+        "Regional-language model programs combine university, product-lab, systems-vendor, and open-research partners.",
+        "Some openness programs include training code, data, checkpoints, and intermediate results rather than weights alone."
+      ],
+      "contradictions_or_limits": [
+        "The annual review summarizes releases but does not expose cluster size, training duration, serving traffic, or production adoption.",
+        "Partnership and release evidence is not proof that a model is deployed at scale.",
+        "The source calls NANDA a leading Hindi model but does not provide a neutral benchmark or all model parameters."
+      ],
+      "fak_implications": [
+        "Track artifact openness dimensions separately: weights, data, code, recipes, checkpoints, and intermediate states.",
+        "Do not infer production serving from a research release or partnership."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "sdaia-allam-watsonx-deployment-2024",
+      "category": "frontier_lab",
+      "entity": "SDAIA / IBM",
+      "topic": [
+        "model_release",
+        "deployment",
+        "arabic_language",
+        "enterprise_platform"
+      ],
+      "published_at": "2024-05-21",
+      "event_at": "2024-05-21",
+      "source_title": "Through partnership with IBM, Saudi Data and Artificial Intelligence Authority launches a groundbreaking Arabic AI model to the Middle East",
+      "source_url": "https://mea.newsroom.ibm.com/sdaia-launches-allam-on-watsonx",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "SDAIA and IBM said the Saudi-developed Arabic ALLaM model became operational on watsonx.ai so enterprise and government clients could access, train, tune, and deploy it with platform governance controls.",
+      "quantified": {},
+      "assumptions": [
+        "Sovereign-language models may be distributed through a multinational enterprise AI platform rather than only a national service.",
+        "Government and enterprise use requires governance and deployment controls in addition to model weights."
+      ],
+      "contradictions_or_limits": [
+        "Operational availability on watsonx is not a measurement of active customers, requests, tokens, latency, hardware, or successful deployments.",
+        "The announcement does not give the served model's parameter count or training-compute envelope.",
+        "Open-source with an optional acceptable-use policy is a licensing statement, not evidence of unrestricted use."
+      ],
+      "fak_implications": [
+        "Represent model availability, client access, fine-tuning, and observed production use as separate lifecycle stages.",
+        "Regional-language routing may need governance and residency attributes in addition to model capability."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "humain-chat-allam34b-launch-2025",
+      "category": "frontier_lab",
+      "entity": "HUMAIN / SDAIA",
+      "topic": [
+        "model_release",
+        "consumer_service",
+        "arabic_language",
+        "deployment"
+      ],
+      "published_at": "2025-08-25",
+      "event_at": "2025-08-25",
+      "source_title": "Sovereign AI for Smarter Conversations: HUMAIN Chat",
+      "source_url": "https://www.humain.ai/en/news/humain-chat-launch/",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "HUMAIN launched a public chat service powered by the Saudi-hosted ALLAM 34B Arabic-first model, saying model development incorporated more than 600 experts and 250 evaluators.",
+      "quantified": {
+        "model_parameters": 34000000000,
+        "domain_experts_min": 600,
+        "evaluators_min": 250,
+        "client_surfaces": 3
+      },
+      "assumptions": [
+        "Sovereign deployment can include a national consumer chat surface as well as enterprise model access.",
+        "Arabic-first service quality depends on regional dialect, cultural context, and human-evaluation coverage."
+      ],
+      "contradictions_or_limits": [
+        "A public launch proves a reachable product surface, not active-user count, request distribution, service reliability, hardware, or useful goodput.",
+        "Claims about model leadership, dataset scale, and cultural fluency are vendor statements unless independently reproduced.",
+        "Saudi hosting and operation do not identify the physical cluster or datacenter envelope.",
+        "The current public page body is dynamically delivered and its static HTML exposes only title/description metadata; the launch details require browser-rendered or archived-page verification during refresh."
+      ],
+      "fak_implications": [
+        "Separate public product availability from measured adoption and workload distributions.",
+        "Preserve language, dialect, residency, and governance as workload-routing dimensions."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "01ai-yi34b-200k-long-context-2024",
+      "category": "frontier_lab",
+      "entity": "01.AI",
+      "topic": [
+        "model_release",
+        "context_length",
+        "long_context_training",
+        "open_source"
+      ],
+      "published_at": "2024-03-08",
+      "event_at": "2024-03-07",
+      "source_title": "Yi-34B-200K model card",
+      "source_url": "https://huggingface.co/01-ai/Yi-34B-200K",
+      "source_kind": "official_model_card",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "01.AI's official Yi-34B-200K model card described a 34B-parameter bilingual Transformer with a 200K context window and a long-context enhancement that continued pretraining on a 5B-token mixture.",
+      "quantified": {
+        "parameters": 34000000000,
+        "context_tokens": 200000,
+        "long_context_continued_pretraining_tokens": 5000000000,
+        "base_training_sequence_tokens": 4000,
+        "base_inference_extension_tokens": 32000
+      },
+      "assumptions": [
+        "One model family can expose a much larger long-context variant than its original training sequence through continued pretraining and extension techniques.",
+        "Open model release supports independent serving experiments but does not describe provider traffic."
+      ],
+      "contradictions_or_limits": [
+        "The model card's needle-test and benchmark rankings are vendor-reported and time-sensitive.",
+        "A 200K maximum context does not reveal production context prevalence, latency, memory footprint, batching, or user demand.",
+        "Hugging Face counters and likes are repository activity, not active model users or requests."
+      ],
+      "fak_implications": [
+        "Track original training sequence, inference extension, long-context continued training, and advertised maximum as separate fields.",
+        "Use open weights for reproducible envelope tests without treating repository popularity as production adoption."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "stepfun-step3-moe-afd-2025",
+      "category": "frontier_lab",
+      "entity": "StepFun",
+      "topic": [
+        "model_architecture",
+        "mixture_of_experts",
+        "multimodal",
+        "serving_efficiency"
+      ],
+      "published_at": "2025-07-31",
+      "event_at": "2025-07-31",
+      "source_title": "Step3: Cost-Effective Multimodal Intelligence",
+      "source_url": "https://stepfun.ai/research/en/step3",
+      "source_kind": "official_technical_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "StepFun released Step3 as a multimodal MoE with 321B total and 38B active parameters, pairing Multi-Matrix Factorization Attention with Attention-FFN Disaggregation to target lower decoding cost across flagship and lower-end accelerators.",
+      "quantified": {
+        "total_parameters": 321000000000,
+        "active_parameters": 38000000000
+      },
+      "assumptions": [
+        "Attention and expert computation can be assigned to different GPU fleets for heterogeneous serving.",
+        "Sparse activation and attention-compute reduction are co-designed with the serving topology rather than treated as model-only changes."
+      ],
+      "contradictions_or_limits": [
+        "The efficiency and accelerator-portability statements are vendor claims; the page does not expose production request traces or neutral matched benchmarks.",
+        "Parameter counts and architecture do not identify the training cluster, service capacity, batching policy, latency SLO, or user distribution.",
+        "Open release does not establish third-party adoption."
+      ],
+      "fak_implications": [
+        "Evaluate attention/FFN disaggregation as a serving envelope with transfer and scheduling overhead included.",
+        "Preserve total and active parameters plus accelerator class when comparing sparse-model serving."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "shanghai-ai-lab-internlm3-2025",
+      "category": "frontier_lab",
+      "entity": "Shanghai AI Laboratory / InternLM",
+      "topic": [
+        "model_release",
+        "training_data",
+        "reasoning",
+        "open_source"
+      ],
+      "published_at": "2025-01-15",
+      "event_at": "2025-01-15",
+      "source_title": "Official release of InternLM series",
+      "source_url": "https://github.com/InternLM/InternLM",
+      "source_kind": "official_repository",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Shanghai AI Laboratory released InternLM3-8B-Instruct as an 8B general-purpose and reasoning model and said it was trained on 4T high-quality tokens, while the broader project supplied open model and deployment toolchains.",
+      "quantified": {
+        "parameters": 8000000000,
+        "training_tokens": 4000000000000,
+        "claimed_training_cost_reduction_min": 0.75
+      },
+      "assumptions": [
+        "A regional lab may pair model weights with first-party training, evaluation, compression, and deployment toolchains.",
+        "Data quality and training process can be traded against raw token volume at a fixed model scale."
+      ],
+      "contradictions_or_limits": [
+        "The greater-than-75% training-cost reduction and model comparisons are project claims, not independently normalized cost accounting.",
+        "Repository release does not reveal physical training hardware, production traffic, latency, batching, or user adoption.",
+        "Supported deployment examples are capability evidence, not observed production deployments."
+      ],
+      "fak_implications": [
+        "Track the model and its adjacent training/deployment stack without converting supported paths into adoption claims.",
+        "Require matched accounting before using claimed training-cost reductions as a fak baseline."
       ],
       "rumor": {
         "is_rumor": false

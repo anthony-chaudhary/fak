@@ -73,7 +73,12 @@ It does not mean complete organizational coverage.
 | Checked | Tencent | Hunyuan-Large 389B total/52B active, 256K context, mixed routing, and KV compression. | Expert-load distribution, cluster, deployed fleet, and service economics. |
 | Checked | Z.ai / Zhipu AI | GLM-4.5 355B total/32B active, 23T training tokens, and hybrid thinking/direct modes. | Cluster hardware, mode-selection rates, API traffic, and independent benchmark reproduction. |
 | Checked | Huawei Cloud Pangu | Pangu 5.0 tiers above 1B/10B/100B/1T parameters and >400 scenarios across >30 industries. | Ascend cluster topology, model-tier traffic, requests/users, batch/cache behavior, and neutral deployment evidence. |
-| Unchecked | 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime, iFlytek, Meituan, Xiaomi | No dedicated current entries. | Model releases, physical compute, adoption, deployment, and lifecycle evidence. |
+| Partial | 01.AI | Yi-34B-200K model card: 34B parameters, 200K advertised context, 5B-token long-context continuation. | Physical compute, neutral long-context serving results, production traffic, and lifecycle evidence. |
+| Partial | StepFun | Step3 release: 321B total / 38B active multimodal MoE and attention/FFN disaggregation design. | Training cluster, neutral matched efficiency, shipped serving topology, adoption, and traffic. |
+| Unchecked | Baichuan, iFlytek, Meituan | No dedicated current entries. | Model releases, physical compute, adoption, deployment, and lifecycle evidence. |
+| Partial | Shanghai AI Lab / InternLM | InternLM3-8B release: 4T training tokens and first-party training/deployment toolchain. | Physical compute, cost accounting, production deployment, and traffic. |
+| Partial | SenseTime | SenseNova 5.0 vendor release: MoE, >10TB token data, ~200K effective context, cloud-device-edge matrix. | Neutral benchmark, physical compute, production workload, and lifecycle evidence. |
+| Partial | Xiaomi MiMo | MiMo-V2-Pro release: >1T total / 42B active parameters, 1M context, tiered API pricing above 256K. | Physical compute, traffic/context distribution, neutral serving performance, and adoption. |
 
 ### Europe
 
@@ -95,7 +100,7 @@ It does not mean complete organizational coverage.
 | Status | Lab | Evidence now indexed | What remains unknown |
 |---|---|---|---|
 | Checked | Technology Innovation Institute (UAE) | Falcon Arabic and Falcon-H1 sovereign-language, hybrid Transformer/Mamba, multilingual, edge-to-enterprise positioning. | Training cluster, production traffic, per-tier throughput/energy, and independent performance. |
-| Partial | G42 / Inception / MBZUAI (UAE) | G42 appears in Stargate UAE, but no dedicated Jais, K2, or model-lab entry. | Model training/serving envelope, national cluster allocation, and product demand. |
+| Partial | G42 / Inception / MBZUAI (UAE) | Stargate UAE plus MBZUAI annual-review evidence for NANDA, LLM360, and K2-65B. | Dedicated Jais evidence, model training/serving envelope, national cluster allocation, and product demand. |
 | Unchecked | Saudi SDAIA/ALLaM and other sovereign programs | No dedicated entry. | Primary model sources, compute allocation, language traffic, and deployment. |
 
 ### India
@@ -119,7 +124,9 @@ It does not mean complete organizational coverage.
 |---|---|---|---|
 | Checked | NAVER Cloud | HyperCLOVA X THINK: 6T Korean/English tokens, 128K context, reasoning/length-control training, and multimodal/agentic targets. | Parameter/cluster size, production demand, language mix, and serving economics. |
 | Checked | LG AI Research | EXAONE 4.0 32B professional + 1.2B on-device hybrid reasoning/direct family with tool use. | Cluster, traffic, mode selection, device latency, and neutral efficiency. |
-| Unchecked | Samsung, SK Telecom, Kakao Brain/related programs | No dedicated entries. | Gauss/A.X/Kakao model and cluster envelopes, product traffic, and lifecycle. |
+| Partial | Samsung Electronics | Gauss2 variants, MoE Supreme tier, internal developer and call-center use. | Model sizes, physical cluster, request/token distribution, latency, and external product deployment. |
+| Partial | SK Telecom | A.X 3.1/4.0 dual strategy, 72B/7B variants, and A. call-summarization application. | Training/serving hardware, traffic, latency, batching, and external adoption. |
+| Partial | Kakao | Kanana technical report and open 2.1B Nano release across a 2.1B-32.5B model family. | Physical compute, production deployment, service traffic, and lifecycle. |
 
 ### Southeast Asia
 
