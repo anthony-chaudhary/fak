@@ -193,3 +193,32 @@ supplier order/backlog
 
 No row above may skip from backlog, sample, roadmap, or equipment order directly to
 usable AI capacity.
+
+## Power, cooling, and modular-delivery additions
+
+| Evidence date | Entity / system | Observed state | Quantified envelope | Boundary that remains |
+|---|---|---|---|---|
+| 2025-09-18 | Schneider Electric / NVIDIA GB300 reference design | Validated, documented design | 3 clusters; up to 1,152 GPUs; up to 142 kW/rack; liquid-to-liquid CDUs and integrated controls | Blueprint is not built, commissioned, loaded, or production-measured infrastructure. |
+| 2026-01-22 | Trane DCDA CDU family | Product launched; first China orders expected Q1 | 400/800/1,350 kW models; custom to 1,700 kW; coordinated control up to 16 units | Expected order delivery is not installed or operating cooling; PUE/space claims are site-dependent. |
+| 2026-05-21 | LiquidStack/Trane GigaModular CDU | Commercially available after full-load integration testing and certification | Modular cooling up to 14 MW; early orders | Cooling MW is not IT MW; orders/testing are not shipment, commissioning, uptime, or accepted compute. |
+| 2026-07-29 | Johnson Controls | Supplier orders/backlog | $21.0B total backlog, +32%; Americas $15.9B, +40%, supported by datacenter and mission-critical demand | Company backlog spans products/services and non-datacenter work; no direct online-MW conversion. |
+
+### Design, product, backlog, and site are different evidence
+
+```text
+reference design
+  -> product validated/certified
+  -> commercially available
+  -> ordered/backlog
+  -> shipped
+  -> installed
+  -> commissioned/accepted
+  -> cooling available at design conditions
+  -> customer IT installed
+  -> live critical IT load
+  -> quality-constrained goodput
+```
+
+Reference designs answer **what must fit together**. Product releases answer **what a
+vendor offers**. Backlog answers **what customers have ordered under the supplier's
+definition**. None alone answers how much AI capacity is operating.

@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T19:55:00-07:00",
+  "updated_at": "2026-08-26T20:14:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9323,
+  "latest_slice_issue": 9325,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 162,
+    "entry_count": 166,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -132,11 +132,13 @@
       "IETF Internet-Draft authors",
       "IndiaAI Mission",
       "International Energy Agency",
+      "Johnson Controls",
       "LG AI Research",
       "Lambda",
       "Large-scale training reliability study",
       "Leyline",
       "Lightmatter",
+      "LiquidStack / Trane Technologies",
       "MBZUAI / G42 Institute of Foundation Models",
       "Marvell / Celestial AI",
       "Meta",
@@ -176,6 +178,7 @@
       "SageServe production-trace study",
       "Sakana AI",
       "Sarvam AI",
+      "Schneider Electric / NVIDIA",
       "Sea AI Lab",
       "SemiAnalysis",
       "ServeGen production study",
@@ -190,6 +193,7 @@
       "TokenScale autoscaling study",
       "Tool-result caching research",
       "TraceLab coding-agent corpus",
+      "Trane Technologies",
       "U.S. AI datacenter pipeline",
       "U.S. Bureau of Industry and Security",
       "U.S. datacenter sector",
@@ -6096,6 +6100,171 @@
       "fak_implications": [
         "Model latency-sensitive and batch/elastic classes separately across regions and provisioning types.",
         "Include model redeployment and VM scaling overhead before accepting capacity savings."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "schneider-gb300-reference-design-2025",
+      "category": "datacenter_physical",
+      "entity": "Schneider Electric / NVIDIA",
+      "topic": [
+        "reference_design",
+        "liquid_cooling",
+        "power_controls",
+        "rack_density",
+        "digital_twin"
+      ],
+      "published_at": "2025-09-18",
+      "event_at": "2025-09-18",
+      "source_title": "Schneider Electric Announces New Reference Designs, Featuring Integrated Power Management and Liquid Cooling Controls, Supporting NVIDIA Mission Control and NVIDIA GB300 NVL72",
+      "source_url": "https://www.se.com/ww/en/about-us/newsroom/news/press-releases/schneider-electric-announces-new-reference-designs-featuring-integrated-power-management-and-liquid-cooling-controls-supporting-nvidia-mission-control-and-nvidia-gb300-nvl72-68ca8fdd5e6c6f9d3a096133/",
+      "source_kind": "official_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Schneider Electric and NVIDIA published a validated reference design for three GB300 NVL72 clusters in one data hall, supporting up to 142 kW per rack and 1,152 GPUs with liquid-to-liquid CDUs, high-temperature chillers, and integrated OT/IT power-and-cooling controls.",
+      "quantified": {
+        "max_rack_density_kw": 142,
+        "clusters": 3,
+        "gpus_up_to": 1152
+      },
+      "assumptions": [
+        "Power, cooling, controls, IT space, and lifecycle software need co-design at rack-scale AI density."
+      ],
+      "contradictions_or_limits": [
+        "A validated reference design is not a constructed, commissioned, occupied, or production-measured facility.",
+        "The source does not provide site build time, installed cost, PUE/WUE, field reliability, utilization, or useful goodput."
+      ],
+      "fak_implications": [
+        "Use reference designs to bound required physical systems, not as delivered-capacity receipts.",
+        "Record rack density, cluster count, control interfaces, cooling loop, redundancy, and field acceptance separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "trane-dcda-apac-cdu-2026",
+      "category": "supply_chain",
+      "entity": "Trane Technologies",
+      "topic": [
+        "liquid_cooling",
+        "cdu",
+        "regional_supply",
+        "delivery",
+        "cluster_control"
+      ],
+      "published_at": "2026-01-22",
+      "event_at": "2026-01-22",
+      "source_title": "Trane Launches Advanced CDU to Enhance Liquid Cooling Efficiency in Asia-Pacific Data Centers",
+      "source_url": "https://www.trane.com/commercial/asia-pacific/in/en/about-us/press-releases/Trane-Launches-Advanced-CDU-to-Enhance-Liquid-Cooling-Efficiency-in-Asia-Pacific-Data-Centers.html",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Trane launched an Asia-Pacific-developed DCDA CDU family in 400, 800, and 1,350 kW variants, configurable to 1,700 kW and cluster-controlled across up to 16 units; first China orders were expected in Q1 2026.",
+      "quantified": {
+        "standard_cooling_capacity_kw": [
+          400,
+          800,
+          1350
+        ],
+        "custom_capacity_kw_up_to": 1700,
+        "coordinated_units_up_to": 16,
+        "claimed_pue_as_low_as": 1.1,
+        "floor_space_savings_pct_up_to": 20
+      },
+      "assumptions": [
+        "Regional cooling products have explicit unit, clustering, maintenance, certification, and delivery lifecycles."
+      ],
+      "contradictions_or_limits": [
+        "Capacity, PUE, space, and control claims are vendor-reported and do not prove site-level efficiency or availability.",
+        "Expected first delivery is not independently confirmed installation, commissioning, or customer operation."
+      ],
+      "fak_implications": [
+        "Track ordered, delivered, installed, commissioned, and operating CDU capacity separately.",
+        "Match coolant loop, redundancy, partial-load curve, controls, and service region to the site envelope."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "liquidstack-gigamodular-commercial-2026",
+      "category": "supply_chain",
+      "entity": "LiquidStack / Trane Technologies",
+      "topic": [
+        "liquid_cooling",
+        "modular_cdu",
+        "commercial_availability",
+        "validation",
+        "phased_delivery"
+      ],
+      "published_at": "2026-05-21",
+      "event_at": "2026-05-21",
+      "source_title": "LiquidStack GigaModular CDU Platform Is Now Commercially Available with Expanded 14 MW Capacity",
+      "source_url": "https://www.trane.com/commercial/north-america/us/en/about-us/newsroom/press-releases/liquidstack-giga-modular-cdu.html",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "LiquidStack, a Trane company, announced commercial availability of its GigaModular CDU after multi-module integration and full-load testing, with modular building blocks scaling to 14 MW, ETL certification, and early customer orders.",
+      "quantified": {
+        "validated_capacity_mw_up_to": 14,
+        "commercially_available": true
+      },
+      "assumptions": [
+        "Modular cooling can align physical delivery with phased compute installation and avoid full upfront overprovisioning."
+      ],
+      "contradictions_or_limits": [
+        "Commercial availability, testing, certification, and early orders do not establish shipment volume, site installation, uptime, efficiency, or accepted IT load.",
+        "The 14 MW figure is cooling-system capacity, not critical IT MW or useful compute capacity."
+      ],
+      "fak_implications": [
+        "Preserve cooling MW, IT MW, redundancy, test state, order, shipment, installation, and commissioning separately.",
+        "Test system-level controls and partial-build efficiency rather than summing independent CDU nameplates."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "johnson-controls-q3-2026-backlog",
+      "category": "supply_chain",
+      "entity": "Johnson Controls",
+      "topic": [
+        "cooling",
+        "building_systems",
+        "backlog",
+        "orders",
+        "regional_delivery"
+      ],
+      "published_at": "2026-07-29",
+      "event_at": "2026-06-30",
+      "source_title": "Johnson Controls Reports Strong Q3 Results; Raises FY26 Guidance",
+      "source_url": "https://investors.johnsoncontrols.com/news/news-details/2026/Johnson-Controls-Reports-Strong-Q3-Results-Raises-FY26-Guidance/default.aspx",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Johnson Controls reported $21.0B of Solutions and Services backlog, up 32% organically, with Americas backlog of $15.9B up 40% and demand supported by data centers and other mission-critical environments.",
+      "quantified": {
+        "total_backlog_usd": 21000000000,
+        "backlog_yoy_organic_pct": 32,
+        "americas_backlog_usd": 15900000000,
+        "americas_backlog_yoy_pct": 40,
+        "emea_backlog_usd": 3100000000,
+        "apac_backlog_usd": 2000000000,
+        "quarter_orders_yoy_organic_pct": 27
+      },
+      "assumptions": [
+        "Cooling and building-system suppliers can become a delivery gate even when accelerator supply and site power exist."
+      ],
+      "contradictions_or_limits": [
+        "Backlog includes Solutions and Services beyond datacenters and was restated to include certain equipment-only longer-cycle projects.",
+        "Backlog is not shipped equipment, installed cooling, commissioned facility capacity, or live IT MW."
+      ],
+      "fak_implications": [
+        "Track supplier backlog definition, product/site allocation, ship/install/commission dates, and live capacity.",
+        "Do not allocate total company backlog to AI datacenters without disclosed segment/project detail."
       ],
       "rumor": {
         "is_rumor": false
