@@ -97,30 +97,33 @@ type AuditDenominatorRow struct {
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
 type AuditTranscriptRow struct {
-	Schema               string                 `json:"schema"`
-	Kind                 string                 `json:"kind"`
-	Source               string                 `json:"source"`
-	TranscriptID         string                 `json:"session_id"`
-	SourcePath           string                 `json:"source_path"`
-	Models               []string               `json:"models"`
-	BuildIdentities      []AuditBuildIdentity   `json:"build_identities"`
-	Tokens               AuditTokens            `json:"tokens"`
-	ToolCalls            int                    `json:"tool_calls"`
-	ToolErrors           int                    `json:"tool_errors"`
-	Distribution         []AuditDistributionRow `json:"distribution,omitempty"`
-	ToolDistribution     []AuditDistributionRow `json:"tool_distribution,omitempty"`
-	ToolResults          []AuditToolResultRow   `json:"tool_results,omitempty"`
-	StorageDistribution  []AuditStorageRow      `json:"storage_distribution,omitempty"`
-	RepeatedFailures     int                    `json:"repeated_failures"`
-	ExpectedWaitTimeouts int                    `json:"expected_wait_timeouts"`
-	MutationChurn        int                    `json:"mutation_churn"`
-	MutationChurnEvents  []QwenMutationChurn    `json:"mutation_churn_events,omitempty"`
-	HookP95MS            *int64                 `json:"hook_p95_ms"`
-	UsageRecords         int                    `json:"usage_records"`
-	SourcePaths          []string               `json:"source_paths,omitempty"`
+	Schema               string                        `json:"schema"`
+	Kind                 string                        `json:"kind"`
+	Source               string                        `json:"source"`
+	TranscriptID         string                        `json:"session_id"`
+	SourcePath           string                        `json:"source_path"`
+	Models               []string                      `json:"models"`
+	BuildIdentities      []AuditBuildIdentity          `json:"build_identities"`
+	Tokens               AuditTokens                   `json:"tokens"`
+	ToolCalls            int                           `json:"tool_calls"`
+	ToolErrors           int                           `json:"tool_errors"`
+	Distribution         []AuditDistributionRow        `json:"distribution,omitempty"`
+	ToolDistribution     []AuditDistributionRow        `json:"tool_distribution,omitempty"`
+	ToolResults          []AuditToolResultRow          `json:"tool_results,omitempty"`
+	StorageDistribution  []AuditStorageRow             `json:"storage_distribution,omitempty"`
+	UnknownExemplars     AuditUnknownExemplarReservoir `json:"unknown_exemplars"`
+	RepeatedFailures     int                           `json:"repeated_failures"`
+	ExpectedWaitTimeouts int                           `json:"expected_wait_timeouts"`
+	MutationChurn        int                           `json:"mutation_churn"`
+	MutationChurnEvents  []QwenMutationChurn           `json:"mutation_churn_events,omitempty"`
+	HookP95MS            *int64                        `json:"hook_p95_ms"`
+	UsageRecords         int                           `json:"usage_records"`
+	SourcePaths          []string                      `json:"source_paths,omitempty"`
 	usageByID            map[string]AuditTokens
 	failureCounts        map[string]int
 	schemaShapes         map[string]auditShapeSet
+	fragmentDigest       string
+	fragmentDigests      map[string]struct{}
 }
 
 // AuditBottleneckRow ranks sessions by exact accounted tokens. DominantBucket
@@ -140,49 +143,50 @@ type AuditBottleneckRow struct {
 
 // AuditSummaryRow is the machine-wide exact rollup and baseline input.
 type AuditSummaryRow struct {
-	Schema                              string                 `json:"schema"`
-	Kind                                string                 `json:"kind"`
-	Sources                             int                    `json:"sources"`
-	Transcripts                         int                    `json:"sessions"`
-	RawFragments                        int                    `json:"raw_fragments"`
-	CanonicalTranscripts                int                    `json:"canonical_transcripts"`
-	FilesDiscovered                     int                    `json:"files_discovered"`
-	FilesScanned                        int                    `json:"files_scanned"`
-	FixtureFilesExcluded                int                    `json:"fixture_files_excluded"`
-	FilesMatched                        int                    `json:"files_matched,omitempty"`
-	Records                             int                    `json:"records"`
-	UsageRecordsExact                   int                    `json:"usage_records_exact"`
-	RefusedRecords                      int                    `json:"refused_records"`
-	Tokens                              AuditTokens            `json:"tokens"`
-	InputOutputRatio                    *float64               `json:"input_output_ratio"`
-	PromptWriteFraction                 *float64               `json:"prompt_write_fraction"`
-	RepeatedFailures                    int                    `json:"repeated_failures"`
-	RepeatedFailuresPerSession          *float64               `json:"repeated_failures_per_session"`
-	RepeatedFailureSemantics            string                 `json:"repeated_failure_semantics"`
-	RepeatedFailureNormalization        string                 `json:"repeated_failure_normalization"`
-	ExpectedWaitTimeouts                int                    `json:"expected_wait_timeouts"`
-	MutationChurn                       int                    `json:"mutation_churn"`
-	HookP95MS                           *int64                 `json:"hook_p95_ms"`
-	DistinctTranscripts                 int                    `json:"distinct_transcripts"`
-	DuplicateFragments                  int                    `json:"duplicate_fragments"`
-	EmptyUsageFiles                     int                    `json:"empty_usage_files"`
-	ToolCalls                           int                    `json:"tool_calls"`
-	ToolErrors                          int                    `json:"tool_errors"`
-	DistributionUnit                    string                 `json:"distribution_unit"`
-	DistributionProvenance              string                 `json:"distribution_provenance"`
-	Distribution                        []AuditDistributionRow `json:"distribution,omitempty"`
-	ToolDistribution                    []AuditDistributionRow `json:"tool_distribution,omitempty"`
-	ToolResults                         []AuditToolResultRow   `json:"tool_results,omitempty"`
-	StorageUnit                         string                 `json:"storage_unit"`
-	StorageDistribution                 []AuditStorageRow      `json:"storage_distribution,omitempty"`
-	ToolErrorFraction                   *float64               `json:"tool_error_fraction"`
-	TopTenTokenFraction                 *float64               `json:"top_ten_token_fraction"`
-	QwenTopContributor                  *string                `json:"qwen_top_contributor"`
-	QwenTopContributorTokens            *int64                 `json:"qwen_top_contributor_tokens"`
-	QwenTotalTokens                     *int64                 `json:"qwen_total_tokens"`
-	QwenTopContributorTokenFraction     *float64               `json:"qwen_top_contributor_token_fraction"`
-	QwenTokenConcentrationThreshold     float64                `json:"qwen_token_concentration_threshold"`
-	QwenTopContributorTokenConcentrated *bool                  `json:"qwen_top_contributor_token_concentrated"`
+	Schema                              string                        `json:"schema"`
+	Kind                                string                        `json:"kind"`
+	Sources                             int                           `json:"sources"`
+	Transcripts                         int                           `json:"sessions"`
+	RawFragments                        int                           `json:"raw_fragments"`
+	CanonicalTranscripts                int                           `json:"canonical_transcripts"`
+	FilesDiscovered                     int                           `json:"files_discovered"`
+	FilesScanned                        int                           `json:"files_scanned"`
+	FixtureFilesExcluded                int                           `json:"fixture_files_excluded"`
+	FilesMatched                        int                           `json:"files_matched,omitempty"`
+	Records                             int                           `json:"records"`
+	UsageRecordsExact                   int                           `json:"usage_records_exact"`
+	RefusedRecords                      int                           `json:"refused_records"`
+	Tokens                              AuditTokens                   `json:"tokens"`
+	InputOutputRatio                    *float64                      `json:"input_output_ratio"`
+	PromptWriteFraction                 *float64                      `json:"prompt_write_fraction"`
+	RepeatedFailures                    int                           `json:"repeated_failures"`
+	RepeatedFailuresPerSession          *float64                      `json:"repeated_failures_per_session"`
+	RepeatedFailureSemantics            string                        `json:"repeated_failure_semantics"`
+	RepeatedFailureNormalization        string                        `json:"repeated_failure_normalization"`
+	ExpectedWaitTimeouts                int                           `json:"expected_wait_timeouts"`
+	MutationChurn                       int                           `json:"mutation_churn"`
+	HookP95MS                           *int64                        `json:"hook_p95_ms"`
+	DistinctTranscripts                 int                           `json:"distinct_transcripts"`
+	DuplicateFragments                  int                           `json:"duplicate_fragments"`
+	EmptyUsageFiles                     int                           `json:"empty_usage_files"`
+	ToolCalls                           int                           `json:"tool_calls"`
+	ToolErrors                          int                           `json:"tool_errors"`
+	DistributionUnit                    string                        `json:"distribution_unit"`
+	DistributionProvenance              string                        `json:"distribution_provenance"`
+	Distribution                        []AuditDistributionRow        `json:"distribution,omitempty"`
+	ToolDistribution                    []AuditDistributionRow        `json:"tool_distribution,omitempty"`
+	ToolResults                         []AuditToolResultRow          `json:"tool_results,omitempty"`
+	StorageUnit                         string                        `json:"storage_unit"`
+	StorageDistribution                 []AuditStorageRow             `json:"storage_distribution,omitempty"`
+	UnknownExemplars                    AuditUnknownExemplarReservoir `json:"unknown_exemplars"`
+	ToolErrorFraction                   *float64                      `json:"tool_error_fraction"`
+	TopTenTokenFraction                 *float64                      `json:"top_ten_token_fraction"`
+	QwenTopContributor                  *string                       `json:"qwen_top_contributor"`
+	QwenTopContributorTokens            *int64                        `json:"qwen_top_contributor_tokens"`
+	QwenTotalTokens                     *int64                        `json:"qwen_total_tokens"`
+	QwenTopContributorTokenFraction     *float64                      `json:"qwen_top_contributor_token_fraction"`
+	QwenTokenConcentrationThreshold     float64                       `json:"qwen_token_concentration_threshold"`
+	QwenTopContributorTokenConcentrated *bool                         `json:"qwen_top_contributor_token_concentrated"`
 }
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
@@ -408,6 +412,11 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 	var refusals []AuditRefusalRow
 	var hookDurations []int64
 	var toolErrorEvents []QwenToolErrorEvent
+	// Canonical merging still receives every row so duplicate-usage conflicts
+	// remain visible. These file-derived side channels have no canonical row
+	// representation, so deduplicate them here by the same transcript identity
+	// and exact fragment digest used by canonicalAuditTranscripts.
+	sideChannelFragments := map[string]struct{}{}
 	for _, path := range files {
 		if opts.Since > 0 {
 			stat, statErr := os.Stat(path)
@@ -444,8 +453,16 @@ func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []
 		denominator.FilesScanned++
 		transcripts = append(transcripts, row)
 		refusals = append(refusals, fileRefusals...)
-		hookDurations = append(hookDurations, fileHooks...)
-		toolErrorEvents = append(toolErrorEvents, fileToolErrors...)
+		sideChannelKey := row.TranscriptID + "\x00" + row.fragmentDigest
+		_, duplicateFragment := sideChannelFragments[sideChannelKey]
+		duplicateFragment = duplicateFragment && row.fragmentDigest != ""
+		if !duplicateFragment {
+			hookDurations = append(hookDurations, fileHooks...)
+			toolErrorEvents = append(toolErrorEvents, fileToolErrors...)
+			if row.fragmentDigest != "" {
+				sideChannelFragments[sideChannelKey] = struct{}{}
+			}
+		}
 	}
 	return denominator, transcripts, refusals, hookDurations, toolErrorEvents, nil
 }
@@ -515,6 +532,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	toolTotals := map[string]*AuditDistributionRow{}
 	var toolResultGroups [][]AuditToolResultRow
 	storageTotals := map[string]*AuditStorageRow{}
+	exemplars := newDefaultAuditUnknownExemplarReservoir()
 	for _, transcript := range transcripts {
 		summary.Tokens.add(transcript.Tokens)
 		summary.RepeatedFailures += transcript.RepeatedFailures
@@ -522,6 +540,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 		summary.MutationChurn += transcript.MutationChurn
 		summary.ToolCalls += transcript.ToolCalls
 		summary.ToolErrors += transcript.ToolErrors
+		exemplars.merge(transcript.UnknownExemplars)
 		for _, r := range transcript.Distribution {
 			categoryTotals[r.Name] += r.Bytes
 		}
@@ -598,6 +617,8 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	summary.ToolResults = mergeAuditToolResultRows(toolResultGroups...)
 	summary.StorageUnit = AuditStorageUnit
 	summary.StorageDistribution = storageDistributionRows(storageTotals)
+	summary.UnknownExemplars = exemplars.snapshot()
+	linkAuditUnknownExemplars(summary.Distribution, summary.StorageDistribution, summary.UnknownExemplars.Exemplars)
 	summary.DistinctTranscripts = len(transcriptIDs)
 	summary.DuplicateFragments = summary.Transcripts - summary.DistinctTranscripts
 	if summary.ToolCalls > 0 {

@@ -31,7 +31,7 @@
       "expected_storage_rows": [
         {"subtype": "attachment/deferred_tools_delta", "bytes": 123, "records": 1},
         {"subtype": "attachment/hook_completed", "bytes": 109, "records": 1},
-        {"subtype": "future_row_v99", "bytes": 90, "records": 1}
+        {"subtype": "record/discriminator#9e88b29883a2", "bytes": 90, "records": 1}
       ],
       "expected_totals": {
         "records": 13,
@@ -92,12 +92,12 @@
         {"line": 23, "ordinal": 0, "subtype": "response_item/message/future_message_block_v99", "category": "visible_unknown", "content_bytes": 61, "visible": true, "visibility": "unresolved", "visibility_reason": "unknown_message_block_subtype", "decision": "retained_unknown"}
       ],
       "expected_storage_rows": [
-        {"subtype": "event_msg/future_event_v99", "bytes": 75, "records": 1},
+        {"subtype": "event_msg/discriminator#8dde2a3a3ed8", "bytes": 75, "records": 1},
         {"subtype": "event_msg/item_completed/CommandExecution", "bytes": 129, "records": 1},
         {"subtype": "event_msg/item_started/CommandExecution", "bytes": 106, "records": 1},
         {"subtype": "event_msg/task_started", "bytes": 103, "records": 1},
         {"subtype": "event_msg/token_count", "bytes": 191, "records": 1},
-        {"subtype": "future_row_v99", "bytes": 54, "records": 1},
+        {"subtype": "record/discriminator#9e88b29883a2", "bytes": 54, "records": 1},
         {"subtype": "session_meta", "bytes": 110, "records": 1},
         {"subtype": "turn_context", "bytes": 59, "records": 1}
       ],

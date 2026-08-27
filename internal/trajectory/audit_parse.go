@@ -3,6 +3,8 @@ package trajectory
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -84,6 +86,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		schemaShapes:    map[string]auditShapeSet{},
 	}
 	var refusals []AuditRefusalRow
+	fragmentHasher := sha256.New()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), auditMaxLineBytes)
 	lineNumber := 0
@@ -93,6 +96,8 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		if len(line) == 0 {
 			continue
 		}
+		_, _ = fragmentHasher.Write(line)
+		_, _ = fragmentHasher.Write([]byte{'\n'})
 		denominator.Records++
 		state.distribution.observe(source, line)
 		var record map[string]any
@@ -159,10 +164,12 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	}
 	applyQwenToolErrorAttribution(state.toolErrorEvents, state.toolErrorAttributions, state.mutationCounts)
 	state.row.HookP95MS = auditPercentile(state.hookDurations, 95)
-	state.row.Distribution = distributionRows(state.distribution.categories)
+	state.row.Distribution = state.distribution.distributionRows()
 	state.row.ToolDistribution = toolDistributionRows(state.distribution.tools)
 	state.row.ToolResults = state.distribution.toolResultRows()
-	state.row.StorageDistribution = storageDistributionRows(state.distribution.storage)
+	state.row.StorageDistribution = state.distribution.storageRows()
+	state.row.UnknownExemplars = state.distribution.exemplars.snapshot()
+	state.row.fragmentDigest = hex.EncodeToString(fragmentHasher.Sum(nil))
 	if source == AuditSourceCodex && state.codexRawTotal != nil {
 		state.row.UsageRecords++
 		denominator.UsageRecordsApplied++
