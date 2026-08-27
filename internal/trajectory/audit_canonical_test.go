@@ -4,8 +4,8 @@ import "testing"
 
 func TestCanonicalAuditTranscriptsRollsUpFragmentsAndPreservesRawRows(t *testing.T) {
 	raw := []AuditTranscriptRow{
-		{Source: AuditSourceClaude, TranscriptID: "same", SourcePath: "b.jsonl", Tokens: AuditTokens{InputTokens: 7}, usageByID: map[string]AuditTokens{"m1": {InputTokens: 7}}, ToolErrors: 1},
-		{Source: AuditSourceClaude, TranscriptID: "same", SourcePath: "a.jsonl", Tokens: AuditTokens{OutputTokens: 3}, usageByID: map[string]AuditTokens{"m2": {OutputTokens: 3}}, RepeatedFailures: 2},
+		{Source: AuditSourceClaude, TranscriptID: "same", SourcePath: "b.jsonl", Tokens: AuditTokens{InputTokens: 7}, usageByID: map[string]AuditTokens{"m1": {InputTokens: 7}}, failureCounts: map[string]int{"same failure": 1}, ToolCalls: 2, ToolErrors: 1, ExpectedWaitTimeouts: 1},
+		{Source: AuditSourceClaude, TranscriptID: "same", SourcePath: "a.jsonl", Tokens: AuditTokens{OutputTokens: 3}, usageByID: map[string]AuditTokens{"m2": {OutputTokens: 3}}, failureCounts: map[string]int{"same failure": 3}, ToolCalls: 3, RepeatedFailures: 2, ExpectedWaitTimeouts: 2},
 		{Source: AuditSourceClaude, TranscriptID: "other", SourcePath: "other.jsonl", Tokens: AuditTokens{InputTokens: 5}, usageByID: map[string]AuditTokens{"m3": {InputTokens: 5}}},
 	}
 	canonical, refusals := canonicalAuditTranscripts(raw)
@@ -21,7 +21,7 @@ func TestCanonicalAuditTranscriptsRollsUpFragmentsAndPreservesRawRows(t *testing
 			same = row
 		}
 	}
-	if same.Tokens.InputTokens != 7 || same.Tokens.OutputTokens != 3 || same.ToolErrors != 1 || same.RepeatedFailures != 2 {
+	if same.Tokens.InputTokens != 7 || same.Tokens.OutputTokens != 3 || same.ToolCalls != 5 || same.ToolErrors != 1 || same.RepeatedFailures != 3 || same.ExpectedWaitTimeouts != 3 {
 		t.Fatalf("rollup = %+v", same)
 	}
 	if len(same.SourcePaths) != 2 || same.SourcePaths[0] != "a.jsonl" || same.SourcePaths[1] != "b.jsonl" {

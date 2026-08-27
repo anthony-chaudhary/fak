@@ -1,0 +1,16 @@
+{
+  "gpu_data": [
+    {
+      "gpu": 0,
+      "usage": {
+        "gfx_activity": {"value": 73, "unit": "%"},
+        "umc_activity": {"value": 81, "unit": "%"}
+      },
+      "mem_usage": {
+        "total_vram": {"value": 65536, "unit": "MB"},
+        "used_vram": {"value": 24576, "unit": "MB"},
+        "free_vram": {"value": 40960, "unit": "MB"}
+      }
+    }
+  ]
+}

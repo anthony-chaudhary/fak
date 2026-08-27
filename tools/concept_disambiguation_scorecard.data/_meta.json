@@ -5685,6 +5685,16 @@
           "category": "incidental",
           "reason": "Function parameter carrying the existing graceful-handoff session identity, not a distinct runtime concept.",
           "token": "handoffSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized normalization unit for the trajectory audit metric, not a distinct session-runtime concept.",
+          "token": "per_session"
+        },
+        {
+          "category": "incidental",
+          "reason": "Go summary field for the trajectory audit rate, not a distinct session-runtime concept.",
+          "token": "RepeatedFailuresPerSession"
         }
       ],
       "id": "session-runtime",
@@ -5740,6 +5750,7 @@
         "ReasonSessionLive",
         "RecordSessionTerminalOutput",
         "RegisteredObserved",
+        "RepeatedFailuresPerSession",
         "ResolveSessionEffect",
         "RestoreSessionClientState",
         "RestoreSessionClientStateWithDependency",
@@ -5923,6 +5934,7 @@
         "orderRecords",
         "parseGuardProviderSessionStart",
         "pathwithincodexsessions",
+        "per_session",
         "provider_session_start",
         "pumpStdinToSession",
         "readSessionHandoffBlocks",

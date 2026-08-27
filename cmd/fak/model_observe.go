@@ -145,6 +145,7 @@ func runModelObserveBandwidthCollect(args []string) error {
 	physicalReadBytes := fs.Uint64("physical-read-bytes", 0, "software physical read bytes; not a DRAM counter")
 	physicalWriteBytes := fs.Uint64("physical-write-bytes", 0, "software physical write bytes; not a DRAM counter")
 	nvidiaDevice := fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0")
+	amdDevice := fs.String("amd-device", "", "AMD device index, BDF, or UUID; empty probes AMD device 0 after NVIDIA")
 	measureRoofline := fs.Bool("measure-host-roofline", false, "benchmark and record sustainable host-memory bandwidth")
 	rooflineBytes := fs.Uint64("roofline-bytes", 64<<20, "host roofline benchmark working set")
 	rooflineTrials := fs.Int("roofline-trials", 5, "host roofline benchmark trial count")
@@ -155,7 +156,7 @@ func runModelObserveBandwidthCollect(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice)}
+	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice), AMDDevice: modelperfobs.AMDDeviceSelector(*amdDevice)}
 	if *measureRoofline {
 		threads := *rooflineThreads
 		if threads == 0 {

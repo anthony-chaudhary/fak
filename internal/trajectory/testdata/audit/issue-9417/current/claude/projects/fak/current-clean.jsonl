@@ -1,0 +1,2 @@
+{"type":"assistant","sessionId":"issue-9417-current-clean","message":{"content":[{"type":"tool_use","id":"ok-1","name":"exec_command","input":{"cmd":"successful-action"}}]}}
+{"type":"user","sessionId":"issue-9417-current-clean","message":{"content":[{"type":"tool_result","tool_use_id":"ok-1","is_error":false,"content":{"status":"ok"}}]}}

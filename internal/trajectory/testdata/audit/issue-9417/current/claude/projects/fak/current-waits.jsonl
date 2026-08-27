@@ -1,0 +1,8 @@
+{"type":"assistant","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_use","id":"wait-1","name":"functions.wait_agent","input":{"targets":["worker-1"],"timeout_ms":1000}}]}}
+{"type":"user","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_result","tool_use_id":"wait-1","is_error":true,"content":{"status":{},"timed_out":true}}]}}
+{"type":"assistant","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_use","id":"wait-2","name":"functions.wait_agent","input":{"targets":["worker-1"],"timeout_ms":1000}}]}}
+{"type":"user","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_result","tool_use_id":"wait-2","is_error":true,"content":{"status":{},"timed_out":true}}]}}
+{"type":"assistant","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_use","id":"wait-3","name":"mcp__dos__wait_agent","input":{"targets":["worker-1"],"timeout_ms":1000}}]}}
+{"type":"user","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_result","tool_use_id":"wait-3","is_error":true,"content":{"status":{},"timed_out":true}}]}}
+{"type":"assistant","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_use","id":"wait-4","name":"mcp__dos__wait_agent","input":{"targets":["worker-1"],"timeout_ms":1000}}]}}
+{"type":"user","sessionId":"issue-9417-current-waits","message":{"content":[{"type":"tool_result","tool_use_id":"wait-4","is_error":true,"content":{"status":{},"timed_out":true}}]}}
