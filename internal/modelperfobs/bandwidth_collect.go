@@ -29,7 +29,33 @@ type HostSignals struct {
 	ProcessMinorFaultsPerSecond *float64 `json:"process_minor_faults_per_second,omitempty"`
 	ProcessMajorFaultsPerSecond *float64 `json:"process_major_faults_per_second,omitempty"`
 	ProcessPageFaultsPerSecond  *float64 `json:"process_page_faults_per_second,omitempty"`
-	ProcessIOScope              string   `json:"process_io_scope,omitempty"`
+	// Linux PSI averages are percentages; totals and derived rates are stall
+	// microseconds. They are pressure evidence, never inferred DRAM throughput.
+	MemoryPressureSomeAvg10Percent               *float64 `json:"memory_pressure_some_avg10_percent,omitempty"`
+	MemoryPressureSomeAvg60Percent               *float64 `json:"memory_pressure_some_avg60_percent,omitempty"`
+	MemoryPressureSomeAvg300Percent              *float64 `json:"memory_pressure_some_avg300_percent,omitempty"`
+	MemoryPressureSomeTotalStallMicroseconds     *uint64  `json:"memory_pressure_some_total_stall_microseconds,omitempty"`
+	MemoryPressureSomeStallMicrosecondsPerSecond *float64 `json:"memory_pressure_some_stall_microseconds_per_second,omitempty"`
+	MemoryPressureFullAvg10Percent               *float64 `json:"memory_pressure_full_avg10_percent,omitempty"`
+	MemoryPressureFullAvg60Percent               *float64 `json:"memory_pressure_full_avg60_percent,omitempty"`
+	MemoryPressureFullAvg300Percent              *float64 `json:"memory_pressure_full_avg300_percent,omitempty"`
+	MemoryPressureFullTotalStallMicroseconds     *uint64  `json:"memory_pressure_full_total_stall_microseconds,omitempty"`
+	MemoryPressureFullStallMicrosecondsPerSecond *float64 `json:"memory_pressure_full_stall_microseconds_per_second,omitempty"`
+	// Linux vmstat reclaim and swap counters are cumulative page activity, not
+	// byte traffic. Rates are derived only from monotonic two-sample deltas.
+	MemoryReclaimKswapdScannedPagesTotal       *uint64  `json:"memory_reclaim_kswapd_scanned_pages_total,omitempty"`
+	MemoryReclaimKswapdScannedPagesPerSecond   *float64 `json:"memory_reclaim_kswapd_scanned_pages_per_second,omitempty"`
+	MemoryReclaimDirectScannedPagesTotal       *uint64  `json:"memory_reclaim_direct_scanned_pages_total,omitempty"`
+	MemoryReclaimDirectScannedPagesPerSecond   *float64 `json:"memory_reclaim_direct_scanned_pages_per_second,omitempty"`
+	MemoryReclaimKswapdReclaimedPagesTotal     *uint64  `json:"memory_reclaim_kswapd_reclaimed_pages_total,omitempty"`
+	MemoryReclaimKswapdReclaimedPagesPerSecond *float64 `json:"memory_reclaim_kswapd_reclaimed_pages_per_second,omitempty"`
+	MemoryReclaimDirectReclaimedPagesTotal     *uint64  `json:"memory_reclaim_direct_reclaimed_pages_total,omitempty"`
+	MemoryReclaimDirectReclaimedPagesPerSecond *float64 `json:"memory_reclaim_direct_reclaimed_pages_per_second,omitempty"`
+	MemorySwapInPagesTotal                     *uint64  `json:"memory_swap_in_pages_total,omitempty"`
+	MemorySwapInPagesPerSecond                 *float64 `json:"memory_swap_in_pages_per_second,omitempty"`
+	MemorySwapOutPagesTotal                    *uint64  `json:"memory_swap_out_pages_total,omitempty"`
+	MemorySwapOutPagesPerSecond                *float64 `json:"memory_swap_out_pages_per_second,omitempty"`
+	ProcessIOScope                             string   `json:"process_io_scope,omitempty"`
 }
 type CollectorAvailability struct {
 	PhysicalMemory bool `json:"physical_memory"`
@@ -168,6 +194,14 @@ func deriveHostPressureRates(previous, current *BandwidthSample) {
 	current.Host.ProcessMinorFaultsPerSecond = counterRate(previous.Host.ProcessMinorFaults, current.Host.ProcessMinorFaults, seconds)
 	current.Host.ProcessMajorFaultsPerSecond = counterRate(previous.Host.ProcessMajorFaults, current.Host.ProcessMajorFaults, seconds)
 	current.Host.ProcessPageFaultsPerSecond = counterRate(previous.Host.ProcessPageFaults, current.Host.ProcessPageFaults, seconds)
+	current.Host.MemoryPressureSomeStallMicrosecondsPerSecond = counterRate(previous.Host.MemoryPressureSomeTotalStallMicroseconds, current.Host.MemoryPressureSomeTotalStallMicroseconds, seconds)
+	current.Host.MemoryPressureFullStallMicrosecondsPerSecond = counterRate(previous.Host.MemoryPressureFullTotalStallMicroseconds, current.Host.MemoryPressureFullTotalStallMicroseconds, seconds)
+	current.Host.MemoryReclaimKswapdScannedPagesPerSecond = counterRate(previous.Host.MemoryReclaimKswapdScannedPagesTotal, current.Host.MemoryReclaimKswapdScannedPagesTotal, seconds)
+	current.Host.MemoryReclaimDirectScannedPagesPerSecond = counterRate(previous.Host.MemoryReclaimDirectScannedPagesTotal, current.Host.MemoryReclaimDirectScannedPagesTotal, seconds)
+	current.Host.MemoryReclaimKswapdReclaimedPagesPerSecond = counterRate(previous.Host.MemoryReclaimKswapdReclaimedPagesTotal, current.Host.MemoryReclaimKswapdReclaimedPagesTotal, seconds)
+	current.Host.MemoryReclaimDirectReclaimedPagesPerSecond = counterRate(previous.Host.MemoryReclaimDirectReclaimedPagesTotal, current.Host.MemoryReclaimDirectReclaimedPagesTotal, seconds)
+	current.Host.MemorySwapInPagesPerSecond = counterRate(previous.Host.MemorySwapInPagesTotal, current.Host.MemorySwapInPagesTotal, seconds)
+	current.Host.MemorySwapOutPagesPerSecond = counterRate(previous.Host.MemorySwapOutPagesTotal, current.Host.MemorySwapOutPagesTotal, seconds)
 }
 
 func counterRate(previous, current *uint64, seconds float64) *float64 {
