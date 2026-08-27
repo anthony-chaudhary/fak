@@ -21,6 +21,17 @@ ideas to borrow into fak. A llama.cpp run never becomes a native result because 
 fronted it, and an unsupported native run never passes by silently changing engines. Every
 comparison keeps the executing engine, matched envelope, quality floor, and evidence status.
 
+## Default cross-domain tuning analysis
+
+Any performance proposal that moves useful work or state across a coherence,
+device, or host boundary includes a **compute-placement-tax** review by default.
+The review fixes one workload/quality envelope, checks capacity feasibility
+before speed, and reports the component ledger plus separate latency,
+throughput, cost, energy, and capacity deltas against an explicit reference.
+An infeasible reference is not assigned a speedup ratio. The typed review seam
+is `quality.ReviewPlacementTax`; the equations, tensor/pipeline/expert/data/
+sequence-parallel mappings, and calibration receipt requirements are in
+[`../serving/compute-placement-tax.md`](../serving/compute-placement-tax.md).
 ## Fleet, cache & session value
 
 | File | Kind | One-liner | Headline |
