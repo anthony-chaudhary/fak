@@ -52,6 +52,15 @@ transmission for Meta’s named Louisiana project. The corpus now contains **222
 **217 unique source URLs**, and **185 entity labels**. Tariff, contract, collateral, queue,
 regulatory approval, construction, energization, actual load, and live IT MW remain distinct.
 
+## Latest slice: component shipment receipts (#9365)
+
+Five primary-source records add Micron HBM3E volume production, Micron HBM4 high-volume
+shipments, Broadcom Tomahawk 6 production-volume shipments, TSMC CoWoS-L production and
+customer qualification, and TSMC Arizona N4 high-volume wafer production. The corpus now
+contains **227 entries**, **222 unique source URLs**, and **190 entity labels**. Samples,
+qualification, volume production, shipped components, assembled systems, deployed clusters,
+and useful goodput remain separate lifecycle states.
+
 ## Result first
 
 The initial evidence already rejects several convenient defaults:

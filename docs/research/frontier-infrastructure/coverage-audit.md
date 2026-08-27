@@ -80,6 +80,13 @@ generation/transmission approval. Totals are **222 entries**, **217 unique URLs*
 entity labels**. Direct queue-position, construction, commissioning, delivered-energy, and
 site-level utilization receipts remain incomplete.
 
+## Issue #9365 delta
+
+Issue #9365 adds five component-delivery receipts across HBM, Ethernet switching, advanced
+packaging, and leading-edge wafers. Totals are **227 entries**, **222 unique URLs**, and **190
+entity labels**. Exact shipped units, yields, allocations, good-package output, assembled
+systems, optics/cabling joins, and deployed capacity remain incomplete.
+
 ## Status vocabulary
 
 | Status | Meaning |

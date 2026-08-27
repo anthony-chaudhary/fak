@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9364,
+  "latest_slice_issue": 9365,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 222,
+    "entry_count": 227,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -113,6 +113,7 @@
       "Azure OpenAI / BurstGPT",
       "Baichuan 2",
       "Baidu",
+      "Broadcom Tomahawk 6",
       "Builder.ai",
       "BurstGPT v1.1",
       "ByteDance Seed",
@@ -172,6 +173,8 @@
       "Meituan MTServe",
       "Meta",
       "Meta Laidley / Entergy Louisiana",
+      "Micron HBM3E",
+      "Micron HBM4",
       "Microsoft",
       "Microsoft Azure / Splitwise",
       "Microsoft Research Mnemosyne",
@@ -233,6 +236,8 @@
       "StepFun",
       "TIE scheduling study",
       "TSMC",
+      "TSMC Arizona Fab 21 N4",
+      "TSMC CoWoS-L",
       "TaiChi serving study",
       "Technology Innovation Institute",
       "Tencent",
@@ -8655,6 +8660,176 @@
       ],
       "fak_implications": [
         "Named-site power records should preserve regulator approval, generation nameplate, transmission scope, construction, commissioning, and delivered-load states separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "micron-hbm3e-volume-production-2024",
+      "category": "supply_chain",
+      "entity": "Micron HBM3E",
+      "topic": [
+        "hbm",
+        "volume_production",
+        "customer_shipment"
+      ],
+      "published_at": "2024-02-26",
+      "event_at": "2024-02-26",
+      "source_title": "Micron Commences Volume Production of Industry-Leading HBM3E Solution",
+      "source_url": "https://investors.micron.com/news-releases/news-release-details/micron-commences-volume-production-industry-leading-hbm3e",
+      "source_kind": "company_press_release",
+      "evidence_class": "volume_production_announcement",
+      "confidence": "high",
+      "claim": "Micron said its 24 GB 8-high HBM3E had entered volume production and would ship with NVIDIA H200 accelerators beginning in calendar Q2 2024, moving this product from sample/qualification language into production tied to a named customer platform.",
+      "quantified": {
+        "stack_capacity_gb": 24,
+        "stack_height_dies": 8,
+        "named_customer_ship_start": "2024-Q2"
+      },
+      "assumptions": [
+        "Volume production and named-platform shipment timing are supplier disclosures, not audited unit counts or end-customer deployment."
+      ],
+      "contradictions_or_limits": [
+        "No wafer starts, good-stack yield, shipped units, customer allocation, price, or deployed accelerator count is disclosed.",
+        "Production start is upstream of system shipment, site acceptance, and schedulable GPU capacity."
+      ],
+      "fak_implications": [
+        "HBM supply ledgers should distinguish engineering samples, qualification, volume production, named-platform shipment, and deployed accelerator inventory."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "micron-hbm4-high-volume-shipments-2026",
+      "category": "supply_chain",
+      "entity": "Micron HBM4",
+      "topic": [
+        "hbm4",
+        "high_volume_shipments",
+        "customer_qualification"
+      ],
+      "published_at": "2026-06-24",
+      "event_at": "2026-06-24",
+      "source_title": "Micron Technology Reports Results for the Third Quarter of Fiscal 2026",
+      "source_url": "https://investors.micron.com/news-releases/news-release-details/micron-technology-inc-reports-results-third-quarter-fiscal-2026",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_shipment_disclosure",
+      "confidence": "high",
+      "claim": "Micron reported that HBM4 had entered high-volume shipments for customer platforms, a stronger lifecycle state than qualification samples, while HBM supply remained sold out under customer agreements.",
+      "quantified": {},
+      "assumptions": [
+        "High-volume shipment is supplier output to customer platforms, not a disclosed module count or complete system deployment."
+      ],
+      "contradictions_or_limits": [
+        "The earnings release does not disclose HBM4 units, bit volume, yield, customer split, platform acceptance, or deployed cluster capacity.",
+        "Sold-out supply and agreements indicate allocation pressure but not shipment quantity or useful goodput."
+      ],
+      "fak_implications": [
+        "Procurement forecasts should weight high-volume shipment above samples but still require unit, allocation, and downstream system evidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "broadcom-tomahawk6-production-shipments-2025",
+      "category": "supply_chain",
+      "entity": "Broadcom Tomahawk 6",
+      "topic": [
+        "ethernet_switch",
+        "production_volume_shipments",
+        "networking"
+      ],
+      "published_at": "2025-06-03",
+      "event_at": "2025-06-03",
+      "source_title": "Broadcom Ships Tomahawk 6, Industry’s First 102.4 Tbps Ethernet Switch",
+      "source_url": "https://www.broadcom.com/company/news/product-releases/130211",
+      "source_kind": "company_press_release",
+      "evidence_class": "production_volume_shipment",
+      "confidence": "high",
+      "claim": "Broadcom said Tomahawk 6, a 102.4 Tbps Ethernet switch with 200G SerDes, was shipping in production volume, crossing from sampling into merchant-silicon delivery for scale-up and scale-out AI networks.",
+      "quantified": {
+        "switch_capacity_tbps": 102.4,
+        "serdes_gbps": 200
+      },
+      "assumptions": [
+        "Production-volume shipment refers to merchant switch silicon, not assembled switch-system deployments."
+      ],
+      "contradictions_or_limits": [
+        "No shipped-unit count, customer allocation, port utilization, optics availability, fabric size, or production cluster prevalence is disclosed.",
+        "Switch-silicon shipment does not prove compatible optics, cables, systems, or end-to-end network goodput."
+      ],
+      "fak_implications": [
+        "Network BOM ledgers should couple switch ASIC delivery to optics, system, cabling, topology, and deployment receipts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tsmc-cowos-l-production-qualification-2024",
+      "category": "supply_chain",
+      "entity": "TSMC CoWoS-L",
+      "topic": [
+        "advanced_packaging",
+        "cowos",
+        "customer_qualification"
+      ],
+      "published_at": "2024-04-18",
+      "event_at": "2024-04-18",
+      "source_title": "TSMC 1Q24 Earnings Conference Transcript",
+      "source_url": "https://investor.tsmc.com/sites/ir/financial-report/2024/TSMC%201Q24%20Transcript.pdf",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_production_disclosure",
+      "confidence": "high",
+      "claim": "TSMC said CoWoS-L had entered production and customer qualification, while it was expanding advanced-packaging capacity to address AI demand; this is a qualified process state rather than a disclosed package-volume or accelerator-shipment count.",
+      "quantified": {},
+      "assumptions": [
+        "Production and customer qualification describe process/customer readiness, not universal qualification across every design."
+      ],
+      "contradictions_or_limits": [
+        "No package output, yield, qualified-customer count, allocation, queue time, or deployed accelerator total is disclosed.",
+        "Capacity expansion and qualification do not equal shipped good packages or live systems."
+      ],
+      "fak_implications": [
+        "Packaging ledgers should type process production, design qualification, good-package output, customer shipment, and system deployment separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tsmc-arizona-n4-high-volume-production-2025",
+      "category": "supply_chain",
+      "entity": "TSMC Arizona Fab 21 N4",
+      "topic": [
+        "wafer_fab",
+        "high_volume_production",
+        "yield"
+      ],
+      "published_at": "2025-01-16",
+      "event_at": "2024-Q4",
+      "source_title": "TSMC 4Q24 Earnings Conference Transcript",
+      "source_url": "https://investor.tsmc.com/sites/ir/financial-report/2024/TSMC%204Q24%20Transcript.pdf",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_high_volume_production",
+      "confidence": "high",
+      "claim": "TSMC said its first Arizona fab entered high-volume production on N4 in 4Q24, with yield comparable to Taiwan fabs, converting the site from construction/ramp into qualified leading-edge wafer output.",
+      "quantified": {
+        "process_node_nm_class": 4,
+        "high_volume_production_start": "2024-Q4"
+      },
+      "assumptions": [
+        "Comparable yield is the company’s statement and does not disclose the underlying yield percentage."
+      ],
+      "contradictions_or_limits": [
+        "No wafer-start count, product/customer mix, good-die output, AI share, packaging destination, or accelerator shipment is disclosed.",
+        "Leading-edge wafer production is upstream of packaging, HBM integration, board/system assembly, and deployed compute."
+      ],
+      "fak_implications": [
+        "Domestic-fab capacity models should begin credit at qualified high-volume output, then separately track product mix, good dies, packaging, and system shipment."
       ],
       "rumor": {
         "is_rumor": false

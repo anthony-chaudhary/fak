@@ -22,6 +22,16 @@ qualified wafers, shipped accelerators, or operating IT MW.
 | Dominion GS-5 | >=25 MW and >=75% load factor class; 14 years; $1.5M/MW collateral; 85%/85%/60% minimum charges | Queue completion or one named project’s operation. |
 | Meta Laidley / Entergy | 2,262 MW generation and 500-kV transmission path approved for a named project | Completed construction, delivered energy, or compute MW. |
 
+## Component delivery receipts (#9365)
+
+| Component | Strongest disclosed state | Missing downstream proof |
+|---|---|---|
+| Micron HBM3E | 24 GB 8-high volume production; named H200 shipment timing | Stack units, yield, allocation, installed H200s. |
+| Micron HBM4 | High-volume shipments for customer platforms | Bit volume, units, customer split, system acceptance. |
+| Broadcom Tomahawk 6 | 102.4 Tbps / 200G-SerDes production-volume silicon shipments | Switch systems, optics, cables, deployed fabric goodput. |
+| TSMC CoWoS-L | In production and customer qualification | Good-package output, qualified designs/customers, accelerator shipments. |
+| TSMC Arizona N4 | High-volume production with company-reported comparable yield | Wafer starts, actual yield, product mix, good dies, AI allocation. |
+
 ## Capacity lifecycle
 
 | State | Minimum evidence |

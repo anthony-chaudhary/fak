@@ -24,6 +24,16 @@ announced/future products, reported negotiations, and unconfirmed rumors.
 | 2025-08-20 | LPSC approved the Meta/Laidley generation and transmission settlement path. | Named project power approval, before construction and commissioning. |
 | 2025-11-25 | Virginia SCC approved Dominion GS-5 effective 2027. | Customer-class tariff and cost allocation, not one site interconnection. |
 
+## Component delivery chronology (#9365)
+
+| Date | Milestone | Lifecycle state |
+|---|---|---|
+| 2024-02-26 | Micron HBM3E entered volume production for H200 timing. | Production start tied to a named platform, without units. |
+| 2024-04-18 | TSMC said CoWoS-L was in production/customer qualification. | Process/design readiness, not good-package shipment totals. |
+| 2024-Q4 | TSMC Arizona N4 entered high-volume production. | Qualified wafer output, upstream of packages and systems. |
+| 2025-06-03 | Broadcom Tomahawk 6 shipped in production volume. | Switch silicon delivery, not completed fabrics. |
+| 2026-06-24 | Micron reported HBM4 high-volume shipments. | Customer-platform shipment state, without unit disclosure. |
+
 ## 2026 chronology
 
 | Date | Entity/event | Type and state | Infrastructure expectation | Evidence caveat |
