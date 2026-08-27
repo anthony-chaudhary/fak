@@ -277,6 +277,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Simulation in performance benchmarking: deterministic feedback, calibrated estimates, and claim ceilings](docs/notes/CONCEPT-SIMULATION-BENCHMARK-EVIDENCE-2026-08-27.md) — field-borrow pass for [#9424](https://github.com/anthony-chaudhary/fak/issues/9424): a multi-fidelity ladder from exact counts through calibrated estimates, with machine-readable claim ceilings that keep simulated evidence out of measured and competitive headlines.
 - [Qwen3.8 upstream runtime, tool, context, and cache support map](docs/notes/qwen38-upstream-support-map-2026-08-26.md) -- source-pinned runtime capability map, fak disposition, stale policy, and follow-on checks for the first-class Qwen3.8-27B path.
 - [QWEN38-FLASH-NEXT execution index](docs/notes/QWEN38-FLASH-NEXT-EPIC-INDEX-2026-08-26.md) -- auto-indexed dated note.
 - [Qwen3.8-Flash-Next source-pinned study](docs/notes/CONCEPT-STUDY-QWEN38-FLASH-NEXT-2026-08-26.md) -- architecture, runtime contract, fak-native seam map, durable receipt, and filed implementation packets.
