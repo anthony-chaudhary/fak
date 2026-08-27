@@ -134,6 +134,19 @@ query, bounded with `--limit` and inspectable with `--json`; surveillance — th
 required `docs` subcommand and prior tree reader. **Verdict: DEFAULT**: the path is
 read-only, reversible, locally witnessed, and keeps explicit controls.
 
+## Match proof to activation depth
+
+A green source tree is not proof that the binary currently serving an operator contains that source. Use the earliest row that reaches the failure boundary; every row deliberately names what it cannot prove.
+
+| Proof depth | Command / witness | A pass proves | It does **not** prove |
+|---|---|---|---|
+| Working overlay | `fak-dev buildcheck --vet --mine <path>...` for compile feedback; `fak validate --mine <path>...` for the owned prospective tree | `HEAD` plus exactly the named working paths compiles (and, for `validate`, passes its affected build/vet/test gate) while peer WIP is hidden. | No commit exists; native code outside the named package graph, installed binaries, and running processes are unchanged. |
+| Prospective native link | `fak validate --mine <native-or-Go-path>...` before commit; `fak commit --path <path>...` reruns the prospective admission automatically | The host-native package owning changed Go, cgo, Objective-C, header, or assembly paths links and its changed-package tests pass against the exact proposed tree. This is the row that catches a source/native-link regression such as #9224 before history changes. | It does not prove committed `HEAD`, another OS/accelerator envelope, or that an installed/running copy advanced. |
+| Committed tip | `fak-dev ci-preflight` after the explicit-path commit | An archived checkout of the literal `HEAD` is gofmt-clean and buildable without peer WIP. | It does not replace pre-commit tests, inspect an installed copy, or restart a mapped process. |
+| Installed copy | Invoke the candidate by its resolved absolute path and run `<absolute-fak> version`; for a source install, run `<absolute-fak> self-update --check --root . --json` | The selected on-disk executable identifies itself, and the self-update receipt compares that executable with the checkout tip. Repeat for every resolved copy when `PATH` contains more than one. | A matching file on disk does not prove an already-running gateway, hook host, or agent mapped the new bytes. |
+| Running activation | Restart or hand off the owned process, then capture that process's own startup/health receipt and executable/build identity (the generic zero-model canary is tracked by #8915) | The process handling new work reports the expected executable identity after restart/handoff. This is the row for a stale-harness case. | A shell-side `version`, install receipt, or source test cannot substitute for process-owned identity; where a surface emits no activation receipt, activation remains **unproven**. |
+
+Cold-reader rule: a missing native symbol in the proposed source belongs to **Prospective native link**; a long-lived harness still serving old bytes belongs to **Running activation**. Do not move either claim upward to an earlier, easier row.
 ## Choose the witness for the question
 
 | Question | Start with | What a pass proves |
