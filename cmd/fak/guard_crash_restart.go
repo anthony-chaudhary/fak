@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
@@ -64,7 +66,101 @@ const (
 	guardCrashRestartExhaustedReason = "CRASH_RESTART_EXHAUSTED"
 	guardCrashNoProgressLimitEnv     = "FLEET_CLAUDE_GUARD_CRASH_NO_PROGRESS_LIMIT"
 	guardCrashNoProgressLimitDefault = 2
+	guardCodexCLIUsageReason         = "CODEX_CLI_USAGE"
+	guardChildStderrCaptureLimit     = 64 << 10
 )
+
+// guardChildStderrCapture preserves the child's stderr stream while retaining a bounded prefix
+// for exit classification. CLI parsers write their actionable diagnostic before exiting, so the
+// prefix contains the directly observed Codex usage envelope without retaining an arbitrarily
+// long interactive session. Write delegates first and records only bytes accepted by the original
+// sink, keeping the operator-visible stream byte-for-byte unchanged.
+type guardChildStderrCapture struct {
+	mu   sync.Mutex
+	dst  io.Writer
+	data []byte
+}
+
+func newGuardChildStderrCapture(dst io.Writer) *guardChildStderrCapture {
+	if dst == nil {
+		dst = io.Discard
+	}
+	return &guardChildStderrCapture{dst: dst}
+}
+
+func (c *guardChildStderrCapture) Write(p []byte) (int, error) {
+	n, err := c.dst.Write(p)
+	if n <= 0 {
+		return n, err
+	}
+	c.mu.Lock()
+	remaining := guardChildStderrCaptureLimit - len(c.data)
+	if remaining > n {
+		remaining = n
+	}
+	if remaining > 0 {
+		c.data = append(c.data, p[:remaining]...)
+	}
+	c.mu.Unlock()
+	return n, err
+}
+
+func (c *guardChildStderrCapture) String() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return string(c.data)
+}
+
+func guardCaptureChildStderr(child *exec.Cmd, agentName string) *guardChildStderrCapture {
+	if child == nil || guardAgentBaseName(agentName) != "codex" {
+		return nil
+	}
+	capture := newGuardChildStderrCapture(child.Stderr)
+	child.Stderr = capture
+	return capture
+}
+
+// guardIsCodexCLIUsageFailure recognizes only the observed Codex exec parse contract: a real
+// exit 2 accompanied by both its unexpected-argument diagnostic and exact usage line. Exit 2 by
+// itself remains a generic crash because Go panics and unrelated commands can use the same code.
+func guardIsCodexCLIUsageFailure(runErr error, childState *os.ProcessState, agentName, capturedStderr string) bool {
+	if guardAgentBaseName(agentName) != "codex" {
+		return false
+	}
+	_, code, isCrash := guardClassifyChildCrash(runErr, childState)
+	if !isCrash || code != 2 {
+		return false
+	}
+	parseDiagnostic := false
+	usage := false
+	for _, raw := range strings.Split(capturedStderr, "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "error: unexpected argument '") && strings.HasSuffix(line, "' found") {
+			parseDiagnostic = true
+		}
+		if line == "Usage: codex exec [OPTIONS] [PROMPT]" {
+			usage = true
+		}
+	}
+	return parseDiagnostic && usage
+}
+
+// guardRefuseCodexCLIUsage records one durable, typed terminal witness. The caller then enters
+// the ordinary final-report funnel with the original *exec.ExitError, preserving exit 2 and the
+// stderr that the capture already streamed while creating no restart hop or replacement child.
+func guardRefuseCodexCLIUsage(runErr error, childState *os.ProcessState, agentName, traceID string, capturedStderr string, started time.Time, auditJournal *journal.Journal, stderr io.Writer) bool {
+	if !guardIsCodexCLIUsageFailure(runErr, childState, agentName, capturedStderr) {
+		return false
+	}
+	appendGuardChildExitWitnessWithReason(auditJournal, agentName, traceID, runErr, childState, started, guardCodexCLIUsageReason)
+	if stderr != nil {
+		fmt.Fprintf(stderr, "fak guard: %s: Codex rejected the command-line usage; correct the command with `codex exec --help` before relaunching\n", guardCodexCLIUsageReason)
+	}
+	return true
+}
 
 func guardCrashNoProgressLimit(crashLimit int) int {
 	raw := strings.TrimSpace(os.Getenv(guardCrashNoProgressLimitEnv))
