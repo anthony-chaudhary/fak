@@ -1,0 +1,83 @@
+{
+  "schema": "fak.issue-9093-qwen38-metal-gdn-sequence/1",
+  "issue": 9093,
+  "verdict": "REJECT",
+  "reason": "the opt-in fak-native Metal sequence path reached production, but the frozen P=32800/T=8 request crossed the predeclared swap-growth guard before response headers and did not bind actual memorystatus",
+  "implementation": {
+    "contract_commit": "84ba6ffff3495fece875dddc8191cb70487841bd",
+    "primitive_commit": "dfa6ea83b927d4aceb25f0d3c6fdc6884373a62b",
+    "production_commit": "254fb97a797fd6c62af4f37e04d292781684d363",
+    "repair_commits": [
+      "4d48a81c7391f3ab88228531fdb565e6f7f8352a",
+      "9f26215d9128bf7a4b42eb07d3d183d4a5d72aae",
+      "3065603fb88bbd6a440e88fcbf77b5984c3964d4"
+    ],
+    "capability_path": "qwen35/gdn-preprojected-sequence-v1",
+    "forward_path": "metal/qwen35-gdn-preprojected-sequence-v1",
+    "selector": "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE=1",
+    "default_enabled": false,
+    "production_promoted": false
+  },
+  "acceptance": {
+    "cpu_oracle_cosine_min": 0.999999,
+    "cpu_oracle_max_abs": 0.0001,
+    "persistent_buffers_per_layer": 2,
+    "state_h2d_transfers_per_operation": 0,
+    "state_d2h_transfers_per_operation": 0,
+    "host_recurrence_steps_per_operation": 0,
+    "stable_state_handles": true,
+    "isolated_sessions": true,
+    "decline_before_mutation": true,
+    "post_submit_fallback_attempts": 0,
+    "exact_greedy_token_handoff": true,
+    "exact_once_cleanup": true
+  },
+  "tests": {
+    "portable": {
+      "internal/metalgemm/gdn_test.go": [
+        "TestGDNPortableOraclePreservesSplitSequenceState"
+      ],
+      "internal/model/qwen35_hal_test.go": [
+        "TestQwen35GDNPreprojectedSequenceAdmissionIsFailClosed",
+        "TestQwen35GDNPreprojectedSequenceSessionIsolationStableIdentityAndNoRetry",
+        "TestQwen35GDNPreprojectedSequenceCleanupCloseResetAndAllocationFailure",
+        "TestQwen35GDNPreprojectedSequenceLeavesDefaultAndCUDALifecyclesUnchanged"
+      ],
+      "internal/agent/inkernel_execution_identity_test.go": [
+        "TestInKernelExecutionIdentityQwen35MetalGDNRequiresExecutedOperation"
+      ]
+    },
+    "native": {
+      "internal/metalgemm/gdn_darwin_test.go": [
+        "TestGDNSequenceMetalParityStateIdentityAndReset",
+        "TestGDNSequenceMetalValidationBeforeMutationAndOwnerIsolation",
+        "TestGDNSequenceMetalInjectedPostSubmitFailureCleansOwner",
+        "TestGDNPanelResourcesDrainPerCall"
+      ],
+      "internal/model/metal_qwen35_gdn_sequence_test.go": [
+        "TestMetalQwen35GDNProductionPrefillContinuityAndDecodeHandoff",
+        "TestMetalQwen35GDNProductionPreflightDeclinesBeforeMutation"
+      ]
+    }
+  },
+  "live_canary": {
+    "source_issue": 9097,
+    "prompt_tokens": 32800,
+    "output_tokens": 8,
+    "deadline_seconds": 2700,
+    "maximum_footprint_bytes": 61162389504,
+    "maximum_swap_growth_bytes": 12884901888,
+    "required_consecutive_crossings": 3,
+    "minimum_memorystatus_percent": 10,
+    "required_restoration_seconds": 90,
+    "child_receipt_sha256": "fb9745c44d639efbcaeab9f0e893b08699adc5a8dbbb0d989aab0fe655e5161a",
+    "memory_samples_sha256": "894f4912a65422a1a5c49644bfd903d804322e804eb15607d4db65f852372915",
+    "native_log_sha256": "c028ab82c3d4b466c3ef47e63581d03820b5ed8f0c8dfb4ace9df31f0da48e62",
+    "child_witness_sha256": "3837c69cd4e29b774f1d413663267d50a29a1eec0f152a06332c196c3867b313"
+  },
+  "next_boundary": {
+    "issue": 9230,
+    "description": "graph-scoped activation and output ownership with device handoffs and terminal synchronization across the whole Qwen forward"
+  },
+  "conclusion": "retain the implementation as an explicit fak-native opt-in, leave the production selector default-off, and make no latency or memory KEEP claim"
+}
