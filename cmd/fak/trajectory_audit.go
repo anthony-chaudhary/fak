@@ -108,7 +108,8 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 		}
 	}
 
-	fmt.Fprintf(stderr, "trajectory audit: sessions=%d exact_usage=%d refused=%d\n", result.Summary.Transcripts, result.Summary.UsageRecordsExact, len(result.Refusals))
+	fmt.Fprintf(stderr, "trajectory audit: sessions=%d exact_usage=%d refused=%d schema_drift=%d schema_breaking=%d\n",
+		result.Summary.Transcripts, result.Summary.UsageRecordsExact, len(result.Refusals), result.ConclusionStatus.SchemaDriftCount, result.ConclusionStatus.BreakingSchemaDrift)
 	if len(result.Refusals) > 0 {
 		first := result.Refusals[0]
 		fmt.Fprintf(stderr, "TRAJECTORY_SCHEMA_REFUSED %s %s:%d %s\n", first.Source, first.SourcePath, first.Line, first.Code)
