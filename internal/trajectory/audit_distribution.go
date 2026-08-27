@@ -185,7 +185,7 @@ func toolDistributionRows(m map[string]*AuditDistributionRow) []AuditDistributio
 }
 
 // RenderAuditDistributionCompact renders a stable one-line status/TUI view.
-func RenderAuditDistributionCompact(categories, tools []AuditDistributionRow, width int) string {
+func CompactAuditDistributionLine(categories, tools []AuditDistributionRow, width int) string {
 	parts := []string{"tokens→"}
 	for i, r := range categories {
 		if i == 3 {

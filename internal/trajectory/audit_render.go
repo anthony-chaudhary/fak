@@ -39,7 +39,7 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		for _, r := range summary.ToolDistribution {
 			fmt.Fprintf(&out, "| `%s` | %d | %d | %.1f%% |\n", r.Name, r.Calls, r.Bytes, r.Share*100)
 		}
-		fmt.Fprintf(&out, "\n`%s`\n", RenderAuditDistributionCompact(summary.Distribution, summary.ToolDistribution, 100))
+		fmt.Fprintf(&out, "\n`%s`\n", CompactAuditDistributionLine(summary.Distribution, summary.ToolDistribution, 100))
 	}
 	if summary.QwenTopContributorTokenFraction == nil {
 		out.WriteString("- Qwen top-contributor token concentration: unknown (no Qwen token usage).\n")

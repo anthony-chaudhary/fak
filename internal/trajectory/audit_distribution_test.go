@@ -5,7 +5,7 @@ import "testing"
 func TestAuditDistributionCompactCapturedRender(t *testing.T) {
 	c := []AuditDistributionRow{{Name: "tool_result", Bytes: 60, Share: .6}, {Name: "reasoning", Bytes: 40, Share: .4}}
 	tools := []AuditDistributionRow{{Name: "exec_command", Bytes: 60, Share: 1, Calls: 2}}
-	got := RenderAuditDistributionCompact(c, tools, 120)
+	got := CompactAuditDistributionLine(c, tools, 120)
 	want := "tokens→ · tool_result 60% · reasoning 40% · top-tool exec_command 100%"
 	if got != want {
 		t.Fatalf("render = %q, want %q", got, want)
