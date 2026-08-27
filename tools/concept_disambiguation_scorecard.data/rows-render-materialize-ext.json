@@ -296,7 +296,8 @@
       "definition": "The RenderMarkdown family (benchscore, swebench, terminalbench, webbench, agenticbench, the browseraction action-mediation report, ...) renders a completed Report/Comparison struct of measured results into a Markdown document.",
       "distinction": "Not the *ContractMarkdown renderers (which emit a pre-run promise before any number exists); RenderMarkdown emits measured results after a run.",
       "distinct_from": [
-        "rendered-ctxplan"
+        "rendered-ctxplan",
+        "render-materialize-render-adapter-report"
       ],
       "aliases": [
         "renderactionmediationmarkdown"
@@ -316,7 +317,8 @@
       "definition": "RenderOfficialRunContractMarkdown renders a benchmark's official-run CONTRACT to Markdown \u2014 the pre-run promise (target choice, evidence class, claim boundary, whether a result claim is allowed); siblings render the DeepSWE and opus-smoke SWE-bench contracts and the terminalbench rehearsal preflight.",
       "distinction": "Not RenderMarkdown (post-run measured results); a contract or preflight is the credential-gated promise rendered BEFORE any measured number exists.",
       "distinct_from": [
-        "RenderMarkdown (bench report)"
+        "RenderMarkdown (bench report)",
+        "render-materialize-render-adapter-report"
       ],
       "aliases": [
         "renderdeepswerawfakcontractmarkdown",
