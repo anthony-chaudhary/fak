@@ -75,10 +75,27 @@ func TestPrepareFailOpenJSONShape(t *testing.T) {
 // TestLandJSONShape proves `fak worktree worker land` emits the applied/committed
 // verdict object.
 func TestLandJSONShape(t *testing.T) {
-	res := workerworktree.Result{OK: true, Applied: true, Committed: true}
-	got := mustKeys(t, res, "ok", "applied", "committed")
+	res := workerworktree.Result{OK: true, Applied: true, Committed: true, Cost: &workerworktree.LandCostReceipt{
+		Schema: "fak-worker-land-cost/1", CacheState: "fresh-isolated-index", Phases: []workerworktree.LandPhaseCost{},
+	}}
+	got := mustKeys(t, res, "ok", "applied", "committed", "cost")
 	if got["committed"] != true {
 		t.Fatalf("committed = %v, want true", got["committed"])
+	}
+}
+
+func TestLandProgressJSONShape(t *testing.T) {
+	var out bytes.Buffer
+	emit := worktreeWorkerProgressEmitter(&out)
+	emit(workerworktree.LandProgressEvent{
+		Schema: "fak-worker-land-progress/1", Phase: "admission", Status: "started", LandElapsedMS: 3,
+	})
+	var got map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(out.Bytes()), &got); err != nil {
+		t.Fatalf("decode progress: %v; output=%q", err, out.String())
+	}
+	if got["schema"] != "fak-worker-land-progress/1" || got["phase"] != "admission" || got["status"] != "started" {
+		t.Fatalf("progress JSON = %v", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/corelockgate"
 	"github.com/anthony-chaudhary/fak/internal/corelocks"
@@ -77,6 +78,10 @@ type landConfig struct {
 	coreLockWitness string
 	recoveryRemote  string
 	requireRemote   bool
+	progress        func(LandProgressEvent)
+	now             func() time.Time
+	resources       func() landResourceSample
+	tracker         *landProgressTracker
 }
 
 // WithCoreLockWitness supplies the hard-self core-lock maintenance witness claim
