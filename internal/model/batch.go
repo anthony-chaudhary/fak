@@ -156,6 +156,9 @@ type BatchSession struct {
 	// buffers only replace per-layer temporaries that are fully consumed before return.
 	pbuf *batchRectPrefillBuf
 
+	// lastStepSharedPanels counts operations where one weight served at least two lanes.
+	lastStepSharedPanels int
+
 	// lastStepMACs is the exact MAC count of the B-proportional projection GEMMs (QKV +
 	// attention-output + SwiGLU gate/up/down + the LM head) of the most recent StepBatch /
 	// StepBatchActive — the weight-streaming decode work the batch dimension amortises and the

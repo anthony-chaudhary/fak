@@ -1012,3 +1012,5 @@ These reader-facing references complement the curated paths above. They are grou
 
 - [`docs/notes/PROVIDER-CACHE-HINT-LIVE-WITNESS-2026-08-25.md`](docs/notes/PROVIDER-CACHE-HINT-LIVE-WITNESS-2026-08-25.md) — live provider cache-hint negotiation witness.
 - [`docs/notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md`](docs/notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md) — Qwen4 experimental support rollback watch and cutover evidence.
+
+- [Actionable CI base-red dogfood 2026-08-27](docs/notes/ACTIONABLE-CI-BASE-RED-DOGFOOD-9466-2026-08-27.md) — live #9466 release-status evidence.

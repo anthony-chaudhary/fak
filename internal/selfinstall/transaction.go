@@ -58,9 +58,37 @@ type preparedCopy struct {
 // RunTransaction stages every candidate and snapshots every target before activating
 // targets in lexical path order. The swapper must consume its source only on success.
 func RunTransaction(copies []Copy, swap Swapper) TransactionResult {
+	return runTransaction(copies, "", swap)
+}
+
+// RunLaunchTransaction is RunTransaction plus the stable-launch replacement
+// boundary for launchTarget. The state is published only after every candidate
+// and snapshot is complete, immediately before the first activation, and stays
+// active through rollback.
+func RunLaunchTransaction(copies []Copy, launchTarget string, swap Swapper) TransactionResult {
+	return runTransaction(copies, launchTarget, swap)
+}
+
+func runTransaction(copies []Copy, launchTarget string, swap Swapper) TransactionResult {
 	ordered, err := validateCopies(copies)
 	if err != nil {
 		return RolledBack{Err: err}
+	}
+	if strings.TrimSpace(launchTarget) != "" {
+		launchTarget, err = filepath.Abs(filepath.Clean(launchTarget))
+		if err != nil {
+			return RolledBack{Err: fmt.Errorf("launch target: %w", err)}
+		}
+		found := false
+		for _, item := range ordered {
+			if sameTransactionPath(item.Target, launchTarget) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return RolledBack{Err: fmt.Errorf("launch target %q is not in the transaction", launchTarget)}
+		}
 	}
 
 	prepared := make([]preparedCopy, 0, len(ordered))
@@ -85,6 +113,14 @@ func RunTransaction(copies []Copy, swap Swapper) TransactionResult {
 		prepared[len(prepared)-1].snapshot = snapshot
 	}
 
+	if launchTarget != "" {
+		finish, err := BeginLaunchTransaction(launchTarget)
+		if err != nil {
+			return RolledBack{Err: fmt.Errorf("publish launch transaction: %w", err)}
+		}
+		defer finish()
+	}
+
 	changed := 0
 	for i := range prepared {
 		attempted := i + 1
@@ -105,6 +141,13 @@ func RunTransaction(copies []Copy, swap Swapper) TransactionResult {
 	}
 
 	return Updated{Attempted: len(prepared), Changed: changed}
+}
+
+func sameTransactionPath(a, b string) bool {
+	if filepath.Separator == '\\' {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
 }
 
 func validateCopies(copies []Copy) ([]Copy, error) {

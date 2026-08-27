@@ -64,6 +64,9 @@ type NativeScheduler struct {
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
 	maxObservedRunning int
+	sharedBatchSteps   uint64
+	sharedPanels       uint64
+	sharedMACs         uint64
 	closed             bool
 
 	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
@@ -96,6 +99,25 @@ func (s *NativeScheduler) MaxObservedRunning() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.maxObservedRunning
+}
+
+// SharedWorkReceipt reports model work that actually crossed a shared BatchSession
+// panel. Running-set size alone is admission evidence; nonzero Panels and MACs are
+// the execution receipt that one set of weights served at least two live lanes.
+type SharedWorkReceipt struct {
+	Steps  uint64
+	Panels uint64
+	MACs   uint64
+}
+
+func (s *NativeScheduler) SharedWorkReceipt() SharedWorkReceipt {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return SharedWorkReceipt{
+		Steps:  s.sharedBatchSteps,
+		Panels: s.sharedPanels,
+		MACs:   s.sharedMACs,
+	}
 }
 
 // NewNativeScheduler builds a scheduler over an already-constructed model (a real
@@ -390,7 +412,7 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	if len(cont) == 0 {
 		return
 	}
-	if len(cont) == 1 || anyQ4K(cont) {
+	if len(cont) == 1 {
 		for i, ln := range cont {
 			ln.logits = ln.sess.Step(ids[i])
 		}
@@ -405,18 +427,16 @@ func (s *NativeScheduler) stepOnce(active []*schedLane) {
 	}
 	bs := &model.BatchSession{M: s.m, Seqs: seqs}
 	out := bs.StepBatch(ids)
+	if panels := bs.LastStepSharedPanels(); panels > 0 {
+		s.mu.Lock()
+		s.sharedBatchSteps++
+		s.sharedPanels += uint64(panels)
+		s.sharedMACs += uint64(bs.LastStepMACs())
+		s.mu.Unlock()
+	}
 	for i, ln := range cont {
 		ln.logits = copyF32(out[i])
 	}
-}
-
-func anyQ4K(lanes []*schedLane) bool {
-	for _, ln := range lanes {
-		if ln.q4k {
-			return true
-		}
-	}
-	return false
 }
 
 // schedLane is one admitted request's state + its EngineRequest handle.

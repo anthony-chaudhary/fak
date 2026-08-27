@@ -37,6 +37,15 @@ jobs:
       - name: parity - batched fused MLP == single
         run: go test -tags fakmetal ./internal/model/ -run 'TestMetalFusedMLPQ6DownBatchMatchesSingle|TestMetalFusedMLPQ6DownMatchesCPU' -count=1 -v
 
+      # Independent-state and mixed-layer correctness witnesses for the Qwen batch path.
+      - name: parity - Qwen independent state and hybrid model batch
+        run: |
+          go test ./internal/metalgemm/ \
+            -run '^TestQwen35DecodeBatchIndependentStateSingleFence$|^TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence$' \
+            -count=1 -v
+          go test ./internal/model/ \
+            -run '^TestQwen35HybridQ4KStepBatchActiveMatchesSerial$' \
+            -count=1 -v
       # The measurement: n separate command buffers (Single) vs one batched (Batch), ms/layer.
       # The Single/Batch ms ratio is the #1382 command-buffer-collapse speedup on the mlp_decode cost.
       - name: benchmark - batched vs single fused expert MLP

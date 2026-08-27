@@ -18,11 +18,27 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 			copy.ToolResults = append([]AuditToolResultRow(nil), row.ToolResults...)
 			copy.usageByID = cloneAuditUsage(row.usageByID)
 			copy.failureCounts = cloneAuditFailureCounts(row.failureCounts)
+			copy.fragmentDigests = map[string]struct{}{}
+			if row.fragmentDigest != "" {
+				copy.fragmentDigests[row.fragmentDigest] = struct{}{}
+			}
 			byID[key] = &copy
 			continue
 		}
 		rollup.SourcePaths = append(rollup.SourcePaths, row.SourcePath)
 		rollup.Models = appendUniqueStrings(rollup.Models, row.Models...)
+		_, duplicateFragment := rollup.fragmentDigests[row.fragmentDigest]
+		duplicateFragment = duplicateFragment && row.fragmentDigest != ""
+		if !duplicateFragment {
+			rollup.Distribution = mergeAuditDistributionRows(rollup.Distribution, row.Distribution)
+			rollup.ToolDistribution = mergeAuditDistributionRows(rollup.ToolDistribution, row.ToolDistribution)
+			rollup.StorageDistribution = mergeAuditStorageRows(rollup.StorageDistribution, row.StorageDistribution)
+			rollup.UnknownExemplars = mergeAuditUnknownExemplarReservoirs(rollup.UnknownExemplars, row.UnknownExemplars)
+			linkAuditUnknownExemplars(rollup.Distribution, rollup.StorageDistribution, rollup.UnknownExemplars.Exemplars)
+			if row.fragmentDigest != "" {
+				rollup.fragmentDigests[row.fragmentDigest] = struct{}{}
+			}
+		}
 		if row.Source == AuditSourceClaude {
 			for id, usage := range row.usageByID {
 				if previous, exists := rollup.usageByID[id]; exists {
@@ -40,6 +56,9 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 			// provenance, not additive usage.
 		} else {
 			refusals = append(refusals, newAuditRefusal(row.Source, row.SourcePath, 0, "codex_fragment_usage_mismatch", "duplicate session id carries different cumulative usage"))
+		}
+		if duplicateFragment {
+			continue
 		}
 		rollup.ToolCalls += row.ToolCalls
 		rollup.ToolErrors += row.ToolErrors

@@ -85,6 +85,21 @@ func TestClaudeAttachmentIsTypedStorage(t *testing.T) {
 	if len(rows) != 1 || rows[0].Subtype != "attachment/deferred_tools_delta" || rows[0].Records != 1 {
 		t.Fatalf("rows=%+v", rows)
 	}
+	if got := d.exemplars.snapshot(); got.Retained != 0 {
+		t.Fatalf("known attachment subtypes entered unknown reservoir: %+v", got)
+	}
+}
+
+func TestClaudeValidatedHookAttachmentIsTypedStorage(t *testing.T) {
+	d := newAuditDistribution()
+	d.observe("claude", []byte(`{"type":"attachment","attachment":{"type":"hook_success","durationMs":12}}`))
+	rows := storageDistributionRows(d.storage)
+	if len(rows) != 1 || rows[0].Subtype != "attachment/hook_success" || rows[0].Records != 1 {
+		t.Fatalf("rows=%+v", rows)
+	}
+	if got := d.exemplars.snapshot(); got.Retained != 0 {
+		t.Fatalf("known hook subtype entered unknown reservoir: %+v", got)
+	}
 }
 
 func TestAuditToolResultsCodexExecOutcomesAndDirectIDs(t *testing.T) {

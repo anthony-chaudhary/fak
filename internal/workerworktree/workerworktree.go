@@ -168,16 +168,23 @@ type ownedIsolationBackend interface {
 
 type gitWorktree struct{}
 
-var defaultIsolationBackend IsolationBackend = gitWorktree{}
+var defaultIsolationBackend IsolationBackend = nativeIsolationBackend()
 
 // IsolationBackends returns all registered implementations for conformance tests.
-func IsolationBackends() []IsolationBackend { return []IsolationBackend{gitWorktree{}} }
+func IsolationBackends() []IsolationBackend {
+	backends := []IsolationBackend{gitWorktree{}}
+	if _, ok := nativeIsolationBackend().(blockClone); ok {
+		backends = append(backends, newBlockCloneBackend())
+	}
+	return backends
+}
 
 // Result is the fail-open outcome of a git-touching op. OK is the one bit callers
 // branch on; the rest carries evidence for the record/log.
 type Result struct {
 	OK        bool   `json:"ok"`
 	Code      string `json:"code,omitempty"`
+	Backend   string `json:"backend,omitempty"`
 	Path      string `json:"path,omitempty"`
 	BaseSHA   string `json:"base_sha,omitempty"`
 	Reused    bool   `json:"reused,omitempty"`
@@ -506,6 +513,15 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 	return res
 }
 
+func isolationBackendName(backend IsolationBackend) string {
+	switch backend.(type) {
+	case blockClone, *blockClone:
+		return blockCloneBackendName
+	default:
+		return gitWorktreeBackendName
+	}
+}
+
 func isGitWorktreeBackend(backend IsolationBackend) bool {
 	switch backend.(type) {
 	case gitWorktree, *gitWorktree:
@@ -804,7 +820,9 @@ func ForceReap(root, wtPath string, git GitRunner) Result {
 // CoreLockWitnessTrailer in the commit message. That gate runs before any apply, so
 // a refused land leaves the trunk exactly as it found it.
 // CountPathsOutsideTrees counts how many of `changed` fall outside every declared tree in
-// `trees`. Both sides are normalised to forward slashes and stripped of leading/trailing
+//
+//	rees`. Both sides are normalised to forward slashes and stripped of leading/trailing
+//
 // separators first, and a tree matches a path exactly or as a "<tree>/" prefix; an empty
 // tree entry matches nothing (so a stray "" can never swallow the whole diff).
 //
@@ -937,12 +955,12 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		finishAdmission()
 		admissionActive = false
 	}
-	finishPolicyAdmission := beginLandPhase(tracker, "policy-admission", 0)
+	phaseDone := beginLandPhase(tracker, "policy-admission", 0)
 	// Resolve a message file: use the caller's, else materialize the worktree tip's
 	// message to a temp file so the landed commit keeps the worker's own subject.
 	msgFile, cleanup, err := resolveMsgFile(wtPath, commitMsgFile, git)
 	if err != nil {
-		finishPolicyAdmission()
+		phaseDone()
 		return Result{OK: false, Applied: false, Committed: false,
 			Reason: "could not resolve commit message: " + err.Error()}
 	}
@@ -958,11 +976,11 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	// runs no git hook. Refusing here leaves the trunk index, worktree and HEAD
 	// untouched; the worker's diff stays in its worktree.
 	if refusal, fired := coreLockLandGate(root, names, diff, msgFile, cfg, git); fired {
-		finishPolicyAdmission()
+		phaseDone()
 		refusal.DroppedOutOfLane = droppedOutOfLane
 		return refusal
 	}
-	finishPolicyAdmission()
+	phaseDone()
 
 	// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
 	// index so the shared index is never a sweep target. handled=false means it could

@@ -743,7 +743,7 @@ func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing
 	oldRead := readDisambiguation
 	defer func() { readDisambiguation = oldRead }()
 	reads := 0
-	readDisambiguation = func(repo, tree string) DisambiguationWitness {
+	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
 		reads++
 		w := DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, FamilyCoverage: map[string]float64{"loop": 100}}
 		if reads == 3 {
@@ -752,7 +752,7 @@ func TestLandIsolatedDisambiguationRefusalPreservesStateAndWorkerDiff(t *testing
 			w.Detail = "post-apply duplicate grounding"
 		}
 		return w
-	}
+	})
 	res, handled := landIsolated("/repo", "/worker", "diff --git a/tools/concept_disambiguation_scorecard.data/rows-loop-family.json b/tools/concept_disambiguation_scorecard.data/rows-loop-family.json\n@@\n-old\n+new\n", writeMsg(t, "feat: x"), []string{"tools/concept_disambiguation_scorecard.data/rows-loop-family.json"}, g.run, g.runEnv)
 	if !handled || res.OK || res.Committed {
 		t.Fatalf("post-apply rejection must be handled before a durable commit: handled=%v result=%+v", handled, res)

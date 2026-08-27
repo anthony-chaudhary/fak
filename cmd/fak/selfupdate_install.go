@@ -164,7 +164,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	}
 	selfUpdateReceiptAttempted = len(copies)
 	stopHeartbeat = startSelfUpdateHeartbeat(82, "installing verified binaries")
-	transaction := selfinstall.RunTransaction(copies, selfinstall.OSSwap)
+	transaction := selfinstall.RunLaunchTransaction(copies, installTarget, selfinstall.OSSwap)
 	stopHeartbeat()
 	switch result := transaction.(type) {
 	case selfinstall.Updated:

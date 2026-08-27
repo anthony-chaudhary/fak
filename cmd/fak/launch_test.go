@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,8 +10,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/launchshim"
+	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 )
 
 func TestLaunchDefaultAndDisablePersist(t *testing.T) {
@@ -159,7 +162,7 @@ func TestLaunchCustomTemplatePreservesArgvBoundaries(t *testing.T) {
 	defer func() { launchChildRunner = old }()
 	var gotCommand string
 	var gotArgs []string
-	launchChildRunner = func(_ io.Writer, _ io.Writer, command string, args []string) int {
+	launchChildRunner = func(_ io.Reader, _ io.Writer, _ io.Writer, command string, args []string) int {
 		gotCommand = command
 		gotArgs = append([]string(nil), args...)
 		return 0
@@ -188,7 +191,7 @@ func TestLaunchInteractiveProviderSuppressesStartupWall(t *testing.T) {
 	old := launchChildRunner
 	defer func() { launchChildRunner = old }()
 	var got []string
-	launchChildRunner = func(_ io.Writer, _ io.Writer, _ string, args []string) int {
+	launchChildRunner = func(_ io.Reader, _ io.Writer, _ io.Writer, _ string, args []string) int {
 		got = append([]string(nil), args...)
 		return 0
 	}
@@ -227,6 +230,10 @@ func TestStableLaunchTargetSurvivesSourceReplacement(t *testing.T) {
 	got, _ := os.ReadFile(target)
 	if string(got) != "v1" {
 		t.Fatalf("stable target changed with source: %q", got)
+	}
+	bound, err := launchshim.StableExecutable(target)
+	if err != nil || !samePath(bound, source) {
+		t.Fatalf("stable executable binding=%q err=%v, want %q", bound, err, source)
 	}
 	shim, _ := os.ReadFile(filepath.Join(shimDir, shimName("third")))
 	if !strings.Contains(string(shim), target) || strings.Contains(string(shim), source) {
@@ -305,7 +312,7 @@ func TestLaunchBypassScopesAndExitPropagation(t *testing.T) {
 	defer func() { launchChildRunner = old }()
 	var gotCommand string
 	var gotArgs []string
-	launchChildRunner = func(_ io.Writer, _ io.Writer, command string, args []string) int {
+	launchChildRunner = func(_ io.Reader, _ io.Writer, _ io.Writer, command string, args []string) int {
 		gotCommand, gotArgs = command, append([]string(nil), args...)
 		return 23
 	}
@@ -357,4 +364,162 @@ func TestLaunchStatusEmptyConfigIsInactiveAndRejectsProviderArg(t *testing.T) {
 	if code := runLaunch(&out, &errb, []string{"status", "codex"}); code != 2 || !strings.Contains(errb.String(), `unexpected argument "codex"`) {
 		t.Fatalf("provider arg code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
 	}
+}
+
+func TestStableLaunchUpdatePoliciesPreserveProcessContract(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	t.Setenv("FAK_UPDATE_LAUNCH_POLICY", "")
+	t.Setenv("FAK_UPDATE_LAUNCH_WAIT", "")
+	target := filepath.Join(dir, "install", "fak")
+	if runtime.GOOS == "windows" {
+		target += ".exe"
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("prior"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shimDir := filepath.Join(dir, "shims")
+	if err := os.MkdirAll(shimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stable, err := installStableLaunchTarget(shimDir, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := launchshim.Save(launchshim.Config{
+		Executable: target,
+		Providers:  map[string]launchshim.Provider{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	finish, err := selfinstall.BeginLaunchTransaction(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(finish)
+
+	oldExecutable := osExecutableForLaunch
+	oldInput := launchInput
+	oldRunner := launchChildRunner
+	oldResolve := stableLaunchResolve
+	t.Cleanup(func() {
+		osExecutableForLaunch = oldExecutable
+		launchInput = oldInput
+		launchChildRunner = oldRunner
+		stableLaunchResolve = oldResolve
+	})
+	osExecutableForLaunch = func() (string, error) { return stable, nil }
+
+	t.Run("default prior is immediate and lossless", func(t *testing.T) {
+		launchInput = strings.NewReader("stdin-prior")
+		var gotCommand string
+		var gotArgs []string
+		launchChildRunner = func(stdin io.Reader, stdout, stderr io.Writer, command string, args []string) int {
+			gotCommand, gotArgs = command, append([]string(nil), args...)
+			gotInput, _ := io.ReadAll(stdin)
+			fmt.Fprintf(stdout, "stdout:%s", gotInput)
+			fmt.Fprint(stderr, "stderr:prior")
+			return 23
+		}
+		var stdout, stderr bytes.Buffer
+		code := runLaunch(&stdout, &stderr, []string{"codex", "--", "space value", `quote"value`})
+		if code != 23 || gotCommand != selfinstall.LaunchPriorPath(target) {
+			t.Fatalf("code=%d command=%q stderr=%s", code, gotCommand, stderr.String())
+		}
+		wantArgs := []string{"launch", "codex", "--", "space value", `quote"value`}
+		if !reflect.DeepEqual(gotArgs, wantArgs) {
+			t.Fatalf("argv=%q want %q", gotArgs, wantArgs)
+		}
+		if stdout.String() != "stdout:stdin-prior" || stderr.String() != "stderr:prior" {
+			t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("fail is strict and does not spawn", func(t *testing.T) {
+		t.Setenv("FAK_UPDATE_LAUNCH_POLICY", "fail")
+		called := false
+		launchChildRunner = func(io.Reader, io.Writer, io.Writer, string, []string) int {
+			called = true
+			return 0
+		}
+		var stdout, stderr bytes.Buffer
+		code := runLaunch(&stdout, &stderr, []string{"codex", "arg"})
+		if code != 75 || called || !strings.Contains(stderr.String(), "self-update is replacing") {
+			t.Fatalf("code=%d called=%t stdout=%q stderr=%q", code, called, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("wait is bounded then launches new with lossless process state", func(t *testing.T) {
+		t.Setenv("FAK_UPDATE_LAUNCH_POLICY", "")
+		resolverEntered := make(chan struct{})
+		releaseResolver := make(chan struct{})
+		stableLaunchResolve = func(gotTarget, policy string, wait time.Duration) (string, error) {
+			if gotTarget != target || policy != launchshim.UpdatePolicyWait || wait != 2*time.Second {
+				t.Errorf("resolve target=%q policy=%q wait=%s", gotTarget, policy, wait)
+			}
+			close(resolverEntered)
+			<-releaseResolver
+			return target, nil
+		}
+		launchInput = strings.NewReader("stdin-wait")
+		childCalled := make(chan struct{})
+		var gotArgs []string
+		launchChildRunner = func(stdin io.Reader, stdout, stderr io.Writer, command string, args []string) int {
+			if command != target {
+				t.Errorf("command=%q want target %q", command, target)
+			}
+			gotArgs = append([]string(nil), args...)
+			gotInput, _ := io.ReadAll(stdin)
+			fmt.Fprintf(stdout, "stdout:%s", gotInput)
+			fmt.Fprint(stderr, "stderr:wait")
+			close(childCalled)
+			return 37
+		}
+		type result struct {
+			code           int
+			stdout, stderr string
+		}
+		resultc := make(chan result, 1)
+		go func() {
+			var stdout, stderr bytes.Buffer
+			code := runLaunch(&stdout, &stderr, []string{"--update-launch-policy=wait", "--update-launch-wait=2s", "codex", "--", "space value", `quote"value`})
+			resultc <- result{code, stdout.String(), stderr.String()}
+		}()
+		<-resolverEntered
+		select {
+		case <-childCalled:
+			t.Fatal("child launched before wait policy released the replacement boundary")
+		default:
+		}
+		close(releaseResolver)
+		got := <-resultc
+		if got.code != 37 || got.stdout != "stdout:stdin-wait" || got.stderr != "stderr:wait" {
+			t.Fatalf("result=%+v", got)
+		}
+		wantArgs := []string{"launch", "codex", "--", "space value", `quote"value`}
+		if !reflect.DeepEqual(gotArgs, wantArgs) {
+			t.Fatalf("argv=%q want %q", gotArgs, wantArgs)
+		}
+	})
+
+	t.Run("provider update-looking args are not consumed", func(t *testing.T) {
+		stableLaunchResolve = func(string, string, time.Duration) (string, error) {
+			return target, nil
+		}
+		launchInput = strings.NewReader("")
+		var gotArgs []string
+		launchChildRunner = func(_ io.Reader, _ io.Writer, _ io.Writer, _ string, args []string) int {
+			gotArgs = append([]string(nil), args...)
+			return 0
+		}
+		var stdout, stderr bytes.Buffer
+		code := runLaunch(&stdout, &stderr, []string{"codex", "--", "--update-launch-policy=fail"})
+		wantArgs := []string{"launch", "codex", "--", "--update-launch-policy=fail"}
+		if code != 0 || !reflect.DeepEqual(gotArgs, wantArgs) {
+			t.Fatalf("code=%d argv=%q want %q stderr=%q", code, gotArgs, wantArgs, stderr.String())
+		}
+	})
 }

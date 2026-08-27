@@ -46,15 +46,15 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		}
 	}
 	if len(summary.StorageDistribution) > 0 {
-		out.WriteString("\n## Transcript storage and telemetry overhead\n\n| Source | Subtype | Records | Serialized UTF-8 bytes | Source share |\n|---|---|---:|---:|---:|\n")
+		out.WriteString("\n## Transcript storage and telemetry overhead\n\n| Source | Subtype | Records | Serialized UTF-8 bytes | Source share | Unknown exemplar IDs |\n|---|---|---:|---:|---:|---|\n")
 		for _, r := range summary.StorageDistribution {
-			fmt.Fprintf(&out, "| `%s` | `%s` | %d | %d | %.1f%% |\n", r.Source, r.Subtype, r.Records, r.Bytes, r.Share*100)
+			fmt.Fprintf(&out, "| `%s` | `%s` | %d | %d | %.1f%% | %s |\n", r.Source, r.Subtype, r.Records, r.Bytes, r.Share*100, auditExemplarIDLinks(r.ExemplarIDs))
 		}
 	}
 	if len(summary.Distribution) > 0 {
-		out.WriteString("\n## Token destination distribution\n\n| Category | UTF-8 bytes | Share |\n|---|---:|---:|\n")
+		out.WriteString("\n## Token destination distribution\n\n| Category | UTF-8 bytes | Share | Unknown exemplar IDs |\n|---|---:|---:|---|\n")
 		for _, r := range summary.Distribution {
-			fmt.Fprintf(&out, "| `%s` | %d | %.1f%% |\n", r.Name, r.Bytes, r.Share*100)
+			fmt.Fprintf(&out, "| `%s` | %d | %.1f%% | %s |\n", r.Name, r.Bytes, r.Share*100, auditExemplarIDLinks(r.ExemplarIDs))
 		}
 	}
 	if len(summary.ToolDistribution) > 0 {
@@ -71,6 +71,19 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 				escapeAuditMarkdown(r.Name), escapeAuditMarkdown(r.Subtype), r.Results, r.Success, r.Errors, r.Timeouts, r.Truncated, r.Unknown, r.Unmatched,
 				r.ExitZero, r.ExitNonzero, r.Results-r.ExitKnown, r.DurationKnown, r.DurationMS,
 				r.Stdout, r.Stderr, r.CombinedOutput, r.ChannelUnknown, r.Bytes)
+		}
+	}
+	if summary.UnknownExemplars.Retained > 0 || summary.UnknownExemplars.DroppedObservations > 0 {
+		reservoir := summary.UnknownExemplars
+		out.WriteString("\n## Unknown event structural exemplars\n\n")
+		fmt.Fprintf(&out, "Retained %d content-free shapes (%d serialized bytes) within fixed limits of %d shapes / %d bytes; dropped observations: %d. Structures contain scrubbed field names and JSON types only; scalar payload values are discarded before hashing and persistence.\n\n",
+			reservoir.Retained, reservoir.StoredBytes, reservoir.CardinalityLimit, reservoir.ByteLimit, reservoir.DroppedObservations)
+		out.WriteString("| ID | Source/subtype | Visibility → aggregate | Observations | Observed bytes | Shape hash | Structure |\n")
+		out.WriteString("|---|---|---|---:|---:|---|---|\n")
+		for _, exemplar := range reservoir.Exemplars {
+			fmt.Fprintf(&out, "| `%s` | `%s` / `%s` | `%s` → `%s` | %d | %d | `%s` | `%s` |\n",
+				exemplar.ID, exemplar.Source, exemplar.Subtype, exemplar.Visibility, exemplar.Aggregate,
+				exemplar.Observations, exemplar.ObservedBytes, exemplar.ShapeHash, escapeAuditMarkdown(exemplar.Structure))
 		}
 	}
 	if summary.QwenTopContributorTokenFraction == nil {
@@ -263,4 +276,15 @@ func auditDeltaComparedRegression(row AuditDeltaRow) bool {
 
 func escapeAuditMarkdown(value string) string {
 	return strings.ReplaceAll(value, "|", "\\|")
+}
+
+func auditExemplarIDLinks(ids []string) string {
+	if len(ids) == 0 {
+		return "—"
+	}
+	quoted := make([]string, len(ids))
+	for i, id := range ids {
+		quoted[i] = "`" + id + "`"
+	}
+	return strings.Join(quoted, ", ")
 }

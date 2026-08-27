@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -16,6 +17,13 @@ import (
 )
 
 func cmdLaunch(argv []string) { os.Exit(runLaunch(os.Stdout, os.Stderr, argv)) }
+
+var (
+	osExecutableForLaunch           = os.Executable
+	launchInput           io.Reader = os.Stdin
+	stableLaunchResolve             = launchshim.ResolveExecutable
+)
+
 func maybeLaunchDefault() bool {
 	c, err := launchshim.Load()
 	if err != nil || strings.TrimSpace(c.Default) == "" {
@@ -26,6 +34,9 @@ func maybeLaunchDefault() bool {
 }
 
 func runLaunch(stdout, stderr io.Writer, argv []string) int {
+	if delegated, code := delegateStableLaunch(stdout, stderr, argv); delegated {
+		return code
+	}
 	if len(argv) > 0 {
 		switch argv[0] {
 		case "install":
@@ -106,7 +117,7 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 	}
 	started := time.Now()
 	if directMode {
-		code := launchChildRunner(stdout, stderr, command, args)
+		code := launchChildRunner(launchInput, stdout, stderr, command, args)
 		_ = launchshim.Record(surface, p, "direct", launchOutcome(code), time.Since(started))
 		return code
 	}
@@ -126,16 +137,92 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 	}
 	guardArgs = append(guardArgs, "--", command)
 	guardArgs = append(guardArgs, args...)
-	code := launchChildRunner(stdout, stderr, fak, guardArgs)
+	code := launchChildRunner(launchInput, stdout, stderr, fak, guardArgs)
 	_ = launchshim.Record(surface, p, "guarded", launchOutcome(code), time.Since(started))
 	return code
 }
 
+// delegateStableLaunch keeps provider shims pinned to an executable that is
+// never itself replaced. It selects the deployed/prior binary at the last
+// possible moment, so ordinary launches participate in the update transaction.
+func delegateStableLaunch(stdout, stderr io.Writer, argv []string) (bool, int) {
+	exe, err := osExecutableForLaunch()
+	if err != nil || !strings.HasPrefix(strings.ToLower(filepath.Base(exe)), "fak-launch") {
+		return false, 0
+	}
+	c, err := launchshim.Load()
+	if err != nil {
+		fmt.Fprintln(stderr, "fak launch:", err)
+		return true, 1
+	}
+	target, bindErr := launchshim.StableExecutable(exe)
+	if errors.Is(bindErr, os.ErrNotExist) {
+		target = strings.TrimSpace(c.Executable)
+		bindErr = nil
+	}
+	if bindErr != nil {
+		fmt.Fprintln(stderr, "fak launch:", bindErr)
+		return true, 1
+	}
+	if strings.TrimSpace(target) == "" || samePath(exe, target) {
+		return false, 0
+	}
+	forward, policyFlag, waitFlag, err := stableLaunchFlags(argv)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak launch:", err)
+		return true, 2
+	}
+	policy, wait, err := launchshim.UpdatePolicy(c, policyFlag, waitFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak launch:", err)
+		return true, 2
+	}
+	selected, err := stableLaunchResolve(target, policy, wait)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak launch:", err)
+		return true, 75
+	}
+	forward = append([]string{"launch"}, forward...)
+	return true, launchChildRunner(launchInput, stdout, stderr, selected, forward)
+}
+
+func stableLaunchFlags(argv []string) (forward []string, policy, wait string, err error) {
+	forward = make([]string, 0, len(argv))
+	for i := 0; i < len(argv); i++ {
+		arg := argv[i]
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			forward = append(forward, argv[i:]...)
+			return forward, policy, wait, nil
+		}
+		switch {
+		case arg == "--update-launch-policy":
+			if i+1 >= len(argv) {
+				return nil, "", "", errors.New("--update-launch-policy requires prior, wait, or fail")
+			}
+			policy, i = argv[i+1], i+1
+		case strings.HasPrefix(arg, "--update-launch-policy="):
+			policy = strings.TrimPrefix(arg, "--update-launch-policy=")
+		case arg == "--update-launch-wait":
+			if i+1 >= len(argv) {
+				return nil, "", "", errors.New("--update-launch-wait requires a positive Go duration")
+			}
+			wait, i = argv[i+1], i+1
+		case strings.HasPrefix(arg, "--update-launch-wait="):
+			wait = strings.TrimPrefix(arg, "--update-launch-wait=")
+		default:
+			// Existing launch flags such as --direct remain byte-for-byte in
+			// the child argv while update flags may follow them.
+			forward = append(forward, arg)
+		}
+	}
+	return forward, policy, wait, nil
+}
+
 var launchChildRunner = runLaunchChild
 
-func runLaunchChild(stdout, stderr io.Writer, command string, args []string) int {
+func runLaunchChild(stdin io.Reader, stdout, stderr io.Writer, command string, args []string) int {
 	cmd := exec.Command(command, args...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, stdout, stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	if err := cmd.Run(); err != nil {
 		if e, ok := err.(*exec.ExitError); ok {
 			return e.ExitCode()
@@ -194,6 +281,12 @@ func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
 	stable, err := installStableLaunchTarget(dir, fak)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak launch install:", err)
+		return 1
+	}
+	if !samePath(stable, fak) {
+		c.Executable = fak
+	} else if strings.TrimSpace(c.Executable) == "" {
+		fmt.Fprintln(stderr, "fak launch install: stable launcher has no deployed fak target; run install from the deployed fak executable")
 		return 1
 	}
 	for _, p := range providers {
@@ -279,6 +372,9 @@ func installStableLaunchTarget(dir, fak string) (string, error) {
 		return "", err
 	}
 	if err := os.WriteFile(target, raw, 0o755); err != nil {
+		return "", err
+	}
+	if err := launchshim.BindStableExecutable(target, fak); err != nil {
 		return "", err
 	}
 	return target, nil
