@@ -1689,6 +1689,43 @@ class FakBinProvenanceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.mod = load()
 
+    def test_repository_relation_uses_git_ancestry_not_revision_age(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True)
+            (root / "row").write_text("one", encoding="utf-8")
+            subprocess.run(["git", "add", "row"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "one"], cwd=root, check=True)
+            old = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            (root / "row").write_text("two", encoding="utf-8")
+            subprocess.run(["git", "commit", "-qam", "two"], cwd=root, check=True)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+            self.assertEqual(self.mod.repository_build_relation(root, old),
+                             {"expected_head": head, "observed_build": old,
+                              "relation": "BEHIND"})
+            self.assertEqual(self.mod.repository_build_relation(root, head)["relation"], "MATCH")
+            self.assertEqual(self.mod.repository_build_relation(root, "f" * 40)["relation"], "UNKNOWN")
+
+    def test_stale_agreeing_build_refuses_before_capacity_admission(self) -> None:
+        stale = {"schema": self.mod.FAK_BIN_PROVENANCE_SCHEMA,
+                 "resolvers": {
+                     "preflight_gate": {"path": "/x/fak", "resolved": True, "build": "111111111111", "dirty": False},
+                     "worker_guard": {"path": "/y/fak", "resolved": True, "build": "111111111111", "dirty": False}},
+                 "distinct_builds": 1, "builds": ["111111111111"], "agree": True,
+                 "dirty": [], "unresolved": [], "resolved_count": 2,
+                 "expected_head": "222222222222", "observed_build": "111111111111",
+                 "repository_relation": "BEHIND", "historical_override": False}
+        patch_checks(self.mod, fak_bin=stale)
+        payload = run_eval(self.mod)
+        self.assertEqual(payload["verdict"], self.mod.REFUSE_FAK_BIN_STALE)
+        self.assertFalse(payload["ok"])
+        self.assertIn("111111111111", payload["reason"])
+        self.assertIn("222222222222", payload["reason"])
+        self.assertIn("fak self-update --force --root .", payload["reason"])
+
     def test_build_identity_reads_the_build_id_and_the_uncommitted_flag(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             exe = Path(td) / "fak.exe"

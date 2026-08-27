@@ -46,6 +46,10 @@ func dispatchGateProvenance(pre map[string]any, env func(string) string) selfins
 	p.WorkerPath, p.WorkerResolved = dispatchMapString(worker, "path"), dispatchMapBool(worker, "resolved")
 	p.WorkerBuild = strings.TrimSpace(dispatchMapString(worker, "build"))
 	p.WorkerAttested = p.WorkerBuild != ""
+	p.RepoHead = strings.TrimSpace(dispatchMapString(block, "expected_head"))
+	p.RepoRelation = strings.TrimSpace(dispatchMapString(block, "repository_relation"))
+	p.RepoError = strings.TrimSpace(dispatchMapString(block, "repository_error"))
+	p.ResolvedCount = dispatchMapInt(block, "resolved_count")
 	return p
 }
 
