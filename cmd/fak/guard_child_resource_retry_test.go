@@ -1,0 +1,206 @@
+package main
+
+import (
+	"bytes"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/procguard"
+)
+
+func TestGuardResourceRestartLimit(t *testing.T) {
+	t.Setenv(guardResourceRestartLimitEnv, "")
+	if got := guardResourceRestartLimit(); got != guardResourceRestartDefaultLimit {
+		t.Fatalf("unset limit=%d, want default %d", got, guardResourceRestartDefaultLimit)
+	}
+	for _, tc := range []struct {
+		raw  string
+		want int
+	}{
+		{raw: "0", want: 0},
+		{raw: "1", want: 1},
+		{raw: " 5 ", want: 5},
+		{raw: "-1", want: guardResourceRestartDefaultLimit},
+		{raw: "invalid", want: guardResourceRestartDefaultLimit},
+	} {
+		t.Run(tc.raw, func(t *testing.T) {
+			t.Setenv(guardResourceRestartLimitEnv, tc.raw)
+			if got := guardResourceRestartLimit(); got != tc.want {
+				t.Fatalf("limit with %q=%d, want %d", tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGuardResourceRetryAdmission(t *testing.T) {
+	for _, reason := range []string{"CHILD_TREE_RSS_LIMIT", "CHILD_TREE_COMMIT_LIMIT", "SYSTEM_COMMIT_HEADROOM"} {
+		t.Run(reason, func(t *testing.T) {
+			state := guardResourceRetryState{limit: 3, noProgressLimit: 0}
+			got := state.decide(resourceRetryEvent(reason), "claude", "sha-a")
+			if got.Action != guardResourceRetryRelaunch || got.Attempt != 1 || got.ResourceType != reason {
+				t.Fatalf("verdict=%+v", got)
+			}
+		})
+	}
+
+	for _, reason := range []string{"CHILD_RESOURCE_MONITOR_ERROR", "CHILD_RESOURCE_MONITOR_UNAVAILABLE", "", "UNKNOWN"} {
+		t.Run("terminal_"+reason, func(t *testing.T) {
+			state := guardResourceRetryState{limit: 3, noProgressLimit: 0}
+			got := state.decide(resourceRetryEvent(reason), "claude", "sha-a")
+			if got.Action != guardResourceRetryTerminal || state.restarts != 0 {
+				t.Fatalf("monitor/non-containment event admitted: verdict=%+v state=%+v", got, state)
+			}
+		})
+	}
+
+	t.Run("missing decision is terminal", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 3}
+		if got := state.decide(guardChildWaitEvent{Kind: guardChildResourceLimit}, "claude", "sha-a"); got.Action != guardResourceRetryTerminal {
+			t.Fatalf("verdict=%+v", got)
+		}
+	})
+
+	t.Run("explicit zero disables", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 0}
+		got := state.decide(resourceRetryEvent("CHILD_TREE_RSS_LIMIT"), "claude", "sha-a")
+		if got.Action != guardResourceRetryTerminal || state.restarts != 0 {
+			t.Fatalf("zero limit admitted retry: verdict=%+v state=%+v", got, state)
+		}
+	})
+
+	t.Run("unrecognized agent cannot cold relaunch", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 3}
+		got := state.decide(resourceRetryEvent("CHILD_TREE_RSS_LIMIT"), "foreign-harness", "sha-a")
+		if got.Action != guardResourceRetryTerminal || got.Cause != guardResourceRestartCauseNoReattach || state.restarts != 0 {
+			t.Fatalf("unrecognized agent admitted retry: verdict=%+v state=%+v", got, state)
+		}
+		status := guardResourceReattachUnavailableStatus("foreign-harness", "trace-resource")
+		for _, want := range []string{guardResourceReattachUnavailable, "foreign-harness", "trace-resource", "refusing a cold relaunch"} {
+			if !strings.Contains(status, want) {
+				t.Fatalf("reattach refusal %q missing %q", status, want)
+			}
+		}
+	})
+}
+
+func TestGuardResourceRetryBackoffAndFiniteBudget(t *testing.T) {
+	state := guardResourceRetryState{limit: 3, noProgressLimit: 0}
+	event := resourceRetryEvent("CHILD_TREE_RSS_LIMIT")
+	for i, wantDelay := range []time.Duration{250 * time.Millisecond, 500 * time.Millisecond, time.Second} {
+		got := state.decide(event, "claude", "")
+		if got.Action != guardResourceRetryRelaunch || got.Attempt != i+1 || got.Delay != wantDelay {
+			t.Fatalf("attempt %d verdict=%+v, want delay %s", i+1, got, wantDelay)
+		}
+	}
+	got := state.decide(event, "claude", "")
+	if got.Action != guardResourceRetryExhausted || got.Cause != guardResourceRestartCauseBudget || got.Limit != 3 {
+		t.Fatalf("spent budget verdict=%+v", got)
+	}
+}
+
+func TestGuardResourceRetryNoProgressExhaustsEarly(t *testing.T) {
+	state := guardResourceRetryState{limit: 5, noProgressLimit: 2}
+	event := resourceRetryEvent("SYSTEM_COMMIT_HEADROOM")
+	if got := state.decide(event, "claude", "sha-a"); got.Action != guardResourceRetryRelaunch || got.NoProgress != 0 {
+		t.Fatalf("first containment=%+v", got)
+	}
+	if got := state.decide(event, "claude", "sha-a"); got.Action != guardResourceRetryRelaunch || got.NoProgress != 1 {
+		t.Fatalf("first no-progress containment=%+v", got)
+	}
+	got := state.decide(event, "claude", "sha-a")
+	if got.Action != guardResourceRetryExhausted || got.Cause != guardResourceRestartCauseNoProgress || got.NoProgress != 2 {
+		t.Fatalf("repeated no-progress containment=%+v", got)
+	}
+
+	state = guardResourceRetryState{limit: 5, progressHead: "sha-a", noProgress: 1, noProgressLimit: 2}
+	if got := state.decide(event, "claude", "sha-b"); got.Action != guardResourceRetryRelaunch || got.NoProgress != 0 || state.progressHead != "sha-b" {
+		t.Fatalf("HEAD progress did not reset pressure=%+v state=%+v", got, state)
+	}
+}
+
+func TestGuardResourceRetryReportAndTypedExhaustion(t *testing.T) {
+	var stderr bytes.Buffer
+	verdict := guardResourceRetryVerdict{
+		Action:       guardResourceRetryRelaunch,
+		Attempt:      1,
+		Limit:        3,
+		Delay:        250 * time.Millisecond,
+		ResourceType: "CHILD_TREE_RSS_LIMIT",
+	}
+	guardReportResourceRestart(&stderr, "claude", verdict, []string{"claude"})
+	for _, want := range []string{
+		"CHILD_TREE_RSS_LIMIT",
+		"verified tree reap and receipt complete",
+		"guard remains up",
+		"reattaching the child after 250ms",
+		"resource restart 1/3",
+		"claude --continue",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("restart report %q missing %q", stderr.String(), want)
+		}
+	}
+
+	status := guardResourceRestartGiveUpStatus(guardResourceRetryVerdict{
+		Cause:      guardResourceRestartCauseNoProgress,
+		Limit:      3,
+		NoProgress: 2,
+	}, "trace-resource")
+	for _, want := range []string{guardResourceRestartExhaustedReason, "2 consecutive", "without HEAD progress", "trace-resource", "refusing another relaunch"} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("exhaustion report %q missing %q", status, want)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	audit, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardRecordResourceRestartGiveUp(audit, "claude", "trace-resource")
+	rows := audit.Recent(1)
+	if err := audit.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Kind != "CHILD_CRASH" || rows[0].Reason != guardResourceRestartExhaustedReason {
+		t.Fatalf("typed exhaustion audit row=%+v", rows)
+	}
+}
+
+func TestGuardResourceRestartHopReattachesSameTrace(t *testing.T) {
+	hop := guardResourceRestartHop("guard-resource", "claude", 2)
+	if hop.FromTrace != "guard-resource" || hop.ToTrace != "guard-resource" || hop.Child != "guard-resource" {
+		t.Fatalf("trace lineage=%+v", hop)
+	}
+	if hop.Handback != guardRestartHandbackContinue || hop.Status != journal.RestartHopOK || hop.Hop != 2 {
+		t.Fatalf("restart hop=%+v", hop)
+	}
+}
+
+func TestGuardResourceNoProgressLimit(t *testing.T) {
+	t.Setenv(guardResourceNoProgressLimitEnv, "")
+	if got := guardResourceNoProgressLimit(3); got != 2 {
+		t.Fatalf("default no-progress limit=%d, want 2", got)
+	}
+	t.Setenv(guardResourceNoProgressLimitEnv, "0")
+	if got := guardResourceNoProgressLimit(3); got != 0 {
+		t.Fatalf("explicit disable=%d, want 0", got)
+	}
+	t.Setenv(guardResourceNoProgressLimitEnv, "9")
+	if got := guardResourceNoProgressLimit(3); got != 2 {
+		t.Fatalf("limit was not clamped before flat budget: %d", got)
+	}
+}
+
+func resourceRetryEvent(reason string) guardChildWaitEvent {
+	return guardChildWaitEvent{
+		Kind: guardChildResourceLimit,
+		Resource: &guardResourceDecision{
+			Stop:   true,
+			Reason: reason,
+			Metric: procguard.MemoryMetricRSS,
+		},
+	}
+}

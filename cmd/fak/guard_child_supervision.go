@@ -106,6 +106,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	var crashProgressHead string
 	crashNoProgress := 0
 	crashNoProgressLimit := guardCrashNoProgressLimit(crashLimit)
+	resourceRetries := newGuardResourceRetryState()
 	wireRetries := 0
 	wireLimit := guardWireRetryLimit()
 	for {
@@ -147,12 +148,32 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			runErr = stopGuardChild(child, wait, 0)
 			lifecycle.finish(false)
 			terminalGuardChild(child, runErr, "resource_limit")
-			if receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid); receiptErr != nil {
-				fmt.Fprintf(os.Stderr, "fak guard: child resource receipt failed: %v\n", receiptErr)
-			}
+			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
 			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
 			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
+			if receiptErr != nil {
+				resourceErr = fmt.Errorf("child resource receipt failed after containment: %w", receiptErr)
+				fmt.Fprintf(os.Stderr, "fak guard: %v\n", resourceErr)
+				finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
+			verdict := resourceRetries.decide(event, agentName, sessionStartSHA())
+			if verdict.Action == guardResourceRetryRelaunch {
+				guardReportResourceRestart(os.Stderr, agentName, verdict, command)
+				time.Sleep(verdict.Delay)
+				guardRecordResourceRestart(auditJournal, os.Stderr, agentName, guardTraceID, verdict.Attempt)
+				command = guardRestartRelaunchCommand(command, agentName)
+				continue
+			}
+			if verdict.Action == guardResourceRetryExhausted {
+				guardRecordResourceRestartGiveUp(auditJournal, agentName, guardTraceID)
+				fmt.Fprintln(os.Stderr, guardResourceRestartGiveUpStatus(verdict, guardTraceID))
+				resourceErr = fmt.Errorf("%s: %w", guardResourceRestartExhaustedReason, resourceErr)
+			} else if verdict.Cause == guardResourceRestartCauseNoReattach {
+				fmt.Fprintln(os.Stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID))
+				resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
+			}
 			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		case runErr = <-wait:
@@ -268,6 +289,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	var crashProgressHead string
 	crashNoProgress := 0
 	crashNoProgressLimit := guardCrashNoProgressLimit(crashLimit)
+	resourceRetries := newGuardResourceRetryState()
 	wireRetries := 0
 	wireLimit := guardWireRetryLimit()
 	// Wall-clock enforcement (#2229): poll the session time budget on a coarse ticker so a
@@ -336,12 +358,38 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			markGuardChildTerminalIntent(child, "resource_limit")
 			_ = job.Close()
 			_ = stopGuardChild(child, wait, 0)
-			if receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid); receiptErr != nil {
-				fmt.Fprintf(os.Stderr, "fak guard: child resource receipt failed: %v\n", receiptErr)
-			}
+			receiptErr := guardWriteResourceReceipt(event, guardTraceID, agentName, child.Process.Pid)
 			fmt.Fprintf(os.Stderr, "fak guard: reaped child resource runaway: %s\n", event.Reason)
 			resourceErr := fmt.Errorf("child resource limit: %s", event.Reason)
 			appendGuardChildExitWitnessWithReason(auditJournal, agentName, guardTraceID, resourceErr, child.ProcessState, childStarted, event.Resource.Reason)
+			if receiptErr != nil {
+				resourceErr = fmt.Errorf("child resource receipt failed after containment: %w", receiptErr)
+				if restarter.stderr != nil {
+					fmt.Fprintf(restarter.stderr, "fak guard: %v\n", resourceErr)
+				}
+				finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
+			verdict := resourceRetries.decide(event, agentName, sessionStartSHA())
+			if verdict.Action == guardResourceRetryRelaunch {
+				guardReportResourceRestart(restarter.stderr, agentName, verdict, command)
+				time.Sleep(verdict.Delay)
+				guardRecordResourceRestart(auditJournal, restarter.stderr, agentName, guardTraceID, verdict.Attempt)
+				command = guardRestartRelaunchCommand(command, agentName)
+				continue
+			}
+			if verdict.Action == guardResourceRetryExhausted {
+				guardRecordResourceRestartGiveUp(auditJournal, agentName, guardTraceID)
+				if restarter.stderr != nil {
+					fmt.Fprintln(restarter.stderr, guardResourceRestartGiveUpStatus(verdict, guardTraceID))
+				}
+				resourceErr = fmt.Errorf("%s: %w", guardResourceRestartExhaustedReason, resourceErr)
+			} else if verdict.Cause == guardResourceRestartCauseNoReattach {
+				if restarter.stderr != nil {
+					fmt.Fprintln(restarter.stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID))
+				}
+				resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
+			}
 			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		case guardChildCompleted:

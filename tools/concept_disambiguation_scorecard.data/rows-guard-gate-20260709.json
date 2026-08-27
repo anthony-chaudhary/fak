@@ -474,8 +474,12 @@
    "definition": "The cmd/fak/guard_child.go function returning the command to relaunch a wrapped child with after a budget restart, appending the agent's resume flag for a recognized agent so the relaunch reattaches the existing transcript.",
    "distinction": "It is the FULL RELAUNCH COMMAND builder used on a budget restart, not guardContinueFlagForAgent, its flag-lookup dependency, and not guardAppendContinueFlag, its idempotent-append dependency, both of which it composes.",
    "distinct_from": [
-    "guard-gate-guardcontinueflagforagent",
-    "guard-gate-guardappendcontinueflag"
+     "guard-gate-guardcontinueflagforagent",
+     "guard-gate-guardappendcontinueflag",
+     "issue9335-guard-gate-child-wait-event",
+     "issue9335-guard-gate-crash-restart-delay",
+     "issue9335-guard-gate-same-trace-relaunch-hop",
+     "issue9335-guard-gate-emit-restart-hop"
    ],
    "aliases": [
     "guardRestartRelaunchCommand"

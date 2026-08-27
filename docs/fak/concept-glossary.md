@@ -2386,3 +2386,31 @@ The closed qwen38 campaign values selecting either fak-native model math for pro
 Token count in the unscoped full-context counterfactual used as the conservation baseline.
 
 **Distinct from:** A baseline count for one evaluator receipt, not a managed runtime context, context span ledger, or context-window limit.
+
+
+### guardChildWaitEvent (supervision outcome envelope)
+
+The tagged outcome returned by the guard child wait multiplexer, carrying exactly one completion, restart, time-budget, or resource-containment result back to the supervision loop.
+
+**Distinct from:** It is the WAIT-MULTIPLEXER OUTCOME ENVELOPE, not guardRestartRelaunchCommand, which builds the next child command, and not guardRestartLimitStatus, which formats restart-budget exhaustion status.
+
+
+### guardCrashRestartDelay (bounded child relaunch backoff)
+
+The function that computes the bounded exponential pause before a child relaunch attempt, shared by generic crash recovery and child resource-containment recovery.
+
+**Distinct from:** It is the RELAUNCH BACKOFF CALCULATOR, not guardRestartLimitStatus, which reports restart-budget state, and not guardRestartRelaunchCommand, which constructs the resumed child command.
+
+
+### guardSameTraceRelaunchHop (restart lineage constructor)
+
+The constructor for one restart-chain lineage hop whose source, destination, and child remain on the same guard trace, marking recognized resume handbacks engaged and unsupported agents orphaned.
+
+**Distinct from:** It is the RESTART LINEAGE VALUE CONSTRUCTOR, not guardRestartRelaunchCommand, which builds the executable child command, and not guardCrashRestartDelay, which computes how long to wait before relaunch.
+
+
+### guardEmitRestartHop (restart lineage persistence)
+
+The supervision helper that persists an already-constructed restart-chain hop to the audit journal and reports the same lineage status to the operator surface.
+
+**Distinct from:** It is the RESTART LINEAGE PERSISTENCE AND REPORTING step, not guardSameTraceRelaunchHop, which constructs the hop value, and not guardRestartRelaunchCommand, which builds the child command that the hop describes.

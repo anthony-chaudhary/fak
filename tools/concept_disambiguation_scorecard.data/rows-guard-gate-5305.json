@@ -570,7 +570,9 @@
       "distinction": "RESTART-BUDGET accounting/status - NOT guardNoProgressStep (no-progress step counting) and NOT formatGuardResumeGuidance (resume text).",
       "distinct_from": [
         "cov5305-guard-no-progress-step",
-        "cov5305-format-guard-resume-guidance"
+        "cov5305-format-guard-resume-guidance",
+        "issue9335-guard-gate-child-wait-event",
+        "issue9335-guard-gate-crash-restart-delay"
       ],
       "aliases": [],
       "grounding": "guardRestartLimitStatus",

@@ -1,0 +1,85 @@
+{
+  "rows": [
+    {
+      "id": "issue9335-guard-gate-child-wait-event",
+      "canonical": "guardChildWaitEvent (supervision outcome envelope)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The tagged outcome returned by the guard child wait multiplexer, carrying exactly one completion, restart, time-budget, or resource-containment result back to the supervision loop.",
+      "distinction": "It is the WAIT-MULTIPLEXER OUTCOME ENVELOPE, not guardRestartRelaunchCommand, which builds the next child command, and not guardRestartLimitStatus, which formats restart-budget exhaustion status.",
+      "distinct_from": [
+        "guard-gate-guardrestartrelaunchcommand",
+        "cov5305-guard-restart-limit-status"
+      ],
+      "aliases": [],
+      "grounding": "guardChildWaitEvent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9335-guard-gate-crash-restart-delay",
+      "canonical": "guardCrashRestartDelay (bounded child relaunch backoff)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The function that computes the bounded exponential pause before a child relaunch attempt, shared by generic crash recovery and child resource-containment recovery.",
+      "distinction": "It is the RELAUNCH BACKOFF CALCULATOR, not guardRestartLimitStatus, which reports restart-budget state, and not guardRestartRelaunchCommand, which constructs the resumed child command.",
+      "distinct_from": [
+        "cov5305-guard-restart-limit-status",
+        "guard-gate-guardrestartrelaunchcommand",
+        "issue9335-guard-gate-same-trace-relaunch-hop"
+      ],
+      "aliases": [],
+      "grounding": "guardCrashRestartDelay",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9335-guard-gate-same-trace-relaunch-hop",
+      "canonical": "guardSameTraceRelaunchHop (restart lineage constructor)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The constructor for one restart-chain lineage hop whose source, destination, and child remain on the same guard trace, marking recognized resume handbacks engaged and unsupported agents orphaned.",
+      "distinction": "It is the RESTART LINEAGE VALUE CONSTRUCTOR, not guardRestartRelaunchCommand, which builds the executable child command, and not guardCrashRestartDelay, which computes how long to wait before relaunch.",
+      "distinct_from": [
+        "guard-gate-guardrestartrelaunchcommand",
+        "issue9335-guard-gate-crash-restart-delay",
+        "issue9335-guard-gate-emit-restart-hop"
+      ],
+      "aliases": [],
+      "grounding": "guardSameTraceRelaunchHop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue9335-guard-gate-emit-restart-hop",
+      "canonical": "guardEmitRestartHop (restart lineage persistence)",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "The supervision helper that persists an already-constructed restart-chain hop to the audit journal and reports the same lineage status to the operator surface.",
+      "distinction": "It is the RESTART LINEAGE PERSISTENCE AND REPORTING step, not guardSameTraceRelaunchHop, which constructs the hop value, and not guardRestartRelaunchCommand, which builds the child command that the hop describes.",
+      "distinct_from": [
+        "issue9335-guard-gate-same-trace-relaunch-hop",
+        "guard-gate-guardrestartrelaunchcommand"
+      ],
+      "aliases": [],
+      "grounding": "guardEmitRestartHop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
