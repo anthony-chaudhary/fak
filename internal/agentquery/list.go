@@ -148,7 +148,7 @@ func rowSortNull(r Row, base string) bool {
 	return false
 }
 
-func cmpInt(a, b *int64) int {
+func cmpOrdered[T int64 | float64](a, b *T) int {
 	if a == nil && b == nil {
 		return 0
 	}
@@ -166,24 +166,9 @@ func cmpInt(a, b *int64) int {
 	}
 	return 0
 }
-func cmpFloat(a, b *float64) int {
-	if a == nil && b == nil {
-		return 0
-	}
-	if a == nil {
-		return 1
-	}
-	if b == nil {
-		return -1
-	}
-	if *a < *b {
-		return -1
-	}
-	if *a > *b {
-		return 1
-	}
-	return 0
-}
+
+func cmpInt(a, b *int64) int     { return cmpOrdered(a, b) }
+func cmpFloat(a, b *float64) int { return cmpOrdered(a, b) }
 func cmpTime(a, b *string) int {
 	if a == nil && b == nil {
 		return 0

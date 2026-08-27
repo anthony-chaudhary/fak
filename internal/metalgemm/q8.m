@@ -602,3 +602,17 @@ void mg_q8_reset(void) {
     gQ8XDBuf = nil; gQ8XDCap = 0;
     gQ8YBuf  = nil; gQ8YCap  = 0;
 }
+
+// Encode one Q8 projection into the caller-owned graph command buffer. Graph storage/accessors
+// live in q4k.m because that TU owns the graph lifecycle; this TU owns the Q8 table/pipeline.
+extern void *mg_graph_command_buffer(void *graph);
+extern void *mg_graph_xq_buffer(void *graph);
+extern void *mg_graph_xd_buffer(void *graph);
+extern int mg_graph_prompt(void *graph);
+extern int mg_graph_input(void *graph);
+extern void *mg_graph_alloc_result(void *graph, int n);
+void *mg_q8_graph_encode(void *graph, int wid) {
+    if (!q8_valid(wid) || !q8_init()) return NULL; int P=mg_graph_prompt(graph),in=mg_graph_input(graph);if(P<=0||in!=gQ8[wid].in)return NULL;
+    id<MTLCommandBuffer>cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(graph);id<MTLBuffer>xq=(__bridge id<MTLBuffer>)mg_graph_xq_buffer(graph),xd=(__bridge id<MTLBuffer>)mg_graph_xd_buffer(graph);if(!cb||!xq||!xd)return NULL;Q8W*w=&gQ8[wid];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_alloc_result(graph,P*w->out);if(!y)return NULL;
+    id<MTLComputeCommandEncoder>e=[cb computeCommandEncoder];[e setComputePipelineState:psoQ8Gemm];[e setBuffer:(__bridge id<MTLBuffer>)w->codes offset:0 atIndex:0];[e setBuffer:(__bridge id<MTLBuffer>)w->scales offset:0 atIndex:1];[e setBuffer:xq offset:0 atIndex:2];[e setBuffer:xd offset:0 atIndex:3];[e setBuffer:y offset:0 atIndex:4];[e setBytes:&w->nblk length:sizeof(int) atIndex:5];[e setBytes:&w->out length:sizeof(int) atIndex:6];[e setBytes:&P length:sizeof(int) atIndex:7];const int BM=64,BN=64,TG=256;int rowBlocks=(w->out+BM-1)/BM;for(int t0=0;t0<P;t0+=BN){int nt=P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:8];[e setBytes:&nt length:sizeof(int) atIndex:9];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding];return (__bridge void*)y;
+}
