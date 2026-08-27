@@ -4,6 +4,7 @@ package modelperfobs
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -61,6 +62,16 @@ func collectHostSnapshot() (hostSnapshot, error) {
 			s.availability.MemoryPressure = true
 		}
 	}
+	if b, e := os.ReadFile("/proc/pressure/memory"); e == nil {
+		if parseProcPressureMemory(string(b), &s.host) {
+			s.availability.MemoryPressure = true
+		}
+	}
+	if b, e := os.ReadFile("/proc/vmstat"); e == nil {
+		if parseProcVMStat(string(b), &s.host) {
+			s.availability.MemoryPressure = true
+		}
+	}
 	if f, e := os.Open("/proc/self/io"); e == nil {
 		defer f.Close()
 		sc := bufio.NewScanner(f)
@@ -98,4 +109,159 @@ func parseProcSelfStatFaults(line string) (minor, major uint64, ok bool) {
 	minor, e1 := strconv.ParseUint(fields[7], 10, 64)
 	major, e2 := strconv.ParseUint(fields[9], 10, 64)
 	return minor, major, e1 == nil && e2 == nil
+}
+
+func parseProcPressureMemory(input string, host *HostSignals) bool {
+	if host == nil {
+		return false
+	}
+	available := false
+	sc := bufio.NewScanner(strings.NewReader(input))
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 2 || (fields[0] != "some" && fields[0] != "full") {
+			continue
+		}
+		scope := fields[0]
+		for _, field := range fields[1:] {
+			key, raw, ok := strings.Cut(field, "=")
+			if !ok {
+				continue
+			}
+			switch key {
+			case "avg10", "avg60", "avg300":
+				value, err := strconv.ParseFloat(raw, 64)
+				if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 100 {
+					continue
+				}
+				switch {
+				case scope == "some" && key == "avg10":
+					host.MemoryPressureSomeAvg10Percent = cloneFloat(&value)
+				case scope == "some" && key == "avg60":
+					host.MemoryPressureSomeAvg60Percent = cloneFloat(&value)
+				case scope == "some" && key == "avg300":
+					host.MemoryPressureSomeAvg300Percent = cloneFloat(&value)
+				case scope == "full" && key == "avg10":
+					host.MemoryPressureFullAvg10Percent = cloneFloat(&value)
+				case scope == "full" && key == "avg60":
+					host.MemoryPressureFullAvg60Percent = cloneFloat(&value)
+				case scope == "full" && key == "avg300":
+					host.MemoryPressureFullAvg300Percent = cloneFloat(&value)
+				}
+				available = true
+			case "total":
+				value, err := strconv.ParseUint(raw, 10, 64)
+				if err != nil {
+					continue
+				}
+				if scope == "some" {
+					host.MemoryPressureSomeTotalStallMicroseconds = cloneU64(&value)
+				} else {
+					host.MemoryPressureFullTotalStallMicroseconds = cloneU64(&value)
+				}
+				available = true
+			}
+		}
+	}
+	return available
+}
+
+func parseProcVMStat(input string, host *HostSignals) bool {
+	if host == nil {
+		return false
+	}
+	type reclaimCounter struct {
+		destination    **uint64
+		modernPresent  bool
+		legacyTotal    uint64
+		legacyPresent  bool
+		legacyOverflow bool
+	}
+	reclaim := map[string]*reclaimCounter{
+		"pgscan_kswapd":  {destination: &host.MemoryReclaimKswapdScannedPagesTotal},
+		"pgscan_direct":  {destination: &host.MemoryReclaimDirectScannedPagesTotal},
+		"pgsteal_kswapd": {destination: &host.MemoryReclaimKswapdReclaimedPagesTotal},
+		"pgsteal_direct": {destination: &host.MemoryReclaimDirectReclaimedPagesTotal},
+	}
+	available := false
+	sc := bufio.NewScanner(strings.NewReader(input))
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) != 2 {
+			continue
+		}
+		key := fields[0]
+		counter := reclaim[key]
+		legacy := false
+		if counter != nil {
+			// Presence, rather than successful parsing, controls precedence: a
+			// malformed aggregate must stay omitted instead of being concealed by
+			// a legacy fallback from mixed input.
+			counter.modernPresent = true
+		} else if base, ok := legacyVMStatBase(key); ok {
+			counter = reclaim[base]
+			legacy = true
+		}
+		if counter != nil {
+			value, err := strconv.ParseUint(fields[1], 10, 64)
+			if err != nil {
+				continue
+			}
+			if legacy {
+				counter.legacyPresent = true
+				if counter.legacyOverflow || value > math.MaxUint64-counter.legacyTotal {
+					counter.legacyOverflow = true
+					continue
+				}
+				counter.legacyTotal += value
+				continue
+			}
+			*counter.destination = cloneU64(&value)
+			available = true
+			continue
+		}
+		var destination **uint64
+		switch key {
+		case "pswpin":
+			destination = &host.MemorySwapInPagesTotal
+		case "pswpout":
+			destination = &host.MemorySwapOutPagesTotal
+		default:
+			continue
+		}
+		value, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		*destination = cloneU64(&value)
+		available = true
+	}
+	for _, key := range []string{"pgscan_kswapd", "pgscan_direct", "pgsteal_kswapd", "pgsteal_direct"} {
+		counter := reclaim[key]
+		if counter.modernPresent || !counter.legacyPresent || counter.legacyOverflow {
+			continue
+		}
+		*counter.destination = cloneU64(&counter.legacyTotal)
+		available = true
+	}
+	return available
+}
+
+func legacyVMStatBase(key string) (string, bool) {
+	separator := strings.LastIndexByte(key, '_')
+	if separator < 0 {
+		return "", false
+	}
+	switch key[separator+1:] {
+	case "dma", "dma32", "normal", "high", "movable":
+	default:
+		return "", false
+	}
+	base := key[:separator]
+	switch base {
+	case "pgscan_kswapd", "pgscan_direct", "pgsteal_kswapd", "pgsteal_direct":
+		return base, true
+	default:
+		return "", false
+	}
 }
