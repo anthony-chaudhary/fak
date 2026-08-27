@@ -324,26 +324,6 @@ func printCatalog(asJSON bool) {
 // and cmd/turntaxdemo -print, for the reuse axis.)
 // ---------------------------------------------------------------------------
 
-type barPalette struct{ red, amber, green, dim, bold, reset string }
-
-func barColors() barPalette {
-	tty := false
-	if fi, err := os.Stdout.Stat(); err == nil {
-		tty = fi.Mode()&os.ModeCharDevice != 0
-	}
-	if os.Getenv("NO_COLOR") != "" || !tty {
-		return barPalette{}
-	}
-	return barPalette{red: "\033[31m", amber: "\033[33m", green: "\033[32m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
-}
-
-func (p barPalette) paint(code, s string) string {
-	if code == "" {
-		return s
-	}
-	return code + s + p.reset
-}
-
 // commaInt formats an int with thousands separators (Go has no built-in for this).
 func commaInt(n int) string {
 	s := strconv.Itoa(n)
@@ -383,7 +363,7 @@ func bar(n, max, width int) string {
 // printBars renders every scenario's reuse comparison as a side-by-side bar chart.
 // scenarioID == "" renders the whole catalog; a non-empty id renders just that one.
 func printBars(scenarioID string) int {
-	p := barColors()
+	p := demoui.TerminalPalette(os.Stdout)
 	scens := catalog()
 	if scenarioID != "" {
 		s, ok := findScenario(scenarioID)
@@ -394,8 +374,8 @@ func printBars(scenarioID string) int {
 		scens = []Scenario{s}
 	}
 	const width = 42
-	fmt.Printf("\n  %s\n", p.paint(p.bold, "fak · context reuse, side by side"))
-	fmt.Printf("  %s\n", p.paint(p.dim, "prefill tokens the model must RE-READ per session — lower is better (decode excluded: it's generated, not re-read)"))
+	fmt.Printf("\n  %s\n", p.Paint(p.Bold, "fak · context reuse, side by side"))
+	fmt.Printf("  %s\n", p.Paint(p.Dim, "prefill tokens the model must RE-READ per session — lower is better (decode excluded: it's generated, not re-read)"))
 	for _, s := range scens {
 		v := viewOf(s)
 		t := v.Tokens
@@ -404,17 +384,17 @@ func printBars(scenarioID string) int {
 			max = t.FakFused
 		}
 		fmt.Printf("\n  %s  %s\n",
-			p.paint(p.bold, s.ID),
-			p.paint(p.dim, fmt.Sprintf("(C=%d agents · T=%d turns · P=%d prefix · maxCtx=%s)", s.Agents, s.Turns, s.Prefix, commaInt(t.MaxContext))))
+			p.Paint(p.Bold, s.ID),
+			p.Paint(p.Dim, fmt.Sprintf("(C=%d agents · T=%d turns · P=%d prefix · maxCtx=%s)", s.Agents, s.Turns, s.Prefix, commaInt(t.MaxContext))))
 		row := func(color, label string, n int) {
 			fmt.Printf("    %s  %s  %s\n",
-				p.paint(p.dim, padTo(label, 26)),
-				p.paint(color, padTo(bar(n, max, width), width)),
-				p.paint(color, commaInt(n)))
+				p.Paint(p.Dim, padTo(label, 26)),
+				p.Paint(color, padTo(bar(n, max, width), width)),
+				p.Paint(color, commaInt(n)))
 		}
-		row(p.amber, "tuned warm-cache (SOTA)", t.PerAgentKV)
-		row(p.green, "fak (cross-agent reuse)", t.FakFused)
-		fmt.Printf("    %s\n", p.paint(p.dim, fmt.Sprintf(
+		row(p.Amber, "tuned warm-cache (SOTA)", t.PerAgentKV)
+		row(p.Green, "fak (cross-agent reuse)", t.FakFused)
+		fmt.Printf("    %s\n", p.Paint(p.Dim, fmt.Sprintf(
 			"→ fak makes the model re-read %.1f× fewer tokens than even a tuned warm-cache stack.",
 			t.TunedOverFak)))
 	}
