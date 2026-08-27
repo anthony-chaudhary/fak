@@ -24,6 +24,20 @@ const (
 )
 
 func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
+	return runBenchSystemBaselineWithAttributor(stdout, stderr, argv, func() systemBaselineCommandAttributor {
+		return systembaseline.NewCommandAttributor()
+	})
+}
+
+type systemBaselineCommandAttributor interface {
+	Configure(*exec.Cmd) bool
+	Active() bool
+	Started(int)
+	LaunchFailed(error)
+	Finish() systembaseline.CgroupV2
+}
+
+func runBenchSystemBaselineWithAttributor(stdout, stderr io.Writer, argv []string, newAttributor func() systemBaselineCommandAttributor) int {
 	fs := flag.NewFlagSet("bench system-baseline", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 250*time.Millisecond, "host/process sample interval (10ms..10s)")
@@ -33,6 +47,7 @@ func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
 	out := fs.String("out", "", "also write the JSON attestation to this path")
 	maxAmbient := fs.Float64("max-non-sut-cpu-percent", 20, "investigate above this non-SUT share of host CPU")
 	maxSamplerDuty := fs.Float64("max-sampler-duty-percent", 10, "investigate above this sampler census duty (0,100]")
+	maxPSIStall := fs.Float64("max-psi-stall-percent", 5, "investigate above this cgroup PSI stall share [0,100]")
 	requireMemory := fs.Bool("require-process-memory", false, "investigate when complete SUT/non-SUT RSS attribution is unavailable")
 	topConsumers := fs.Bool("top-consumers", false, "include up to five scrubbed image+PID non-SUT consumers (local/high-cardinality evidence)")
 	if err := fs.Parse(argv); err != nil {
@@ -52,8 +67,8 @@ func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *interval < minimumSystemBaselineInterval || *interval > maximumSystemBaselineInterval ||
 		*baselineDuration < minimumSystemBaselineDuration || *baselineDuration > maximumSystemBaselineDuration ||
-		*timeout < 0 || *timeout > maximumSystemBaselineTimeout || *maxAmbient <= 0 || *maxAmbient > 100 || *maxSamplerDuty <= 0 || *maxSamplerDuty > 100 {
-		fmt.Fprintln(stderr, "fak bench system-baseline: interval must be 10ms..10s, baseline duration 10ms..60s, timeout 0..24h, max non-SUT CPU in (0,100], and max sampler duty in (0,100]")
+		*timeout < 0 || *timeout > maximumSystemBaselineTimeout || *maxAmbient <= 0 || *maxAmbient > 100 || *maxSamplerDuty <= 0 || *maxSamplerDuty > 100 || *maxPSIStall < 0 || *maxPSIStall > 100 {
+		fmt.Fprintln(stderr, "fak bench system-baseline: interval must be 10ms..10s, baseline duration 10ms..60s, timeout 0..24h, max non-SUT CPU in (0,100], max sampler duty in (0,100], and max PSI stall in [0,100]")
 		return 2
 	}
 
@@ -65,14 +80,32 @@ func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
 		ctx, cancel = context.WithTimeout(ctx, *timeout)
 	}
 	defer cancel()
-	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	cmd.Stdout, cmd.Stderr = stderr, stderr
+	newCommand := func() *exec.Cmd {
+		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+		windowgate.ConfigureBackgroundCommand(cmd)
+		cmd.Stdout, cmd.Stderr = stderr, stderr
+		return cmd
+	}
+	attributor := newAttributor()
+	cmd := newCommand()
+	configured := attributor.Configure(cmd)
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintf(stderr, "fak bench system-baseline: start child: %v\n", err)
-		return 1
+		if configured {
+			attributor.LaunchFailed(err)
+			cmd = newCommand()
+			err = cmd.Start()
+		}
+		if err != nil {
+			attributor.LaunchFailed(err)
+			_ = attributor.Finish()
+			fmt.Fprintf(stderr, "fak bench system-baseline: start child: %v\n", err)
+			return 1
+		}
 	}
 	rootPID := cmd.Process.Pid
+	if configured && attributor.Active() {
+		attributor.Started(rootPID)
+	}
 	sampler := newAdaptiveSystemBaselineSampler(cadencePolicy)
 	samples := []systembaseline.Snapshot{sampler.capture()}
 	done := make(chan error, 1)
@@ -107,11 +140,13 @@ waitLoop:
 	policy := systembaseline.DefaultPolicy()
 	policy.MaximumNonSUTCPUPercent = *maxAmbient
 	policy.MaximumSamplerDutyPercent = *maxSamplerDuty
+	policy.MaximumPSIStallPercent = *maxPSIStall
 	policy.MinimumCensusIntervalNS = int64(cadencePolicy.Minimum)
 	policy.MaximumCensusIntervalNS = int64(cadencePolicy.Maximum)
 	policy.RequireProcessMemory = *requireMemory
 	policy.IncludeTopConsumers = *topConsumers
-	report := systembaseline.Build(baselineSamples, samples, rootPID, *interval, policy, exitCode, timedOut)
+	cgroup := attributor.Finish()
+	report := systembaseline.BuildWithCgroupV2(baselineSamples, samples, rootPID, *interval, policy, exitCode, timedOut, &cgroup)
 	raw, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "fak bench system-baseline: encode: %v\n", err)

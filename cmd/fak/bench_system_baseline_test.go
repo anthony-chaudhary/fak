@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -34,6 +35,85 @@ type failingSystemBaselineWriter struct{}
 
 func (failingSystemBaselineWriter) Write([]byte) (int, error) {
 	return 0, errors.New("injected stdout failure")
+}
+
+type recordingSystemBaselineAttributor struct {
+	startedPID  int
+	finishCalls int
+}
+
+func (*recordingSystemBaselineAttributor) Configure(*exec.Cmd) bool { return true }
+func (*recordingSystemBaselineAttributor) Active() bool             { return true }
+func (a *recordingSystemBaselineAttributor) Started(pid int)        { a.startedPID = pid }
+func (*recordingSystemBaselineAttributor) LaunchFailed(error)       {}
+func (a *recordingSystemBaselineAttributor) Finish() systembaseline.CgroupV2 {
+	a.finishCalls++
+	reason := "injected cgroup counter fallback"
+	metric := func(unit string) systembaseline.Metric {
+		return systembaseline.Metric{Unit: unit, Reason: reason}
+	}
+	axis := systembaseline.PressureAxis{Some: metric("microseconds"), Full: metric("microseconds")}
+	return systembaseline.CgroupV2{
+		State:  systembaseline.CgroupStateUnavailable,
+		Reason: reason,
+		Membership: systembaseline.CgroupMembership{
+			AtomicPlacement:  true,
+			RootPID:          a.startedPID,
+			AfterStart:       metric("processes"),
+			AfterWait:        metric("processes"),
+			PlacementSource:  "injected command-wrap seam",
+			UnavailableCause: reason,
+		},
+		CPU: systembaseline.CounterSet{Reason: reason},
+		Memory: systembaseline.CgroupMemory{
+			CurrentBytes: metric("bytes"),
+			PeakBytes:    metric("bytes"),
+			Events:       systembaseline.CounterSet{Reason: reason},
+		},
+		Pressure: systembaseline.CgroupPressure{CPU: axis, Memory: axis, IO: axis},
+		Cleanup:  systembaseline.CgroupCleanup{Attempted: true, Empty: true, Removed: true},
+	}
+}
+
+func TestBenchSystemBaselineFinalizesCgroupForEveryCommandOutcome(t *testing.T) {
+	tests := []struct {
+		name, mode string
+		timeout    string
+		wantExit   int
+	}{
+		{name: "success", mode: "success", wantExit: 0},
+		{name: "failure", mode: "failure", wantExit: 7},
+		{name: "timeout", mode: "timeout", timeout: "40ms", wantExit: 124},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("GO_WANT_SYSTEM_BASELINE_HELPER", test.mode)
+			attributor := &recordingSystemBaselineAttributor{}
+			args := []string{"--interval", "10ms", "--baseline-duration", "20ms", "--max-sampler-duty-percent", "100"}
+			if test.timeout != "" {
+				args = append(args, "--timeout", test.timeout)
+			}
+			args = append(args, "--", os.Args[0], "-test.run=^TestSystemBaselineHelper$")
+			var stdout, stderr bytes.Buffer
+			code := runBenchSystemBaselineWithAttributor(&stdout, &stderr, args, func() systemBaselineCommandAttributor { return attributor })
+			if code != test.wantExit {
+				t.Fatalf("exit=%d want=%d stderr=%s", code, test.wantExit, stderr.String())
+			}
+			var report systembaseline.Report
+			if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+				t.Fatalf("decode: %v\n%s", err, stdout.String())
+			}
+			if attributor.startedPID <= 0 || attributor.finishCalls != 1 {
+				t.Fatalf("started=%d finish_calls=%d", attributor.startedPID, attributor.finishCalls)
+			}
+			if report.CgroupV2 == nil || !report.CgroupV2.Cleanup.Attempted || !report.CgroupV2.Cleanup.Empty || !report.CgroupV2.Cleanup.Removed {
+				t.Fatalf("cleanup receipt=%+v", report.CgroupV2)
+			}
+			if err := report.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
 }
 
 func TestBenchSystemBaselineReturnsFailureOnStdoutWriteError(t *testing.T) {

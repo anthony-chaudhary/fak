@@ -43,6 +43,7 @@ type Policy struct {
 	MinimumSamples            int     `json:"minimum_samples"`
 	MaximumNonSUTCPUPercent   float64 `json:"maximum_non_sut_cpu_percent"`
 	MaximumSamplerDutyPercent float64 `json:"maximum_sampler_duty_percent"`
+	MaximumPSIStallPercent    float64 `json:"maximum_psi_stall_percent,omitempty"`
 	MinimumCensusIntervalNS   int64   `json:"minimum_census_interval_ns"`
 	MaximumCensusIntervalNS   int64   `json:"maximum_census_interval_ns"`
 	RequireHostCPU            bool    `json:"require_host_cpu"`
@@ -52,7 +53,7 @@ type Policy struct {
 }
 
 func DefaultPolicy() Policy {
-	return Policy{MinimumBaselineSamples: 2, MinimumSamples: 2, MaximumNonSUTCPUPercent: 20, MaximumSamplerDutyPercent: 10, MinimumCensusIntervalNS: int64(10 * time.Millisecond), MaximumCensusIntervalNS: int64(time.Second), RequireHostCPU: true, RequireSUTCPU: true}
+	return Policy{MinimumBaselineSamples: 2, MinimumSamples: 2, MaximumNonSUTCPUPercent: 20, MaximumSamplerDutyPercent: 10, MaximumPSIStallPercent: 5, MinimumCensusIntervalNS: int64(10 * time.Millisecond), MaximumCensusIntervalNS: int64(time.Second), RequireHostCPU: true, RequireSUTCPU: true}
 }
 
 type Window struct {
@@ -125,6 +126,7 @@ type Report struct {
 	Coverage        Coverage        `json:"coverage"`
 	Host            HostTotals      `json:"host_totals"`
 	Attribution     Attribution     `json:"attribution"`
+	CgroupV2        *CgroupV2       `json:"cgroup_v2,omitempty"`
 	TopNonSUT       []Consumer      `json:"top_non_sut_consumers"`
 	Policy          Policy          `json:"policy"`
 	Findings        []Finding       `json:"findings"`
@@ -178,7 +180,18 @@ func Capture() Snapshot {
 }
 
 func Build(baselineSamples, samples []Snapshot, rootPID int, interval time.Duration, policy Policy, exitCode int, timedOut bool) Report {
+	return BuildWithCgroupV2(baselineSamples, samples, rootPID, interval, policy, exitCode, timedOut, nil)
+}
+
+// BuildWithCgroupV2 builds the ordinary host/process report and, when a
+// verified delegated cgroup is supplied, replaces sampled SUT CPU and memory
+// with the cgroup's cumulative whole-descendant counters.
+func BuildWithCgroupV2(baselineSamples, samples []Snapshot, rootPID int, interval time.Duration, policy Policy, exitCode int, timedOut bool, cgroup *CgroupV2) Report {
 	r := Report{Schema: Schema, Verdict: VerdictClean, Policy: normalizePolicy(policy), CommandExitCode: exitCode, TimedOut: timedOut, TopNonSUT: []Consumer{}, Findings: []Finding{}}
+	if cgroup != nil {
+		copy := cgroup.clone()
+		r.CgroupV2 = &copy
+	}
 	if len(baselineSamples) > 0 {
 		baselineSamples = append([]Snapshot(nil), baselineSamples...)
 		sort.SliceStable(baselineSamples, func(i, j int) bool { return baselineSamples[i].At.Before(baselineSamples[j].At) })
@@ -230,6 +243,7 @@ func Build(baselineSamples, samples []Snapshot, rootPID int, interval time.Durat
 		r.Host.ProcessCount = unavailable("processes", "process census unavailable")
 	}
 	r.foldProcesses(samples, rootPID)
+	r.foldCgroupV2(samples)
 	r.applyPolicy()
 	r.Seal()
 	return r
@@ -247,6 +261,9 @@ func normalizePolicy(p Policy) Policy {
 	}
 	if p.MaximumSamplerDutyPercent <= 0 || p.MaximumSamplerDutyPercent > 100 || math.IsNaN(p.MaximumSamplerDutyPercent) || math.IsInf(p.MaximumSamplerDutyPercent, 0) {
 		p.MaximumSamplerDutyPercent = 10
+	}
+	if p.MaximumPSIStallPercent < 0 || p.MaximumPSIStallPercent > 100 || math.IsNaN(p.MaximumPSIStallPercent) || math.IsInf(p.MaximumPSIStallPercent, 0) {
+		p.MaximumPSIStallPercent = 5
 	}
 	if p.MinimumCensusIntervalNS <= 0 {
 		p.MinimumCensusIntervalNS = int64(10 * time.Millisecond)
@@ -660,6 +677,7 @@ func (r *Report) applyPolicy() {
 		r.Findings = append(r.Findings, Finding{Code: "COMMAND_TIMEOUT", Detail: "child command exceeded the configured timeout"})
 		r.Verdict = VerdictInvalid
 	}
+	r.applyCgroupPolicy()
 }
 
 func available(v float64, unit, source string) Metric {
@@ -743,6 +761,18 @@ func (r Report) policyVerdict() string {
 	if r.Attribution.NonSUTCPUPercentOfHost.Available && r.Attribution.NonSUTCPUPercentOfHost.Value > p.MaximumNonSUTCPUPercent {
 		return VerdictInvestigate
 	}
+	if r.CgroupV2 != nil {
+		if r.CgroupV2.Cleanup.Attempted && (!r.CgroupV2.Cleanup.Empty || !r.CgroupV2.Cleanup.Removed) {
+			return VerdictInvestigate
+		}
+		for _, axis := range []PressureAxis{r.CgroupV2.Pressure.CPU, r.CgroupV2.Pressure.Memory, r.CgroupV2.Pressure.IO} {
+			for _, metric := range []Metric{axis.Some, axis.Full} {
+				if pct, ok := pressureStallPercent(metric, r.Window.DurationNS); ok && pct > p.MaximumPSIStallPercent {
+					return VerdictInvestigate
+				}
+			}
+		}
+	}
 	return VerdictClean
 }
 
@@ -768,6 +798,14 @@ func (r Report) Validate() error {
 	for _, metric := range []Metric{r.BaselineHost.CPUPercent, r.BaselineHost.MemoryTotalBytes, r.BaselineHost.MemoryAvailableBytes, r.BaselineSampler.DutyPercent, r.Host.CPUPercent, r.Host.MemoryTotalBytes, r.Host.MemoryAvailableBytes, r.Host.ProcessCount, r.CommandSampler.DutyPercent, r.Attribution.SUTCPUPercentOfHost, r.Attribution.NonSUTCPUPercentOfHost, r.Attribution.SUTRSSBytes, r.Attribution.NonSUTRSSBytes} {
 		if metric.Available && (math.IsNaN(metric.Value) || math.IsInf(metric.Value, 0) || metric.Value < 0 || metric.Unit == "") {
 			return errors.New("systembaseline: available metric has invalid value or unit; provide a finite non-negative value and unit or mark it unavailable")
+		}
+	}
+	if r.CgroupV2 != nil {
+		if err := r.CgroupV2.validate(); err != nil {
+			return err
+		}
+		if r.Coverage.DescendantAttribution == "exact_cgroup_v2" && r.CgroupV2.State != CgroupStateMeasured {
+			return errors.New("systembaseline: exact_cgroup_v2 coverage requires measured cgroup evidence")
 		}
 	}
 	if want := r.policyVerdict(); r.Verdict != want {
