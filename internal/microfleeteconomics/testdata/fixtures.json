@@ -1,0 +1,59 @@
+{
+  "rates": {
+    "compute_micro_usd_per_joule": 1,
+    "machine_micro_usd_per_millisecond": 1,
+    "network_micro_usd_per_byte": 0,
+    "storage_micro_usd_per_byte_second": 0
+  },
+  "cases": [
+    {
+      "name": "shared-cache-wins",
+      "winner": "micro/small/100k-fanout",
+      "receipts": [
+        {
+          "name": "micro/frontier/1", "task": "bounded-judgment-v1", "width": 1,
+          "attempted": 1, "accepted": 1, "quality_milli": 900,
+          "operations": {"branches":1,"cache_constructions":1,"cache_hits":0,"verifications":1,"cancellations":0,"failures":0,"retries":0,"recoveries":0,"stragglers":0},
+          "costs": {
+            "useful_work":{"compute_joules":1000000,"machine_millis":1000000},
+            "branching":{"compute_joules":1},"cache_construction":{"compute_joules":1000},"cache_hits":{},"queue_delay":{"machine_millis":100},"verification":{"compute_joules":1000},"fan_in":{"compute_joules":10},"cancellation":{},"failures":{},"retries":{},"recovery":{},"stragglers":{}
+          }
+        },
+        {
+          "name": "micro/small/1000-fanout", "task": "bounded-judgment-v1", "width": 1000,
+          "attempted": 1000, "accepted": 10, "quality_milli": 900,
+          "operations": {"branches":1000,"cache_constructions":1,"cache_hits":999,"verifications":1000,"cancellations":50,"failures":10,"retries":10,"recoveries":5,"stragglers":20},
+          "costs": {
+            "useful_work":{"compute_joules":500000,"machine_millis":100000},"branching":{"compute_joules":1000},"cache_construction":{"compute_joules":1000},"cache_hits":{"compute_joules":999},"queue_delay":{"machine_millis":10000},"verification":{"compute_joules":10000},"fan_in":{"compute_joules":5000},"cancellation":{"compute_joules":500},"failures":{"compute_joules":100},"retries":{"compute_joules":5000},"recovery":{"compute_joules":500},"stragglers":{"machine_millis":5000}
+          }
+        },
+        {
+          "name": "micro/small/100k-fanout", "task": "bounded-judgment-v1", "width": 100000,
+          "attempted": 100000, "accepted": 1000, "quality_milli": 900,
+          "operations": {"branches":100000,"cache_constructions":1,"cache_hits":99999,"verifications":100000,"cancellations":5000,"failures":1000,"retries":1000,"recoveries":500,"stragglers":2000},
+          "costs": {
+            "useful_work":{"compute_joules":5000000,"machine_millis":1000000},"branching":{"compute_joules":100000},"cache_construction":{"compute_joules":1000},"cache_hits":{"compute_joules":99999},"queue_delay":{"machine_millis":100000},"verification":{"compute_joules":1000000},"fan_in":{"compute_joules":500000},"cancellation":{"compute_joules":50000},"failures":{"compute_joules":10000},"retries":{"compute_joules":50000},"recovery":{"compute_joules":5000},"stragglers":{"machine_millis":50000}
+          }
+        }
+      ]
+    },
+    {
+      "name": "coordination-overhead-loses",
+      "winner": "micro/frontier/1",
+      "receipts": [
+        {
+          "name": "micro/frontier/1", "task": "bounded-judgment-v1", "width": 1,
+          "attempted": 1, "accepted": 1, "quality_milli": 900,
+          "operations": {"branches":1,"cache_constructions":1,"cache_hits":0,"verifications":1,"cancellations":0,"failures":0,"retries":0,"recoveries":0,"stragglers":0},
+          "costs": {"useful_work":{"compute_joules":1000,"machine_millis":1000},"branching":{"compute_joules":1},"cache_construction":{"compute_joules":10},"cache_hits":{},"queue_delay":{},"verification":{"compute_joules":10},"fan_in":{"compute_joules":1},"cancellation":{},"failures":{},"retries":{},"recovery":{},"stragglers":{}}
+        },
+        {
+          "name": "micro/small/100000-fanout", "task": "bounded-judgment-v1", "width": 100000,
+          "attempted": 100000, "accepted": 1, "quality_milli": 900,
+          "operations": {"branches":100000,"cache_constructions":1,"cache_hits":99999,"verifications":100000,"cancellations":90000,"failures":5000,"retries":5000,"recoveries":1000,"stragglers":10000},
+          "costs": {"useful_work":{"compute_joules":100000},"branching":{"compute_joules":100000},"cache_construction":{"compute_joules":1000},"cache_hits":{"compute_joules":99999},"queue_delay":{"machine_millis":1000000},"verification":{"compute_joules":1000000},"fan_in":{"compute_joules":500000},"cancellation":{"compute_joules":90000},"failures":{"compute_joules":50000},"retries":{"compute_joules":50000},"recovery":{"compute_joules":10000},"stragglers":{"machine_millis":500000}}
+        }
+      ]
+    }
+  ]
+}
