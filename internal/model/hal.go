@@ -64,7 +64,12 @@ func (m *Model) NewBackendSessionChecked(be compute.Backend) (*Session, error) {
 	if gr, ok := be.(interface{ GraphReset() }); ok {
 		gr.GraphReset()
 	}
-	s := &Session{M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv, halW: make(map[string]compute.Tensor), modelWeightsHeld: true}
+	s := &Session{
+		M: m, Cache: NewKVCache(m.Cfg), Backend: be, halKV: kv,
+		halW:             make(map[string]compute.Tensor),
+		borrowedHALW:     make(map[string]struct{}),
+		modelWeightsHeld: true,
+	}
 	s.initMixedQKV()
 	if m.Cfg.IsQwen35Hybrid() {
 		// ValidateBackendForwardPath already proved this exact structural capability and
@@ -98,8 +103,11 @@ func (s *Session) Close() {
 			}
 			if s.halW != nil {
 				for name, t := range s.halW {
-					s.Backend.Free(t)
+					if _, borrowed := s.borrowedHALW[name]; !borrowed {
+						s.Backend.Free(t)
+					}
 					delete(s.halW, name)
+					delete(s.borrowedHALW, name)
 				}
 			}
 			// Routed-expert weights served by the bounded ring are NOT in halW (that is the point), so they
@@ -129,6 +137,7 @@ func (s *Session) Close() {
 			}
 			s.halKV = nil
 			s.halW = nil
+			s.borrowedHALW = nil
 		}
 		if s.modelWeightsHeld {
 			s.modelWeightsHeld = false
@@ -153,21 +162,42 @@ func (s *Session) uploadHostF32(shape []int, data []float32, class compute.Memor
 	return uploadHostF32Class(s.Backend, shape, data, class, site)
 }
 
-func (s *Session) weightHAL(name string) compute.Tensor {
+func (s *Session) cachedImmutableWeight(sessionKey, residencyKey string, stage func() compute.Tensor) compute.Tensor {
 	if s.halW != nil {
-		if t, ok := s.halW[name]; ok {
+		if t, ok := s.halW[sessionKey]; ok {
 			return t // already resident on the backend; never re-upload an immutable weight
 		}
 	}
-	meta, ok := s.M.manifest[name]
-	if !ok {
-		panic("model: missing tensor " + name)
+	if resident := s.M.immutableDeviceWeights(s.Backend); resident != nil {
+		weight := resident.getOrStage(residencyKey, stage)
+		// Keep a session-local borrowed-handle memo so steady decode retains the original
+		// plain-map fast path. Close distinguishes borrowed model residents from private
+		// routed-expert fallbacks before freeing.
+		if s.halW != nil {
+			s.halW[sessionKey] = weight
+			if s.borrowedHALW == nil {
+				s.borrowedHALW = make(map[string]struct{})
+			}
+			s.borrowedHALW[sessionKey] = struct{}{}
+		}
+		return weight
 	}
-	t := s.uploadHostF32(meta.Shape, s.M.tensor(name), compute.MemoryWeights, "hal-weight "+name)
+	t := stage()
 	if s.halW != nil {
-		s.halW[name] = t
+		s.halW[sessionKey] = t
 	}
 	return t
+}
+
+func (s *Session) weightHAL(name string) compute.Tensor {
+	stage := func() compute.Tensor {
+		meta, ok := s.M.manifest[name]
+		if !ok {
+			panic("model: missing tensor " + name)
+		}
+		return s.uploadHostF32(meta.Shape, s.M.tensor(name), compute.MemoryWeights, "hal-weight "+name)
+	}
+	return s.cachedImmutableWeight(name, "f32:"+name, stage)
 }
 
 func (s *Session) useHALQ8Weights() bool {
@@ -202,16 +232,8 @@ var halQ8BatchLayers = envIntMin("FAK_HAL_Q8_BATCH_LAYERS", 0, 2)
 // per-format construction + its own nil-tensor guard) and uploads it. Shared by
 // weightHALQ8 / weightHALQ4K.
 func (s *Session) weightHALStaged(key string, mk func() compute.Tensor, dtype compute.Dtype) compute.Tensor {
-	if s.halW != nil {
-		if t, ok := s.halW[key]; ok {
-			return t
-		}
-	}
-	t := s.Backend.Upload(mk(), dtype)
-	if s.halW != nil {
-		s.halW[key] = t
-	}
-	return t
+	stage := func() compute.Tensor { return s.Backend.Upload(mk(), dtype) }
+	return s.cachedImmutableWeight(key, key, stage)
 }
 
 // requireTensorPresent panics with the uniform "missing weight" message the

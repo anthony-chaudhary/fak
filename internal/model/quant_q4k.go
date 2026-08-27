@@ -596,13 +596,14 @@ func (m *Model) q4k(name string) *q4kTensor {
 }
 
 type weightCloserState struct {
-	mu       sync.Mutex
-	once     sync.Once
-	c        io.Closer
-	err      error
-	sessions int
-	closing  bool
-	closed   bool
+	mu         sync.Mutex
+	once       sync.Once
+	c          io.Closer
+	err        error
+	halWeights *modelHALWeightResidency
+	sessions   int
+	closing    bool
+	closed     bool
 }
 
 var weightCloserInitMu sync.Mutex
@@ -644,6 +645,9 @@ func (m *Model) holdModelWeights() bool {
 
 func (m *Model) finishWeightClose(s *weightCloserState) {
 	s.once.Do(func() {
+		// Immutable HAL weights are model-owned and may outlive every individual request,
+		// but never the mapped Q4_K/Q8 or checkpoint bytes from which they were staged.
+		s.halWeights.close()
 		// Native buffers stop borrowing mapped Q4_K/Q8 backing before the checkpoint owner can unmap it.
 		releaseModelQ4KHandles(m)
 		m.releaseMetalQ8Residency()

@@ -121,6 +121,21 @@ func (s *Session) weightHALStagedBounded(key, name string, mk func() compute.Ten
 			return t
 		}
 	}
+	// A routed expert that is outside a ring or refused by its bound remains session-local:
+	// sharing it here would turn the deliberately bounded expert tier into an unbounded
+	// model-lifetime memoizer. Dense/shared weights use model-lifetime immutable residency.
+	if isRoutedExpertWeight(name) {
+		if s.halW != nil {
+			if t, ok := s.halW[key]; ok {
+				return t
+			}
+		}
+		t := s.Backend.Upload(mk(), dtype)
+		if s.halW != nil {
+			s.halW[key] = t
+		}
+		return t
+	}
 	return s.weightHALStaged(key, mk, dtype)
 }
 
