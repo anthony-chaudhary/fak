@@ -305,9 +305,14 @@ func refuse(reason RefusalReason, axis, detail string) error {
 }
 
 func validatePins(m ReleaseManifest) error {
-	for axis, value := range map[string]string{
-		"source.uri": m.Source.URI, "artifact.uri": m.Artifact.URI,
-	} {
+	uriChecks := []struct {
+		axis, value string
+	}{
+		{"source.uri", m.Source.URI},
+		{"artifact.uri", m.Artifact.URI},
+	}
+	for _, check := range uriChecks {
+		axis, value := check.axis, check.value
 		if strings.TrimSpace(value) == "" {
 			return refuse(RefusalPinInvalid, axis, "value is required")
 		}
@@ -315,13 +320,17 @@ func validatePins(m ReleaseManifest) error {
 	if !isHexLen(m.Source.Revision, 40, 64) {
 		return refuse(RefusalPinInvalid, "source.revision", "must be a 40- or 64-character hexadecimal revision")
 	}
-	for axis, value := range map[string]string{
-		"source.manifest_sha256":        m.Source.ManifestSHA256,
-		"artifact.sha256":               m.Artifact.SHA256,
-		"artifact.tokenizer_sha256":     m.Artifact.TokenizerSHA256,
-		"artifact.chat_template_sha256": m.Artifact.ChatTemplateSHA256,
-		"artifact.context_sha256":       m.Artifact.ContextSHA256,
-	} {
+	digestChecks := []struct {
+		axis, value string
+	}{
+		{"source.manifest_sha256", m.Source.ManifestSHA256},
+		{"artifact.sha256", m.Artifact.SHA256},
+		{"artifact.tokenizer_sha256", m.Artifact.TokenizerSHA256},
+		{"artifact.chat_template_sha256", m.Artifact.ChatTemplateSHA256},
+		{"artifact.context_sha256", m.Artifact.ContextSHA256},
+	}
+	for _, check := range digestChecks {
+		axis, value := check.axis, check.value
 		if !isHexLen(value, 64) {
 			return refuse(RefusalPinInvalid, axis, "must be a 64-character hexadecimal digest")
 		}
