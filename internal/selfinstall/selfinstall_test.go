@@ -2,10 +2,12 @@ package selfinstall
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // scriptRunner fails the FIRST command whose joined argv contains failOn; everything else
@@ -620,5 +622,305 @@ func TestInstallVerifiedCopyLeavesTargetOnSwapFailure(t *testing.T) {
 	}
 	if string(got) != "stale but usable" {
 		t.Fatalf("target changed after failed swap: %q", got)
+	}
+}
+
+const (
+	cacheTestCommitA = "0123456789abcdef0123456789abcdef01234567"
+	cacheTestCommitB = "89abcdef0123456789abcdef0123456789abcdef"
+)
+
+// candidateCacheRunner models the entire expensive gate with a virtual clock. The latency
+// table never changes between cold and warm runs, so timing assertions measure eliminated
+// work rather than scheduler noise. Smoke identities may be queued to model a digest-valid
+// cache entry whose executable provenance is nevertheless wrong.
+type candidateCacheRunner struct {
+	commit        string
+	goEnv         string
+	artifact      []byte
+	builds        int
+	vets          int
+	smokes        int
+	elapsed       time.Duration
+	smokeCommits  []string
+	lastBuildPath string
+}
+
+func newCandidateCacheRunner() *candidateCacheRunner {
+	return &candidateCacheRunner{
+		commit: cacheTestCommitA,
+		goEnv: `go1.26.0
+/toolchain/go1.26
+auto
+windows
+amd64
+windows
+amd64
+`,
+		artifact: []byte("exact candidate bytes"),
+	}
+}
+
+func (r *candidateCacheRunner) run(_ context.Context, _ string, name string, args ...string) (string, bool) {
+	switch {
+	case name == "git" && len(args) == 2 && args[0] == "status":
+		r.elapsed += 25 * time.Millisecond
+		return "", true
+	case name == "git" && len(args) == 2 && args[0] == "rev-parse":
+		r.elapsed += 25 * time.Millisecond
+		return r.commit + "\n", true
+	case name == "go" && len(args) > 0 && args[0] == "env":
+		r.elapsed += 50 * time.Millisecond
+		return r.goEnv, true
+	case name == "go" && len(args) > 0 && args[0] == "build":
+		r.elapsed += 5 * time.Second
+		r.builds++
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] != "-o" {
+				continue
+			}
+			r.lastBuildPath = args[i+1]
+			if err := os.WriteFile(args[i+1], r.artifact, 0o755); err != nil {
+				return err.Error(), false
+			}
+			return "", true
+		}
+		return "build has no output path", false
+	case name == "go" && len(args) > 0 && args[0] == "vet":
+		r.elapsed += 5 * time.Second
+		r.vets++
+		return "", true
+	case len(args) == 2 && args[0] == "version" && args[1] == "--json":
+		r.elapsed += 100 * time.Millisecond
+		r.smokes++
+		commit := r.commit
+		if len(r.smokeCommits) > 0 {
+			commit = r.smokeCommits[0]
+			r.smokeCommits = r.smokeCommits[1:]
+		}
+		out, err := json.Marshal(candidateVersionIdentity{Commit: commit, Stamped: true})
+		if err != nil {
+			return err.Error(), false
+		}
+		return string(out), true
+	default:
+		return "unexpected command", false
+	}
+}
+
+// runCompleteCacheTransaction follows the production shape: Install captures the freshly
+// gated (or cache-restored) candidate, then RunTransaction stages, snapshots, and activates
+// that one candidate across every selected stale target.
+func runCompleteCacheTransaction(t *testing.T, r *candidateCacheRunner, opts Options, targets ...string) Result {
+	t.Helper()
+	var candidate string
+	res := Install(context.Background(), r.run, func(src, _ string) error {
+		candidate = src
+		return nil
+	}, opts)
+	if !res.Installed || candidate == "" {
+		return res
+	}
+	defer os.Remove(candidate)
+
+	copies := make([]Copy, 0, len(targets))
+	for _, target := range targets {
+		copies = append(copies, Copy{Source: candidate, Target: target})
+	}
+	transaction := RunTransaction(copies, func(src, dst string) error {
+		r.elapsed += 25 * time.Millisecond
+		return OSSwap(src, dst)
+	})
+	if got, ok := transaction.(Updated); !ok || got.Changed != len(targets) {
+		t.Fatalf("transaction = %#v, want Updated across %d targets", transaction, len(targets))
+	}
+	return res
+}
+
+func seedCacheTransactionTargets(t *testing.T, dir string, n int) []string {
+	t.Helper()
+	targets := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		target := filepath.Join(dir, "stale-"+string(rune('a'+i)))
+		if err := os.WriteFile(target, []byte("stale"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		targets = append(targets, target)
+	}
+	return targets
+}
+
+func TestInstallVerifiedCandidateCacheCompleteTransactionCutsSameEnvelopeFivefold(t *testing.T) {
+	dir := t.TempDir()
+	r := newCandidateCacheRunner()
+	targets := seedCacheTransactionTargets(t, dir, 3)
+	opts := Options{
+		RepoRoot:       dir,
+		Target:         targets[0],
+		BuildTmp:       filepath.Join(dir, "candidate"),
+		CacheDir:       filepath.Join(dir, "cache"),
+		ExpectedCommit: cacheTestCommitA,
+	}
+
+	before := r.elapsed
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed {
+		t.Fatalf("cold transaction: %+v", got)
+	}
+	cold := r.elapsed - before
+	before = r.elapsed
+	got := runCompleteCacheTransaction(t, r, opts, targets...)
+	warm := r.elapsed - before
+	if !got.Installed || !strings.Contains(got.Detail, "exact-commit verified candidate cache") {
+		t.Fatalf("warm transaction: %+v", got)
+	}
+	if r.builds != 1 || r.vets != 1 || r.smokes != 2 {
+		t.Fatalf("builds=%d vets=%d smokes=%d, want one cold build/vet and smoke on both transactions", r.builds, r.vets, r.smokes)
+	}
+	ratio := float64(cold) / float64(warm)
+	t.Logf("complete stale-update transaction: cold=%s warm=%s speedup=%.2fx", cold, warm, ratio)
+	if ratio < 5 {
+		t.Fatalf("complete-transaction same-envelope speedup = %.2fx, want >=5x (cold=%s warm=%s)", ratio, cold, warm)
+	}
+}
+
+func TestInstallCorruptCandidateCacheFallsBackAndAtomicallyRefreshes(t *testing.T) {
+	dir := t.TempDir()
+	r := newCandidateCacheRunner()
+	targets := seedCacheTransactionTargets(t, dir, 1)
+	cacheDir := filepath.Join(dir, "cache")
+	opts := Options{RepoRoot: dir, Target: targets[0], BuildTmp: filepath.Join(dir, "candidate"), CacheDir: cacheDir, ExpectedCommit: cacheTestCommitA}
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed {
+		t.Fatalf("seed transaction: %+v", got)
+	}
+
+	manifestData, err := os.ReadFile(candidateCachePaths(cacheDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest candidateCacheManifest
+	if err := json.Unmarshal(manifestData, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	artifact := candidateArtifactPath(cacheDir, manifest.ArtifactDigest)
+	if err := os.WriteFile(artifact, []byte("corrupt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from exact-commit") {
+		t.Fatalf("corrupt-cache fallback transaction: %+v", got)
+	}
+	if r.builds != 2 || r.vets != 2 {
+		t.Fatalf("builds=%d vets=%d, corrupt cache must rerun the complete build+vet gate", r.builds, r.vets)
+	}
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !strings.Contains(got.Detail, "exact-commit verified candidate cache") {
+		t.Fatalf("transaction after atomic refresh: %+v", got)
+	}
+	if r.builds != 2 || r.vets != 2 {
+		t.Fatalf("builds=%d vets=%d after refreshed hit, want no third rebuild", r.builds, r.vets)
+	}
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp-") {
+			t.Fatalf("atomic refresh leaked temporary cache entry %q", entry.Name())
+		}
+	}
+}
+
+func TestInstallCandidateCacheIdentityBindsCommitToolchainPlatformAndBuildInputs(t *testing.T) {
+	dir := t.TempDir()
+	r := newCandidateCacheRunner()
+	targets := seedCacheTransactionTargets(t, dir, 1)
+	opts := Options{RepoRoot: dir, Target: targets[0], BuildTmp: filepath.Join(dir, "candidate"), CacheDir: filepath.Join(dir, "cache"), ExpectedCommit: cacheTestCommitA}
+	assertRebuilt := func(label string) {
+		t.Helper()
+		beforeBuilds, beforeVets := r.builds, r.vets
+		if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from exact-commit") {
+			t.Fatalf("%s mismatch transaction: %+v", label, got)
+		}
+		if r.builds != beforeBuilds+1 || r.vets != beforeVets+1 {
+			t.Fatalf("%s mismatch builds/vets = %d/%d, want %d/%d", label, r.builds, r.vets, beforeBuilds+1, beforeVets+1)
+		}
+	}
+
+	assertRebuilt("empty cache")
+	r.goEnv = strings.Replace(r.goEnv, "go1.26.0", "go1.27.0", 1)
+	assertRebuilt("toolchain")
+	r.goEnv = strings.Replace(r.goEnv, "windows\namd64\n", "linux\narm64\n", 1)
+	assertRebuilt("platform")
+	r.commit = cacheTestCommitB
+	opts.ExpectedCommit = cacheTestCommitB
+	assertRebuilt("exact commit")
+	if err := os.WriteFile(filepath.Join(dir, "VERSION"), []byte("9.9.2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assertRebuilt("build arguments")
+
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !strings.Contains(got.Detail, "exact-commit verified candidate cache") {
+		t.Fatalf("unchanged bound identity should hit cache: %+v", got)
+	}
+}
+
+func TestInstallCandidateCacheProvenanceFailureFallsBackToFullGate(t *testing.T) {
+	dir := t.TempDir()
+	r := newCandidateCacheRunner()
+	targets := seedCacheTransactionTargets(t, dir, 1)
+	opts := Options{RepoRoot: dir, Target: targets[0], BuildTmp: filepath.Join(dir, "candidate"), CacheDir: filepath.Join(dir, "cache"), ExpectedCommit: cacheTestCommitA}
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed {
+		t.Fatalf("seed transaction: %+v", got)
+	}
+
+	// The first identity belongs to the restored cache candidate and must be rejected. The
+	// second belongs to the newly built candidate and permits activation only after build+vet.
+	r.smokeCommits = []string{cacheTestCommitB, cacheTestCommitA}
+	if got := runCompleteCacheTransaction(t, r, opts, targets...); !got.Installed || strings.Contains(got.Detail, "from exact-commit") {
+		t.Fatalf("cached provenance fallback: %+v", got)
+	}
+	if r.builds != 2 || r.vets != 2 || r.smokes != 3 {
+		t.Fatalf("builds=%d vets=%d smokes=%d, want cached smoke followed by full build/vet/fresh smoke", r.builds, r.vets, r.smokes)
+	}
+}
+
+func TestInstallRejectsMalformedExplicitExpectedCommit(t *testing.T) {
+	r := newCandidateCacheRunner()
+	swapCalled := false
+	res := Install(context.Background(), r.run, func(_, _ string) error {
+		swapCalled = true
+		return nil
+	}, Options{RepoRoot: t.TempDir(), Target: filepath.Join(t.TempDir(), "fak"), ExpectedCommit: "01234567"})
+	if res.Installed || res.Stage != StageSmoke || swapCalled {
+		t.Fatalf("malformed exact commit must fail closed before build/swap: result=%+v swap=%v", res, swapCalled)
+	}
+	if r.builds != 0 || r.vets != 0 || r.smokes != 0 {
+		t.Fatalf("malformed exact commit ran build/vet/smoke = %d/%d/%d", r.builds, r.vets, r.smokes)
+	}
+}
+
+func TestInstallRejectsSourceThatDoesNotMatchExpectedCommit(t *testing.T) {
+	r := newCandidateCacheRunner()
+	res := Install(context.Background(), r.run, func(_, _ string) error {
+		t.Fatal("swap called for the wrong source commit")
+		return nil
+	}, Options{RepoRoot: t.TempDir(), Target: filepath.Join(t.TempDir(), "fak"), CacheDir: t.TempDir(), ExpectedCommit: cacheTestCommitB})
+	if res.Installed || res.Stage != StageSmoke || !strings.Contains(res.Detail, cacheTestCommitA) {
+		t.Fatalf("source/selection mismatch must fail closed: %+v", res)
+	}
+	if r.builds != 0 || r.vets != 0 || r.smokes != 0 {
+		t.Fatalf("source/selection mismatch ran build/vet/smoke = %d/%d/%d", r.builds, r.vets, r.smokes)
+	}
+}
+
+func TestCandidateCacheDirUsesCloneSharedGitCommonDir(t *testing.T) {
+	commonDir := filepath.Join(t.TempDir(), "primary.git")
+	want := filepath.Join(commonDir, "fak", "self-update-cache")
+	if got := CandidateCacheDir(commonDir); got != want {
+		t.Fatalf("CandidateCacheDir(%q) = %q, want clone-shared %q", commonDir, got, want)
+	}
+	for _, unresolved := range []string{"", "  \t\r\n"} {
+		if got := CandidateCacheDir(unresolved); got != "" {
+			t.Fatalf("CandidateCacheDir(%q) = %q, want cache disabled rather than a relative worktree path", unresolved, got)
+		}
 	}
 }

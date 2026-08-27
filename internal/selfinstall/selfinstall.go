@@ -10,6 +10,8 @@
 // once; the gate is therefore not optional polish — it is the whole point.
 //
 // The flow (Install):
+//  0. cache   restore only an exact-input, digest-verified candidate, then smoke it again;
+//     any miss or mismatch falls through to the complete gate below.
 //  1. build   `go build [-ldflags -X …BuildVersion=<VERSION>] -o <tmp> ./cmd/fak` — a tree
 //     that won't compile stops here; the ldflags bake the tree's VERSION into the
 //     binary so its reported version does not depend on a guard's runtime cwd.
@@ -23,11 +25,16 @@
 package selfinstall
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -61,6 +68,64 @@ type Result struct {
 	Detail    string // captured output / error context for the failing or final stage
 }
 
+const candidateCacheSchema = "fak.selfinstall.candidate-cache.v1"
+
+var candidateGoEnvKeys = []string{
+	"GOVERSION",
+	"GOROOT",
+	"GOTOOLCHAIN",
+	"GOHOSTOS",
+	"GOHOSTARCH",
+	"GOOS",
+	"GOARCH",
+	"GOAMD64",
+	"GOARM64",
+	"GOARM",
+	"GO386",
+	"GOMIPS",
+	"GOMIPS64",
+	"GOEXPERIMENT",
+	"GOFIPS140",
+	"CGO_ENABLED",
+	"CC",
+	"CXX",
+	"CGO_CFLAGS",
+	"CGO_CPPFLAGS",
+	"CGO_CXXFLAGS",
+	"CGO_LDFLAGS",
+	"PKG_CONFIG",
+	"GOFLAGS",
+	"GO111MODULE",
+	"GOWORK",
+}
+
+type candidateCacheInput struct {
+	Schema         string   `json:"schema"`
+	ExpectedCommit string   `json:"expected_commit"`
+	SourceCommit   string   `json:"source_commit"`
+	HostOS         string   `json:"host_os"`
+	HostArch       string   `json:"host_arch"`
+	GoEnvKeys      []string `json:"go_env_keys"`
+	GoEnv          string   `json:"go_env"`
+	BuildArgs      []string `json:"build_args"`
+	VetArgs        []string `json:"vet_args"`
+}
+
+type candidateCacheManifest struct {
+	Schema         string `json:"schema"`
+	ExpectedCommit string `json:"expected_commit"`
+	InputDigest    string `json:"input_digest"`
+	ArtifactDigest string `json:"artifact_digest"`
+	ArtifactSize   int64  `json:"artifact_size"`
+	BoundDigest    string `json:"bound_digest"`
+}
+
+type candidateVersionIdentity struct {
+	Commit  string `json:"commit"`
+	Dirty   bool   `json:"dirty"`
+	Stamped bool   `json:"stamped"`
+}
+
 // Options configures Install.
 type Options struct {
 	// RepoRoot is the checkout to build from (the dir `go build` runs in).
@@ -70,6 +135,14 @@ type Options struct {
 	// BuildTmp is where the candidate binary is built before the swap. Empty => a sibling
 	// of Target with a ".new" suffix (same volume, so the swap is a cheap rename).
 	BuildTmp string
+	// CacheDir stores a previously build/vet/smoke-verified candidate. Empty disables
+	// reuse. Cache acceptance is fail-closed on the clean exact commit, Go
+	// toolchain/platform/build inputs, artifact SHA-256, and a fresh smoke/provenance check.
+	CacheDir string
+	// ExpectedCommit is the exact clean commit selected by the caller. When caching is enabled,
+	// empty falls back to the checkout's clean HEAD. A valid explicit value must match both the
+	// checkout and the candidate's full `version --json` provenance before reuse or activation.
+	ExpectedCommit string
 }
 
 // Install runs the gated build→vet→smoke→swap ladder. It installs IFF every gate passes; on
@@ -86,54 +159,353 @@ func Install(ctx context.Context, run Runner, swap Swapper, opts Options) Result
 		}
 	}()
 
-	// 1. build the candidate, baking the tree's VERSION into it as appversion.BuildVersion
-	//    (see versionLDFlags for why this is load-bearing, not cosmetic). -buildvcs=true
-	//    FORCES the VCS stamp: under Go's default -buildvcs=auto the detached-worktree build
-	//    (PrepareOrigin) can silently drop the stamp when VCS detection can't resolve the
-	//    repo, shipping a binary that cannot attest which commit it is (#3350, epic #2218 gap
-	//    G2). With =true the build FAILS instead of emitting an unstamped binary.
-	buildArgs := []string{"build", "-buildvcs=true"}
-	commit := ""
+	sourceCommit := ""
 	if out, ok := run(ctx, opts.RepoRoot, "git", "status", "--porcelain"); ok && strings.TrimSpace(out) == "" {
 		if out, ok := run(ctx, opts.RepoRoot, "git", "rev-parse", "HEAD"); ok {
 			candidate := strings.TrimSpace(out)
 			if validCommit(candidate) {
-				commit = candidate
+				sourceCommit = strings.ToLower(candidate)
 			}
 		}
 	}
-	if ld := versionLDFlags(opts.RepoRoot, commit); ld != "" {
-		buildArgs = append(buildArgs, "-ldflags", ld)
+
+	explicitExpectedCommit := strings.ToLower(strings.TrimSpace(opts.ExpectedCommit))
+	if explicitExpectedCommit != "" && !validCommit(explicitExpectedCommit) {
+		return Result{Stage: StageSmoke, Detail: "expected commit is not a full 40-character Git object ID"}
 	}
-	buildArgs = append(buildArgs, "-o", tmp, "./cmd/fak")
-	if out, ok := run(ctx, opts.RepoRoot, "go", buildArgs...); !ok {
-		return Result{Stage: StageBuild, Detail: trim(out)}
+	if explicitExpectedCommit != "" && !strings.EqualFold(sourceCommit, explicitExpectedCommit) {
+		return Result{Stage: StageSmoke, Detail: fmt.Sprintf("clean source checkout reports commit %s, want exact commit %s", emptyLabel(sourceCommit), explicitExpectedCommit)}
 	}
-	// 2. vet the package (catches a compiling-but-suspect tree).
-	if out, ok := run(ctx, opts.RepoRoot, "go", "vet", "./cmd/fak"); !ok {
-		return Result{Stage: StageVet, Detail: trim(out)}
+	expectedCommit := explicitExpectedCommit
+	if expectedCommit == "" && strings.TrimSpace(opts.CacheDir) != "" {
+		expectedCommit = sourceCommit
 	}
-	// 3. smoke: the freshly-built binary must run, self-report its version, AND carry a real
-	//    VCS stamp. Running catches a binary that builds but cannot start (bad cgo link,
-	//    missing data file, panic on init). The stamp check is fail-CLOSED on provenance
-	//    (#3350, epic #2218 gap G2): an unstamped binary still exits 0 on `version`, so
-	//    without it a stampless candidate would swap in indistinguishable from a good one and
-	//    blind every downstream "which commit is this guard?" / version-skew check.
-	//    -buildvcs=true already makes the build FAIL when it cannot stamp; this second gate
-	//    refuses to swap a binary that somehow still reports no stamp.
-	out, ok := run(ctx, opts.RepoRoot, tmp, "version")
-	if !ok {
-		return Result{Stage: StageSmoke, Detail: trim(out)}
+	if !validCommit(expectedCommit) {
+		expectedCommit = ""
 	}
-	if !versionOutputStamped(out) {
-		return Result{Stage: StageSmoke, Detail: "candidate binary is UNSTAMPED — `version` reports no VCS provenance; refusing to swap an unattestable binary over the fleet: " + trim(out)}
+
+	// The output path changes per activation and cannot affect the artifact, so the cache
+	// identity binds the stable build arguments rather than BuildTmp.
+	buildInputs := []string{"build", "-buildvcs=true"}
+	if ld := versionLDFlags(opts.RepoRoot, sourceCommit); ld != "" {
+		buildInputs = append(buildInputs, "-ldflags", ld)
 	}
+	buildArgs := append(append([]string{}, buildInputs...), "-o", tmp, "./cmd/fak")
+	buildInputs = append(buildInputs, "./cmd/fak")
+	vetArgs := []string{"vet", "./cmd/fak"}
+
+	cacheDir := strings.TrimSpace(opts.CacheDir)
+	var cacheInput candidateCacheInput
+	cacheEligible := cacheDir != "" &&
+		validCommit(sourceCommit) &&
+		validCommit(expectedCommit) &&
+		strings.EqualFold(sourceCommit, expectedCommit)
+	cacheHit := false
+	if cacheEligible {
+		envArgs := append([]string{"env"}, candidateGoEnvKeys...)
+		if out, ok := run(ctx, opts.RepoRoot, "go", envArgs...); ok {
+			cacheInput = candidateCacheInput{
+				Schema:         candidateCacheSchema,
+				ExpectedCommit: expectedCommit,
+				SourceCommit:   sourceCommit,
+				HostOS:         runtime.GOOS,
+				HostArch:       runtime.GOARCH,
+				GoEnvKeys:      append([]string{}, candidateGoEnvKeys...),
+				GoEnv:          normalizeCommandOutput(out),
+				BuildArgs:      append([]string{}, buildInputs...),
+				VetArgs:        append([]string{}, vetArgs...),
+			}
+			if restoreCandidateCache(cacheDir, cacheInput, tmp) == nil {
+				if _, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, expectedCommit); ok {
+					cacheHit = true
+				} else {
+					// Digest-valid bytes still need to start and attest the exact selected
+					// commit on every activation. Any smoke/provenance failure falls through
+					// to a full build+vet rather than failing open or wedging updates.
+					_ = os.Remove(tmp)
+				}
+			}
+		} else {
+			cacheEligible = false
+		}
+	}
+
+	cacheRefreshDetail := ""
+	if !cacheHit {
+		// 1. build the candidate, baking the tree's VERSION into it as
+		//    appversion.BuildVersion (see versionLDFlags for why this is load-bearing, not
+		//    cosmetic). -buildvcs=true FORCES the VCS stamp: under Go's default
+		//    -buildvcs=auto the detached-worktree build (PrepareOrigin) can silently drop the
+		//    stamp when VCS detection cannot resolve the repo, shipping a binary that cannot
+		//    attest which commit it is (#3350, epic #2218 gap G2). With =true the build FAILS
+		//    instead of emitting an unstamped binary.
+		if out, ok := run(ctx, opts.RepoRoot, "go", buildArgs...); !ok {
+			return Result{Stage: StageBuild, Detail: trim(out)}
+		}
+		// 2. vet the package (catches a compiling-but-suspect tree).
+		if out, ok := run(ctx, opts.RepoRoot, "go", vetArgs...); !ok {
+			return Result{Stage: StageVet, Detail: trim(out)}
+		}
+		// 3. smoke: the freshly-built binary must run and report its full machine-readable
+		//    provenance. When the caller selected an exact commit, the candidate must attest
+		//    that full commit and a clean build before it can be cached or swapped.
+		if out, ok := smokeCandidate(ctx, run, opts.RepoRoot, tmp, expectedCommit); !ok {
+			return Result{Stage: StageSmoke, Detail: trim(out)}
+		}
+		if cacheEligible {
+			if err := refreshCandidateCache(cacheDir, cacheInput, tmp); err != nil {
+				// Cache persistence is an optimization, not an installation gate. The
+				// candidate itself still passed build, vet, and exact-provenance smoke.
+				cacheRefreshDetail = "; candidate cache refresh failed: " + trim(err.Error())
+			}
+		}
+	}
+
 	// 4. swap: only now is the candidate trusted over the running fleet.
 	cleanupBuildArtifact = false
 	if err := swap(tmp, opts.Target); err != nil {
 		return Result{Stage: StageSwap, Detail: err.Error()}
 	}
-	return Result{Installed: true, Stage: StageSwap, Detail: "installed " + filepath.Base(opts.Target)}
+	detail := "installed " + filepath.Base(opts.Target)
+	if cacheHit {
+		detail += " from exact-commit verified candidate cache"
+	}
+	return Result{Installed: true, Stage: StageSwap, Detail: detail + cacheRefreshDetail}
+}
+
+func normalizeCommandOutput(out string) string {
+	return strings.TrimSpace(strings.ReplaceAll(out, "\r\n", "\n"))
+}
+
+func emptyLabel(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "(unverified or dirty)"
+	}
+	return value
+}
+
+func smokeCandidate(ctx context.Context, run Runner, repoRoot, candidate, expectedCommit string) (string, bool) {
+	out, ok := run(ctx, repoRoot, candidate, "version", "--json")
+	if !ok {
+		return out, false
+	}
+	var identity candidateVersionIdentity
+	if err := json.Unmarshal([]byte(out), &identity); err != nil {
+		if expectedCommit == "" && versionOutputStamped(out) {
+			return out, true
+		}
+		return "candidate provenance is not valid `version --json`: " + trim(out), false
+	}
+	if !identity.Stamped || identity.Dirty || !validCommit(identity.Commit) {
+		return "candidate binary is unstamped or dirty; refusing to swap: " + trim(out), false
+	}
+	if expectedCommit != "" && !strings.EqualFold(identity.Commit, expectedCommit) {
+		return fmt.Sprintf("candidate binary reports commit %s, want exact commit %s", identity.Commit, expectedCommit), false
+	}
+	return out, true
+}
+
+func candidateInputDigest(input candidateCacheInput) (string, error) {
+	data, err := json.Marshal(input)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func candidateBoundDigest(inputDigest, artifactDigest string) string {
+	sum := sha256.Sum256([]byte(candidateCacheSchema + "\x00" + inputDigest + "\x00" + artifactDigest))
+	return hex.EncodeToString(sum[:])
+}
+
+// CandidateCacheDir maps the clone-shared Git common directory to the persistent
+// self-update cache. An unresolved common directory disables caching rather than creating
+// a relative or bogus .git directory inside a linked/custom worktree.
+func CandidateCacheDir(gitCommonDir string) string {
+	if strings.TrimSpace(gitCommonDir) == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Clean(gitCommonDir), "fak", "self-update-cache")
+}
+
+func candidateCachePaths(dir string) (manifest string) {
+	return filepath.Join(dir, "manifest.json")
+}
+
+func candidateArtifactPath(dir, artifactDigest string) string {
+	return filepath.Join(dir, "candidate-"+artifactDigest)
+}
+
+func fileSHA256(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", 0, err
+	}
+	if !info.Mode().IsRegular() {
+		return "", 0, fmt.Errorf("%s is not a regular file", path)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), info.Size(), nil
+}
+
+func restoreCandidateCache(dir string, input candidateCacheInput, dst string) error {
+	inputDigest, err := candidateInputDigest(input)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(candidateCachePaths(dir))
+	if err != nil {
+		return err
+	}
+	var manifest candidateCacheManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return err
+	}
+	if manifest.Schema != candidateCacheSchema ||
+		!strings.EqualFold(manifest.ExpectedCommit, input.ExpectedCommit) ||
+		manifest.InputDigest != inputDigest ||
+		manifest.BoundDigest != candidateBoundDigest(inputDigest, manifest.ArtifactDigest) {
+		return fmt.Errorf("candidate cache identity mismatch")
+	}
+	if !validSHA256(manifest.ArtifactDigest) {
+		return fmt.Errorf("candidate cache artifact digest is malformed")
+	}
+	artifact := candidateArtifactPath(dir, manifest.ArtifactDigest)
+	digest, size, err := fileSHA256(artifact)
+	if err != nil {
+		return err
+	}
+	if digest != manifest.ArtifactDigest || size != manifest.ArtifactSize {
+		return fmt.Errorf("candidate cache artifact digest mismatch")
+	}
+	if err := atomicCopyFile(artifact, dst); err != nil {
+		return err
+	}
+	copiedDigest, copiedSize, err := fileSHA256(dst)
+	if err != nil {
+		_ = os.Remove(dst)
+		return err
+	}
+	if copiedDigest != manifest.ArtifactDigest || copiedSize != manifest.ArtifactSize {
+		_ = os.Remove(dst)
+		return fmt.Errorf("restored candidate digest mismatch")
+	}
+	return nil
+}
+
+func validSHA256(s string) bool {
+	if len(s) != sha256.Size*2 || strings.ToLower(s) != s {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
+
+func refreshCandidateCache(dir string, input candidateCacheInput, src string) error {
+	inputDigest, err := candidateInputDigest(input)
+	if err != nil {
+		return err
+	}
+	artifactDigest, artifactSize, err := fileSHA256(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	artifact := candidateArtifactPath(dir, artifactDigest)
+	if err := atomicCopyFile(src, artifact); err != nil {
+		return err
+	}
+	storedDigest, storedSize, err := fileSHA256(artifact)
+	if err != nil {
+		return err
+	}
+	if storedDigest != artifactDigest || storedSize != artifactSize {
+		return fmt.Errorf("refreshed candidate digest mismatch")
+	}
+	manifest := candidateCacheManifest{
+		Schema:         candidateCacheSchema,
+		ExpectedCommit: input.ExpectedCommit,
+		InputDigest:    inputDigest,
+		ArtifactDigest: artifactDigest,
+		ArtifactSize:   artifactSize,
+		BoundDigest:    candidateBoundDigest(inputDigest, artifactDigest),
+	}
+	data, err := json.Marshal(manifest)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	if err := atomicWriteFile(candidateCachePaths(dir), 0o600, bytes.NewReader(data)); err != nil {
+		return err
+	}
+	pruneCandidateArtifacts(dir, artifact)
+	return nil
+}
+
+func atomicCopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(dst, info.Mode().Perm(), in)
+}
+
+func atomicWriteFile(dst string, mode os.FileMode, source io.Reader) (err error) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+	if err := tmp.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := io.Copy(tmp, source); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return OSSwap(tmpPath, dst)
+}
+
+func pruneCandidateArtifacts(dir, keep string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if path == keep || !strings.HasPrefix(entry.Name(), "candidate-") {
+			continue
+		}
+		_ = os.Remove(path)
+	}
 }
 
 // InstallVerifiedCopy installs an already-gated fak binary at another hot-copy path.
