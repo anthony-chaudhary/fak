@@ -157,7 +157,7 @@ _SIDECAR_CREATE_AFTER_SLOP_SECONDS = 10
 # bash) spawned in the same minute, gets miscounted as a live worker and pins the
 # dispatcher at cap against ghosts. A bare shell image NEVER counts; only the
 # named agent backends do, and even then only inside the spawn window.
-_WORKER_BACKEND_IMAGES = ("claude", "opencode", "node")
+_WORKER_BACKEND_IMAGES = ("claude", "opencode", "codex", "node")
 # A guarded issue worker's root process is ``fak guard -- <backend> ...``. The
 # backend child may be visible too, but the `.pid` sidecar records the root PID,
 # so the sidecar liveness fallback must accept a cmdline-hidden `fak.exe` inside
@@ -638,17 +638,18 @@ def seat_check(root: Path, *, product: str) -> dict[str, Any]:
     never fail-closed on a missing view.
 
     Codex is the one-product exception to the switcher roster: it uses one ambient
-    ChatGPT/OAuth login rather than switcher-managed account dirs. That login is one
-    rate-limit bucket, but the bucket admits multiple concurrent ``codex exec`` sessions,
-    so live Codex processes consume one slot each from a small fixed bucket instead of
-    collapsing the whole product to a single seat."""
+    ChatGPT/OAuth login rather than switcher-managed account dirs. The process census is
+    telemetry only here: an attended coordinator is not a managed worker lease. Validated
+    worker sidecars are folded into ``free`` later by
+    :func:`account_unattributed_live_slots`, through the same managed-worker count that
+    enforces the process cap."""
     if product == "codex":
         total = DEFAULT_CODEX_OAUTH_SESSIONS
-        live = len(ambient_codex_pids())
-        leased = min(live, total)
-        return {"total": total, "free": max(0, total - live), "leased": leased,
-                "depleted": live >= total, "ambient_live": live,
-                "reason": f"codex ambient OAuth bucket ({total} concurrent sessions)"}
+        ambient_live = len(ambient_codex_pids())
+        return {"total": total, "free": total, "leased": 0,
+                "depleted": False, "ambient_live": ambient_live,
+                "reason": (f"codex ambient OAuth telemetry ({ambient_live} attended "
+                           f"session(s)); {total} managed session slots")}
     sw = root / "tools" / "fleet_accounts.py"
     if not sw.exists():
         return {"total": None, "error": f"switcher not found: {sw}"}
@@ -1153,6 +1154,28 @@ def ambient_codex_pids_excluding_sidecar_parents(sidecar_pids: set[int]) -> set[
     return {pid for pid in pids if not _pid_has_ancestor(pid, parents, sidecar_pids)}
 
 
+def _managed_cmdline_pids_excluding_sidecar_trees(sidecar_pids: set[int], *,
+                                                   product: str) -> set[int]:
+    """Marker-authenticated workers not already represented by a sidecar tree."""
+    marker_pids = _cmdline_worker_pids(product=product)
+    if not marker_pids or product != "codex" or not sidecar_pids:
+        return marker_pids - sidecar_pids
+    rows = _ambient_codex_process_rows()
+    parents: dict[int, int] = {}
+    for row in rows:
+        try:
+            pid = int(row.get("pid") or 0)
+            ppid = int(row.get("ppid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pid > 0:
+            parents[pid] = ppid
+    return {
+        pid for pid in marker_pids
+        if pid not in sidecar_pids and not _pid_has_ancestor(pid, parents, sidecar_pids)
+    }
+
+
 def _parse_process_create_time(value: Any) -> float | None:
     if value is None:
         return None
@@ -1507,6 +1530,145 @@ def live_goal_worker_pids(
     return pids
 
 
+def _known_process_product(image: str) -> str | None:
+    return next((candidate for candidate in _PRODUCT_BACKENDS
+                 if _image_matches_product(image, candidate)), None)
+
+
+def managed_worker_census(
+    root: Path,
+    *,
+    product: str,
+    probe: Callable[[int], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return the one provenance census used for capacity and refusal."""
+    if product != "codex":
+        pids = set(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
+        pids.update(live_goal_worker_pids(root / GOAL_RUNS_DIRNAME, product=product))
+        pids.update(_cmdline_worker_pids(product=product))
+        return {"pids": sorted(pids), "count": len(pids),
+                "status": "CONSISTENT", "ambiguous": []}
+
+    probe_fn = probe or _process_probe
+    pids: set[int] = set()
+    sidecar_pids: set[int] = set()
+    ambiguous: list[dict[str, Any]] = []
+    known_backends = {b for values in _PRODUCT_BACKENDS.values() for b in values}
+
+    def inspect(pid_file: Path, *, backend: str | None, goal: bool = False) -> None:
+        try:
+            raw_pid = pid_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            ambiguous.append({"sidecar": pid_file.name, "reason": "unreadable_pid",
+                              "error": type(exc).__name__})
+            return
+        try:
+            pid = int(raw_pid)
+        except ValueError:
+            ambiguous.append({"sidecar": pid_file.name, "reason": "malformed_pid"})
+            return
+        if pid <= 0:
+            ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                              "reason": "malformed_pid"})
+            return
+        try:
+            rec = probe_fn(pid)
+        except Exception as exc:
+            ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                              "reason": "probe_inspection_failed",
+                              "error": type(exc).__name__})
+            return
+        if not isinstance(rec, dict) or "alive" not in rec:
+            ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                              "reason": "probe_uninspectable"})
+            return
+        if rec.get("alive") is False:
+            return
+        if rec.get("alive") is not True:
+            ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                              "reason": "probe_uninspectable"})
+            return
+        try:
+            sidecar_mtime = pid_file.stat().st_mtime
+        except OSError as exc:
+            ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                              "reason": "unreadable_sidecar",
+                              "error": type(exc).__name__})
+            return
+        image_product = _known_process_product(str(rec.get("name") or ""))
+        if goal:
+            if image_product and image_product != product:
+                return
+            if image_product != product:
+                ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                                  "reason": "recycled_or_unverifiable_pid"})
+                return
+        elif image_product and image_product != product:
+            ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                              "reason": "contradictory_backend_image",
+                              "backend": backend, "image": rec.get("name")})
+            return
+        if not _sidecar_process_matches(
+                pid, sidecar_mtime, probe=lambda _pid, rec=rec: rec):
+            ambiguous.append({"sidecar": pid_file.name, "pid": pid,
+                              "reason": "recycled_or_unverifiable_pid"})
+            return
+        pids.add(pid)
+        sidecar_pids.add(pid)
+
+    runs_dir = root / RUNS_DIRNAME
+    if runs_dir.is_dir():
+        for pid_file in (*runs_dir.glob("resolve-*.pid"),
+                         *runs_dir.glob("repair-*.pid")):
+            if not _RESOLVE_PID_RE.match(pid_file.name):
+                continue
+            backend_file = pid_file.with_suffix(".backend")
+            try:
+                backend = backend_file.read_text(encoding="utf-8").strip() or None
+            except FileNotFoundError:
+                ambiguous.append({"sidecar": pid_file.name,
+                                  "reason": "missing_backend"})
+                continue
+            except OSError as exc:
+                ambiguous.append({"sidecar": pid_file.name,
+                                  "reason": "unreadable_backend",
+                                  "error": type(exc).__name__})
+                continue
+            if backend is None:
+                ambiguous.append({"sidecar": pid_file.name,
+                                  "reason": "missing_backend"})
+                continue
+            if backend not in known_backends:
+                ambiguous.append({"sidecar": pid_file.name,
+                                  "reason": "unknown_backend", "backend": backend})
+                continue
+            if backend not in _product_backends(product):
+                continue
+            inspect(pid_file, backend=backend)
+
+    goal_runs_dir = root / GOAL_RUNS_DIRNAME
+    if goal_runs_dir.is_dir():
+        for pid_file in goal_runs_dir.glob("*.pid"):
+            if _GOAL_PID_RE.match(pid_file.name):
+                inspect(pid_file, backend=None, goal=True)
+
+    pids.update(_managed_cmdline_pids_excluding_sidecar_trees(
+        sidecar_pids, product=product))
+    return {"pids": sorted(pids), "count": len(pids),
+            "status": "AMBIGUOUS" if ambiguous else "CONSISTENT",
+            "ambiguous": ambiguous}
+
+
+def managed_worker_identity_check(
+    root: Path,
+    *,
+    product: str,
+    probe: Callable[[int], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    census = managed_worker_census(root, product=product, probe=probe)
+    return {"status": census["status"], "ambiguous": census["ambiguous"]}
+
+
 def proc_worker_count(root: Path | None = None, *, product: str | None = None) -> int:
     """Count live worker processes that consume the dispatch cap.
 
@@ -1521,10 +1683,10 @@ def proc_worker_count(root: Path | None = None, *, product: str | None = None) -
     When ``product`` is given, only workers in that account pool count — a claude
     worker no longer pins the opencode lane's cap and vice versa, so the two lanes
     fill to their independent account headrooms instead of starving one another.
-    Codex has a single ambient seat rather than a roster; for that product, every
-    live Codex CLI process also consumes the cap so an attended Codex session blocks
-    background codex dispatch. The generic cmdline-marked DOS-loop workers carry no
-    backend tag, so they are attributed to a pool by their process IMAGE
+    Codex has a single ambient login rather than a roster, but foreground sessions are
+    telemetry, not managed worker provenance. Codex capacity therefore uses the same
+    positive sidecar/breadcrumb/guarded-marker union as every other product. The generic
+    cmdline-marked DOS-loop workers carry no backend tag, so they are attributed to a pool by their process IMAGE
     (``_image_matches_product``): a claude dos-dispatch-loop worker counts against
     the claude pool's cap even though it wrote no `.backend` sidecar — without this,
     a product-scoped count returned 0 while such workers were live and authorized an
@@ -1533,17 +1695,7 @@ def proc_worker_count(root: Path | None = None, *, product: str | None = None) -
     """
     root = root or repo_root()
     if product is not None:
-        pids = set(live_resolve_worker_pids(root / RUNS_DIRNAME, product=product))
-        pids.update(live_goal_worker_pids(root / GOAL_RUNS_DIRNAME, product=product))
-        if product == "codex":
-            # Codex is fully covered by sidecars (background workers) plus the
-            # ambient Codex process scan (foreground and generic Codex sessions).
-            # The generic command-line marker scan would double-count spawned
-            # sessions whose prompt appears on both wrapper/native process argv.
-            pids.update(ambient_codex_pids_excluding_sidecar_parents(pids))
-            return len(pids)
-        pids.update(_cmdline_worker_pids(product=product))
-        return len(pids)
+        return int(managed_worker_census(root, product=product)["count"])
     pids = set(_cmdline_worker_pids())
     pids.update(live_resolve_worker_pids(root / RUNS_DIRNAME))
     pids.update(live_goal_worker_pids(root / GOAL_RUNS_DIRNAME))
@@ -1785,13 +1937,13 @@ def host_resources() -> dict[str, Any]:
 
 def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
              max_threads: int | None = None) -> dict[str, Any]:
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as pool:
         host_f = pool.submit(host_check, root, max_threads=max_threads)
         acct_f = pool.submit(account_check, root, work_kind=work_kind, product=product)
         kern_f = pool.submit(kernel_alive, root)
         seat_f = pool.submit(seat_check, root, product=product)
         host_res_f = pool.submit(host_resources)
-        alive_proc_f = pool.submit(proc_worker_count, root, product=product)
+        worker_census_f = pool.submit(managed_worker_census, root, product=product)
         # Advisory only: which `fak` build each resolver picks, and whether any gate
         # is about to run an unreviewed `+uncommitted` compile. Probed in the same
         # pool because it is pure I/O (stat + one bounded `version` per distinct
@@ -1802,7 +1954,14 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         kern = kern_f.result()
         seat = seat_f.result()
         host_res = host_res_f.result()
-        alive_proc = alive_proc_f.result()
+        try:
+            worker_identity = worker_census_f.result()
+            alive_proc = int(worker_identity["count"])
+        except Exception as exc:  # noqa: BLE001 - identity uncertainty fails closed below
+            worker_identity = {"pids": [], "count": 0, "status": "AMBIGUOUS",
+                               "ambiguous": [
+                                   {"reason": "inspection_error", "error": str(exc)}]}
+            alive_proc = 0
         try:
             fak_bin = fak_bin_f.result()
         except Exception as exc:  # noqa: BLE001 — provenance NEVER decides a verdict
@@ -1905,6 +2064,13 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         verdict = REFUSE_INSPECT
         reason = (host.get("error") or kern.get("error")
                   or "a preflight safety check could not run")
+    elif worker_identity.get("status") == "AMBIGUOUS":
+        verdict = REFUSE_INSPECT
+        reasons = sorted({str(row.get("reason") or "unknown")
+                          for row in worker_identity.get("ambiguous", [])})
+        reason = ("managed worker identity is ambiguous: "
+                  + ", ".join(reasons)
+                  + "; inspect the named sidecar(s) before growing the fleet")
     elif not host["safe"]:
         verdict = REFUSE_HOST
         reason = (f"host resource guard flagged {host['flagged']} process(es): "
@@ -1977,6 +2143,7 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         "account": {k: acct.get(k) for k in ("available", "tag", "dir", "tier", "model", "login_status", "can_serve")},
         "kernel": kern,
         "os_worker_procs": alive_proc,
+        "worker_identity": worker_identity,
     }
 
 
