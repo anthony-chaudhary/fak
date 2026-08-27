@@ -33,5 +33,10 @@
     "backend": "cuda/sm_89/approx"
   },
   "limitations": ["TTFT missing", "generated/quality output missing", "CUDA fallback count and identity unknown; tracked by #9121"],
-  "raw_evidence": "retained in the authorized private evidence store; public artifact is intentionally scrubbed"
+  "raw_evidence": "retained in the authorized private evidence store; public artifact is intentionally scrubbed",
+  "decision": {
+    "promotion": "registered for declared single-user offline, CPU, GPU, dataset, and serving classes after an authenticated route and three successful fak-native CUDA trials",
+    "demote_or_retire_if": ["authenticated route no longer completes", "stated preconditions no longer produce a repeatable three-trial baseline", "fleet status can no longer resolve this witness"],
+    "invalidating_assumptions": ["AC performance mode and thermal idle", "no competing GPU workload", "pinned source, model, and P32/D32 workload envelope", "fak-native CUDA receipt"]
+  }
 }
