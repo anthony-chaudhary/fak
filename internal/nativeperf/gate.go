@@ -43,6 +43,7 @@ type GatePolicy struct {
 	ChangedLeverID             string  `json:"changed_lever_id"`
 	AcceptedRevision           string  `json:"accepted_revision"`
 	MinimumRepetitions         int     `json:"minimum_repetitions"`
+	MinimumCleanRepetitions    int     `json:"minimum_clean_repetitions,omitempty"`
 	MaximumNoisePercent        float64 `json:"maximum_noise_percent"`
 	InvestigateDropPercent     float64 `json:"investigate_drop_percent"`
 	RegressionDropPercent      float64 `json:"regression_drop_percent"`
@@ -85,19 +86,21 @@ type BisectPacket struct {
 	StopCondition   string          `json:"stop_condition"`
 }
 type GateVerdict struct {
-	Schema                  string          `json:"schema"`
-	EnvelopeID              string          `json:"envelope_id"`
-	Classification          string          `json:"classification"`
-	AcceptedRevision        string          `json:"accepted_revision"`
-	CandidateRevision       string          `json:"candidate_revision"`
-	AcceptedMeanTokensPerS  float64         `json:"accepted_mean_tokens_per_second"`
-	CandidateMeanTokensPerS float64         `json:"candidate_mean_tokens_per_second"`
-	ThroughputDeltaPercent  float64         `json:"throughput_delta_percent"`
-	AcceptedNoisePercent    float64         `json:"accepted_noise_percent"`
-	CandidateNoisePercent   float64         `json:"candidate_noise_percent"`
-	Checks                  []GateCheck     `json:"checks"`
-	SuspectModules          []SuspectModule `json:"suspect_modules,omitempty"`
-	Bisect                  *BisectPacket   `json:"bisect,omitempty"`
+	Schema                  string              `json:"schema"`
+	EnvelopeID              string              `json:"envelope_id"`
+	Classification          string              `json:"classification"`
+	AcceptedRevision        string              `json:"accepted_revision"`
+	CandidateRevision       string              `json:"candidate_revision"`
+	AcceptedMeanTokensPerS  float64             `json:"accepted_mean_tokens_per_second"`
+	CandidateMeanTokensPerS float64             `json:"candidate_mean_tokens_per_second"`
+	ThroughputDeltaPercent  float64             `json:"throughput_delta_percent"`
+	AcceptedNoisePercent    float64             `json:"accepted_noise_percent"`
+	CandidateNoisePercent   float64             `json:"candidate_noise_percent"`
+	AcceptedSamples         RepetitionSummaries `json:"accepted_samples"`
+	CandidateSamples        RepetitionSummaries `json:"candidate_samples"`
+	Checks                  []GateCheck         `json:"checks"`
+	SuspectModules          []SuspectModule     `json:"suspect_modules,omitempty"`
+	Bisect                  *BisectPacket       `json:"bisect,omitempty"`
 }
 
 // Gate returns a typed verdict and, for non-pass results, a guarded bisect packet.
@@ -153,6 +156,8 @@ func Gate(r GateRequest) (GateVerdict, error) {
 	if len(a.Repetitions) < p.MinimumRepetitions || len(c.Repetitions) < p.MinimumRepetitions {
 		return GateVerdict{}, fmt.Errorf("policy requires at least %d repetitions", p.MinimumRepetitions)
 	}
+	acceptedSamples := SummarizeRepetitions(a.Repetitions, a.AmbientEvidence)
+	candidateSamples := SummarizeRepetitions(c.Repetitions, c.AmbientEvidence)
 	if p.RequireAmbientEvidence {
 		for _, pair := range []struct {
 			name    string
@@ -165,14 +170,25 @@ func Gate(r GateRequest) (GateVerdict, error) {
 				if err := ValidateAmbientEvidence(evidence); err != nil {
 					return GateVerdict{}, fmt.Errorf("%s ambient evidence %d: %w", pair.name, i, err)
 				}
-				if evidence.Verdict != AmbientClean {
-					return GateVerdict{Schema: GateVerdictSchema, Classification: GateInvestigate, EnvelopeID: c.EnvelopeID, AcceptedRevision: a.Revision, CandidateRevision: c.Revision, Checks: []GateCheck{{Name: "ambient_evidence", Status: "fail", Detail: fmt.Sprintf("%s repetition %d verdict=%s", pair.name, i, evidence.Verdict)}}}, nil
+				if p.MinimumCleanRepetitions == 0 && evidence.Verdict != AmbientClean {
+					return GateVerdict{Schema: GateVerdictSchema, Classification: GateInvestigate, EnvelopeID: c.EnvelopeID, AcceptedRevision: a.Revision, CandidateRevision: c.Revision, AcceptedSamples: acceptedSamples, CandidateSamples: candidateSamples, Checks: []GateCheck{{Name: "ambient_evidence", Status: "fail", Detail: fmt.Sprintf("%s repetition %d verdict=%s", pair.name, i, evidence.Verdict)}}}, nil
 				}
 			}
 		}
 	}
-	am, cm := meanTPS(a.Repetitions), meanTPS(c.Repetitions)
-	an, cn := noisePercent(a.Repetitions), noisePercent(c.Repetitions)
+	if err := requireCleanSamples("last accepted", acceptedSamples, p.MinimumCleanRepetitions); err != nil {
+		return GateVerdict{}, err
+	}
+	if err := requireCleanSamples("candidate", candidateSamples, p.MinimumCleanRepetitions); err != nil {
+		return GateVerdict{}, err
+	}
+	acceptedForGate, candidateForGate := a.Repetitions, c.Repetitions
+	if p.MinimumCleanRepetitions > 0 {
+		acceptedForGate = cleanRepetitions(a.Repetitions, a.AmbientEvidence)
+		candidateForGate = cleanRepetitions(c.Repetitions, c.AmbientEvidence)
+	}
+	am, cm := meanTPS(acceptedForGate), meanTPS(candidateForGate)
+	an, cn := noisePercent(acceptedForGate), noisePercent(candidateForGate)
 	drop := (am - cm) / am * 100
 	checks := []GateCheck{gateCheck("engine", c.Execution.Engine == p.RequiredEngine, fmt.Sprintf("got %s; require %s", c.Execution.Engine, p.RequiredEngine)), gateCheck("forward_path", c.Execution.ForwardPath == p.RequiredForwardPath, fmt.Sprintf("got %s; require %s", c.Execution.ForwardPath, p.RequiredForwardPath)), gateCheck("fallback", c.Execution.FallbackCount == 0, fmt.Sprintf("count=%d", c.Execution.FallbackCount)), gateCheck("memory", c.Memory.PeakBytes <= p.MaximumPeakBytes, fmt.Sprintf("peak=%d ceiling=%d", c.Memory.PeakBytes, p.MaximumPeakBytes)), gateCheck("quality", qualityPass(c.Quality, p), fmt.Sprintf("%s=%g floor=%g", c.Quality.Name, c.Quality.Score, p.MinimumQualityScore)), gateCheck("throughput_floor", cm >= p.MinimumThroughput, fmt.Sprintf("mean=%g floor=%g", cm, p.MinimumThroughput))}
 	ambStatus, ambDetail := systemBaselineGateState(a, c, p.RequireSystemBaseline, p.AllowSampledSystemBaseline)
@@ -200,7 +216,7 @@ func Gate(r GateRequest) (GateVerdict, error) {
 		class = GateInvestigate
 	}
 	suspects := changedModules(a.ModuleVersions, c.ModuleVersions)
-	v := GateVerdict{GateVerdictSchema, p.EnvelopeID, class, a.Revision, c.Revision, am, cm, -drop, an, cn, checks, nil, nil}
+	v := GateVerdict{Schema: GateVerdictSchema, EnvelopeID: p.EnvelopeID, Classification: class, AcceptedRevision: a.Revision, CandidateRevision: c.Revision, AcceptedMeanTokensPerS: am, CandidateMeanTokensPerS: cm, ThroughputDeltaPercent: -drop, AcceptedNoisePercent: an, CandidateNoisePercent: cn, AcceptedSamples: acceptedSamples, CandidateSamples: candidateSamples, Checks: checks}
 	if class != GatePass && (ambStatus != "investigate" || class == GateRegression) {
 		v.SuspectModules = suspects
 		v.Bisect = &BisectPacket{BisectPacketSchema, p.EnvelopeID, a.Revision, c.Revision, suspects, []string{fmt.Sprintf("dos arbitrate --lane native-performance --paths %s", suspectPaths(suspects)), "fak native-performance --gate gate-request.json"}, "first revision classified regression under the exact envelope, quality, identity, memory, and throughput policy"}
@@ -272,6 +288,12 @@ func validateGatePolicy(p GatePolicy) error {
 	}
 	if p.Schema == GatePolicySchemaV1 && (p.RequireSystemBaseline || p.AllowSampledSystemBaseline) {
 		return fmt.Errorf("v1 gate policy cannot require system baseline evidence")
+	}
+	if p.MinimumCleanRepetitions < 0 || p.MinimumCleanRepetitions > p.MinimumRepetitions {
+		return fmt.Errorf("minimum clean repetitions must be between zero and minimum repetitions")
+	}
+	if p.MinimumCleanRepetitions > 0 && !p.RequireAmbientEvidence {
+		return fmt.Errorf("minimum clean repetitions require ambient evidence")
 	}
 	if p.RequireAmbientEvidence && p.RequireSystemBaseline {
 		return fmt.Errorf("gate policy cannot require both legacy ambient evidence and system baseline evidence")
