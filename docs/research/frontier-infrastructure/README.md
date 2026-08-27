@@ -25,6 +25,21 @@ views are:
 
 Empty or missing slices are coverage debt, not evidence that a category has no activity.
 
+## Latest slice: New York and ERCOT large-load controls (#9373)
+
+Four bounded official-source records now cover the PUCT-granted ERCOT Batch Zero deadline
+extension plus three directly inspected sources: New York Executive Order 62, ERCOT's June
+Batch Zero approval release, and ERCOT's August transmission-planning response. The slice
+separates New York's qualified state-application abeyance from local permissions and a blanket
+construction ban; tracked ERCOT request nameplate from verified or livable demand; and plan
+assumptions, sensitivities, and forecasts from actual load. It also keeps planned or recommended
+765-kV facilities distinct from constructed and energized assets. The New York GEIS/report and
+60/90-day and twelve-month processes, ERCOT's final Batch Zero classification and Fall 2027
+statewide plan, and the final end-2026 forecast including Batch loads remain future work. The
+Texas governor directive/~474 GW claim remains coverage debt because no direct governor source
+was supplied. The corpus now contains **248 entries**, **243 unique URLs**, and **210 entity
+labels**.
+
 ## Latest slice: Chinese platform envelopes (#9362)
 
 Six bounded records add Baichuan 2 training, iFLYTEK ecosystem denominators, Meituan

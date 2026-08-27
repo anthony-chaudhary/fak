@@ -36,6 +36,35 @@ announced/future products, reported negotiations, and unconfirmed rumors.
 
 ## 2026 chronology
 
+### 2026-08-20 — ERCOT publishes 765-kV planning and forecast distinctions
+
+- **Planning evidence, not built capacity:** ERCOT's August 12 response says the 2024 RTP used
+  about 150 GW in 2030, the 2025 RTP used about 159 GW for the 2031 summer peak, and a lower
+  approximately 125 GW 2030 sensitivity still required the full STEP 765-kV additions.
+- **Forecast boundary:** ERCOT's most recent approximately 110 GW 2032 econometric base-plus-
+  mid-size forecast excludes Batch-process large loads; a final forecast including those loads
+  was expected by the end of 2026. Assumption, sensitivity, forecast, actual load, planned line,
+  constructed line, and energized asset are not interchangeable states.
+
+### 2026-08-20 — PUCT grants ERCOT Batch Zero classification extension
+
+- **Completed decision:** the PUCT granted ERCOT's good-cause request to move the Batch Zero
+  first-classification deadline from **2026-09-01** to **2026-10-01**; the **2027-10-01**
+  batch-study deadline did not move.
+- **Stated reason:** ERCOT needed the month for manual initial screening; duplicate, terminated,
+  withdrawn, and completed-request cleanup; lower-priority identification; transmission-service-
+  provider validation of project status/readiness; and the resulting Batch Zero update to the
+  Long-Term Load Forecast due **2026-10-01**.
+- **Lifecycle boundary:** this is a classification/forecast-input delay, not cancellation, denial,
+  a construction stop, completed study, approved interconnection, energization, or live load.
+  Requested nameplate MW is not verified capacity, coincident peak, annual energy, or IT MW.
+- **Primary witness:** [PUCT Project No. 59142 ERCOT request](https://interchange.puc.texas.gov/Documents/59142_42_1672561.PDF)
+  and [order granting the exception](https://interchange.puc.texas.gov/Documents/59142_53_1675960.PDF),
+  checked 2026-08-27.
+- **Omitted candidates:** no record was added for the suggested New York permit pause, Texas-
+  governor directive/~474 GW quantity, or ERCOT planning sensitivity/transmission dependency;
+  this pass did not obtain direct official witnesses establishing their exact scope and limits.
+
 | Date | Entity/event | Type and state | Infrastructure expectation | Evidence caveat |
 |---|---|---|---|---|
 | 2026-01-05 | NVIDIA Vera Rubin / Rubin NVL72 | Product launch; announced production ramp | Rack-scale co-design, liquid cooling, RAS, and MoE fabrics become the integration boundary | Vendor peak claims require production goodput. |
@@ -62,6 +91,27 @@ announced/future products, reported negotiations, and unconfirmed rumors.
 | 2026-08-25 | Reported OpenAI datacenter leadership change | **Rumor/reported personnel and strategy signal** | Build-versus-lease strategy and organizational execution may change delivery | Official account and full strategic interpretation absent. |
 | 2026-08-26 | AWS–NVIDIA two-million-GPU plan | Future 2027–2028 product/capacity plan | Fleets mix Blackwell/Rubin generations, custom silicon, and secure government capacity | Manufacturing, power, delivery, and demand can change planned counts. |
 | 2026-08-26 | Anthropic–Nscale reported $45B lease | Reported contract/future project | Long-duration neocloud leases couple startup finance with dedicated generation | Planned West Virginia facility and 2027 start are prospective. |
+
+### 2026-07-14 — New York orders a qualified state-permit abeyance for large data centers
+
+- **Operative scope:** Executive Order 62 directs DEC to hold specified discretionary state
+  applications in abeyance when they were pending and not deemed complete before the order;
+  local-government permissions are excluded. Covered data centers consume or are designed to
+  consume at least 50 MW, with manufacturing, research, education, and medical-care exclusions.
+- **Queue and future-work boundaries:** the order cites nearly 12 GW of NYISO data-center load
+  requests as of May 2026, more than 8 GW entered in 2025. Those are requests, not live demand.
+  The report/GEIS and 60-day, 90-day, and twelve-month processes remain future work, so the
+  order is neither a blanket construction ban nor a simple fixed one-year expiry.
+
+### 2026-06-18 — PUCT approves ERCOT's transition Batch Zero process
+
+- **Tracked queue:** ERCOT reports more than 438,000 MW of tracked large-load requests, nearly
+  89% from data centers, and groups qualified projects of at least 75 MW into Batch Zero. ERCOT
+  cautions that not all requests become built projects; tracked nameplate is not verified or
+  livable demand.
+- **Announced milestones:** classification was then expected in August 2026, later superseded by
+  the October 1 deadline record above, and a final statewide transmission plan was expected in
+  Fall 2027. Neither announcement proves a completed plan, constructed project, or energized load.
 
 ## Pre-2026 anchor events
 

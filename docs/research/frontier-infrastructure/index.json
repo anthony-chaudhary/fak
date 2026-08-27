@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9371,
+  "latest_slice_issue": 9373,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 244,
+    "entry_count": 248,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -76,26 +76,21 @@
     "entities": [
       "01.AI",
       "AEP Ohio data-center tariff",
-      "AI Singapore SEA-LION",
+      "Agent workflow scheduling study",
+      "Agentic OS research study",
+      "AgentSysBench",
       "AI datacenter power architecture research",
       "AI optical interconnect sector",
-      "AI21 Labs",
-      "AMD / Cerebras",
-      "AWS",
-      "AWS / Anthropic",
-      "AWS / Cerebras",
-      "AWS / NVIDIA",
-      "AWS Bedrock",
-      "Agent workflow scheduling study",
-      "AgentSysBench",
-      "Agentic OS research study",
+      "AI Singapore SEA-LION",
       "Ai2",
+      "AI21 Labs",
       "Alibaba",
       "Alibaba Cloud / Aliyun",
       "Alibaba Cloud Tair",
       "Alibaba Qwen",
       "Alphabet",
       "Amazon",
+      "AMD / Cerebras",
       "Ampere Computing / SoftBank",
       "Anthropic",
       "Anthropic / AWS",
@@ -110,6 +105,11 @@
       "Applied Digital",
       "Arista Networks",
       "Arista XPO MSA",
+      "AWS",
+      "AWS / Anthropic",
+      "AWS / Cerebras",
+      "AWS / NVIDIA",
+      "AWS Bedrock",
       "Azure OpenAI / BurstGPT",
       "Baichuan 2",
       "Baidu",
@@ -132,6 +132,8 @@
       "EAGLE",
       "Eaton",
       "Equinix Metal",
+      "ERCOT Batch Zero large-load process",
+      "ERCOT regional transmission planning",
       "European Commission / EuroHPC",
       "European Union / AI Office",
       "FERC / Susquehanna-Amazon co-location",
@@ -149,29 +151,31 @@
       "Google internal developer tools",
       "Graphcore / SoftBank",
       "Groq",
-      "HUMAIN / SDAIA",
       "HeteroScale production study",
       "Hitachi Energy",
       "Huawei Atlas 900 A3 SuperPoD",
       "Huawei Cloud Pangu",
+      "HUMAIN / SDAIA",
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
+      "iFLYTEK Spark / Open Platform",
       "IndiaAI Mission",
       "Intel manufacturing expansion",
       "International Energy Agency",
       "Johnson Controls",
       "Kakao",
-      "LG AI Research",
-      "LMSYS-Chat-1M",
       "Lambda",
       "Large-scale training reliability study",
       "Leyline",
+      "LG AI Research",
       "Lightmatter",
       "LiquidStack / Trane Technologies",
-      "MBZUAI / G42 Institute of Foundation Models",
-      "MBZUAI / Inception / Cerebras / Petuum",
+      "llm-d / Google",
+      "LMSYS-Chat-1M",
       "MagicDec",
       "Marvell / Celestial AI",
+      "MBZUAI / G42 Institute of Foundation Models",
+      "MBZUAI / Inception / Cerebras / Petuum",
       "Medusa",
       "Meituan DORA",
       "Meituan LongCat-Flash",
@@ -191,6 +195,8 @@
       "Moonshot AI",
       "Multi-tenant prefix-cache admission study",
       "NAVER Cloud",
+      "Nebius Group",
+      "New York Executive Order 62",
       "NTT tsuzumi",
       "NVIDIA",
       "NVIDIA / Coherent",
@@ -203,8 +209,6 @@
       "NVIDIA Dynamo Planner",
       "NVIDIA Nemotron",
       "NVIDIA TensorRT-LLM",
-      "Nebius Group",
-      "OSWorld",
       "OctoAI / NVIDIA",
       "OpenAI",
       "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
@@ -219,14 +223,10 @@
       "Operator-level LLM autoscaling study",
       "Oracle",
       "Orca",
-      "PJM Interconnection",
+      "OSWorld",
       "Parrot serving study",
+      "PJM Interconnection",
       "Robust KV cache management study",
-      "SDAIA / IBM",
-      "SGLang",
-      "SK Telecom",
-      "SK hynix",
-      "SMetric agent scheduling study",
       "SageServe production-trace study",
       "Sakana AI",
       "Samsung Electronics",
@@ -234,29 +234,35 @@
       "Sarvam AI",
       "Schneider Electric",
       "Schneider Electric / NVIDIA",
+      "SDAIA / IBM",
       "Sea AI Lab",
       "SemiAnalysis",
       "SenseTime",
       "ServeGen production study",
+      "SGLang",
       "Shanghai AI Laboratory / InternLM",
       "Siemens Energy",
       "Siemens Energy / Start Campus",
       "Singapore IMDA",
+      "SK hynix",
+      "SK Telecom",
       "SkyWalker cross-region study",
+      "SMetric agent scheduling study",
       "SpecInfer",
       "Speculative decoding",
       "StepFun",
-      "TIE scheduling study",
-      "TSMC",
-      "TSMC Arizona Fab 21 N4",
-      "TSMC CoWoS-L",
       "TaiChi serving study",
+      "tau-bench",
       "Technology Innovation Institute",
       "Tencent",
+      "TIE scheduling study",
       "TokenScale autoscaling study",
       "Tool-result caching research",
       "TraceLab coding-agent corpus",
       "Trane Technologies",
+      "TSMC",
+      "TSMC Arizona Fab 21 N4",
+      "TSMC CoWoS-L",
       "U.S. AI datacenter pipeline",
       "U.S. Bureau of Industry and Security",
       "U.S. Bureau of Industry and Security / UAE",
@@ -268,19 +274,16 @@
       "VAST Data",
       "VAST Data / NVIDIA / CoreWeave",
       "Vertiv",
-      "WEKA",
-      "WebArena",
-      "WildChat",
-      "WorkArena / BrowserGym",
-      "Xiaomi MiMo",
-      "Z.ai / Zhipu AI",
-      "iFLYTEK Spark / Open Platform",
-      "llm-d / Google",
-      "tau-bench",
       "vLLM",
       "vLLM / PagedAttention",
+      "WebArena",
+      "WEKA",
+      "WildChat",
+      "WorkArena / BrowserGym",
       "xAI",
-      "xAI Grok 3"
+      "xAI Grok 3",
+      "Xiaomi MiMo",
+      "Z.ai / Zhipu AI"
     ],
     "explicit_gaps": [
       "Entity-complete frontier-lab coverage, especially China, France, Canada, the Middle East, and private labs beyond OpenAI and Anthropic.",
@@ -8871,8 +8874,8 @@
       "confidence": "high",
       "claim": "The foundational speculative-decoding method uses a faster approximation model to draft several tokens and a target model to verify them in parallel with a rejection-sampling correction that preserves the target output distribution; T5-XXL experiments reported roughly 2x-3x acceleration over standard T5X decoding.",
       "quantified": {
-        "speedup_min": 2.0,
-        "speedup_max": 3.0
+        "speedup_min": 2,
+        "speedup_max": 3
       },
       "assumptions": [
         "Speedup depends on draft cost, draft-target agreement, verification cost, hardware, model pair, sequence geometry, and load."
@@ -9019,7 +9022,7 @@
         "batch_size_min": 32,
         "batch_size_max": 256,
         "a100_gpus": 8,
-        "llama2_7b_32k_speedup_max": 2.0,
+        "llama2_7b_32k_speedup_max": 2,
         "llama31_8b_speedup_max": 1.84
       },
       "assumptions": [
@@ -9517,6 +9520,192 @@
         "Tag benchmark-only speculative fields so they cannot be silently joined with production request telemetry.",
         "Require request/fleet denominators and output-token accounting before comparing acceptance across engines.",
         "Retain the unresolved production retry/fallback/client-side distribution gap."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "ercot-batch-zero-puct-delay-2026",
+      "category": "policy_regulation",
+      "entity": "ERCOT Batch Zero large-load process",
+      "topic": [
+        "large_load_interconnection",
+        "batch_zero",
+        "queue_verification",
+        "load_forecast",
+        "regulatory_timeline"
+      ],
+      "published_at": "2026-08-20",
+      "event_at": "2026-08-20",
+      "source_title": "PUCT Project No. 59142 Order Granting ERCOT Request for Good Cause Exception",
+      "source_url": "https://interchange.puc.texas.gov/Documents/59142_53_1675960.PDF",
+      "source_kind": "regulator_filing_and_order",
+      "evidence_class": "official_regulatory_decision",
+      "confidence": "high",
+      "claim": "ERCOT asked the Public Utility Commission of Texas to extend the first-classification deadline for its transition Batch Zero of large-load interconnection requests. The Commission granted the good-cause exception, moving the classification deadline from September 1, 2026 to October 1, 2026 while leaving the October 1, 2027 batch-study deadline unchanged. ERCOT said the extra month was needed to complete a manual initial screening process; identify duplicate, terminated, withdrawn, and completed requests; identify lower-priority projects; validate project status and readiness with transmission service providers; and reflect the resulting status changes in the Batch Zero forecast incorporated into ERCOT’s Long-Term Load Forecast before the October 1, 2026 forecasting deadline.",
+      "quantified": {
+        "previous_classification_deadline": "2026-09-01",
+        "extended_classification_deadline": "2026-10-01",
+        "batch_study_deadline_unchanged": "2027-10-01",
+        "forecast_update_deadline": "2026-10-01",
+        "extension_days": 30
+      },
+      "assumptions": [
+        "The PUCT Interchange filing and order are the authoritative witnessed surfaces for the requested and granted deadline change.",
+        "Batch Zero is a transition classification for requests already under study before the new batch process; it is not proof that any request completed a study, received interconnection approval, energized, or became live load."
+      ],
+      "contradictions_or_limits": [
+        "The decision changes a classification deadline; it does not cancel or deny projects and does not stop construction.",
+        "Initial screening, transmission-service-provider validation, Batch Zero classification, Long-Term Load Forecast inclusion, completed batch study, approved interconnection, energization, and measured demand are separate lifecycle states.",
+        "Requested nameplate megawatts are not verified project capacity, coincident peak, annual energy, IT megawatts, or actual demand.",
+        "The source does not establish the suggested approximately 474 GW queue total, a completed audit outcome, project-level verification results, or a published transmission-planning sensitivity. Those claims remain omitted pending direct official witnesses."
+      ],
+      "fak_implications": [
+        "Grid-capacity ledgers should preserve request, screening, validated status, batch classification, forecast, study, approval, energization, and live-load states separately.",
+        "Planning inputs should retain forecast version and deadline provenance because verification can revise the load set before transmission studies consume it.",
+        "Do not treat a classification extension or forecast update as built or energized transmission capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "new-york-executive-order-62-data-center-permit-moratorium-2026",
+      "category": "policy_regulation",
+      "entity": "New York Executive Order 62",
+      "topic": [
+        "data_center_permitting",
+        "temporary_moratorium",
+        "state_environmental_review",
+        "grid_load_requests",
+        "geis"
+      ],
+      "published_at": "2026-07-14",
+      "event_at": "2026-07-14",
+      "source_title": "Executive Order No. 62: Establishing a Temporary Moratorium on Data Centers in New York While the State Develops a Sustainable Data Center Policy",
+      "source_url": "https://www.governor.ny.gov/executive-order/no-62-establishing-temporary-moratorium-data-centers-new-york-while-state-develops",
+      "source_kind": "official_policy_release",
+      "evidence_class": "official_regulatory_decision",
+      "confidence": "high",
+      "claim": "New York Executive Order 62 directed the Department of Environmental Conservation (DEC) to hold in abeyance discretionary state permit, approval, and license applications for construction or expansion of covered data centers that were pending and had not been deemed complete before the order. It excluded local-government permits and other permissions. The order cited nearly 12 GW of data-center load requests in the NYISO interconnection queue as of May 2026, with more than 8 GW entering during 2025. Its covered definition reaches facilities whose operations consume, or are designed to consume, at least 50 MW, while excluding facilities used primarily for manufacturing, research, education, or medical care. The order also starts future policy work: a DEC-led report and Generic Environmental Impact Statement (GEIS), initial agency information within 60 days, stakeholder recommendations within 90 days, and a final report and GEIS within twelve months.",
+      "quantified": {
+        "nyiso_data_center_load_requests_as_of_may_2026_gw": "nearly 12",
+        "load_requests_entered_during_2025_gw": "more than 8",
+        "covered_facility_threshold_mw": 50,
+        "initial_agency_information_days": 60,
+        "stakeholder_recommendations_days": 90,
+        "final_report_and_geis_months": 12
+      },
+      "assumptions": [
+        "The governor-hosted executive-order text is the authoritative witness for the order, its scope, definitions, exclusions, and directed future processes.",
+        "The cited NYISO figures are queue requests reported by the order, not verified projects, coincident demand, energized capacity, or measured load."
+      ],
+      "contradictions_or_limits": [
+        "This is not a blanket construction ban: it applies to specified discretionary state applications pending and not deemed complete before the order, and it excludes local-government permissions.",
+        "The order does not establish a simple fixed one-year expiry. Its report, GEIS, 60-day, 90-day, and twelve-month processes are future work, and the order describes conditions for the moratorium rather than a single automatic expiration date.",
+        "A covered facility is defined by a 50 MW consumption or design threshold and excludes facilities used primarily for manufacturing, research, education, or medical care.",
+        "Queue-request megawatts are not built, approved, energized, or live demand."
+      ],
+      "fak_implications": [
+        "Policy ledgers should preserve state versus local authority, application-completeness status, facility threshold, and use-based exclusions rather than collapsing the order into a blanket ban.",
+        "Capacity models should keep NYISO queue requests separate from verified, permitted, constructed, energized, and measured demand.",
+        "Treat the GEIS, report, and 60/90-day and twelve-month deliverables as pending milestones until directly witnessed as completed."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "ercot-batch-zero-process-release-2026",
+      "category": "policy_regulation",
+      "entity": "ERCOT Batch Zero large-load process",
+      "topic": [
+        "large_load_interconnection",
+        "batch_zero",
+        "tracked_requests",
+        "data_centers",
+        "transmission_planning"
+      ],
+      "published_at": "2026-06-18",
+      "event_at": "2026-06-18",
+      "source_title": "PUCT Approves ERCOT's Batch Zero Process for Connecting Large Electricity Users While Protecting System Reliability for Texans",
+      "source_url": "https://www.ercot.com/news/release/06182026-puct-approves-ercots",
+      "source_kind": "official_release",
+      "evidence_class": "official_regulatory_approval",
+      "confidence": "high",
+      "claim": "ERCOT reported that the PUCT approved its Batch Zero process for large-user connection requests. ERCOT was tracking more than 438,000 MW of large-load requests, nearly 89% attributed to data centers. Qualified projects of at least 75 MW that were already under study were grouped into the transition Batch Zero. The June release expected applicant classification in August 2026 and a final statewide transmission plan for the batch in Fall 2027; the classification timing was subsequently delayed by the later PUCT record in this corpus. ERCOT expressly cautioned that not all interconnection requests result in built projects.",
+      "quantified": {
+        "tracked_large_load_requests_mw": "more than 438000",
+        "data_center_share_percent": "nearly 89",
+        "qualified_project_minimum_mw": 75,
+        "classification_expected": "2026-08",
+        "statewide_final_transmission_plan_expected": "Fall 2027"
+      },
+      "assumptions": [
+        "The ERCOT release is the authoritative witness for the June 18 approval announcement, tracked-request total, stated data-center share, qualification threshold, and announced planning milestones.",
+        "The more-than-438,000 MW figure is tracked request nameplate, not a verified or livable demand forecast."
+      ],
+      "contradictions_or_limits": [
+        "The August 2026 classification expectation was later superseded by the PUCT-granted October 1, 2026 deadline recorded separately.",
+        "Tracked requests, qualified Batch Zero membership, classification, forecast inclusion, study completion, approval, construction, energization, and live load are separate states.",
+        "ERCOT states that not all requests become built projects; the tracked total is not verified demand, coincident peak, annual energy, or operational load.",
+        "The Fall 2027 statewide plan was future work at publication and does not prove facilities were constructed or energized."
+      ],
+      "fak_implications": [
+        "Use the tracked request total only as an upper-stage queue measure with source date and denominator, never as livable demand.",
+        "Preserve the at-least-75 MW qualification rule and transition-batch status when comparing large-load queue figures.",
+        "Keep announced classification and transmission-plan milestones linked to later deadline and completion evidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "ercot-geren-response-transmission-load-sensitivities-2026",
+      "category": "supply_chain",
+      "entity": "ERCOT regional transmission planning",
+      "topic": [
+        "transmission_planning",
+        "load_forecast",
+        "forecast_sensitivity",
+        "765_kv",
+        "batch_zero"
+      ],
+      "published_at": "2026-08-20",
+      "event_at": "2026-08-12",
+      "source_title": "ERCOT Response to Representative Geren Regarding Permian Basin Reliability Plan and 765 kV Transmission Facilities",
+      "source_url": "https://www.ercot.com/files/docs/2026/08/20/Rep.-Geren-Response-2026-08-12.pdf",
+      "source_kind": "official_report",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "In an August 12 response published August 20, ERCOT distinguished successive planning assumptions and forecasts. The 2024 Regional Transmission Plan used an approximately 150 GW 2030 load level; the 2025 plan used an approximately 159 GW 2031 summer peak. ERCOT also studied a lower approximately 125 GW 2030 sensitivity and said the full Strategic Texas Electric Plan (STEP) 765-kV additions were needed under both the 125 GW and 150 GW cases. Its most recent econometric base-plus-mid-size forecast was approximately 110 GW in 2032, but excluded large loads being evaluated through the Batch process; those loads must be added to obtain ERCOT’s total forecast. ERCOT expected the final forecast including Batch-process loads by the end of 2026.",
+      "quantified": {
+        "rtp_2024_load_assumption_2030_gw": "approximately 150",
+        "rtp_2025_summer_peak_2031_gw": "approximately 159",
+        "lower_sensitivity_2030_gw": "approximately 125",
+        "econometric_base_plus_mid_size_forecast_2032_gw": "approximately 110",
+        "final_forecast_including_batch_loads_expected": "end of 2026",
+        "step_voltage_kv": 765
+      },
+      "assumptions": [
+        "The ERCOT-hosted response dated August 12 and posted August 20 is the authoritative witness for the stated planning cases, forecast boundaries, and dependency claims.",
+        "The 150 GW, 159 GW, 125 GW, and 110 GW values retain their distinct years, methods, and roles rather than being treated as interchangeable forecasts or actual demand."
+      ],
+      "contradictions_or_limits": [
+        "The approximately 150 GW and 159 GW values are Regional Transmission Plan assumptions; the approximately 125 GW value is a sensitivity; and the approximately 110 GW value is an econometric base-plus-mid-size forecast that excludes Batch-process large loads. None is actual measured load.",
+        "The final total forecast including Batch-process loads remained future work expected by the end of 2026.",
+        "A finding that the full STEP 765-kV plan is needed in studied cases is a planning result, not proof that transmission facilities were permitted, constructed, energized, or available.",
+        "The response does not validate every tracked large-load request or convert queue nameplate into livable demand."
+      ],
+      "fak_implications": [
+        "Forecast ledgers should retain forecast family, study year, target year, included load classes, and sensitivity status for every grid-demand number.",
+        "Transmission-capacity models should separate recommended or planned facilities from permitted, constructed, energized, and operational assets.",
+        "Batch-process loads should be added only through a dated final forecast or project-level evidence, not by combining raw queue nameplate with econometric demand."
       ],
       "rumor": {
         "is_rumor": false

@@ -13,6 +13,22 @@ financial or site lifecycles, or a resolved rumor history. “Exhaustive” rema
 operating method—explicit taxonomy, dated evidence, and visible gaps—not a claim that
 the open web has a finite or fully enumerated boundary.
 
+Issue #9373 now adds four official-source records: the existing PUCT-granted Batch Zero
+classification extension, New York Executive Order 62, ERCOT's June Batch Zero approval
+release, and ERCOT's August transmission-planning response. The slice preserves the operative
+boundaries: New York's state-level abeyance is limited to specified discretionary applications
+pending and not deemed complete before the order, excludes local permissions, and is not a
+blanket construction ban or simple fixed one-year expiry; ERCOT's >438,000 MW tracked request
+nameplate and nearly 89% data-center share are not verified or livable demand; and the 150 GW
+and 159 GW planning assumptions, 125 GW sensitivity, and 110 GW econometric forecast retain
+their distinct years, populations, and forecast roles. Request, verified status, Batch
+classification, forecast inclusion, completed study, approval, construction, energization, and
+live load remain separate states. The New York GEIS/report processes, final Batch Zero outputs,
+Fall 2027 statewide transmission plan, and end-2026 forecast including Batch loads remain future
+work. The Texas-governor directive/~474 GW claim remains explicit coverage debt because no
+direct governor source was supplied. **Exact indexed totals: 248 entries, 243 unique URLs, and
+210 entity labels.**
+
 Issue #9325 adds an opened Modine/Airedale cooling factory, a >$4B 2027-2029
 capacity reservation with $165M upfront funding, and a shipping Schneider prefabricated
 pod rated to 1MW+. Factory opening, reserved capacity, shipping module, site acceptance,
