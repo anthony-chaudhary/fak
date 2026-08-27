@@ -477,3 +477,58 @@ uint64_t mg_gdn_current_allocated_size(void) {
     if (!mg_init()) return 0;
     return (uint64_t)gDev.currentAllocatedSize;
 }
+
+
+// Encode B independent P=1 state owners in one command buffer. The projection
+// panels are row-major [B,width]; each row advances only its matching owner.
+// This deliberately emits the three recurrent kernels per row while keeping
+// all rows in the caller's single graph submission. The five weight projection
+// dispatches remain B-wide and are encoded by the graph before this function.
+void *mg_gdn_graph_encode_batch(void *graph, const int *owners, int batch,
+                                void *mixedPtr, void *zPtr, void *bPtr, void *aPtr,
+                                const float *convW, const float *aLog, const float *dtBias, const float *norm,
+                                int nK, int nV, int kHd, int vHd, int convKernel, float eps) {
+    if (!graph || !owners || batch < 2 || batch > 8 || !mixedPtr || !zPtr || !bPtr || !aPtr ||
+        !convW || !aLog || !dtBias || !norm || !gdn_init()) return NULL;
+    int keyDim=nK*kHd,valueDim=nV*vHd,convDim=2*keyDim+valueDim;
+    id<MTLCommandBuffer> cb=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(graph);
+    id<MTLBuffer> mixed=(__bridge id<MTLBuffer>)mixedPtr,z=(__bridge id<MTLBuffer>)zPtr,
+                  bv=(__bridge id<MTLBuffer>)bPtr,av=(__bridge id<MTLBuffer>)aPtr;
+    id<MTLBuffer> core=(__bridge id<MTLBuffer>)mg_graph_alloc_result(graph,batch*valueDim);
+    if(!cb||!mixed||!z||!bv||!av||!core)return NULL;
+    id<MTLBuffer> cw=gdn_host_buffer(convW,(NSUInteger)convDim*convKernel*sizeof(float));
+    id<MTLBuffer> al=gdn_host_buffer(aLog,(NSUInteger)nV*sizeof(float));
+    id<MTLBuffer> db=gdn_host_buffer(dtBias,(NSUInteger)nV*sizeof(float));
+    id<MTLBuffer> nw=gdn_host_buffer(norm,(NSUInteger)vHd*sizeof(float));
+    if(!cw||!al||!db||!nw)return NULL;
+    int tokens=1;
+    for(int row=0;row<batch;row++){
+        int owner=owners[row];
+        if(owner<0||owner>=GDN_MAX_OWNERS)return NULL;
+        GDNOwner*o=&gOwners[owner];
+        if(!o->live||o->nK!=nK||o->nV!=nV||o->kHd!=kHd||o->vHd!=vHd||o->convKernel!=convKernel)return NULL;
+        id<MTLBuffer> convOut=[gDevice newBufferWithLength:(NSUInteger)convDim*sizeof(float) options:MTLResourceStorageModePrivate];
+        id<MTLBuffer> qk=[gDevice newBufferWithLength:(NSUInteger)2*keyDim*sizeof(float) options:MTLResourceStorageModePrivate];
+        if(!convOut||!qk)return NULL;
+        NSUInteger mixedOff=(NSUInteger)row*convDim*sizeof(float), zOff=(NSUInteger)row*valueDim*sizeof(float),
+                   scalarOff=(NSUInteger)row*nV*sizeof(float), coreOff=(NSUInteger)row*valueDim*sizeof(float);
+        id<MTLComputeCommandEncoder> e1=[cb computeCommandEncoder];
+        [e1 setComputePipelineState:gConv];[e1 setBuffer:mixed offset:mixedOff atIndex:0];[e1 setBuffer:cw offset:0 atIndex:1];
+        [e1 setBuffer:o->conv offset:0 atIndex:2];[e1 setBuffer:convOut offset:0 atIndex:3];
+        [e1 setBytes:&tokens length:4 atIndex:4];[e1 setBytes:&convDim length:4 atIndex:5];[e1 setBytes:&convKernel length:4 atIndex:6];
+        gdn_dispatch(e1,gConv,(NSUInteger)convDim);[e1 endEncoding];
+        id<MTLComputeCommandEncoder> e2=[cb computeCommandEncoder];
+        [e2 setComputePipelineState:gNorm];[e2 setBuffer:convOut offset:0 atIndex:0];[e2 setBuffer:qk offset:0 atIndex:1];
+        [e2 setBytes:&tokens length:4 atIndex:2];[e2 setBytes:&nK length:4 atIndex:3];[e2 setBytes:&kHd length:4 atIndex:4];[e2 setBytes:&keyDim length:4 atIndex:5];
+        gdn_dispatch(e2,gNorm,(NSUInteger)(2*keyDim));[e2 endEncoding];
+        id<MTLComputeCommandEncoder> e3=[cb computeCommandEncoder];
+        [e3 setComputePipelineState:gRecur];[e3 setBuffer:qk offset:0 atIndex:0];[e3 setBuffer:convOut offset:(NSUInteger)2*keyDim*sizeof(float) atIndex:1];
+        [e3 setBuffer:z offset:zOff atIndex:2];[e3 setBuffer:bv offset:scalarOff atIndex:3];[e3 setBuffer:av offset:scalarOff atIndex:4];
+        [e3 setBuffer:al offset:0 atIndex:5];[e3 setBuffer:db offset:0 atIndex:6];[e3 setBuffer:nw offset:0 atIndex:7];
+        [e3 setBuffer:o->recurrent offset:0 atIndex:8];[e3 setBuffer:core offset:coreOff atIndex:9];
+        [e3 setBytes:&tokens length:4 atIndex:10];[e3 setBytes:&nK length:4 atIndex:11];[e3 setBytes:&nV length:4 atIndex:12];
+        [e3 setBytes:&kHd length:4 atIndex:13];[e3 setBytes:&vHd length:4 atIndex:14];[e3 setBytes:&eps length:4 atIndex:15];
+        gdn_dispatch(e3,gRecur,(NSUInteger)(nV*vHd));[e3 endEncoding];
+    }
+    return (__bridge void*)core;
+}
