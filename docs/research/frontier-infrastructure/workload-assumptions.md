@@ -4,6 +4,35 @@
 accepted, rejected, or parameterized in fak benchmarks. It is not a substitute for the
 per-source provenance in [`index.json`](index.json).
 
+## Google AI Hypercomputer topology and admission assumptions (#9384)
+
+The five-source Google slice supports a typed control-plane benchmark, not one flat
+accelerator count:
+
+| Boundary | Source-backed envelope | Benchmark rule |
+|---|---|---|
+| Cluster Director GPU hierarchy | Physical host → single-rack sub-block → block → cluster; one GPU-network hop inside a sub-block, at most two inside a block; clusters can scale to thousands of GPUs | Treat “thousands” as a supported scale class, not a configured maximum, prevalent layout, available fleet, or active job |
+| Current GKE TPU Multislice | Two or more homogeneous multi-host slices; same TPU type, size, and topology; ICI within each slice, DCN between slices; synchronous multicontroller training; atomic node-pool scale-up | Preserve job/slice/VM-or-host/chip levels and admit the slice atomically; no current maximum slices-per-JobSet is public |
+| Legacy Cloud TPU API | v4+; one Multislice node equals one slice; maximum 256 slices per queued resource; gang scheduling is all-or-none | Version the 256-slice ceiling to the maintenance-only API; do not copy it into GKE or future TPU control planes |
+| Dynamic Workload Scheduler | Flex-start: standalone wait up to two hours, MIG request persists until available/canceled, 10-minute to seven-day run, best-effort capacity and dense placement. Reservation-bound/calendar: up to 90-day workloads, very high assurance after approval, exclusive reserved capacity | Record requested → pending → approved/admitted → provisioned → running → expired separately; a wait ceiling is not a queue-wait distribution |
+| XPK/GKE achieved run | 50,944 TPU v5e chips across 199 pods; 256 chips/pod; ICI within pod and Jupiter DCN across pods; XPK creates/resizes clusters and submits Kueue JobSets | Treat as provider-reported achieved active work, not announced capacity, a schedulable customer maximum, or a prevalent topology |
+
+Use separate physical and workload hierarchies in receipts:
+
+- physical: `fleet/region → cluster → block or TPU pod → slice → host/VM → chip`;
+- workload allocation: `job/JobSet → one or more pods/slices → hosts/VMs → chips`.
+
+The order is not identical across GPU and TPU products: Cluster Director exposes
+host/rack/block/cluster placement, while Multislice exposes job/slice/host/chip
+communication domains. Do not manufacture a one-to-one mapping between a Cluster
+Director block, a TPU pod, and a TPU slice.
+
+Missing values remain first-class parameters. None of these official sources reports a
+production queue-wait distribution, utilization, provider-wide healthy/schedulable/active
+scale, failure or retry distribution, power, energy, or total workload cost. Sweep those
+values synthetically or leave them unknown; do not derive them from supported maxima or
+the 2023 achieved job.
+
 ## Provider-scale population denominators (#9379)
 
 Official first-party disclosures now bound several unlike populations: 950 million Gemini

@@ -1,0 +1,275 @@
+{
+  "schema": "fak-upstream-study-completeness/1",
+  "repository": "llm-d/llm-d",
+  "cutoff": "2026-08-27T10:00:00Z",
+  "revision": "bc20f73bd344b5a0faad5afca93831088aeee957",
+  "capture": {
+    "path": "docs/research/inventory/llm-d-llm-d-corpus.jsonl",
+    "bytes": 5273559,
+    "sha256": "8df8bb3eb0ead297ce143ce2a21bda4a4cfc486f7e71617b9dbab632e5c8ff7f",
+    "records": 2474,
+    "validation": "go run ./cmd/fak study-forge validate --receipt docs/research/inventory/llm-d-llm-d-corpus.jsonl",
+    "validation_result": "valid"
+  },
+  "atomicity": {
+    "status": "complete_non_atomic",
+    "statement": "Every declared forge endpoint paginated successfully and the corpus validator passed. The endpoints were crawled sequentially, not as one atomic GitHub snapshot; receipt.non_atomic_delta preserves the exact cross-endpoint observation instead of claiming atomic completeness."
+  },
+  "source_classes": [
+    {
+      "class": "repository_tree",
+      "status": "complete",
+      "count": 1139,
+      "evidence": [
+        "llm-d/llm-d@bc20f73bd344b5a0faad5afca93831088aeee957",
+        "git tree paths sha256:903b51775862e90c69cdf47782d72c5ebd1c088089d8bfdf2f70f882e8b80f8e"
+      ],
+      "note": "Detached checkout pinned to the forge-reported main revision; no working-tree drift."
+    },
+    {
+      "class": "readme_docs",
+      "status": "complete",
+      "count": 138,
+      "evidence": [
+        "ONBOARDING.md",
+        "README.md",
+        "docs/api-reference/README.md",
+        "docs/api-reference/artifacts.md",
+        "docs/api-reference/endpointpickerconfig.md",
+        "docs/api-reference/epp-grpc-apis.md",
+        "docs/api-reference/epp-http-apis.md",
+        "docs/api-reference/epp-http-headers.md",
+        "docs/api-reference/glossary.md",
+        "docs/api-reference/inferencemodelrewrite.md",
+        "docs/api-reference/inferenceobjective.md",
+        "docs/api-reference/inferencepool.md",
+        "docs/architecture/README.md",
+        "docs/architecture/advanced/autoscaling/README.md",
+        "docs/architecture/advanced/autoscaling/hpa-architecture.svg",
+        "docs/architecture/advanced/autoscaling/hpa-epp.md",
+        "docs/architecture/advanced/autoscaling/hpa-wva.md",
+        "docs/architecture/advanced/autoscaling/scaling-engine-pipeline.svg",
+        "docs/architecture/advanced/autoscaling/slo-aware-keda.md",
+        "docs/architecture/advanced/autoscaling/wva-architecture.svg",
+        "... 118 more paths included by prefix scan"
+      ],
+      "note": "Path coverage is deterministic from the pinned tree; candidate extraction used focused content search plus proposal/guide read-back."
+    },
+    {
+      "class": "architecture_design",
+      "status": "complete",
+      "count": 46,
+      "evidence": [
+        "docs/architecture/README.md",
+        "docs/architecture/advanced/autoscaling/README.md",
+        "docs/architecture/advanced/autoscaling/hpa-architecture.svg",
+        "docs/architecture/advanced/autoscaling/hpa-epp.md",
+        "docs/architecture/advanced/autoscaling/hpa-wva.md",
+        "docs/architecture/advanced/autoscaling/scaling-engine-pipeline.svg",
+        "docs/architecture/advanced/autoscaling/slo-aware-keda.md",
+        "docs/architecture/advanced/autoscaling/wva-architecture.svg",
+        "docs/architecture/advanced/batch/README.md",
+        "docs/architecture/advanced/batch/async-processor.md",
+        "docs/architecture/advanced/batch/batch-gateway.md",
+        "docs/architecture/advanced/disaggregation/README.md",
+        "docs/architecture/advanced/inference-payload-processing/README.md",
+        "docs/architecture/advanced/kv-management/README.md",
+        "docs/architecture/advanced/kv-management/kv-indexer.md",
+        "docs/architecture/advanced/kv-management/kv-offloader.md",
+        "docs/architecture/advanced/kv-management/prefix-cache-aware-routing.md",
+        "docs/architecture/advanced/latency-predictor.md",
+        "docs/architecture/core/images/flow_control_dashboard.png",
+        "docs/architecture/core/inferencepool.md",
+        "... 26 more paths included by prefix scan"
+      ],
+      "note": "Path coverage is deterministic from the pinned tree; candidate extraction used focused content search plus proposal/guide read-back."
+    },
+    {
+      "class": "deployment_guides",
+      "status": "complete",
+      "count": 804,
+      "evidence": [
+        "docker/Dockerfile.cpu",
+        "docker/Dockerfile.cuda",
+        "docker/Dockerfile.rdma-tools",
+        "docker/Dockerfile.rocm",
+        "docker/Dockerfile.xpu",
+        "docker/build-constraints.txt",
+        "docker/common-versions",
+        "docker/constraints.txt",
+        "docker/packages/common/runtime-otel-package-requirements.txt",
+        "docker/packages/cuda/builder-packages.json",
+        "docker/packages/cuda/runtime-packages.json",
+        "docker/packages/rpms/builder/amd64/base/hwloc-2.4.1-5.el9.x86_64.rpm",
+        "docker/packages/rpms/builder/amd64/base/hwloc-libs-2.4.1-5.el9.x86_64.rpm",
+        "docker/packages/rpms/builder/amd64/devel/hwloc-devel-2.4.1-5.el9.x86_64.rpm",
+        "docker/packages/rpms/builder/amd64/devel/libaio-devel-0.3.111-13.el9.x86_64.rpm",
+        "docker/packages/rpms/builder/amd64/devel/numactl-devel-2.0.19-3.el9.x86_64.rpm",
+        "docker/packages/rpms/builder/arm64/base/hwloc-2.4.1-5.el9.aarch64.rpm",
+        "docker/packages/rpms/builder/arm64/base/hwloc-libs-2.4.1-5.el9.aarch64.rpm",
+        "docker/packages/rpms/builder/arm64/devel/hwloc-devel-2.4.1-5.el9.aarch64.rpm",
+        "docker/packages/rpms/builder/arm64/devel/libaio-devel-0.3.111-13.el9.aarch64.rpm",
+        "... 784 more paths included by prefix scan"
+      ],
+      "note": "Path coverage is deterministic from the pinned tree; candidate extraction used focused content search plus proposal/guide read-back."
+    },
+    {
+      "class": "tests_ci_failure_history",
+      "status": "complete",
+      "count": 882,
+      "evidence": [
+        ".github/ISSUE_TEMPLATE/bug.yml",
+        ".github/ISSUE_TEMPLATE/feature-request.yml",
+        ".github/ISSUE_TEMPLATE/hardware-platform-support.yml",
+        ".github/ISSUE_TEMPLATE/new-release.md",
+        ".github/actionlint.yaml",
+        ".github/dependabot.yml",
+        ".github/scripts/e2e/e2e-validate-flow-control.sh",
+        ".github/scripts/e2e/e2e-validate-predicted-latency.sh",
+        ".github/scripts/e2e/e2e-validate-scale-event.sh",
+        ".github/scripts/e2e/e2e-validate.sh",
+        ".github/scripts/e2e/helm-get-all.sh",
+        ".github/scripts/e2e/wide-ep-transform.sh",
+        ".github/scripts/install-agentgateway-crds.sh",
+        ".github/scripts/install-disaggregatedset-crds.sh",
+        ".github/scripts/install-envoy-gateway-crds.sh",
+        ".github/scripts/install-fma-crds.sh",
+        ".github/scripts/install-gke-crds.sh",
+        ".github/scripts/install-keda-crds.sh",
+        ".github/scripts/install-nvidia-dra-crds.sh",
+        ".github/scripts/nightly-e2e-verification/.gitignore",
+        "... 862 more paths included by prefix scan"
+      ],
+      "note": "Path coverage is deterministic from the pinned tree; candidate extraction used focused content search plus proposal/guide read-back."
+    },
+    {
+      "class": "license_provenance",
+      "status": "complete",
+      "count": 1,
+      "evidence": [
+        "LICENSE@bc20f73bd344b5a0faad5afca93831088aeee957"
+      ],
+      "note": "Apache-2.0. Candidate dispositions still avoid importing Kubernetes product surface into fak-native execution."
+    },
+    {
+      "class": "forge_issues",
+      "status": "complete",
+      "count": 2386,
+      "evidence": [
+        "https://api.github.com/repos/llm-d/llm-d/issues?state=all&sort=created&direction=asc&per_page=100&page=1",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=2&after=Y3Vyc29yOnYyOpLPAAABlzb2AAjOuaoQkA%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=3&after=Y3Vyc29yOnYyOpLPAAABmS7c8oDOypRYQw%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=4&after=Y3Vyc29yOnYyOpLPAAABmaYGjBjOz1PE0w%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=5&after=Y3Vyc29yOnYyOpLPAAABmi4NnyDO1HFZCw%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=6&after=Y3Vyc29yOnYyOpLPAAABmrujyqjO2l18Rw%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=7&after=Y3Vyc29yOnYyOpLPAAABm8IkI7jO45BFBA%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=8&after=Y3Vyc29yOnYyOpLPAAABnCohXuDO6Fgb2g%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=9&after=Y3Vyc29yOnYyOpLPAAABnHKH0zDO7ATy6A%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=10&after=Y3Vyc29yOnYyOpLPAAABnLl-6KDO78Siwg%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=11&after=Y3Vyc29yOnYyOpLPAAABnRb1IejO9WJFKg%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=12&after=Y3Vyc29yOnYyOpLPAAABnWmW-LjO-42IUQ%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=13&after=Y3Vyc29yOnYyOpLPAAABnalMuZjO_-WOFA%3D%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=14&after=Y3Vyc29yOnYyOpLPAAABndvwCvjPAAAAAQOO7fo%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=15&after=Y3Vyc29yOnYyOpLPAAABnffMC_DPAAAAAQVHFYA%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=16&after=Y3Vyc29yOnYyOpLPAAABniIyBSDPAAAAAQieudc%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=17&after=Y3Vyc29yOnYyOpLPAAABnmNVIUDPAAAAAQ2Qwyw%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=18&after=Y3Vyc29yOnYyOpLPAAABnpkmUjDPAAAAARIkwXE%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=19&after=Y3Vyc29yOnYyOpLPAAABnr3JOjDPAAAAARVUD5o%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=20&after=Y3Vyc29yOnYyOpLPAAABnvGaJoDPAAAAARlouyk%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=21&after=Y3Vyc29yOnYyOpLPAAABnzYQvxjPAAAAAR8Vjbs%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=22&after=Y3Vyc29yOnYyOpLPAAABn49-wkjPAAAAASelfw4%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=23&after=Y3Vyc29yOnYyOpLPAAABn9yJ25DPAAAAAS9w4KA%3D",
+        "https://api.github.com/repositories/975070903/issues?state=all&sort=created&direction=asc&per_page=100&page=24&after=Y3Vyc29yOnYyOpLPAAABoAQBcxjPAAAAATNv5WY%3D"
+      ],
+      "note": "24 paginated pages; checksums and request metadata are in the corpus receipt."
+    },
+    {
+      "class": "forge_pulls",
+      "status": "complete",
+      "count": 1850,
+      "evidence": [
+        "https://api.github.com/repos/llm-d/llm-d/pulls?state=all&sort=created&direction=asc&per_page=100&page=1",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=2",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=3",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=4",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=5",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=6",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=7",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=8",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=9",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=10",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=11",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=12",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=13",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=14",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=15",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=16",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=17",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=18",
+        "https://api.github.com/repositories/975070903/pulls?state=all&sort=created&direction=asc&per_page=100&page=19"
+      ],
+      "note": "19 paginated pages; checksums and request metadata are in the corpus receipt."
+    },
+    {
+      "class": "forge_discussions",
+      "status": "complete",
+      "count": 0,
+      "evidence": [
+        "https://api.github.com/repos/llm-d/llm-d/discussions?direction=asc&per_page=100&page=1"
+      ],
+      "note": "1 paginated pages; checksums and request metadata are in the corpus receipt."
+    },
+    {
+      "class": "forge_releases",
+      "status": "complete",
+      "count": 11,
+      "evidence": [
+        "https://api.github.com/repos/llm-d/llm-d/releases?per_page=100&page=1"
+      ],
+      "note": "1 paginated pages; checksums and request metadata are in the corpus receipt."
+    },
+    {
+      "class": "forge_labels",
+      "status": "complete",
+      "count": 66,
+      "evidence": [
+        "https://api.github.com/repos/llm-d/llm-d/labels?per_page=100&page=1"
+      ],
+      "note": "1 paginated pages; checksums and request metadata are in the corpus receipt."
+    },
+    {
+      "class": "forge_milestones",
+      "status": "complete",
+      "count": 11,
+      "evidence": [
+        "https://api.github.com/repos/llm-d/llm-d/milestones?state=all&sort=due_on&direction=asc&per_page=100&page=1"
+      ],
+      "note": "1 paginated pages; checksums and request metadata are in the corpus receipt."
+    },
+    {
+      "class": "roadmap_todos",
+      "status": "checked_absent",
+      "count": 0,
+      "evidence": [],
+      "note": "No dedicated roadmap/TODO/backlog file exists in the pinned tree; proposals, releases, milestones, issues, and PRs are the roadmap surfaces."
+    },
+    {
+      "class": "fak_issue_dedup",
+      "status": "complete",
+      "count": 1000,
+      "evidence": [
+        "sha256:79d4955cf9361923df50737c91193a33a64657897b6eaa12dff37ccc13821533"
+      ],
+      "note": "`gh issue list --state all --limit 1000 --json number,title,state,body` plus targeted `gh issue list --search` queries; candidate-specific matches are recorded in dedup-map.json."
+    }
+  ],
+  "completeness_critic": {
+    "unopened_material": [],
+    "limits": [
+      "GitHub search ranking is not an exhaustive semantic oracle; the full 1,000-ticket local export and explicit candidate searches are retained as the dedup basis.",
+      "The repository tree was pinned at the forge-reported main revision, which is later than the cutoff only if upstream moved during capture; the receipt records revision and times exactly.",
+      "Discussions returned zero rows. This is an observed complete endpoint result, not proof that discussion-like decisions do not exist in issues or PR review threads."
+    ],
+    "verdict": "All declared source classes are accounted for. No source class is silently omitted; the forge receipt is complete but explicitly non-atomic."
+  }
+}
