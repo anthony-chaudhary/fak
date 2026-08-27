@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -142,6 +143,12 @@ func worktreeWorkerEmit(v any) {
 	_ = enc.Encode(v)
 }
 
+func worktreeWorkerProgressEmitter(w io.Writer) func(workerworktree.LandProgressEvent) {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return func(event workerworktree.LandProgressEvent) { _ = enc.Encode(event) }
+}
+
 // worktreePrepareOut is the prepare JSON: the primitive's Result plus the child
 // env the caller needs to spawn the worker in the isolated worktree (the Python
 // CLI adds `env` on a successful prepare the same way). Embedding flattens Result's
@@ -230,7 +237,10 @@ func worktreeWorkerLand(argv []string) {
 		os.Exit(2)
 	}
 
-	opts := []workerworktree.LandOption{workerworktree.WithCoreLockWitness(*coreLockWitness)}
+	opts := []workerworktree.LandOption{
+		workerworktree.WithCoreLockWitness(*coreLockWitness),
+		workerworktree.WithLandProgress(worktreeWorkerProgressEmitter(os.Stderr)),
+	}
 	if strings.TrimSpace(*recoveryRemote) != "" || *requireRemote {
 		remote := strings.TrimSpace(*recoveryRemote)
 		if remote == "" {

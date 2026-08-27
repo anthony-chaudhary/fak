@@ -167,16 +167,23 @@ type ownedIsolationBackend interface {
 
 type gitWorktree struct{}
 
-var defaultIsolationBackend IsolationBackend = gitWorktree{}
+var defaultIsolationBackend IsolationBackend = nativeIsolationBackend()
 
 // IsolationBackends returns all registered implementations for conformance tests.
-func IsolationBackends() []IsolationBackend { return []IsolationBackend{gitWorktree{}} }
+func IsolationBackends() []IsolationBackend {
+	backends := []IsolationBackend{gitWorktree{}}
+	if _, ok := nativeIsolationBackend().(blockClone); ok {
+		backends = append(backends, newBlockCloneBackend())
+	}
+	return backends
+}
 
 // Result is the fail-open outcome of a git-touching op. OK is the one bit callers
 // branch on; the rest carries evidence for the record/log.
 type Result struct {
 	OK        bool   `json:"ok"`
 	Code      string `json:"code,omitempty"`
+	Backend   string `json:"backend,omitempty"`
 	Path      string `json:"path,omitempty"`
 	BaseSHA   string `json:"base_sha,omitempty"`
 	Reused    bool   `json:"reused,omitempty"`
@@ -196,7 +203,6 @@ type Result struct {
 	Disambiguation   *DisambiguationWitnesses `json:"disambiguation,omitempty"`
 	RecoveryRef      string                   `json:"recovery_ref,omitempty"`
 	RemoteRecovery   *RemoteReadback          `json:"remote_recovery,omitempty"`
-	Cost             *LandCostReceipt         `json:"cost,omitempty"`
 	// pooled is internal lifecycle evidence: unlike generic same-key reuse, this
 	// Prepare exclusively reserved an idle member and may safely destroy it if the
 	// post-materialization owner/state write fails.
@@ -490,6 +496,15 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 		res.Detail = metadataErr.Error() + cleanupDetail
 	}
 	return res
+}
+
+func isolationBackendName(backend IsolationBackend) string {
+	switch backend.(type) {
+	case blockClone, *blockClone:
+		return blockCloneBackendName
+	default:
+		return gitWorktreeBackendName
+	}
 }
 
 func isGitWorktreeBackend(backend IsolationBackend) bool {
@@ -790,7 +805,9 @@ func ForceReap(root, wtPath string, git GitRunner) Result {
 // CoreLockWitnessTrailer in the commit message. That gate runs before any apply, so
 // a refused land leaves the trunk exactly as it found it.
 // CountPathsOutsideTrees counts how many of `changed` fall outside every declared tree in
-// `trees`. Both sides are normalised to forward slashes and stripped of leading/trailing
+//
+//	rees`. Both sides are normalised to forward slashes and stripped of leading/trailing
+//
 // separators first, and a tree matches a path exactly or as a "<tree>/" prefix; an empty
 // tree entry matches nothing (so a stray "" can never swallow the whole diff).
 //
@@ -858,18 +875,8 @@ func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) 
 	sort.Strings(expanded)
 	return expanded, nil
 }
-func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) (res Result) {
+func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) Result {
 	cfg := newLandConfig(opts)
-	tracker := newLandProgressTracker(cfg)
-	cfg.tracker = tracker
-	finishAdmission := beginLandPhase(tracker, "admission", 0)
-	admissionActive := true
-	defer func() {
-		if admissionActive {
-			finishAdmission()
-		}
-		res.Cost = tracker.receipt()
-	}()
 	diffRef := baseSHA
 	if diffRef == "" {
 		diffRef = "HEAD"
@@ -903,32 +910,20 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	if namesRC != 0 {
 		names = ""
 	}
-	tracker.setScanned(countLandScanFiles(names), int64(len(diff)))
 	droppedOutOfLane := 0
 	if len(paths) > 0 && names != "" {
 		droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
 	}
 	if verify != nil {
-		finishAdmission()
-		admissionActive = false
-		finishValidation := beginLandPhase(tracker, "prospective-validation", 0)
 		if ok, detail := verify(wtPath); !ok {
-			finishValidation()
 			return Result{OK: false, Applied: false, Committed: false,
 				Reason: "worktree verify failed, refusing to land: " + detail}
 		}
-		finishValidation()
 	}
-	if admissionActive {
-		finishAdmission()
-		admissionActive = false
-	}
-	finishPolicyAdmission := beginLandPhase(tracker, "policy-admission", 0)
 	// Resolve a message file: use the caller's, else materialize the worktree tip's
 	// message to a temp file so the landed commit keeps the worker's own subject.
 	msgFile, cleanup, err := resolveMsgFile(wtPath, commitMsgFile, git)
 	if err != nil {
-		finishPolicyAdmission()
 		return Result{OK: false, Applied: false, Committed: false,
 			Reason: "could not resolve commit message: " + err.Error()}
 	}
@@ -944,11 +939,9 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	// runs no git hook. Refusing here leaves the trunk index, worktree and HEAD
 	// untouched; the worker's diff stays in its worktree.
 	if refusal, fired := coreLockLandGate(root, names, diff, msgFile, cfg, git); fired {
-		finishPolicyAdmission()
 		refusal.DroppedOutOfLane = droppedOutOfLane
 		return refusal
 	}
-	finishPolicyAdmission()
 
 	// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
 	// index so the shared index is never a sweep target. handled=false means it could
@@ -963,10 +956,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		}
 	}
 
-	tracker.setCache("shared-index-fallback", false)
-	finishApply := beginLandPhase(tracker, "trunk-apply", 0)
 	applied := gitApply(root, diff, git)
-	finishApply()
 	if !applied.OK {
 		return Result{OK: false, Applied: false, Committed: false,
 			Reason: "git apply to trunk failed", Detail: applied.Detail}
@@ -976,21 +966,17 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		commitArgs = append(commitArgs, "--")
 		commitArgs = append(commitArgs, paths...)
 	}
-	finishCommit := beginLandPhase(tracker, "commit", 0)
 	rc, out := run(git, root, commitArgs)
-	finishCommit()
-	res = Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
+	res := Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
 	// Opt-in honest-refusal readback (default OFF): confirm the commit we just made
 	// actually carries our intended paths. A missing path means our staged change
 	// was swept into a concurrent commit on the shared index (#3547); refuse rather
 	// than return a false success. FAIL-OPEN — only a positive mismatch flips OK.
 	if rc == 0 && len(paths) > 0 && landReadbackEnabled() {
-		finishReadback := beginLandPhase(tracker, "land-readback", 0)
 		if ok, reason := landReadbackVerify(root, paths, git); !ok {
 			res.OK = false
 			res.Reason = reason
 		}
-		finishReadback()
 	}
 	return res
 }
@@ -1089,14 +1075,6 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 	if len(configs) > 0 {
 		cfg = configs[0]
 	}
-	tracker := cfg.tracker
-	finishIsolationAdmission := beginLandPhase(tracker, "isolated-admission", 0)
-	isolationAdmissionActive := true
-	defer func() {
-		if isolationAdmissionActive {
-			finishIsolationAdmission()
-		}
-	}()
 	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
 	branch := strings.TrimSpace(ref)
@@ -1128,9 +1106,6 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 	os.Remove(idx) // read-tree writes it fresh; a pre-existing empty file would also do
 	defer os.Remove(idx)
 	env := map[string]string{"GIT_INDEX_FILE": idx}
-	if tracker != nil {
-		tracker.setCache("fresh-isolated-index", false)
-	}
 
 	// The captured diff and the signed message are attempt-invariant: write them once
 	// so every CAS attempt stages byte-identical content under the same subject.
@@ -1144,8 +1119,6 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		return Result{}, false
 	}
 	defer cleanupMsg()
-	finishIsolationAdmission()
-	isolationAdmissionActive = false
 
 	// Bounded optimistic-concurrency loop (#3570): each attempt seeds the throwaway
 	// index from the CURRENT base, builds the commit as a child of that exact base,
@@ -1158,18 +1131,14 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 			// A peer is actively landing: back off briefly, then re-resolve the base
 			// the peer just moved so this attempt re-builds on the NEW HEAD.
 			casRetrySleep(attempt)
-			finishRebase := beginLandPhase(tracker, "cas-rebase", attempt)
 			rc, head := run(git, root, []string{"rev-parse", "HEAD"})
-			finishRebase()
 			oldHEAD = strings.TrimSpace(head)
 			if rc != 0 || oldHEAD == "" {
 				return Result{}, false
 			}
 		}
 		// Seed the throwaway index with the current trunk HEAD's tree.
-		finishIndex := beginLandPhase(tracker, "index-construction", attempt)
 		if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
-			finishIndex()
 			return Result{}, false
 		}
 		// Stage the worker diff into the throwaway index ONLY (--cached never touches
@@ -1177,39 +1146,30 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		// means a concurrent change to the SAME paths; let the baseline path adjudicate
 		// it exactly as today rather than force it.
 		if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
-			finishIndex()
 			return Result{}, false
 		}
 		rc, tree := runEnv(genv, root, env, []string{"write-tree"})
 		treeSHA := strings.TrimSpace(tree)
 		if rc != 0 || treeSHA == "" {
-			finishIndex()
 			return Result{}, false
 		}
-		finishIndex()
 		disambiguation = nil
 		if disambiguationRelevant(paths) {
-			finishAnalysis := beginLandPhase(tracker, "whole-tree-disambiguation", attempt)
 			var valid bool
 			disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
-			finishAnalysis()
 			if !valid {
 				return Result{OK: false, Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}, true
 			}
 		}
-		finishCommit := beginLandPhase(tracker, "commit-construction", attempt)
 		rc, commit := runEnv(genv, root, env, []string{"commit-tree", treeSHA, "-p", oldHEAD, "-F", ctMsg})
-		finishCommit()
 		newCommit := strings.TrimSpace(commit)
 		if rc != 0 || newCommit == "" {
 			return Result{}, false
 		}
 		// Name the off-branch commit before trunk CAS. A process crash from here on
 		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
-		finishRecovery := beginLandPhase(tracker, "recovery-ref-publication", attempt)
 		recoveryRef, anchorErr := AnchorRecoveryEntry(root, wtPath, newCommit, func(r string, a []string) (int, string) { return runEnv(genv, r, env, a) })
 		if anchorErr != nil {
-			finishRecovery()
 			return Result{OK: false, Reason: "isolated land recovery anchor failed — trunk unchanged", Detail: anchorErr.Error()}, true
 		}
 		var remoteReceipt *RemoteReadback
@@ -1217,18 +1177,13 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 			receipt := PublishRecoveryRef(root, cfg.recoveryRemote, recoveryRef, newCommit, git)
 			remoteReceipt = &receipt
 			if cfg.requireRemote && !receipt.Witnessed {
-				finishRecovery()
 				return Result{OK: false, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt, Reason: "required remote recovery witness failed — trunk unchanged", Detail: receipt.Reason}, true
 			}
 		}
-		finishRecovery()
 		// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit
 		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
 		// commit built on the stale base is simply abandoned, unreferenced.
-		finishCAS := beginLandPhase(tracker, "trunk-cas", attempt)
-		rc, _ = run(git, root, []string{"update-ref", branch, newCommit, oldHEAD})
-		finishCAS()
-		if rc != 0 {
+		if rc, _ := run(git, root, []string{"update-ref", branch, newCommit, oldHEAD}); rc != 0 {
 			continue
 		}
 		// The ref moved but the shared working tree still holds OLD content for `paths`
@@ -1236,11 +1191,9 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		// change, matching the baseline post-state. A sync failure does NOT unland.
 		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts) + "; recovery-ref=" + recoveryRef
 		coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
-		finishSync := beginLandPhase(tracker, "working-tree-sync", attempt)
 		if rc, out := run(git, root, coArgs); rc != 0 {
 			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
 		}
-		finishSync()
 		return Result{OK: true, Applied: true, Committed: true,
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
 			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true
