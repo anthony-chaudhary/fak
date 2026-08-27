@@ -14,6 +14,17 @@ service must retain.
 This ledger separates **proposal, rule, enforcement posture, tender, allocation,
 award, delivery, and operating capacity**. It is not legal advice.
 
+## Operative advanced-computing replacement timeline
+
+| Effective date | Jurisdiction / destination | Operative state | Deployment meaning | Missing delivery evidence |
+|---|---|---|---|---|
+| 2025-05-13 | U.S. global AI export framework | BIS withdrew enforcement of the January 2025 AI Diffusion Rule and promised a replacement | The proposed tier framework was not the operative deployment matrix | Replacement rules, licenses, shipments, installations, and runtime receipts |
+| 2026-01-13 | China, approved customers | H200, MI325X, and similar chips moved to case-by-case license review under supply, compliance, screening, and U.S. testing conditions | A qualifying application can be reviewed; approval is not automatic | Approved customers, quantities, licenses granted, shipments, installed clusters, useful goodput |
+| 2026-07-10 | UAE Government and approved companies | UAE moved from EAR D:3/D:4 to A:5; specified advanced-computing items, including AI chips and servers, became eligible for license-free treatment under the bilateral framework | Destination/end-user eligibility differs materially from the rescinded global tier proposal | Approved-company census, item quantities, shipments, facilities, healthy capacity, schedulable workloads |
+
+Version every regional hardware claim by effective date, destination, end user, item/ECCN,
+license or exception, conditions, quantity, shipment, installation, and engine/runtime receipt.
+
 ## Dated ledger
 
 | Date / jurisdiction | Instrument or program | Current observed state | Quantified boundary | Operational implication |

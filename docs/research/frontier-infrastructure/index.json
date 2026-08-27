@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9330,
+  "latest_slice_issue": 9315,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 191,
+    "entry_count": 193,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -216,6 +216,7 @@
       "Trane Technologies",
       "U.S. AI datacenter pipeline",
       "U.S. Bureau of Industry and Security",
+      "U.S. Bureau of Industry and Security / UAE",
       "U.S. datacenter sector",
       "Ultra Ethernet Consortium",
       "Untether AI",
@@ -7392,6 +7393,86 @@
       ],
       "fak_implications": [
         "Carry request, probability adjustment, financial commitment, duplicate-screening, ramp, contract, upgrade, and energization as separate lifecycle fields."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "bis-h200-china-case-review-2026",
+      "category": "policy_regulation",
+      "entity": "U.S. Bureau of Industry and Security",
+      "topic": [
+        "export controls",
+        "advanced computing",
+        "China",
+        "H200",
+        "MI325X"
+      ],
+      "published_at": "2026-01-13",
+      "event_at": "2026-01-13",
+      "source_title": "Department of Commerce Revises License Review Policy for Semiconductors Exported to China",
+      "source_url": "https://www.bis.gov/press-release/department-commerce-revises-license-review-policy-semiconductors-exported-china",
+      "source_kind": "official regulator press release and final-rule notice",
+      "evidence_class": "operative rule change",
+      "confidence": "high",
+      "claim": "BIS changed license review for Nvidia H200, AMD MI325X, and similar chips exported to approved customers in China from the prior posture to case-by-case review subject to supply, compliance, customer-screening, and U.S. third-party testing requirements.",
+      "quantified": {
+        "effective_immediately": true,
+        "named_chip_families": 2
+      },
+      "assumptions": [
+        "Case-by-case eligibility is not license approval, shipment, installation, schedulable capacity, or useful goodput."
+      ],
+      "contradictions_or_limits": [
+        "Applicants must show exports will not reduce global production capacity available to U.S. customers, purchasers have compliance/customer-screening procedures, and products undergo independent U.S. testing.",
+        "The rule does not disclose approved customers, quantities, licenses granted, shipment dates, or installed capacity."
+      ],
+      "fak_implications": [
+        "Version regional hardware envelopes by rule effective date and preserve license, shipment, installation, and runtime evidence separately."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "bis-uae-advanced-computing-2026",
+      "category": "policy_regulation",
+      "entity": "U.S. Bureau of Industry and Security / UAE",
+      "topic": [
+        "export controls",
+        "advanced computing",
+        "UAE",
+        "license exception",
+        "sovereign AI"
+      ],
+      "published_at": "2026-07-10",
+      "event_at": "2026-07-10",
+      "source_title": "Department of Commerce Eases Export Controls for UAE",
+      "source_url": "https://www.bis.gov/press-release/department-commerce-eases-export-controls-uae",
+      "source_kind": "official regulator press release and EAR change",
+      "evidence_class": "operative rule change",
+      "confidence": "high",
+      "claim": "BIS moved the UAE from EAR Country Groups D:3/D:4 to A:5 and approved the UAE Government and certain companies to receive advanced-computing items, including AI chips and servers, license-free under the bilateral framework.",
+      "quantified": {
+        "effective_date": "2026-07-10",
+        "country_groups_removed": [
+          "D:3",
+          "D:4"
+        ],
+        "country_group_added": "A:5"
+      },
+      "assumptions": [
+        "Destination and approved-end-user eligibility is not evidence of a specific order, shipment, installation, healthy cluster, or schedulable goodput."
+      ],
+      "contradictions_or_limits": [
+        "The announcement does not enumerate all approved companies, item quantities, shipment dates, facilities, or live capacity.",
+        "License-free treatment remains bounded by the EAR, named eligibility, anti-diversion commitments, and the bilateral framework."
+      ],
+      "fak_implications": [
+        "Version hardware-availability envelopes by destination, end user, item, license/exception, effective date, and actual delivery receipts."
       ],
       "rumor": {
         "is_rumor": false,
