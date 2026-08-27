@@ -279,6 +279,33 @@ def test_duplication_behavior_gate_keeps_equivalent_renamed_functions():
     assert len(cs.kpi_duplication(files)["defects"]) >= 1
 
 
+def test_duplication_behavior_gate_ignores_quote_markers_in_comments():
+    # Comments are not Go string/rune literals. An apostrophe or backtick in one must
+    # not strand the lightweight owner scanner in quote state and thereby let a
+    # behavior-divergent clone bypass the owner-fingerprint confirmation gate.
+    divergent = {
+        "a.go": ("package x\n"
+                 "func ratio(a, b float64) float64 {\n"
+                 "    // the reader's `zero` case is deliberately different\n"
+                 "    if b == 0 { return 1 }\n"
+                 "    result := a / b\n"
+                 "    if result < 0 { result = -result }\n"
+                 "    if result > 100 { result = 100 }\n"
+                 "    return result\n"
+                 "}\n"),
+        "b.go": "package x\n" + _semantic_ratio("rate", 0),
+    }
+    assert cs.kpi_duplication(divergent)["defects"] == []
+    assert any("behavior-divergent" in row
+               for row in cs.kpi_duplication(divergent)["soft"])
+
+    # Recall control: comments with the same quote markers must not suppress a genuine
+    # owner-equivalent clone merely because the function names differ.
+    equivalent = dict(divergent)
+    equivalent["a.go"] = equivalent["a.go"].replace("return 1", "return 0")
+    assert len(cs.kpi_duplication(equivalent)["defects"]) >= 1
+
+
 def test_duplication_import_block_is_soft_not_extractable():
     block = """package {pkg}
 import (

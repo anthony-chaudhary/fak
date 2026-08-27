@@ -527,8 +527,23 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
     for m in starts:
         brace = text.find("{", m.start(), m.end())
         depth, quote, escaped, end = 0, "", False, -1
-        for i in range(brace, len(text)):
+        line_comment = block_comment = False
+        i = brace
+        while i < len(text):
             ch = text[i]
+            nxt = text[i + 1] if i + 1 < len(text) else ""
+            if line_comment:
+                if ch == "\n":
+                    line_comment = False
+                i += 1
+                continue
+            if block_comment:
+                if ch == "*" and nxt == "/":
+                    block_comment = False
+                    i += 2
+                else:
+                    i += 1
+                continue
             if quote:
                 if escaped:
                     escaped = False
@@ -536,16 +551,28 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
                     escaped = True
                 elif ch == quote:
                     quote = ""
+                i += 1
                 continue
-            if ch in {'"', "'", "`"}:
+            if ch == "/" and nxt == "/":
+                line_comment = True
+                i += 2
+            elif ch == "/" and nxt == "*":
+                block_comment = True
+                i += 2
+            elif ch in {'"', "'", "`"}:
                 quote = ch
+                i += 1
             elif ch == "{":
                 depth += 1
+                i += 1
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
                     end = i + 1
                     break
+                i += 1
+            else:
+                i += 1
         if end > 0:
             out.append((m.start(), end, text[m.start():brace].strip(), text[brace + 1:end - 1]))
     return out
