@@ -25,6 +25,15 @@ views are:
 
 Empty or missing slices are coverage debt, not evidence that a category has no activity.
 
+## Latest slice: Chinese platform envelopes (#9362)
+
+Six bounded records add Baichuan 2 training, iFLYTEK ecosystem denominators, Meituan
+LongCat training/inference, production-scale asynchronous RL, stateful generative-
+recommendation caching, and one-week recommendation-training sequences. The corpus now
+contains **213 entries**, **208 unique source URLs**, and **176 entity labels**. Developer
+teams, applications, developers, API growth, agents, sequences, users, requests, and
+tokens remain separate denominators; internal/vendor maxima are not universal.
+
 ## Result first
 
 The initial evidence already rejects several convenient defaults:

@@ -75,7 +75,7 @@ It does not mean complete organizational coverage.
 | Checked | Huawei Cloud Pangu | Pangu 5.0 tiers above 1B/10B/100B/1T parameters and >400 scenarios across >30 industries; the separate Atlas 900 A3 SuperPoD vendor specification names 384 Ascend NPUs, 300 TB HBM, 48 PFLOPS dense BF16, 16.1 PB/s HBM bandwidth, 7.2 PB/s scale-up bandwidth, and 96 cabinets. | Built/installed/healthy/schedulable deployment, power/cooling, model-tier traffic, requests/users, batch/cache behavior, and neutral goodput. |
 | Partial | 01.AI | Yi-34B-200K model card: 34B parameters, 200K advertised context, 5B-token long-context continuation. | Physical compute, neutral long-context serving results, production traffic, and lifecycle evidence. |
 | Partial | StepFun | Step3 release: 321B total / 38B active multimodal MoE and attention/FFN disaggregation design. | Training cluster, neutral matched efficiency, shipped serving topology, adoption, and traffic. |
-| Unchecked | Baichuan, iFlytek, Meituan | No dedicated current entries. | Model releases, physical compute, adoption, deployment, and lifecycle evidence. |
+| Covered | Baichuan, iFLYTEK, Meituan | Baichuan 2 run-specific A800/token envelope; iFLYTEK typed ecosystem denominators; Meituan LongCat, DORA, MTServe, and MTGenRec records. | iFLYTEK hardware/Ascend receipts, absolute traffic, user/session distributions, and neutral production performance remain missing. |
 | Partial | Shanghai AI Lab / InternLM | InternLM3-8B release: 4T training tokens and first-party training/deployment toolchain. | Physical compute, cost accounting, production deployment, and traffic. |
 | Partial | SenseTime | SenseNova 5.0 vendor release: MoE, >10TB token data, ~200K effective context, cloud-device-edge matrix. | Neutral benchmark, physical compute, production workload, and lifecycle evidence. |
 | Partial | Xiaomi MiMo | MiMo-V2-Pro release: >1T total / 42B active parameters, 1M context, tiered API pricing above 256K. | Physical compute, traffic/context distribution, neutral serving performance, and adoption. |
@@ -136,6 +136,13 @@ It does not mean complete organizational coverage.
 | Checked | AI Singapore SEA-LION | v4.5 multilingual/multimodal/agentic family for >11 SEA languages with custom speculative decoder. | Model size, hardware, acceptance distribution, traffic, and language/user shares. |
 | Unchecked | Grab, GoTo, SCB10X, VinAI, regional sovereign programs | SCB10X appears only as a Sailor2 collaborator; no dedicated lab entries. | Model programs, compute, product demand, and country/language distributions. |
 
+## Chinese platform delta (#9362)
+
+Baichuan, iFLYTEK, and Meituan now have dedicated records, but maturity differs: Baichuan
+is a disclosed training run, iFLYTEK is an ecosystem/adoption filing without hardware or
+absolute traffic, and Meituan spans model training plus internal production-system
+measurements. These records do not turn author/vendor maxima into neutral prevalence.
+
 ## Cross-lab parameter observations
 
 | Dimension | Evidence in this batch | Safe expectation |
@@ -151,8 +158,8 @@ It does not mean complete organizational coverage.
 ## Remaining priority queue
 
 1. NVIDIA Nemotron plus Microsoft first-party deployment/traffic evidence.
-2. Huawei Ascend deployment and power/cooling receipts, 01.AI, StepFun, Baichuan,
-   Shanghai AI Lab, SenseTime, iFlytek, Meituan, and Xiaomi.
+2. Huawei/iFLYTEK Ascend deployment and power/cooling receipts, 01.AI, StepFun,
+   Shanghai AI Lab, SenseTime, and Xiaomi; deepen Baichuan and Meituan traffic/user evidence.
 3. G42/Inception Jais/Nanda deployment evidence and Saudi ALLaM/SDAIA sovereign programs.
 4. Samsung Gauss, SKT A.X, and Kakao-related Korean programs.
 5. Preferred Networks, Fujitsu, SoftBank/SAKURA, and Japanese public compute.

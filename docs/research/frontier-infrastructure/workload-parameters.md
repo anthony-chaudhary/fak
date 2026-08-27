@@ -5,6 +5,16 @@ parameters instead of collapsing every serving workload into “Poisson arrivals
 popularity, fixed token lengths.” The source-level claims and limitations remain in
 [`index.json`](index.json).
 
+## Chinese platform and recommendation envelopes (#9362)
+
+| Source | Typed population / envelope | Bounded implication |
+|---|---|---|
+| iFLYTEK filing | >8.7M AI developer teams; >3.42M production apps; 1.52M large-model developers; API daily-call growth 4.3x YTD; agents +85% YTD | Five different ecosystem denominators, not users, requests, tokens, or one traffic distribution. |
+| LongCat-Flash | 560B total / 18.6B–31.3B activated parameters; >20T pretraining tokens; 4,096-H800 pipeline; batch-32 H800 throughput about 100k tok/s | Bind capacity and throughput to activated parameters, accelerator, batch, and source-estimated cost. |
+| DORA | Thousands of production accelerators; up to 6.2x rollout speedup for an approximately 500B MoE | Trajectory tails, policy versions, and KV migration invalidate one synchronous-batch model. |
+| MTServe | Unique user/item state; request- and prefix-level caches; up to 4.93x throughput and 4.19x lower latency | Stateful recommendation locality is not ordinary shared-prefix reuse and does not prove Zipf. |
+| MTGenRec | 200M real user sequences over one week; 128 A100s | Sequences are training examples, not unique users, sessions, requests, or live QPS. |
+
 ## Trace populations
 
 | Trace | Population and window | Scale | Directly observed fields | Boundary |

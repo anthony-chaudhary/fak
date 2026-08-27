@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9360,
+  "latest_slice_issue": 9362,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 207,
+    "entry_count": 213,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -110,6 +110,7 @@
       "Arista Networks",
       "Arista XPO MSA",
       "Azure OpenAI / BurstGPT",
+      "Baichuan 2",
       "Baidu",
       "BurstGPT v1.1",
       "ByteDance Seed",
@@ -158,6 +159,10 @@
       "MBZUAI / G42 Institute of Foundation Models",
       "MBZUAI / Inception / Cerebras / Petuum",
       "Marvell / Celestial AI",
+      "Meituan DORA",
+      "Meituan LongCat-Flash",
+      "Meituan MTGenRec",
+      "Meituan MTServe",
       "Meta",
       "Microsoft",
       "Microsoft Azure / Splitwise",
@@ -240,6 +245,7 @@
       "WEKA",
       "Xiaomi MiMo",
       "Z.ai / Zhipu AI",
+      "iFLYTEK Spark / Open Platform",
       "llm-d / Google",
       "vLLM / PagedAttention",
       "xAI",
@@ -8079,6 +8085,242 @@
       "rumor": {
         "is_rumor": false,
         "status": "not_applicable"
+      }
+    },
+    {
+      "id": "baichuan2-training-2023",
+      "category": "frontier_lab",
+      "entity": "Baichuan 2",
+      "topic": [
+        "training_cluster",
+        "training_tokens",
+        "model_scale"
+      ],
+      "published_at": "2023-09-19",
+      "event_at": "2023-09-19",
+      "source_title": "Baichuan 2: Open Large-scale Language Models",
+      "source_url": "https://arxiv.org/abs/2309.10305",
+      "source_kind": "research_paper",
+      "evidence_class": "model_training_report",
+      "confidence": "high",
+      "claim": "Baichuan 2 reports open 7B and 13B base/chat models trained on 2.6T tokens with 4,096-token maximum sequences; the 7B run used 1,200 NVIDIA A800 GPUs and the 13B run used 1,024 A800 GPUs.",
+      "quantified": {
+        "model_parameters_billion": [
+          7,
+          13
+        ],
+        "training_tokens_trillion": 2.6,
+        "maximum_sequence_tokens": 4096,
+        "seven_b_training_a800_gpus": 1200,
+        "thirteen_b_training_a800_gpus": 1024
+      },
+      "assumptions": [
+        "The disclosed GPU counts describe two model-specific training runs, not one additive fleet."
+      ],
+      "contradictions_or_limits": [
+        "Author-reported training envelope, not production serving traffic, installed fleet capacity, utilization, or user distribution.",
+        "The two GPU counts are run-specific and must not be summed into deployed capacity."
+      ],
+      "fak_implications": [
+        "Training-cluster records should bind accelerator counts to a named model, run, token budget, and sequence envelope."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "iflytek-open-platform-2025",
+      "category": "frontier_lab",
+      "entity": "iFLYTEK Spark / Open Platform",
+      "topic": [
+        "developer_adoption",
+        "api_growth",
+        "agent_ecosystem"
+      ],
+      "published_at": "2026-03-28",
+      "event_at": "2025-06-30",
+      "source_title": "iFLYTEK 2025 Securities Offering Prospectus",
+      "source_url": "https://static.cninfo.com.cn/finalpage/2026-03-28/1225045471.PDF",
+      "source_kind": "regulatory_filing",
+      "evidence_class": "company_operating_disclosure",
+      "confidence": "high",
+      "claim": "As of June 2025, iFLYTEK disclosed more than 8.7M AI developer teams, more than 3.42M production-grade applications, 1.52M large-model developers, 4.3x year-to-date growth in average daily large-model API calls, and 85% year-to-date growth in agent count.",
+      "quantified": {
+        "ai_developer_teams_min": 8700000,
+        "production_applications_min": 3420000,
+        "large_model_developers": 1520000,
+        "large_model_api_average_daily_calls_growth_x": 4.3,
+        "agent_count_growth_fraction": 0.85
+      },
+      "assumptions": [
+        "The filing reports ecosystem/adoption denominators, not an inference workload trace."
+      ],
+      "contradictions_or_limits": [
+        "Developer teams, applications, developers, API-call growth, and agent count are different denominators and cannot be substituted for each other.",
+        "No absolute API calls, DAU/MAU, token volume, geography, session distribution, hardware count, or neutral performance is disclosed."
+      ],
+      "fak_implications": [
+        "Adoption ledgers should type teams, apps, developers, agents, and API growth separately from users, requests, and tokens."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meituan-longcat-flash-2025",
+      "category": "frontier_lab",
+      "entity": "Meituan LongCat-Flash",
+      "topic": [
+        "mixture_of_experts",
+        "training_cluster",
+        "inference_throughput"
+      ],
+      "published_at": "2025-09-01",
+      "event_at": "2025-09-01",
+      "source_title": "LongCat-Flash Technical Report",
+      "source_url": "https://arxiv.org/abs/2509.01322",
+      "source_kind": "research_paper",
+      "evidence_class": "model_training_report",
+      "confidence": "high",
+      "claim": "Meituan reports a 560B-total-parameter MoE activating 18.6B–31.3B parameters by context, pretrained over 20T tokens with 2.5D pipeline parallelism over 4,096 H800 GPUs; 15,999 chips accumulated 7.5M GPU-hours, with an estimated $6M training cost.",
+      "quantified": {
+        "total_parameters_billion": 560,
+        "activated_parameters_billion_min": 18.6,
+        "activated_parameters_billion_max": 31.3,
+        "pretraining_tokens_trillion_min": 20,
+        "pipeline_parallel_h800_gpus": 4096,
+        "training_chips": 15999,
+        "training_gpu_hours": 7500000,
+        "estimated_training_cost_usd": 6000000,
+        "single_h800_tokens_per_second_min": 9600,
+        "h800_batch_32_total_tokens_per_second_approx": 100000,
+        "throughput_batch_size": 32
+      },
+      "assumptions": [
+        "Dollar cost uses the paper’s then-prevailing H800 rental price rather than an invoice."
+      ],
+      "contradictions_or_limits": [
+        "Author-reported model/run and benchmark envelope; GPU and chip counts have source-specific scopes and are not additive fleet capacity.",
+        "Batch-32 throughput is not interactive latency or production prevalence, and the cost is an estimate rather than audited spend."
+      ],
+      "fak_implications": [
+        "MoE capacity models should track total versus activated parameters, batch size, accelerator generation, and estimated versus paid cost."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meituan-dora-production-2026",
+      "category": "serving_system",
+      "entity": "Meituan DORA",
+      "topic": [
+        "reinforcement_learning",
+        "asynchronous_rollout",
+        "kv_cache_migration"
+      ],
+      "published_at": "2026-04-29",
+      "event_at": "2026-04-29",
+      "source_title": "DORA: A Scalable Asynchronous Reinforcement Learning System for Language Model Training",
+      "source_url": "https://arxiv.org/abs/2604.26256",
+      "source_kind": "research_paper",
+      "evidence_class": "production_deployment",
+      "confidence": "high",
+      "claim": "DORA combines multi-version streaming training, centralized load-balancing orchestration, and direct same-version KV-cache migration; it reports up to 2.12x end-to-end and 8.2x rollout-stage speedup on open benchmarks, plus up to 6.2x rollout speedup in production on thousands of accelerators while training an approximately 500B-parameter MoE.",
+      "quantified": {
+        "benchmark_end_to_end_speedup_max": 2.12,
+        "benchmark_rollout_speedup_max": 8.2,
+        "production_rollout_speedup_max": 6.2,
+        "production_accelerators_min": 1000,
+        "production_model_parameters_billion_approx": 500
+      },
+      "assumptions": [
+        "Production accelerator count is disclosed only as “thousands,” so the numeric floor records the weakest literal bound."
+      ],
+      "contradictions_or_limits": [
+        "Reported maxima are bounded and non-stackable.",
+        "The production disclosure omits accelerator type, exact count, cluster topology, utilization, availability, and neutral reproduction."
+      ],
+      "fak_implications": [
+        "RL capacity models need trajectory-tail, policy-version, migration, and stage-specific throughput accounting rather than synchronous batch assumptions alone."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meituan-mtserve-2026",
+      "category": "serving_system",
+      "entity": "Meituan MTServe",
+      "topic": [
+        "generative_recommendation",
+        "hierarchical_cache",
+        "stateful_serving"
+      ],
+      "published_at": "2026-04-24",
+      "event_at": "2026-04-24",
+      "source_title": "MTServe: Efficient Serving for Generative Recommendation Models with Hierarchical Caches",
+      "source_url": "https://arxiv.org/abs/2604.22881",
+      "source_kind": "research_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "MTServe targets generative recommendation requests with unique user/item embeddings that break ordinary shared-prefix KV reuse; request- and prefix-level hierarchical caches evaluated on real-world production datasets delivered up to 4.93x throughput and up to 4.19x lower latency versus cited state-of-the-art baselines.",
+      "quantified": {
+        "throughput_speedup_max": 4.93,
+        "latency_reduction_factor_max": 4.19,
+        "cache_levels": 2
+      },
+      "assumptions": [
+        "Per-request user/item state changes prefix-equivalence and cache-reuse geometry."
+      ],
+      "contradictions_or_limits": [
+        "The source withholds absolute trace population/rate, cache-hit distributions, hardware topology, and deployment prevalence.",
+        "Maxima are not universal, and per-user/item state is not evidence for a Zipf law."
+      ],
+      "fak_implications": [
+        "Cache routing must distinguish request-level state reuse from token-prefix reuse and key locality by typed user/item state."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meituan-mtgenrec-2025",
+      "category": "serving_system",
+      "entity": "Meituan MTGenRec",
+      "topic": [
+        "generative_recommendation",
+        "distributed_training",
+        "sequence_balancing"
+      ],
+      "published_at": "2025-05-19",
+      "event_at": "2025-05-19",
+      "source_title": "MTGenRec: An Efficient Distributed Training System for Generative Recommendation Models in Meituan",
+      "source_url": "https://arxiv.org/abs/2505.12663",
+      "source_kind": "research_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "MTGenRec evaluated generative-recommendation training on 200M real user sequences produced over one week at Meituan and 128 A100 GPUs; it reports near-linear scaling, 2.44x lower training time than TorchRec, 1.75x throughput from dynamic sequence balancing, and 53% throughput improvement from feature-ID deduplication.",
+      "quantified": {
+        "real_user_sequences": 200000000,
+        "trace_days": 7,
+        "evaluation_a100_gpus": 128,
+        "training_time_reduction_factor": 2.44,
+        "sequence_balancing_throughput_speedup": 1.75,
+        "feature_id_deduplication_throughput_improvement_fraction": 0.53
+      },
+      "assumptions": [
+        "The 200M rows are user sequences used for training, not 200M unique users or sessions."
+      ],
+      "contradictions_or_limits": [
+        "One-week author/internal benchmark; user sequences are not unique users, sessions, or live requests.",
+        "The source does not establish a universal sequence-length or popularity family or a live serving rate."
+      ],
+      "fak_implications": [
+        "Recommendation training planners should account for sequence-length imbalance and duplicate feature communication separately from request traffic."
+      ],
+      "rumor": {
+        "is_rumor": false
       }
     }
   ]

@@ -55,6 +55,14 @@ studies; Splitwise contributes one-day Conversation and Coding token/rate distri
 The Atlas 900 A3 row is a 384-NPU, 96-cabinet vendor reference topology, not proof of a
 built, healthy, schedulable production system, and it does not disclose power or cooling.
 
+## Issue #9362 delta
+
+Issue #9362 closes the dedicated Baichuan, iFLYTEK, and Meituan census gap with six
+source-bounded records: two disclosed training envelopes, typed ecosystem adoption,
+production-scale asynchronous RL, stateful recommendation caching, and 200M one-week
+training sequences. iFLYTEK hardware and neutral Ascend operating receipts remain
+missing. Corpus totals are **213 entries**, **208 unique URLs**, and **176 entity labels**.
+
 ## Status vocabulary
 
 | Status | Meaning |
@@ -106,7 +114,7 @@ Middle East, India, Japan, Korea, and Southeast Asia and records model/serving s
 without treating plans or releases as delivered capacity.
 
 **Missing or shallow:** Microsoft first-party traffic, Huawei Ascend physical evidence,
-Baichuan, iFlytek, Meituan, G42/Inception Jais, NTT/Preferred Networks/Fujitsu/SoftBank,
+iFLYTEK hardware/Ascend operations, G42/Inception Jais, NTT/Preferred Networks/Fujitsu/SoftBank,
 Grab/GoTo/SCB10X/VinAI, Europe beyond Mistral/DeepMind, and many Canadian/private labs.
 Most checked labs—including the newly added NVIDIA Nemotron, 01.AI, StepFun, Shanghai AI
 Lab, SenseTime, Xiaomi, Samsung, SKT, Kakao, MBZUAI, and Saudi rows—still lack physical

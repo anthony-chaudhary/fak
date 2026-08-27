@@ -4,6 +4,15 @@
 accepted, rejected, or parameterized in fak benchmarks. It is not a substitute for the
 per-source provenance in [`index.json`](index.json).
 
+## Denominator and locality additions (#9362)
+
+The new Chinese-platform evidence reinforces typed denominators: developer teams,
+applications, developers, API growth, agents, user sequences, unique users, sessions,
+requests, and tokens are not interchangeable. MTServe adds per-request user/item state
+whose reuse geometry differs from exact prompt or token-prefix reuse; MTGenRec adds a
+one-week sequence-training population, not a serving arrival law. None supports a
+universal Zipf, lognormal, Pareto, Poisson, Hawkes, or MMPP model.
+
 ## Distribution assumptions
 
 | Dimension | Convenient but weak default | Evidence-backed expectation | Benchmark requirement |
