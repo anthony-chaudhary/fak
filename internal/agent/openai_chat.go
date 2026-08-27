@@ -21,6 +21,15 @@ type openAIChatResponse struct {
 	} `json:"choices"`
 }
 
+// CompleteLocalAppChat adapts the agent-owned wire transport to the local app
+// helper's dependency-injection seam without moving receipt semantics here.
+func CompleteLocalAppChat(ctx context.Context, client *http.Client, endpoint, model, system, user string) (string, error) {
+	return CompleteOpenAIChat(ctx, client, endpoint, model, []Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: user},
+	})
+}
+
 // CompleteOpenAIChat performs one bounded, non-streaming completion against an
 // OpenAI-compatible endpoint. It does not retry or select a fallback provider.
 func CompleteOpenAIChat(ctx context.Context, client *http.Client, endpoint, model string, messages []Message) (string, error) {
