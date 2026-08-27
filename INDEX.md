@@ -191,6 +191,8 @@ Each turns a fuzzy goal into a number you can drive toward zero.
 - [Tool-prior compatibility ledger](docs/benchmarks/tool-prior/qwen2.5-14b-2026-08-14.json) — dated Qwen 2.5 14B raw-call corpus comparing canonical, provider-native, API, and command-style tool names (#6820)
 
 - [Benchmark evidence authority](BENCHMARK-AUTHORITY.md) — the governed sheet for scoped benchmark rows, tuned baselines, artifacts, and reproduce commands.
+- [Qwen performance index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) — the generated active readout and retained envelope-specific witnesses for Qwen native performance.
+- [Latest Qwen3.8-27B results](docs/benchmarks/QWEN38-27B-LATEST.md) — the detailed accepted, approximate, and diagnostic lifecycle without cross-envelope splicing.
 - [Benchmark template](BENCHMARK-TEMPLATE.md) — the shape a new benchmark result doc must take.
 - [Observed small-model Ultracode micro-context + prefix-cache win](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md) — replayable `qwen2.5:0.5b` agentic frontier at widths 1/2/4/8; records equal outcomes, attributes 62.7% of credited avoidance to fak role scoping and 37.3% to ordinary Ollama/llama.cpp prefix reuse, and names the missing factorial fusion control (#8624).
 - [Net-true value standard](docs/standards/net-true-value.md) — how fak decides a gain is real, not noise: the six-question rubric (real baseline / net of cost / scope / provenance / witness / realized) used on fak's own claims and on incoming industry "5×" claims, each criterion bound to the stick that enforces it.

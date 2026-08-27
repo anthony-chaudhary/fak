@@ -94,7 +94,7 @@ def _native_status(date: str = "2026-06-20") -> str:
     return f"""<!-- native-status: {date} -->
 ### Native-model status
 | Lane | Result | Current hold |
-| **Qwen3.8-27B** | [native](docs/_witnesses/issue-8848-qwen38-overnight/README.md) | Below parity |
+| **Qwen3.8-27B** | [index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | Below parity |
 | **Ultracode / microagents** | [small](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md) | ABSTAIN |
 Refresh contract: update evidence and rerun the audit.
 
@@ -120,6 +120,43 @@ def test_native_status_warns_without_authority_or_hold() -> None:
     assert c["status"] == "WARN"
     assert "qwen38_authority" in c["items"]
     assert "honest_hold" in c["items"]
+
+
+def _qwen_block(old_splice: bool = False) -> str:
+    body = ("accepted **2.3-2.9 decode tok/s** functional `PASS`; "
+            "**3.3 vs 6.966061 tok/s (~47%)** approximate, not accepted parity; "
+            "P31/T64 versus P32/T64, no joint quality-complete receipt; "
+            "diagnostic **~0.2 tok/s with 0/5 exact**")
+    if old_splice:
+        body += "; cached fak-native decode collapsed to 0.3 tok/s median versus 36.55"
+    return "<!-- qwen38-frontdoor:begin -->\n" + body + "\n<!-- qwen38-frontdoor:end -->"
+
+
+def test_qwen_frontdoor_accepts_separated_generated_classes() -> None:
+    c = rfa.check_qwen_frontdoor(_qwen_block(), _qwen_block())
+    assert c["status"] == "OK", c
+
+
+def test_qwen_frontdoor_rejects_old_cache_parity_splice() -> None:
+    c = rfa.check_qwen_frontdoor(_qwen_block(old_splice=True), _qwen_block())
+    assert c["status"] == "FAIL", c
+    assert "old_cache_parity_splice" in c["items"], c
+
+
+def test_qwen_frontdoor_rejects_index_drift() -> None:
+    c = rfa.check_qwen_frontdoor(_qwen_block(), "# index without generated block")
+    assert c["status"] == "FAIL", c
+    assert "index_generated_block" in c["items"], c
+
+
+def test_headline_authority_defers_generated_qwen_values() -> None:
+    c = rfa.check_headline_authority(
+        _qwen_block() + "\nOutside claim: **9.876543 tok/s**.",
+        "No matching benchmark value here.",
+    )
+    assert c["status"] == "WARN", c
+    assert "9.876543 tok/s" in c["items"], c
+    assert "6.966061 tok/s" not in c["items"], c
 
 def _project_status(date: str = "2026-06-20") -> str:
     return f"""<!-- project-status: {date} -->
@@ -829,7 +866,9 @@ def test_live_collect_real_readme() -> None:
     p = rfa.collect(root, today=TODAY)
     assert p["schema"] == rfa.SCHEMA
     assert "ok" in p and isinstance(p["checks"], list) and p["checks"]
-    assert p["corpus"]["readme_debt"] == 0, p["corpus"]
+    assert p["ok"] is True, p
+    qwen = next(c for c in p["checks"] if c["check"] == "qwen_frontdoor")
+    assert qwen["status"] == "OK", qwen
 
 
 def test_live_showcase_sync_reads_the_real_homepage() -> None:

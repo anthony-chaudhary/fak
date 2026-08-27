@@ -1,9 +1,19 @@
 ---
-title: "Qwen3.8-27B latest performance"
-description: "One-page index of the newest accepted Qwen3.8-27B performance evidence, its status, and the comparable Qwen3.6/llama.cpp bars."
+title: "Qwen3.8-27B M3 Pro evidence (2026-08-20)"
+description: "Dated M3 Pro detail for the 2026-08-20 Qwen3.8-27B result; the Qwen performance index owns the current cross-hardware view."
 ---
 
-# Qwen3.8-27B latest performance
+# Qwen3.8-27B M3 Pro evidence (2026-08-20)
+
+For the current cross-hardware view, use the canonical [Qwen performance index](QWEN-PERFORMANCE-INDEX.md). This page retains the dated M3 Pro envelope and its detailed witnesses.
+
+<!-- qwen38-frontdoor:begin -->
+## Generated current readout
+
+- **Accepted:** native fak Metal Q4_K_M, **2.3-2.9 decode tok/s**, functional `PASS` in the frozen M3 Pro full-run envelope.
+- **Closest near-matched observation:** **3.3 vs 6.966061 tok/s (~47%)**; approximate only because native was P31/T64 versus P32/T64 and no joint quality-complete receipt exists.
+- **Separate diagnostic:** A100 cache restore was **~0.2 tok/s with 0/5 exact**; failed quality excludes it from parity presentation.
+<!-- qwen38-frontdoor:end -->
 
 **Latest accepted Mac result:** native fak Metal runs Qwen3.8-27B Q4_K_M at
 **2.3–2.9 decode tok/s** and **3.2–8.4 full-prefill tok/s** on the 18-GPU-core,

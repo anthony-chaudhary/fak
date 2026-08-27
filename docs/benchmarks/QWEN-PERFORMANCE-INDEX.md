@@ -7,6 +7,16 @@ description: "Canonical cross-hardware index and publishing route for accepted Q
 
 **This is the one current index for Qwen performance updates.** Hardware workers publish the full receipt under `docs/_witnesses/`, then update this page in the same landing. Detailed model pages and `BENCHMARK-AUTHORITY.md` remain evidence and methodology sources; worker logs and issue comments are not the current result surface.
 
+<!-- qwen38-frontdoor:begin -->
+## Generated front-door readout
+
+This block is derived by `fak native-performance --frontdoor-md`; classifications cannot be spliced across envelopes.
+
+- **ACCEPTED:** fak-native Metal Q4_K_M delivered **2.3-2.9 decode tok/s** with functional `PASS` in the frozen M3 Pro full-run envelope. [Receipt](../_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json).
+- **APPROXIMATE:** the closest near-matched observation is **3.3 vs 6.966061 tok/s (~47%)**. It is not accepted parity: P31/T64 native versus P32/T64 llama.cpp, with no joint quality-complete receipt. [Issue #8697](https://github.com/anthony-chaudhary/fak/issues/8697).
+- **DIAGNOSTIC:** the separate A100 cache-restore arm measured **~0.2 tok/s with 0/5 exact**. Failed quality keeps it out of accepted and approximate comparison headlines. [Attribution](../_witnesses/issue-8819-qwen38-cache-attribution/README.md).
+<!-- qwen38-frontdoor:end -->
+
 ## Read this first: rows are envelopes, not a timeline
 
 A newer result replaces an older row **only when its envelope key matches**: model + artifact/precision + engine/path + hardware/topology + workload/cache mode. A Metal kernel improvement does not supersede an A100 CUDA result, and a kernel microbenchmark does not supersede an end-to-end tokens/sec result.

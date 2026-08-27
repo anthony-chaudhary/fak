@@ -19,6 +19,15 @@ func TestQwenPerformanceIndexRoutesCurrentResults(t *testing.T) {
 	}
 	page := string(body)
 	required := []string{
+		"<!-- qwen38-frontdoor:begin -->",
+		"ACCEPTED",
+		"APPROXIMATE",
+		"DIAGNOSTIC",
+		"3.3 vs 6.966061",
+		"~47%",
+		"P31/T64",
+		"P32/T64",
+		"0/5 exact",
 		"This is the one current index for Qwen performance updates",
 		"rows are envelopes, not a timeline",
 		"docs/_witnesses/",
@@ -37,13 +46,30 @@ func TestQwenPerformanceIndexRoutesCurrentResults(t *testing.T) {
 		}
 	}
 
-	for _, frontDoor := range []string{"README.md", "llms.txt", "BENCHMARK-AUTHORITY.md"} {
+	for _, frontDoor := range []string{"README.md", "llms.txt", "llms-full.txt", "INDEX.md", "BENCHMARK-AUTHORITY.md"} {
 		content, err := os.ReadFile(filepath.Join(root, frontDoor))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !strings.Contains(string(content), "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md") {
 			t.Errorf("%s does not route readers to the Qwen performance index", frontDoor)
+		}
+	}
+	directoryIndex, err := os.ReadFile(filepath.Join(root, "docs", "benchmarks", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(directoryIndex), "QWEN-PERFORMANCE-INDEX.md") {
+		t.Error("docs/benchmarks/README.md does not route readers to the Qwen performance index")
+	}
+
+	for _, frontDoor := range []string{"docs/benchmarks/README.md", "INDEX.md", "llms-full.txt"} {
+		content, err := os.ReadFile(filepath.Join(root, frontDoor))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), "QWEN38-27B-LATEST.md") {
+			t.Errorf("%s does not route readers to the detailed Qwen3.8 result page", frontDoor)
 		}
 	}
 }

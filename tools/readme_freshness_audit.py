@@ -118,6 +118,7 @@ SCHEMA = "fleet-readme-freshness-audit/2"
 README_REL = "README.md"
 VERSION_REL = "VERSION"
 AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
+QWEN_INDEX_REL = "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md"
 # The binary's real dispatch table — the source of truth for which `fak <verb>`
 # commands actually exist. Parsed live (never a hand-list) so the lcd_onramp
 # anti-gaming cross-check stays correct as verbs are added/renamed.
@@ -247,6 +248,12 @@ SUBSTANCE_SHORTFALL_SCALE = 10.0
 _STAMP_RE = re.compile(
     r"<!--\s*readme-verified:\s*(\d{4}-\d{2}-\d{2})\b(?P<rest>[^>]*)-->",
     re.IGNORECASE,
+)
+
+_QWEN_FRONTDOOR_RE = re.compile(
+    r"<!--\s*qwen38-frontdoor:begin\s*-->(.*?)"
+    r"<!--\s*qwen38-frontdoor:end\s*-->",
+    re.IGNORECASE | re.DOTALL,
 )
 
 # A Markdown inline link: [text](target). We only resolve LOCAL targets — http(s),
@@ -446,8 +453,11 @@ def check_headline_authority(readme: str, authority: str) -> dict[str, Any]:
     multiplier / latency / rate number that has no matching figure there to be
     reconciled by hand.
     """
+    # The generated Qwen block has a stronger, graph-derived authority check
+    # below. Do not make its scoped values pretend to be ledger headlines.
+    scan = _QWEN_FRONTDOOR_RE.sub("", readme)
     missing: list[str] = []
-    for m in _BOLD_RE.finditer(readme):
+    for m in _BOLD_RE.finditer(scan):
         missing.extend(_trace_claim_numbers(m.group("body"), authority)["missing"])
     missing = sorted(set(missing))
     if missing:
@@ -507,9 +517,9 @@ def check_native_status(readme: str, *, today: _dt.date,
     requirements = {
         "qwen38_lane": "qwen3.8-27b" in body,
         "ultracode_lane": "ultracode / microagents" in body,
-        "qwen38_authority": "docs/_witnesses/issue-8848-qwen38-overnight/" in body,
+        "qwen38_authority": QWEN_INDEX_REL.lower() in body,
         "microagent_authority": "docs/_witnesses/issue-8624-ultracode-smallmodel/" in body,
-        "honest_hold": "below parity" in body and "abstain" in body,
+        "honest_hold": ("below parity" in body or "not accepted parity" in body) and "abstain" in body,
         "refresh_contract": "refresh contract:" in body,
     }
     missing.extend(name for name, present in requirements.items() if not present)
@@ -517,6 +527,43 @@ def check_native_status(readme: str, *, today: _dt.date,
     detail = (f"status dated {marker.group(1)} ({age}d old) with both sourced lanes and holds"
               if not missing else "native status needs: " + ", ".join(missing))
     return {"check": "native_status", "status": status, "detail": detail,
+            "items": missing}
+
+
+def check_qwen_frontdoor(readme: str, qwen_index: str) -> dict[str, Any]:
+    """Fail when Qwen's generated front-door classes drift or get spliced.
+
+    This is intentionally semantic as well as marker-based: the old README
+    combined a failed-quality cache diagnostic with an unrelated llama.cpp
+    number and presented the splice as the product's parity state.
+    """
+    readme_match = _QWEN_FRONTDOOR_RE.search(readme or "")
+    index_match = _QWEN_FRONTDOOR_RE.search(qwen_index or "")
+    missing: list[str] = []
+    if readme_match is None:
+        missing.append("readme_generated_block")
+    if index_match is None:
+        missing.append("index_generated_block")
+    readme_block = readme_match.group(1).lower() if readme_match else ""
+    index_block = index_match.group(1).lower() if index_match else ""
+    required = {
+        "accepted_metal": ("2.3-2.9 decode tok/s", "functional `pass`"),
+        "approximate_pair": ("3.3", "6.966061", "~47%", "approximate", "not accepted parity"),
+        "diagnostic_cache": ("~0.2 tok/s", "0/5 exact", "diagnostic"),
+        "p31_p32_caveat": ("p31/t64", "p32/t64", "no joint quality-complete receipt"),
+    }
+    for name, needles in required.items():
+        if any(needle not in readme_block for needle in needles):
+            missing.append("readme_" + name)
+        if any(needle not in index_block for needle in needles):
+            missing.append("index_" + name)
+    old_splice = ("cached fak-native decode collapsed", "0.3 tok/s median versus 36.55")
+    if any(needle in readme_block for needle in old_splice):
+        missing.append("old_cache_parity_splice")
+    status = "OK" if not missing else "FAIL"
+    detail = ("generated Qwen front-door blocks agree on accepted, approximate, and diagnostic classes"
+              if not missing else "Qwen front-door drift: " + ", ".join(missing))
+    return {"check": "qwen_frontdoor", "status": status, "detail": detail,
             "items": missing}
 
 def check_project_status(readme: str, *, today: _dt.date,
@@ -1395,7 +1442,8 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
                today: _dt.date, max_age_days: int,
                dispatch: set[str] | None = None,
                showcase: str | None = None,
-               dataset_versions: set[str] | None = None) -> list[dict[str, Any]]:
+               dataset_versions: set[str] | None = None,
+               qwen_index: str = "") -> list[dict[str, Any]]:
     """All checks over already-read text. The pure core; tests call this."""
     return [
         # hygiene — is the page correct?
@@ -1405,6 +1453,7 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_headline_authority(readme, authority),
         check_freshness_stamp(readme, today=today, max_age_days=max_age_days),
         check_native_status(readme, today=today, max_age_days=max_age_days),
+        check_qwen_frontdoor(readme, qwen_index),
         check_project_status(readme, today=today, max_age_days=max_age_days),
         check_showcase_sync(readme, showcase, version=version,
                             dataset_versions=dataset_versions, dispatch=dispatch),
@@ -1435,6 +1484,7 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
     # WARN inside that check, it does not error the whole audit.
     version = _safe_read(root / VERSION_REL)
     authority = _safe_read(root / AUTHORITY_REL)
+    qwen_index = _safe_read(root / QWEN_INDEX_REL)
     dispatch = fak_dispatch_verbs(root)
     # None (not "") when the second front door is absent, so check_showcase_sync can
     # tell "no page to read" (abstain) apart from "an empty page" (a real defect).
@@ -1442,7 +1492,8 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
     checks = run_checks(readme, version, authority, root,
                         today=today, max_age_days=max_age_days, dispatch=dispatch,
                         showcase=showcase,
-                        dataset_versions=bench_dataset_versions(root))
+                        dataset_versions=bench_dataset_versions(root),
+                        qwen_index=qwen_index)
     return build_payload(workspace=str(root), checks=checks)
 
 
