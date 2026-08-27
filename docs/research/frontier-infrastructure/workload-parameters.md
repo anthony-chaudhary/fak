@@ -189,6 +189,19 @@ serving region, tenant, session, prefix, WAN latency, sovereignty eligibility, r
 and metric units separately. The fuller field contract is in
 [`geography-session-locality.md`](geography-session-locality.md).
 
+## Agentic system-envelope addendum
+
+| Source | Population | Measured envelope | System implication | Missing distribution |
+|---|---|---|---|---|
+| AgentSysBench | 10 agentic applications plus a production-trace sidecar | Non-LLM work dominates latency in 5/10; sandbox state reaches 28 GB/session; intra-application task latency differs up to 32x; production state idles minutes-to-hours | Model the workflow DAG, component affinity, sandbox state, transfers, and idle residency | Universal session length, tool-chain length, retry/failure, tenant, and geography |
+| AgentSysBench optimization probes | Evaluated task graphs and load levels | Task disaggregation cuts latency 29-40%; communication-aware placement reaches 4.5x; state offload cuts memory 4.6x | Separate mechanism gain from workload distribution and count transfers/overhead | Cross-provider replication and CIs |
+| AgentSysBench tool trace | Production query/fetch traces with a 10-minute query TTL | 35.2% redundant search calls removed; aggregate search latency falls 19.3% | Cache exact tool queries/results with freshness and authorization boundaries | Query population, user concentration, staleness cost, and failure/retry rates |
+
+These parameters complement, rather than replace, the existing Copilot and TraceLab rows.
+Copilot contributes production model/tool prevalence; TraceLab contributes trajectory and
+state reconstruction; AgentSysBench contributes heterogeneous component, memory, idle, and
+tool-cache envelopes.
+
 ## Agentic accounting additions
 
 | Variable | Production evidence | Modeling rule | Missing |

@@ -149,6 +149,12 @@ highest SLO-satisfied, quality-constrained goodput.
 
 ## Agentic workflow boundary
 
+AgentSysBench strengthens the boundary: in five of ten applications non-LLM components
+dominate latency, per-session sandbox state reaches 28 GB, task latency differs by 32x,
+and production state can sit idle for minutes to hours. A request-only arrival/service
+model therefore misses the workflow DAG, component affinity, live OS state, transfers,
+external-tool latency, and idle residency.
+
 A model request is often the wrong scheduling/accounting unit for an agent. The current
 production traces and systems work support a wider envelope:
 
