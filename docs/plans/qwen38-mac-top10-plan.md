@@ -20,7 +20,7 @@ Rejected experiments, default-off candidates, enabling-only commits, synthetic-o
 - **For:** operators running exact Qwen3.8-27B Q4_K_M through fak-native Metal on a MacBook-class machine.
 - **Problem:** accepted native decode is 2.3-2.9 tok/s, the closest approximate point is 3.3 tok/s versus the pinned 6.966061 tok/s comparator, and a fresh exact receipt is blocked by a 55.73 GiB startup estimate on the sanctioned 36 GiB M3 Pro.
 - **Today:** the accepted P32/T64 profile is synchronization-bound: 14,833 command buffers, 23,025 encoders, 15.322 s GPU execution, and 39.773 s host wait.
-- **Better because:** each phase removes one measured memory, submission, state, or scheduling boundary and is retained only if the complete fak-native receipt improves.
+- **Better because:** each phase removes one measured memory, submission, state, or scheduling boundary and is retained only if the full fak-native receipt improves.
 - **Witness:** one receipt per KEEP pins artifact/revision, module versions, engine/backend/forward path, fallback count, quality gates, OFF/ON axis, timings, memory, and ambient-system evidence.
 
 ## Problem checks
@@ -36,43 +36,54 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 
 ## Ordered phases
 
-### M1 - No-copy streamed Q4_K Metal spans (#9073)
+- [ ] M1 - No-copy streamed Q4_K Metal spans (#9073)
+- [ ] M2 - Forward-owned quantized Qwen sequence boundary (#9257, #9230)
+- [ ] M3 - Q8 projection-to-GDN device handoff (#9216)
+- [ ] M4 - Coarse resident hybrid decode graph (#8324)
+- [ ] M5 - Quality-clean exact P32/T64 receipt (#8972)
+- [ ] M6 - Paged Qwen hybrid state live arm (#9076, #8395)
+- [ ] M7 - Exact-prefix block reuse (#8395; ship-alone child required)
+- [ ] M8 - Bounded chunked-prefill scheduling (#9066, #1912, #8395)
+- [ ] M9 - Resident hybrid co-batching (#9074, #9075, #8395)
+- [ ] M10 - Matched parity reconvergence (#8697, #2723)
+
+### 1. M1 - No-copy streamed Q4_K Metal spans (#9073)
 
 Route mapped GGUF spans into Metal without a second host copy. KEEP requires identical output, lower startup/steady memory, a retained mapping lifetime, and an exact fak-native Mac receipt.
 
-### M2 - Forward-owned quantized Qwen sequence boundary (#9257, #9230)
+### 2. M2 - Forward-owned quantized Qwen sequence boundary (#9257, #9230)
 
 Consume landed #9259/#9267 primitives to encode quantized operations into device activation/result handles owned by one sequence submission. Compatibility wrappers that retain per-op waits do not satisfy this phase. #9257 was reopened after unrelated issue-number collisions falsely closed it.
 
-### M3 - Q8 projection-to-GDN device handoff (#9216)
+### 3. M3 - Q8 projection-to-GDN device handoff (#9216)
 
 Encode the linear-attention Q8 projections into the resident GDN submission and read back core once. KEEP requires exact P32 parity and positive end-to-end movement; rejected #9093 grouping remains evidence only.
 
-### M4 - Coarse resident hybrid decode graph (#8324)
+### 4. M4 - Coarse resident hybrid decode graph (#8324)
 
-Complete `metal.command-buffer-amortization` and `metal.fused-hybrid-graph-coverage` across GDN/full-attention decode. Target at least 5 tok/s before default enablement, with CPU-reference cosine >=0.9999 and exact greedy tokens.
+Finish `metal.command-buffer-amortization` and `metal.fused-hybrid-graph-coverage` across GDN/full-attention decode. Target at least 5 tok/s before default enablement, with CPU-reference cosine >=0.9999 and exact greedy tokens.
 
-### M5 - Quality-complete exact P32/T64 receipt (#8972)
+### 5. M5 - Quality-clean exact P32/T64 receipt (#8972)
 
 After M1-M4 fit safely, capture three repetitions of the frozen exact native/control campaign with hash, identities, system baselines, memory, profiles, quality, and zero fallback.
 
-### M6 - Paged Qwen hybrid state live arm (#9076, #8395)
+### 6. M6 - Paged Qwen hybrid state live arm (#9076, #8395)
 
 Exercise the shipped swap/preemption state on the exact serving trace. KEEP requires occupancy, peak memory, TTFT/ITL, aggregate throughput, state parity, and fallback evidence; implementation-only #9076 is not enough.
 
-### M7 - Exact-prefix block reuse (#8395)
+### 7. M7 - Exact-prefix block reuse (#8395)
 
 File or reconcile one ship-alone child before implementation. Run the isolated prefix arm with paged state fixed on and retain only a complete quality/latency/throughput/cache receipt.
 
-### M8 - Bounded chunked-prefill scheduling (#9066, #1912, #8395)
+### 8. M8 - Bounded chunked-prefill scheduling (#9066, #1912, #8395)
 
-Build on shipped append-capable Q4_K prefill and complete live scheduler interleaving. KEEP requires identical outputs plus positive TTFT/ITL and memory movement; rejected one-shot reserve #9094 does not count.
+Build on the landed append-capable Q4_K prefill and finish live scheduler interleaving. KEEP requires identical outputs plus positive TTFT/ITL and memory movement; rejected one-shot reserve #9094 does not count.
 
-### M9 - Resident hybrid co-batching (#9074, #9075, #8395)
+### 9. M9 - Resident hybrid co-batching (#9074, #9075, #8395)
 
 Panelize shared Q4_K/Q8 projections while preserving each session's KV, position, convolution, and recurrent state, then exercise the live coalescer. KEEP requires non-serial execution evidence and positive aggregate throughput.
 
-### M10 - Matched parity reconvergence (#8697, #2723)
+### 10. M10 - Matched parity reconvergence (#8697, #2723)
 
 Run the final same-artifact fak-native versus pinned llama.cpp/MLX Mac campaign. Publish the exact current result without mixing envelopes; the plan exits after this phase rather than expanding into another optimization queue.
 
