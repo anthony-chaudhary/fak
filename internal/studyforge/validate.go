@@ -15,9 +15,15 @@ func Validate(c Corpus) error { return validateCorpus(c, true) }
 
 // validateCheckpoint accepts explicit partial/failed progress, but verifies every durable
 // fact already claimed by the checkpoint. Resume must never build on a weak partial file.
-func validateCheckpoint(c Corpus) error { return validateCorpus(c, false) }
+func validateCheckpoint(c Corpus) error { return validateCorpus(c, false, false) }
 
-func validateCorpus(c Corpus, requireComplete bool) error {
+// validateResumeCheckpoint recognizes exactly the pre-#9314 mixed-issues
+// representation. The exception is private to resume loading; ordinary reads,
+// writes, and validation continue to require the explicit identity marker.
+func validateResumeCheckpoint(c Corpus) error { return validateCorpus(c, false, true) }
+
+func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) error {
+	allowLegacy := len(allowLegacyResume) == 1 && allowLegacyResume[0]
 	var es []error
 	if c.Schema != CorpusSchema {
 		es = append(es, fmt.Errorf("schema must be %q", CorpusSchema))
@@ -186,6 +192,18 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 			es = append(es, fmt.Errorf("%s checksum mismatch", s.Name))
 		}
 		if s.Name == "issues" {
+			legacy := allowLegacy && isLegacyMixedPullCheckpoint(r, s)
+			if !legacy {
+				if len(s.ClassifiedPullIdentities) != s.ClassifiedPullCount {
+					es = append(es, fmt.Errorf("issues classified pull identity count %d does not match classified_pull_count %d", len(s.ClassifiedPullIdentities), s.ClassifiedPullCount))
+				}
+				if !validDigest(s.ClassifiedPullChecksum) || s.ClassifiedPullChecksum != identityDigest(s.ClassifiedPullIdentities) {
+					es = append(es, errors.New("issues classified pull identity checksum mismatch"))
+				}
+				if err := validateIdentityList("issues classified pulls", s.ClassifiedPullIdentities); err != nil {
+					es = append(es, err)
+				}
+			}
 			copy := s
 			issuesSource = &copy
 		}
@@ -195,8 +213,11 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 		}
 	}
 	if issuesSource != nil && pullsSource != nil && issuesSource.Status == StatusComplete && pullsSource.Status == StatusComplete {
-		if err := validateNonAtomicDelta(r, *issuesSource, *pullsSource, recordsForSource(c.Records, "pulls"), requireComplete); err != nil {
-			es = append(es, err)
+		legacy := allowLegacy && isLegacyMixedPullCheckpoint(r, *issuesSource)
+		if !legacy {
+			if err := validateNonAtomicDelta(r, *issuesSource, *pullsSource, recordsForSource(c.Records, "pulls"), requireComplete); err != nil {
+				es = append(es, err)
+			}
 		}
 	}
 	for _, record := range c.Records {
@@ -237,10 +258,6 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 }
 
 func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords []Record, requireComplete bool) error {
-	legacyPartial := r.Status != StatusComplete && !requireComplete && len(issues.ClassifiedPullIdentities) == 0 && issues.ClassifiedPullChecksum == ""
-	if legacyPartial && r.NonAtomicDelta == nil {
-		return nil
-	}
 	if len(issues.ClassifiedPullIdentities) != issues.ClassifiedPullCount {
 		return fmt.Errorf("issues classified pull identity count %d does not match classified_pull_count %d", len(issues.ClassifiedPullIdentities), issues.ClassifiedPullCount)
 	}
@@ -329,6 +346,15 @@ func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords 
 	return nil
 }
 
+func isLegacyMixedPullCheckpoint(r Receipt, issues SourceReceipt) bool {
+	return r.Status != StatusComplete &&
+		issues.Status == StatusComplete &&
+		issues.ClassifiedPullCount > 0 &&
+		len(issues.ClassifiedPullIdentities) == 0 &&
+		issues.ClassifiedPullChecksum == "" &&
+		r.NonAtomicDelta == nil
+}
+
 func validateIdentityList(name string, identities []CrossEndpointIdentity) error {
 	seen := make(map[int64]bool, len(identities))
 	for i, identity := range identities {
@@ -372,8 +398,12 @@ func validDigest(value string) bool {
 
 func mustParseCutoff(v string) time.Time { t, _ := time.Parse(time.RFC3339Nano, v); return t }
 
-func validateResume(c Corpus, repo string, cutoff time.Time, baseURL string, expectedEndpoints map[string]string) error {
-	if err := validateCheckpoint(c); err != nil {
+func validateResume(c Corpus, repo string, cutoff time.Time, baseURL string, expectedEndpoints map[string]string, allowLegacy bool) error {
+	validator := validateCheckpoint
+	if allowLegacy {
+		validator = validateResumeCheckpoint
+	}
+	if err := validator(c); err != nil {
 		return fmt.Errorf("invalid resume: %w", err)
 	}
 	if c.Receipt.Repository != repo {

@@ -128,7 +128,13 @@ func refreshChecksums(c *Corpus) {
 		c.Receipt.Sources[i].UniqueCount = len(seen)
 		if c.Receipt.Sources[i].Name == "issues" {
 			sortIdentities(c.Receipt.Sources[i].ClassifiedPullIdentities)
-			c.Receipt.Sources[i].ClassifiedPullChecksum = identityDigest(c.Receipt.Sources[i].ClassifiedPullIdentities)
+			// Preserve the absent pre-#9314 marker while a resume migration is
+			// still waiting for the terminal pulls census. Strict validation
+			// rejects this shape everywhere except the resume-only loader.
+			legacyMarkerMissing := c.Receipt.Sources[i].ClassifiedPullCount > 0 && len(c.Receipt.Sources[i].ClassifiedPullIdentities) == 0 && c.Receipt.Sources[i].ClassifiedPullChecksum == ""
+			if !legacyMarkerMissing {
+				c.Receipt.Sources[i].ClassifiedPullChecksum = identityDigest(c.Receipt.Sources[i].ClassifiedPullIdentities)
+			}
 		}
 		c.Receipt.Sources[i].PageChecksum = pageDigest(c.Receipt.Sources[i].Pages)
 		c.Receipt.Sources[i].Checksum = recordDigest(rs)

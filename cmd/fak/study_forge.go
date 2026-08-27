@@ -55,7 +55,7 @@ func runStudyForgeCapture(stdout, stderr io.Writer, args []string) int {
 	}
 	var prior *studyforge.Corpus
 	if *resume {
-		corpus, err := studyforge.Read(*out)
+		corpus, err := studyforge.ReadResume(*out)
 		if err != nil {
 			fmt.Fprintf(stderr, "study-forge: read resume corpus: %v\n", err)
 			return 1

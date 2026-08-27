@@ -3,9 +3,13 @@ package studyforge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -151,14 +155,21 @@ func TestCaptureResumesLegacyCheckpointWithoutRefetchingCompleteEndpoints(t *tes
 			partial.Receipt.Sources[i].ClassifiedPullChecksum = ""
 		}
 	}
-	if err := validateCheckpoint(partial); err != nil {
+	if err := validateResumeCheckpoint(partial); err != nil {
 		t.Fatalf("legacy checkpoint rejected: %v", err)
 	}
 	mu.Lock()
 	issuesBefore, pullsBefore := calls["/repos/acme/widget/issues"], calls["/repos/acme/widget/pulls"]
 	failDiscussions = false
 	mu.Unlock()
-	completed, err := collector.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoff, Resume: &partial})
+	var checkpoints []Corpus
+	completed, err := collector.Capture(context.Background(), CaptureRequest{
+		Owner: "acme", Repository: "widget", Cutoff: cutoff, Resume: &partial,
+		Checkpoint: func(c Corpus) error {
+			checkpoints = append(checkpoints, cloneCorpus(c))
+			return nil
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +185,220 @@ func TestCaptureResumesLegacyCheckpointWithoutRefetchingCompleteEndpoints(t *tes
 	if completed.Receipt.NonAtomicDelta == nil || completed.Receipt.NonAtomicDelta.IdentityBasis != identityBasisLegacyProjection {
 		t.Fatalf("legacy reconciliation evidence = %+v", completed.Receipt.NonAtomicDelta)
 	}
+	if len(checkpoints) == 0 {
+		t.Fatal("resume did not persist an upgraded checkpoint")
+	}
+	persistedIssues, _ := sourceByName(checkpoints[0].Receipt.Sources, "issues")
+	if len(persistedIssues.ClassifiedPullIdentities) != 1 || persistedIssues.ClassifiedPullIdentities[0].ID != 21 || persistedIssues.ClassifiedPullChecksum != identityDigest(persistedIssues.ClassifiedPullIdentities) {
+		t.Fatalf("first resumed checkpoint was not upgraded: %+v", persistedIssues)
+	}
+	if checkpoints[0].Receipt.NonAtomicDelta == nil || checkpoints[0].Receipt.NonAtomicDelta.IdentityBasis != identityBasisLegacyProjection {
+		t.Fatalf("first resumed checkpoint delta = %+v", checkpoints[0].Receipt.NonAtomicDelta)
+	}
 }
+
+func TestCaptureMigratesLegacyCheckpointAfterCompletingPullCensus(t *testing.T) {
+	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	var (
+		mu        sync.Mutex
+		calls     = map[string]int{}
+		failPage2 = true
+		server    *httptest.Server
+	)
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls[r.URL.Path+"?"+r.URL.RawQuery]++
+		fail := failPage2
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/repos/acme/widget":
+			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/acme/widget/commits/main":
+			fmt.Fprint(w, `{"sha":"legacy-page-revision"}`)
+		case "/repos/acme/widget/issues":
+			writeRows(w, []int64{31, 32}, true)
+		case "/repos/acme/widget/pulls":
+			if r.URL.Query().Get("page") == "2" {
+				if fail {
+					http.Error(w, "interrupted", http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Link", `<`+server.URL+`/repos/acme/widget/pulls?page=3>; rel="next"`)
+				writeRows(w, []int64{32}, false)
+				return
+			}
+			if r.URL.Query().Get("page") == "3" {
+				fmt.Fprint(w, `[]`)
+				return
+			}
+			w.Header().Set("Link", `<`+server.URL+`/repos/acme/widget/pulls?page=2>; rel="next"`)
+			writeRows(w, []int64{31}, false)
+		case "/repos/acme/widget/discussions", "/repos/acme/widget/releases", "/repos/acme/widget/labels", "/repos/acme/widget/milestones":
+			fmt.Fprint(w, `[]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	collector := NewCollector(server.Client())
+	collector.BaseURL = server.URL
+	collector.MaxRetries = 0
+	collector.Now = func() time.Time { return cutoff }
+	partial, err := collector.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoff})
+	if err == nil {
+		t.Fatal("initial capture unexpectedly completed")
+	}
+	legacyizeMixedPullCheckpoint(&partial)
+	if err := validateResumeCheckpoint(partial); err != nil {
+		t.Fatalf("legacy checkpoint rejected: %v", err)
+	}
+	if err := validateCheckpoint(partial); err == nil || !strings.Contains(err.Error(), "classified pull identity count") {
+		t.Fatalf("ordinary checkpoint validation error = %v, want strict marker rejection", err)
+	}
+	legacyPath := filepath.Join(t.TempDir(), "legacy.json")
+	legacyJSON, err := json.Marshal(partial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, legacyJSON, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Read(legacyPath); err == nil {
+		t.Fatal("ordinary Read accepted a legacy markerless checkpoint")
+	}
+	loaded, err := ReadResume(legacyPath)
+	if err != nil {
+		t.Fatalf("ReadResume rejected legacy checkpoint: %v", err)
+	}
+	partial = loaded
+	page1Key := "/repos/acme/widget/pulls?"
+	issuesKey := "/repos/acme/widget/issues?"
+	mu.Lock()
+	page1Before, issuesBefore := calls[page1Key], calls[issuesKey]
+	page2Before := calls["/repos/acme/widget/pulls?page=2"]
+	page3Before := calls["/repos/acme/widget/pulls?page=3"]
+	anyCheckpointBeforeUpgrade := false
+	failPage2 = false
+	mu.Unlock()
+	var persisted []Corpus
+	completed, err := collector.Capture(context.Background(), CaptureRequest{
+		Owner: "acme", Repository: "widget", Cutoff: cutoff, Resume: &partial,
+		Checkpoint: func(c Corpus) error {
+			issues, _ := sourceByName(c.Receipt.Sources, "issues")
+			if len(issues.ClassifiedPullIdentities) == 0 {
+				anyCheckpointBeforeUpgrade = true
+			}
+			persisted = append(persisted, cloneCorpus(c))
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	page1After, issuesAfter := calls[page1Key], calls[issuesKey]
+	page2After := calls["/repos/acme/widget/pulls?page=2"]
+	page3After := calls["/repos/acme/widget/pulls?page=3"]
+	mu.Unlock()
+	if page1After != page1Before || issuesAfter != issuesBefore || page2After != page2Before+1 || page3After != page3Before+1 {
+		t.Fatalf("resume requests: issues %d->%d pull page1 %d->%d pull page2 %d->%d pull page3 %d->%d", issuesBefore, issuesAfter, page1Before, page1After, page2Before, page2After, page3Before, page3After)
+	}
+	if anyCheckpointBeforeUpgrade || len(persisted) == 0 {
+		t.Fatalf("persisted=%d checkpoint_before_upgrade=%t", len(persisted), anyCheckpointBeforeUpgrade)
+	}
+	issues, _ := sourceByName(completed.Receipt.Sources, "issues")
+	assertIdentityIDs(t, issues.ClassifiedPullIdentities, 31, 32)
+	if completed.Receipt.NonAtomicDelta == nil || completed.Receipt.NonAtomicDelta.IdentityBasis != identityBasisLegacyProjection {
+		t.Fatalf("completed legacy delta = %+v", completed.Receipt.NonAtomicDelta)
+	}
+}
+
+func TestLegacyMixedPullMigrationRejectsAmbiguityBeforeRequests(t *testing.T) {
+	corpus, err := captureReconciliationFixture(t, []int64{41}, []int64{41, 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyizeMixedPullCheckpoint(&corpus)
+	requests := 0
+	collector := NewCollector(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("unexpected request")
+	})})
+	collector.BaseURL = corpus.Receipt.APIBase
+	_, err = collector.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoffTime(t, corpus.Receipt.Cutoff), Resume: &corpus})
+	if err == nil || !strings.Contains(err.Error(), "mixed pull evidence is ambiguous") {
+		t.Fatalf("Capture error = %v, want ambiguity failure", err)
+	}
+	if requests != 0 {
+		t.Fatalf("ambiguous resume made %d requests", requests)
+	}
+}
+
+func TestLegacyMixedPullMigrationRejectsContradictoryMarkerBeforeRequests(t *testing.T) {
+	corpus, err := captureReconciliationFixture(t, []int64{45}, []int64{45})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyizeMixedPullCheckpoint(&corpus)
+	issues, _ := sourceByName(corpus.Receipt.Sources, "issues")
+	issues.ClassifiedPullIdentities = []CrossEndpointIdentity{{ID: 45, Number: 45, NodeID: "PR_45"}}
+	upsertSource(&corpus.Receipt.Sources, issues)
+	requests := 0
+	collector := NewCollector(&http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("unexpected request")
+	})})
+	collector.BaseURL = corpus.Receipt.APIBase
+	_, err = collector.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoffTime(t, corpus.Receipt.Cutoff), Resume: &corpus})
+	if err == nil || !strings.Contains(err.Error(), "classified pull identity checksum mismatch") {
+		t.Fatalf("Capture error = %v, want contradictory marker failure", err)
+	}
+	if requests != 0 {
+		t.Fatalf("contradictory resume made %d requests", requests)
+	}
+}
+
+func TestLegacyMixedPullMigrationIsIdempotentForUpgradedCheckpoint(t *testing.T) {
+	corpus, err := captureReconciliationFixture(t, []int64{51}, []int64{51})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := cloneCorpus(corpus)
+	for i := 0; i < 2; i++ {
+		upgraded, err := upgradeLegacyMixedPullEvidence(&corpus)
+		if err != nil || upgraded {
+			t.Fatalf("upgrade current checkpoint = %t, %v", upgraded, err)
+		}
+	}
+	if !reflect.DeepEqual(corpus, want) {
+		t.Fatal("already-upgraded checkpoint changed")
+	}
+}
+
+func legacyizeMixedPullCheckpoint(c *Corpus) {
+	c.Receipt.Status = StatusPartial
+	c.Receipt.CompletedAt = ""
+	c.Receipt.NonAtomicDelta = nil
+	for i := range c.Receipt.Sources {
+		if c.Receipt.Sources[i].Name == "issues" {
+			c.Receipt.Sources[i].ClassifiedPullIdentities = nil
+			c.Receipt.Sources[i].ClassifiedPullChecksum = ""
+		}
+	}
+}
+
+func cutoffTime(t *testing.T, value string) time.Time {
+	t.Helper()
+	cutoff, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cutoff
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func captureReconciliationFixture(t *testing.T, mixed, dedicated []int64) (Corpus, error) {
 	t.Helper()
