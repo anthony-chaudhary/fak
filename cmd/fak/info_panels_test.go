@@ -298,3 +298,25 @@ func TestRenderGuardInfoLineCarriesAgents(t *testing.T) {
 		t.Errorf("status line must omit agents with no sessions: %q", renderGuardInfoLine(bare))
 	}
 }
+
+func TestGuardInfoTrendsPanelCapturesPerTurnPhaseAndCost(t *testing.T) {
+	tr := newGuardInfoTrend(8)
+	tr.prefillPerTurn = []float64{100, 120}
+	tr.decodePerTurn = []float64{20, 30}
+	tr.costPerTurn = []float64{120, 150}
+	ctx := guardInfoPanelCtx{v: provenVisualVars(), tr: tr, width: 120, sparkW: 8, gaugeW: 10}
+	rows := guardInfoTrendsPanelRows(ctx, guardPanelFull)
+	got := strings.Join(rows, "\n")
+	for _, exact := range []string{
+		" prefill ▁█  120 tok/turn",
+		" decode  ▁█  30 tok/turn",
+		" cost    ▁█  150 tok-eq/turn · avg 135 · trend ↑ +25%",
+	} {
+		if !strings.Contains(got, exact) {
+			t.Errorf("captured panel missing exact row %q:\n%s", exact, got)
+		}
+	}
+	if strings.Contains(got, "$") || strings.Contains(got, "USD") {
+		t.Fatalf("token-only endpoint was rendered as currency:\n%s", got)
+	}
+}

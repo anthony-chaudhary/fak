@@ -201,6 +201,14 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 		rows = append(rows, fmt.Sprintf(" hit   %s  %.0f%%  ×%.2f", sparklineTUI(ctx.tr.hit, ctx.sparkW), guardInfoHitPct(v), guardInfoMult(v)))
 	}
 	rows = append(rows, fmt.Sprintf(" work  %s  %d replies · busy %d", sparklineTUI(ctx.tr.turns, ctx.sparkW), v.Inference.Turns, v.Gateway.InflightRequests))
+	if len(ctx.tr.costPerTurn) > 0 {
+		last := len(ctx.tr.costPerTurn) - 1
+		rows = append(rows,
+			fmt.Sprintf(" prefill %s  %.0f tok/turn", sparklineTUI(ctx.tr.prefillPerTurn, ctx.sparkW), ctx.tr.prefillPerTurn[last]),
+			fmt.Sprintf(" decode  %s  %.0f tok/turn", sparklineTUI(ctx.tr.decodePerTurn, ctx.sparkW), ctx.tr.decodePerTurn[last]),
+			fmt.Sprintf(" cost    %s  %.0f tok-eq/turn · avg %.0f · trend %s", sparklineTUI(ctx.tr.costPerTurn, ctx.sparkW), ctx.tr.costPerTurn[last], meanTUI(ctx.tr.costPerTurn), trendTUI(ctx.tr.costPerTurn)),
+		)
+	}
 	if ctx.tr.baselineChanges > 0 {
 		rows = append(rows, fmt.Sprintf(" base  changed ×%d · trend restarted at %s", ctx.tr.baselineChanges, ctx.tr.baseline.ID))
 	}
@@ -453,5 +461,40 @@ func guardInfoShortCount(n int) string {
 		return strings.TrimSuffix(fmt.Sprintf("%.1f", float64(n)/1_000), ".0") + "k"
 	default:
 		return fmt.Sprintf("%d", n)
+	}
+}
+
+func meanTUI(vals []float64) float64 {
+	if len(vals) == 0 {
+		return 0
+	}
+	var total float64
+	for _, v := range vals {
+		total += v
+	}
+	return total / float64(len(vals))
+}
+
+// trendTUI compares the latest marginal turn cost with the preceding turn. It is
+// deliberately explicit rather than implying a forecast from a cumulative slope.
+func trendTUI(vals []float64) string {
+	if len(vals) < 2 {
+		return "—"
+	}
+	previous, latest := vals[len(vals)-2], vals[len(vals)-1]
+	if previous == 0 {
+		if latest == 0 {
+			return "→ 0%"
+		}
+		return "↑ new"
+	}
+	pct := 100 * (latest - previous) / previous
+	switch {
+	case pct > 0.5:
+		return fmt.Sprintf("↑ +%.0f%%", pct)
+	case pct < -0.5:
+		return fmt.Sprintf("↓ %.0f%%", pct)
+	default:
+		return "→ 0%"
 	}
 }

@@ -85,6 +85,7 @@ type guardInfoVars struct {
 	} `json:"kernel"`
 	Inference struct {
 		Turns                 int64   `json:"turns"`
+		PromptTokens          uint64  `json:"prompt_tokens"`
 		CompletionTokens      uint64  `json:"completion_tokens"`
 		OutputTokensPerSecond float64 `json:"output_tokens_per_second"`
 		MeanTTFTSeconds       float64 `json:"mean_ttft_seconds"`

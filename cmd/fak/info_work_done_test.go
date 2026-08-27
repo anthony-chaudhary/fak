@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -272,5 +273,45 @@ func TestGuardInfoWorkDoneReconcilesStaleElisionWithoutCompactionOverlap(t *test
 	}
 	if !strings.Contains(string(encoded), `"id":"context_reduction"`) || !strings.Contains(string(encoded), `"input_token_equiv":73600`) {
 		t.Fatalf("query lost elision receipt: %s", encoded)
+	}
+}
+
+func TestGuardInfoTrendSamplesCompletedTurnUsageOnly(t *testing.T) {
+	tr := newGuardInfoTrend(8)
+	var v guardInfoVars
+	v.Inference.Turns, v.Inference.PromptTokens, v.Inference.CompletionTokens = 10, 1000, 100
+	tr.pushTurnUsage(v) // establish cumulative baseline
+
+	// Repeated polls of the same turn, even if decode is still moving, are not completed turns.
+	v.Inference.CompletionTokens = 105
+	tr.pushTurnUsage(v)
+	if len(tr.costPerTurn) != 0 {
+		t.Fatalf("idle/inflight poll created samples: %v", tr.costPerTurn)
+	}
+
+	v.Inference.Turns, v.Inference.PromptTokens, v.Inference.CompletionTokens = 11, 1120, 130
+	tr.pushTurnUsage(v)
+	v.Inference.Turns, v.Inference.PromptTokens, v.Inference.CompletionTokens = 12, 1200, 150
+	tr.pushTurnUsage(v)
+	if got, want := tr.prefillPerTurn, []float64{120, 80}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("prefill samples = %v, want %v", got, want)
+	}
+	if got, want := tr.decodePerTurn, []float64{25, 20}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("decode samples = %v, want %v", got, want)
+	}
+	if got, want := tr.costPerTurn, []float64{145, 100}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("cost samples = %v, want %v", got, want)
+	}
+
+	// A restarted process/counter establishes a fresh baseline instead of underflowing.
+	v.Inference.Turns, v.Inference.PromptTokens, v.Inference.CompletionTokens = 1, 10, 2
+	tr.pushTurnUsage(v)
+	if got := len(tr.costPerTurn); got != 2 {
+		t.Fatalf("counter reset created a sample; len=%d values=%v", got, tr.costPerTurn)
+	}
+	v.Inference.Turns, v.Inference.PromptTokens, v.Inference.CompletionTokens = 2, 30, 7
+	tr.pushTurnUsage(v)
+	if got, want := tr.costPerTurn, []float64{145, 100, 25}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("post-reset samples = %v, want %v", got, want)
 	}
 }

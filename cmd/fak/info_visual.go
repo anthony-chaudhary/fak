@@ -44,6 +44,13 @@ type guardInfoTrend struct {
 	inflight        []float64 // requests in flight right now
 	heap            []float64 // gateway heap-alloc bytes — the resources panel's live memory trend
 	savedCalls      []float64 // cumulative engine calls fak avoided (turns saved) — its slope is the saving rate
+	prefillPerTurn  []float64 // prompt/prefill tokens for each newly completed turn
+	decodePerTurn   []float64 // completion/decode tokens for each newly completed turn
+	costPerTurn     []float64 // observed token-equivalent cost per newly completed turn
+	lastTurns       int64
+	lastPrompt      uint64
+	lastCompletion  uint64
+	usagePrimed     bool
 }
 
 // newGuardInfoTrend returns an empty trend ring with the given per-series cap (clamped to >=1).
@@ -65,6 +72,8 @@ func (t *guardInfoTrend) push(v guardInfoVars) {
 		t.baseline = baseline
 		t.baselineChanges++
 		t.saved, t.hit, t.turns, t.inflight, t.heap, t.savedCalls = nil, nil, nil, nil, nil, nil
+		t.prefillPerTurn, t.decodePerTurn, t.costPerTurn = nil, nil, nil
+		t.usagePrimed = false
 	}
 	saved, hit := 0.0, 0.0
 	if v.VCache != nil {
@@ -77,6 +86,33 @@ func (t *guardInfoTrend) push(v guardInfoVars) {
 	t.inflight = appendCappedTUI(t.inflight, float64(v.Gateway.InflightRequests), t.cap)
 	t.heap = appendCappedTUI(t.heap, float64(v.Runtime.Memory.HeapAllocBytes), t.cap)
 	t.savedCalls = appendCappedTUI(t.savedCalls, float64(guardInfoTurnsSaved(v)), t.cap)
+	t.pushTurnUsage(v)
+}
+
+// pushTurnUsage converts cumulative gateway counters into marginal completed-turn samples.
+// Polls while a turn is in flight add no point; counter resets merely establish a new baseline.
+func (t *guardInfoTrend) pushTurnUsage(v guardInfoVars) {
+	turns, prompt, completion := v.Inference.Turns, v.Inference.PromptTokens, v.Inference.CompletionTokens
+	if !t.usagePrimed || turns < t.lastTurns || prompt < t.lastPrompt || completion < t.lastCompletion {
+		t.lastTurns, t.lastPrompt, t.lastCompletion, t.usagePrimed = turns, prompt, completion, true
+		return
+	}
+	advanced := turns - t.lastTurns
+	if advanced <= 0 {
+		// Keep the baseline current while a turn is in flight without charting it.
+		t.lastPrompt, t.lastCompletion = prompt, completion
+		return
+	}
+	prefill := float64(prompt-t.lastPrompt) / float64(advanced)
+	decode := float64(completion-t.lastCompletion) / float64(advanced)
+	// The live endpoint has token counts, not provider prices. Token-equivalent cost is
+	// therefore the honest comparable basis; it must not be presented as currency.
+	for i := int64(0); i < advanced; i++ {
+		t.prefillPerTurn = appendCappedTUI(t.prefillPerTurn, prefill, t.cap)
+		t.decodePerTurn = appendCappedTUI(t.decodePerTurn, decode, t.cap)
+		t.costPerTurn = appendCappedTUI(t.costPerTurn, prefill+decode, t.cap)
+	}
+	t.lastTurns, t.lastPrompt, t.lastCompletion = turns, prompt, completion
 }
 
 // appendCappedTUI appends v to s and keeps only the last capN elements (a fixed-size tail ring).
