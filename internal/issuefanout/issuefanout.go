@@ -121,7 +121,7 @@ var taxonomy = []template{
 		inScope:    "One captured run of the spine ({spine}) against the repo's real data; defects found get filed; readout committed under docs/notes/ or a ledger.",
 		outOfScope: "Fixing every defect the run surfaces (file them).",
 		done:       "A committed readout of a real run exists and every defect it surfaced is filed with a marker key.",
-		witness:    "The committed readout path plus the filed issue numbers.",
+		witness:    "A captured readout verified by `git show`, plus the filed issue numbers.",
 		gate:       "Readout committed on trunk; issues visible on the tracker.",
 		confusion:  "A synthetic fixture run is not dogfood; use the repo's live backlog/data.",
 		steps:      3, generation: "gen/now", priority: "priority/P1",
@@ -169,7 +169,7 @@ var taxonomy = []template{
 		inScope:    "Message wording over {paths}; tests pinning the improved messages.",
 		outOfScope: "Behavior changes.",
 		done:       "Each failure message names the fix; tests pin the wording.",
-		witness:    "Before/after message capture in the issue plus the pinned tests.",
+		witness:    "Captured before/after messages in the issue plus the pinned tests.",
 		gate:       "make test-fast green.",
 		confusion:  "Do not bury the fix in prose — lead with the action.",
 		steps:      3, generation: "gen/next", priority: "priority/P2",
@@ -241,7 +241,7 @@ var taxonomy = []template{
 		inScope:    "The doctrine/README section; docs/INDEX.md and llms.txt lines; AGENTS.md pointer if the default is load-bearing.",
 		outOfScope: "Marketing copy.",
 		done:       "INDEX/llms.txt reference the doc; links resolve; doc names the verb and the floor.",
-		witness:    "The committed docs diff.",
+		witness:    "The committed docs diff verified by `git show`.",
 		gate:       "Docs placement gates (DOC_PLACEMENT/INDEX_SYNC) green.",
 		confusion:  "Dated notes go under docs/notes/ WITH an INDEX.md line same-commit.",
 		steps:      2, generation: "gen/next", priority: "priority/P2",
@@ -253,7 +253,7 @@ var taxonomy = []template{
 		inScope:    "The CLAIMS.md line with the right tag; the release-note bullet.",
 		outOfScope: "Cutting the release itself.",
 		done:       "claims-lint green with the new tagged line; note drafted under docs/releases/ conventions.",
-		witness:    "The committed CLAIMS.md diff and claims-lint output.",
+		witness:    "The committed CLAIMS.md diff plus captured claims-lint output.",
 		gate:       "make claims-lint green.",
 		confusion:  "Do not upgrade [SIMULATED]/[STUB] to [SHIPPED] without the witness.",
 		steps:      2, generation: "gen/next", priority: "priority/P2",
@@ -314,6 +314,9 @@ func Build(in Input) (Plan, error) {
 		if in.Max != 0 && len(plan.Candidates) >= in.Max {
 			break
 		}
+		if in.ParentIssue > 0 && in.ParentBaseline > 0 && float64(t.steps) > in.ParentBaseline {
+			return Plan{}, refusef("issuefanout: candidate %s contributes %d points, exceeding the declared parent baseline %g — raise --parent-baseline-points to the parent's audited production scope or fan out from a parent large enough to contain this child", t.slug, t.steps, in.ParentBaseline)
+		}
 		plan.Candidates = append(plan.Candidates, expand(t, in, goPackage))
 		plan.AreaCounts[t.area]++
 	}
@@ -325,8 +328,15 @@ func Build(in Input) (Plan, error) {
 	// alphabet, a title/spine tripping the private-boundary screen) would
 	// otherwise flow silently into candidates the issue contract refuses after
 	// filing — so Build reviews its own output and refuses the input instead.
+	reviewOptions := issuepolicy.Options{
+		StrictModelTier:   true,
+		StrictScale:       true,
+		StrictWitness:     true,
+		StrictBornRouted:  true,
+		StrictProjectWork: in.ParentIssue > 0 && in.ParentBaseline > 0,
+	}
 	for _, c := range plan.Candidates {
-		if r := issuepolicy.ReviewCandidate(c, issuepolicy.Options{}); r.Dispatchability != issuepolicy.Dispatchable {
+		if r := issuepolicy.ReviewCandidate(c, reviewOptions); r.Dispatchability != issuepolicy.Dispatchable {
 			detail := strings.Join(r.Reasons, ", ")
 			if len(r.MissingFields) > 0 {
 				detail += "; missing/invalid: " + strings.Join(r.MissingFields, ", ")
@@ -473,6 +483,30 @@ func fanoutProblemFrame(t template) issuepolicy.ProblemFrame {
 	return issuepolicy.ProblemFrame{Schema: issuepolicy.ProblemFrameSchema, Ready: true, Enforced: true, Centrality: centrality, CentralityTarget: target, Checks: checks}
 }
 
+func fanoutClass(area string) string {
+	switch area {
+	case "qa", "observability", "integration":
+		return "class:infra"
+	case "dogfood", "product":
+		return "class:dev"
+	case "docs", "release":
+		return "class:frontdoor"
+	default:
+		return ""
+	}
+}
+
+func fanoutModelTiers(priority string) (required, optimal string) {
+	switch strings.ToLower(strings.TrimSpace(priority)) {
+	case "priority/p1":
+		return "T1", "T0"
+	case "priority/p2":
+		return "T2", "T1"
+	default:
+		return "", ""
+	}
+}
+
 // expand substitutes one template into a fully-scoped candidate.
 func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 	paths := in.Paths
@@ -490,6 +524,7 @@ func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 		"{paths}", strings.Join(paths, ", "),
 		"{go_package}", goPackage,
 	)
+	requiredTier, optimalTier := fanoutModelTiers(t.priority)
 	c := issuepolicy.Candidate{
 		ProblemFrame:  fanoutProblemFrame(t),
 		Key:           fanoutMarkerKey(in.Leaf, in.SpineRef, t.slug),
@@ -516,9 +551,14 @@ func expand(t template, in Input, goPackage string) issuepolicy.Candidate {
 		AcceptanceGate: r.Replace(t.gate),
 		Lane:           in.Leaf,
 		Paths:          paths,
-		Labels:         []string{"fanout", t.area},
+		Labels:         []string{"fanout", t.area, fanoutClass(t.area), t.priority},
 		Priority:       t.priority,
 		ClosureBinding: "Close via a commit whose body carries `Closes #<n>` and whose diff lands the witness above.",
+		// The body fallback stays explicit because not every tracker exposes tier
+		// labels. Priority selects the required capability floor and the stronger
+		// recommended tier without conflating priority/P* with tier/T* syntax.
+		RequiredModelTier: requiredTier,
+		OptimalModelTier:  optimalTier,
 	}
 	if in.ParentIssue > 0 && in.ParentBaseline > 0 {
 		points := float64(t.steps)
