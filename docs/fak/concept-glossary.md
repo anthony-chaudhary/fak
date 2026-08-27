@@ -907,6 +907,9 @@ canonical **Candidate** (a scored context span) or **Plan (planner)** (a residen
   loop counter), `nCandidate` (a signal-select count). An id-vector / a counter, not the
   Candidate object; distinct from `candidate-count` (a dispatch *price*) and
   `CandidateBound` (the ctxplan set *cap*).
+- **NonCandidate** - the study-classification disposition for a source record that is
+  release metadata or otherwise outside the actionable mechanism queue. It is not a
+  rejected planner Candidate and does not describe the final ticket selection.
 - **promotion / resume candidates** - `KnownBadCandidate` (a guardrsi fleet-correlated
   failure pattern proposed for filing) and `PrefixCandidates` (resume partial-id prefix
   matches, #3782). Neither is a context span.

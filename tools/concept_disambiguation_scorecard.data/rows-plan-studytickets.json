@@ -1,0 +1,25 @@
+{
+  "rows": [
+    {
+      "id": "studytickets-noncandidate",
+      "canonical": "NonCandidate",
+      "family": "plan",
+      "kind": "doc-term",
+      "definition": "The study-classification disposition for a source record that is release metadata or otherwise outside the actionable mechanism queue.",
+      "distinction": "A NonCandidate is intentionally outside the study ticket selection universe; unlike Candidate, it is not an actionable or scored work item under consideration.",
+      "distinct_from": [
+        "covg-plan-ncandidate",
+        "candidate-planner"
+      ],
+      "aliases": [
+        "explicit non-candidate disposition"
+      ],
+      "grounding": "NonCandidate",
+      "grounding_kind": "doc",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

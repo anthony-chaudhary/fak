@@ -385,6 +385,10 @@ const usageCoreText = `usage:
   fak study-priority validate --source-ledger PATH --ledger PATH --summary PATH
                 (build or validate the versioned, hard-gated, dependency-respecting
                  priority queue over every uncovered actionable study-link cluster.)
+  fak study-tickets build --priority PATH --join PATH --forge PATH --adjacency PATH --classification PATH --ledger PATH --report PATH
+  fak study-tickets validate --priority PATH --join PATH --forge PATH --adjacency PATH --classification PATH --ledger PATH --report PATH
+                (construct or validate the exact open-ticket mapping, full corpus receipts,
+                 dependency order, and zero-leftover closure over the selected queue.)
 `
 
 const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]

@@ -1,0 +1,373 @@
+{
+  "schema": "fak.study-ticket-closure/1",
+  "parent_issue": 9268,
+  "sources": {
+    "priority": {
+      "path": "docs/research/vllm-priority-2026-08-27/ledger.json",
+      "sha256": "sha256:df1f2114211a78b15f88decad3bb02de1e3ff790e150bd65c8ec55b73d68a417",
+      "schema": "fak.study-priority-ledger/1",
+      "revision": "anthony-chaudhary/fak@b4103047b27d94bcb5995bbcae912f99d661857f",
+      "cutoff": "2026-08-27T04:36:00Z",
+      "record_count": 2
+    },
+    "join": {
+      "path": "docs/research/vllm-fak-join-2026-08-27/ledger.json",
+      "sha256": "sha256:2e7b2a6c64a3b2a48a6a49db0bed2086e82327d4b41c150b3fa297f424b6413d",
+      "schema": "fak.study-join-ledger/1",
+      "revision": "anthony-chaudhary/fak@b4103047b27d94bcb5995bbcae912f99d661857f",
+      "cutoff": "2026-08-27T04:36:00Z",
+      "record_count": 193
+    },
+    "forge": {
+      "path": "fak-forge.json",
+      "sha256": "sha256:1507a16160b4c9a95fa5057e9e1f3d1bbdccc6709daa9fe8bd7ff2f392f11b1c",
+      "schema": "fak-studyforge-corpus/1",
+      "revision": "8effa952450f642aa7169910249ae756d8580607",
+      "cutoff": "2026-08-27T05:52:00Z",
+      "record_count": 9537,
+      "receipt_sha256": "sha256:a34377af672312ea0a4dfcd6b54845a6e3166f089fdb1d644b6541116325c6e5",
+      "index_checksum": "sha256:35c6e6f1d5bb5bd1927c38d5614bfa445bcca8fb6e227e1287cba2c049362d7a",
+      "capture_status": "complete"
+    },
+    "adjacency": {
+      "path": "docs/research/inventory/vllm-related-system-adjacency-v1.json",
+      "sha256": "sha256:be5cde2c2ed4df1bde2a069d889884204138d51189fa3f5ecd1ab04c35254f34",
+      "schema": "fak-study-adjacency/1",
+      "record_count": 14
+    }
+  },
+  "coverage": {
+    "join_clusters": 193,
+    "actionable_clusters": 183,
+    "disposition_counts": [
+      {
+        "disposition": "landed",
+        "count": 4,
+        "actionable": 4
+      },
+      {
+        "disposition": "open_exact",
+        "count": 2,
+        "actionable": 2
+      },
+      {
+        "disposition": "partial",
+        "count": 168,
+        "actionable": 159
+      },
+      {
+        "disposition": "conflict",
+        "count": 13,
+        "actionable": 13
+      },
+      {
+        "disposition": "obsolete",
+        "count": 1,
+        "actionable": 0
+      },
+      {
+        "disposition": "uncovered",
+        "count": 5,
+        "actionable": 5
+      }
+    ],
+    "uncovered_actionable": 5,
+    "selected_candidates": 2,
+    "mapped_source_clusters": 5,
+    "selected_unmapped": 0,
+    "unclassified": 0,
+    "unmapped_actionable": 0,
+    "closure_leftovers": 0,
+    "created_count": 2,
+    "reused_count": 0,
+    "construction_definition": "created counts tickets constructed specifically for these two priority candidates before this offline closure build; reused counts pre-existing unrelated issues adopted for a candidate"
+  },
+  "tickets": [
+    {
+      "candidate_id": "native-vllm-ir",
+      "candidate_title": "Lower fak-native Qwen3.8 execution through a stable vLLM-IR-shaped optimization seam",
+      "issue": 9377,
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9377",
+      "state": "open",
+      "title": "feat(nativeir): add a fak-native Qwen3.8 IR optimization spine",
+      "record_sha256": "sha256:d6bce3bdaca14d868fd371a382f9e91e13598a961580460a4ad9c29a92abf7bd",
+      "created_at": "2026-08-27T05:48:19Z",
+      "updated_at": "2026-08-27T05:48:19Z",
+      "labels": [
+        "gen/now",
+        "performance",
+        "priority/P1"
+      ],
+      "horizon": "now",
+      "queue_rank": 1,
+      "score": 68,
+      "centrality": "Core",
+      "dependencies": null,
+      "source_clusters": [
+        {
+          "cluster_id": "architecture_runtime:body:vllm-ir",
+          "mechanism": "architecture_runtime",
+          "signal": "vllm ir",
+          "rule": "mechanism.architecture_runtime.body",
+          "members_sha256": "sha256:f168d9723b9e417d195432b1ac11d3477244be91e8dafe6820b0937d6b51cdda",
+          "evidence_sha256": "sha256:aaaf72b53db61a4d320c61ea248c335f303f22dc73a71c1270a474136f640fb1"
+        },
+        {
+          "cluster_id": "architecture_runtime:label:vllm-ir",
+          "mechanism": "architecture_runtime",
+          "signal": "vllm-ir",
+          "rule": "mechanism.architecture_runtime.label",
+          "members_sha256": "sha256:5239e2505c171b2da28275bbcbeb1aafcdc3c6e191b98e52c83af103926e7dee",
+          "evidence_sha256": "sha256:07e04bd23c01f3c277071137b03e95d45ddfe4a27c50b5e3aa3eaa2ba1c315f3"
+        },
+        {
+          "cluster_id": "architecture_runtime:title:vllm-ir",
+          "mechanism": "architecture_runtime",
+          "signal": "vllm ir",
+          "rule": "mechanism.architecture_runtime.title",
+          "members_sha256": "sha256:d22f665db56bd2ae8e181eea77866bf8f69bdeb4a0b4567583af34688a83b98a",
+          "evidence_sha256": "sha256:d4030d749c3fa49b9ec49f7c4b2ea2da35135e83773c6a8ca449dc48f159cd6f"
+        },
+        {
+          "cluster_id": "kernels_compilation:label:vllm-ir",
+          "mechanism": "kernels_compilation",
+          "signal": "vllm-ir",
+          "rule": "mechanism.kernels_compilation.label",
+          "members_sha256": "sha256:b454a27aa032845f9a566d5fd24c3f58aadb7cd2cc82f7541d12c1861d9dcbff",
+          "evidence_sha256": "sha256:f4a9f2d726e3028f5e8c17f0e1319f19e0625ba5a6eaa7fad326d13656f78715"
+        }
+      ],
+      "constructed_for_candidate": true,
+      "reused_existing_work": false,
+      "native_constraint": "engine=fak-native model=Qwen3.8 fallback_allowed=false"
+    },
+    {
+      "candidate_id": "allocator-fragmentation",
+      "candidate_title": "Measure and bound allocator fragmentation on the fak-native Qwen3.8 serve path",
+      "issue": 9378,
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9378",
+      "state": "open",
+      "title": "perf(nativealloc): measure and bound Qwen3.8 allocator fragmentation",
+      "record_sha256": "sha256:134345b376d37b49e6372ad837c7af5b4db8a67889a47d032be46f2119e0b20b",
+      "created_at": "2026-08-27T05:48:20Z",
+      "updated_at": "2026-08-27T05:48:20Z",
+      "labels": [
+        "gen/next",
+        "performance",
+        "priority/P1"
+      ],
+      "horizon": "next",
+      "queue_rank": 2,
+      "score": 62,
+      "centrality": "Core",
+      "dependencies": null,
+      "source_clusters": [
+        {
+          "cluster_id": "memory_residency:body:allocator-fragmentation",
+          "mechanism": "memory_residency",
+          "signal": "allocator fragmentation",
+          "rule": "mechanism.memory_residency.body",
+          "members_sha256": "sha256:dfbb2ef090870fb571e64f3ca1e844eb15fcb4f619d139adcbcdf98a7988b57c",
+          "evidence_sha256": "sha256:590b7300bf80baa4d29c6e6738bbf053a0e9551aa215bcd6e1483df6bb5263eb"
+        }
+      ],
+      "constructed_for_candidate": true,
+      "reused_existing_work": false,
+      "native_constraint": "engine=fak-native model=Qwen3.8 fallback_allowed=false"
+    }
+  ],
+  "queue": [
+    {
+      "rank": 1,
+      "candidate_id": "native-vllm-ir",
+      "issue": 9377,
+      "horizon": "now",
+      "dependencies": null
+    },
+    {
+      "rank": 2,
+      "candidate_id": "allocator-fragmentation",
+      "issue": 9378,
+      "horizon": "next",
+      "dependencies": null
+    }
+  ],
+  "adjacency": {
+    "id": "vllm-related-system-adjacency-2026-08-26-v1",
+    "member_count": 14,
+    "complete_class_count": 29,
+    "partial_class_count": 4,
+    "inaccessible_class_count": 9,
+    "partial_classes": [
+      {
+        "repository": "ai-dynamo/dynamo",
+        "class": "runtime_tree",
+        "status": "partial",
+        "notes": "Reused docs/research/inventory/ai-dynamo-dynamo.json at stale pin f494601e; 5,401 files were exhaustive there, not at the cutoff pin."
+      },
+      {
+        "repository": "flashinfer-ai/flashinfer",
+        "class": "runtime_tree",
+        "status": "partial",
+        "notes": "Reused docs/research/inventory/flashinfer-ai-flashinfer.json at stale pin fb28d724; exact cutoff tree remains uncaptured."
+      },
+      {
+        "repository": "llm-d/llm-d",
+        "class": "runtime_tree",
+        "status": "partial",
+        "notes": "Reused docs/research/inventory/llm-d-llm-d.json at stale pin 3243fcf1; the exact cutoff tree is not captured."
+      },
+      {
+        "repository": "vllm-project/speculators",
+        "class": "runtime_tree",
+        "status": "partial",
+        "notes": "Reused docs/research/inventory/vllm-project-speculators.json at stale pin 0faffeb3; exact cutoff tree is not inventoried."
+      }
+    ],
+    "inaccessible_classes": [
+      {
+        "repository": "NVIDIA/TensorRT-LLM",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No machine-readable runtime tree inventory exists for c2f5f319; docs/notes/CONCEPT-STUDY-TENSORRT-LLM-2026-07-18.md is stale source guidance only."
+      },
+      {
+        "repository": "sgl-project/sglang",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No standard inventory for full sgl-project/sglang at 7f27bf47; existing mini-sglang map is a different repository and cannot satisfy this member."
+      },
+      {
+        "repository": "vllm-project/afd-plugin",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No pinned runtime tree slice is retained in git or allocated scratch for this run."
+      },
+      {
+        "repository": "vllm-project/aibrix",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No pinned runtime tree inventory is present."
+      },
+      {
+        "repository": "vllm-project/production-stack",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No standard pinned runtime tree inventory was produced in this run."
+      },
+      {
+        "repository": "vllm-project/router",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No standard pinned runtime tree inventory was produced in this run."
+      },
+      {
+        "repository": "vllm-project/semantic-router",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No pinned runtime tree inventory is present."
+      },
+      {
+        "repository": "vllm-project/vllm-gguf-plugin",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No pinned runtime tree inventory is present."
+      },
+      {
+        "repository": "vllm-project/vllm-metal",
+        "class": "runtime_tree",
+        "status": "missing",
+        "notes": "No standard pinned runtime tree inventory was produced in this run."
+      }
+    ]
+  },
+  "capture": {
+    "repository": "anthony-chaudhary/fak",
+    "revision": "8effa952450f642aa7169910249ae756d8580607",
+    "cutoff": "2026-08-27T05:52:00Z",
+    "status": "complete",
+    "record_count": 9537,
+    "complete_sources": [
+      "issues",
+      "pulls",
+      "discussions",
+      "releases",
+      "labels",
+      "milestones"
+    ],
+    "index_checksum": "sha256:35c6e6f1d5bb5bd1927c38d5614bfa445bcca8fb6e227e1287cba2c049362d7a",
+    "receipt_sha256": "sha256:a34377af672312ea0a4dfcd6b54845a6e3166f089fdb1d644b6541116325c6e5"
+  },
+  "corpus_coverage": {
+    "vllm_records": 53848,
+    "vllm_revision": "f18d0ba90d972a852a351c98be3f42b31372cfe4",
+    "vllm_cutoff": "2026-08-26T22:35:00Z",
+    "vllm_index_checksum": "sha256:75577e65370ac201f29efcf6ce38c15b7bf48c0d793fbfb946407a4045de7c14",
+    "related_repositories": 14,
+    "related_forge_complete": 14,
+    "related_records": 121063,
+    "fak_records": 9537
+  },
+  "sampling_evidence": [
+    {
+      "cluster_id": "apis_tool_calling_structured_output:body:guided-decoding",
+      "disposition": "landed",
+      "actionable": true,
+      "artifact_count": 2,
+      "confidence": "explicit-map+captured-closed+history",
+      "manual_review": false,
+      "members_sha256": "sha256:3ad8cbf1f822e92e1f9a77a9d4a84ba1f239425afff985f39ce2d82228793af8",
+      "evidence_sha256": "sha256:e8b8aaf79d2322e1ee2176103c869c3af6be6977f2e92b74b12db5f089ae17a0"
+    },
+    {
+      "cluster_id": "apis_tool_calling_structured_output:title:structured-output",
+      "disposition": "open_exact",
+      "actionable": true,
+      "artifact_count": 3,
+      "confidence": "exact-title",
+      "manual_review": false,
+      "members_sha256": "sha256:1804e1c831fa3d5a2918a9574bd05b04ab7523fd198bf2a8db48c632c8737269",
+      "evidence_sha256": "sha256:8e9e6da3c3301b1a53ed8adf982b754504db15cc2c3813008e4c4435c7148a0f"
+    },
+    {
+      "cluster_id": "apis_tool_calling_structured_output:body:json-schema",
+      "disposition": "partial",
+      "actionable": true,
+      "artifact_count": 8,
+      "confidence": "lexical-candidate",
+      "manual_review": true,
+      "manual_reason": "lexical evidence is reproducible but insufficient for an exact semantic join",
+      "members_sha256": "sha256:eaa53379c72dc5258a3a5978b43ffb6c1b89136b3d6e04d9c01831101c7210e9",
+      "evidence_sha256": "sha256:99424d7388bd05d9c49eeec93dc8315edfa14a6b3594755549c1e3db551d0237"
+    },
+    {
+      "cluster_id": "model_backend_hardware:title:model-support",
+      "disposition": "conflict",
+      "actionable": true,
+      "artifact_count": 3,
+      "confidence": "ambiguous",
+      "manual_review": true,
+      "manual_reason": "multiple FAK issue titles contain the exact cluster signal; no exact issue is selected automatically",
+      "members_sha256": "sha256:686a6f717005b824cfb7b1ec34cbc661f74a1ae2fd69f46e9d4adab36213b27e",
+      "evidence_sha256": "sha256:686e36b0551b796feb6a69a521adea022101c0e834e3b45072770b1faac31613"
+    },
+    {
+      "cluster_id": "explicit_non_candidate:disposition:release-metadata-noncandidate",
+      "disposition": "obsolete",
+      "actionable": false,
+      "artifact_count": 0,
+      "confidence": "source-explicit-noncandidate",
+      "manual_review": false,
+      "members_sha256": "sha256:c467cb1121042d6ee5be47149b77cbe494f49963d9d226d9938965a43c5090bb",
+      "evidence_sha256": "sha256:d289037c999007f3924e4c9eb90b5564c918e99978c6ad571ea639ae96599780"
+    }
+  ],
+  "refresh_obligations": [
+    "Recapture the complete anthony-chaudhary/fak study-forge corpus before relying on issue open state after either mapped issue changes.",
+    "Rebuild the study-link ledger when its classification index, FAK forge capture, repository revision, or adjacency manifest changes.",
+    "Rebuild the study-priority ledger when the uncovered actionable set, hard gates, rubric, dependencies, or queue order changes.",
+    "Run fak study-tickets build and validate whenever any recorded source checksum changes.",
+    "Refresh this closure if #9377 or #9378 changes state, title, body, labels, horizon, source-cluster links, or dependencies.",
+    "classification source checksum: sha256:b62813994a053eba39e85a817c0e2f68f0401ae9f6023cde66bb9684d6b7ddaa"
+  ]
+}

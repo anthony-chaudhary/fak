@@ -1441,6 +1441,23 @@ ledger and rejects missing or duplicate source inputs, cycles, missing dependenc
 violations, output drift, and checksum drift. Native-inference candidates remain fak-native;
 llama.cpp evidence is reference/borrowing evidence only and cannot authorize a fallback.
 
+## `fak study-tickets`
+
+Construct or validate the final ticket-closure ledger from the priority queue, complete FAK
+forge corpus, adjacency ledger, classification index, and FAK evidence join:
+
+```bash
+fak study-tickets build --priority docs/research/vllm-priority-2026-08-27/ledger.json --join docs/research/vllm-fak-join-2026-08-27/ledger.json --forge /path/to/fak-forge.json --adjacency docs/research/inventory/vllm-related-system-adjacency-v1.json --classification docs/research/vllm-classification-2026-08-26/index.json --ledger docs/research/vllm-ticket-closure-2026-08-27/ledger.json --report docs/research/vllm-ticket-closure-2026-08-27/README.md
+fak study-tickets validate --priority docs/research/vllm-priority-2026-08-27/ledger.json --join docs/research/vllm-fak-join-2026-08-27/ledger.json --forge /path/to/fak-forge.json --adjacency docs/research/inventory/vllm-related-system-adjacency-v1.json --classification docs/research/vllm-classification-2026-08-26/index.json --ledger docs/research/vllm-ticket-closure-2026-08-27/ledger.json --report docs/research/vllm-ticket-closure-2026-08-27/README.md
+```
+
+`build` requires exact candidate-to-issue mappings, verifies that mapped issues remain open and
+contain their required source-cluster and fak-native Qwen3.8 contracts, preserves complete,
+partial, and inaccessible adjacency evidence separately, and emits deterministic JSON and
+Markdown. `validate` rebuilds from the supplied corpora and rejects source checksum drift,
+duplicate mappings, queue/dependency drift, closed or malformed tickets, and any actionable,
+unclassified, selected-unmapped, or closure leftover.
+
 ## `fak study-inventory`
 
 Render a deterministic local-checkout map for an exhaustive `study-repo` pass:

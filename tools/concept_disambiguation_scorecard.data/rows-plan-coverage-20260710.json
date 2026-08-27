@@ -135,7 +135,7 @@
       "kind": "symbol",
       "definition": "nCandidate (internal/signals/select.go) is the count of candidates considered in a signal-selection pass.",
       "distinction": "A COUNT of candidates in signal selection (a local tally), distinct from candidate-count (a dispatch PRICE unit) and from CandidateBound (the ctxplan index-bounded set cap). Local count vs price vs cap.",
-      "distinct_from": ["x-plan-candidatecount", "x2-plan-candidatebound", "candidate-planner"],
+      "distinct_from": ["x-plan-candidatecount", "x2-plan-candidatebound", "candidate-planner", "studytickets-noncandidate"],
       "aliases": ["n candidate", "candidate count var"],
       "grounding": "nCandidate",
       "grounding_kind": "symbol",

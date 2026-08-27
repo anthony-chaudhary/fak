@@ -723,6 +723,7 @@ var tier = map[string]int{
 	"studyclass":                 2,
 	"studyadjacency":             2,
 	"studyprio":                  2,
+	"studytickets":               2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

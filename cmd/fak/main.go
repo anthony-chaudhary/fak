@@ -695,6 +695,9 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 	case "study-priority":
 		// Bounded, dependency-respecting prioritization of uncovered study joins.
 		os.Exit(runStudyPriority(os.Stdout, os.Stderr, args))
+	case "study-tickets":
+		// Audited ticket construction and zero-leftover closure over the selected study queue.
+		os.Exit(runStudyTickets(os.Stdout, os.Stderr, args))
 	case "study-adjacency":
 		// Bounded cross-runtime adjacency manifest validation and rendering.
 		os.Exit(runStudyAdjacency(os.Stdout, os.Stderr, args))

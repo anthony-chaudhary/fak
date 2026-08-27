@@ -354,6 +354,7 @@ var verbManifest = []Verb{
 	{Name: "study-link", Synopsis: "build and validate a deterministic evidence ledger joining study clusters to witnessed FAK work", Lane: "studylink"},
 	{Name: "study-monitor", Synopsis: "report recurring research sources that are due for another study pass", Lane: "cmd"},
 	{Name: "study-priority", Synopsis: "build and validate a versioned hard-gated dependency queue over uncovered actionable study joins", Lane: "studyprio", Doc: "docs/cli-reference.md"},
+	{Name: "study-tickets", Synopsis: "construct and validate a zero-leftover ticket closure over the selected study queue", Lane: "studytickets", Doc: "docs/cli-reference.md"},
 	{Name: "superloop", Synopsis: "operator-intent meta-loop: walk a set of member loops/scorecards/gardens worst-first (list/explain/walk)", Lane: "cmd"},
 	{Name: "support", Synopsis: "per-cell support read-out: one line per model x backend cell (rung.regime.target.next-action)", Lane: "cmd"},
 	{Name: "support-maturity-scorecard", Synopsis: "native support-maturity payload: fold the model x backend coverage matrix into a grade", Lane: "cmd"},

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 )
@@ -21,7 +20,7 @@ const (
 	BenchmarkOnly Disposition = "benchmark_only"
 )
 
-type Ticket struct {
+type AuditTicket struct {
 	ClusterID        string      `json:"cluster_id"`
 	CandidateID      string      `json:"candidate_id,omitempty"`
 	Disposition      Disposition `json:"disposition"`
@@ -43,22 +42,21 @@ type Ticket struct {
 }
 
 type Audit struct {
-	Schema             string   `json:"schema"`
-	Cutoff             string   `json:"cutoff"`
-	SourceRevision     string   `json:"source_revision"`
-	Checksum           string   `json:"checksum"`
-	PriorityChecksum   string   `json:"priority_checksum,omitempty"`
-	SourceCount        int      `json:"source_count"`
-	InaccessibleCount  int      `json:"inaccessible_count"`
-	CreatedCount       int      `json:"created_count"`
-	ReusedCount        int      `json:"reused_count"`
-	RefreshObligations []string `json:"refresh_obligations"`
-	Tickets            []Ticket `json:"tickets"`
+	Schema             string        `json:"schema"`
+	Cutoff             string        `json:"cutoff"`
+	SourceRevision     string        `json:"source_revision"`
+	Checksum           string        `json:"checksum"`
+	PriorityChecksum   string        `json:"priority_checksum,omitempty"`
+	SourceCount        int           `json:"source_count"`
+	InaccessibleCount  int           `json:"inaccessible_count"`
+	CreatedCount       int           `json:"created_count"`
+	ReusedCount        int           `json:"reused_count"`
+	RefreshObligations []string      `json:"refresh_obligations"`
+	Tickets            []AuditTicket `json:"tickets"`
 }
 
 type ClosureSummary struct{ SourceClusters, ClassifiedClusters, QueueTickets, Created, Reused int }
 
-var ErrInvalid = errors.New("studytickets: closure audit invalid")
 var allowed = map[Disposition]bool{Selected: true, Matched: true, Deferred: true, Rejected: true, Landed: true, BenchmarkOnly: true}
 
 //go:embed testdata/closure-ledger.json
@@ -78,14 +76,14 @@ func LoadClosureLedger() (Audit, error) {
 	if dec.More() {
 		return Audit{}, ErrInvalid
 	}
-	if err := Validate(a); err != nil {
+	if err := ValidateAudit(a); err != nil {
 		return Audit{}, err
 	}
 	return a, nil
 }
 
 func Summary(a Audit) (ClosureSummary, error) {
-	if err := Validate(a); err != nil {
+	if err := ValidateAudit(a); err != nil {
 		return ClosureSummary{}, err
 	}
 	q, err := Queue(a)
@@ -95,7 +93,7 @@ func Summary(a Audit) (ClosureSummary, error) {
 	return ClosureSummary{len(a.Tickets), len(a.Tickets), len(q), a.CreatedCount, a.ReusedCount}, nil
 }
 
-func Validate(a Audit) error {
+func ValidateAudit(a Audit) error {
 	if a.Schema != "fak.study-ticket-audit/1" || a.Cutoff == "" || a.SourceRevision == "" || a.Checksum == "" || a.PriorityChecksum == "" || len(a.Tickets) != a.SourceCount || len(a.RefreshObligations) == 0 || a.CreatedCount < 0 || a.ReusedCount < 0 {
 		return ErrInvalid
 	}
@@ -144,18 +142,18 @@ func Validate(a Audit) error {
 	return nil
 }
 
-func Queue(a Audit) ([]Ticket, error) {
-	if err := Validate(a); err != nil {
+func Queue(a Audit) ([]AuditTicket, error) {
+	if err := ValidateAudit(a); err != nil {
 		return nil, err
 	}
-	by := map[string]Ticket{}
+	by := map[string]AuditTicket{}
 	for _, t := range a.Tickets {
 		if t.Disposition == Selected || t.Disposition == Matched {
 			by[t.ClusterID] = t
 		}
 	}
 	state := map[string]int{}
-	var out []Ticket
+	var out []AuditTicket
 	var visit func(string) error
 	visit = func(id string) error {
 		if state[id] == 1 {
