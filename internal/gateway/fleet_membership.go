@@ -134,12 +134,13 @@ type MembershipEvent struct {
 }
 
 type memberWorker struct {
-	spec       WorkerSpec
-	health     WorkerHealth
-	draining   bool
-	okStreak   int // consecutive successful probes (drives the healthy hysteresis)
-	failStreak int // consecutive failed probes (drives the unhealthy hysteresis)
-	inflight   int // in-flight requests acquired against this worker
+	spec               WorkerSpec
+	health             WorkerHealth
+	draining           bool
+	okStreak           int // consecutive successful probes (drives the healthy hysteresis)
+	failStreak         int // consecutive failed probes (drives the unhealthy hysteresis)
+	inflight           int // in-flight requests acquired against this worker
+	bookedOutputBlocks int // anticipated decode blocks owned by those requests
 }
 
 // admissible reports whether a worker may receive NEW work: healthy and not
@@ -206,17 +207,23 @@ type FleetMembership struct {
 // the membership lock, so there is never a selected-but-unbooked fallback. Release
 // is idempotent and never lets occupancy become negative.
 type fleetReservation struct {
-	mu       sync.Mutex
-	fleet    *FleetMembership
-	workerID string
-	engine   EngineKind
-	released bool
+	mu                 sync.Mutex
+	fleet              *FleetMembership
+	workerID           string
+	engine             EngineKind
+	bookedOutputBlocks int
+	released           bool
 }
 
 // fleetReservationPick runs while FleetMembership.mu is held. The statuses are
 // the complete admissible, allowed, untried candidate set and carry the exact
 // in-flight counts that the selected worker will be charged against.
-type fleetReservationPick func([]WorkerStatus) (workerID string, ok bool)
+type fleetReservationPickResult struct {
+	workerID           string
+	bookedOutputBlocks int
+}
+
+type fleetReservationPick func([]WorkerStatus) (fleetReservationPickResult, bool)
 
 // MembershipConfig tunes the health-loop hysteresis. Zero values fall back to
 // safe defaults (HealthyAfter=1, UnhealthyAfter=2) so a single missed beat does
@@ -333,10 +340,11 @@ func (m *FleetMembership) Admissible() []WorkerSpec {
 // WorkerStatus is the per-worker membership/health row the observability surface
 // publishes (labeled by ID) — the live replacement for a static endpoint row.
 type WorkerStatus struct {
-	Spec     WorkerSpec
-	Health   WorkerHealth
-	Draining bool
-	Inflight int
+	Spec               WorkerSpec
+	Health             WorkerHealth
+	Draining           bool
+	Inflight           int
+	BookedOutputBlocks int
 }
 
 // Snapshot returns the current per-worker status in registration order.
@@ -346,7 +354,7 @@ func (m *FleetMembership) Snapshot() []WorkerStatus {
 	out := make([]WorkerStatus, 0, len(m.order))
 	for _, id := range m.order {
 		if w := m.workers[id]; w != nil {
-			out = append(out, WorkerStatus{Spec: w.spec, Health: w.health, Draining: w.draining, Inflight: w.inflight})
+			out = append(out, WorkerStatus{Spec: w.spec, Health: w.health, Draining: w.draining, Inflight: w.inflight, BookedOutputBlocks: w.bookedOutputBlocks})
 		}
 	}
 	return out
@@ -363,18 +371,23 @@ func (m *FleetMembership) reserveForModel(model string, engine EngineKind, allow
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	workerID, err := m.reserveForModelLocked(model, engine, allowed, skip, pick)
+	decision, err := m.reserveForModelLocked(model, engine, allowed, skip, pick)
 	if err != nil {
 		return nil, err
 	}
-	return &fleetReservation{fleet: m, workerID: workerID, engine: m.workers[workerID].spec.Engine}, nil
+	return &fleetReservation{
+		fleet:              m,
+		workerID:           decision.workerID,
+		engine:             m.workers[decision.workerID].spec.Engine,
+		bookedOutputBlocks: decision.bookedOutputBlocks,
+	}, nil
 }
 
 // reserveForModelLocked is reserveForModel's lock-held core.
-func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind, allowed, skip map[string]struct{}, pick fleetReservationPick) (string, error) {
+func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind, allowed, skip map[string]struct{}, pick fleetReservationPick) (fleetReservationPickResult, error) {
 	ids, err := m.classifyForModelLocked(model)
 	if err != nil {
-		return "", err
+		return fleetReservationPickResult{}, err
 	}
 	statuses := make([]WorkerStatus, 0, len(ids))
 	candidates := make(map[string]struct{}, len(ids))
@@ -395,32 +408,37 @@ func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind,
 			continue
 		}
 		statuses = append(statuses, WorkerStatus{
-			Spec:     w.spec,
-			Health:   w.health,
-			Draining: w.draining,
-			Inflight: w.inflight,
+			Spec:               w.spec,
+			Health:             w.health,
+			Draining:           w.draining,
+			Inflight:           w.inflight,
+			BookedOutputBlocks: w.bookedOutputBlocks,
 		})
 		candidates[id] = struct{}{}
 	}
 	if len(statuses) == 0 {
-		return "", ErrNoHealthyWorker
+		return fleetReservationPickResult{}, ErrNoHealthyWorker
 	}
 	if pick == nil {
-		return "", ErrNoHealthyWorker
+		return fleetReservationPickResult{}, ErrNoHealthyWorker
 	}
-	workerID, ok := pick(statuses)
+	decision, ok := pick(statuses)
 	if !ok {
-		return "", ErrNoHealthyWorker
+		return fleetReservationPickResult{}, ErrNoHealthyWorker
 	}
-	if _, ok := candidates[workerID]; !ok {
-		return "", ErrNoHealthyWorker
+	if _, ok := candidates[decision.workerID]; !ok {
+		return fleetReservationPickResult{}, ErrNoHealthyWorker
 	}
-	w := m.workers[workerID]
+	w := m.workers[decision.workerID]
 	if w == nil || !w.admissible() {
-		return "", ErrNoHealthyWorker
+		return fleetReservationPickResult{}, ErrNoHealthyWorker
+	}
+	if decision.bookedOutputBlocks < 0 {
+		decision.bookedOutputBlocks = 0
 	}
 	w.inflight++
-	return workerID, nil
+	w.bookedOutputBlocks = saturatingNonnegativeAdd(w.bookedOutputBlocks, decision.bookedOutputBlocks)
+	return decision, nil
 }
 
 // Engine returns the execution-engine class the reservation must retain across
@@ -466,17 +484,18 @@ func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struc
 	defer m.mu.Unlock()
 
 	failed := r.workerID
-	m.releaseLocked(failed)
+	m.releaseReservationLocked(failed, r.bookedOutputBlocks)
 	m.markDispatchFailureLocked(failed)
 
-	workerID, err := m.reserveForModelLocked(model, r.engine, allowed, skip, pick)
+	decision, err := m.reserveForModelLocked(model, r.engine, allowed, skip, pick)
 	if err != nil {
 		r.workerID = ""
 		r.released = true
 		return "", err
 	}
-	r.workerID = workerID
-	return workerID, nil
+	r.workerID = decision.workerID
+	r.bookedOutputBlocks = decision.bookedOutputBlocks
+	return decision.workerID, nil
 }
 
 // Release frees the current occupancy booking exactly once.
@@ -490,7 +509,7 @@ func (r *fleetReservation) Release() {
 		return
 	}
 	r.fleet.mu.Lock()
-	r.fleet.releaseLocked(r.workerID)
+	r.fleet.releaseReservationLocked(r.workerID, r.bookedOutputBlocks)
 	r.fleet.mu.Unlock()
 	r.workerID = ""
 	r.released = true
@@ -644,6 +663,20 @@ func (m *FleetMembership) releaseLocked(id string) {
 	w := m.workers[id]
 	if w == nil {
 		return
+	}
+	m.releaseWorkerLocked(id, w)
+}
+
+func (m *FleetMembership) releaseReservationLocked(id string, bookedOutputBlocks int) {
+	w := m.workers[id]
+	if w == nil {
+		return
+	}
+	if bookedOutputBlocks > 0 {
+		w.bookedOutputBlocks -= bookedOutputBlocks
+		if w.bookedOutputBlocks < 0 {
+			w.bookedOutputBlocks = 0
+		}
 	}
 	m.releaseWorkerLocked(id, w)
 }

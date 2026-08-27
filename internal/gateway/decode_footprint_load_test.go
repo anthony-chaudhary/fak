@@ -141,3 +141,16 @@ func TestAnticipatedDecodeBytes(t *testing.T) {
 		t.Fatalf("non-positive BlockBytes must yield 0, got %d", got)
 	}
 }
+
+func TestDecodeFootprintArithmeticSaturatesInsteadOfWrapping(t *testing.T) {
+	in := DecodeFootprintInputs{ExpectedOutputTokens: maxIntValue(), BlockTokens: 16, BlockBytes: maxIntValue(), Scale: 1}
+	if blocks := AnticipatedDecodeBlocks(in); blocks <= 0 {
+		t.Fatalf("max-sized prediction wrapped to %d blocks", blocks)
+	}
+	if got := AnticipatedDecodeBytes(in); got != maxIntValue() {
+		t.Fatalf("byte projection = %d, want saturated max %d", got, maxIntValue())
+	}
+	if got := EffectiveLoadWithDecodeFootprint(maxIntValue(), DecodeFootprintInputs{ExpectedOutputTokens: 16, BlockTokens: 16, Scale: 1}); got != maxIntValue() {
+		t.Fatalf("effective load wrapped to %d, want saturated max %d", got, maxIntValue())
+	}
+}

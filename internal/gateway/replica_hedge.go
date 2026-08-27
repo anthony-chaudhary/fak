@@ -208,14 +208,32 @@ func (r *ReplicaRouter) completeHedged(ctx context.Context, primary reservedPlan
 
 	var alternate reservedPlannerReplica
 	if r.membership == nil {
-		repl, ok := r.pickDistinctReplica(primary.replica.Name)
-		if !ok {
-			return awaitPrimary("no_distinct_admissible_replica")
+		if _, decodeAware := r.policy.(decodeFootprintPickPolicy); decodeAware {
+			var err error
+			alternate, err = r.reserveOnEngineWithDecode(
+				primary.prefix,
+				map[string]struct{}{primary.replica.Name: {}},
+				"",
+				decodeFootprintRouteRequest{ExpectedOutputTokens: primary.decodeDecision.RequestedOutputTokens},
+			)
+			if err != nil {
+				return awaitPrimary("no_distinct_admissible_replica")
+			}
+		} else {
+			repl, ok := r.pickDistinctReplica(primary.replica.Name)
+			if !ok {
+				return awaitPrimary("no_distinct_admissible_replica")
+			}
+			alternate = reservedPlannerReplica{replica: repl, prefix: primary.prefix}
 		}
-		alternate = reservedPlannerReplica{replica: repl, prefix: primary.prefix}
 	} else {
 		var err error
-		alternate, err = r.reserveOnEngine(primary.prefix, map[string]struct{}{primary.replica.Name: {}}, primary.reservation.Engine())
+		alternate, err = r.reserveOnEngineWithDecode(
+			primary.prefix,
+			map[string]struct{}{primary.replica.Name: {}},
+			primary.reservation.Engine(),
+			decodeFootprintRouteRequest{ExpectedOutputTokens: primary.decodeDecision.RequestedOutputTokens},
+		)
 		if err != nil {
 			return awaitPrimary("no_distinct_admissible_replica")
 		}
@@ -298,8 +316,8 @@ func drainLoser(result <-chan hedgeResult, timeout time.Duration, policy *HedgeP
 }
 
 func runHedgeAttempt(ctx context.Context, index int, route reservedPlannerReplica, ch chan<- hedgeResult, m []agent.Message, t []agent.ToolDef, o ...agent.SampleOpt) {
-	defer route.Release()
 	c, e := route.replica.Planner.Complete(ctx, m, t, o...)
+	route.finish(ctx, c, e, false)
 	ch <- hedgeResult{index: index, completion: c, err: e, finished: time.Now()}
 }
 
