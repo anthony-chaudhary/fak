@@ -19,6 +19,14 @@ import (
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
+func readJSONFileInto(path string, dst any) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, dst)
+}
+
 func readJSONLCorpus[T any](path, label string) []T {
 	if path == "" {
 		return nil
