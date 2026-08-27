@@ -140,6 +140,7 @@ var verbTiers = map[string]VerbTier{
 	"study-forge":           TierDev,
 	"study-adjacency":       TierDev,
 	"study-classify":        TierDev,
+	"study-link":            TierDev,
 	"study-monitor":         TierDev,
 	"temp-artifacts":        TierDev,
 	"terminal-relief":       TierDev,

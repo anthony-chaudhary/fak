@@ -351,6 +351,7 @@ var verbManifest = []Verb{
 	{Name: "study-adjacency", Synopsis: "validate and render the bounded related-system runtime study manifest", Lane: "cmd"},
 	{Name: "study-classify", Synopsis: "classify a validated forge corpus into deterministic dispositions and evidence-backed mechanism clusters", Lane: "cmd", Doc: "docs/cli-reference.md"},
 	{Name: "study-inventory", Synopsis: "render a deterministic local checkout map for exhaustive study-repo passes", Lane: "cmd"},
+	{Name: "study-link", Synopsis: "build and validate a deterministic evidence ledger joining study clusters to witnessed FAK work", Lane: "studylink"},
 	{Name: "study-monitor", Synopsis: "report recurring research sources that are due for another study pass", Lane: "cmd"},
 	{Name: "superloop", Synopsis: "operator-intent meta-loop: walk a set of member loops/scorecards/gardens worst-first (list/explain/walk)", Lane: "cmd"},
 	{Name: "support", Synopsis: "per-cell support read-out: one line per model x backend cell (rung.regime.target.next-action)", Lane: "cmd"},

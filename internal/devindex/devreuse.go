@@ -276,6 +276,7 @@ var maintainerDevCommands = []string{
 	"study-forge",
 	"study-adjacency",
 	"study-classify",
+	"study-link",
 	"study-inventory",
 	"study-monitor",
 	"superloop",

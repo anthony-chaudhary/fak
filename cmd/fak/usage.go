@@ -377,6 +377,10 @@ const usageCoreText = `usage:
                  one primary disposition and evidence-backed mechanism clusters.
                  Keep the full per-record output in scratch; --index-out is the
                  bounded, commit-sized cluster index. Exit 0 valid, 2 usage, 1 invalid.)
+  fak study-link build --index PATH --forge PATH --adjacency PATH --repo PATH --out PATH --summary PATH
+  fak study-link validate --ledger PATH --index PATH --forge PATH --adjacency PATH --repo PATH
+                (build or validate the deterministic evidence ledger joining every
+                 compact study cluster to witnessed FAK issues and repository artifacts.)
 `
 
 const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]

@@ -1401,6 +1401,29 @@ The command writes both outputs atomically and deterministically. `--out` contai
 
 Clusters retain upstream identities, state, dates, confidence, and the exact field/rule signal used for membership. They do not reconstruct GitHub relationships that the corpus did not capture: related members mean they share deterministic rule evidence, not that one issue links to, duplicates, implements, or supersedes another. `validate` strict-decodes the full output, revalidates the corpus, and rejects schema drift, unknown fields, checksum or input-binding mismatches, duplicate or missing identities, invalid dispositions/mechanisms, and actionable clusters without evidence. `validate-index` additionally joins the commit-sized index to that validated full output, making every omitted-membership, summary, and full-output checksum independently recomputable. `schema` emits the embedded Draft 2020-12 JSON Schema for the full output contract.
 
+## `fak study-link`
+
+Build or validate the bounded evidence ledger that joins a compact study cluster index
+to witnessed FAK issues and repository artifacts:
+
+```bash
+fak study-link build --index docs/research/vllm-classification-2026-08-26/index.json --forge /path/to/fak-forge.json --adjacency docs/research/inventory/vllm-related-system-adjacency-v1.json --repo . --out docs/research/vllm-fak-join-2026-08-27/ledger.json --summary docs/research/vllm-fak-join-2026-08-27/README.md
+fak study-link validate --ledger docs/research/vllm-fak-join-2026-08-27/ledger.json --index docs/research/vllm-classification-2026-08-26/index.json --forge /path/to/fak-forge.json --adjacency docs/research/inventory/vllm-related-system-adjacency-v1.json --repo .
+```
+
+`build` reads the complete captured study-forge corpus, compact cluster index,
+adjacency manifest, and repository root. It deterministically emits a bounded
+machine-readable ledger through `--out` and a Markdown review summary through
+`--summary`. Use the complete captured corpus; `gh issue list --limit 1000` is not a
+valid substitute.
+
+Joins are conservative: strong matches require reproducible exact evidence, while
+ambiguous candidates remain explicitly marked for manual review rather than being
+promoted into fabricated semantic links. `validate` rechecks complete cluster coverage,
+captured issue existence and state, duplicate exact joins, repository paths, and source
+checksums against the same four inputs. The checked-in vLLM/FAK result lives under
+`docs/research/vllm-fak-join-2026-08-27/`.
+
 ## `fak study-inventory`
 
 Render a deterministic local-checkout map for an exhaustive `study-repo` pass:
