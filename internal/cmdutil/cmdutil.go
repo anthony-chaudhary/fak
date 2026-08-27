@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchids"
 )
 
 // Argmax returns the index of the first maximal element of v, or 0 when v is
@@ -60,13 +62,37 @@ func LCGIDs(n, vocab int, seed uint64) []int {
 	if n <= 0 || vocab <= 0 {
 		return nil
 	}
-	ids := make([]int, n)
-	state := 2463534242 + seed
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
+	return benchids.LCG(n, vocab, seed)
+}
+
+// CapPositive caps n when cap is positive and otherwise returns at least one.
+func CapPositive(n, cap int) int {
+	if cap > 0 && n > cap {
+		return cap
 	}
-	return ids
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// MaxAbsDiffF32 returns the largest absolute difference over the shorter input.
+func MaxAbsDiffF32(a, b []float32) float64 {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	var maxDiff float64
+	for i := 0; i < n; i++ {
+		diff := float64(a[i] - b[i])
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > maxDiff {
+			maxDiff = diff
+		}
+	}
+	return maxDiff
 }
 
 // MarkdownCell escapes table separators and flattens line breaks while

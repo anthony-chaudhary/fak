@@ -30,6 +30,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/benchids"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
@@ -37,13 +38,7 @@ import (
 
 // lcgIDs — bit-for-bit the recurrence in cmd/modelbench/main.go and bench_hf.py.
 func lcgIDs(n, vocab int) []int {
-	ids := make([]int, n)
-	state := uint64(2463534242)
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
+	return benchids.LCG(n, vocab, 0)
 }
 
 func medianMS(ds []time.Duration) float64 {

@@ -13,8 +13,14 @@ package benchids
 // seed alone distinguishes one synthetic prompt from another. This is the exact
 // behaviour of the bench harnesses' former lcgIDs(n, vocab, seed).
 func LCG(n, vocab int, seed uint64) []int {
+	return LCGFromState(n, vocab, 2463534242+seed)
+}
+
+// LCGFromState returns n synthetic token IDs in [0, vocab) by advancing the
+// linear congruential generator from state. It is the exact loop seam for
+// callers whose existing API supplies the initial state directly.
+func LCGFromState(n, vocab int, state uint64) []int {
 	ids := make([]int, n)
-	state := 2463534242 + seed
 	for i := 0; i < n; i++ {
 		state = (state*1103515245 + 12345) & 0x7fffffff
 		ids[i] = int(state % uint64(vocab))

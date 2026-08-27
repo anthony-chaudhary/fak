@@ -64,6 +64,8 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/benchids"
+	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 	"github.com/anthony-chaudhary/fak/internal/radixkv"
@@ -72,21 +74,7 @@ import (
 // ---- token generation (shared prefixes are LITERALLY the same ids) ----
 
 func lcgIDs(n, vocab int, seed uint64) []int {
-	ids := make([]int, n)
-	state := 2463534242 + seed
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
-}
-
-func cat(parts ...[]int) []int {
-	var out []int
-	for _, p := range parts {
-		out = append(out, p...)
-	}
-	return out
+	return benchids.LCG(n, vocab, seed)
 }
 
 // ---- workloads (the verified SGLang benchmark shapes) ----
@@ -105,7 +93,7 @@ func fewShot(vocab, P, Q, N int) Workload {
 	pre := lcgIDs(P, vocab, 1001)
 	reqs := make([][]int, N)
 	for i := 0; i < N; i++ {
-		reqs[i] = cat(pre, lcgIDs(Q, vocab, uint64(2000+i)))
+		reqs[i] = intlist.Concat(pre, lcgIDs(Q, vocab, uint64(2000+i)))
 	}
 	return Workload{
 		Name: "few-shot", Desc: "N questions share one few-shot preamble (MMLU 5-shot shape)",
@@ -122,7 +110,7 @@ func multiTurn(vocab, base, turnLen, T int) Workload {
 	reqs := make([][]int, 0, T)
 	for t := 0; t < T; t++ {
 		if t > 0 {
-			ctx = cat(ctx, lcgIDs(turnLen, vocab, uint64(3100+t)))
+			ctx = intlist.Concat(ctx, lcgIDs(turnLen, vocab, uint64(3100+t)))
 		}
 		reqs = append(reqs, append([]int(nil), ctx...))
 	}
@@ -146,7 +134,7 @@ func treeOfThought(vocab, root, seg, fanout, depth int) Workload {
 			return
 		}
 		for f := 0; f < fanout; f++ {
-			child := cat(prefix, lcgIDs(seg, vocab, uint64(seed*7919+f*131+level*17+1)))
+			child := intlist.Concat(prefix, lcgIDs(seg, vocab, uint64(seed*7919+f*131+level*17+1)))
 			rec(child, level+1, seed*fanout+f+1)
 		}
 	}
@@ -175,7 +163,7 @@ func agents(vocab, P, step, C, T int) Workload {
 	// prefix-first ≡ DFS) scheduling fixes — the paper's headline scheduling result.
 	for t := 0; t < T; t++ {
 		for a := 0; a < C; a++ {
-			ctx[a] = cat(ctx[a], lcgIDs(step, vocab, uint64(5100+a*97+t)))
+			ctx[a] = intlist.Concat(ctx[a], lcgIDs(step, vocab, uint64(5100+a*97+t)))
 			reqs = append(reqs, append([]int(nil), ctx[a]...))
 		}
 	}
@@ -581,8 +569,8 @@ type policyWitness struct {
 
 func policyEvictionWitness(vocab int) policyWitness {
 	pre := lcgIDs(16, vocab, 9001)
-	good := cat(pre, lcgIDs(8, vocab, 9100))
-	bad := cat(pre, lcgIDs(8, vocab, 9200)) // e.g. a poisoned tool-result span sharing the system prefix
+	good := intlist.Concat(pre, lcgIDs(8, vocab, 9100))
+	bad := intlist.Concat(pre, lcgIDs(8, vocab, 9200)) // e.g. a poisoned tool-result span sharing the system prefix
 
 	tree := radixkv.New(0)
 	bg, mg := tree.Lookup(good)

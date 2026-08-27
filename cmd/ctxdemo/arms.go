@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/benchids"
 	"github.com/anthony-chaudhary/fak/internal/modelladder"
 )
 
@@ -25,13 +26,7 @@ func lcgIDs(n, vocab int, seed uint64) []int {
 	if n <= 0 {
 		return nil
 	}
-	ids := make([]int, n)
-	state := 2463534242 + seed
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
+	return benchids.LCG(n, vocab, seed)
 }
 
 // armResult carries the timing split — total wall-clock plus the decode/prefill
