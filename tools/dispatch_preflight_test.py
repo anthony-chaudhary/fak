@@ -158,7 +158,9 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res
     mod.host_check = lambda root, **kw: host
     mod.account_check = lambda root, **kw: account
     mod.kernel_alive = lambda root: kernel
-    mod.proc_worker_count = lambda root=None, *, product=None: procs
+    mod.managed_worker_census = lambda root, *, product=None: {
+        "pids": list(range(procs)), "count": procs,
+        "status": "CONSISTENT", "ambiguous": []}
     mod.host_resources = lambda: host_res
     mod.seat_check = lambda root, *, product=None: seat
     mod.weekly_cap_check = lambda root, **kw: weekly
@@ -368,20 +370,14 @@ class EvaluateVerdictTest(unittest.TestCase):
     def test_refuse_at_cap_counts_issue_resolution_sidecars(self) -> None:
         mod = load()
         patch_checks(mod, kernel={"alive": 0, "target": 9, "verdict": "X"}, procs=0)
-        # Restore the real proc_worker_count, but make its two live-process witnesses
+        # Restore the real managed census, but make its live-process witnesses
         # hermetic: no command-line workers, two live issue-resolution sidecars.
         mod._cmdline_worker_pids = lambda: set()
         mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101, 102}
-        # Exercise the REAL union/scoping logic: an unscoped count is cmdline âˆª
-        # sidecars; a product-scoped count is the sidecars for that product. Here
-        # the patched witnesses ignore product, so both views see {101, 102}.
-        def _count(root=None, *, product=None):
-            if product is not None:
-                return len(mod.live_resolve_worker_pids((root or ROOT) / mod.RUNS_DIRNAME,
-                                                        product=product))
-            return len(mod._cmdline_worker_pids() | mod.live_resolve_worker_pids(
-                (root or ROOT) / mod.RUNS_DIRNAME))
-        mod.proc_worker_count = _count
+        mod.live_goal_worker_pids = lambda runs_dir, **kw: set()
+        mod.managed_worker_census = lambda root, *, product: {
+            "pids": [101, 102], "count": 2,
+            "status": "CONSISTENT", "ambiguous": []}
         p = run_eval(mod, max_workers=2)
         self.assertEqual(p["live"], 2)
         self.assertEqual(p["os_worker_procs"], 2)
@@ -909,65 +905,223 @@ class WorkerCountTest(unittest.TestCase):
         ]
         self.assertEqual(mod._codex_process_pids_from_rows(rows), {11, 20})
 
-    def test_proc_worker_count_codex_includes_ambient_codex_processes(self) -> None:
+    def test_proc_worker_count_codex_excludes_unregistered_interactive_processes(self) -> None:
         mod = load()
-        mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101}
+        mod.live_resolve_worker_pids = lambda runs_dir, **kw: set()
         mod.live_goal_worker_pids = lambda runs_dir, **kw: set()
-        mod.ambient_codex_pids_excluding_sidecar_parents = lambda sidecars: {201, 202}
-        mod._cmdline_worker_pids = lambda product=None: {301}
-        self.assertEqual(mod.proc_worker_count(ROOT, product="codex"), 3)
+        mod._cmdline_worker_pids = lambda product=None: set()
+        self.assertEqual(mod.proc_worker_count(ROOT, product="codex"), 0)
 
-    def test_proc_worker_count_codex_deduplicates_sidecar_wrapper_native_descendant(self) -> None:
+    def test_codex_marker_only_process_row_is_managed(self) -> None:
         mod = load()
-        rows = [
-            {"pid": 101, "ppid": 1, "name": "cmd.exe", "cmdline": r"cmd.exe /c codex.CMD exec"},
-            {"pid": 111, "ppid": 101, "name": "node.exe",
-             "cmdline": r"C:\node.exe C:\Users\u\AppData\Roaming\npm\node_modules\@openai\codex\bin\codex.js"},
-            {"pid": 201, "ppid": 111, "name": "codex.exe", "cmdline": r"C:\...\codex.exe"},
-            {"pid": 202, "ppid": 1, "name": "codex.exe", "cmdline": r"C:\...\codex.exe"},
-        ]
-        mod._ambient_codex_process_rows = lambda: rows
-        self.assertEqual(mod.ambient_codex_pids_excluding_sidecar_parents({101}), {202})
+        rows = [{"pid": 303, "ppid": 1, "name": "codex.exe",
+                 "cmdline": "codex exec resolve GitHub issue #9400"}]
+        self.assertEqual(mod._worker_pids_from_process_rows(rows, product="codex"),
+                         {303})
 
-    def test_codex_seat_is_ambient_oauth_bucket_and_depletes_at_session_cap(self) -> None:
+    def test_codex_registered_sidecar_counts_once_and_stale_sidecar_drops(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            side = runs / "resolve-9400-20260827-120000.pid"
+            side.write_text("101", encoding="utf-8")
+            side.with_suffix(".backend").write_text("codex", encoding="utf-8")
+            now = side.stat().st_mtime
+            mod._cmdline_worker_pids = lambda product=None: {201}
+            mod._ambient_codex_process_rows = lambda: [
+                {"pid": 111, "ppid": 101, "name": "node.exe", "cmdline": "codex.js"},
+                {"pid": 201, "ppid": 111, "name": "codex.exe",
+                 "cmdline": "codex exec resolve GitHub issue #9400"},
+            ]
+            mod._process_probe = lambda pid: {
+                "alive": True, "create_time": now, "name": "codex.exe",
+                "cmdline": "codex exec resolve GitHub issue #9400",
+            }
+            self.assertEqual(mod.proc_worker_count(root, product="codex"), 1)
+            self.assertEqual(mod.managed_worker_identity_check(root, product="codex")["status"],
+                             "CONSISTENT")
+
+            mod._process_probe = lambda pid: {"alive": False}
+            mod._cmdline_worker_pids = lambda product=None: set()
+            self.assertEqual(mod.proc_worker_count(root, product="codex"), 0)
+            self.assertEqual(mod.managed_worker_identity_check(root, product="codex")["status"],
+                             "CONSISTENT")
+
+    def test_codex_stdin_goal_breadcrumb_is_managed(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            goals = root / mod.GOAL_RUNS_DIRNAME
+            goals.mkdir()
+            side = goals / "issue-9400-20260827-120000.pid"
+            side.write_text("404", encoding="utf-8")
+            now = side.stat().st_mtime
+            mod._cmdline_worker_pids = lambda product=None: set()
+            census = mod.managed_worker_census(
+                root, product="codex", probe=lambda pid: {
+                    "alive": True, "create_time": now, "name": "codex.exe",
+                    "cmdline": "codex exec -",
+                })
+            self.assertEqual(census["pids"], [404])
+            self.assertEqual(census["count"], 1)
+            self.assertEqual(census["status"], "CONSISTENT")
+
+    def test_codex_live_ambiguous_sidecar_refuses_inspection(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            side = runs / "resolve-9400-20260827-120000.pid"
+            side.write_text("101", encoding="utf-8")
+            now = side.stat().st_mtime
+            mod._process_probe = lambda pid: {
+                "alive": True, "create_time": now + 3600, "name": "powershell.exe",
+                "cmdline": "powershell.exe",
+            }
+            identity = mod.managed_worker_identity_check(root, product="codex")
+            self.assertEqual(identity["status"], "AMBIGUOUS")
+            self.assertEqual(identity["ambiguous"][0]["reason"], "missing_backend")
+
+            patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"},
+                         procs=0, seat={"total": 10, "free": 10, "leased": 0,
+                                        "depleted": False})
+            mod.managed_worker_census = lambda root, product=None: {
+                "pids": [], "count": 0, **identity}
+            p = run_eval(mod, max_workers=1, product="codex")
+            self.assertEqual(p["verdict"], mod.REFUSE_INSPECT)
+            self.assertEqual(p["worker_identity"]["status"], "AMBIGUOUS")
+
+    def test_codex_malformed_probe_and_contradictory_sidecars_are_ambiguous(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            fixtures = ((101, "not-a-pid", "codex"),
+                        (202, "202", "codex"),
+                        (303, "303", "codex"))
+            for issue, pid, backend in fixtures:
+                side = runs / f"resolve-{issue}-20260827-120000.pid"
+                side.write_text(pid, encoding="utf-8")
+                side.with_suffix(".backend").write_text(backend, encoding="utf-8")
+            mod._cmdline_worker_pids = lambda product=None: set()
+            def probe(pid):
+                if pid == 202:
+                    raise PermissionError("denied")
+                return {"alive": True, "create_time": 0, "name": "claude.exe",
+                        "cmdline": "claude resolve GitHub issue #9400"}
+            census = mod.managed_worker_census(root, product="codex", probe=probe)
+            self.assertEqual(census["count"], 0)
+            self.assertEqual({row["reason"] for row in census["ambiguous"]}, {
+                "malformed_pid", "probe_inspection_failed",
+                "contradictory_backend_image",
+            })
+
+    def test_codex_mixed_backend_sidecars_are_isolated(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / mod.RUNS_DIRNAME
+            runs.mkdir()
+            now = 1_000_000.0
+            for pid, backend in ((101, "codex"), (202, "claude")):
+                side = runs / f"resolve-{pid}-20260827-120000.pid"
+                side.write_text(str(pid), encoding="utf-8")
+                side.with_suffix(".backend").write_text(backend, encoding="utf-8")
+                os.utime(side, (now, now))
+            mod._cmdline_worker_pids = lambda product=None: set()
+            mod._process_probe = lambda pid: {
+                "alive": True, "create_time": now, "name": f"{101 == pid and 'codex' or 'claude'}.exe",
+                "cmdline": f"{101 == pid and 'codex' or 'claude'} resolve GitHub issue #9400",
+            }
+            self.assertEqual(mod.proc_worker_count(root, product="codex"), 1)
+            self.assertEqual(mod.proc_worker_count(root, product="claude"), 1)
+            self.assertEqual(mod.managed_worker_identity_check(root, product="codex")["status"],
+                             "CONSISTENT")
+
+    def test_codex_seat_keeps_ambient_sessions_as_telemetry_only(self) -> None:
         mod = load()
         mod.DEFAULT_CODEX_OAUTH_SESSIONS = 10
         mod.ambient_codex_pids = lambda: {201, 202, 203}
         seat = mod.seat_check(ROOT, product="codex")
         self.assertEqual(seat["total"], 10)
-        self.assertEqual(seat["free"], 7)
-        self.assertEqual(seat["leased"], 3)
+        self.assertEqual(seat["free"], 10)
+        self.assertEqual(seat["leased"], 0)
         self.assertFalse(seat["depleted"])
         self.assertEqual(seat["ambient_live"], 3)
 
         mod.ambient_codex_pids = lambda: set(range(20))
         seat = mod.seat_check(ROOT, product="codex")
         self.assertEqual(seat["total"], 10)
-        self.assertEqual(seat["free"], 0)
-        self.assertEqual(seat["leased"], 10)
-        self.assertTrue(seat["depleted"])
+        self.assertEqual(seat["free"], 10)
+        self.assertEqual(seat["leased"], 0)
+        self.assertFalse(seat["depleted"])
+        self.assertEqual(seat["ambient_live"], 20)
 
-    def test_codex_ambient_oauth_bucket_admits_until_session_cap(self) -> None:
+    def test_codex_managed_worker_hits_cap_boundary(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=1,
+                     seat={"total": 10, "free": 10, "leased": 0, "depleted": False})
+        self.assertEqual(run_eval(mod, max_workers=1, product="codex")["verdict"],
+                         mod.REFUSE_AT_CAP)
+        self.assertEqual(run_eval(mod, max_workers=2, product="codex")["verdict"],
+                         mod.OK_VERDICT)
+
+    def test_codex_registered_worker_folds_final_seat_and_process_gap(self) -> None:
+        mod = load()
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"}, procs=1,
+                     seat={"total": 10, "free": 10, "leased": 0,
+                           "depleted": False})
+        p = run_eval(mod, max_workers=10, product="codex")
+        self.assertEqual(p["live"], 1)
+        self.assertEqual(p["seat"]["leased"], 1)
+        self.assertEqual(p["seat"]["free"], 9)
+        self.assertEqual(p["seat"]["process_consistency"],
+                         "PROCESS_TREES_EXCEED_SEATS")
+
+    def test_codex_resolver_and_native_fixture_json_agree(self) -> None:
+        """Mirror the native #7827 fixture at the shared JSON boundary."""
+        mod = load()
+        rows = [
+            {"pid": 10, "ppid": 1, "name": "codex.exe", "cmdline": "codex"},
+            {"pid": 20, "ppid": 1, "name": "node.exe", "cmdline": "codex.js"},
+            {"pid": 21, "ppid": 20, "name": "codex.exe", "cmdline": "codex"},
+            {"pid": 200, "ppid": 1, "name": "codex.exe",
+             "cmdline": "codex exec resolve GitHub issue #9400"},
+        ]
+        managed = mod._worker_pids_from_process_rows(rows, product="codex")
+        self.assertEqual(managed, {200})
+        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"},
+                     procs=len(managed),
+                     seat={"total": 10, "free": 10, "leased": 0,
+                           "depleted": False})
+        resolver = run_eval(mod, max_workers=1, product="codex")
+        resolver_json = json.dumps({
+            "live_workers": resolver["live"],
+            "os_worker_procs": resolver["worker_identity"]["count"],
+            "verdict": resolver["verdict"],
+        }, sort_keys=True)
+        native_fixture_json = json.dumps({
+            "live_workers": 1,
+            "os_worker_procs": 1,
+            "verdict": mod.REFUSE_AT_CAP,
+        }, sort_keys=True)
+        self.assertEqual(resolver_json, native_fixture_json)
+
+    def test_codex_foreground_sessions_cannot_deplete_managed_seats(self) -> None:
         mod = load()
         mod.DEFAULT_CODEX_OAUTH_SESSIONS = 10
+        mod.ambient_codex_pids = lambda: set(range(20))
+        seat = mod.seat_check(ROOT, product="codex")
         patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"},
-                     procs=3, seat={"total": 10, "free": 7, "leased": 3,
-                                    "depleted": False, "ambient_live": 3})
-        p = run_eval(mod, max_workers=4, product="codex")
-        self.assertEqual(p["cap"], 4)
-        self.assertEqual(p["live"], 3)
-        self.assertEqual(p["verdict"], mod.OK_VERDICT)
-
-    def test_codex_ambient_oauth_bucket_refuses_at_session_cap(self) -> None:
-        mod = load()
-        mod.DEFAULT_CODEX_OAUTH_SESSIONS = 10
-        patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"},
-                     procs=10, seat={"total": 10, "free": 0, "leased": 10,
-                                     "depleted": True, "ambient_live": 10})
+                     procs=0, seat=seat)
         p = run_eval(mod, max_workers=10, product="codex")
         self.assertEqual(p["cap"], 10)
-        self.assertEqual(p["live"], 10)
-        self.assertEqual(p["verdict"], mod.REFUSE_NO_SEAT)
+        self.assertEqual(p["live"], 0)
+        self.assertEqual(p["verdict"], mod.OK_VERDICT)
 
     def test_fak_command_prefers_installed_binary_over_repo_artifact(self) -> None:
         mod = load()
@@ -979,13 +1133,13 @@ class WorkerCountTest(unittest.TestCase):
             bindir.mkdir()
             installed = bindir / ("fak.exe" if os.name == "nt" else "fak")
             installed.write_text("installed build", encoding="utf-8")
-            with mock.patch.dict(mod.os.environ, {"PATH": str(bindir), "FAK_BIN": ""}, clear=False):
-                self.assertEqual(mod._fak_command(root), [str(installed)])
+            env = dict(os.environ, PATH=str(bindir), FAK_BIN="")
+            self.assertEqual(mod._fak_command(root, env), [str(installed)])
 
     def test_fak_command_explicit_override_still_wins(self) -> None:
         mod = load()
-        with mock.patch.dict(mod.os.environ, {"FAK_BIN": "C:/pinned/fak.exe"}, clear=False):
-            self.assertEqual(mod._fak_command(ROOT), ["C:/pinned/fak.exe"])
+        env = dict(os.environ, FAK_BIN="C:/pinned/fak.exe")
+        self.assertEqual(mod._fak_command(ROOT, env), ["C:/pinned/fak.exe"])
 
     def test_account_check_native_route_rejects_needs_login(self) -> None:
         mod = load()
@@ -1188,9 +1342,9 @@ class GoalBreadcrumbTest(unittest.TestCase):
             root = Path(d)
             (root / mod.GOAL_RUNS_DIRNAME).mkdir()
             self._crumb(root / mod.GOAL_RUNS_DIRNAME, 4717)
-            real_count = mod.proc_worker_count
+            real_census = mod.managed_worker_census
             patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"})
-            mod.proc_worker_count = real_count
+            mod.managed_worker_census = real_census
             mod._cmdline_worker_pids = lambda product=None: set()
             mod._process_probe = self._live_claude_probe()
             p = mod.evaluate(root, max_workers=1, work_kind="engineering",
@@ -1207,9 +1361,9 @@ class GoalBreadcrumbTest(unittest.TestCase):
             root = Path(d)
             (root / mod.GOAL_RUNS_DIRNAME).mkdir()
             self._crumb(root / mod.GOAL_RUNS_DIRNAME, 4718)
-            real_count = mod.proc_worker_count
+            real_census = mod.managed_worker_census
             patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"})
-            mod.proc_worker_count = real_count
+            mod.managed_worker_census = real_census
             mod._cmdline_worker_pids = lambda product=None: set()
             mod._process_probe = lambda pid: {"alive": False}
             p = mod.evaluate(root, max_workers=1, work_kind="engineering",
@@ -1688,6 +1842,43 @@ class FakBinProvenanceTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.mod = load()
+
+    def test_repository_relation_uses_git_ancestry_not_revision_age(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "fixture@example.com"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Fixture"], cwd=root, check=True)
+            (root / "row").write_text("one", encoding="utf-8")
+            subprocess.run(["git", "add", "row"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "one"], cwd=root, check=True)
+            old = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+            (root / "row").write_text("two", encoding="utf-8")
+            subprocess.run(["git", "commit", "-qam", "two"], cwd=root, check=True)
+            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+            self.assertEqual(self.mod.repository_build_relation(root, old),
+                             {"expected_head": head, "observed_build": old,
+                              "relation": "BEHIND"})
+            self.assertEqual(self.mod.repository_build_relation(root, head)["relation"], "MATCH")
+            self.assertEqual(self.mod.repository_build_relation(root, "f" * 40)["relation"], "UNKNOWN")
+
+    def test_stale_agreeing_build_refuses_before_capacity_admission(self) -> None:
+        stale = {"schema": self.mod.FAK_BIN_PROVENANCE_SCHEMA,
+                 "resolvers": {
+                     "preflight_gate": {"path": "/x/fak", "resolved": True, "build": "111111111111", "dirty": False},
+                     "worker_guard": {"path": "/y/fak", "resolved": True, "build": "111111111111", "dirty": False}},
+                 "distinct_builds": 1, "builds": ["111111111111"], "agree": True,
+                 "dirty": [], "unresolved": [], "resolved_count": 2,
+                 "expected_head": "222222222222", "observed_build": "111111111111",
+                 "repository_relation": "BEHIND", "historical_override": False}
+        patch_checks(self.mod, fak_bin=stale)
+        payload = run_eval(self.mod)
+        self.assertEqual(payload["verdict"], self.mod.REFUSE_FAK_BIN_STALE)
+        self.assertFalse(payload["ok"])
+        self.assertIn("111111111111", payload["reason"])
+        self.assertIn("222222222222", payload["reason"])
+        self.assertIn("fak self-update --force --root .", payload["reason"])
 
     def test_build_identity_reads_the_build_id_and_the_uncommitted_flag(self) -> None:
         with tempfile.TemporaryDirectory() as td:

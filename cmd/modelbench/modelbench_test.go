@@ -67,6 +67,13 @@ func TestStreamQ4KValidation(t *testing.T) {
 	if err := validateFlagCombinations(valid); err != nil {
 		t.Fatalf("valid streamed Q4_K load rejected: %v", err)
 	}
+	*valid.nativeProfileOut = "profile.json"
+	*valid.metal = true
+	*valid.decodePrompt = 32
+	*valid.decodeSteps = 64
+	if err := validateFlagCombinations(valid); err != nil {
+		t.Fatalf("valid streamed native-performance profile rejected: %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -76,7 +83,23 @@ func TestStreamQ4KValidation(t *testing.T) {
 		{name: "missing q4k", edit: func(f *benchFlags) { *f.q4k = false }, want: "requires exact -gguf and -q4k"},
 		{name: "missing gguf", edit: func(f *benchFlags) { *f.gguf = "" }, want: "requires exact -gguf and -q4k"},
 		{name: "lean remains incompatible", edit: func(f *benchFlags) { *f.lean = true }, want: "omit -lean"},
-		{name: "native profile envelope unchanged", edit: func(f *benchFlags) { *f.nativeProfileOut = "profile.json" }, want: "not yet admitted"},
+		{name: "native profile still requires metal", edit: func(f *benchFlags) {
+			*f.nativeProfileOut = "profile.json"
+			*f.decodePrompt = 32
+			*f.decodeSteps = 64
+		}, want: "requires -gguf, -q4k, -metal"},
+		{name: "native profile still requires P32", edit: func(f *benchFlags) {
+			*f.nativeProfileOut = "profile.json"
+			*f.metal = true
+			*f.decodePrompt = 31
+			*f.decodeSteps = 64
+		}, want: "-decode-prompt=32"},
+		{name: "native profile still requires T64", edit: func(f *benchFlags) {
+			*f.nativeProfileOut = "profile.json"
+			*f.metal = true
+			*f.decodePrompt = 32
+			*f.decodeSteps = 63
+		}, want: "-decode-steps=64"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -270,6 +293,107 @@ func TestTransferredWeightCloserRunsExactlyOnce(t *testing.T) {
 			t.Fatalf("exit code = %d, want 1 after close failure", gotCode)
 		}
 	})
+}
+
+func TestStreamedNativeProfileRetainsAndClosesWeightsExactlyOnce(t *testing.T) {
+	tests := []struct {
+		name    string
+		runErr  error
+		wantErr string
+	}{
+		{name: "success"},
+		{name: "profile error", runErr: fmt.Errorf("capture failed"), wantErr: "capture failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := testCompleteBenchFlags()
+			*f.streamQ4K = true
+			f.processExit = func(int) {}
+			calls := 0
+			m := &model.Model{}
+			m.SetWeightCloser(testCloser(func() error {
+				calls++
+				return nil
+			}))
+			if !bindLoadedModelWeights(f, m) {
+				t.Fatal("streamed native profile did not bind model weight ownership")
+			}
+			err := runWithTransferredWeightLifetime(f, func() error {
+				if calls != 0 {
+					t.Fatal("checkpoint closed before native profile completed")
+				}
+				return tt.runErr
+			})
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("native profile returned error: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("native profile error = %v, want substring %q", err, tt.wantErr)
+			}
+			f.exit(1)
+			_ = f.closeTransferredWeights()
+			if calls != 1 {
+				t.Fatalf("weight closer calls = %d, want exactly 1", calls)
+			}
+		})
+	}
+}
+
+func TestNativeProfileFailureFinishesExecutionBeforeTransferredWeights(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*f.streamQ4K = true
+	var events []string
+	f.bindWeightCloser(func() error {
+		events = append(events, "weights")
+		return nil
+	})
+
+	err := runWithTransferredWeightLifetime(f, func() (err error) {
+		finishProfile := onceFinishNativeProfile(func() { events = append(events, "session") })
+		defer finishProfile()
+		return fmt.Errorf("injected profile failure")
+	})
+	if err == nil || !strings.Contains(err.Error(), "injected profile failure") {
+		t.Fatalf("profile error = %v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"session", "weights"}) {
+		t.Fatalf("failure cleanup order = %v, want [session weights]", events)
+	}
+}
+
+func TestNativeProfileFinishDoesNotRepeat(t *testing.T) {
+	calls := 0
+	finishProfile := onceFinishNativeProfile(func() { calls++ })
+	finishProfile()
+	finishProfile()
+	if calls != 1 {
+		t.Fatalf("session closer calls = %d, want exactly 1", calls)
+	}
+}
+
+func TestResidentNativeProfileDoesNotBindWeightCloser(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*f.gguf = "fixture.gguf"
+	*f.q4k = true
+	*f.metal = true
+	*f.decodePrompt = 32
+	*f.decodeSteps = 64
+	*f.nativeProfileOut = "profile.json"
+	if err := validateFlagCombinations(f); err != nil {
+		t.Fatalf("historical non-stream native profile rejected: %v", err)
+	}
+	m := &model.Model{}
+	calls := 0
+	m.SetWeightCloser(testCloser(func() error { calls++; return nil }))
+	if bindLoadedModelWeights(f, m) {
+		t.Fatal("resident native profile unexpectedly transferred streamed weight ownership")
+	}
+	if err := runWithTransferredWeightLifetime(f, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Fatalf("resident native profile closer calls = %d, want 0", calls)
+	}
 }
 
 func TestParsePositiveInts(t *testing.T) {

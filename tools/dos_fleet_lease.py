@@ -99,6 +99,7 @@ from typing import Any, Callable
 install_no_window_subprocess_defaults(subprocess)
 
 SCHEMA = "fleet-multinode-lease/1"
+KERNEL_CONTRACT_ERROR = "KERNEL_CONTRACT_ERROR"
 
 # Exit codes (shared protocol with release_lock.py).
 EXIT_OK, EXIT_USAGE, EXIT_DENIED, EXIT_INTERNAL = 0, 2, 3, 4
@@ -208,8 +209,9 @@ def kernel_acquire(
         cmd += ["--lane", lane]
     if kind:
         cmd += ["--kind", kind]
-    if mode:
-        cmd += ["--mode", mode]
+    # DOS 0.28 removed --mode from lease-lane acquire. Keep accepting the
+    # wrapper's compatibility argument, but let the kernel's current acquire
+    # contract remain authoritative rather than forwarding an obsolete flag.
     if run_id:
         cmd += ["--run-id", run_id]
     if leases:
@@ -217,6 +219,8 @@ def kernel_acquire(
     res = run_text(cmd, workspace)
     out = parse_first_obj(res.get("stdout", ""))
     out.setdefault("_returncode", res.get("returncode"))
+    if res.get("returncode") not in (0, None) and res.get("stderr"):
+        out.setdefault("_stderr", str(res["stderr"]).strip())
     return out
 
 
@@ -632,6 +636,13 @@ def do_acquire(
                  "detail": "advisory pre-filter: a fleet peer holds this lane"}, EXIT_DENIED)
     res = acquire(workspace, lane=lane, owner=owner, kind=kind, mode=mode, run_id=run_id, leases=union)
     outcome = str(res.get("outcome") or "")
+    if res.get("_returncode") == EXIT_USAGE:
+        stderr = str(res.get("_stderr") or "").strip()
+        detail = "DOS lane-acquire CLI contract failed"
+        if stderr:
+            detail += f": {stderr}"
+        return ({"ok": False, "error": KERNEL_CONTRACT_ERROR, "kernel": res,
+                 "detail": detail}, EXIT_USAGE)
     if outcome != "acquire" or res.get("_returncode") not in (0, None):
         return ({"ok": False, "reason": REASON_HELD_REMOTE, "kernel": res,
                  "detail": "kernel refused the acquire"}, EXIT_DENIED)

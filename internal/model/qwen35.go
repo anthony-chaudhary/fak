@@ -423,6 +423,15 @@ func (s *Session) linearAttnStep(l int, xn []float32, mat matKernel) []float32 {
 		s.Cache.linear = newLinearAttnCache(cfg)
 	}
 	lst := s.Cache.linear.layer(cfg, l)
+	if _, resident := mat.(sessionQ4KKernel); resident {
+		if out, _, accepted, err := s.tryQwen35MetalDecodeMixer(l, xn); accepted {
+			if err != nil {
+				panic(err)
+			}
+			s.tapOp(l, "out", out)
+			return out
+		}
+	}
 
 	t := s.phaseStart()
 	xp := mat.prep(xn)

@@ -209,6 +209,7 @@ func guardInfoTrendsPanelRows(ctx guardInfoPanelCtx, level guardInfoPanelLevel) 
 			fmt.Sprintf(" cost    %s  %.0f tok-eq/turn · avg %.0f · trend %s", sparklineTUI(ctx.tr.costPerTurn, ctx.sparkW), ctx.tr.costPerTurn[last], meanTUI(ctx.tr.costPerTurn), trendTUI(ctx.tr.costPerTurn)),
 		)
 	}
+	rows = append(rows, infoTokenDestinationRows(v.TokenDestination, ctx.width)...)
 	if ctx.tr.baselineChanges > 0 {
 		rows = append(rows, fmt.Sprintf(" base  changed ×%d · trend restarted at %s", ctx.tr.baselineChanges, ctx.tr.baseline.ID))
 	}

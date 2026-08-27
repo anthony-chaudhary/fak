@@ -39,7 +39,11 @@ import "strings"
 // RefuseBinSkew is the verdict a spawn preflight returns when the binary adjudicating the
 // tick is unreviewable or disagrees with the binary the workers will run. It is a refusal
 // like REFUSE_AT_CAP / REFUSE_GATE: the sweep stops on it.
-const RefuseBinSkew = "REFUSE_BIN_SKEW"
+const (
+	RefuseBinSkew       = "REFUSE_BIN_SKEW"
+	RefuseBinStale      = "REFUSE_FAK_BIN_STALE"
+	RefuseBinProvenance = "REFUSE_FAK_BIN_PROVENANCE"
+)
 
 // GateProvenance is the MEASURED identity of the two binaries that matter to an admission
 // decision: the one adjudicating the gate and the one that will front the admitted worker.
@@ -67,6 +71,11 @@ type GateProvenance struct {
 	WorkerResolved bool
 	WorkerAttested bool
 	WorkerBuild    string
+
+	RepoHead      string // committed checkout revision the launch is for
+	RepoRelation  string // MATCH, BEHIND, AHEAD, DIVERGED, UNKNOWN, or UNRESOLVED
+	RepoError     string // bounded ancestry-probe evidence when relation is UNKNOWN
+	ResolvedCount int    // resolver observations supporting the aggregate relation
 
 	// Allow records an explicit operator override for THIS tick (normally an env knob read
 	// by the impure shell). It converts the refusal into an admitted-but-annotated pass.
@@ -110,9 +119,9 @@ func GateSkewRefusal(p GateProvenance) (bool, string) {
 		return false, ""
 	}
 	if p.Allow {
-		return false, "bin-skew ADMITTED BY OVERRIDE — " + why
+		return false, "binary provenance ADMITTED BY OVERRIDE — " + why
 	}
-	return true, RefuseBinSkew + ": " + why
+	return true, gateRefusalVerdict(p) + ": " + why
 }
 
 // gateSkew names the skew, or "" when there is none to name. Every early return here is a
@@ -139,7 +148,39 @@ func gateSkew(p GateProvenance) string {
 			orElse(p.WorkerPath, "the worker guard") + " " + shortRev(p.WorkerBuild) +
 			"); converge the hot copies (`fak self-update --check`) before admitting more load"
 	}
-	return ""
+	if p.ResolvedCount < 2 {
+		return ""
+	}
+	switch strings.ToUpper(strings.TrimSpace(p.RepoRelation)) {
+	case "", "MATCH", "UNRESOLVED":
+		return ""
+	case "BEHIND":
+		return "installed fak build " + shortRev(p.GateBuild) + " is behind committed HEAD " +
+			shortRev(p.RepoHead) + "; run `fak self-update --force --root .` and retry"
+	case "AHEAD", "DIVERGED", "UNKNOWN":
+		return "installed fak build " + shortRev(p.GateBuild) + " has repository relation " +
+			strings.ToUpper(strings.TrimSpace(p.RepoRelation)) + " to committed HEAD " +
+			shortRev(p.RepoHead) + "; run `fak self-update --force --root .` and retry"
+	default:
+		return "installed fak build " + shortRev(p.GateBuild) + " has unrecognized repository relation " +
+			strings.TrimSpace(p.RepoRelation) + "; ancestry evidence: " + orElse(p.RepoError, "unavailable")
+	}
+}
+
+func gateRefusalVerdict(p GateProvenance) string {
+	switch strings.ToUpper(strings.TrimSpace(p.RepoRelation)) {
+	case "BEHIND":
+		if !p.GateDirty && p.GateAttested && p.WorkerResolved && p.WorkerAttested &&
+			sameRev(p.GateBuild, p.WorkerBuild) && p.ResolvedCount >= 2 {
+			return RefuseBinStale
+		}
+	case "AHEAD", "DIVERGED", "UNKNOWN":
+		if !p.GateDirty && p.GateAttested && p.WorkerResolved && p.WorkerAttested &&
+			sameRev(p.GateBuild, p.WorkerBuild) && p.ResolvedCount >= 2 {
+			return RefuseBinProvenance
+		}
+	}
+	return RefuseBinSkew
 }
 
 // ApplyGateSkew folds bin skew into an ALREADY-COMPUTED spawn verdict, and is the shape the
@@ -163,7 +204,7 @@ func ApplyGateSkew(verdict, reason, okVerdict string, p GateProvenance) (string,
 		return verdict, reason
 	}
 	if refuse {
-		return RefuseBinSkew, why
+		return gateRefusalVerdict(p), why
 	}
 	return verdict, strings.TrimSpace(strings.TrimSpace(reason) + " (" + why + ")")
 }

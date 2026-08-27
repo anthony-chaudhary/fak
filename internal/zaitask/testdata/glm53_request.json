@@ -1,0 +1,16 @@
+{
+  "model": "glm-5.3-flash",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}},
+      {"type":"file","file":{"file_id":"file-123"}},
+      {"type":"video_url","video_url":{"url":"https://example.test/video.mp4"}},
+      {"type":"text","text":"describe the inputs"}
+    ]
+  }],
+  "stream": true,
+  "thinking": {"type":"enabled","clear_thinking":false},
+  "reasoning_effort": "max",
+  "tool_stream": true
+}

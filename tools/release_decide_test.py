@@ -367,6 +367,19 @@ class ReleaseDecideTest(unittest.TestCase):
         self.assertEqual(green["decision"], "release")
         self.assertEqual(green["ci_source"], "whole")
 
+    def test_effective_ci_adversarial_inputs_fail_safe(self) -> None:
+        rd = load()
+        for hostile in (None, "red", ["red"], True, 7):
+            with self.subTest(hostile=repr(hostile)):
+                verdict = rd.decide(
+                    payload(ci_on_head=hostile, ci_fast={"status": "x" * 100_000}),
+                    require_ci_green=True,
+                )
+                self.assertEqual(verdict["decision"], "hold")
+                self.assertIn("CI_STATE_UNKNOWN", verdict["blockers"])
+                self.assertEqual(verdict["ci_source"], "whole")
+                self.assertEqual(verdict["ci_signal"], {"status": "unknown"})
+
     def test_retry_to_green_does_not_apply_to_fast_subset(self) -> None:
         rd = load()
         # CI_RETRY_TO_GREEN is a whole-ci concern (flaky -race / heavy suite). A

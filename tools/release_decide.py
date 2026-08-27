@@ -302,7 +302,13 @@ def effective_ci(payload: dict) -> tuple[dict, str]:
     ``ci_on_head`` signal, so a missing/in-progress fast subset can never cut on a
     blind base.
     """
-    whole = payload.get("ci_on_head") or {}
+    whole_value = payload.get("ci_on_head")
+    whole = (
+        whole_value
+        if isinstance(whole_value, dict)
+        and str(whole_value.get("status")) in {"green", "red", "none", "unknown"}
+        else {"status": "unknown"}
+    )
     fast = payload.get("ci_fast")
     if isinstance(fast, dict) and str(fast.get("status")) in _DECISIVE_CI_STATES:
         return fast, "fast"

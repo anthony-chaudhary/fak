@@ -144,6 +144,46 @@ func TestGateSkewOverrideAdmitsButAnnotates(t *testing.T) {
 	}
 }
 
+func TestRepositoryStalenessCannotReturnSpawnOK(t *testing.T) {
+	base := GateProvenance{
+		Probed: true, GatePath: "/repo/fak", GateResolved: true, GateAttested: true,
+		GateBuild:  "1111111111111111111111111111111111111111",
+		WorkerPath: "/repo/tools/.bin/fak", WorkerResolved: true, WorkerAttested: true,
+		WorkerBuild: "1111111111111111111111111111111111111111",
+		RepoHead:    "2222222222222222222222222222222222222222", RepoRelation: "BEHIND",
+		ResolvedCount: 3,
+	}
+	verdict, reason := ApplyGateSkew(spawnOK, "capacity available", spawnOK, base)
+	if verdict != RefuseBinStale {
+		t.Fatalf("verdict = %q, want %q", verdict, RefuseBinStale)
+	}
+	for _, want := range []string{"111111111111", "222222222222", "fak self-update --force --root ."} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("reason %q does not contain recovery evidence %q", reason, want)
+		}
+	}
+
+	base.RepoRelation = "MATCH"
+	if v, _ := ApplyGateSkew(spawnOK, "", spawnOK, base); v != spawnOK {
+		t.Fatalf("matching repository build refused: %q", v)
+	}
+	for _, relation := range []string{"AHEAD", "DIVERGED", "UNKNOWN"} {
+		base.RepoRelation = relation
+		if v, r := ApplyGateSkew(spawnOK, "", spawnOK, base); v != RefuseBinProvenance || !strings.Contains(r, relation) {
+			t.Errorf("relation %s = %q / %q, want typed provenance refusal", relation, v, r)
+		}
+	}
+	base.RepoRelation, base.ResolvedCount = "BEHIND", 1
+	if v, _ := ApplyGateSkew(spawnOK, "", spawnOK, base); v != spawnOK {
+		t.Fatalf("one resolver observation claimed aggregate staleness: %q", v)
+	}
+	base.ResolvedCount = 3
+	base.RepoRelation, base.Allow = "BEHIND", true
+	if v, r := ApplyGateSkew(spawnOK, "capacity available", spawnOK, base); v != spawnOK || !strings.Contains(r, "OVERRIDE") {
+		t.Fatalf("historical override = %q / %q, want annotated admission", v, r)
+	}
+}
+
 // TestApplyGateSkewNeverOverwritesAHigherPrecedenceRefusal — the fold sits BELOW the capacity
 // ladder. A preflight that already refused (at-cap, no-seat, host) keeps its verdict and its
 // reason; replacing them would lose the actually-binding term and send an operator to converge
@@ -162,5 +202,16 @@ func TestApplyGateSkewNeverOverwritesAHigherPrecedenceRefusal(t *testing.T) {
 	// The zero provenance (nothing measured) never touches a verdict.
 	if v, r := ApplyGateSkew(spawnOK, "ok", spawnOK, GateProvenance{}); v != spawnOK || r != "ok" {
 		t.Errorf("unmeasured provenance changed the verdict: %q / %q", v, r)
+	}
+}
+
+func TestApplyGateSkewPreservesPythonStaleRefusal(t *testing.T) {
+	p := GateProvenance{Probed: true, GateResolved: true, GateAttested: true, GateDirty: true}
+	for _, verdict := range []string{RefuseBinStale, RefuseBinProvenance} {
+		reason := verdict + ": Python repository admission refused before worker creation"
+		v, r := ApplyGateSkew(verdict, reason, spawnOK, p)
+		if v != verdict || r != reason {
+			t.Errorf("Python refusal %s changed at Go fold: %q / %q", verdict, v, r)
+		}
 	}
 }

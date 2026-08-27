@@ -171,7 +171,8 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 			return 1
 		}
 		if next == nil {
-			fmt.Fprintln(stdout, "NEXT NATIVE-PERFORMANCE ARM: none")
+			fmt.Fprintln(stdout, "NEXT GRAPH-READY NATIVE-PERFORMANCE ARM: none")
+			fmt.Fprintln(stdout, "Dispatch status: semantic graph projection only; use --current work_packets for runnable-now state")
 			return 0
 		}
 		renderNextNativePerformance(stdout, *next)
@@ -322,7 +323,8 @@ func boolCount(values ...bool) int {
 }
 
 func renderNextNativePerformance(w io.Writer, lever nativeperf.Lever) {
-	fmt.Fprintln(w, "NEXT NATIVE-PERFORMANCE ARM")
+	fmt.Fprintln(w, "NEXT GRAPH-READY NATIVE-PERFORMANCE ARM")
+	fmt.Fprintln(w, "Dispatch status: semantic graph projection only; use --current work_packets for runnable-now state")
 	fmt.Fprintf(w, "Lever: %s\n", lever.ID)
 	fmt.Fprintf(w, "Envelope: %s | %s | %s\n", lever.Applicability.EnvelopeID, lever.Applicability.Platform, lever.Applicability.Backend)
 	fmt.Fprintf(w, "State: enabled=%t status=%s\n", lever.Enabled, lever.Status)

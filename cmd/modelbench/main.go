@@ -467,6 +467,8 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	phases := appendNativeProfilePhase(nil, "load-setup", loadDuration)
 
 	s := newSession()
+	finishProfile := onceFinishNativeProfile(s.Close)
+	defer finishProfile()
 	profiler := model.NewPhaseProfiler()
 	s.PhaseProfiler = profiler
 	prompt := lcgIDs(32, vocab)
@@ -520,7 +522,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	phases = appendNativeProfilePhase(phases, "verification", d)
 
 	t = time.Now()
-	s.Close()
+	finishProfile()
 	d = time.Since(t)
 	phases = appendNativeProfilePhase(phases, "teardown", d)
 
@@ -943,7 +945,9 @@ func main() {
 		return s
 	}
 	if *f.nativeProfileOut != "" {
-		if err := runNativePerformanceProfile(f, m, loadNanos, vocab, nativeControls, newSession); err != nil {
+		if err := runWithTransferredWeightLifetime(f, func() error {
+			return runNativePerformanceProfile(f, m, loadNanos, vocab, nativeControls, newSession)
+		}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			f.exit(1)
 		}

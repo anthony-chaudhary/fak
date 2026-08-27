@@ -26,6 +26,7 @@ package releasestatus
 import (
 	"bufio"
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -34,6 +35,11 @@ import (
 // Schema is the stable envelope id, matching tools/release_status.py's SCHEMA so a
 // consumer of the native fold sees the same record id as the python emitted.
 const Schema = "fleet-release-status/1"
+
+const (
+	ciModulePath      = "github.com/anthony-chaudhary/fak"
+	ciMaxLogLineBytes = 8 << 20
+)
 
 // actionNextActions is the closed set of next_action.kind values that mean a human
 // or loop must act (loop-status verdict ACTION). Any kind outside it reads OK. This
@@ -283,6 +289,7 @@ func ParseGoTestWorkUnits(logText string) []CIWorkUnit {
 	byPackage := map[string]map[string]bool{}
 	pending := []string{}
 	s := bufio.NewScanner(strings.NewReader(logText))
+	s.Buffer(make([]byte, 64<<10), ciMaxLogLineBytes)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		if i := strings.Index(line, "--- FAIL: "); i >= 0 {
@@ -297,7 +304,7 @@ func ParseGoTestWorkUnits(logText string) []CIWorkUnit {
 			continue
 		}
 		pkg := m[1]
-		if !strings.Contains(pkg, "/") && pkg != "." {
+		if !validCIPackage(pkg) {
 			continue
 		}
 		if byPackage[pkg] == nil {
@@ -328,6 +335,14 @@ func ParseGoTestWorkUnits(logText string) []CIWorkUnit {
 		out = append(out, CIWorkUnit{Package: pkg, Tests: tests, Argv: []string{"fak", "test", pkg, "--", "-count=1", "-run", pattern}})
 	}
 	return out
+}
+
+func validCIPackage(pkg string) bool {
+	if pkg == "." {
+		return true
+	}
+	return (pkg == ciModulePath || strings.HasPrefix(pkg, ciModulePath+"/")) &&
+		path.Clean(pkg) == pkg && !strings.Contains(pkg, `\`)
 }
 
 func uniqueSorted(values []string) []string {

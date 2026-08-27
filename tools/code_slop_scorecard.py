@@ -521,11 +521,14 @@ def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, in
 def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
     """Return lexical Go function spans as (start, end, signature, body)."""
     starts = re.finditer(
-        r"(?m)^\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*\s*\([^\n{}]*\)"
+        r"(?m)^\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*"
+        r"(?:\s*\[[^\n]*\])?\s*\([^\n{}]*\)"
         r"(?:\s*\([^\n{}]*\)|\s+[^\n{]+)?\s*\{", text)
     out: list[tuple[int, int, str, str]] = []
     for m in starts:
-        brace = text.find("{", m.start(), m.end())
+        # A generic constraint may itself contain an interface literal. The match ends
+        # at the function-body brace, so select that brace instead of the first one.
+        brace = m.end() - 1
         depth, quote, escaped, end = 0, "", False, -1
         line_comment = block_comment = False
         i = brace

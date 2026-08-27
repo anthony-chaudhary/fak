@@ -14,6 +14,18 @@ Read this if you want to prove the demos from a fresh checkout before touching h
 infrastructure. By the end, you'll be able to pick the right track, run the model-free
 witnesses first, and know which demos require a browser, network, or live model.
 
+## Operator PR overlay (deterministic LCD)
+
+See the worst-attention-first `steer prs` view without a key, network, GPU, or
+repository history:
+
+```bash
+go run ./cmd/fak steer prs --demo internal/steerpr/testdata/lcd-demo.json --selfcheck
+```
+
+The one-screen fixture includes RESIDUAL, UNVERIFIABLE, and CLEARED bands, a
+multi-commit unit, and an unstamped orphan. `--selfcheck` validates that exact
+fold and exits non-zero if the fixture or renderer drifts.
 ## Start here: your first command
 
 You are a new runner proving the demos from a fresh checkout — no key, no model, no GPU,
