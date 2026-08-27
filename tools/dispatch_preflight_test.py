@@ -370,20 +370,14 @@ class EvaluateVerdictTest(unittest.TestCase):
     def test_refuse_at_cap_counts_issue_resolution_sidecars(self) -> None:
         mod = load()
         patch_checks(mod, kernel={"alive": 0, "target": 9, "verdict": "X"}, procs=0)
-        # Restore the real proc_worker_count, but make its two live-process witnesses
+        # Restore the real managed census, but make its live-process witnesses
         # hermetic: no command-line workers, two live issue-resolution sidecars.
         mod._cmdline_worker_pids = lambda: set()
         mod.live_resolve_worker_pids = lambda runs_dir, **kw: {101, 102}
-        # Exercise the REAL union/scoping logic: an unscoped count is cmdline âˆª
-        # sidecars; a product-scoped count is the sidecars for that product. Here
-        # the patched witnesses ignore product, so both views see {101, 102}.
-        def _count(root=None, *, product=None):
-            if product is not None:
-                return len(mod.live_resolve_worker_pids((root or ROOT) / mod.RUNS_DIRNAME,
-                                                        product=product))
-            return len(mod._cmdline_worker_pids() | mod.live_resolve_worker_pids(
-                (root or ROOT) / mod.RUNS_DIRNAME))
-        mod.proc_worker_count = _count
+        mod.live_goal_worker_pids = lambda runs_dir, **kw: set()
+        mod.managed_worker_census = lambda root, *, product: {
+            "pids": [101, 102], "count": 2,
+            "status": "CONSISTENT", "ambiguous": []}
         p = run_eval(mod, max_workers=2)
         self.assertEqual(p["live"], 2)
         self.assertEqual(p["os_worker_procs"], 2)
@@ -1139,13 +1133,13 @@ class WorkerCountTest(unittest.TestCase):
             bindir.mkdir()
             installed = bindir / ("fak.exe" if os.name == "nt" else "fak")
             installed.write_text("installed build", encoding="utf-8")
-            with mock.patch.dict(mod.os.environ, {"PATH": str(bindir), "FAK_BIN": ""}, clear=False):
-                self.assertEqual(mod._fak_command(root), [str(installed)])
+            env = dict(os.environ, PATH=str(bindir), FAK_BIN="")
+            self.assertEqual(mod._fak_command(root, env), [str(installed)])
 
     def test_fak_command_explicit_override_still_wins(self) -> None:
         mod = load()
-        with mock.patch.dict(mod.os.environ, {"FAK_BIN": "C:/pinned/fak.exe"}, clear=False):
-            self.assertEqual(mod._fak_command(ROOT), ["C:/pinned/fak.exe"])
+        env = dict(os.environ, FAK_BIN="C:/pinned/fak.exe")
+        self.assertEqual(mod._fak_command(ROOT, env), ["C:/pinned/fak.exe"])
 
     def test_account_check_native_route_rejects_needs_login(self) -> None:
         mod = load()
@@ -1348,9 +1342,9 @@ class GoalBreadcrumbTest(unittest.TestCase):
             root = Path(d)
             (root / mod.GOAL_RUNS_DIRNAME).mkdir()
             self._crumb(root / mod.GOAL_RUNS_DIRNAME, 4717)
-            real_count = mod.proc_worker_count
+            real_census = mod.managed_worker_census
             patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"})
-            mod.proc_worker_count = real_count
+            mod.managed_worker_census = real_census
             mod._cmdline_worker_pids = lambda product=None: set()
             mod._process_probe = self._live_claude_probe()
             p = mod.evaluate(root, max_workers=1, work_kind="engineering",
@@ -1367,9 +1361,9 @@ class GoalBreadcrumbTest(unittest.TestCase):
             root = Path(d)
             (root / mod.GOAL_RUNS_DIRNAME).mkdir()
             self._crumb(root / mod.GOAL_RUNS_DIRNAME, 4718)
-            real_count = mod.proc_worker_count
+            real_census = mod.managed_worker_census
             patch_checks(mod, kernel={"alive": 0, "target": 0, "verdict": "X"})
-            mod.proc_worker_count = real_count
+            mod.managed_worker_census = real_census
             mod._cmdline_worker_pids = lambda product=None: set()
             mod._process_probe = lambda pid: {"alive": False}
             p = mod.evaluate(root, max_workers=1, work_kind="engineering",

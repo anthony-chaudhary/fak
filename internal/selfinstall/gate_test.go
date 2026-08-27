@@ -207,9 +207,11 @@ func TestApplyGateSkewNeverOverwritesAHigherPrecedenceRefusal(t *testing.T) {
 
 func TestApplyGateSkewPreservesPythonStaleRefusal(t *testing.T) {
 	p := GateProvenance{Probed: true, GateResolved: true, GateAttested: true, GateDirty: true}
-	const reason = "installed fak build 111111111111 is behind committed HEAD 222222222222"
-	v, r := ApplyGateSkew(RefuseBinStale, reason, spawnOK, p)
-	if v != RefuseBinStale || r != reason {
-		t.Fatalf("Python stale refusal changed at Go fold: %q / %q", v, r)
+	for _, verdict := range []string{RefuseBinStale, RefuseBinProvenance} {
+		reason := verdict + ": Python repository admission refused before worker creation"
+		v, r := ApplyGateSkew(verdict, reason, spawnOK, p)
+		if v != verdict || r != reason {
+			t.Errorf("Python refusal %s changed at Go fold: %q / %q", verdict, v, r)
+		}
 	}
 }
