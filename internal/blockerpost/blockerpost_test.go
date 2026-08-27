@@ -240,7 +240,14 @@ func TestFoldIssuesAllOwnedIsBackgroundStatus(t *testing.T) {
 		t.Fatalf("all-owned blockers should be background status, got %q", b.Severity)
 	}
 	if strings.Contains(b.Text(), "<!here>") {
-		t.Fatalf("an all-owned (in-progress) fold MUST NOT page:\n%s", b.Text())
+		t.Fatalf("an all-owned fold MUST NOT page:\n%s", b.Text())
+	}
+	got := strings.ToLower(b.Text())
+	if !strings.Contains(got, "have owners") || !strings.Contains(got, "ownership recorded") {
+		t.Fatalf("all-owned fold should state only the witnessed ownership fact:\n%s", b.Text())
+	}
+	if strings.Contains(got, "in progress") || strings.Contains(got, "no action needed") {
+		t.Fatalf("all-owned fold inferred progress or completion from assignment alone:\n%s", b.Text())
 	}
 }
 

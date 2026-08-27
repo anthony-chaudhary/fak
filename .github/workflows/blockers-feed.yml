@@ -13,7 +13,8 @@ name: blockers-feed
 #   * 0 blocked issues            -> a quiet green all-clear card (no page).
 #   * >=1 with an UNOWNED issue    -> an OPERATOR card: <!here> + a triage link (paged) —
 #                                     a blocker with no assignee needs a human to pick up.
-#   * >=1 but all assigned         -> a muted background-status card (tracked, no page).
+#   * >=1 but all assigned         -> a muted background-status card (ownership recorded,
+#                                     no page; assignment alone does not prove progress).
 #
 # This is a SLACK STATUS feeder (cadence -> channel post), the dual of steering-guard.yml
 # — NOT an issue feeder like score-/bench-/gate-signal.yml (those turn a regression into
@@ -73,31 +74,33 @@ jobs:
           cache: false
 
       # List the open blocker-labelled issues — the standing-blocker signal. `gh` ships
-      # on the runner and authenticates with the built-in GITHUB_TOKEN. A label that does
-      # not exist (or any gh hiccup) must NOT fail the heartbeat: fall back to an empty
-      # array, which folds to the honest "no standing blockers" all-clear card.
+      # on the runner and authenticates with the built-in GITHUB_TOKEN. Source acquisition
+      # is fail-closed: `fak blockers source` requires the exact label both immediately
+      # before and after the query and validates the JSON array. Its marker starts UNKNOWN
+      # and flips to OK only after every check. continue-on-error lets the render step read
+      # that marker and fail the job, so source failure cannot become an all-clear.
       - name: list blocked issues
         id: issues
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set +e
-          gh issue list --state open --label "$FAK_BLOCKERS_LABEL" --limit 200 \
-            --json number,title,url,assignees,labels > issues.json
-          rc=$?
-          set -e
-          if [ $rc -ne 0 ] || [ ! -s issues.json ]; then
-            echo "gh issue list returned no usable payload (rc=$rc); treating as no standing blockers"
-            echo "[]" > issues.json
-          fi
-          echo "count=$(jq 'length' issues.json 2>/dev/null || echo 0)" >> "$GITHUB_OUTPUT"
+          go run ./cmd/fak blockers source \
+            --repo "${{ github.repository }}" \
+            --label "$FAK_BLOCKERS_LABEL" \
+            --issues-out issues.json \
+            --status-out blockers-source.json
+          echo "count=$(jq 'length' issues.json)" >> "$GITHUB_OUTPUT"
 
-      # Always render the card to the step summary (and as the artifact) so the run is
-      # auditable even when nothing posts (missing secret / manual dry-run / fork).
+      # With a proven source, always render the card to the step summary (and as the
+      # artifact) so the run is auditable even when nothing posts (missing secret /
+      # manual dry-run / fork). --source-status is checked before the issue payload, so
+      # UNKNOWN fails this step and the later post step never runs.
       - name: render card (dry-run)
         run: |
           go run ./cmd/fak blockers feed \
             --issues issues.json \
+            --source-status blockers-source.json \
             --label "$FAK_BLOCKERS_LABEL" \
             --repo-url "${{ github.server_url }}/${{ github.repository }}" \
             --channel "$FAK_BLOCKERS_CHANNEL" \
@@ -116,6 +119,7 @@ jobs:
         run: |
           go run ./cmd/fak blockers feed \
             --issues issues.json \
+            --source-status blockers-source.json \
             --label "$FAK_BLOCKERS_LABEL" \
             --repo-url "${{ github.server_url }}/${{ github.repository }}" \
             --channel "$FAK_BLOCKERS_CHANNEL" \
@@ -132,5 +136,6 @@ jobs:
           name: blockers-card
           path: |
             blockers-card.txt
+            blockers-source.json
             issues.json
           if-no-files-found: ignore
