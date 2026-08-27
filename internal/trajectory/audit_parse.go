@@ -46,6 +46,7 @@ type auditParseState struct {
 	usageDuplicates       int
 	toolErrorEvents       []QwenToolErrorEvent
 	toolErrorAttributions []qwenToolErrorAttribution
+	distribution          auditDistribution
 }
 
 type auditCodexRawTokens struct {
@@ -63,6 +64,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	defer file.Close()
 
 	state := auditParseState{
+		distribution: newAuditDistribution(),
 		row: AuditTranscriptRow{
 			Schema: AuditSchema, Kind: "session", Source: source,
 			TranscriptID: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)), SourcePath: rel,
@@ -144,6 +146,8 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	}
 	applyQwenToolErrorAttribution(state.toolErrorEvents, state.toolErrorAttributions, state.mutationCounts)
 	state.row.HookP95MS = auditPercentile(state.hookDurations, 95)
+	state.row.Distribution = distributionRows(state.distribution.categories)
+	state.row.ToolDistribution = toolDistributionRows(state.distribution.tools)
 	if source == AuditSourceCodex && state.codexRawTotal != nil {
 		state.row.UsageRecords++
 		denominator.UsageRecordsApplied++

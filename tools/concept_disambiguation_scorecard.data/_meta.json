@@ -12052,6 +12052,11 @@
           "category": "incidental",
           "reason": "specific CLI renderer, not a reusable render-materialization concept",
           "token": "renderSessionJournalAudit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Narrow trajectory-audit compact presentation helper; no new render/materialize domain concept.",
+          "token": "renderauditdistributioncompact"
         }
       ],
       "id": "render-materialize",
@@ -12133,6 +12138,7 @@
         "renderValidate",
         "renderVelocityLeg",
         "renderWorkpattern",
+        "renderauditdistributioncompact",
         "rendercanonicalentry",
         "rendered",
         "renderidentitypage",

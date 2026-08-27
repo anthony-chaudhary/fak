@@ -27,6 +27,20 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Repeated failures: %d; mutation churn: %d; hook p95: %s ms.\n", summary.RepeatedFailures, summary.MutationChurn, auditInt(summary.HookP95MS))
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
+	fmt.Fprintf(&out, "- Payload distribution unit: `%s` — %s\n", summary.DistributionUnit, summary.DistributionProvenance)
+	if len(summary.Distribution) > 0 {
+		out.WriteString("\n## Token destination distribution\n\n| Category | UTF-8 bytes | Share |\n|---|---:|---:|\n")
+		for _, r := range summary.Distribution {
+			fmt.Fprintf(&out, "| `%s` | %d | %.1f%% |\n", r.Name, r.Bytes, r.Share*100)
+		}
+	}
+	if len(summary.ToolDistribution) > 0 {
+		out.WriteString("\n### Per tool\n\n| Tool | Calls | UTF-8 bytes | Share |\n|---|---:|---:|---:|\n")
+		for _, r := range summary.ToolDistribution {
+			fmt.Fprintf(&out, "| `%s` | %d | %d | %.1f%% |\n", r.Name, r.Calls, r.Bytes, r.Share*100)
+		}
+		fmt.Fprintf(&out, "\n`%s`\n", RenderAuditDistributionCompact(summary.Distribution, summary.ToolDistribution, 100))
+	}
 	if summary.QwenTopContributorTokenFraction == nil {
 		out.WriteString("- Qwen top-contributor token concentration: unknown (no Qwen token usage).\n")
 	} else {
