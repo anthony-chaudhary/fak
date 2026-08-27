@@ -60,6 +60,10 @@ type metalQ8ExactState struct {
 	err     error
 }
 
+func init() {
+	releaseModelQ4KHandles = releaseMetalQ4KResidency
+}
+
 func (s *Session) metalExecution(operation metalgemm.ExecutionOperation, call func(*metalgemm.ExecutionObservation)) {
 	observation := metalgemm.NewExecutionObservation(operation)
 	call(observation)
@@ -845,9 +849,9 @@ func (m *Model) withMetalQ4K(name string, qt *q4kTensor, use func(*metalgemm.Q4K
 }
 
 // metalQ4KWeight returns this model's GPU q4_k handle for name, uploading the raw blocks once.
-// A streamed tensor is read into page-aligned storage only on first use. UploadQ4K then either
-// pins that storage behind a no-copy shared Metal buffer or copies it into Metal-owned storage;
-// in both cases the cached handle owns the only runtime copy and later tokens do no checkpoint I/O.
+// A streamed tensor inside a retained mmap shard is bound directly through the offset-aware
+// no-copy upload. Other descriptors read into page-aligned storage only on first use. In both
+// cases the cached handle owns the runtime residency and later tokens do no checkpoint I/O.
 // Resident tensors keep the historical CPU-fallback lifetime below.
 func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight {
 	metalQ4KMu.Lock()
@@ -860,16 +864,24 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 	if w, ok := tbl[name]; ok {
 		return w
 	}
+	var w *metalgemm.Q4KWeight
 	raw := qt.raw
 	if qt.lazy != nil {
-		var err error
-		raw, err = qt.materializeRaw()
-		if err != nil {
-			panic("model: lazy Q4_K read " + name + ": " + err.Error())
+		if span, offset, ok := qt.mappedRaw(); ok {
+			w = metalgemm.UploadQ4KMappedSpan(span, offset, qt.out, qt.in)
 		}
-		raw = pageAlignResidentBytes(raw)
+		if w == nil {
+			var err error
+			raw, err = qt.materializeRaw()
+			if err != nil {
+				panic("model: lazy Q4_K read " + name + ": " + err.Error())
+			}
+			raw = pageAlignResidentBytes(raw)
+		}
 	}
-	w := metalgemm.UploadQ4K(raw, qt.out, qt.in)
+	if w == nil {
+		w = metalgemm.UploadQ4K(raw, qt.out, qt.in)
+	}
 	tbl[name] = w // cache nil too, so a failed upload doesn't retry every token
 	if qt.lazy == nil && w != nil && freeCPUCopyAfterUpload && !w.NoCopy() {
 		// Drop the CPU copy → single residency (~16 GB for 27B vs ~30 GB doubled). UNSAFE
@@ -882,4 +894,19 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 		qt.raw = nil
 	}
 	return w
+}
+
+// releaseMetalQ4KResidency drops every handle owned by m before its retained
+// checkpoint mapping is closed. Handles are removed from the cache first so no
+// later lookup can rediscover a buffer whose backing is about to be unmapped.
+func releaseMetalQ4KResidency(m *Model) {
+	metalQ4KMu.Lock()
+	tbl := metalQ4KW[m]
+	delete(metalQ4KW, m)
+	metalQ4KMu.Unlock()
+	for _, w := range tbl {
+		if w != nil {
+			w.Release()
+		}
+	}
 }

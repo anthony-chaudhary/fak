@@ -197,6 +197,80 @@ func TestMetalLazyQ4KGemvMatchesResidentAndCachesHandle(t *testing.T) {
 	}
 }
 
+func TestIssue9073MetalLazyQ4KUsesMappedSpanWithoutReadAt(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("Metal unavailable")
+	}
+	metalgemm.ResetQ4K()
+	defer metalgemm.ResetQ4K()
+	const out, in, offset = 5, 256, 32
+	resident := randomQ4KTensor(out, in, 9073)
+	span := alignedBytes(os.Getpagesize())
+	copy(span[offset:], resident.raw)
+	reader := &issue9073ReaderAt{data: append([]byte("fallback"), resident.raw...)}
+	lazy := &q4kTensor{out: out, in: in, nblk: 1, lazy: &LazyQ4KRange{
+		Reader: reader, Offset: int64(len("fallback")), Bytes: len(resident.raw),
+		MappedSpan: span, MappedOffset: offset,
+	}}
+	m := &Model{q4kw: map[string]*q4kTensor{"w": lazy}}
+	w := m.metalQ4KWeight("w", lazy)
+	if w == nil || !w.NoCopy() {
+		t.Fatalf("mapped upload = %#v, want no-copy handle", w)
+	}
+	if reader.reads != 0 {
+		t.Fatalf("mapped upload performed %d payload ReadAt calls, want zero", reader.reads)
+	}
+	x := randomVecF(in, 9073)
+	want := q4kMatRows(resident, x)
+	got := make([]float32, out)
+	w.GEMV(x, got)
+	if cos, maxRel := cosineAndMaxRel(want, got); cos < 0.9999 || maxRel > 0.02 {
+		t.Fatalf("mapped GEMV cosine=%g maxRel=%g", cos, maxRel)
+	}
+	m.SetWeightCloser(closeFunc(func() error {
+		if w.ID() >= 0 {
+			t.Fatal("checkpoint unmap reached before borrowing Q4_K handle release")
+		}
+		return nil
+	}))
+	if err := m.CloseWeights(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIssue9073MetalLazyQ4KReadAtFallbackIsByteIdentical(t *testing.T) {
+	if !metalgemm.Available() {
+		t.Skip("Metal unavailable")
+	}
+	metalgemm.ResetQ4K()
+	defer metalgemm.ResetQ4K()
+	const out, in = 5, 256
+	resident := randomQ4KTensor(out, in, 9074)
+	prefix := []byte("fallback")
+	reader := &issue9073ReaderAt{data: append(append([]byte(nil), prefix...), resident.raw...)}
+	lazy := &q4kTensor{out: out, in: in, nblk: 1, lazy: &LazyQ4KRange{
+		Reader: reader, Offset: int64(len(prefix)), Bytes: len(resident.raw),
+		MappedSpan: alignedBytes(os.Getpagesize()), MappedOffset: os.Getpagesize() - 32,
+	}}
+	m := &Model{q4kw: map[string]*q4kTensor{"w": lazy}}
+	m.SetWeightCloser(closeFunc(func() error { return nil }))
+	defer m.CloseWeights()
+	w := m.metalQ4KWeight("w", lazy)
+	if w == nil {
+		t.Fatal("ReadAt fallback upload failed")
+	}
+	if reader.reads != 1 {
+		t.Fatalf("fallback payload ReadAt calls=%d, want 1", reader.reads)
+	}
+	x := randomVecF(in, 9074)
+	want := q4kMatRows(resident, x)
+	got := make([]float32, out)
+	w.GEMV(x, got)
+	if cos, maxRel := cosineAndMaxRel(want, got); cos < 0.9999 || maxRel > 0.02 {
+		t.Fatalf("fallback GEMV cosine=%g maxRel=%g", cos, maxRel)
+	}
+}
+
 func TestMetalQ4KUploadUsesNoCopyUnifiedMemory(t *testing.T) {
 	if !metalgemm.Available() {
 		t.Skip("no Metal device available")
@@ -659,7 +733,7 @@ func TestMetalQ4KGemmMM32UnavailableDeclinesBeforeMutation(t *testing.T) {
 		single[i] = mark
 	}
 	singleObservation := metalgemm.NewExecutionObservation(metalgemm.ExecutionQ4KGEMM)
-	mode := metalgemm.Q4KGEMMModeMM32Unavailable
+	mode := metalgemm.Q4KGEMMMode(metalgemm.Q4KGEMMModeMM32Unavailable)
 	wantIdentity := metalgemm.Q4KGEMMIdentityForMode(P, mode, metalgemm.Q4KGEMMNotExecuted)
 	if identity := w.GEMMWithEventsMode(X, P, single, singleObservation, mode); identity != wantIdentity {
 		t.Fatalf("unavailable single identity=%+v want %+v", identity, wantIdentity)

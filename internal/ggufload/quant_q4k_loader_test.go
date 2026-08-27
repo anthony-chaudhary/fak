@@ -10,6 +10,67 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
+func writeIssue9073MappedQ4KFixture(t *testing.T) string {
+	t.Helper()
+	const dim = 256
+	const payloadBytes = 144
+	var b bytes.Buffer
+	writeMinimalHeader(&b, 1, 8)
+	writeKVString(&b, "general.architecture", "llama")
+	writeKVUint32(&b, "general.alignment", 32)
+	writeKVUint32(&b, "llama.embedding_length", dim)
+	writeKVUint32(&b, "llama.block_count", 1)
+	writeKVUint32(&b, "llama.attention.head_count", 1)
+	writeKVUint32(&b, "llama.attention.key_length", dim)
+	writeKVUint32(&b, "llama.feed_forward_length", dim)
+	writeKVFloat32(&b, "llama.attention.layer_norm_rms_epsilon", 1e-6)
+	writeTensorInfoForTest(&b, "blk.0.attn_v.weight", []uint64{dim, 1}, TensorQ4_K, 0)
+	padToAlignment(&b, 32)
+	for i := 0; i < payloadBytes; i++ {
+		b.WriteByte(byte(i*17 + 3))
+	}
+	page := os.Getpagesize()
+	for b.Len()%page != 0 {
+		b.WriteByte(0)
+	}
+	path := filepath.Join(t.TempDir(), "issue-9073.gguf")
+	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestIssue9073StreamedDenseQ4KCarriesBoundsCheckedMappedShardView(t *testing.T) {
+	const payloadBytes = 144
+	path := writeIssue9073MappedQ4KFixture(t)
+	t.Setenv("FAK_GGUF_MMAP", "1")
+	resetGGUFMmapGateForTest()
+	t.Cleanup(resetGGUFMmapGateForTest)
+	ws, err := OpenWeights(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	if ws.data == nil {
+		t.Skip("GGUF mmap unavailable")
+	}
+	info := ws.File.Tensors[0]
+	tw := ws.lazyDenseQ4KTensorWork(info, "model.layers.0.self_attn.v_proj.weight", 0)
+	if tw.err != nil || len(tw.pending) != 1 {
+		t.Fatalf("lazy work = %+v", tw)
+	}
+	mapped, ok := tw.pending[0].lazyReader.(*mappedQ4KReaderAt)
+	if !ok {
+		t.Fatalf("lazy reader = %T, want mapped Q4_K view", tw.pending[0].lazyReader)
+	}
+	if mapped.offset != int(info.FileOffset) || len(mapped.span)%os.Getpagesize() != 0 {
+		t.Fatalf("mapped view offset=%d span=%d", mapped.offset, len(mapped.span))
+	}
+	if end := mapped.offset + payloadBytes; end > len(mapped.span) {
+		t.Fatalf("mapped payload end=%d exceeds span=%d", end, len(mapped.span))
+	}
+}
+
 // TestLoadModelQ4KRoutesByIdentityNorm is the small-scale (27B-free) integration test for
 // the resident-Q4_K loader. It writes a real 1-layer GGUF with four Q4_K matmul tensors,
 // loads it via LoadModelQ4K, and asserts the loader's routing:

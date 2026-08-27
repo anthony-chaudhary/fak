@@ -17,6 +17,7 @@ package ggufload
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -534,11 +535,20 @@ func (s *WeightSource) lazyDenseQ4KTensorWork(info TensorInfo, canon string, tic
 		tw.err = err
 		return tw
 	}
-	r, _, err := s.tensorReader(info)
+	r, size, err := s.tensorReader(info)
 	if err != nil {
 		tw.err = err
 		return tw
 	}
+	n, err := tensorPayloadBytes(info)
+	if err != nil || n > uint64(math.MaxInt) {
+		if err == nil {
+			err = fmt.Errorf("gguf: tensor %s payload is too large", info.Name)
+		}
+		tw.err = err
+		return tw
+	}
+	r = s.mappedQ4KReader(info, r, size, int(n))
 	tw.pending = []pendingTensor{{lazyQ4K: true, name: canon, shape: shape, sourceInfo: info, lazyReader: r}}
 	tw.acctType, tw.acctBytes, tw.acctTensors, tw.acctResident = info.Type.String(), tensorOnDiskBytes(info), 1, true
 	return tw
@@ -554,7 +564,12 @@ func applyQ4KTensorWork(tw tensorWork, p *LoadProfiler, cfg model.Config, builde
 			if err != nil {
 				return err
 			}
-			if err := builder.AddLazyQ4K(pt.name, pt.shape, model.LazyQ4KRange{Reader: pt.lazyReader, Offset: pt.sourceInfo.FileOffset, Bytes: int(n)}); err != nil {
+			src := model.LazyQ4KRange{Reader: pt.lazyReader, Offset: pt.sourceInfo.FileOffset, Bytes: int(n)}
+			if mapped, ok := pt.lazyReader.(*mappedQ4KReaderAt); ok {
+				src.MappedSpan = mapped.span
+				src.MappedOffset = mapped.offset
+			}
+			if err := builder.AddLazyQ4K(pt.name, pt.shape, src); err != nil {
 				return err
 			}
 		case pt.isKVBHalf:

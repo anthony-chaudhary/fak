@@ -51,9 +51,28 @@ const qkK = 256
 
 // LazyQ4KRange names one immutable Q4_K payload in a retained checkpoint reader.
 type LazyQ4KRange struct {
-	Reader io.ReaderAt
-	Offset int64
-	Bytes  int
+	Reader       io.ReaderAt
+	Offset       int64
+	Bytes        int
+	MappedSpan   []byte
+	MappedOffset int
+}
+
+// mappedRaw returns a checked tensor view inside the retained page mapping.
+// The full span and offset are kept separate because Metal binds the buffer at
+// the page-aligned base and applies the tensor offset at encoder dispatch.
+func (q *q4kTensor) mappedRaw() (span []byte, offset int, ok bool) {
+	if q == nil || q.lazy == nil || q.lazy.Bytes <= 0 || len(q.lazy.MappedSpan) == 0 {
+		return nil, 0, false
+	}
+	span, offset = q.lazy.MappedSpan, q.lazy.MappedOffset
+	page := os.Getpagesize()
+	if offset < 0 || offset%32 != 0 || page <= 0 || len(span)%page != 0 ||
+		uintptr(unsafe.Pointer(&span[0]))%uintptr(page) != 0 ||
+		offset > len(span) || q.lazy.Bytes > len(span)-offset {
+		return nil, 0, false
+	}
+	return span, offset, true
 }
 
 func (q *q4kTensor) materializeRaw() ([]byte, error) {
@@ -588,6 +607,10 @@ type weightCloserState struct {
 
 var weightCloserInitMu sync.Mutex
 
+// releaseModelQ4KHandles is replaced by the Darwin Metal build. Other builds
+// keep the no-op while sharing the same release-before-checkpoint-close order.
+var releaseModelQ4KHandles = func(*Model) {}
+
 // WeightSessionsActiveError reports a deferred model-weight close. The last live session
 // completes teardown; new sessions are refused from the first close request.
 type WeightSessionsActiveError struct{ Count int }
@@ -621,7 +644,8 @@ func (m *Model) holdModelWeights() bool {
 
 func (m *Model) finishWeightClose(s *weightCloserState) {
 	s.once.Do(func() {
-		// Native buffers stop borrowing Q8 backing before the checkpoint owner can unmap it.
+		// Native buffers stop borrowing mapped Q4_K/Q8 backing before the checkpoint owner can unmap it.
+		releaseModelQ4KHandles(m)
 		m.releaseMetalQ8Residency()
 		if s.c != nil {
 			s.err = s.c.Close()
