@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,17 +28,31 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/affectedtests"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
-const defaultValidateTimeout = 4 * time.Minute
+const (
+	defaultValidateTimeout      = 4 * time.Minute
+	validateWSLPreflightTimeout = 14500 * time.Millisecond
+)
 
 var (
-	validateNow       = time.Now
-	validatePhaseHook = func(context.Context, string) {}
+	validateNow             = time.Now
+	validatePhaseHook       = func(context.Context, string) {}
+	validateWSLLookPath     = exec.LookPath
+	validateWSLCommand      = runValidateWSLCapabilityCommand
+	validateWSLCapabilities = struct {
+		sync.Mutex
+		byIdentity         map[string]validateWSLCapabilityVerdict
+		identityByLauncher map[string]string
+	}{
+		byIdentity:         make(map[string]validateWSLCapabilityVerdict),
+		identityByLauncher: make(map[string]string),
+	}
 )
 
 type validatePhase struct {
@@ -52,26 +67,36 @@ type validateOverlayProgress struct {
 	Skipped []string `json:"skipped"`
 }
 
+type validateWSLCapabilityVerdict struct {
+	Status   string   `json:"status"`
+	Identity string   `json:"identity,omitempty"`
+	Required []string `json:"required"`
+	Missing  []string `json:"missing"`
+	Detail   string   `json:"detail,omitempty"`
+	Cached   bool     `json:"cached"`
+}
+
 type validateResult struct {
-	Schema        string                  `json:"schema"`
-	Mode          string                  `json:"mode"`
-	Ref           string                  `json:"ref"`
-	Tip           string                  `json:"tip"`
-	Mine          []string                `json:"mine"`
-	Tested        []string                `json:"tested,omitempty"`
-	Runner        string                  `json:"runner,omitempty"`
-	TestRun       string                  `json:"test_run,omitempty"`
-	TestScope     string                  `json:"test_scope,omitempty"`
-	OK            bool                    `json:"ok"`
-	Partial       bool                    `json:"partial"`
-	TimedOut      bool                    `json:"timed_out"`
-	Reason        string                  `json:"reason,omitempty"`
-	TimeoutMS     int64                   `json:"timeout_ms"`
-	ElapsedMS     int64                   `json:"elapsed_ms"`
-	Phases        []validatePhase         `json:"phases"`
-	SkippedPhases []string                `json:"skipped_phases"`
-	Overlays      validateOverlayProgress `json:"overlays"`
-	Failures      []ciPreflightFailure    `json:"failures"`
+	Schema        string                        `json:"schema"`
+	Mode          string                        `json:"mode"`
+	Ref           string                        `json:"ref"`
+	Tip           string                        `json:"tip"`
+	Mine          []string                      `json:"mine"`
+	Tested        []string                      `json:"tested,omitempty"`
+	Runner        string                        `json:"runner,omitempty"`
+	TestRun       string                        `json:"test_run,omitempty"`
+	TestScope     string                        `json:"test_scope,omitempty"`
+	OK            bool                          `json:"ok"`
+	Partial       bool                          `json:"partial"`
+	TimedOut      bool                          `json:"timed_out"`
+	Reason        string                        `json:"reason,omitempty"`
+	TimeoutMS     int64                         `json:"timeout_ms"`
+	ElapsedMS     int64                         `json:"elapsed_ms"`
+	Phases        []validatePhase               `json:"phases"`
+	SkippedPhases []string                      `json:"skipped_phases"`
+	Overlays      validateOverlayProgress       `json:"overlays"`
+	WSLPreflight  *validateWSLCapabilityVerdict `json:"wsl_preflight,omitempty"`
+	Failures      []ciPreflightFailure          `json:"failures"`
 }
 
 type validateRecorder struct {
@@ -202,6 +227,22 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 		return code
 	}
 	res.Tip = tip
+	if runtime.GOOS == "windows" && *wslTests {
+		phase = recorder.start("wsl_preflight")
+		verdict := preflightValidateWSLCapabilitiesWithin(ctx)
+		res.WSLPreflight = &verdict
+		if ctx.Err() != nil {
+			phase.finish(ctx.Err())
+			return finishValidateTimeout(stdout, &res, &recorder, "wsl_preflight", *asJSON)
+		}
+		if verdict.Status != "ready" {
+			phase.finishAs("failed", verdict.Detail)
+			return finishValidateWSLCapabilityRefusal(stdout, stderr, &res, &recorder, verdict, *asJSON)
+		}
+		phase.finish(nil)
+	} else {
+		recorder.skip("wsl_preflight", "native workspace selected")
+	}
 	prep, code, failed := prepareValidateWorkspace(validateWorkspaceRequest{
 		stdout: stdout, stderr: stderr, ctx: ctx, result: &res, recorder: &recorder,
 		root: r, tip: tip, mine: mine, testRun: *testRun, wslTests: *wslTests, asJSON: *asJSON,
@@ -605,6 +646,156 @@ func appendUniqueStrings(dst []string, values ...string) []string {
 		}
 	}
 	return dst
+}
+
+var validateWSLCommandSurface = []struct {
+	phase    string
+	commands []string
+}{
+	{phase: "launcher", commands: []string{"wsl.exe", "bash"}},
+	{phase: "test_materialize", commands: []string{"rm", "mkdir", "tar", "go"}},
+	{phase: "extract_tip", commands: []string{"rm", "mkdir", "git", "tar", "mv", "ls", "tail", "xargs"}},
+	{phase: "cleanup", commands: []string{"rm"}},
+	{phase: "overlay", commands: []string{"pwd", "mkdir", "cp", "rm"}},
+	{phase: "go_checks", commands: []string{"go", "gofmt"}},
+}
+
+func validateWSLRequiredCommandNames() []string {
+	seen := make(map[string]bool)
+	for _, surface := range validateWSLCommandSurface {
+		for _, command := range surface.commands {
+			seen[command] = true
+		}
+	}
+	commands := make([]string, 0, len(seen))
+	for command := range seen {
+		commands = append(commands, command)
+	}
+	sort.Strings(commands)
+	return commands
+}
+
+func runValidateWSLCapabilityCommand(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := windowgate.CommandContext(ctx, "wsl.exe", args...)
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
+	if exitErr, ok := err.(*exec.ExitError); ok && len(exitErr.Stderr) > 0 {
+		out = append(out, exitErr.Stderr...)
+	}
+	return out, err
+}
+
+func preflightValidateWSLCapabilitiesWithin(ctx context.Context) validateWSLCapabilityVerdict {
+	required := validateWSLRequiredCommandNames()
+	verdict := validateWSLCapabilityVerdict{Status: "ready", Required: required, Missing: []string{}}
+	wslPath, err := validateWSLLookPath("wsl.exe")
+	if err != nil {
+		verdict.Status = "missing"
+		verdict.Missing = []string{"wsl.exe"}
+		verdict.Detail = "WSL capability preflight: host command wsl.exe is unavailable; repair WSL and rerun; no fallback selected"
+		return verdict
+	}
+	validateWSLCapabilities.Lock()
+	if identityKey, ok := validateWSLCapabilities.identityByLauncher[wslPath]; ok {
+		if cached, found := validateWSLCapabilities.byIdentity[wslPath+"\x00"+identityKey]; found {
+			validateWSLCapabilities.Unlock()
+			cached.Cached = true
+			cached.Required = append([]string(nil), cached.Required...)
+			cached.Missing = append([]string(nil), cached.Missing...)
+			return cached
+		}
+	}
+	validateWSLCapabilities.Unlock()
+
+	probeCtx, cancel := context.WithTimeout(ctx, validateWSLPreflightTimeout)
+	defer cancel()
+	out, err := validateWSLCommand(probeCtx, "bash", "-lc", validateWSLCapabilityScript(required))
+	if err != nil {
+		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			verdict.Status = "unavailable"
+			verdict.Detail = fmt.Sprintf("WSL capability preflight exceeded %s before workspace allocation; repair WSL and rerun; no fallback selected", validateWSLPreflightTimeout)
+		} else {
+			verdict.Status = "missing"
+			verdict.Missing = []string{"bash"}
+			verdict.Detail = fmt.Sprintf("WSL capability preflight: bash is unavailable in the selected WSL environment: %s; repair WSL and rerun; no fallback selected", validateCommandDetail(out, err))
+		}
+		return verdict
+	}
+	identityOut, missingOut, err := parseValidateWSLCapabilityOutput(out)
+	if err != nil {
+		verdict.Status = "unavailable"
+		verdict.Detail = fmt.Sprintf("WSL capability preflight returned an invalid verdict: %v; repair WSL and rerun; no fallback selected", err)
+		return verdict
+	}
+	identity, identityKey := validateWSLEnvironmentIdentity(identityOut)
+	verdict.Identity = identity
+	cacheKey := wslPath + "\x00" + identityKey
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(string(missingOut), "\n") {
+		if command := strings.TrimSpace(line); command != "" && !seen[command] {
+			seen[command] = true
+			verdict.Missing = append(verdict.Missing, command)
+		}
+	}
+	sort.Strings(verdict.Missing)
+	if len(verdict.Missing) > 0 {
+		verdict.Status = "missing"
+		verdict.Detail = fmt.Sprintf("WSL capability preflight: environment %q is missing required command(s): %s; repair the selected WSL distribution and rerun; no fallback selected", verdict.Identity, strings.Join(verdict.Missing, ", "))
+	}
+	validateWSLCapabilities.Lock()
+	validateWSLCapabilities.byIdentity[cacheKey] = verdict
+	validateWSLCapabilities.identityByLauncher[wslPath] = identityKey
+	validateWSLCapabilities.Unlock()
+	return verdict
+}
+
+const (
+	validateWSLDistroPrefix = "__FAK_VALIDATE_DISTRO__="
+	validateWSLPathPrefix   = "__FAK_VALIDATE_PATH__="
+)
+
+func parseValidateWSLCapabilityOutput(out []byte) (identity, missing []byte, err error) {
+	lines := bytes.SplitN(bytes.ReplaceAll(out, []byte("\r\n"), []byte("\n")), []byte("\n"), 3)
+	if len(lines) < 2 || !bytes.HasPrefix(lines[0], []byte(validateWSLDistroPrefix)) || !bytes.HasPrefix(lines[1], []byte(validateWSLPathPrefix)) {
+		return nil, nil, fmt.Errorf("missing environment identity header")
+	}
+	distro := bytes.TrimPrefix(lines[0], []byte(validateWSLDistroPrefix))
+	path := bytes.TrimPrefix(lines[1], []byte(validateWSLPathPrefix))
+	identity = append(append(append([]byte(nil), distro...), '\n'), path...)
+	if len(lines) == 3 {
+		missing = lines[2]
+	}
+	return identity, missing, nil
+}
+
+func validateWSLEnvironmentIdentity(out []byte) (display, key string) {
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)
+	distro := strings.TrimSpace(parts[0])
+	path := ""
+	if len(parts) == 2 {
+		path = strings.TrimSpace(parts[1])
+	}
+	digest := sha256.Sum256([]byte(path))
+	return fmt.Sprintf("%s@path:%x", distro, digest[:6]), distro + "\x00" + fmt.Sprintf("%x", digest[:])
+}
+
+func validateWSLCapabilityScript(required []string) string {
+	var checked []string
+	for _, command := range required {
+		if command != "wsl.exe" {
+			checked = append(checked, posixQuote(command))
+		}
+	}
+	return "set -u; printf '" + validateWSLDistroPrefix + "%s\\n" + validateWSLPathPrefix + "%s\\n' \"${WSL_DISTRO_NAME:-unknown}\" \"${PATH:-}\"; " +
+		"for cmd in " + strings.Join(checked, " ") + "; do " +
+		"command -v \"$cmd\" >/dev/null 2>&1 || printf '%s\\n' \"$cmd\"; done"
+}
+
+func validateCommandDetail(out []byte, err error) string {
+	if detail := strings.TrimSpace(string(out)); detail != "" {
+		return detail
+	}
+	return err.Error()
 }
 
 func defaultValidateWSLTests(goos string) bool { return goos == "windows" }
@@ -1031,7 +1222,7 @@ func validateWriterIsTerminal(w io.Writer) bool {
 }
 
 func validatePhaseOrder(testOnly bool) []string {
-	phases := []string{"resolve_root", "resolve_ref", "normalize_mine", "extract_tip", "base_graph", "overlay"}
+	phases := []string{"resolve_root", "resolve_ref", "wsl_preflight", "normalize_mine", "extract_tip", "base_graph", "overlay"}
 	if !testOnly {
 		phases = append(phases, "gofmt")
 	}
@@ -1063,6 +1254,30 @@ func finishValidateTimeout(stdout io.Writer, res *validateResult, recorder *vali
 	recorder.finish()
 	emitValidateResult(stdout, *res, asJSON)
 	return 1
+}
+
+func finishValidateWSLCapabilityRefusal(stdout, stderr io.Writer, res *validateResult, recorder *validateRecorder, verdict validateWSLCapabilityVerdict, asJSON bool) int {
+	reason := "WSL_CAPABILITY_MISSING"
+	if verdict.Status == "unavailable" {
+		reason = "WSL_CAPABILITY_PREFLIGHT_FAILED"
+	}
+	res.OK = false
+	res.Partial = true
+	res.Reason = reason
+	res.Failures = append(res.Failures, ciPreflightFailure{Step: "wsl_preflight", Detail: verdict.Detail})
+	completed := make(map[string]bool, len(res.Phases))
+	for _, timing := range res.Phases {
+		completed[timing.Name] = true
+	}
+	for _, name := range recorder.phaseOrder {
+		if !completed[name] {
+			res.SkippedPhases = append(res.SkippedPhases, name)
+		}
+	}
+	recorder.finish()
+	emitValidateResult(stdout, *res, asJSON)
+	fmt.Fprintln(stderr, "fak validate: "+verdict.Detail)
+	return 2
 }
 
 func emitValidateResult(stdout io.Writer, res validateResult, asJSON bool) {

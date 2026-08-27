@@ -53,13 +53,15 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	var s *model.Session
 	closeSession := false
 	var cachedLogits []float32
+	skipExactDeviceL1Readmission := false
 	if reuse {
 		owner, scoped := prefixCacheIdentityFromContext(ctx)
+		scopedLookup := scoped && p.scopedTree != nil
 		var matchedKV *model.KVCache
 		var matchedSnapshot *model.PrefixSnapshot
 		var m int
 		var tier radixkv.SnapshotTier
-		if scoped && p.scopedTree != nil {
+		if scopedLookup {
 			if p.backend != nil {
 				matchedSnapshot, cachedLogits, m, _, tier, err = p.scopedTree.LookupSnapshotTieredContext(ctx, owner, ids)
 			} else {
@@ -128,6 +130,13 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 				sourceTier = radixkv.SnapshotTierMiss
 			}
 		}
+		// The unscoped hot tree already owns the full snapshot and lookup restored a
+		// deep clone into this session. Cached logits mean no prompt state changed, so
+		// capturing and admitting that same state again only performs a second clone.
+		// Scoped hits retain re-admission because lookup does not yet expose the source
+		// scope needed to prove that tenant materialization is redundant.
+		skipExactDeviceL1Readmission = !scopedLookup && matchedSnapshot != nil &&
+			matched == len(ids) && cachedLogits != nil && sourceTier == radixkv.SnapshotTierDeviceL1
 	}
 	if s == nil {
 		matched = 0
@@ -235,7 +244,7 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	// fresh Lookup→Insert→Done. The snapshot covers the FULL ids prefix, so it is a valid
 	// leaf kv no matter how much a concurrent turn may have inserted since step 1.
 	if reuse {
-		if p.backend != nil {
+		if p.backend != nil && !skipExactDeviceL1Readmission {
 			var snap *model.PrefixSnapshot
 			snap, err = s.PrefixSnapshot()
 			if err != nil {

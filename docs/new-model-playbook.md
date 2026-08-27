@@ -1,6 +1,6 @@
 ---
-title: "Adding a new model to fak — the fast path and the scaffold path"
-description: "A maintainer playbook for recognizing and validating a new model architecture in fak's in-kernel engine. One decision splits the work: a new frontier model that is a variant of a family fak already runs is a one-line arch alias plus a recognition test (minutes); a genuinely new topology is a `fak new-model` scaffold plus a forward implementation and an oracle (longer). Grounded in the Kimi and Bonsai aliases now in the tree."
+title: "Adding a new model to fak — pinned intake, fast path, and scaffold path"
+description: "A maintainer playbook for compiling a pinned model release into a refusal-safe onboarding packet, then recognizing and validating the architecture in fak's in-kernel engine."
 ---
 
 # Adding a new model to fak
@@ -10,7 +10,71 @@ new model architecture. It does **not** cover fronting a model through the gatew
 upstream serves is already fronted unchanged (see [supported models](supported/models.md), Layer 1).
 This is Layer 2: the pure-Go forward pass.
 
-The whole playbook turns on one question, so answer it first.
+Start every release with the deterministic intake below. Only an accepted packet reaches the
+architecture decision; refusal is a result, not a prompt to guess or fall back.
+
+## Compile the pinned release first
+
+```console
+fak new-model --from-manifest release.json --json
+```
+
+The read-only compiler accepts `fak.new-model-manifest/1` JSON from local disk and emits a
+`fak.new-model-onboarding-packet/1`. It performs no network request, model import, weight allocation,
+code write, runtime selection, or scaffold application. The synthetic, non-claiming Qwen3.8-family
+contract fixture is
+[`internal/newmodel/testdata/qwen38-valid.json`](../internal/newmodel/testdata/qwen38-valid.json).
+Its format-valid digest strings are deliberately synthetic and prove only compiler/refusal behavior;
+they are not artifact provenance, model-support evidence, or benchmark inputs. A real intake uses
+`release.evidence_class: "pinned-release"` and witnessed digests; fixtures use
+`"synthetic-non-claiming"`.
+
+The manifest pins four identities before any support work begins:
+
+- the source URI and immutable source revision;
+- the source-manifest SHA-256;
+- the exact model artifact SHA-256; and
+- the tokenizer, chat-template, and context-configuration SHA-256 values.
+
+The manifest also requires an explicit rollback action. Because intake is read-only, the action
+normally says to discard the packet and retain the previous native descriptor; later consumers must
+carry that action forward rather than inventing an implicit rollback after state changes.
+
+It also declares architecture aliases, the dimensions consumed by `internal/modeldescriptor`, a
+closed list of semantic deltas, the still-open semantic/oracle/backend/test/docs/performance
+obligations, and the candidate's coupling counts and budget. The compiler normalizes and sorts those
+set-like fields, validates the resulting `modeldescriptor.Descriptor`, and emits its digest and
+existing `modeldescriptor.Check` report. Recompiling the same logical manifest therefore produces
+byte-identical JSON.
+
+The packet always names `engine: "fak-native"` and
+`external_runtime_fallback: false`. Compatibility evidence from Transformers, vLLM, SGLang, or
+llama.cpp can inform an obligation, benchmark, or oracle; it cannot become an automatic execution
+path or close a fak-native rung.
+
+### Support ladder and closure
+
+| Rung | Compiler state | What closes it |
+|---|---|---|
+| `release-pinned` | complete | all source and artifact pins are present and well formed |
+| `descriptor-validated` | complete | `modeldescriptor.Validate` accepts the normalized descriptor |
+| `semantic-reference` | pending | every declared semantic and oracle obligation has captured evidence |
+| `fak-native` | pending | backend, conformance/refusal-test, and support-doc obligations are witnessed |
+| `optimized` | pending | quality-constrained, end-to-end performance obligations are witnessed |
+
+`registration_closure.open` lists every unresolved obligation as `kind:id`; it remains open in the
+intake packet by design. The packet is an immutable work contract, not a support-promotion receipt.
+
+### Typed refusal before allocation
+
+Semantic deltas use a closed axis/value vocabulary. An unknown axis or value returns
+`UNKNOWN_SEMANTIC_DELTA`; two values for one axis return `CONTRADICTORY_SEMANTIC_DELTA`. Both carry
+the unresolved `axis` in a `fak.new-model-refusal/1` JSON object, exit nonzero, and emit no scaffold
+or executable behavior. Invalid pins, malformed descriptors, and missing obligation categories also
+refuse before allocation. Repair the pinned manifest; do not translate a refusal into a generic
+external runtime.
+
+After the packet is accepted, answer the architecture question.
 
 ## The one decision
 
@@ -150,6 +214,8 @@ Run in order. Each rung proves more and costs more; stop where the risk for your
 
 ## Related
 
+- [Zero-day model-onboarding study](notes/CONCEPT-STUDY-ZERO-DAY-MODEL-ONBOARDING-2026-08-27.md)
+  — pinned vLLM/SGLang evidence and the release-to-descriptor design decision behind this compiler.
 - [Models supported by fak](supported/models.md) — the two meanings of "supported"; the in-kernel grid.
 - [Model-arch seam status (#487)](notes/model-arch-seam-status-487.md) — the stage-by-stage,
   file:line status of the seam this playbook rides.

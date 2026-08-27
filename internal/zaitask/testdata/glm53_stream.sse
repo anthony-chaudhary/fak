@@ -5,4 +5,3 @@ data: {"choices":[{"delta":{"reasoning_content":"second","content":"answer","too
 data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Paris\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":3}}}
 
 data: [DONE]
-

@@ -22,15 +22,26 @@ func TestNewLeafCommandDryRun(t *testing.T) {
 		t.Fatalf("runNewLeaf rc=%d stderr=%q", rc, stderr.String())
 	}
 	var report struct {
-		Name   string `json:"name"`
-		Tier   string `json:"tier"`
-		DryRun bool   `json:"dry_run"`
+		Name      string   `json:"name"`
+		Tier      string   `json:"tier"`
+		DryRun    bool     `json:"dry_run"`
+		NextSteps []string `json:"next_steps"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
 		t.Fatalf("unmarshal report: %v", err)
 	}
 	if report.Name != "fedtrust" || report.Tier != "primitive" || !report.DryRun {
 		t.Fatalf("unexpected report: %+v", report)
+	}
+	wantNextSteps := []string{
+		"1. name the end-to-end outcome and implement its smallest applied path through the real seam in internal/fedtrust/fedtrust.go",
+		"2. go test ./internal/fedtrust ./internal/architest to capture the working spine test or command that drives the real fedtrust object end to end",
+		"3. fak-dev issue fanout --title \"<feature>\" --leaf fedtrust --spine <commit|command|doc> --json",
+		"4. expand the exhaustive proof envelope around that spine: failure paths, edge cases, platforms, concurrency, and soak",
+		"5. measure the end-to-end baseline before optimizing, then keep only a net-true gain",
+	}
+	if strings.Join(report.NextSteps, "\n") != strings.Join(wantNextSteps, "\n") {
+		t.Fatalf("dry-run next_steps drifted:\ngot:  %#v\nwant: %#v", report.NextSteps, wantNextSteps)
 	}
 	if _, err := os.Stat(filepath.Join(root, "internal", "fedtrust")); !os.IsNotExist(err) {
 		t.Fatalf("leaf dir exists after dry-run, err=%v", err)

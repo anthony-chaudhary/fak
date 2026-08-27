@@ -8733,6 +8733,11 @@
           "category": "incidental",
           "reason": "Internal report-policy helper name, not a capability or authorization concept",
           "token": "applyWindowsJobPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private launcher-selected environment key for one helper bearer secret; it is not a new capability-policy concept",
+          "token": "FAK_APP_CAPABILITY"
         }
       ],
       "exclude": [
@@ -8766,6 +8771,7 @@
         "ErrNotAdjudicated",
         "EvidenceAdjudication",
         "EvidencePolicy",
+        "FAK_APP_CAPABILITY",
         "FAK_ORG_POLICY_CACHE_PATH",
         "FAK_ORG_POLICY_URL",
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",

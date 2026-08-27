@@ -380,29 +380,24 @@ func (s *Session) normWeightHAL(name string) compute.Tensor {
 		return s.weightHAL(name)
 	}
 	key := name + "#norm-gain-1p"
-	if t, ok := s.halW[key]; ok {
-		return t
+	stage := func() compute.Tensor {
+		meta, ok := s.M.manifest[name]
+		if !ok {
+			panic("model: missing tensor " + name)
+		}
+		data := append([]float32(nil), s.M.tensor(name)...)
+		for i := range data {
+			data[i]++
+		}
+		return s.uploadHostF32(meta.Shape, data, compute.MemoryWeights, "hal-weight "+key)
 	}
-	meta, ok := s.M.manifest[name]
-	if !ok {
-		panic("model: missing tensor " + name)
-	}
-	data := append([]float32(nil), s.M.tensor(name)...)
-	for i := range data {
-		data[i]++
-	}
-	t := s.uploadHostF32(meta.Shape, data, compute.MemoryWeights, "hal-weight "+key)
-	s.halW[key] = t
-	return t
+	return s.cachedImmutableWeight(key, "f32:"+key, stage)
 }
 
 func (s *Session) derivedWeightHAL(key string, shape []int, data []float32) compute.Tensor {
-	if t, ok := s.halW[key]; ok {
-		return t
-	}
-	t := s.uploadHostF32(shape, data, compute.MemoryWeights, "hal-weight "+key)
-	s.halW[key] = t
-	return t
+	return s.cachedImmutableWeight(key, "f32:"+key, func() compute.Tensor {
+		return s.uploadHostF32(shape, data, compute.MemoryWeights, "hal-weight "+key)
+	})
 }
 
 func splitQwen35HeadInterleavedRows(src []float32, nHeads, headDim, rowWidth int) (query, gate []float32) {

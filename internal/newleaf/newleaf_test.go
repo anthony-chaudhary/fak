@@ -110,9 +110,25 @@ func TestImplGoRegisterAddsABIAndInit(t *testing.T) {
 	}
 }
 
-func TestTestGoHasReadyTest(t *testing.T) {
-	if !strings.Contains(TestGo("fedtrust"), "func TestReady") {
-		t.Fatal("generated test missing TestReady")
+func TestTestGoScaffoldsWorkingSpine(t *testing.T) {
+	want := `package fedtrust
+
+import "testing"
+
+// TestSpine drives the generated leaf's real surface end to end. Keep this
+// representative path working while the proof envelope expands around it.
+func TestSpine(t *testing.T) {
+	if !Ready() {
+		t.Fatal("generated leaf spine did not reach Ready")
+	}
+}
+`
+	got := TestGo("fedtrust")
+	if got != want {
+		t.Fatalf("generated spine scaffold drifted:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+	if strings.Contains(got, "TestTODO") {
+		t.Fatal("generated spine regressed to a disconnected TestTODO")
 	}
 }
 
@@ -213,6 +229,24 @@ func TestApplyDryRunDoesNotWrite(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "internal", "fedtrust")); !os.IsNotExist(err) {
 		t.Fatalf("leaf dir exists after dry-run, err=%v", err)
+	}
+}
+
+func TestApplyDryRunOrdersSpineThenFanout(t *testing.T) {
+	root := newLeafWorkspace(t)
+	report, err := Apply(Options{Root: root, Name: "fedtrust", Tier: "primitive", DryRun: true})
+	if err != nil {
+		t.Fatalf("Apply dry-run returned error: %v", err)
+	}
+	want := []string{
+		"1. name the end-to-end outcome and implement its smallest applied path through the real seam in internal/fedtrust/fedtrust.go",
+		"2. go test ./internal/fedtrust ./internal/architest to capture the working spine test or command that drives the real fedtrust object end to end",
+		"3. fak-dev issue fanout --title \"<feature>\" --leaf fedtrust --spine <commit|command|doc> --json",
+		"4. expand the exhaustive proof envelope around that spine: failure paths, edge cases, platforms, concurrency, and soak",
+		"5. measure the end-to-end baseline before optimizing, then keep only a net-true gain",
+	}
+	if strings.Join(report.NextSteps, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("dry-run next_steps drifted:\ngot:  %#v\nwant: %#v", report.NextSteps, want)
 	}
 }
 

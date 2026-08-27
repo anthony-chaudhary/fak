@@ -73,13 +73,31 @@ type CommitVelocity struct {
 // clock at the commit/push boundaries) so the scorer stays pure and clock-free —
 // which is exactly what makes it injected-clock testable.
 func ScoreCommitVelocity(res Result, localElapsed, pushElapsed time.Duration, budgets VelocityBudgets) CommitVelocity {
-	localQualified := res.Committed && res.Verified
+	localQualified := res.Committed && res.DeliveryVerified()
 	pushQualified := localQualified && res.Pushed
 
 	return CommitVelocity{
 		Local: velocityLeg(localElapsed, budgets.Local, localQualified, localUnscoredNote(res)),
 		Push:  velocityLeg(pushElapsed, budgets.Push, pushQualified, pushUnscoredNote(res)),
 	}
+}
+
+// requalifyCommitVelocity preserves measured timings while applying a newly attached completion
+// contract. CommitWith measures before cmd/fak attaches compile/test evidence, so failing to fold
+// the same axes here would leave a skipped-infra receipt with an incorrectly SCORED local leg.
+func requalifyCommitVelocity(res *Result) {
+	if res == nil || res.Velocity == nil {
+		return
+	}
+	v := ScoreCommitVelocity(*res,
+		time.Duration(res.Velocity.Local.ElapsedNS),
+		time.Duration(res.Velocity.Push.ElapsedNS),
+		VelocityBudgets{
+			Local: time.Duration(res.Velocity.Local.BudgetNS),
+			Push:  time.Duration(res.Velocity.Push.BudgetNS),
+		},
+	)
+	res.Velocity = &v
 }
 
 // velocityLeg builds one leg. When qualified it carries a budget-relative score and
@@ -132,7 +150,7 @@ func localUnscoredNote(res Result) string {
 	switch {
 	case !res.Committed:
 		return "no commit landed"
-	case !res.Verified:
+	case !res.DeliveryVerified():
 		return "commit did not verify"
 	default:
 		return ""
@@ -142,7 +160,7 @@ func localUnscoredNote(res Result) string {
 // pushUnscoredNote explains why the push leg did not qualify.
 func pushUnscoredNote(res Result) string {
 	switch {
-	case !res.Committed || !res.Verified:
+	case !res.Committed || !res.DeliveryVerified():
 		return "local commit did not qualify"
 	case !res.Pushed:
 		if res.Reason == ReasonPushRejected {

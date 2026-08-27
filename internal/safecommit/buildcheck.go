@@ -93,6 +93,10 @@ type BuildCheckResult struct {
 	// Detail carries the compiler transcript (red outcomes) or the error that stopped the gate
 	// (skips), so the skip is diagnosable from the JSON alone rather than from stderr.
 	Detail string `json:"detail,omitempty"`
+	// CompileEvidence and TestEvidence separate the validator's two delivery claims. Empty is
+	// accepted only for legacy producers and is conservatively derived from Outcome.
+	CompileEvidence EvidenceOutcome `json:"compile_evidence,omitempty"`
+	TestEvidence    EvidenceOutcome `json:"test_evidence,omitempty"`
 }
 
 // ClassifyBuildCheckError maps the error that aborted the gate onto the outcome it must

@@ -25,7 +25,7 @@ func ScoreResult(res Result) Result {
 func resultScore(res Result) (int, []string) {
 	if strings.TrimSpace(res.Reason) == "" {
 		switch {
-		case res.Verified:
+		case res.DeliveryVerified():
 			// A commit admitted WITHOUT its prospective tree ever being compiled is not a
 			// full-credit commit (#6006): the gate the checkpoint bar leans on did not run, so
 			// the grade must differ from one that passed it. 85 lands it a whole GRADE below a
@@ -39,6 +39,8 @@ func resultScore(res Result) (int, []string) {
 				return 94, []string{"verified commit; optional review unavailable"}
 			}
 			return 100, nil
+		case res.RecordOnlyVerified():
+			return 85, []string{"record-only commit; compile and test were not required"}
 		case res.Committed:
 			return 55, []string{"commit landed but verification did not complete"}
 		default:
@@ -54,7 +56,7 @@ func resultScore(res Result) (int, []string) {
 	case ReasonWriterLeaseHeld:
 		return 82, []string{"retryable worktree-writer contention (a sync apply window holds the #4240 writer lease)"}
 	case ReasonPushRejected:
-		if res.Verified {
+		if res.DeliveryVerified() {
 			return 80, []string{"verified local commit; push rejected"}
 		}
 		return 60, []string{"push rejected before a verified local result"}

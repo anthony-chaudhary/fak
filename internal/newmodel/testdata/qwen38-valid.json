@@ -1,0 +1,74 @@
+{
+  "schema": "fak.new-model-manifest/1",
+  "release": {
+    "id": "synthetic-qwen38-family",
+    "family": "qwen38",
+    "revision": "synthetic-contract-v1",
+    "evidence_class": "synthetic-non-claiming"
+  },
+  "rollback": "discard this read-only packet and retain the previous native descriptor",
+  "source": {
+    "uri": "fixture://synthetic/qwen38/config.json",
+    "revision": "ffffffffffffffffffffffffffffffffffffffff",
+    "manifest_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "artifact": {
+    "uri": "fixture://synthetic/qwen38/model.gguf",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "tokenizer_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "chat_template_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "context_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "descriptor": {
+    "aliases": ["Qwen3_8ForCausalLM", "qwen3.8", "qwen38"],
+    "topology": ["decoder", "pre_norm", "hybrid_attention"],
+    "state": [
+      {"kind": "kv", "shape": [32, 128], "bytes_per_element": 2},
+      {"kind": "gdn", "shape": [64], "bytes_per_element": 4}
+    ],
+    "quantization": ["q4_k_m"],
+    "storage": ["gguf"],
+    "tokenizer": ["bpe"],
+    "tools": ["json_tools"],
+    "multimodal": ["text_only"],
+    "backends": ["metal", "cuda", "cpu"],
+    "kernels": ["gated_delta_net", "grouped_query_attention", "swiglu"],
+    "envelopes": ["m3_pro_p32_t64", "a100_p1_decode"],
+    "oracles": ["semantic_answer_quality_v2"],
+    "readiness": ["manifest_only"],
+    "migration": ["retain_previous_native_descriptor"],
+    "forbidden": [["external_runtime", "native_ready"]]
+  },
+  "semantic_deltas": [
+    {"axis": "attention", "value": "hybrid"},
+    {"axis": "ffn", "value": "swiglu"},
+    {"axis": "normalization", "value": "rmsnorm"},
+    {"axis": "position", "value": "rope"},
+    {"axis": "routing", "value": "moe_topk"},
+    {"axis": "state", "value": "hybrid"}
+  ],
+  "obligations": [
+    {"id": "confirm_tensor_names", "kind": "semantic", "description": "Confirm the pinned release tensor names against the qwen38 family resolver."},
+    {"id": "capture_quality_oracle", "kind": "oracle", "description": "Capture the frozen semantic-answer-quality oracle on the pinned artifact."},
+    {"id": "prove_native_backends", "kind": "backend", "description": "Prove fak-native prefill and decode on every declared backend envelope."},
+    {"id": "run_conformance_and_refusals", "kind": "test", "description": "Run recognition, conformance, unknown-delta, and contradictory-delta witnesses."},
+    {"id": "update_support_surfaces", "kind": "docs", "description": "Update the supported-model grid and rollback note from the accepted receipts."},
+    {"id": "match_performance_envelopes", "kind": "performance", "description": "Capture quality-constrained end-to-end comparisons for each declared envelope."}
+  ],
+  "coupling": {
+    "counts": {
+      "core_switches": 0,
+      "outside_leaf_files": 1,
+      "architecture_branches": 0,
+      "duplicated_lifecycle": 0,
+      "duplicated_metrics": 0
+    },
+    "budget": {
+      "core_switches": 0,
+      "outside_leaf_files": 1,
+      "architecture_branches": 0,
+      "duplicated_lifecycle": 0,
+      "duplicated_metrics": 0
+    }
+  }
+}
