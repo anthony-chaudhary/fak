@@ -353,6 +353,34 @@ int mg_gdn_state_run(int owner,
     }
 }
 
+// Encode the resident GDN operation into a caller-owned projection graph. All
+// projected operands are already graph-resident; only the small immutable GDN
+// vectors are staged. The existing private convolution/recurrent buffers are
+// mutated in place and remain the same owner handed to resident decode.
+extern void *mg_graph_command_buffer(void *graph);
+extern void *mg_graph_alloc_result(void *graph, int n);
+void *mg_gdn_graph_encode(void *graph, int owner,
+                          void *mixedPtr, void *zPtr, void *bPtr, void *aPtr,
+                          const float *convW, const float *aLog, const float *dtBias, const float *norm,
+                          int tokens, int nK, int nV, int kHd, int vHd, int convKernel, float eps) {
+    if(!graph||owner<0||owner>=MG_GDN_MAX_OWNERS||tokens!=32||!mixedPtr||!zPtr||!bPtr||!aPtr||!convW||!aLog||!dtBias||!norm||eps<=0||!mg_gdn_pipelines())return NULL;
+    MGGDNOwner slot;@synchronized(gDev){slot=gGDNOwners[owner];}
+    if(slot.conv==NULL||slot.recurrent==NULL||slot.nK!=nK||slot.nV!=nV||slot.kHd!=kHd||slot.vHd!=vHd||slot.convKernel!=convKernel)return NULL;
+    int keyDim=nK*kHd,valueDim=nV*vHd,convDim=2*keyDim+valueDim;
+    id<MTLBuffer>mixed=(__bridge id<MTLBuffer>)mixedPtr,z=(__bridge id<MTLBuffer>)zPtr,b=(__bridge id<MTLBuffer>)bPtr,a=(__bridge id<MTLBuffer>)aPtr;
+    id<MTLBuffer>convWB=mg_gdn_shared(convW,(size_t)convDim*convKernel),aLogB=mg_gdn_shared(aLog,nV),dtBiasB=mg_gdn_shared(dtBias,nV),normB=mg_gdn_shared(norm,vHd);
+    id<MTLBuffer>convOut=[gDev newBufferWithLength:(size_t)tokens*convDim*sizeof(float) options:MTLResourceStorageModePrivate];
+    id<MTLBuffer>qNorm=[gDev newBufferWithLength:(size_t)tokens*nK*kHd*sizeof(float) options:MTLResourceStorageModePrivate];
+    id<MTLBuffer>kNorm=[gDev newBufferWithLength:(size_t)tokens*nK*kHd*sizeof(float) options:MTLResourceStorageModePrivate];
+    id<MTLBuffer>core=(__bridge id<MTLBuffer>)mg_graph_alloc_result(graph,tokens*valueDim);
+    id<MTLCommandBuffer>command=(__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(graph);
+    if(!mixed||!z||!b||!a||!convWB||!aLogB||!dtBiasB||!normB||!convOut||!qNorm||!kNorm||!core||!command)return NULL;
+    id<MTLComputeCommandEncoder>encoder=[command computeCommandEncoder];
+    [encoder setComputePipelineState:gGDNConvPSO];[encoder setBuffer:mixed offset:0 atIndex:0];[encoder setBuffer:convWB offset:0 atIndex:1];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.conv offset:0 atIndex:2];[encoder setBuffer:convOut offset:0 atIndex:3];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:4];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:5];[encoder setBytes:&convKernel length:sizeof(convKernel) atIndex:6];[encoder dispatchThreads:MTLSizeMake((NSUInteger)convDim,1,1) threadsPerThreadgroup:MTLSizeMake(256,1,1)];[encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+    int qThreads=mg_gdn_threads(kHd);[encoder setComputePipelineState:gGDNQKNormPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:3];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:4];[encoder setBytes:&nK length:sizeof(nK) atIndex:5];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:6];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nK,(NSUInteger)tokens,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads,1,1)];[encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+    int vThreads=mg_gdn_threads(vHd);[encoder setComputePipelineState:gGDNRecurrentPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBuffer:z offset:0 atIndex:3];[encoder setBuffer:b offset:0 atIndex:4];[encoder setBuffer:a offset:0 atIndex:5];[encoder setBuffer:aLogB offset:0 atIndex:6];[encoder setBuffer:dtBiasB offset:0 atIndex:7];[encoder setBuffer:normB offset:0 atIndex:8];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.recurrent offset:0 atIndex:9];[encoder setBuffer:core offset:0 atIndex:10];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:11];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];[encoder setBytes:&nK length:sizeof(nK) atIndex:13];[encoder setBytes:&nV length:sizeof(nV) atIndex:14];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:15];[encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];[encoder setBytes:&eps length:sizeof(eps) atIndex:17];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads,1,1)];[encoder endEncoding];return (__bridge void*)core;
+}
+
 int mg_gdn_state_seed(int owner, const float *conv, int convElems, const float *recurrent, int recurrentElems) {
     @autoreleasepool {
         if (owner < 0 || owner >= MG_GDN_MAX_OWNERS || recurrent == NULL) return 0;

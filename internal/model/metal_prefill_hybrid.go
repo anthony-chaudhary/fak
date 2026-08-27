@@ -33,8 +33,242 @@ var (
 )
 
 type metalQwen35GDNSequenceBackend struct {
-	mu     sync.Mutex
-	states map[Qwen35GDNAuxState]*metalgemm.GDNState
+	mu                             sync.Mutex
+	states                         map[Qwen35GDNAuxState]*metalgemm.GDNState
+	forwardReceipt                 qwen35MetalForwardSequenceReceipt
+	forwardRan                     bool
+	injectForwardPostSubmitFailure bool
+}
+
+func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequenceReceipt() (qwen35MetalForwardSequenceReceipt, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.forwardReceipt, b.forwardRan
+}
+
+func (b *metalQwen35GDNSequenceBackend) setForwardReceipt(r qwen35MetalForwardSequenceReceipt) {
+	b.mu.Lock()
+	b.forwardReceipt = r
+	b.forwardRan = true
+	b.mu.Unlock()
+}
+
+func qwen35GraphProjection(g *metalgemm.ProjectionGraph, s *Session, name string, input *metalgemm.GraphResult, quantized map[*metalgemm.GraphResult]*metalgemm.QuantizedGraphResult) (*metalgemm.GraphResult, error) {
+	m := s.M
+	if qt := m.q4kw[name]; qt != nil {
+		w := m.metalQ4KWeight(name, qt)
+		if w == nil {
+			return nil, fmt.Errorf("metalgemm: Q4_K graph weight unavailable: %s", name)
+		}
+		return g.EncodeQ4KFrom(w, input)
+	}
+	if qt := m.kqw[name]; qt != nil {
+		w := m.metalQ6KWeight(name, qt)
+		if w == nil {
+			return nil, fmt.Errorf("metalgemm: Q6_K graph weight unavailable: %s", name)
+		}
+		return g.EncodeQ6KFrom(w, input)
+	}
+	qt := m.q8w[name]
+	if qt == nil {
+		return nil, fmt.Errorf("metalgemm: Q8 graph weight missing: %s", name)
+	}
+	w := m.metalQ8Weight(name, qt)
+	if w == nil {
+		return nil, fmt.Errorf("metalgemm: Q8 graph weight unavailable: %s", name)
+	}
+	q := quantized[input]
+	if q == nil {
+		var err error
+		q, err = g.QuantizeQ8(input)
+		if err != nil {
+			return nil, err
+		}
+		quantized[input] = q
+	}
+	return g.EncodeQ8From(w, q)
+}
+
+func qwen35GraphProjections(g *metalgemm.ProjectionGraph, s *Session, names []string, input *metalgemm.GraphResult, quantized map[*metalgemm.GraphResult]*metalgemm.QuantizedGraphResult) ([]*metalgemm.GraphResult, error) {
+	out := make([]*metalgemm.GraphResult, len(names))
+	for i, name := range names {
+		var err error
+		out[i], err = qwen35GraphProjection(g, s, name, input, quantized)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func qwen35MetalForwardGeometryError(cfg Config) error {
+	if cfg.NumExperts != 0 || cfg.AttentionBias || cfg.LayerNorm || cfg.QKNormPerHeadWeight ||
+		cfg.HiddenSize <= 0 || cfg.HiddenSize%32 != 0 || cfg.IntermediateSize <= 0 || cfg.IntermediateSize%32 != 0 ||
+		cfg.HeadDim < 2 || cfg.HeadDim > 256 || cfg.HeadDim%2 != 0 || cfg.NumHeads <= 0 || cfg.NumKVHeads <= 0 ||
+		cfg.NumHeads%cfg.NumKVHeads != 0 {
+		return fmt.Errorf("metalgemm: unsupported exact P32 Qwen hybrid geometry")
+	}
+	return nil
+}
+
+func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequence(s *Session, ids []int) ([]float32, qwen35MetalForwardSequenceReceipt, bool, error) {
+	if s == nil || s.M == nil || s.Backend != nil || !s.Q4K || !s.MetalQ4K || len(ids) != 32 || s.qwen35HAL == nil || !s.qwen35HAL.sequenceAccepted {
+		return nil, qwen35MetalForwardSequenceReceipt{}, false, nil
+	}
+	m, cfg := s.M, s.M.Cfg
+	if err := qwen35MetalForwardGeometryError(cfg); err != nil {
+		return nil, qwen35MetalForwardSequenceReceipt{}, true, err
+	}
+	base, H, P := s.Cache.Len(), cfg.HiddenSize, len(ids)
+	if base+P > 4096 {
+		return nil, qwen35MetalForwardSequenceReceipt{}, true, fmt.Errorf("metalgemm: P32 graph attention context %d exceeds 4096", base+P)
+	}
+	// Resolve every resident handle before graph construction. Once Begin succeeds,
+	// any failure remains accepted and cannot replay through the host forward.
+	s.prefillQwen35HybridQ4KMetalUpload()
+	embed := m.embedRows()
+	X := make([]float32, P*H)
+	for i, id := range ids {
+		copy(X[i*H:(i+1)*H], embed[id*H:(id+1)*H])
+		scaleEmbedInPlace(X[i*H:(i+1)*H], cfg)
+	}
+	g, err := metalgemm.BeginProjectionGraph(X, nil, nil, P, H)
+	if err != nil {
+		return nil, qwen35MetalForwardSequenceReceipt{}, true, err
+	}
+	defer g.Free()
+	if b.injectForwardPostSubmitFailure {
+		g.InjectPostSubmitFailureForTest()
+	}
+	x, err := g.Input(H)
+	if err != nil {
+		return nil, qwen35MetalForwardSequenceReceipt{}, true, err
+	}
+	quantized := make(map[*metalgemm.GraphResult]*metalgemm.QuantizedGraphResult)
+	type kvResult struct {
+		layer          int
+		kraw, kpost, v *metalgemm.GraphResult
+	}
+	var kvResults []kvResult
+	eps := float32(cfg.RMSNormEps)
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := func(suffix string) string { return layerName(l, suffix) }
+		xn, runErr := g.RMSNorm(x, m.tensor(p("input_layernorm.weight")), eps, cfg.NormGain1p)
+		if runErr != nil {
+			return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+		}
+		var attnOut *metalgemm.GraphResult
+		if cfg.isLinearAttnLayer(l) {
+			in, runErr := qwen35GraphProjections(g, s, []string{
+				p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"),
+				p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"),
+			}, xn, quantized)
+			if runErr != nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+			}
+			state := b.state(s.qwen35HAL.sequenceLayers[l])
+			if state == nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, fmt.Errorf("metalgemm: missing GDN graph owner for layer %d", l)
+			}
+			core, runErr := g.GDN(state, in[0], in[1], in[2], in[3], metalgemm.GDNPanel{
+				Conv1D: m.tensor(p("linear_attn.conv1d.weight")), ALog: m.tensor(p("linear_attn.A_log")),
+				DTBias: m.tensor(p("linear_attn.dt_bias")), Norm: m.tensor(p("linear_attn.norm.weight")), RMSNormEpsilon: eps,
+			})
+			if runErr != nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+			}
+			attnOut, runErr = qwen35GraphProjection(g, s, p("linear_attn.out_proj.weight"), core, quantized)
+			if runErr != nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+			}
+		} else {
+			qkv, runErr := qwen35GraphProjections(g, s, []string{p("self_attn.q_proj.weight"), p("self_attn.k_proj.weight"), p("self_attn.v_proj.weight")}, xn, quantized)
+			if runErr != nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+			}
+			q, gate, runErr := g.SplitGatedQ(qkv[0], cfg.NumHeads*cfg.HeadDim, cfg.HeadDim)
+			if runErr != nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+			}
+			qnorm, knorm := make([]float32, cfg.HeadDim), make([]float32, cfg.HeadDim)
+			if cfg.QKNorm {
+				qnorm = m.tensor(p("self_attn.q_norm.weight"))
+				knorm = m.tensor(p("self_attn.k_norm.weight"))
+				qwidth, kvwidth := cfg.NumHeads*cfg.HeadDim, cfg.NumKVHeads*cfg.HeadDim
+				if len(qnorm) != cfg.HeadDim && len(qnorm) != qwidth || len(knorm) != cfg.HeadDim && len(knorm) != kvwidth {
+					return nil, qwen35MetalForwardSequenceReceipt{}, true, fmt.Errorf("metalgemm: P32 Qwen graph requires shared or projection-wide per-head Q/K norm weights")
+				}
+			}
+			rotary := cfg.rotaryDim()
+			cosv, sinv := make([]float32, 0, P*(rotary/2)), make([]float32, 0, P*(rotary/2))
+			for pos := 0; pos < P; pos++ {
+				c, si := ropeRowForLayer(cfg, l, base+pos)
+				cosv, sinv = append(cosv, c...), append(sinv, si...)
+			}
+			attention, runErr := g.FullAttention(q, qkv[1], qkv[2], gate, qnorm, knorm, cosv, sinv,
+				s.Cache.K[l], s.Cache.V[l], base, cfg.NumHeads, cfg.NumKVHeads, cfg.HeadDim, rotary, cfg.attnScale(), cfg.qkNormEps(), cfg.NormGain1p, cfg.QKNorm)
+			if runErr != nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+			}
+			attnOut, runErr = qwen35GraphProjection(g, s, p("self_attn.o_proj.weight"), attention.Output, quantized)
+			if runErr != nil {
+				return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+			}
+			kvResults = append(kvResults, kvResult{layer: l, kraw: attention.KRaw, kpost: attention.KPost, v: attention.V})
+		}
+		if err = g.AddInPlace(x, attnOut); err != nil {
+			return nil, qwen35MetalForwardSequenceReceipt{}, true, err
+		}
+		xn2, runErr := g.RMSNorm(x, m.tensor(p("post_attention_layernorm.weight")), eps, cfg.NormGain1p)
+		if runErr != nil {
+			return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+		}
+		gu, runErr := qwen35GraphProjections(g, s, []string{p("mlp.gate_proj.weight"), p("mlp.up_proj.weight")}, xn2, quantized)
+		if runErr != nil {
+			return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+		}
+		if err = g.SwiGLUInPlace(gu[0], gu[1]); err != nil {
+			return nil, qwen35MetalForwardSequenceReceipt{}, true, err
+		}
+		down, runErr := qwen35GraphProjection(g, s, p("mlp.down_proj.weight"), gu[0], quantized)
+		if runErr != nil {
+			return nil, qwen35MetalForwardSequenceReceipt{}, true, runErr
+		}
+		if err = g.AddInPlace(x, down); err != nil {
+			return nil, qwen35MetalForwardSequenceReceipt{}, true, err
+		}
+	}
+	hiddenResult, err := g.LastRMSNorm(x, m.tensor("model.norm.weight"), eps, cfg.NormGain1p)
+	if err != nil {
+		return nil, qwen35MetalForwardSequenceReceipt{}, true, err
+	}
+	terminal := []*metalgemm.GraphResult{hiddenResult}
+	for _, kv := range kvResults {
+		terminal = append(terminal, kv.kraw, kv.kpost, kv.v)
+	}
+	outputs, graphReceipt, err := g.FinishRead(terminal...)
+	receipt := qwen35MetalForwardSequenceReceipt{Tokens: P, CommandBuffers: 1, Encoders: graphReceipt.Encoders, TerminalWaits: 1, TerminalReadbacks: graphReceipt.HostReadbacks, Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait}
+	b.setForwardReceipt(receipt)
+	if err != nil || !graphReceipt.Committed || !graphReceipt.CompletedWait || graphReceipt.HostReadbacks != 1 {
+		if err == nil {
+			err = fmt.Errorf("metalgemm: incomplete Qwen graph receipt: %+v", graphReceipt)
+		}
+		return nil, receipt, true, err
+	}
+	hidden := outputs[0]
+	outIndex := 1
+	for _, kv := range kvResults {
+		s.Cache.Kraw[kv.layer] = append(s.Cache.Kraw[kv.layer], outputs[outIndex]...)
+		s.Cache.K[kv.layer] = append(s.Cache.K[kv.layer], outputs[outIndex+1]...)
+		s.Cache.V[kv.layer] = append(s.Cache.V[kv.layer], outputs[outIndex+2]...)
+		outIndex += 3
+	}
+	for i, id := range ids {
+		s.Cache.appendPosition(base+i, id)
+	}
+	s.q4kHybridPrefillChunks++
+	s.q4kHybridPrefillLastBase = base
+	return hidden, receipt, true, nil
 }
 
 func init() {

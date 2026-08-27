@@ -25,6 +25,8 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit the committed native-performance graph as JSON")
 	nextOut := fs.Bool("next", false, "emit the first dependency-ready unwitnessed lever")
+	currentOut := fs.Bool("current", false, "emit the current native-performance constraint portfolio as JSON")
+	currentMD := fs.Bool("current-md", false, "emit the generated current native-performance constraint page")
 	dotOut := fs.Bool("dot", false, "emit the lever graph as Graphviz DOT")
 	baselineLever := fs.String("baseline", "", "emit a pre-change baseline receipt template for LEVER")
 	compareBaseline := fs.String("compare", "", "compare baseline receipt FILE with --candidate FILE")
@@ -49,7 +51,7 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	fs.Visit(func(f *flag.Flag) {
 		set[f.Name] = true
 	})
-	modeCount := boolCount(*jsonOut, *nextOut, *dotOut)
+	modeCount := boolCount(*jsonOut, *nextOut, *currentOut, *currentMD, *dotOut)
 	if *baselineLever != "" {
 		modeCount++
 	}
@@ -78,7 +80,7 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 	attachMode := set["attach-receipt"] || set["system-baseline"]
 	frontdoorMode := *frontdoorMD || *checkDoc || *writeDoc
 	if fs.NArg() != 0 || modeCount > 1 || ((*compareBaseline == "") != (*compareCandidate == "")) || (set["profile"] && *profilePath == "") || (set["profile-next"] && *profileNextPath == "") || (set["gate"] && *gatePath == "") || (set["capacity-receipt"] && *capacityReceiptPath == "") || (attachMode && (*attachReceiptPath == "" || *attachBaselinePath == "")) || (set["out"] && !attachMode) || (set["as-of"] && !frontdoorMode) || (set["workspace"] && !(*checkDoc || *writeDoc)) {
-		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --attach-receipt RECEIPT --system-baseline ATTESTATION [--out FILE] | --capacity-plan | --capacity-receipt FILE | --frontdoor-md [--as-of DATE] | (--check-doc|--write-doc) [--as-of DATE] [--workspace DIR]]")
+		fmt.Fprintln(stderr, "usage: fak native-performance [--json | --next | --current | --current-md | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --attach-receipt RECEIPT --system-baseline ATTESTATION [--out FILE] | --capacity-plan | --capacity-receipt FILE | --frontdoor-md [--as-of DATE] | (--check-doc|--write-doc) [--as-of DATE] [--workspace DIR]]")
 		return 2
 	}
 
@@ -174,6 +176,18 @@ func runNativePerformance(stdout, stderr io.Writer, args []string) int {
 		}
 		renderNextNativePerformance(stdout, *next)
 		return 0
+	}
+	if *currentOut || *currentMD {
+		snapshot, err := nativeperf.BuildCurrentSnapshot(graph)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak native-performance: current snapshot: %v\n", err)
+			return 1
+		}
+		if *currentMD {
+			fmt.Fprint(stdout, nativeperf.RenderCurrentMarkdown(snapshot))
+			return 0
+		}
+		return encodeNativePerformanceJSON(stdout, stderr, snapshot)
 	}
 	if *dotOut {
 		dot, err := nativeperf.DOT(graph)

@@ -169,6 +169,8 @@ type GDNState struct {
 	geometry        GDNGeometry
 	conv, recurrent GDNStateHandle
 	closed          bool
+	graphDone       chan struct{}
+	graphWaiters    int
 }
 
 // NewGDNState allocates zeroed convolution-window and recurrent-state buffers.
@@ -225,11 +227,64 @@ func (s *GDNState) Run(panel GDNPanel) (core []float32, accounting GDNAccounting
 	return s.run(panel, false)
 }
 
+// lockIdle excludes state mutation while a caller-owned graph has encoded this
+// owner but has not yet completed its terminal wait. The channel avoids holding
+// a Go mutex across separate graph API calls while preserving Run's lifetime.
+func (s *GDNState) lockIdle() {
+	s.mu.Lock()
+	for s.graphDone != nil {
+		done := s.graphDone
+		s.graphWaiters++
+		s.mu.Unlock()
+		<-done
+		s.mu.Lock()
+		s.graphWaiters--
+	}
+}
+
+func (s *GDNState) graphGeometry() (GDNGeometry, error) {
+	if s == nil {
+		return GDNGeometry{}, &GDNDeclinedError{Reason: "nil owner"}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return GDNGeometry{}, &GDNDeclinedError{Reason: "owner is closed"}
+	}
+	return s.geometry, nil
+}
+
+func (s *GDNState) retainGraph() (C.int, chan struct{}, error) {
+	if s == nil {
+		return -1, nil, &GDNDeclinedError{Reason: "nil owner"}
+	}
+	s.lockIdle()
+	defer s.mu.Unlock()
+	if s.closed {
+		return -1, nil, &GDNDeclinedError{Reason: "owner is closed"}
+	}
+	done := make(chan struct{})
+	s.graphDone = done
+	return s.owner, done, nil
+}
+
+func (s *GDNState) releaseGraph(done chan struct{}) {
+	if s == nil || done == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.graphDone == done {
+		s.graphDone = nil
+		close(done)
+	}
+	s.mu.Unlock()
+}
+
 func (s *GDNState) run(panel GDNPanel, injectPostSubmitFailure bool) ([]float32, GDNAccounting, bool, error) {
 	if s == nil {
 		return nil, GDNAccounting{}, false, &GDNDeclinedError{Reason: "nil owner"}
 	}
-	s.mu.Lock()
+	s.lockIdle()
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil, GDNAccounting{}, false, &GDNDeclinedError{Reason: "owner is closed"}
@@ -267,7 +322,7 @@ func (s *GDNState) Seed(conv, recurrent []float32) error {
 	if s == nil {
 		return &GDNDeclinedError{Reason: "nil owner"}
 	}
-	s.mu.Lock()
+	s.lockIdle()
 	defer s.mu.Unlock()
 	if s.closed {
 		return &GDNDeclinedError{Reason: "owner is closed"}
@@ -293,7 +348,7 @@ func (s *GDNState) Reset() error {
 	if s == nil {
 		return &GDNDeclinedError{Reason: "nil owner"}
 	}
-	s.mu.Lock()
+	s.lockIdle()
 	defer s.mu.Unlock()
 	if s.closed {
 		return &GDNDeclinedError{Reason: "owner is closed"}
@@ -312,7 +367,7 @@ func (s *GDNState) Snapshot() (conv, recurrent []float32, err error) {
 	if s == nil {
 		return nil, nil, &GDNDeclinedError{Reason: "nil owner"}
 	}
-	s.mu.Lock()
+	s.lockIdle()
 	defer s.mu.Unlock()
 	if s.closed {
 		return nil, nil, &GDNDeclinedError{Reason: "owner is closed"}
@@ -344,7 +399,7 @@ func (s *GDNState) Close() {
 	if s == nil {
 		return
 	}
-	s.mu.Lock()
+	s.lockIdle()
 	defer s.mu.Unlock()
 	s.releaseLocked()
 }

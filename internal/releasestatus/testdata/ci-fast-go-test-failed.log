@@ -1,0 +1,29 @@
+# Scrubbed package/test excerpts captured from GitHub Actions run 33047582124.
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9030293Z --- FAIL: TestRunAccountsStatusIncludesDiscoveredCodexHomes (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9030293Z FAIL	github.com/anthony-chaudhary/fak/cmd/fak	340.640s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:37.2474595Z --- FAIL: TestOwnershipCommandUsesInventory (0.11s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:37.2478501Z FAIL	github.com/anthony-chaudhary/fak/cmd/fak-dev	0.246s
+--- FAIL: TestCapturedSelfcheckReceipt (0.03s)
+FAIL	github.com/anthony-chaudhary/fak/cmd/harnesswebdemo	0.032s
+--- FAIL: TestCheckedInPageIsFresh (2.28s)
+FAIL	github.com/anthony-chaudhary/fak/cmd/verbsdoc	4.605s
+--- FAIL: TestPrimitiveLeavesStayPrimitive (1.35s)
+FAIL	github.com/anthony-chaudhary/fak/internal/architest	31.554s
+--- FAIL: TestCavemanPinnedInputsAndSemanticGate (0.00s)
+FAIL	github.com/anthony-chaudhary/fak/internal/armbench	0.140s
+--- FAIL: TestBoundaryPolicy (3.37s)
+FAIL	github.com/anthony-chaudhary/fak/internal/boundarylint	6.028s
+--- FAIL: TestHardcodedRefAuditCurrentTreeClassified (38.91s)
+FAIL	github.com/anthony-chaudhary/fak/internal/branchrole	38.990s
+--- FAIL: TestParseFrontmatterDecodesQuotedScalars (0.00s)
+FAIL	github.com/anthony-chaudhary/fak/internal/capindex	0.159s
+--- FAIL: TestCLAIMSLedgerIsClean (0.00s)
+FAIL	github.com/anthony-chaudhary/fak/internal/claimcheck	0.005s
+--- FAIL: TestRunOwnershipJSON (0.06s)
+FAIL	github.com/anthony-chaudhary/fak/internal/devcmd	22.468s
+--- FAIL: TestNoNewPythonTools (0.00s)
+FAIL	github.com/anthony-chaudhary/fak/internal/pythongate	0.007s
+# The captured run contained repeated/matrix-shaped output; this exact duplicate
+# pins deterministic deduplication without generating synthetic log rows.
+--- FAIL: TestNoNewPythonTools (0.00s)
+FAIL	github.com/anthony-chaudhary/fak/internal/pythongate	0.007s

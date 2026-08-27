@@ -602,9 +602,31 @@ kernel void q6k_gemm(device const uchar* W [[buffer(0)]],
     acc = simd_sum(acc);
     if (lid == 0) Y[(long)t * out + o] = acc;
 }
+
+// Exact Q8_0 activation quantization for a graph-resident f32 panel. One 32-lane
+// threadgroup owns one block, matching model.quantizeRowQ8scalar's amax/127 and
+// round-half-away-from-zero contract. The resulting codes/scales remain owned by
+// the graph and may feed any number of downstream Q8 projections before its fence.
+kernel void graph_quantize_q8(device const float* X [[buffer(0)]],
+                              device char* Q [[buffer(1)]],
+                              device float* D [[buffer(2)]],
+                              constant int& blocks [[buffer(3)]],
+                              uint block [[threadgroup_position_in_grid]],
+                              uint lane [[thread_index_in_threadgroup]]) {
+    if (block >= (uint)blocks || lane >= 32) return;
+    float v = X[(long)block * 32 + lane];
+    float a = fabs(v);
+    a = simd_max(a);
+    float d = simd_broadcast(a / 127.0f, 0);
+    if (lane == 0) D[block] = d;
+    float q = d == 0.0f ? 0.0f : v / d;
+    q = q >= 0.0f ? floor(q + 0.5f) : ceil(q - 0.5f);
+    q = clamp(q, -127.0f, 127.0f);
+    Q[(long)block * 32 + lane] = (char)q;
+}
 )MSL";
 
-static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm;
+static id<MTLComputePipelineState> psoQ4KGemv, psoQ4KGemvVectorized, psoQ4KGemvMulti[5], psoQ4KGemm, psoQ4KGemmMM32, psoQ4KSwiGLU, psoQ6KGemv, psoQ6KGemm, psoGraphQuantizeQ8;
 static int gQ4KReady;
 
 // q4k_gemv_pso binds selection to an executed-kernel status. A vector request never falls back:
@@ -660,9 +682,10 @@ static int q4k_init(void) {
     psoQ4KSwiGLU = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q4k_swiglu"] error:&err];
     psoQ6KGemv = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemv"] error:&err];
     psoQ6KGemm = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"q6k_gemm"] error:&err];
+    psoGraphQuantizeQ8 = [gDev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"graph_quantize_q8"] error:&err];
     if (!psoQ4KGemv || !psoQ4KGemvMulti[0] || !psoQ4KGemvMulti[1] || !psoQ4KGemvMulti[2] ||
         !psoQ4KGemvMulti[3] || !psoQ4KGemvMulti[4] || !psoQ4KGemm || !psoQ4KSwiGLU ||
-        !psoQ6KGemv || !psoQ6KGemm) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
+        !psoQ6KGemv || !psoQ6KGemm || !psoGraphQuantizeQ8) { NSLog(@"q4k: pipeline build failed: %@", err); return 0; }
     gQ4KReady = 1;
     return 1;
 }
@@ -1627,7 +1650,7 @@ void *mg_graph_begin(const float *xf, const signed char *xq, const float *xd, in
     g->P=P; g->in=in; g->cb=[gQueue commandBuffer]; g->results=[NSMutableArray array];
     if (!g->cb || !g->results) { free(g); return NULL; }
     NSUInteger nf=(NSUInteger)P*(NSUInteger)in;
-    if (xf) { g->xf=[gDev newBufferWithLength:nf*sizeof(float) options:MTLResourceStorageModeShared]; memcpy([g->xf contents],xf,nf*sizeof(float)); }
+    if (xf) { g->xf=[gDev newBufferWithLength:nf*sizeof(float) options:MTLResourceStorageModeShared]; memcpy([g->xf contents],xf,nf*sizeof(float)); [g->results addObject:g->xf]; }
     if (xq) { g->xq=[gDev newBufferWithLength:nf options:MTLResourceStorageModeShared]; memcpy([g->xq contents],xq,nf); }
     if (xd) { NSUInteger ns=(NSUInteger)P*(NSUInteger)(in/32); g->xd=[gDev newBufferWithLength:ns*sizeof(float) options:MTLResourceStorageModeShared]; memcpy([g->xd contents],xd,ns*sizeof(float)); }
     return g;
@@ -1638,6 +1661,21 @@ static void *mg_graph_result(MGProjectionGraph *g, NSUInteger n) {
     if (!y) return NULL; [g->results addObject:y]; g->encoders++; return (__bridge void*)y;
 }
 
+void *mg_graph_quantize_q8(void *opaque, void *input, int elems, void **scales) {
+    MGProjectionGraph *g=opaque; id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;
+    if(scales)*scales=NULL;
+    if(!g||g->committed||!x||elems<=0||elems%32||![g->results containsObject:x]||!psoGraphQuantizeQ8)return NULL;
+    int blocks=elems/32;
+    id<MTLBuffer>q=[gDev newBufferWithLength:(NSUInteger)elems options:MTLResourceStorageModeShared];
+    id<MTLBuffer>d=[gDev newBufferWithLength:(NSUInteger)blocks*sizeof(float) options:MTLResourceStorageModeShared];
+    if(!q||!d)return NULL;
+    [g->results addObject:q];[g->results addObject:d];
+    id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];
+    [e setComputePipelineState:psoGraphQuantizeQ8];[e setBuffer:x offset:0 atIndex:0];[e setBuffer:q offset:0 atIndex:1];[e setBuffer:d offset:0 atIndex:2];[e setBytes:&blocks length:sizeof(blocks) atIndex:3];
+    [e dispatchThreadgroups:MTLSizeMake((NSUInteger)blocks,1,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];
+    g->encoders++;if(scales)*scales=(__bridge void*)d;return (__bridge void*)q;
+}
+
 void *mg_graph_encode_q4k(void *opaque, int wid) {
     MGProjectionGraph *g=opaque; if (!g || g->committed || !g->xf || wid<0 || wid>=gNQ4 || gQ4[wid].in!=g->in) return NULL;
     Q4KW *w=&gQ4[wid]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out); if(!y)return NULL;
@@ -1645,18 +1683,33 @@ void *mg_graph_encode_q4k(void *opaque, int wid) {
     const int BM=64,TG=256; int rowBlocks=(w->out+BM-1)/BM;
     id<MTLComputeCommandEncoder> e=[g->cb computeCommandEncoder]; [e setComputePipelineState:pso]; [e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0]; [e setBuffer:g->xf offset:0 atIndex:1]; [e setBuffer:y offset:0 atIndex:2]; [e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5]; for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding]; return (__bridge void*)y;
 }
+void *mg_graph_encode_q4k_from(void *opaque,int wid,void*input,int elems) {
+    MGProjectionGraph*g=opaque;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||wid<0||wid>=gNQ4||gQ4[wid].in*g->P!=elems||![g->results containsObject:x])return NULL;
+    Q4KW*w=&gQ4[wid];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;
+    int executed=0,BN=64;id<MTLComputePipelineState>pso=q4k_gemm_pso(g->P,0,&executed,&BN);if(!pso)return NULL;const int BM=64,TG=256;int rowBlocks=(w->out+BM-1)/BM;
+    id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:pso];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:w->offset atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];for(int t0=0;t0<g->P;t0+=BN){int nt=g->P-t0;if(nt>BN)nt=BN;[e setBytes:&t0 length:sizeof(int) atIndex:6];[e setBytes:&nt length:sizeof(int) atIndex:7];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)rowBlocks,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)TG,1,1)];}[e endEncoding];return (__bridge void*)y;
+}
 void *mg_graph_encode_q6k(void *opaque, int wid) {
     MGProjectionGraph *g=opaque; int i=wid-MG_Q6_BASE; if(!g||g->committed||!g->xf||i<0||i>=gNQ6||gQ6[i].in!=g->in)return NULL; Q6KW *w=&gQ6[i]; id<MTLBuffer> y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL; id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:g->xf offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
 }
+void *mg_graph_encode_q6k_from(void *opaque,int wid,void*input,int elems) {
+    MGProjectionGraph*g=opaque;int i=wid-MG_Q6_BASE;id<MTLBuffer>x=(__bridge id<MTLBuffer>)input;if(!g||g->committed||!x||i<0||i>=gNQ6||gQ6[i].in*g->P!=elems||![g->results containsObject:x])return NULL;Q6KW*w=&gQ6[i];id<MTLBuffer>y=(__bridge id<MTLBuffer>)mg_graph_result(g,(NSUInteger)g->P*(NSUInteger)w->out);if(!y)return NULL;id<MTLComputeCommandEncoder>e=[g->cb computeCommandEncoder];[e setComputePipelineState:psoQ6KGemm];[e setBuffer:(__bridge id<MTLBuffer>)w->buf offset:0 atIndex:0];[e setBuffer:x offset:0 atIndex:1];[e setBuffer:y offset:0 atIndex:2];[e setBytes:&w->nblk length:sizeof(int) atIndex:3];[e setBytes:&w->out length:sizeof(int) atIndex:4];[e setBytes:&g->P length:sizeof(int) atIndex:5];[e dispatchThreadgroups:MTLSizeMake((NSUInteger)w->out,(NSUInteger)g->P,1) threadsPerThreadgroup:MTLSizeMake(32,1,1)];[e endEncoding];return (__bridge void*)y;
+}
 extern void *mg_q8_graph_encode(void *graph, int wid);
+extern void *mg_q8_graph_encode_from(void *graph, int wid, void *q, void *d, int elems);
 void *mg_graph_encode_q8(void *opaque,int wid){return mg_q8_graph_encode(opaque,wid);}
-int mg_graph_finish(void *opaque,mg_graph_receipt*r){MGProjectionGraph*g=opaque;if(r)memset(r,0,sizeof(*r));if(!g||g->committed||g->encoders==0)return 0;g->committed=1;CFAbsoluteTime t=CFAbsoluteTimeGetCurrent();[g->cb commit];[g->cb waitUntilCompleted];g->wait_ms=(CFAbsoluteTimeGetCurrent()-t)*1000.;if(r){r->committed=1;r->completed_wait=1;r->encoders=g->encoders;r->host_readbacks=g->readbacks;r->wait_milliseconds=g->wait_ms;if(@available(macOS 10.15,*)){double a=g->cb.GPUStartTime,b=g->cb.GPUEndTime;if(b>=a&&a>0){r->gpu_milliseconds=(b-a)*1000.;r->timing_available=1;}}}return g->cb.status==MTLCommandBufferStatusCompleted;}
+void *mg_graph_encode_q8_from(void *opaque,int wid,void*q,void*d,int elems){return mg_q8_graph_encode_from(opaque,wid,q,d,elems);}
+int mg_graph_finish(void *opaque,mg_graph_receipt*r,int inject_post_submit_failure){MGProjectionGraph*g=opaque;if(r)memset(r,0,sizeof(*r));if(!g||g->committed||g->encoders==0)return 0;g->committed=1;CFAbsoluteTime t=CFAbsoluteTimeGetCurrent();[g->cb commit];[g->cb waitUntilCompleted];g->wait_ms=(CFAbsoluteTimeGetCurrent()-t)*1000.;if(r){r->committed=1;r->completed_wait=g->cb.status==MTLCommandBufferStatusCompleted;r->encoders=g->encoders;r->host_readbacks=g->readbacks;r->wait_milliseconds=g->wait_ms;if(@available(macOS 10.15,*)){double a=g->cb.GPUStartTime,b=g->cb.GPUEndTime;if(b>=a&&a>0){r->gpu_milliseconds=(b-a)*1000.;r->timing_available=1;}}}return g->cb.status==MTLCommandBufferStatusCompleted&&!inject_post_submit_failure;}
 int mg_graph_read(void*opaque,void*result,float*dst,int n){MGProjectionGraph*g=opaque;id<MTLBuffer>y=(__bridge id<MTLBuffer>)result;if(!g||!g->committed||!y||!dst||n<0||![g->results containsObject:y])return 0;memcpy(dst,[y contents],(NSUInteger)n*sizeof(float));g->readbacks++;return 1;}
+int mg_graph_read_pack(void*opaque,void**results,const int*sizes,int count,float*dst,int total){MGProjectionGraph*g=opaque;if(!g||!g->committed||!results||!sizes||count<=0||!dst||total<0)return 0;int off=0;for(int i=0;i<count;i++){id<MTLBuffer>y=(__bridge id<MTLBuffer>)results[i];int n=sizes[i];if(!y||n<0||off>total-n||![g->results containsObject:y])return 0;memcpy(dst+off,[y contents],(NSUInteger)n*sizeof(float));off+=n;}if(off!=total)return 0;g->readbacks++;return 1;}
 void mg_graph_free(void*opaque){MGProjectionGraph*g=opaque;if(!g)return;g->cb=nil;g->xf=nil;g->xq=nil;g->xd=nil;g->results=nil;free(g);}
 
 void *mg_graph_command_buffer(void *opaque){MGProjectionGraph*g=opaque;return g?(__bridge void*)g->cb:NULL;}
+void *mg_graph_xf_buffer(void *opaque){MGProjectionGraph*g=opaque;return g?(__bridge void*)g->xf:NULL;}
 void *mg_graph_xq_buffer(void *opaque){MGProjectionGraph*g=opaque;return g?(__bridge void*)g->xq:NULL;}
 void *mg_graph_xd_buffer(void *opaque){MGProjectionGraph*g=opaque;return g?(__bridge void*)g->xd:NULL;}
 int mg_graph_prompt(void *opaque){MGProjectionGraph*g=opaque;return g?g->P:0;}
 int mg_graph_input(void *opaque){MGProjectionGraph*g=opaque;return g?g->in:0;}
 void *mg_graph_alloc_result(void *opaque,int n){MGProjectionGraph*g=opaque;return g?mg_graph_result(g,(NSUInteger)n):NULL;}
+void *mg_graph_alloc_buffer(void *opaque,int n){MGProjectionGraph*g=opaque;if(!g||g->committed||n<=0)return NULL;id<MTLBuffer>b=[gDev newBufferWithLength:(NSUInteger)n*sizeof(float) options:MTLResourceStorageModeShared];if(!b)return NULL;[g->results addObject:b];return (__bridge void*)b;}
+void mg_graph_note_encoder(void *opaque){MGProjectionGraph*g=opaque;if(g&&!g->committed)g->encoders++;}

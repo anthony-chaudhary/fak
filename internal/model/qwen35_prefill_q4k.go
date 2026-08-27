@@ -96,6 +96,16 @@ type qwen35GDNSequenceSnapshotter interface {
 	SnapshotQwen35GDNAuxState(Qwen35GDNAuxState) (conv, recurrent []float32, err error)
 }
 
+type qwen35MetalForwardSequenceReceipt struct {
+	Tokens, CommandBuffers, Encoders, TerminalWaits, TerminalReadbacks int
+	Committed, CompletedWait                                           bool
+}
+
+type qwen35MetalForwardSequenceRunner interface {
+	Qwen35MetalForwardSequence(*Session, []int) ([]float32, qwen35MetalForwardSequenceReceipt, bool, error)
+	Qwen35MetalForwardSequenceReceipt() (qwen35MetalForwardSequenceReceipt, bool)
+}
+
 // EnableQwen35MetalGDNPreprojectedSequence admits the opt-in owner before any
 // prompt state is mutated. Unsupported builds and non-fresh sessions refuse
 // explicitly instead of changing the requested path to host recurrence.
@@ -184,11 +194,63 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	if !q4kQwen35HybridPrefillAtPositionOK(s.M.Cfg, len(ids), s.Cache.Len()) {
 		return nil, false
 	}
-	hidden := s.prefillQwen35HybridQ4KHidden(ids)
+	var hidden []float32
+	if s.qwen35HAL != nil && s.qwen35HAL.sequenceAccepted {
+		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok && len(ids) == 32 {
+			var receipt qwen35MetalForwardSequenceReceipt
+			var accepted bool
+			var err error
+			hidden, receipt, accepted, err = runner.Qwen35MetalForwardSequence(s, ids)
+			_ = receipt
+			if accepted {
+				if err != nil {
+					panic(s.failQwen35MetalForwardSequence(err))
+				}
+				if !wantLogits {
+					return nil, true
+				}
+				return s.headResident(hidden), true
+			}
+		}
+	}
+	hidden = s.prefillQwen35HybridQ4KHidden(ids)
 	if !wantLogits {
 		return nil, true
 	}
 	return s.headResident(hidden), true
+}
+
+func (s *Session) failQwen35MetalForwardSequence(cause error) error {
+	err := &Qwen35GDNSequenceOperationError{Layer: -1, Stage: "whole-sequence forward", Cause: cause}
+	if s == nil || s.qwen35HAL == nil {
+		return err
+	}
+	q := s.qwen35HAL
+	backend := q.sequenceBackend
+	states := q.sequenceLayers
+	q.sequenceLayers = nil
+	for _, state := range states {
+		if state.valid() && backend != nil {
+			_ = backend.FreeQwen35GDNAuxState(state)
+		}
+	}
+	// Retain only the receipt-bearing backend object so the accepted failure can
+	// still be audited. It owns no live state after the loop above.
+	q.sequenceAccepted = true
+	q.decodeAccepted = false
+	q.sequenceFailure = err
+	return err
+}
+
+func (s *Session) qwen35MetalForwardSequenceReceipt() (qwen35MetalForwardSequenceReceipt, bool) {
+	if s == nil || s.qwen35HAL == nil {
+		return qwen35MetalForwardSequenceReceipt{}, false
+	}
+	runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner)
+	if !ok {
+		return qwen35MetalForwardSequenceReceipt{}, false
+	}
+	return runner.Qwen35MetalForwardSequenceReceipt()
 }
 
 func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
