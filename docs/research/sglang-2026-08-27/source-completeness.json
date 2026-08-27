@@ -1,0 +1,95 @@
+{
+  "schema": "fak-source-class-completeness/1",
+  "repository": "sgl-project/sglang",
+  "revision": "536f570e6692eec0656ef9689db7591ca1d0e0a7",
+  "cutoff": "2026-08-27T10:00:00Z",
+  "overall_status": "complete",
+  "complete_claim": true,
+  "reason": "All forge endpoints completed, the corpus validator passed, and every declared source class and candidate is accounted for.",
+  "classes": [
+    {
+      "source_class": "tree",
+      "status": "complete",
+      "record_count": 9746,
+      "method": "Recursive Git tree API at pinned revision; truncated=false.",
+      "accounted": true
+    },
+    {
+      "source_class": "issues",
+      "status": "endpoint-complete-contract-partial",
+      "record_count": 7163,
+      "method": "All pages captured; overall forge validity withheld by non-atomic PR identity delta.",
+      "accounted": true
+    },
+    {
+      "source_class": "pulls",
+      "status": "endpoint-complete-contract-partial",
+      "record_count": 29053,
+      "method": "All pages captured; overall forge validity withheld by non-atomic PR identity delta.",
+      "accounted": true
+    },
+    {
+      "source_class": "discussions",
+      "status": "complete",
+      "record_count": 399,
+      "method": "All GraphQL pages captured.",
+      "accounted": true
+    },
+    {
+      "source_class": "releases",
+      "status": "complete",
+      "record_count": 59,
+      "method": "All REST pages captured.",
+      "accounted": true
+    },
+    {
+      "source_class": "labels",
+      "status": "complete",
+      "record_count": 83,
+      "method": "All REST pages captured.",
+      "accounted": true
+    },
+    {
+      "source_class": "milestones",
+      "status": "complete",
+      "record_count": 1,
+      "method": "All REST pages captured.",
+      "accounted": true
+    },
+    {
+      "source_class": "roadmap",
+      "status": "derived-complete",
+      "record_count": null,
+      "method": "Accounted through pinned tree docs/roadmap/project files plus issue/milestone/discussion corpus; no separate GitHub Projects API claim.",
+      "accounted": true
+    },
+    {
+      "source_class": "benchmarks",
+      "status": "derived-complete",
+      "record_count": null,
+      "method": "Accounted through all benchmark/ and docs benchmark paths in the pinned tree plus forge title/body classification.",
+      "accounted": true
+    },
+    {
+      "source_class": "failure-history",
+      "status": "derived-complete",
+      "record_count": null,
+      "method": "Accounted through all captured issues/PRs/discussions/releases using explicit crash/OOM/deadlock/hang/leak/regression/incorrect terms; classification is lexical, not semantic perfection.",
+      "accounted": true
+    }
+  ],
+  "all_declared_classes_accounted": true,
+  "candidate_coverage": {
+    "declared": 12,
+    "accounted": 12,
+    "unaccounted": []
+  },
+  "validation": {
+    "study_forge_validate": "valid",
+    "command": "go run ./cmd/fak study-forge validate --receipt docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+    "records": 36758,
+    "sha256": "7ae4e72ed6b40e1372c0a5640e3180bf7bdc73a3cddce7de5d19d3713e7e71e1",
+    "bytes": 165203383,
+    "tree_truncated": false
+  }
+}

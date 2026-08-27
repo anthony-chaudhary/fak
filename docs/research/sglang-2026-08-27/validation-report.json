@@ -1,0 +1,86 @@
+{
+  "schema": "fak-study-validation/1",
+  "json_checks": [
+    {
+      "path": "docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+      "json_valid": true,
+      "bytes": 3666,
+      "sha256": "sha256:25f44041cc32420770c01df9213f453c8acc46785f8797419ce2bc30c4438053",
+      "error": null
+    },
+    {
+      "path": "docs/research/sglang-2026-08-27/candidate-ledger.json",
+      "json_valid": true,
+      "bytes": 29679,
+      "sha256": "sha256:0cd631ca1c1b3daff7e54f67e5b8936c7aa50e16a3e848145360b02f3b504061",
+      "error": null
+    },
+    {
+      "path": "docs/research/sglang-2026-08-27/dedup-map.json",
+      "json_valid": true,
+      "bytes": 133775,
+      "sha256": "sha256:1e18e161a5030397663ffd226524c48c7e7b9d87f14d1683109d505d9a0dc082",
+      "error": null
+    },
+    {
+      "path": "docs/research/sglang-2026-08-27/source-completeness.json",
+      "json_valid": true,
+      "bytes": 3282,
+      "sha256": "sha256:99d91169585c50725ccad59be73c9f176eef6eb6de521061e20de03543d28617",
+      "error": null
+    },
+    {
+      "path": "docs/research/sglang-2026-08-27/validation-report.json",
+      "json_valid": true,
+      "bytes": 2188,
+      "sha256": "sha256:0b62ca228e33e566fd14ba403471fbb5be8c156f9acb4757e738095af3f8d9e5",
+      "error": null
+    }
+  ],
+  "all_json_valid": true,
+  "local_links": [
+    {
+      "target": "../inventory/sgl-project-sglang-corpus.jsonl.gz",
+      "exists": true
+    },
+    {
+      "target": "source-completeness.json",
+      "exists": true
+    },
+    {
+      "target": "candidate-ledger.json",
+      "exists": true
+    },
+    {
+      "target": "dedup-map.json",
+      "exists": true
+    },
+    {
+      "target": "validation-report.json",
+      "exists": true
+    }
+  ],
+  "all_local_links_valid": true,
+  "study_forge_validate": {
+    "command": "fak study-forge validate --receipt docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+    "exit_code": 1,
+    "expected": true,
+    "result": "invalid receipt: receipt status must be complete, got partial"
+  },
+  "invariants": {
+    "candidate_count_matches": true,
+    "all_candidates_accounted": true,
+    "all_source_classes_accounted": true,
+    "dedup_query_count_matches": true,
+    "all_dedup_rows_accounted": true,
+    "no_new_issue_claim_consistent": true,
+    "native_ownership_preserved": true
+  },
+  "all_deterministic_checks_pass": true,
+  "corpus_validation": {
+    "status": "valid",
+    "command": "go run ./cmd/fak study-forge validate --receipt docs/research/inventory/sgl-project-sglang-corpus.jsonl.gz",
+    "records": 36758,
+    "revision": "536f570e6692eec0656ef9689db7591ca1d0e0a7"
+  }
+}

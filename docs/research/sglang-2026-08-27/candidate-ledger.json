@@ -1,0 +1,730 @@
+{
+  "schema": "fak-candidate-ledger/1",
+  "study": "sgl-project/sglang at 94183a8d2b357a3200c97a1d7fccd2b866b8eda3",
+  "cutoff": "2026-08-27T10:00:00Z",
+  "candidate_count": 12,
+  "all_candidates_accounted": true,
+  "new_issues_created": [],
+  "candidates": [
+    {
+      "id": "scheduler-admission",
+      "mechanism": "scheduler admission",
+      "disposition": "ADAPT",
+      "fak_seam": "Keep policy and execution fak-native",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#35",
+        "#36",
+        "#8395"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 17026,
+          "title": "feat: Priority-based scheduling optimization (including default priority, preemption toggle, priority-based metrics, etc.)",
+          "url": "https://github.com/sgl-project/sglang/pull/17026",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 15249,
+          "title": "[Fix] Add missed preemption when AddReqResult.NO_TOKEN occurs (priority scheduling)",
+          "url": "https://github.com/sgl-project/sglang/pull/15249",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 13470,
+          "title": "[Task] Add priority scheduling CIs for preemption path",
+          "url": "https://github.com/sgl-project/sglang/issues/13470",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 13361,
+          "title": "[Priority based scheduling] Preempt just enough requests to meet memory requirement",
+          "url": "https://github.com/sgl-project/sglang/pull/13361",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 8746,
+          "title": "feat: add priority based scheduling with priority based request acceptance and preemption",
+          "url": "https://github.com/sgl-project/sglang/pull/8746",
+          "score": 30,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 6238,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "radix-prefix-reuse",
+      "mechanism": "radix prefix reuse",
+      "disposition": "COPY",
+      "fak_seam": "The narrow RadixKey isolation/eviction/search borrows already shipped in #3889-#3891",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#3889",
+        "#3890",
+        "#3891",
+        "#41",
+        "#8395"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 26618,
+          "title": "[Bug] FlashInfer MIS appears to use full-sequence delimiter indices after radix-cache prefix hits",
+          "url": "https://github.com/sgl-project/sglang/issues/26618",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 26046,
+          "title": "[P/D disagg] Add HiRadixCache and cache-aware DP routing for decode disaggregation",
+          "url": "https://github.com/sgl-project/sglang/pull/26046",
+          "score": 21,
+          "state": "open"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 28756,
+          "title": "perf(sgl-router): shard cache-aware-zmq radix tree to remove read-vs-write lock contention",
+          "url": "https://github.com/sgl-project/sglang/pull/28756",
+          "score": 20,
+          "state": "open"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 26580,
+          "title": "[KDA] Enable MambaRadixCache (prefix caching) for KDA   (KimiLinearForCausalLM)",
+          "url": "https://github.com/sgl-project/sglang/pull/26580",
+          "score": 20,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 26575,
+          "title": "[Feature] Enable MambaRadixCache (prefix caching) for KDA   (KimiLinearForCausalLM)",
+          "url": "https://github.com/sgl-project/sglang/issues/26575",
+          "score": 20,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 3849,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "chunked-prefill-continuous-batching",
+      "mechanism": "chunked prefill continuous batching",
+      "disposition": "ADAPT",
+      "fak_seam": "Port scheduling invariants and mixed-batch witnesses into fak StepBatch/paged-KV rather than embedding SGLang.",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#36",
+        "#282",
+        "#8395"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 35300,
+          "title": "[Speculative] Enable target-only mixed chunked prefill for DSpark",
+          "url": "https://github.com/sgl-project/sglang/pull/35300",
+          "score": 11,
+          "state": "open"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 35241,
+          "title": "[Bug] PrefillDelayer can enter a persistent mixed-state feedback loop and collapse prefill progress under DP Attention + chunked prefill",
+          "url": "https://github.com/sgl-project/sglang/issues/35241",
+          "score": 11,
+          "state": "open"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 34298,
+          "title": "[Bug] Prefill FLOPs estimate ignores `prefix_lens`, so `est. prefill TFLOPS/s` degenerates into 1/latency across chunked-prefill chunks",
+          "url": "https://github.com/sgl-project/sglang/issues/34298",
+          "score": 11,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 29522,
+          "title": "Guard Blackwell TRT-LLM prefill chunk size",
+          "url": "https://github.com/sgl-project/sglang/pull/29522",
+          "score": 11,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 26148,
+          "title": "Skip PP output communication for pure chunked prefill batches",
+          "url": "https://github.com/sgl-project/sglang/pull/26148",
+          "score": 11,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 538,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "prefill-decode-disaggregation",
+      "mechanism": "prefill decode disaggregation",
+      "disposition": "INTEGRATE",
+      "fak_seam": "Integrate governed external transport/role seams only",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#28",
+        "#29",
+        "#37",
+        "#53",
+        "#79"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 35224,
+          "title": "[Docs] Enable PD disaggregation for DSV4 low-latency recipes",
+          "url": "https://github.com/sgl-project/sglang/pull/35224",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 34905,
+          "title": "feat: add layer-wise KV transfer for PD disaggregation",
+          "url": "https://github.com/sgl-project/sglang/pull/34905",
+          "score": 21,
+          "state": "open"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 32837,
+          "title": "feat: support Kimi Linear PD disaggregation with DCP",
+          "url": "https://github.com/sgl-project/sglang/pull/32837",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 32652,
+          "title": "[Bug] [Security tracking][PD disaggregation] Decode control-path failure can remain invisible to health checks",
+          "url": "https://github.com/sgl-project/sglang/issues/32652",
+          "score": 21,
+          "state": "open"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 31182,
+          "title": "add pd disaggregation prefill cp rank transfer policy",
+          "url": "https://github.com/sgl-project/sglang/pull/31182",
+          "score": 21,
+          "state": "open"
+        }
+      ],
+      "corpus_matches": 2487,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "speculative-decoding",
+      "mechanism": "speculative decoding",
+      "disposition": "WATCH",
+      "fak_seam": "Track EAGLE/DSpark envelope evidence while native verify-accept depends on the serving spine.",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#23"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 21272,
+          "title": "[AMD] Auto-detect Eagle3 draft model when --speculative-algorithm EAGLE is used",
+          "url": "https://github.com/sgl-project/sglang/pull/21272",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 10088,
+          "title": "[Feature] Improve the CUDA graph capture on the draft model in EAGLE speculative decoding mode.",
+          "url": "https://github.com/sgl-project/sglang/issues/10088",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 36593,
+          "title": "Fix EAGLE3 startup without draft model",
+          "url": "https://github.com/sgl-project/sglang/pull/36593",
+          "score": 21,
+          "state": "open"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 36528,
+          "title": "[Bug] EAGLE3 without `--speculative-draft-model-path` loads the target as draft and crashes on normal Qwen/Llama targets",
+          "url": "https://github.com/sgl-project/sglang/issues/36528",
+          "score": 21,
+          "state": "open"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 32377,
+          "title": "[GLM-5.2 FP4 Bug] tvm.error.InternalError in trtllm_bf16_moe on Blackwell (SM100) during speculative decoding (EAGLE) with GLM-5.2-NVFP4",
+          "url": "https://github.com/sgl-project/sglang/issues/32377",
+          "score": 21,
+          "state": "open"
+        }
+      ],
+      "corpus_matches": 3930,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "structured-generation",
+      "mechanism": "structured generation",
+      "disposition": "INTEGRATE",
+      "fak_seam": "Use grammar/parser compatibility evidence at the gateway boundary",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#26",
+        "#8382"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 28804,
+          "title": "fix(constrained): reject JSON schemas xgrammar cannot enforce",
+          "url": "https://github.com/sgl-project/sglang/pull/28804",
+          "score": 30,
+          "state": "open"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 28407,
+          "title": "[Bug] NEXTN (MTP) + structured output (xgrammar) crashes scheduler on Mamba-hybrid model (Qwen3.5-397B) — TypeError 'NoneType' in prepare_mamba_track_for_verify (sm_100)",
+          "url": "https://github.com/sgl-project/sglang/issues/28407",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 8250,
+          "title": "[Feature] Support disabling of `any_whitespace` for XGrammar JSON structured outputs",
+          "url": "https://github.com/sgl-project/sglang/issues/8250",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 2518,
+          "title": "[Bug] using xgrammar with json schema, performance is worse than no xgrammar and json schema",
+          "url": "https://github.com/sgl-project/sglang/issues/2518",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 24283,
+          "title": "[Bug] EAGLE/NEXTN speculative decoding crashes scheduler on response_format (xgrammar type mismatch)",
+          "url": "https://github.com/sgl-project/sglang/issues/24283",
+          "score": 22,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 2320,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "multimodal-moe",
+      "mechanism": "multimodal moe",
+      "disposition": "WATCH",
+      "fak_seam": "Existing native multimodal/MoE and accounting work covers the seam",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#25",
+        "#290",
+        "#399",
+        "#4875",
+        "#5777"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 27602,
+          "title": "[sglang-miles] Cherry-pick RL/VLM/Qwen3-MoE fixes",
+          "url": "https://github.com/sgl-project/sglang/pull/27602",
+          "score": 21,
+          "state": "open"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 12971,
+          "title": "[Feature][VLM] Support the DP feature for ViT and multimodal backbone",
+          "url": "https://github.com/sgl-project/sglang/issues/12971",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 35349,
+          "title": "[VLM] Size the multimodal preprocessing pool by where preprocessing runs",
+          "url": "https://github.com/sgl-project/sglang/pull/35349",
+          "score": 20,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 35342,
+          "title": "[VLM] Route every multimodal processor through the worker pool's call site",
+          "url": "https://github.com/sgl-project/sglang/pull/35342",
+          "score": 20,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 34995,
+          "title": "[VLM] Avoid synchronizing multimodal placeholder counts",
+          "url": "https://github.com/sgl-project/sglang/pull/34995",
+          "score": 20,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 6588,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "distributed-execution",
+      "mechanism": "distributed execution",
+      "disposition": "ADAPT",
+      "fak_seam": "Borrow device-mesh, TP/EP scheduling lessons under the existing native collective seam.",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#25"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 22084,
+          "title": "[Feature] Distributed Weight Data Parallelism (DWDP) for Sparse MoE Models",
+          "url": "https://github.com/sgl-project/sglang/issues/22084",
+          "score": 23,
+          "state": "open"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 9227,
+          "title": "[Bug] Tensor Parallel size 4 fails with NCCL on v0.5.0rc1-cu126 (works on v0.4.7.post1-cu124)",
+          "url": "https://github.com/sgl-project/sglang/issues/9227",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 34495,
+          "title": "[Spec] Sync MTP draft model weights on distributed (NCCL) online weight updates",
+          "url": "https://github.com/sgl-project/sglang/pull/34495",
+          "score": 20,
+          "state": "open"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 29778,
+          "title": "[Feature] Add DWDP (Distributed Weight Data Parallelism) for MoE prefill",
+          "url": "https://github.com/sgl-project/sglang/pull/29778",
+          "score": 20,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 27208,
+          "title": "NCCL issues arising from interrupt inference in distributed deployment of large models",
+          "url": "https://github.com/sgl-project/sglang/issues/27208",
+          "score": 20,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 2630,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "observability",
+      "mechanism": "observability",
+      "disposition": "INTEGRATE",
+      "fak_seam": "Map SGLang metrics names into fak-owned telemetry and compatibility adapters",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#216",
+        "#5629",
+        "#5631",
+        "#6801"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 23169,
+          "title": "feat(observability): add OpenTelemetry tracing for pipeline parallelism",
+          "url": "https://github.com/sgl-project/sglang/pull/23169",
+          "score": 31,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 23197,
+          "title": "feat(observability): add OpenTelemetry tracing for all speculative decoding workers",
+          "url": "https://github.com/sgl-project/sglang/pull/23197",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 20801,
+          "title": "[Observability] Add Prometheus metrics endpoint for gRPC mode",
+          "url": "https://github.com/sgl-project/sglang/pull/20801",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 19545,
+          "title": "feat(observability): add OpenTelemetry tracing for speculative decoding",
+          "url": "https://github.com/sgl-project/sglang/pull/19545",
+          "score": 30,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 10916,
+          "title": "[Feature] Propose Unified Observability Interface for Request Tracing, PD Metric, and TimeStat Log",
+          "url": "https://github.com/sgl-project/sglang/issues/10916",
+          "score": 23,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 2519,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "kernel-runtime-integration",
+      "mechanism": "kernel runtime integration",
+      "disposition": "REJECT",
+      "fak_seam": "Reject wholesale runtime/kernel adoption. Feed specific kernels through fak SOTA checks and matched witnesses only.",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#8395"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 26715,
+          "title": "[Bug] flashinfer_trtllm BF16 MoE: piecewise CUDA graph capture causes illegal memory access at trtllm_fused_moe_dev_kernel.cu:991 (regression in lmsysorg/sglang:dev between 0.0.0.dev1+g0c8049d9b and 0.0.0.dev1+g208397aff)",
+          "url": "https://github.com/sgl-project/sglang/issues/26715",
+          "score": 31,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 21938,
+          "title": "[Bug] PR #21436 regression: piecewise CUDA graph crashes for NemotronH hybrid models (Mamba2 Triton kernel + cuBLAS failures)",
+          "url": "https://github.com/sgl-project/sglang/issues/21938",
+          "score": 31,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 21629,
+          "title": "[flackci] Intermittent segfault in Triton MoE kernel during piecewise CUDA graph warmup on B200",
+          "url": "https://github.com/sgl-project/sglang/issues/21629",
+          "score": 31,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 1558,
+          "title": "[Bug] Exception: Capture cuda graph failed: Triton Error [CUDA]: device kernel image is invalid",
+          "url": "https://github.com/sgl-project/sglang/issues/1558",
+          "score": 31,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 1401,
+          "title": "Support cuda graph in the triton attention backend",
+          "url": "https://github.com/sgl-project/sglang/pull/1401",
+          "score": 31,
+          "state": "closed"
+        }
+      ],
+      "corpus_matches": 18860,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "failure-reliability",
+      "mechanism": "failure reliability",
+      "disposition": "ADAPT",
+      "fak_seam": "Turn upstream crashes/OOM/races into deterministic fak regression witnesses at parser, scheduler, and cache seams.",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#8382",
+        "#8395"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 32118,
+          "title": "Fix nightly CI: NVFP4 cuda-graph crash, NVILA batching, CuTe paged-KV zero-size, Kimi-VL OOM",
+          "url": "https://github.com/sgl-project/sglang/pull/32118",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 31046,
+          "title": "[Bug] [Regression] DeepSeek-V4 serving crashes with ValueError: Unrecognized configuration class _DeepseekV4ConfigAlias in v0.5.15 (Works in v0.5.14)",
+          "url": "https://github.com/sgl-project/sglang/issues/31046",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "issues",
+          "kind": "issue",
+          "number": 30505,
+          "title": "[Bug] DSA + fp8 KV (flashmla_kv): unbudgeted ~1GiB prefill transients OOM-crash the whole server on 80GB GPUs (GLM-5.2-W4AFP8, 8xH100)",
+          "url": "https://github.com/sgl-project/sglang/issues/30505",
+          "score": 21,
+          "state": "open"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 30372,
+          "title": "[fix] Fix two trunk test regressions due to flexkv change (#29701)",
+          "url": "https://github.com/sgl-project/sglang/pull/30372",
+          "score": 21,
+          "state": "closed"
+        },
+        {
+          "source": "pulls",
+          "kind": "pull",
+          "number": 29203,
+          "title": "[Fix] Fix embedding crash/hang with --tokenizer-worker-num > 1",
+          "url": "https://github.com/sgl-project/sglang/pull/29203",
+          "score": 21,
+          "state": "open"
+        }
+      ],
+      "corpus_matches": 22844,
+      "accounting": "mapped-existing-or-rejected"
+    },
+    {
+      "id": "compatibility-benchmark",
+      "mechanism": "compatibility benchmark",
+      "disposition": "INTEGRATE",
+      "fak_seam": "Use SGLang only as an explicit compatibility/benchmark arm",
+      "operating_envelope": "Qwen3.8-preferred fak-native serving; SGLang is explicit reference/compatibility/benchmark evidence only. GPU results require matched quality, hardware, workload, and full overhead accounting.",
+      "next_best_alternative": "Continue the cited existing fak-native issue(s) or remain minimal; do not add an automatic SGLang engine fallback.",
+      "existing_fak_tickets": [
+        "#39",
+        "#44",
+        "#6473",
+        "#6474"
+      ],
+      "new_ticket": null,
+      "upstream_evidence": [
+        {
+          "source": "tree",
+          "kind": "repository",
+          "number": null,
+          "title": "Pinned SGLang repository tree",
+          "url": "https://github.com/sgl-project/sglang/tree/94183a8d2b357a3200c97a1d7fccd2b866b8eda3",
+          "score": null,
+          "state": null
+        }
+      ],
+      "corpus_matches": null,
+      "accounting": "mapped-existing-or-rejected"
+    }
+  ]
+}

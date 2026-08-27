@@ -1,0 +1,3700 @@
+{
+  "schema": "fak-upstream-dedup-map/1",
+  "query": "gh issue list --repo anthony-chaudhary/fak --state all --limit 1000 --search sglang",
+  "query_result_count": 271,
+  "all_query_results_accounted": true,
+  "anchor_ticket_count": 29,
+  "candidate_to_existing_tickets": {
+    "scheduler-admission": [
+      "#35",
+      "#36",
+      "#8395"
+    ],
+    "radix-prefix-reuse": [
+      "#3889",
+      "#3890",
+      "#3891",
+      "#41",
+      "#8395"
+    ],
+    "chunked-prefill-continuous-batching": [
+      "#36",
+      "#282",
+      "#8395"
+    ],
+    "prefill-decode-disaggregation": [
+      "#28",
+      "#29",
+      "#37",
+      "#53",
+      "#79"
+    ],
+    "speculative-decoding": [
+      "#23"
+    ],
+    "structured-generation": [
+      "#26",
+      "#8382"
+    ],
+    "multimodal-moe": [
+      "#25",
+      "#290",
+      "#399",
+      "#4875",
+      "#5777"
+    ],
+    "distributed-execution": [
+      "#25"
+    ],
+    "observability": [
+      "#216",
+      "#5629",
+      "#5631",
+      "#6801"
+    ],
+    "kernel-runtime-integration": [
+      "#8395"
+    ],
+    "failure-reliability": [
+      "#8382",
+      "#8395"
+    ],
+    "compatibility-benchmark": [
+      "#39",
+      "#44",
+      "#6473",
+      "#6474"
+    ]
+  },
+  "new_issue_decision": {
+    "created": [],
+    "reason": "No genuine unduplicated gap remained after mapping every declared candidate to existing fak issues or an explicit WATCH/REJECT disposition."
+  },
+  "issues": [
+    {
+      "issue": 23,
+      "state": "OPEN",
+      "title": "feat(decode): speculative decoding  -  ride free on Track A, native verify-accept later (build-on #285/#148)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/23",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 24,
+      "state": "CLOSED",
+      "title": "feat(serving): native autoscaler/planner scaling prefill-vs-decode pools (missing base item)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/24",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "observability",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 25,
+      "state": "CLOSED",
+      "title": "feat(model): coordinate native TP (#274) + EP-for-MoE on a device-mesh/collective seam  -  SCOPE-GATED R3",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/25",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 26,
+      "state": "CLOSED",
+      "title": "feat(gateway): structured/guided decoding (JSON-schema/grammar/logit-bias) feeding tool-call gating",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/26",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 27,
+      "state": "CLOSED",
+      "title": "feat(governance): wire L3 KV-governance referee + native exact-span eviction (build-on #504/#532/#129/#135)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/27",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 28,
+      "state": "CLOSED",
+      "title": "feat(serving): native prefill/decode role split over the continuous-batching scheduler",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/28",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 29,
+      "state": "CLOSED",
+      "title": "feat(transport): native KVCache->bytes serializer + RDMA/UCX KV transport (Track-B P/D data plane)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/29",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 30,
+      "state": "CLOSED",
+      "title": "feat(pp): network PP serve loop  -  band-running worker replacing EchoFrames (build-on #85)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/30",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 31,
+      "state": "CLOSED",
+      "title": "feat(scheduler): preemption + KV swap-to-host/recompute under memory pressure (after paged KV)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/31",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "observability",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 32,
+      "state": "CLOSED",
+      "title": "feat(scheduler): real per-step request cancellation  -  thread ctx into the decode loop",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/32",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 33,
+      "state": "CLOSED",
+      "title": "design(kv): prove bit-exact middle-span Evict survives paged/block KV (Evict-on-paged tension)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/33",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 34,
+      "state": "CLOSED",
+      "title": "feat(kv): paged/block KV allocator carrying the bit-exact Evict value-add (build-on #36)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/34",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 35,
+      "state": "CLOSED",
+      "title": "feat(scheduler): admission control + priority + fairness gate (under #36)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/35",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 36,
+      "state": "CLOSED",
+      "title": "feat(scheduler): continuous-batching iteration scheduler over StepBatch (build-on #46)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/36",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 37,
+      "state": "CLOSED",
+      "title": "feat(serving): orchestrate external P/D disaggregation + govern KV-transport bridge (NIXL/Mooncake/LMCache)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/37",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 38,
+      "state": "CLOSED",
+      "title": "feat(engine): Dynamo interop  -  fak router stands beside or in front of Dynamo's P/D router",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/38",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 39,
+      "state": "CLOSED",
+      "title": "feat(engine): SGLang adapter behind the EngineDriver seam (RadixAttention signal + scheduler metrics)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/39",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 40,
+      "state": "CLOSED",
+      "title": "feat(engine): vLLM-V1 adapter behind the EngineDriver seam (HTTP + KV-events)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/40",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 41,
+      "state": "CLOSED",
+      "title": "feat(serving): per-worker prefix-residency index + cache-aware power-of-two routing (build-on #45)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/41",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "observability"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 42,
+      "state": "CLOSED",
+      "title": "feat(serving): node membership/health/drain/failover loop feeding the router",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/42",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "observability",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 43,
+      "state": "CLOSED",
+      "title": "feat(metrics): TTFT/TPOT/ITL/goodput/queue/KV-util serving surface  -  two emitters, one schema (build-on #47)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/43",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 44,
+      "state": "CLOSED",
+      "title": "bench(serving): EXTEND the bench harness/webbench into a vLLM/SGLang/native parity harness",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/44",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 45,
+      "state": "CLOSED",
+      "title": "feat(gateway): fleet router skeleton  -  N-upstream dispatch + static replica registry (build-on #46)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/45",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "distributed-execution",
+        "observability",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 46,
+      "state": "CLOSED",
+      "title": "feat(modelengine): extend EngineDriver from one-shot Complete to admit/step/stream  -  designed against BOTH consumers",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/46",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 47,
+      "state": "CLOSED",
+      "title": "feat(gateway): real token-by-token streaming reconciled with whole-turn tool-call gating",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/47",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 48,
+      "state": "CLOSED",
+      "title": "feat(gateway): incremental detokenizer  -  streaming/token-timing prerequisite",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/48",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 49,
+      "state": "CLOSED",
+      "title": "docs(serving): dual-track RIDE+NATIVE serving decision doc with honest scope + de-dup map",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/49",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 50,
+      "state": "OPEN",
+      "title": "epic(serving): large-scale disaggregated serving  -  dual-track (RIDE + NATIVE) over one shared spine",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/50",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 53,
+      "state": "OPEN",
+      "title": "epic(agentl3): external L3 disaggregated cache as a fak-governed tier",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/53",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 79,
+      "state": "CLOSED",
+      "title": "epic: re-imagine the external L3 disaggregated KV cache first-class for fak (CAMA semantics layer)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/79",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 105,
+      "state": "CLOSED",
+      "title": "docs(agent-machine-link-protocol): three different `schema` identifiers are never reconciled",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/105",
+      "relevance": "search-noise",
+      "candidate_ids": [],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 131,
+      "state": "CLOSED",
+      "title": "docs(radixattention-explainer): apples-to-oranges \"100% of optimal vs the paper's 96% average\"",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/131",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 132,
+      "state": "CLOSED",
+      "title": "docs(radixattention-explainer): \"the four shapes SGLang's paper evaluates\" — but multi-turn uses 8 turns where the paper uses 4",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/132",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 192,
+      "state": "CLOSED",
+      "title": "docs(on-demand): \"vLLM's automatic prefix caching hashes blocks using parent prefix, block tokens, and extra identity axes\" — \"extra identity axes\" uncited",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/192",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 209,
+      "state": "CLOSED",
+      "title": "docs(regime): \"deterministic 7.50× token ceiling\" — \"deterministic\" is undefined and unexplained",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/209",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 221,
+      "state": "CLOSED",
+      "title": "feat(gateway): OpenAI API Feature Parity [F-001]",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/221",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 282,
+      "state": "CLOSED",
+      "title": "perf(serving): Continuous Batching Integration [B-004]",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/282",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 322,
+      "state": "CLOSED",
+      "title": "examples: RadixAttention adoption walkthrough (cmd/radixbench across 4 workload shapes)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/322",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 331,
+      "state": "CLOSED",
+      "title": "examples: fanbench adoption walkthrough (orchestrator→N-subagents, sweep your own fan-out)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/331",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 355,
+      "state": "CLOSED",
+      "title": "docs(readme): \"parity\" used in two senses (bit-exact vs throughput), and the throughput claim tensions with \"doesn't compete on throughput\"",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/355",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 398,
+      "state": "CLOSED",
+      "title": "feat(gateway): implement intelligent request routing and tiered serving",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/398",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 401,
+      "state": "CLOSED",
+      "title": "feat(engine): implement native continuous batching for improved throughput",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/401",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 402,
+      "state": "CLOSED",
+      "title": "feat(model): implement speculative decoding for 2-3x decode speedup",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/402",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 409,
+      "state": "CLOSED",
+      "title": "[epic] fak live API (serve): proven, tested, working end-to-end for an external adopter",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/409",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 411,
+      "state": "CLOSED",
+      "title": "serve(gateway): wire engine-cache reset + a trace-taint observe route into the native fak paths (proxy/native asymmetry)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/411",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "observability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 413,
+      "state": "CLOSED",
+      "title": "GLM-5.2 DSA: witness full-size checkpoint serving behind fak",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/413",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 414,
+      "state": "CLOSED",
+      "title": "GLM-5.2 DSA: support exact-span remote KV/index eviction when engines expose it",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/414",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 430,
+      "state": "CLOSED",
+      "title": "bench(fanbench): add tuned shared-prefix serving baselines for vLLM/SGLang/llama.cpp",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/430",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 431,
+      "state": "CLOSED",
+      "title": "bench(fanbench): validate 256K-1M prefix-scale points with real long-context model wall-clock",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/431",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 432,
+      "state": "CLOSED",
+      "title": "memory/runtime: bridge semantic views to provider and KV materialization safely",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/432",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 437,
+      "state": "CLOSED",
+      "title": "[epic] memory: provenance-bound virtual views over recall/core images",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/437",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 448,
+      "state": "CLOSED",
+      "title": "model: cross-engine zero-copy KV co-residence so KV-fusion holds against an external engine",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/448",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "speculative-decoding",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 451,
+      "state": "CLOSED",
+      "title": "adoption: run fak in front of a real engine (vLLM/SGLang) and publish the ns/call adjudication overhead",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/451",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 533,
+      "state": "CLOSED",
+      "title": "serve(polymodel): single-pass batched + tree verify execution (tree-attention masks)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/533",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 534,
+      "state": "CLOSED",
+      "title": "serve(polymodel): cross-model prefill share — wire CanShare into cachemeta + KVCache.Clone splice",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/534",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 581,
+      "state": "CLOSED",
+      "title": "feat(serve): wire RadixAttention prefix-tree KV reuse into the fak serve mainline",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/581",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 589,
+      "state": "CLOSED",
+      "title": "epic(brand): durable positioning — anchor fak on the agent-kernel / syscall spine",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/589",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 637,
+      "state": "OPEN",
+      "title": "epic(serving): throughput parity + trust/L3 over one shared spine — the worst-regret sequencing plan",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/637",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 734,
+      "state": "CLOSED",
+      "title": "feat(benchmark): measure kernel-in-the-loop guard-hop overhead + prompt-cache preservation as a BENCHMARK-AUTHORITY row + gate",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/734",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 903,
+      "state": "CLOSED",
+      "title": "research(sota): learn P/D disaggregation + KV routing before the next serving/vcache push",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/903",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 905,
+      "state": "CLOSED",
+      "title": "research(sota): learn production kernel stacks before more native GLM/Qwen optimization",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/905",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 907,
+      "state": "CLOSED",
+      "title": "research(sota): structured-output decoding for schema-valid tool-call candidates",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/907",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "speculative-decoding",
+        "structured-generation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 918,
+      "state": "CLOSED",
+      "title": "docs(glm-dgx-loop): document `--upstream-base-url` (ship/run) vs `--base-url` (witness) flag naming",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/918",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 919,
+      "state": "CLOSED",
+      "title": "docs(glm-dgx-loop): state whether the \"witness\" step proves native GLM serving or only fak-fronted SGLang",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/919",
+      "relevance": "direct-title-related",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 923,
+      "state": "CLOSED",
+      "title": "infra(dgx): pin ninja in the box sglang venv (flashinfer JIT dep) so it survives re-provision",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/923",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 929,
+      "state": "CLOSED",
+      "title": "feat(model): native sampler logit-bias + JSON-schema mask hook at the decode boundary, bit-exact-off (follow-on to #907)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/929",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 931,
+      "state": "OPEN",
+      "title": "epic(serving): run exact Qwen3.6-27B-FP8 on GPU server in the pure fak kernel with native L2/L3",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/931",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1010,
+      "state": "CLOSED",
+      "title": "epic(benchmarks): GLM-5.2 through fak's own kernel + cache, driving the Claude harness over a real solved ticket on dgx compute",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1010",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 1026,
+      "state": "OPEN",
+      "title": "epic(model-support): Ornith 1.0 first-class support — it's a Qwen3.5 family, so serve it, don't port it",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1026",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "multimodal-moe",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1033,
+      "state": "CLOSED",
+      "title": "swebench: reproduce Ornith SWE-Bench Verified + Terminal-Bench 2.1 on a fak-served Ornith-9B — turn vendor OBSERVED into fak-WITNESSED",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1033",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1050,
+      "state": "CLOSED",
+      "title": "epic(industry-scorecard): keep the vLLM-parity map fresh — re-ground the SOTA bars on every round, measure the adjacent gaps fak can honestly own",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1050",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1051,
+      "state": "CLOSED",
+      "title": "scorecard(latency): measure the gateway request-path latency percentiles (TTFT/TPOT/E2EL/tail) — the tax fak can honestly report",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1051",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1054,
+      "state": "CLOSED",
+      "title": "scorecard(process): stand up the recurring industry-freshness cadence — keep the 21 still-stale bars re-confirmed, not silently regrowing",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1054",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "speculative-decoding"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1055,
+      "state": "CLOSED",
+      "title": "scorecard(model): follow through on MLPerf v6.0 / DeepSeek-R1 671B — make fak's MoE position one coherent story across the rows",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1055",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1063,
+      "state": "OPEN",
+      "title": "epic(benchmarks): fak benchmark-entry portfolio - which competitive boards fak enters (ranked, with the per-lane honesty fence) + the SKIP list",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1063",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "multimodal-moe",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1068,
+      "state": "CLOSED",
+      "title": "bench(agentic): survey the frontier AGENT leaderboards (GAIA2 / Galileo v2 / Vals Index / AA Agentic Index / BFCL V4) for a scoreable fak axis + pick the one to enter",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1068",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1070,
+      "state": "CLOSED",
+      "title": "bench(security): scope fak as an AILuminate (MLCommons) model+guardrail SUT - is content-harm adjacency worth the operator-gated run?",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1070",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1072,
+      "state": "OPEN",
+      "title": "epic(cache): make the OWNED KV cache value OBSERVED + default-visible + 2x — not just planned",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1072",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1258,
+      "state": "OPEN",
+      "title": "epic(syspromptmmu): fak owns its own base context — fak-first spine, harness items queried/paged/dynamically-modifiable (the authorship dual of #751)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1258",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "observability",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1457,
+      "state": "OPEN",
+      "title": "epic(roadmap): the 6 live-but-not-quite-there workstreams — milestone-mapped + witnessed status",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1457",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "observability",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1477,
+      "state": "CLOSED",
+      "title": "feat(serving): one-command GCP-H100 GLM-5.2 demo — provision, pure-fak serve, probe, cache-value, teardown (epic #1476 C1)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1477",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 1480,
+      "state": "CLOSED",
+      "title": "bench(serving): measure TTFT/TPOT/ITL for fak gateway vs raw SGLang on a GPU server",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1480",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1490,
+      "state": "OPEN",
+      "title": "epic(cache): turn the vCache gates ON by default + honest per-mechanism attribution",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1490",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 1498,
+      "state": "OPEN",
+      "title": "feat(cache): push the vBlock/anchor abstraction across pure-fak, sglang, vllm, llama.cpp + the API surface",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1498",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1549,
+      "state": "CLOSED",
+      "title": "cache-default[31]: external engines: Build a cache capability inventory for SGLang, vLLM, llama.cpp, Ollama, and LM Studio",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1549",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1550,
+      "state": "CLOSED",
+      "title": "cache-default[32]: external engines: Add a wire-neutral `engine.CacheCapability` contract",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1550",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1551,
+      "state": "CLOSED",
+      "title": "cache-default[33]: external engines: Add a vLLM prefix-cache observation adapter",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1551",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1552,
+      "state": "CLOSED",
+      "title": "cache-default[34]: external engines: Add an SGLang radix/prefix-cache observation adapter",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1552",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1553,
+      "state": "CLOSED",
+      "title": "cache-default[35]: external engines: Add a llama.cpp/llama-server session-cache observation adapter",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1553",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1554,
+      "state": "CLOSED",
+      "title": "cache-default[36]: external engines: Add adapter conformance tests for \"fronted\" vs \"cache-integrated.\"",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1554",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 1556,
+      "state": "CLOSED",
+      "title": "cache-default[38]: external engines: Add per-engine cold-path correctness witnesses",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1556",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1557,
+      "state": "OPEN",
+      "title": "cache-default[39]: external engines: Compare pure-fak, vLLM, SGLang, and llama paths on the same session geometry",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1557",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1564,
+      "state": "CLOSED",
+      "title": "cache-default[46]: remove legacy: Add docs/claims lint for cache headlines that omit plane/provenance",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1564",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 1570,
+      "state": "OPEN",
+      "title": "managed-context: product/runtime epic for continuous governed context",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1570",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "observability",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1602,
+      "state": "CLOSED",
+      "title": "managed-context: surface a prefix-stability score",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1602",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1603,
+      "state": "CLOSED",
+      "title": "managed-context: plan cache breakpoints as part of context planning",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1603",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1604,
+      "state": "CLOSED",
+      "title": "managed-context: audit deterministic prompt serialization",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1604",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1605,
+      "state": "CLOSED",
+      "title": "managed-context: choose mask-vs-remove for tool schemas explicitly",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1605",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1606,
+      "state": "CLOSED",
+      "title": "managed-context: gate cache-bursting compaction on break-even",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1606",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1607,
+      "state": "CLOSED",
+      "title": "managed-context: join provider cache metrics to context events",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1607",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1609,
+      "state": "CLOSED",
+      "title": "managed-context: preserve cache affinity across continuations",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1609",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1611,
+      "state": "CLOSED",
+      "title": "managed-context: witness warm-prefix replay after reset",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1611",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1613,
+      "state": "CLOSED",
+      "title": "managed-context: define cross-agent shared context segment policy",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1613",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1614,
+      "state": "CLOSED",
+      "title": "managed-context: calibrate provider cache TTL against real resumes",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1614",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1678,
+      "state": "OPEN",
+      "title": "Epic: fak as the vendor-neutral binding layer for neo-silicon and neo-clouds",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1678",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1688,
+      "state": "CLOSED",
+      "title": "GPU-bias correction: add a hardware-shape-neutrality dimension to the industry scorecard",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1688",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1705,
+      "state": "CLOSED",
+      "title": "fak serve in-kernel sampler drops frequency_penalty/presence_penalty — reasoning models loop, never emit a final answer",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1705",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1731,
+      "state": "CLOSED",
+      "title": "bench(vllm): record torch.compile cache and CUDA-graph warmup in tuned baselines",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1731",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 1841,
+      "state": "CLOSED",
+      "title": "feat(model): in-kernel + remote engines implement fusedturn.WeightBearing so ClassifyResolved works on live routes",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/1841",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 2169,
+      "state": "OPEN",
+      "title": "feat(l4object): first-class object-store (S3/MinIO/blob) L4 cache tier — stateful offload + verified access [epic]",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2169",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2236,
+      "state": "OPEN",
+      "title": "epic(superset): fak > best of vLLM + SGLang + Dynamo + TRT-LLM/LMDeploy/llama.cpp - ranked concept-by-concept, conceptual to benchmark, memory-first",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2236",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "observability",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2237,
+      "state": "OPEN",
+      "title": "research(superset): memory-concept ranking dossier - 10 concepts ranked fak-vs-engines with evidence + adopt-or-SKIP verdicts (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2237",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2238,
+      "state": "CLOSED",
+      "title": "feat(route): fleet-level KV-aware routing - event-fed prefix-overlap scoring across heterogeneous engine workers (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2238",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2239,
+      "state": "CLOSED",
+      "title": "feat(kvbm): cost-aware eviction + KV pin leases + tiered offload-before-preempt on the native ladder (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2239",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2240,
+      "state": "CLOSED",
+      "title": "feat(engine): KV-cache quantization ladder - int8/fp8 KV tier states + CacheGen-class cold-tier compression (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2240",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2241,
+      "state": "CLOSED",
+      "title": "feat(engine): hybrid-model KV memory plane - allocator groups for SWA windows + GDN/Mamba state (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2241",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2244,
+      "state": "OPEN",
+      "title": "bench(superset): the memory benchmark matrix - TTFT-vs-overlap, hit-rate, eviction pressure, offload tiers, transfer latency vs vLLM/SGLang/Dynamo (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2244",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2283,
+      "state": "CLOSED",
+      "title": "docs(explainer): \"fak is not a serving engine\" — the honest boundary",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2283",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2301,
+      "state": "CLOSED",
+      "title": "docs(compare): \"fak vs vLLM/SGLang\" — different boundary, not a race",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2301",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2352,
+      "state": "OPEN",
+      "title": "idea-scout: Speculative Pre-Positioning: Decoding Stateful Sessions to the Next Decision Point Off the Critic…",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2352",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2509,
+      "state": "CLOSED",
+      "title": "bench(guard): kernel-control vs API ablation - prove fak guard value with GLM-5.2 on dgx (epic #1010)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2509",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2580,
+      "state": "OPEN",
+      "title": "research(vfs): T5 — the FS-snapshot <-> KV-prefix-reuse duality (fork one FS snapshot, share the KV prefix)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2580",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2596,
+      "state": "CLOSED",
+      "title": "feat(grammar): compile tool schemas into the native LogitMask spine",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2596",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "structured-generation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2597,
+      "state": "CLOSED",
+      "title": "docs(integration): structured-output library recipes through fak",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2597",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2599,
+      "state": "CLOSED",
+      "title": "docs(positioning): structured generation became infrastructure, not a dead topic",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2599",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2663,
+      "state": "CLOSED",
+      "title": "docs(deploy): neo-cloud deployment quickstart (rent-a-GPU box: CoreWeave/Lambda/RunPod/Crusoe/Vast)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2663",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2666,
+      "state": "CLOSED",
+      "title": "epic(kvbm): finish production wiring for cost-aware KV eviction after #2239 (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2666",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2668,
+      "state": "CLOSED",
+      "title": "feat(kvbm): add GDSF aging clock to the KV value function — scan-resistant cost-aware eviction (extends #2239/#2666)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2668",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2670,
+      "state": "CLOSED",
+      "title": "feat(kvbm): cross-session fan-out multiplier in the KV value function — shared prefixes are worth their breadth (extends #2239/#2666)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2670",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2671,
+      "state": "CLOSED",
+      "title": "feat(kvbm): generalize evict to a min-cost tier ACTION (keep/quantize/spill/evict) — demote-not-drop across the ladder (concretizes #2666)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2671",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2674,
+      "state": "CLOSED",
+      "title": "feat(kvbm): per-tenant weighted fairness floors for KV eviction — stop noisy neighbors starving quiet tenants (extends #2239/#2666)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2674",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "observability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2675,
+      "state": "CLOSED",
+      "title": "test(kvbm): real-trace replay loader + Belady-oracle witness for cost-aware KV eviction — the committed validation artifact (concretizes #2666, feeds #2244)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2675",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2722,
+      "state": "OPEN",
+      "title": "epic(mac): Mac CPU+RAM+SSD offload serving — close the #2691 slow-prefill gap, beat llama.cpp/MLX provably, land fak's cache-value on top",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2722",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2724,
+      "state": "CLOSED",
+      "title": "feat(engine): MLX ride-adapter — front mlx-lm/vllm-mlx the way fak already fronts vLLM/SGLang",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2724",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2727,
+      "state": "CLOSED",
+      "title": "feat(engine,cachevalue): witness fak's exact-span KV eviction + cache-value P&L end-to-end on the Mac serving path",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2727",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2955,
+      "state": "CLOSED",
+      "title": "ops(gcp): automate GLM-5.2 capacity fallback and dogfood proof",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2955",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "structured-generation",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 2994,
+      "state": "CLOSED",
+      "title": "perf(lab): restore GLM-5.2 guarded route under developer latency budget",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2994",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 2997,
+      "state": "CLOSED",
+      "title": "fix(model): make GLM-5.2 expert-parallel fit planning rank-local",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/2997",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3006,
+      "state": "OPEN",
+      "title": "epic(deepseek): support DeepSeek V4 Pro as first-class hosted/self-hosted routes",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3006",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3011,
+      "state": "CLOSED",
+      "title": "test(deepseek): add hosted and self-hosted V4 Pro conformance fixtures before live spend",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3011",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3012,
+      "state": "CLOSED",
+      "title": "docs(deepseek): publish V4 Pro runbook, route examples, and alias migration warning",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3012",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3013,
+      "state": "CLOSED",
+      "title": "bench(selfhost): baseline DeepSeek V4 Pro through vLLM/SGLang before native MoE work",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3013",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3015,
+      "state": "CLOSED",
+      "title": "perf(deepseek): model V4 long-context memory/KV budgets before claiming 1M support",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3015",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3016,
+      "state": "CLOSED",
+      "title": "kernel(attn): map DeepSeek V4 CSA/HCA sparse-attention kernels to fak seams",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3016",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3018,
+      "state": "CLOSED",
+      "title": "kernel(moe): DeepSeek V4 Pro expert dispatch and fused MegaMoE prior-art baseline",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3018",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3019,
+      "state": "CLOSED",
+      "title": "kernel(quant): support plan for DeepSeek V4 FP4 expert weights and FP4 indexer path",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3019",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3020,
+      "state": "CLOSED",
+      "title": "perf(deepseek): evaluate V4 MTP/speculative decoding route before native implementation",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3020",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3051,
+      "state": "CLOSED",
+      "title": "serve: gate GLM-5.2 readiness on a completed warmup inference, not port-bind (kills the ~500s first-turn tax)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3051",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3052,
+      "state": "CLOSED",
+      "title": "serve/infra: persist DeepGEMM/torch.compile/CUDA-graph caches across restarts (pay the GLM-5.2 cold tax once, not per boot)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3052",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3059,
+      "state": "OPEN",
+      "title": "livecodebench(serving): front GLM-5.2 on the 80GB DGX lab lane via fak gateway",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3059",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3060,
+      "state": "OPEN",
+      "title": "run(livecodebench): GLM-5.2 on DGX — first graded pass@1 (raw + fak arms)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3060",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "structured-generation",
+        "distributed-execution",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 3088,
+      "state": "CLOSED",
+      "title": "perf(attn): serve GLM-5.2 DSA as TRUE sparse attention, not full MLA — long-context decode/prefill delta [DGX 2 · Lane E · L7]",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3088",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 3142,
+      "state": "CLOSED",
+      "title": "research(superset): add LMCache row to the external-engine cache capability inventory (#1549 pattern) — the epic names it, the inventory can't point at it",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3142",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3143,
+      "state": "OPEN",
+      "title": "research(superset): rank LMCache CacheBlend (non-prefix KV reuse) vs fak radixkv — the missing #2236 concept row",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3143",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3145,
+      "state": "OPEN",
+      "title": "feat(engine): passive-observe adapter for LMCache lookup/KV-event surface behind the CacheCapability seam (#1551–#1553 pattern)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3145",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "observability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3174,
+      "state": "CLOSED",
+      "title": "feat(moe): expert-weight residency/streaming cache as memory-concept M11 (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3174",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3175,
+      "state": "CLOSED",
+      "title": "feat(engine): recurrent-state prefix reuse — SSM/GDN state checkpoint+handoff (M12, epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3175",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3205,
+      "state": "OPEN",
+      "title": "feat(model): batch-size-invariance rung + determinism posture on fronted engines (borrow Thinking Machines batch_invariant_ops)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3205",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3259,
+      "state": "OPEN",
+      "title": "epic(disaggregation): the claim-space is the universal compute-partition primitive — disaggregate every area through one admission kernel",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3259",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3309,
+      "state": "CLOSED",
+      "title": "research(superset): rank MinIO MemKV (flash-KV-over-RDMA memory tier) vs fak KV-transport ride seam - adopt/observe/SKIP (epic #2236)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3309",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3311,
+      "state": "OPEN",
+      "title": "docs(serving): add MinIO MemKV competitor row to KV-transport-governance doc - closed-source flash-memory tier, observe/SKIP (epic #3199)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3311",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3312,
+      "state": "OPEN",
+      "title": "feat(cachemeta): name the persistent flash-KV-over-RDMA memory-tier rung MemKV/Mooncake occupy - profile + govern-the-bridge (epic #50)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3312",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3314,
+      "state": "OPEN",
+      "title": "research(cost): record MinIO MemKV 40-60% cost/token claim as an OBSERVED vendor datapoint + net-true comparand (epic #2671)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3314",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3315,
+      "state": "OPEN",
+      "title": "brand(positioning): reference MinIO MemKV as validation-and-contrast in the disaggregated-KV-memory-tier positioning surfaces (epic #2169)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3315",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3407,
+      "state": "CLOSED",
+      "title": "docs(enginecache): re-witness external-engine cache capability inventory against the landed observation adapters (epic #1490)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3407",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3413,
+      "state": "OPEN",
+      "title": "feat(serving): co-residence handshake transport mapping a real engine KV region into the xenginekv arena (epic #53)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3413",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3476,
+      "state": "CLOSED",
+      "title": "reliability(engine): HTTP adapters have no transport deadlines (Timeout:0 + no ResponseHeaderTimeout / SSE idle) (#3153)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3476",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation",
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3489,
+      "state": "OPEN",
+      "title": "Engine adapters' nil-client fallback is Timeout:0 with no transport deadlines",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3489",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 3889,
+      "state": "CLOSED",
+      "title": "feat(radixkv): namespace/holder-scoped prefix isolation — key nodes by (tokens, extra_key/session), not tokens-only (borrow sglang RadixKey + session_radix_cache)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3889",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 3890,
+      "state": "CLOSED",
+      "title": "feat(radixkv): open the closed eviction-policy enum into a get_priority strategy seam + register scan-resistant SLRU (borrow sglang evict_policy registry)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3890",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "radix-prefix-reuse"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 3891,
+      "state": "CLOSED",
+      "title": "perf(radixkv): gallop + binary-search the edge run-compare in walk() instead of token-by-token (borrow sglang RadixKey.match)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3891",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 3952,
+      "state": "CLOSED",
+      "title": "perf(cache): single-pass budget→reuse sweep with infinite-cache ceiling + 99% knee to size --compact-history-budget from evidence",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/3952",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4104,
+      "state": "OPEN",
+      "title": "feat(gateway): fleet tool-call history as a retrieval-draft corpus — the predictor SEAM 4 lacks",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4104",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "speculative-decoding"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4207,
+      "state": "OPEN",
+      "title": "epic(inference-radar-study): mine RunAnywhere's Inference Radar (Hy3 / MoE-serving roundup) for fak — witnessed borrows",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4207",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4232,
+      "state": "CLOSED",
+      "title": "guard complaint [over-broad] TRUST_VIOLATION tool=WebFetch — study-repo acquisition: WebFetch of public upstream source over-refused (TRUST_VIOLATION), forcing API-only grounding",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4232",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4367,
+      "state": "OPEN",
+      "title": "Run witnessed 24-hour four-resource GPU benchmark campaign",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4367",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 4380,
+      "state": "OPEN",
+      "title": "bench(guard): K1/K2/A1 guard-value ablation matrix on an 8-GPU box",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4380",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4509,
+      "state": "CLOSED",
+      "title": "epic(quality): build the missing middle validation ladder from decode parity to executive-report dogfood",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4509",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "distributed-execution",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4534,
+      "state": "CLOSED",
+      "title": "test(quality): compare prefix-cache on/off output parity",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4534",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4535,
+      "state": "CLOSED",
+      "title": "test(quality): validate KV eviction and recomputation quality parity",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4535",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4536,
+      "state": "CLOSED",
+      "title": "test(quality): gate chunked versus monolithic prefill parity",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4536",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4537,
+      "state": "CLOSED",
+      "title": "test(quality): qualify every scheduler policy for output parity",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4537",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4538,
+      "state": "CLOSED",
+      "title": "test(quality): prove retry and mid-generation resume preserve semantics",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4538",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4539,
+      "state": "CLOSED",
+      "title": "test(quality): validate speculative decoding against target-only decode",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4539",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4540,
+      "state": "CLOSED",
+      "title": "test(quality): set quantization-specific quality budgets",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4540",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4541,
+      "state": "CLOSED",
+      "title": "test(quality): qualify FP32, BF16, and FP16 execution quality deltas",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4541",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4542,
+      "state": "CLOSED",
+      "title": "test(quality): gate tensor-parallel degree output parity",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4542",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4543,
+      "state": "CLOSED",
+      "title": "test(quality): gate pipeline-parallel output parity and resumes",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4543",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4544,
+      "state": "CLOSED",
+      "title": "test(quality): maintain CPU, CUDA, ROCm, Metal, and Vulkan quality matrices",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4544",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4545,
+      "state": "CLOSED",
+      "title": "test(quality): verify model load and conversion preserve generation quality",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4545",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4546,
+      "state": "CLOSED",
+      "title": "test(quality): detect quality cliffs across context length and position scaling",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4546",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4547,
+      "state": "CLOSED",
+      "title": "test(quality): qualify OpenAI-compatible request and response semantics",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4547",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4548,
+      "state": "CLOSED",
+      "title": "test(quality): validate constrained and structured-output semantic quality",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4548",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4549,
+      "state": "CLOSED",
+      "title": "test(quality): validate multi-turn state and report consistency",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4549",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4574,
+      "state": "CLOSED",
+      "title": "feat(quality): split PR, nightly, and release quality suites by evidence cost",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4574",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4575,
+      "state": "CLOSED",
+      "title": "feat(quality): select quality cases from changed engine surfaces",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4575",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4576,
+      "state": "CLOSED",
+      "title": "feat(quality): govern golden and statistical baseline promotion",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4576",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4577,
+      "state": "CLOSED",
+      "title": "ci(quality): run a nightly model-backend-engine quality matrix",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4577",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4578,
+      "state": "CLOSED",
+      "title": "ci(quality): require witnessed quality qualification before release",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4578",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4579,
+      "state": "CLOSED",
+      "title": "feat(quality): evaluate candidate engines on scrubbed shadow requests",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4579",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4580,
+      "state": "CLOSED",
+      "title": "feat(quality): add quality-aware canary promotion and rollback",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4580",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4581,
+      "state": "CLOSED",
+      "title": "feat(quality): monitor input and output quality drift by cohort",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4581",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4582,
+      "state": "CLOSED",
+      "title": "feat(quality): define quality SLOs and error budgets for serving",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4582",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4583,
+      "state": "CLOSED",
+      "title": "feat(quality): automate commit and configuration bisect for replayable regressions",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4583",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4584,
+      "state": "CLOSED",
+      "title": "feat(quality): auto-file deduplicated quality regressions with replay evidence",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4584",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4585,
+      "state": "CLOSED",
+      "title": "feat(quality): publish a quality ladder dashboard from primitives to dogfood",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4585",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4586,
+      "state": "CLOSED",
+      "title": "feat(quality): measure validation cost and marginal defect yield",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4586",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4587,
+      "state": "CLOSED",
+      "title": "docs(quality): write the output-quality regression incident runbook",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4587",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4781,
+      "state": "CLOSED",
+      "title": "bench(deepseek): capture pure-fak V4 Pro witness on DGX3",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4781",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4784,
+      "state": "OPEN",
+      "title": "perf(glm52): execute routed k-quant experts across all GPUs in pure fak",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4784",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "distributed-execution",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 4788,
+      "state": "CLOSED",
+      "title": "infra(deepseek): provision immutable V4 Pro model artifact for DGX validation",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4788",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4802,
+      "state": "CLOSED",
+      "title": "fix(cuda): make GLM-5.2 EP device all-reduce survive first routed layer",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4802",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4804,
+      "state": "CLOSED",
+      "title": "feat(serve): fan one GLM-5.2 EP request through every rank collective",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4804",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4807,
+      "state": "CLOSED",
+      "title": "feat(deepseek): stream V4 Pro experts through the pure fak serve path",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4807",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "prefill-decode-disaggregation",
+        "observability",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4821,
+      "state": "CLOSED",
+      "title": "fix(dgx): align NCCL runtime with CUDA 12.8 for multi-process collectives",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4821",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 4830,
+      "state": "CLOSED",
+      "title": "fix(gateway): inherit request deadline for slow GLM-5.2 EP fanout",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4830",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "distributed-execution",
+        "failure-reliability"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 4835,
+      "state": "CLOSED",
+      "title": "perf(glm52): replace duplicate HTTP rank inference with coordinated EP execution",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4835",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4855,
+      "state": "CLOSED",
+      "title": "fix(glm52): prevent EP streaming stall and rank-0 residency collapse",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4855",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 4952,
+      "state": "CLOSED",
+      "title": "fix(glm52): apply rank-local EP capacity plan before device-load refusal",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/4952",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "scheduler-admission",
+        "structured-generation",
+        "distributed-execution",
+        "failure-reliability"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 5241,
+      "state": "CLOSED",
+      "title": "feat(serve): inference-hardware serve-readiness doctor — CPU ISA tier / VRAM-for-model / NUMA capability report (ktransformers kt-doctor borrow, sibling #3900)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5241",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "structured-generation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5256,
+      "state": "OPEN",
+      "title": "epic(tensorrt-llm-study): mine NVIDIA TensorRT-LLM for fak — witnessed borrows (adaptive spec gate, no-evict admission, per-request KV retention, block-hash cache events)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5256",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5266,
+      "state": "CLOSED",
+      "title": "feat(admission): set the admission TokenBudget from a measured warmup capacity probe, not a static default (TGI borrow)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5266",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5270,
+      "state": "OPEN",
+      "title": "feat(gateway): fail-closed front-door validation of the structured-output contract (422 before upstream) (TGI borrow)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5270",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5279,
+      "state": "CLOSED",
+      "title": "feat(moe): length-gated prefill compute-placement — switch expert GEMMs between host-hybrid and device-layerwise by prefill token count (ktransformers-borrow, child #3900)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5279",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5286,
+      "state": "OPEN",
+      "title": "feat(agent): witnessed think-token budget — count reasoning tokens and force </think> exit at a cap (sglang-study)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5286",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5287,
+      "state": "CLOSED",
+      "title": "feat(resume): soft watchdog — capture a diagnostic state dump on an alive-but-stalled session before nudge/revive (sglang-study)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5287",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "scheduler-admission",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5288,
+      "state": "CLOSED",
+      "title": "feat(serving): prefix-delta KV handoff — destination advertises its held prefix, sender ships only the suffix (sglang-study)",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5288",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5632,
+      "state": "OPEN",
+      "title": "epic(gateway): the gateway is the fleet's front door — bind the model catalog, the worker roster, and the control spine to the live wire",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5632",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 5797,
+      "state": "OPEN",
+      "title": "fix(gateway): parallel tool_results are re-emitted as N stacked user turns, structurally suppressing batching",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/5797",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6082,
+      "state": "OPEN",
+      "title": "bench(radixkv): compare native prefix reuse with SGLang and fak + llm-d",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6082",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6114,
+      "state": "CLOSED",
+      "title": "bench(enginecache): run vLLM, SGLang, and LMCache invalidation arms",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6114",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6131,
+      "state": "OPEN",
+      "title": "bench(kvbudget): reconcile KV model with vLLM, SGLang, and GenAI-Perf",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6131",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6135,
+      "state": "OPEN",
+      "title": "bench(deadlineadmit): run scheduler and integration alternative arms",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6135",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6152,
+      "state": "OPEN",
+      "title": "Benchmark warm-cache budget scheduling against engine alternatives",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6152",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6159,
+      "state": "OPEN",
+      "title": "Benchmark concentration-weighted cache allocation against alternatives",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6159",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6162,
+      "state": "OPEN",
+      "title": "Benchmark dedicated cache warming against provider and engine alternatives",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6162",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6259,
+      "state": "CLOSED",
+      "title": "research(model): evaluate attention-preserving KV vector quantization",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6259",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 6374,
+      "state": "OPEN",
+      "title": "fix(glm52): return a coherent response after EP-8 LOAD_READY",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6374",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6471,
+      "state": "OPEN",
+      "title": "docs: capture TensorRT-LLM behind fak compatibility witness",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6471",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6473,
+      "state": "OPEN",
+      "title": "docs: capture SGLang behind fak compatibility witness",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6473",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "structured-generation",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 6474,
+      "state": "OPEN",
+      "title": "bench: compare tuned TensorRT-LLM and SGLang agent-serving paths behind fak",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6474",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 6475,
+      "state": "OPEN",
+      "title": "adoption: ship AEO and SEO discovery surfaces for the TensorRT-LLM vs SGLang explainer",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6475",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6851,
+      "state": "OPEN",
+      "title": "bench(cache): witness pure-fak host L2 restore on exact Qwen3.6-27B-FP8 on GPU server",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6851",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "distributed-execution",
+        "observability",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6852,
+      "state": "OPEN",
+      "title": "bench(cache): witness pure-fak CPU server L3 recovery on exact Qwen3.6-27B-FP8",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6852",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "distributed-execution"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6869,
+      "state": "OPEN",
+      "title": "feat(cache): optionally adapt SGLang-owned Qwen hybrid snapshots into fak cache tiers",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6869",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 6870,
+      "state": "CLOSED",
+      "title": "feat(model): load the exact Qwen3.6-27B-FP8 checkpoint in the pure fak engine",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/6870",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 7346,
+      "state": "OPEN",
+      "title": "feat(deploy): ship one auditable Lambda managed-GPU deployment spine",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/7346",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 8129,
+      "state": "OPEN",
+      "title": "experiment(qwen38): run controlled DGX multi-arm runtime and cache campaigns",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8129",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 8130,
+      "state": "CLOSED",
+      "title": "research(qwen38): map upstream runtime, tool, context, and cache support",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8130",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "multimodal-moe",
+        "observability",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 8258,
+      "state": "CLOSED",
+      "title": "feat(polymodel): expose per-position speculative acceptance profiles for suffix-decay decisions",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8258",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "observability",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 8382,
+      "state": "OPEN",
+      "title": "test(qwen38): gate vLLM and SGLang tool-call parser regressions",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8382",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 8384,
+      "state": "CLOSED",
+      "title": "bench(qwen38): measure a quality-constrained speculative decoding frontier",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8384",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 8391,
+      "state": "CLOSED",
+      "title": "feat(qwen38): enforce provenance for directly copied inference kernels",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8391",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 8395,
+      "state": "OPEN",
+      "title": "perf(qwen38): close the serving baseline with paged KV, prefix reuse, chunked prefill, and batching",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8395",
+      "relevance": "mapped-anchor",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "reuse-existing"
+    },
+    {
+      "issue": 8593,
+      "state": "OPEN",
+      "title": "epic(plugin): \"everything is a plugin\" — plugin-shape the four remaining seams: model adapter, agent loop, session store, runtime tool admit",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8593",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "kernel-runtime-integration",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 8650,
+      "state": "OPEN",
+      "title": "bench(ultracode): test scoped-prefix savings across radix-cache runtimes",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8650",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 8752,
+      "state": "CLOSED",
+      "title": "feat(nativeperf): expose per-lever ablations and deterministic next experiment",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/8752",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9000,
+      "state": "CLOSED",
+      "title": "study: refresh exhaustive inventory for sgl-project/mini-sglang",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9000",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9123,
+      "state": "CLOSED",
+      "title": "feat(qwen4exp): build native four-layer correctness oracle",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9123",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9204,
+      "state": "OPEN",
+      "title": "epic(model): QWEN38-FLASH-NEXT fak-native support",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9204",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "structured-generation",
+        "distributed-execution",
+        "observability",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9206,
+      "state": "OPEN",
+      "title": "test(qwen4exp): lock upstream FP8 PLE and tool-parser regressions",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9206",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9209,
+      "state": "OPEN",
+      "title": "perf(qwen4exp): ship exact CUDA kernels and residency plan",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9209",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9211,
+      "state": "CLOSED",
+      "title": "feat(qwen4exp): make PLE and sparse-index placement explicit",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9211",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "distributed-execution",
+        "failure-reliability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9212,
+      "state": "OPEN",
+      "title": "bench(qwen4exp): publish matched CUDA Metal and runtime frontier",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9212",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "distributed-execution",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9214,
+      "state": "CLOSED",
+      "title": "docs(qwen4exp): publish support matrix rollback and upstream watch",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9214",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "distributed-execution",
+        "observability"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9268,
+      "state": "CLOSED",
+      "title": "research(vllm): exhaustively index upstream work and prioritize FAK tickets",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9268",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "observability",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9269,
+      "state": "CLOSED",
+      "title": "research(infra): index frontier-lab, hyperscaler, datacenter, and workload expectations",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9269",
+      "relevance": "search-noise",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "excluded-search-noise"
+    },
+    {
+      "issue": 9275,
+      "state": "CLOSED",
+      "title": "research(runtime): declare and index the related-system adjacency set",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9275",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "radix-prefix-reuse",
+        "kernel-runtime-integration"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9289,
+      "state": "OPEN",
+      "title": "research(sglang): exhaustively index upstream and prioritize FAK tickets",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9289",
+      "relevance": "direct-title-related",
+      "candidate_ids": [
+        "scheduler-admission",
+        "radix-prefix-reuse",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "multimodal-moe",
+        "distributed-execution",
+        "observability",
+        "kernel-runtime-integration",
+        "failure-reliability",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9371,
+      "state": "CLOSED",
+      "title": "research(infra): add speculative acceptance telemetry",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9371",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [
+        "scheduler-admission",
+        "chunked-prefill-continuous-batching",
+        "prefill-decode-disaggregation",
+        "speculative-decoding",
+        "structured-generation",
+        "observability",
+        "kernel-runtime-integration",
+        "compatibility-benchmark"
+      ],
+      "action": "context-only-no-new-ticket"
+    },
+    {
+      "issue": 9372,
+      "state": "CLOSED",
+      "title": "fix(studyforge): pin revision at the declared cutoff",
+      "url": "https://github.com/anthony-chaudhary/fak/issues/9372",
+      "relevance": "mention-reviewed",
+      "candidate_ids": [],
+      "action": "context-only-no-new-ticket"
+    }
+  ]
+}
