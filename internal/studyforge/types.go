@@ -20,6 +20,17 @@ const (
 	StatusFailed   = "failed"
 )
 
+const (
+	// NonAtomicDeltaType is the closed receipt evidence type for reconciling the
+	// mixed issues census with the dedicated pulls census.
+	NonAtomicDeltaType = "non_atomic_delta"
+	// NonAtomicDeltaPolicyType names the deterministic bounded acceptance policy.
+	NonAtomicDeltaPolicyType = "bounded_identity_delta"
+	// DefaultNonAtomicDeltaLimit bounds each side and the total symmetric
+	// difference. The receipt carries this value explicitly; it is not ambient.
+	DefaultNonAtomicDeltaLimit = 1000
+)
+
 // SourceNames is the stable collection and receipt order.
 var SourceNames = []string{"issues", "pulls", "discussions", "releases", "labels", "milestones"}
 
@@ -54,33 +65,85 @@ type Corpus struct {
 
 // Receipt proves the revision, cutoff, API calls, completeness, and index digest.
 type Receipt struct {
-	Schema        string          `json:"schema"`
-	Repository    string          `json:"repository"`
-	Revision      string          `json:"revision"`
-	Cutoff        string          `json:"cutoff"`
-	APIBase       string          `json:"api_base"`
-	StartedAt     string          `json:"started_at"`
-	CompletedAt   string          `json:"completed_at,omitempty"`
-	Status        string          `json:"status"`
-	Sources       []SourceReceipt `json:"sources"`
-	IndexChecksum string          `json:"index_checksum"`
-	API           []APIReceipt    `json:"api,omitempty"`
+	Schema         string                  `json:"schema"`
+	Repository     string                  `json:"repository"`
+	Revision       string                  `json:"revision"`
+	Cutoff         string                  `json:"cutoff"`
+	APIBase        string                  `json:"api_base"`
+	StartedAt      string                  `json:"started_at"`
+	CompletedAt    string                  `json:"completed_at,omitempty"`
+	Status         string                  `json:"status"`
+	Sources        []SourceReceipt         `json:"sources"`
+	NonAtomicDelta *NonAtomicDeltaEvidence `json:"non_atomic_delta,omitempty"`
+	IndexChecksum  string                  `json:"index_checksum"`
+	API            []APIReceipt            `json:"api,omitempty"`
 }
 
 // SourceReceipt records the complete page chain and count reconciliation for a source.
 type SourceReceipt struct {
-	Name                string        `json:"name"`
-	Endpoint            string        `json:"endpoint"`
-	Status              string        `json:"status"`
-	Pages               []PageReceipt `json:"pages"`
-	FetchedCount        int           `json:"fetched_count"`
-	NormalizedCount     int           `json:"normalized_count"`
-	UniqueCount         int           `json:"unique_count"`
-	ClassifiedPullCount int           `json:"classified_pull_count,omitempty"`
-	CutoffExcludedCount int           `json:"cutoff_excluded_count,omitempty"`
-	PageChecksum        string        `json:"page_checksum"`
-	Checksum            string        `json:"checksum"`
-	Failure             string        `json:"failure,omitempty"`
+	Name                     string                  `json:"name"`
+	Endpoint                 string                  `json:"endpoint"`
+	Status                   string                  `json:"status"`
+	CrawlStartedAt           string                  `json:"crawl_started_at,omitempty"`
+	CrawlEndedAt             string                  `json:"crawl_ended_at,omitempty"`
+	Pages                    []PageReceipt           `json:"pages"`
+	FetchedCount             int                     `json:"fetched_count"`
+	NormalizedCount          int                     `json:"normalized_count"`
+	UniqueCount              int                     `json:"unique_count"`
+	ClassifiedPullCount      int                     `json:"classified_pull_count,omitempty"`
+	ClassifiedPullIdentities []CrossEndpointIdentity `json:"classified_pull_identities,omitempty"`
+	ClassifiedPullChecksum   string                  `json:"classified_pull_checksum,omitempty"`
+	CutoffExcludedCount      int                     `json:"cutoff_excluded_count,omitempty"`
+	PageChecksum             string                  `json:"page_checksum"`
+	Checksum                 string                  `json:"checksum"`
+	Failure                  string                  `json:"failure,omitempty"`
+}
+
+// CrossEndpointIdentity is the stable PR identity shared by GitHub's mixed
+// issues endpoint and its dedicated pulls endpoint. ID is the reconciliation
+// key; Number and NodeID make contradictory endpoint shapes observable.
+type CrossEndpointIdentity struct {
+	ID     int64  `json:"id"`
+	Number int    `json:"number,omitempty"`
+	NodeID string `json:"node_id,omitempty"`
+}
+
+// CrawlWindow binds reconciliation evidence to the independently completed
+// traversal that produced it.
+type CrawlWindow struct {
+	StartedAt string `json:"started_at"`
+	EndedAt   string `json:"ended_at"`
+}
+
+// NonAtomicDeltaPolicy is the declared, deterministic acceptance envelope.
+// All three bounds must hold; a zero value is a real zero-tolerance policy.
+type NonAtomicDeltaPolicy struct {
+	Type               string `json:"type"`
+	MaxOnlyInMixed     int    `json:"max_only_in_mixed"`
+	MaxOnlyInDedicated int    `json:"max_only_in_dedicated"`
+	MaxTotal           int    `json:"max_total"`
+}
+
+// NonAtomicDeltaEvidence reconciles two authoritative endpoint traversals
+// without pretending they were an atomic snapshot. Identity slices are sorted
+// by ID and carry the exact sets behind every count.
+type NonAtomicDeltaEvidence struct {
+	Type                 string                  `json:"type"`
+	MixedSource          string                  `json:"mixed_source"`
+	DedicatedSource      string                  `json:"dedicated_source"`
+	IdentityBasis        string                  `json:"identity_basis"`
+	MixedCrawl           CrawlWindow             `json:"mixed_crawl"`
+	DedicatedCrawl       CrawlWindow             `json:"dedicated_crawl"`
+	MixedCount           int                     `json:"mixed_count"`
+	DedicatedCount       int                     `json:"dedicated_count"`
+	OverlapCount         int                     `json:"overlap_count"`
+	OnlyInMixedCount     int                     `json:"only_in_mixed_count"`
+	OnlyInDedicatedCount int                     `json:"only_in_dedicated_count"`
+	Overlap              []CrossEndpointIdentity `json:"overlap"`
+	OnlyInMixed          []CrossEndpointIdentity `json:"only_in_mixed"`
+	OnlyInDedicated      []CrossEndpointIdentity `json:"only_in_dedicated"`
+	Policy               NonAtomicDeltaPolicy    `json:"policy"`
+	Accepted             bool                    `json:"accepted"`
 }
 
 // PageReceipt binds a page body digest to its pagination and API evidence.

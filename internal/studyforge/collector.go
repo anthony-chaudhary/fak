@@ -70,6 +70,9 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		corpus.Receipt.StartedAt = c.Now().UTC().Format(time.RFC3339Nano)
 		corpus.Receipt.CompletedAt = ""
 		corpus.Receipt.Status = StatusPartial
+		for i := range corpus.Receipt.Sources {
+			backfillCrawlWindow(&corpus.Receipt.Sources[i])
+		}
 	}
 
 	acceptedSinceCheckpoint := 0
@@ -111,7 +114,7 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 			continue
 		}
 		if !existing {
-			sr = SourceReceipt{Name: spec.name, Endpoint: c.repoURL(req.Owner, req.Repository, spec.path), Status: StatusPartial}
+			sr = SourceReceipt{Name: spec.name, Endpoint: c.repoURL(req.Owner, req.Repository, spec.path), Status: StatusPartial, CrawlStartedAt: c.Now().UTC().Format(time.RFC3339Nano)}
 		}
 		records := recordsForSource(corpus.Records, spec.name)
 		other := recordsExceptSource(corpus.Records, spec.name)
@@ -120,13 +123,14 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 			corpus.Records = append(append([]Record(nil), other...), sourceRecords...)
 			upsertSource(&corpus.Receipt.Sources, progress)
 			sortCorpus(&corpus)
-			refreshChecksums(&corpus)
 			corpus.Receipt.Status = StatusPartial
 			corpus.Receipt.CompletedAt = ""
-			if completeSourceCount(corpus.Receipt.Sources) == len(SourceNames) {
+			reconcileErr := reconcileNonAtomicDelta(&corpus)
+			if completeSourceCount(corpus.Receipt.Sources) == len(SourceNames) && reconcileErr == nil {
 				corpus.Receipt.Status = StatusComplete
 				corpus.Receipt.CompletedAt = c.Now().UTC().Format(time.RFC3339Nano)
 			}
+			refreshChecksums(&corpus)
 			acceptedSinceCheckpoint++
 			if err := persist(false); err != nil {
 				checkpointFailed = true
@@ -146,16 +150,17 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		}
 	}
 	sortCorpus(&corpus)
+	reconcileErr := reconcileNonAtomicDelta(&corpus)
 	refreshChecksums(&corpus)
 	corpus.Receipt.CompletedAt = c.Now().UTC().Format(time.RFC3339Nano)
-	if len(failures) == 0 {
+	if len(failures) == 0 && reconcileErr == nil {
 		corpus.Receipt.Status = StatusComplete
 	} else if completeSourceCount(corpus.Receipt.Sources) == 0 {
 		corpus.Receipt.Status = StatusFailed
 	} else {
 		corpus.Receipt.Status = StatusPartial
 	}
-	if len(failures) == 0 {
+	if len(failures) == 0 && reconcileErr == nil {
 		if err := Validate(corpus); err != nil {
 			return corpus, err
 		}
@@ -163,9 +168,9 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		return corpus, errors.Join(errors.Join(failures...), err)
 	}
 	if err := persist(true); err != nil {
-		return corpus, errors.Join(errors.Join(failures...), err)
+		return corpus, errors.Join(errors.Join(failures...), reconcileErr, err)
 	}
-	return corpus, errors.Join(failures...)
+	return corpus, errors.Join(errors.Join(failures...), reconcileErr)
 }
 
 func (c *Collector) defaults() {
@@ -215,18 +220,31 @@ func (c *Collector) resolveRevision(ctx context.Context, owner, repo string) (st
 }
 
 func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records []Record, cutoff time.Time, checkpoint func(SourceReceipt, []Record) error) (SourceReceipt, []Record, error) {
+	backfillCrawlWindow(&sr)
+	if sr.CrawlStartedAt == "" {
+		sr.CrawlStartedAt = c.Now().UTC().Format(time.RFC3339Nano)
+	}
 	next := sr.Endpoint
 	if len(sr.Pages) > 0 {
 		next = sr.Pages[len(sr.Pages)-1].Next
 	}
 	if next == "" && len(sr.Pages) > 0 {
 		sr.Status = StatusComplete
+		if sr.CrawlEndedAt == "" {
+			sr.CrawlEndedAt = sr.Pages[len(sr.Pages)-1].FetchedAt
+		}
 		sr.Failure = ""
 		return sr, records, nil
 	}
 	seenIDs := make(map[int64]bool, len(records))
 	for _, record := range records {
 		seenIDs[record.ID] = true
+	}
+	for _, identity := range sr.ClassifiedPullIdentities {
+		if seenIDs[identity.ID] {
+			return sr, records, fmt.Errorf("duplicate %s id %d in checkpoint", sr.Name, identity.ID)
+		}
+		seenIDs[identity.ID] = true
 	}
 	for next != "" {
 		body, hdr, status, err := c.get(ctx, next)
@@ -263,16 +281,24 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 		page := PageReceipt{Number: len(sr.Pages) + 1, URL: next, ItemCount: len(raws), Checksum: digest(body), Next: pageNext, FetchedAt: c.Now().UTC().Format(time.RFC3339Nano), StatusCode: status}
 		fillAPIHeaders(&page.RequestID, &page.ETag, &page.RateLimit, &page.RateRemain, &page.RateReset, hdr)
 		pageRecords := make([]Record, 0, len(raws))
+		pagePullIdentities := make([]CrossEndpointIdentity, 0)
 		pagePulls, pageExcluded := 0, 0
 		for _, raw := range raws {
-			record, isPull, excluded, err := normalize(sr.Name, raw, cutoff)
+			record, pullIdentity, excluded, err := normalize(sr.Name, raw, cutoff)
 			if err != nil {
 				sr.Failure = err.Error()
 				sr.Status = StatusPartial
 				return sr, records, err
 			}
-			if isPull {
+			if pullIdentity != nil {
+				if seenIDs[pullIdentity.ID] {
+					sr.Failure = fmt.Sprintf("duplicate %s id %d across page boundary", sr.Name, pullIdentity.ID)
+					sr.Status = StatusPartial
+					return sr, records, errors.New(sr.Failure)
+				}
+				seenIDs[pullIdentity.ID] = true
 				pagePulls++
+				pagePullIdentities = append(pagePullIdentities, *pullIdentity)
 				continue
 			}
 			if excluded {
@@ -292,11 +318,13 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 		sr.Pages = append(sr.Pages, page)
 		sr.FetchedCount += len(raws)
 		sr.ClassifiedPullCount += pagePulls
+		sr.ClassifiedPullIdentities = append(sr.ClassifiedPullIdentities, pagePullIdentities...)
 		sr.CutoffExcludedCount += pageExcluded
 		records = append(records, pageRecords...)
 		next = pageNext
 		if next == "" {
 			sr.Status, sr.Failure = StatusComplete, ""
+			sr.CrawlEndedAt = c.Now().UTC().Format(time.RFC3339Nano)
 		} else {
 			sr.Status, sr.Failure = StatusPartial, ""
 		}

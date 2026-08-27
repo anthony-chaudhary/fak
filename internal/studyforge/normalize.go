@@ -53,27 +53,28 @@ type rawRecord struct {
 	} `json:"head"`
 }
 
-func normalize(source string, data json.RawMessage, cutoff time.Time) (Record, bool, bool, error) {
+func normalize(source string, data json.RawMessage, cutoff time.Time) (Record, *CrossEndpointIdentity, bool, error) {
 	var raw rawRecord
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return Record{}, false, false, fmt.Errorf("decode %s record: %w", source, err)
+		return Record{}, nil, false, fmt.Errorf("decode %s record: %w", source, err)
 	}
 	if raw.ID == 0 {
-		return Record{}, false, false, fmt.Errorf("%s record missing id", source)
-	}
-	if source == "issues" && len(raw.PullRequest) > 0 && string(raw.PullRequest) != "null" {
-		return Record{}, true, false, nil
+		return Record{}, nil, false, fmt.Errorf("%s record missing id", source)
 	}
 	if raw.CreatedAt != "" {
 		if created, err := time.Parse(time.RFC3339, raw.CreatedAt); err != nil {
-			return Record{}, false, false, fmt.Errorf("%s record %d invalid created_at", source, raw.ID)
+			return Record{}, nil, false, fmt.Errorf("%s record %d invalid created_at", source, raw.ID)
 		} else if created.After(cutoff) {
-			return Record{}, false, true, nil
+			return Record{}, nil, true, nil
 		}
+	}
+	if source == "issues" && len(raw.PullRequest) > 0 && string(raw.PullRequest) != "null" {
+		identity := CrossEndpointIdentity{ID: raw.ID, Number: raw.Number, NodeID: raw.NodeID}
+		return Record{}, &identity, false, nil
 	}
 	kind := map[string]string{"issues": "issue", "pulls": "pull", "discussions": "discussion", "releases": "release", "labels": "label", "milestones": "milestone"}[source]
 	if kind == "" {
-		return Record{}, false, false, fmt.Errorf("unsupported source %q", source)
+		return Record{}, nil, false, fmt.Errorf("unsupported source %q", source)
 	}
 	r := Record{Source: source, Kind: kind, ID: raw.ID, NodeID: raw.NodeID, Number: raw.Number, Name: raw.Name, Title: raw.Title, Body: raw.Body, State: raw.State, URL: raw.HTMLURL, Author: raw.User.Login, Draft: raw.Draft, Locked: raw.Locked, Merged: raw.Merged, TagName: raw.TagName, TargetCommitish: raw.TargetCommitish, CreatedAt: raw.CreatedAt, UpdatedAt: raw.UpdatedAt, ClosedAt: raw.ClosedAt, MergedAt: raw.MergedAt, PublishedAt: raw.PublishedAt, DueOn: raw.DueOn}
 	for _, label := range raw.Labels {
@@ -95,5 +96,5 @@ func normalize(source string, data json.RawMessage, cutoff time.Time) (Record, b
 	if raw.Head != nil {
 		r.HeadRef, r.HeadSHA = raw.Head.Ref, raw.Head.SHA
 	}
-	return r, false, false, nil
+	return r, nil, false, nil
 }

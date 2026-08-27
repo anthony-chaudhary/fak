@@ -86,6 +86,13 @@ func TestInventoryReportRejectsPartialOrInconsistentStudyForgeReceipt(t *testing
 			},
 			want: "revision does not match checked_revision",
 		},
+		{
+			name: "missing non atomic delta",
+			mutate: func(receipt *StudyForgeReceiptEvidence) {
+				receipt.NonAtomicDelta = nil
+			},
+			want: "non_atomic_delta is required",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,13 +133,23 @@ func validStudyForgeReceiptForTest() StudyForgeReceiptEvidence {
 	// The issues census legitimately fetches mixed pull-request rows and then
 	// partitions them out of its normalized issue-only index.
 	sources[0].FetchedCount = 3
+	sources[0].ClassifiedPullCount = 1
+	identity := StudyForgeCrossEndpointIdentity{ID: 1}
 	return StudyForgeReceiptEvidence{
-		Schema:        StudyForgeReceiptSchema,
-		Repository:    "owner/repo",
-		Revision:      "abc",
-		Cutoff:        "2026-08-26T22:00:00Z",
-		Status:        "complete",
-		Sources:       sources,
+		Schema:     StudyForgeReceiptSchema,
+		Repository: "owner/repo",
+		Revision:   "abc",
+		Cutoff:     "2026-08-26T22:00:00Z",
+		Status:     "complete",
+		Sources:    sources,
+		NonAtomicDelta: &StudyForgeNonAtomicDeltaEvidence{
+			Type: "non_atomic_delta", MixedSource: "issues", DedicatedSource: "pulls", IdentityBasis: "captured_endpoint_rows",
+			MixedCrawl:     StudyForgeCrawlWindow{StartedAt: "2026-08-26T22:00:00Z", EndedAt: "2026-08-26T22:01:00Z"},
+			DedicatedCrawl: StudyForgeCrawlWindow{StartedAt: "2026-08-26T22:01:00Z", EndedAt: "2026-08-26T22:02:00Z"},
+			MixedCount:     1, DedicatedCount: 2, OverlapCount: 1, OnlyInMixedCount: 0, OnlyInDedicatedCount: 1,
+			Overlap: []StudyForgeCrossEndpointIdentity{identity}, OnlyInMixed: []StudyForgeCrossEndpointIdentity{}, OnlyInDedicated: []StudyForgeCrossEndpointIdentity{{ID: 2}},
+			Policy: &StudyForgeNonAtomicDeltaPolicy{Type: "bounded_identity_delta", MaxOnlyInMixed: 1000, MaxOnlyInDedicated: 1000, MaxTotal: 1000}, Accepted: true,
+		},
 		IndexChecksum: "sha256:index",
 	}
 }

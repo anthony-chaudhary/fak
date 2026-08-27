@@ -126,6 +126,10 @@ func refreshChecksums(c *Corpus) {
 			seen[r.ID] = true
 		}
 		c.Receipt.Sources[i].UniqueCount = len(seen)
+		if c.Receipt.Sources[i].Name == "issues" {
+			sortIdentities(c.Receipt.Sources[i].ClassifiedPullIdentities)
+			c.Receipt.Sources[i].ClassifiedPullChecksum = identityDigest(c.Receipt.Sources[i].ClassifiedPullIdentities)
+		}
 		c.Receipt.Sources[i].PageChecksum = pageDigest(c.Receipt.Sources[i].Pages)
 		c.Receipt.Sources[i].Checksum = recordDigest(rs)
 	}

@@ -63,8 +63,7 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 	seenSources := map[string]bool{}
 	seenNodeIDs := map[string]bool{}
 	complete := true
-	var issuePulls, pullRows int
-	var issuesComplete, pullsComplete bool
+	var issuesSource, pullsSource *SourceReceipt
 	for sourceIndex, s := range r.Sources {
 		if sourceIndex >= len(SourceNames) || s.Name != SourceNames[sourceIndex] {
 			es = append(es, fmt.Errorf("source order mismatch at position %d", sourceIndex+1))
@@ -89,6 +88,28 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 		if s.Status == StatusComplete && s.Failure != "" {
 			es = append(es, fmt.Errorf("%s complete with failure evidence", s.Name))
 		}
+		if s.CrawlStartedAt != "" {
+			if _, e := time.Parse(time.RFC3339Nano, s.CrawlStartedAt); e != nil {
+				es = append(es, fmt.Errorf("%s crawl_started_at must be RFC3339", s.Name))
+			}
+		}
+		if s.CrawlEndedAt != "" {
+			if _, e := time.Parse(time.RFC3339Nano, s.CrawlEndedAt); e != nil {
+				es = append(es, fmt.Errorf("%s crawl_ended_at must be RFC3339", s.Name))
+			}
+		}
+		if s.Status == StatusComplete && (s.CrawlStartedAt == "" || s.CrawlEndedAt == "") && r.Status == StatusComplete {
+			// Old partial checkpoints may predate per-source windows. Capture
+			// backfills them from accepted page receipts before completion.
+			es = append(es, fmt.Errorf("%s complete source requires crawl start and end", s.Name))
+		}
+		if s.CrawlStartedAt != "" && s.CrawlEndedAt != "" {
+			started, startErr := time.Parse(time.RFC3339Nano, s.CrawlStartedAt)
+			ended, endErr := time.Parse(time.RFC3339Nano, s.CrawlEndedAt)
+			if startErr == nil && endErr == nil && ended.Before(started) {
+				es = append(es, fmt.Errorf("%s crawl ends before it starts", s.Name))
+			}
+		}
 
 		seenPageURLs := map[string]bool{}
 		for i, p := range s.Pages {
@@ -101,6 +122,9 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 			seenPageURLs[p.URL] = true
 			if !validDigest(p.Checksum) {
 				es = append(es, fmt.Errorf("%s page %d checksum is invalid", s.Name, p.Number))
+			}
+			if _, e := time.Parse(time.RFC3339Nano, p.FetchedAt); e != nil {
+				es = append(es, fmt.Errorf("%s page %d fetched_at must be RFC3339", s.Name, p.Number))
 			}
 			if p.StatusCode < 200 || p.StatusCode >= 300 {
 				es = append(es, fmt.Errorf("%s page %d status code is not successful", s.Name, p.Number))
@@ -162,14 +186,18 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 			es = append(es, fmt.Errorf("%s checksum mismatch", s.Name))
 		}
 		if s.Name == "issues" {
-			issuePulls, issuesComplete = s.ClassifiedPullCount, s.Status == StatusComplete
+			copy := s
+			issuesSource = &copy
 		}
 		if s.Name == "pulls" {
-			pullRows, pullsComplete = s.FetchedCount, s.Status == StatusComplete
+			copy := s
+			pullsSource = &copy
 		}
 	}
-	if issuesComplete && pullsComplete && issuePulls != pullRows {
-		es = append(es, fmt.Errorf("issues pull partition count %d does not reconcile with pulls census %d", issuePulls, pullRows))
+	if issuesSource != nil && pullsSource != nil && issuesSource.Status == StatusComplete && pullsSource.Status == StatusComplete {
+		if err := validateNonAtomicDelta(r, *issuesSource, *pullsSource, recordsForSource(c.Records, "pulls"), requireComplete); err != nil {
+			es = append(es, err)
+		}
 	}
 	for _, record := range c.Records {
 		if !seenSources[record.Source] {
@@ -206,6 +234,131 @@ func validateCorpus(c Corpus, requireComplete bool) error {
 		es = append(es, errors.New("index checksum mismatch"))
 	}
 	return errors.Join(es...)
+}
+
+func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords []Record, requireComplete bool) error {
+	legacyPartial := r.Status != StatusComplete && !requireComplete && len(issues.ClassifiedPullIdentities) == 0 && issues.ClassifiedPullChecksum == ""
+	if legacyPartial && r.NonAtomicDelta == nil {
+		return nil
+	}
+	if len(issues.ClassifiedPullIdentities) != issues.ClassifiedPullCount {
+		return fmt.Errorf("issues classified pull identity count %d does not match classified_pull_count %d", len(issues.ClassifiedPullIdentities), issues.ClassifiedPullCount)
+	}
+	if !validDigest(issues.ClassifiedPullChecksum) || issues.ClassifiedPullChecksum != identityDigest(issues.ClassifiedPullIdentities) {
+		return errors.New("issues classified pull identity checksum mismatch")
+	}
+	if err := validateIdentityList("issues classified pulls", issues.ClassifiedPullIdentities); err != nil {
+		return err
+	}
+	if r.NonAtomicDelta == nil {
+		return errors.New("completed issues and pulls sources require non_atomic_delta evidence")
+	}
+
+	delta := *r.NonAtomicDelta
+	if delta.Type != NonAtomicDeltaType || delta.MixedSource != "issues" || delta.DedicatedSource != "pulls" {
+		return errors.New("non_atomic_delta has invalid type or sources")
+	}
+	if delta.IdentityBasis != identityBasisCaptured && delta.IdentityBasis != identityBasisLegacyProjection {
+		return fmt.Errorf("non_atomic_delta has invalid identity_basis %q", delta.IdentityBasis)
+	}
+	if delta.MixedCrawl != (CrawlWindow{StartedAt: issues.CrawlStartedAt, EndedAt: issues.CrawlEndedAt}) || delta.DedicatedCrawl != (CrawlWindow{StartedAt: pulls.CrawlStartedAt, EndedAt: pulls.CrawlEndedAt}) {
+		return errors.New("non_atomic_delta crawl windows contradict source receipts")
+	}
+	for name, window := range map[string]CrawlWindow{"mixed": delta.MixedCrawl, "dedicated": delta.DedicatedCrawl} {
+		started, startErr := time.Parse(time.RFC3339Nano, window.StartedAt)
+		ended, endErr := time.Parse(time.RFC3339Nano, window.EndedAt)
+		if startErr != nil || endErr != nil || ended.Before(started) {
+			return fmt.Errorf("non_atomic_delta %s crawl window is invalid", name)
+		}
+	}
+	if err := validateIdentityList("non_atomic_delta overlap", delta.Overlap); err != nil {
+		return err
+	}
+	if err := validateIdentityList("non_atomic_delta only_in_mixed", delta.OnlyInMixed); err != nil {
+		return err
+	}
+	if err := validateIdentityList("non_atomic_delta only_in_dedicated", delta.OnlyInDedicated); err != nil {
+		return err
+	}
+
+	mixedByID := make(map[int64]CrossEndpointIdentity, len(issues.ClassifiedPullIdentities))
+	for _, identity := range issues.ClassifiedPullIdentities {
+		mixedByID[identity.ID] = identity
+	}
+	dedicated := pullRecordIdentities(pullRecords)
+	dedicatedByID := make(map[int64]CrossEndpointIdentity, len(dedicated))
+	for _, identity := range dedicated {
+		dedicatedByID[identity.ID] = identity
+	}
+	wantOverlap := make([]CrossEndpointIdentity, 0, min(len(mixedByID), len(dedicatedByID)))
+	wantOnlyMixed := make([]CrossEndpointIdentity, 0)
+	wantOnlyDedicated := make([]CrossEndpointIdentity, 0)
+	for _, identity := range issues.ClassifiedPullIdentities {
+		other, exists := dedicatedByID[identity.ID]
+		if !exists {
+			wantOnlyMixed = append(wantOnlyMixed, identity)
+			continue
+		}
+		if identity.Number != other.Number || (identity.NodeID != "" && other.NodeID != "" && identity.NodeID != other.NodeID) {
+			return fmt.Errorf("pull identity %d contradicts across issues and pulls endpoints", identity.ID)
+		}
+		wantOverlap = append(wantOverlap, identity)
+	}
+	for _, identity := range dedicated {
+		if _, exists := mixedByID[identity.ID]; !exists {
+			wantOnlyDedicated = append(wantOnlyDedicated, identity)
+		}
+	}
+	if !sameIdentityList(delta.Overlap, wantOverlap) || !sameIdentityList(delta.OnlyInMixed, wantOnlyMixed) || !sameIdentityList(delta.OnlyInDedicated, wantOnlyDedicated) {
+		return errors.New("non_atomic_delta identity sets contradict endpoint evidence")
+	}
+	if delta.MixedCount != len(issues.ClassifiedPullIdentities) || delta.DedicatedCount != len(dedicated) || delta.OverlapCount != len(delta.Overlap) || delta.OnlyInMixedCount != len(delta.OnlyInMixed) || delta.OnlyInDedicatedCount != len(delta.OnlyInDedicated) {
+		return errors.New("non_atomic_delta counts contradict identity sets")
+	}
+	policy := delta.Policy
+	if policy.Type != NonAtomicDeltaPolicyType || policy.MaxOnlyInMixed < 0 || policy.MaxOnlyInDedicated < 0 || policy.MaxTotal < 0 || policy.MaxOnlyInMixed > DefaultNonAtomicDeltaLimit || policy.MaxOnlyInDedicated > DefaultNonAtomicDeltaLimit || policy.MaxTotal > DefaultNonAtomicDeltaLimit {
+		return errors.New("non_atomic_delta acceptance policy is missing or exceeds the repository bound")
+	}
+	accepted := len(delta.OnlyInMixed) <= policy.MaxOnlyInMixed && len(delta.OnlyInDedicated) <= policy.MaxOnlyInDedicated && len(delta.OnlyInMixed)+len(delta.OnlyInDedicated) <= policy.MaxTotal
+	if delta.Accepted != accepted {
+		return errors.New("non_atomic_delta accepted verdict contradicts its policy")
+	}
+	if !accepted && (requireComplete || r.Status == StatusComplete) {
+		return fmt.Errorf("non_atomic_delta policy overflow: only_in_mixed=%d only_in_dedicated=%d total=%d", len(delta.OnlyInMixed), len(delta.OnlyInDedicated), len(delta.OnlyInMixed)+len(delta.OnlyInDedicated))
+	}
+	return nil
+}
+
+func validateIdentityList(name string, identities []CrossEndpointIdentity) error {
+	seen := make(map[int64]bool, len(identities))
+	for i, identity := range identities {
+		if identity.ID <= 0 {
+			return fmt.Errorf("%s contains invalid id %d", name, identity.ID)
+		}
+		if seen[identity.ID] {
+			return fmt.Errorf("%s contains duplicate identity %d", name, identity.ID)
+		}
+		seen[identity.ID] = true
+		if i > 0 {
+			previous := identities[i-1]
+			if previous.ID > identity.ID || (previous.ID == identity.ID && (previous.Number > identity.Number || (previous.Number == identity.Number && previous.NodeID > identity.NodeID))) {
+				return fmt.Errorf("%s is not in canonical order", name)
+			}
+		}
+	}
+	return nil
+}
+
+func sameIdentityList(a, b []CrossEndpointIdentity) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func validDigest(value string) bool {
