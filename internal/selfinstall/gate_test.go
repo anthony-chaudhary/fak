@@ -204,3 +204,12 @@ func TestApplyGateSkewNeverOverwritesAHigherPrecedenceRefusal(t *testing.T) {
 		t.Errorf("unmeasured provenance changed the verdict: %q / %q", v, r)
 	}
 }
+
+func TestApplyGateSkewPreservesPythonStaleRefusal(t *testing.T) {
+	p := GateProvenance{Probed: true, GateResolved: true, GateAttested: true, GateDirty: true}
+	const reason = "installed fak build 111111111111 is behind committed HEAD 222222222222"
+	v, r := ApplyGateSkew(RefuseBinStale, reason, spawnOK, p)
+	if v != RefuseBinStale || r != reason {
+		t.Fatalf("Python stale refusal changed at Go fold: %q / %q", v, r)
+	}
+}
