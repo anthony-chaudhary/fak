@@ -19,12 +19,20 @@ type HostSignals struct {
 	ProcessResidentBytes   *uint64 `json:"process_resident_bytes,omitempty"`
 	ProcessReadBytes       *uint64 `json:"process_read_bytes,omitempty"`
 	ProcessWriteBytes      *uint64 `json:"process_write_bytes,omitempty"`
+	SwapTotalBytes         *uint64 `json:"swap_total_bytes,omitempty"`
+	SwapUsedBytes          *uint64 `json:"swap_used_bytes,omitempty"`
+	CommitLimitBytes       *uint64 `json:"commit_limit_bytes,omitempty"`
+	CommitUsedBytes        *uint64 `json:"commit_used_bytes,omitempty"`
+	ProcessMinorFaults     *uint64 `json:"process_minor_faults,omitempty"`
+	ProcessMajorFaults     *uint64 `json:"process_major_faults,omitempty"`
+	ProcessPageFaults      *uint64 `json:"process_page_faults,omitempty"`
 	ProcessIOScope         string  `json:"process_io_scope,omitempty"`
 }
 type CollectorAvailability struct {
 	PhysicalMemory bool `json:"physical_memory"`
 	ProcessMemory  bool `json:"process_memory"`
 	ProcessIO      bool `json:"process_io"`
+	MemoryPressure bool `json:"memory_pressure"`
 	DRAMCounters   bool `json:"dram_counters"`
 	DeviceCounters bool `json:"device_counters"`
 }
@@ -107,6 +115,7 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		av.PhysicalMemory = av.PhysicalMemory || snap.availability.PhysicalMemory
 		av.ProcessMemory = av.ProcessMemory || snap.availability.ProcessMemory
 		av.ProcessIO = av.ProcessIO || snap.availability.ProcessIO
+		av.MemoryPressure = av.MemoryPressure || snap.availability.MemoryPressure
 		av.DeviceCounters = av.DeviceCounters || device.available
 		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Device: device.device, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
 		if device.available {

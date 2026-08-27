@@ -27,13 +27,26 @@ func collectHostSnapshot() (hostSnapshot, error) {
 		s.host.PhysicalTotalBytes = &m.TotalPhys
 		s.host.PhysicalAvailableBytes = &m.AvailPhys
 		s.availability.PhysicalMemory = true
+		// Despite its API field name, TotalPageFile is the system commit
+		// limit (RAM plus paging files), not paging-file capacity or I/O.
+		commitLimit := m.TotalPageFile
+		commitUsed := uint64(0)
+		if m.TotalPageFile >= m.AvailPageFile {
+			commitUsed = m.TotalPageFile - m.AvailPageFile
+		}
+		s.host.CommitLimitBytes = &commitLimit
+		s.host.CommitUsedBytes = &commitUsed
+		s.availability.MemoryPressure = true
 	}
 	h, _, _ := k.NewProc("GetCurrentProcess").Call()
 	p := processMemoryCounters{CB: uint32(unsafe.Sizeof(processMemoryCounters{}))}
 	if r, _, _ := k.NewProc("K32GetProcessMemoryInfo").Call(h, uintptr(unsafe.Pointer(&p)), uintptr(p.CB)); r != 0 {
 		v := uint64(p.WorkingSetSize)
 		s.host.ProcessResidentBytes = &v
+		faults := uint64(p.PageFaultCount)
+		s.host.ProcessPageFaults = &faults
 		s.availability.ProcessMemory = true
+		s.availability.MemoryPressure = true
 	}
 	var io ioCounters
 	if r, _, _ := k.NewProc("GetProcessIoCounters").Call(h, uintptr(unsafe.Pointer(&io))); r != 0 {
