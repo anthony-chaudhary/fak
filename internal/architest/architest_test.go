@@ -1331,13 +1331,15 @@ func TestRequestPathLeavesRegistered(t *testing.T) {
 // *entrenched* over time before it was deleted. `agent` owns the general outbound
 // planner (`HTTPPlanner`); `engine` owns the narrow vLLM EngineDriver adapter that
 // must speak vLLM's public OpenAI-compatible generation surface; `gateway` is the
-// inbound SERVER of that route (the adjudication proxy), not a client; and off-path
+// inbound SERVER of that route (the adjudication proxy), not a client; `openaiadapter` is the
+// inbound authenticated app-migration compatibility server, not a client; and off-path
 // witnesses may replay or benchmark the same wire. cmd/fak's help text also names it
 // but lives outside internal/, so it is not scanned.
 var chatEndpointRole = map[string]string{
 	"agent":             "the single outbound chat-completions client (HTTPPlanner)",
 	"engine":            "the narrow vLLM EngineDriver adapter speaking vLLM's OpenAI-compatible generation surface",
 	"gateway":           "the inbound /v1/chat/completions server route (adjudication proxy)",
+	"openaiadapter":     "the inbound authenticated app-migration compatibility server (not a live planner)",
 	"chatrelay":         "the off-path Slack bridge client to a served in-kernel model (not a live planner)",
 	"webbench":          "the off-path serving-parity benchmark client (not a live planner)",
 	"guardtrace":        "the off-path trace-replay upstream fake (OpenAI/Anthropic provider replay, not a live planner)",
