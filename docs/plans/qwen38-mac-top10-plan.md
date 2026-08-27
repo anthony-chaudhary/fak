@@ -2,7 +2,7 @@
 
 - Owner: Codex coordinator, 2026-08-27
 - Umbrella: #9430; parent context #8011
-- Authority: `docs/benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md` and `fak native-performance --next`
+- Authority: `fak native-performance --current` for runnable-now packets and live holds; `docs/benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md` / `--next` remain the semantic graph-ready lever view.
 - Centrality: Core
 - Work shape: finite phased deliverable; one accepted Mac receipt per KEEP
 - Target: Apple M3 Pro, 18 GPU cores, 36 GiB unified memory; exact Qwen3.8-27B Q4_K_M artifact
@@ -89,8 +89,12 @@ Run the final same-artifact fak-native versus pinned llama.cpp/MLX Mac campaign.
 
 ## Current state
 
-- M1-M4 are the memory/submission spine and are ordered by current dependencies, not by issue age.
+- M1's #9073 mechanism landed at `58fc89e29`, but #9073 explicitly excluded the parent's live startup/RSS win. M1 remains `0 KEEP` until #8325 records the exact keep/reject receipt.
+- M2's first child #9444 was closed after code witnessing refuted its compute-HAL premise. Corrected backend-nil product-path implementation #9456 landed at `8a423b8a5`, but M2 remains `0 KEEP` until the exact #9230 P32 A/B passes its quality, accounting, and >=15% median-prefill gate.
+- M1-M4 remain the memory/submission spine and are ordered by current dependencies, not by issue age. M1 then M2 are same-Mac measurement packets; later source work may run only when paths and device receipts are disjoint.
 - M5 is not runnable on the 36 GiB host until the startup envelope is reduced or a sanctioned >=64 GiB Apple-Silicon node is available.
+- The old M5 receipt leaf #8972 was manually closed without meeting its acceptance gate. #9430 must create or reconcile a replacement ship-alone receipt leaf after M1-M4; closure is not evidence.
+- The closed #8848 no longer owns the still-open measurement loop. #9495 owns the real Metal profile after M1, #9497 owns the independently runnable real CUDA profile, and #9498 owns returned-receipt workflow consumption after both bundles validate.
 - M6-M9 have partial/shipped building blocks but no accepted isolated Mac arm under this plan.
 - M10 remains the close-out receipt.
 - Rejected/default-off #9093, #9192, and #8833 experiments are excluded from KEEP credit.
@@ -110,6 +114,10 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 - 2026-08-27: read the authoritative eight-lever Metal graph and selected only two measured prerequisites to form the ten-item execution queue.
 - 2026-08-27: opened umbrella #9430 with all ten task-list items and full completion contract.
 - 2026-08-27: independently reopened #9257 after its closing commits proved unrelated Open SWE harder-eval work.
+- 2026-08-27: #9073 landed the no-copy mechanism; retained M1 at `0 KEEP` pending #8325's exact startup/steady-memory receipt.
+- 2026-08-27: replaced invalid compute-HAL child #9444 with backend-nil product-path child #9456; its implementation landed at `8a423b8a5`, while #9230 still owns M2's keep/reject receipt.
+- 2026-08-27: recorded #8972 as closed-without-gate and required a replacement M5 receipt child rather than counting closure.
+- 2026-08-27: repaired the closed-#8848 ownership gap with exact leaves #9495, #9497, and #9498.
 
 ## Completion audit
 

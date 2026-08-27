@@ -53,7 +53,7 @@ func TestNativePerformanceHumanOutputIsBackwardReadableAndShowsLevers(t *testing
 	}
 }
 
-func TestNativePerformanceNextIsDeterministicAndRunnable(t *testing.T) {
+func TestNativePerformanceNextIsDeterministicGraphProjection(t *testing.T) {
 	var first, second bytes.Buffer
 	if code := runNativePerformance(&first, &bytes.Buffer{}, []string{"--next"}); code != 0 {
 		t.Fatalf("first exit=%d", code)
@@ -64,7 +64,7 @@ func TestNativePerformanceNextIsDeterministicAndRunnable(t *testing.T) {
 	if first.String() != second.String() {
 		t.Fatal("--next changed across identical calls")
 	}
-	for _, want := range []string{"metal.command-buffer-amortization", "Owning issue: #8324", "Required witness:", "OFF/ON", "qwen38-27b-q4km-m3pro-p32-t64"} {
+	for _, want := range []string{"NEXT GRAPH-READY", "semantic graph projection only", "use --current work_packets", "metal.command-buffer-amortization", "Owning issue: #8324", "Required witness:", "OFF/ON", "qwen38-27b-q4km-m3pro-p32-t64"} {
 		if !strings.Contains(first.String(), want) {
 			t.Fatalf("--next missing %q:\n%s", want, first.String())
 		}
@@ -84,7 +84,7 @@ func TestNativePerformanceCurrentShowsAllReadyWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := stdout.String()
-	for _, want := range []string{"measurement-control-loop", "metal.command-buffer-amortization", "metal.paged-kv", "metal.chunked-prefill", "cuda.q8_1-activation-quant", "keep/reject"} {
+	for _, want := range []string{"measurement-control-loop", "active-native-lane-collision", "mac.m1-streamed-q4k-no-copy", "cuda.cache-weight-residency", "metal.command-buffer-amortization", "metal.paged-kv", "metal.chunked-prefill", "cuda.q8_1-activation-quant", "keep/reject"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("--current missing %q", want)
 		}
@@ -102,7 +102,7 @@ func TestNativePerformanceCurrentMarkdownIsDeterministic(t *testing.T) {
 	if first.String() != second.String() {
 		t.Fatal("--current-md changed across identical calls")
 	}
-	for _, want := range []string{"Current native-performance constraints", "Dependency-ready work and collisions", "OSS-to-performance walk"} {
+	for _, want := range []string{"Current native-performance constraints", "Divide-and-conquer execution", "Graph-dependency-ready arms and collisions", "OSS-to-performance walk"} {
 		if !strings.Contains(first.String(), want) {
 			t.Errorf("--current-md missing %q", want)
 		}
