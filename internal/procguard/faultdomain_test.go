@@ -50,11 +50,15 @@ func TestFaultDomainsHaveIndependentNativeIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer b.Close()
-	if a.native == b.native {
-		t.Fatal("owners unexpectedly share a native fault domain")
-	}
-	if a.Receipt().OwnerID == b.Receipt().OwnerID {
+	aReceipt, bReceipt := a.Receipt(), b.Receipt()
+	if aReceipt.OwnerID == bReceipt.OwnerID {
 		t.Fatal("owner identities collapsed")
+	}
+	if runtime.GOOS == "windows" && (aReceipt.Mode != EnforcementHard || bReceipt.Mode != EnforcementHard) {
+		t.Fatalf("Windows must expose hard native isolation: a=%+v b=%+v", aReceipt, bReceipt)
+	}
+	if aReceipt.Mode == EnforcementHard && bReceipt.Mode == EnforcementHard && a.native == b.native {
+		t.Fatal("hard-isolated owners unexpectedly share a native fault domain")
 	}
 }
 
