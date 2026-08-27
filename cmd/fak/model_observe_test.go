@@ -123,3 +123,63 @@ func TestModelObserveBandwidthMeasuresHostRoofline(t *testing.T) {
 		}
 	}
 }
+
+func TestModelObserveBandwidthImportsNVIDIAProfile(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "collection.json")
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "nvidia-hbm-ncu.csv")
+	args := []string{
+		"collect",
+		"--nvidia-ncu-csv", fixture,
+		"--device", "NVIDIA H100 80GB HBM3 (0)",
+		"--capture-start", "2026-08-27T10:00:00Z",
+		"--capture-end", "2026-08-27T10:01:00Z",
+		"--phase", "decode",
+		"--shape", "large",
+		"--theoretical-gb-s", "3350",
+		"--device-roofline-gb-s", "1250",
+		"--output", output,
+		"--pretty=false",
+	}
+	if err := runModelObserveBandwidth(args); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{
+		`"engine":"fak-native"`,
+		`"collector":"nvidia-nsight-compute"`,
+		`"dram_counters":true`,
+		`"read_gb_s":750`,
+		`"write_gb_s":250`,
+		`"total_gb_s":1000`,
+		`"utilization":0.8`,
+		`"selected_source":"measured-sustainable"`,
+		`"schema":"fak-nvidia-ncu-bandwidth-profile/1"`,
+		`"engine_evidence":"operator-asserted-not-proven-by-csv"`,
+		`"launch_count":2`,
+		`"cumulative_duration_ns":2000000`,
+		`"capture_ended_at":"2026-08-27T10:01:00Z"`,
+		`"device_roofline_evidence":"operator-supplied-matched-device-measurement"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("NVIDIA profile collection missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestModelObserveBandwidthRejectsCrossModeFlags(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "nvidia-hbm-ncu.csv")
+	base := []string{"collect", "--nvidia-ncu-csv", fixture, "--device", "NVIDIA H100", "--capture-start", "2026-08-27T10:00:00Z", "--capture-end", "2026-08-27T10:01:00Z", "--phase", "decode", "--shape", "large"}
+	for _, incompatible := range [][]string{{"--count", "2"}, {"--measured-gb-s", "80"}, {"--nvidia-device", "0"}, {"--logical-bytes", "10"}} {
+		args := append(append([]string(nil), base...), incompatible...)
+		if err := runModelObserveBandwidth(args); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+			t.Fatalf("args=%v error=%v", incompatible, err)
+		}
+	}
+	if err := runModelObserveBandwidth([]string{"collect", "--device", "NVIDIA H100", "--count", "1", "--interval", "10ms", "--phase", "other", "--shape", "small"}); err == nil || !strings.Contains(err.Error(), "requires --nvidia-ncu-csv") {
+		t.Fatalf("profile-only flag error=%v", err)
+	}
+}
