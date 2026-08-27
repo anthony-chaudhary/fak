@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/benchids"
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -142,13 +144,7 @@ func lcgIDs(n, vocab int) []int {
 }
 
 func lcgIDsSeed(n, vocab int, seed uint64) []int {
-	ids := make([]int, n)
-	state := seed
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
+	return benchids.LCGFromState(n, vocab, seed)
 }
 
 func medianMS(ds []time.Duration) float64 {
@@ -188,11 +184,5 @@ type workloadDecodeResult struct {
 }
 
 func capPositive(n, cap int) int {
-	if cap > 0 && n > cap {
-		return cap
-	}
-	if n < 1 {
-		return 1
-	}
-	return n
+	return cmdutil.CapPositive(n, cap)
 }

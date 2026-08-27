@@ -23,6 +23,13 @@ func TestLCGGolden(t *testing.T) {
 	}
 }
 
+func TestLCGFromStateGolden(t *testing.T) {
+	want := []int{116, 333, 938, 571, 640}
+	if got := LCGFromState(5, 1000, 7); !reflect.DeepEqual(got, want) {
+		t.Errorf("LCGFromState(5, 1000, 7) = %v, want %v", got, want)
+	}
+}
+
 func TestLCGShape(t *testing.T) {
 	const n, vocab = 64, 256
 	ids := LCG(n, vocab, 1)

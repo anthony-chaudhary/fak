@@ -59,8 +59,10 @@ import (
 	// poisonedmcpdemo and the ctxmmu witness wire it. The eviction verdict itself does not
 	// depend on it, but this keeps the gate the production one.
 	_ "github.com/anthony-chaudhary/fak/internal/blob"
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/demoui"
+	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
 
@@ -159,34 +161,6 @@ type Events struct {
 	Marker     string   `json:"marker"`
 }
 
-func cat(parts ...[]int) []int {
-	var out []int
-	for _, p := range parts {
-		out = append(out, p...)
-	}
-	return out
-}
-
-// maxAbsDiff is the per-element max |a-b| over two next-token logit vectors — the same
-// measure internal/kvmmu's witness and internal/model's oracle use.
-func maxAbsDiff(a, b []float32) float64 {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	var mx float64
-	for i := 0; i < n; i++ {
-		d := float64(a[i] - b[i])
-		if d < 0 {
-			d = -d
-		}
-		if d > mx {
-			mx = d
-		}
-	}
-	return mx
-}
-
 func buildCells(prefixState, poisonState, queryState string, incPoison, incQuery bool) []Cell {
 	var cs []Cell
 	pos := 0
@@ -217,9 +191,9 @@ func runExperiment() Events {
 	P, Q := len(prefixIDs), len(poisonIDs)
 
 	// Reference brains.
-	lNever := m.NewSession().Prefill(cat(prefixIDs, queryIDs))             // never saw the poison
-	lPoison := m.NewSession().Prefill(cat(prefixIDs, poisonIDs, queryIDs)) // kept the poison (control)
-	dPoison := maxAbsDiff(lPoison, lNever)
+	lNever := m.NewSession().Prefill(intlist.Concat(prefixIDs, queryIDs))             // never saw the poison
+	lPoison := m.NewSession().Prefill(intlist.Concat(prefixIDs, poisonIDs, queryIDs)) // kept the poison (control)
+	dPoison := cmdutil.MaxAbsDiffF32(lPoison, lNever)
 
 	// Act 1 — the defended run: real gate quarantines, bridge evicts WRITE-TIME.
 	s := m.NewSession()
@@ -228,12 +202,12 @@ func runExperiment() Events {
 	v, evicted, _ := c.AdmitResult(ctx, "policy", "read_refund_policy", poisonIDs, []byte(poisonBody))
 	cacheAfterEvict := c.CacheLen()
 	lEvict, _ := c.Append("usr", "user", queryIDs)
-	dEvict := maxAbsDiff(lEvict, lNever)
+	dEvict := cmdutil.MaxAbsDiffF32(lEvict, lNever)
 
 	// Act 2 — the Surgeon's Cut: middle-span evict so survivors are repositioned; measure
 	// the re-RoPE reposition residual on the live cache (non-vacuous: the query survivors moved).
 	rep := m.NewSession()
-	rep.Prefill(cat(prefixIDs, poisonIDs, queryIDs))
+	rep.Prefill(intlist.Concat(prefixIDs, poisonIDs, queryIDs))
 	rep.Cache.Evict(P, Q)
 	repResid := rep.Cache.MaxRepositionResidual()
 
@@ -242,10 +216,10 @@ func runExperiment() Events {
 	q0 := queryIDs[:len(queryIDs)-1]
 	qLast := queryIDs[len(queryIDs)-1]
 	late := m.NewSession()
-	late.Prefill(cat(prefixIDs, poisonIDs, q0)) // q0 already absorbed the poison
+	late.Prefill(intlist.Concat(prefixIDs, poisonIDs, q0)) // q0 already absorbed the poison
 	late.Cache.Evict(P, Q)
 	lLate := late.Step(qLast)
-	dTooLate := maxAbsDiff(lLate, lNever)
+	dTooLate := cmdutil.MaxAbsDiffF32(lLate, lNever)
 
 	w := Witness{
 		Model:            "synthetic Llama (hidden 32, 2 layers, 4q/2kv heads, head_dim 8, vocab 48) — WIRING witness; numerics-vs-HF proven by internal/model oracle",

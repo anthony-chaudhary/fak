@@ -36,15 +36,15 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 
 ## Ordered phases
 
-- [ ] M1 - No-copy streamed Q4_K Metal spans (#9073)
-- [ ] M2 - Forward-owned quantized Qwen sequence boundary (#9257, #9230)
-- [ ] M3 - Q8 projection-to-GDN device handoff (#9216)
-- [ ] M4 - Coarse resident hybrid decode graph (#8324)
+- [ ] M1 - No-copy streamed Q4_K Metal spans (#8325; mechanism #9073 shipped, exact campaign #9482 HOLD)
+- [ ] M2 - Forward-owned quantized Qwen sequence boundary (#9230/#9257; mechanism #9456 shipped, exact receipt child #9525 blocked after #8325)
+- [ ] M3 - Q8 projection-to-GDN device handoff (#9216; mechanism #9486 shipped, exact Mac receipt outstanding)
+- [ ] M4 - Coarse resident hybrid decode graph (#8324; block mechanism #9488 shipped, exact Mac receipt outstanding)
 - [ ] M5 - Quality-clean exact P32/T64 receipt (#8972)
-- [ ] M6 - Paged Qwen hybrid state live arm (#9076, #8395)
+- [ ] M6 - Paged Qwen hybrid state live arm (#9076/#8395; exact Metal receipt #9492 blocked by M1-M4)
 - [ ] M7 - Exact-prefix block reuse (#8395; ship-alone child required)
 - [ ] M8 - Bounded chunked-prefill scheduling (#9066, #1912, #8395)
-- [ ] M9 - Resident hybrid co-batching (#9074, #9075, #8395)
+- [ ] M9 - Resident hybrid co-batching (#9074/#9075/#8395; linear substrate #9515 shipped, full-attention substrate #9516 open)
 - [ ] M10 - Matched parity reconvergence (#8697, #2723)
 
 ### 1. M1 - No-copy streamed Q4_K Metal spans (#9073)
@@ -89,13 +89,17 @@ Run the final same-artifact fak-native versus pinned llama.cpp/MLX Mac campaign.
 
 ## Current state
 
-- M1's #9073 mechanism landed at `58fc89e29`, but #9073 explicitly excluded the parent's live startup/RSS win. M1 remains `0 KEEP` until #8325 records the exact keep/reject receipt.
-- M2's first child #9444 was closed after code witnessing refuted its compute-HAL premise. Corrected backend-nil product-path implementation #9456 landed at `8a423b8a5`, but M2 remains `0 KEEP` until the exact #9230 P32 A/B passes its quality, accounting, and >=15% median-prefill gate.
+- M1 mechanism #9073 landed at `58fc89e29`, but the exact #9482/#8325 campaign is HOLD, not KEEP or REJECT: control arm 01 exited 137 after 48.075 s with 12,959,285,248-byte sampled peak RSS, +12,534,876,733-byte swap, no profile, and no candidate arms. Restart requires a durable clean source witness, restored and soaked incumbent identity, stricter pressure gates, and fresh quiescence checks.
+- M2's invalid #9444 child remains rejected. Corrected mechanism #9456 landed at `8a423b8a5`; #9525 now owns the typed receipt instrumentation and exact six-arm P32 A/B under #9230, with a hard dependency after #8325 establishes a recovered safe envelope. M2 remains `0 KEEP`.
+- M3 mechanism #9486 landed at `46fdd8a52fd70b3e29345cd311be3cc89443e8fc` with one P=1 Qwen GDN mixer command buffer, and M4 block mechanism #9488 landed at `99ea660ae222dd6a75dd661c54778f470904f9e7` with the GDN-through-residual/norm/MLP block. Both closures explicitly deny throughput KEEP credit; their exact Mac receipts remain outstanding.
 - M1-M4 remain the memory/submission spine and are ordered by current dependencies, not by issue age. M1 then M2 are same-Mac measurement packets; later source work may run only when paths and device receipts are disjoint.
 - M5 is not runnable on the 36 GiB host until the startup envelope is reduced or a sanctioned >=64 GiB Apple-Silicon node is available.
 - The old M5 receipt leaf #8972 was manually closed without meeting its acceptance gate. #9430 must create or reconcile a replacement ship-alone receipt leaf after M1-M4; closure is not evidence.
 - The closed #8848 no longer owns the still-open measurement loop. #9495 owns the real Metal profile after M1, #9497 owns the independently runnable real CUDA profile, and #9498 owns returned-receipt workflow consumption after both bundles validate.
-- M6-M9 have partial/shipped building blocks but no accepted isolated Mac arm under this plan.
+- M6 correctness substrate #9076 remains synthetic-only. #9492 owns the exact same-binary NativeScheduler Metal paged-swap OFF/ON implementation plus live receipt; it is blocked by accepted M1-M4 receipts and the `composition-9280-full` modelengine lease.
+- M7-M8 retain partial prerequisites but no accepted isolated Mac arm under this plan.
+- M9 linear-attention B=2..8 substrate #9515 is validly shipped at `14dd0d1e405273e4b37da742ed2529053dc0f243`, enabling-only. Full-attention substrate #9516 is open after its cited `24c2fd7a7c` closure was disproved: the object and the two new files/test symbol are absent. #9074 integration remains open. #9075 was likewise reopened after its cited `82f1a635c8098ae569dac2db0c3b222765098226` proved absent and its prior audit showed rendezvous rather than shared Qwen execution.
+- Umbrella #9430 was incorrectly closed from plan-document-only commit `a6fa45cd25e047865c763384beaf27ee9a2a2149` and has been reopened: both this plan and the issue body remain `0 / 10 KEEP` with ten unchecked tasks.
 - M10 remains the close-out receipt.
 - Rejected/default-off #9093, #9192, and #8833 experiments are excluded from KEEP credit.
 - Managed worker inventory contains overlapping stale Metal/model worktrees; harvest against git truth before dispatching any overlapping phase.
@@ -118,6 +122,12 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 - 2026-08-27: replaced invalid compute-HAL child #9444 with backend-nil product-path child #9456; its implementation landed at `8a423b8a5`, while #9230 still owns M2's keep/reject receipt.
 - 2026-08-27: recorded #8972 as closed-without-gate and required a replacement M5 receipt child rather than counting closure.
 - 2026-08-27: repaired the closed-#8848 ownership gap with exact leaves #9495, #9497, and #9498.
+- 2026-08-27: M1 exact campaign #9482 entered HOLD after control arm 01 exited 137 at 48.075 s with 12,959,285,248-byte sampled peak RSS, +12,534,876,733-byte swap, no profile, and no candidate arms; #8325 remains the keep/reject owner.
+- 2026-08-27: registered #9525 as M2's exact P32 receipt child after #9456; it requires missing receipt fields and cannot run until #8325 restores a safe exact-Mac envelope.
+- 2026-08-27: shipped M3 mechanism #9486 at `46fdd8a52` and M4 block mechanism #9488 at `99ea660ae`; retained both phase boxes unchecked because neither closure contains an accepted Mac performance receipt.
+- 2026-08-27: audited M6: #9076 is synthetic correctness only and #9492 owns the blocked exact Metal NativeScheduler paged-swap arm.
+- 2026-08-27: audited M9: #9515's linear batch substrate is shipped at `14dd0d1e4`; #9516 was falsely closed against absent `24c2fd7a7c` and reopened with no implementation on trunk; #9074 still owns mixed-layer integration.
+- 2026-08-27: found and corrected tracker drift: #9075 was reclosed against absent `82f1a635c8098ae569dac2db0c3b222765098226` after its own audit refuted shared Qwen execution, and umbrella #9430 was closed from docs-only `a6fa45cd25e047865c763384beaf27ee9a2a2149` despite `0 / 10 KEEP`; both issues are reopened and neither closure changes plan completion.
 
 ## Completion audit
 

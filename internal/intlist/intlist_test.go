@@ -28,3 +28,19 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+func TestConcat(t *testing.T) {
+	if got, want := Concat([]int{1, 2}, nil, []int{3}, []int{}, []int{4, 5}), []int{1, 2, 3, 4, 5}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Concat = %v, want %v", got, want)
+	}
+	if got := Concat(); got != nil {
+		t.Fatalf("Concat() = %v, want nil", got)
+	}
+
+	src := []int{9, 9}
+	out := Concat(src, []int{1})
+	out[0] = 42
+	if src[0] != 9 {
+		t.Errorf("Concat aliased its input: src[0] = %d, want 9", src[0])
+	}
+}

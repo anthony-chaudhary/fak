@@ -123,6 +123,117 @@ func TestUpstreamBadRequestIsProviderOutcomeNotUnknownVerdict(t *testing.T) {
 	}
 }
 
+func TestProviderOutcomeClassificationEdges(t *testing.T) {
+	tests := []struct {
+		name               string
+		rows               []map[string]any
+		wantProviderRows   int
+		wantUnknownVerdict int
+		wantByVerdict      map[string]int
+		wantQuality        float64
+	}{
+		{
+			name: "normalized lowercase and whitespace kind",
+			rows: []map[string]any{
+				{"verdict": "ALLOW", "kind": "DECIDE"},
+				{"kind": " \tupstream_bad_request\n", "reason": "scrubbed provider detail"},
+			},
+			wantProviderRows: 1,
+			wantByVerdict:    map[string]int{"ALLOW": 1},
+			wantQuality:      100,
+		},
+		{
+			name: "two provider rows count additively",
+			rows: []map[string]any{
+				{"verdict": "ALLOW", "kind": "DECIDE"},
+				{"kind": "UPSTREAM_BAD_REQUEST"},
+				{"kind": "UPSTREAM_BAD_REQUEST"},
+			},
+			wantProviderRows: 2,
+			wantByVerdict:    map[string]int{"ALLOW": 1},
+			wantQuality:      100,
+		},
+		{
+			name: "provider kind wins over conflicting explicit verdict",
+			rows: []map[string]any{
+				{"verdict": "ALLOW", "kind": "DECIDE"},
+				{"kind": "UPSTREAM_BAD_REQUEST", "verdict": "DENY"},
+			},
+			wantProviderRows: 1,
+			wantByVerdict:    map[string]int{"ALLOW": 1},
+			wantQuality:      100,
+		},
+		{
+			name: "near match remains unknown",
+			rows: []map[string]any{
+				{"verdict": "ALLOW", "kind": "DECIDE"},
+				{"kind": "UPSTREAM_BAD_REQUEST_EXTRA"},
+			},
+			wantUnknownVerdict: 1,
+			wantByVerdict: map[string]int{
+				"ALLOW":                      1,
+				"UPSTREAM_BAD_REQUEST_EXTRA": 1,
+			},
+			wantQuality: 50,
+		},
+		{
+			name: "provider token in verdict without kind remains unknown",
+			rows: []map[string]any{
+				{"verdict": "ALLOW", "kind": "DECIDE"},
+				{"verdict": "UPSTREAM_BAD_REQUEST"},
+			},
+			wantUnknownVerdict: 1,
+			wantByVerdict: map[string]int{
+				"ALLOW":                1,
+				"UPSTREAM_BAD_REQUEST": 1,
+			},
+			wantQuality: 50,
+		},
+		{
+			name: "provider only fold has zero verdict denominator",
+			rows: []map[string]any{
+				{"kind": "UPSTREAM_BAD_REQUEST"},
+			},
+			wantProviderRows: 1,
+			wantByVerdict:    map[string]int{},
+			wantQuality:      0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := writeJournal(t, tt.rows)
+			fold := FoldRows([]string{p})
+			if fold.TotalRows != len(tt.rows) {
+				t.Fatalf("TotalRows = %d, want %d", fold.TotalRows, len(tt.rows))
+			}
+			if fold.ProviderOutcomeRows != tt.wantProviderRows {
+				t.Errorf("ProviderOutcomeRows = %d, want %d", fold.ProviderOutcomeRows, tt.wantProviderRows)
+			}
+			if got := fold.ByProviderOutcomeKind["UPSTREAM_BAD_REQUEST"]; got != tt.wantProviderRows {
+				t.Errorf("ByProviderOutcomeKind[UPSTREAM_BAD_REQUEST] = %d, want %d", got, tt.wantProviderRows)
+			}
+			if fold.UnknownVerdict != tt.wantUnknownVerdict {
+				t.Errorf("UnknownVerdict = %d, want %d", fold.UnknownVerdict, tt.wantUnknownVerdict)
+			}
+			if len(fold.ByVerdict) != len(tt.wantByVerdict) {
+				t.Errorf("ByVerdict = %v, want %v", fold.ByVerdict, tt.wantByVerdict)
+			}
+			for verdict, want := range tt.wantByVerdict {
+				if got := fold.ByVerdict[verdict]; got != want {
+					t.Errorf("ByVerdict[%s] = %d, want %d", verdict, got, want)
+				}
+			}
+			if fold.BlankReasonOnDeny != 0 {
+				t.Errorf("BlankReasonOnDeny = %d, want 0", fold.BlankReasonOnDeny)
+			}
+			if got := VerdictQuality(fold); got != tt.wantQuality {
+				t.Errorf("quality = %v, want %v", got, tt.wantQuality)
+			}
+		})
+	}
+}
+
 func TestUnexplainedBlockLowersQuality(t *testing.T) {
 	p := writeJournal(t, []map[string]any{
 		{"verdict": "ALLOW", "kind": "DECIDE"},

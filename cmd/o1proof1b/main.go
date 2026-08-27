@@ -43,8 +43,11 @@ import (
 	"os"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchids"
+	"github.com/anthony-chaudhary/fak/internal/cmdutil"
 	"github.com/anthony-chaudhary/fak/internal/ctxmmu"
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/kvmmu"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -71,39 +74,15 @@ func qwen25_1_5b() model.Config {
 }
 
 func lcgIDs(n, vocab int, seed uint64) []int {
-	ids := make([]int, n)
-	state := 2463534242 + seed
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
+	return benchids.LCG(n, vocab, seed)
 }
 
 func cat(parts ...[]int) []int {
-	var out []int
-	for _, p := range parts {
-		out = append(out, p...)
-	}
-	return out
+	return intlist.Concat(parts...)
 }
 
 func maxAbsDiff(a, b []float32) float64 {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	var mx float64
-	for i := 0; i < n; i++ {
-		d := float64(a[i] - b[i])
-		if d < 0 {
-			d = -d
-		}
-		if d > mx {
-			mx = d
-		}
-	}
-	return mx
+	return cmdutil.MaxAbsDiffF32(a, b)
 }
 
 func ms(d time.Duration) float64 { return float64(d.Nanoseconds()) / 1e6 }

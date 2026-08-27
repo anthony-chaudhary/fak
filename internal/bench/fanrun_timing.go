@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchids"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
 )
@@ -124,14 +125,8 @@ func decodeBatch(bs *model.BatchSession, ids0 []int, steps, vocab int) {
 // lcgIDs generates n deterministic pseudo-token ids in [0,vocab) (the fleetserve LCG, so
 // the timing prefix is reproducible across runs and matches fleetserve's distribution).
 func lcgIDs(n, vocab, seed int) []int {
-	ids := make([]int, n)
-	state := uint64(2463534242 + seed)
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		if vocab <= 0 {
-			vocab = 1
-		}
-		ids[i] = int(state % uint64(vocab))
+	if n > 0 && vocab <= 0 {
+		vocab = 1
 	}
-	return ids
+	return benchids.LCGFromState(n, vocab, uint64(2463534242+seed))
 }
