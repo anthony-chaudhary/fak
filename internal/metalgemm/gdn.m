@@ -381,6 +381,107 @@ void *mg_gdn_graph_encode(void *graph, int owner,
     int vThreads=mg_gdn_threads(vHd);[encoder setComputePipelineState:gGDNRecurrentPSO];[encoder setBuffer:convOut offset:0 atIndex:0];[encoder setBuffer:qNorm offset:0 atIndex:1];[encoder setBuffer:kNorm offset:0 atIndex:2];[encoder setBuffer:z offset:0 atIndex:3];[encoder setBuffer:b offset:0 atIndex:4];[encoder setBuffer:a offset:0 atIndex:5];[encoder setBuffer:aLogB offset:0 atIndex:6];[encoder setBuffer:dtBiasB offset:0 atIndex:7];[encoder setBuffer:normB offset:0 atIndex:8];[encoder setBuffer:(__bridge id<MTLBuffer>)slot.recurrent offset:0 atIndex:9];[encoder setBuffer:core offset:0 atIndex:10];[encoder setBytes:&tokens length:sizeof(tokens) atIndex:11];[encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];[encoder setBytes:&nK length:sizeof(nK) atIndex:13];[encoder setBytes:&nV length:sizeof(nV) atIndex:14];[encoder setBytes:&kHd length:sizeof(kHd) atIndex:15];[encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];[encoder setBytes:&eps length:sizeof(eps) atIndex:17];[encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads,1,1)];[encoder endEncoding];return (__bridge void*)core;
 }
 
+// Encode B independent P=1 owners into one caller-owned projection graph. The
+// projected operands are B-row panels, but each row receives its own private
+// convolution and recurrent buffers; rows are never scanned as token order.
+void *mg_gdn_graph_encode_batch(void *graph, const int *owners, int batch,
+                                void *mixedPtr, void *zPtr, void *bPtr, void *aPtr,
+                                const float *convW, const float *aLog, const float *dtBias, const float *norm,
+                                int nK, int nV, int kHd, int vHd, int convKernel, float eps) {
+    if (!graph || !owners || batch < 2 || batch > 8 || !mixedPtr || !zPtr || !bPtr || !aPtr ||
+        !convW || !aLog || !dtBias || !norm || eps <= 0 || !mg_gdn_pipelines()) return NULL;
+
+    MGGDNOwner slots[8];
+    for (int row = 0; row < batch; ++row) {
+        if (owners[row] < 0 || owners[row] >= MG_GDN_MAX_OWNERS) return NULL;
+        for (int previous = 0; previous < row; ++previous) {
+            if (owners[previous] == owners[row]) return NULL;
+        }
+        @synchronized(gDev) { slots[row] = gGDNOwners[owners[row]]; }
+        MGGDNOwner slot = slots[row];
+        if (slot.conv == NULL || slot.recurrent == NULL || slot.nK != nK || slot.nV != nV ||
+            slot.kHd != kHd || slot.vHd != vHd || slot.convKernel != convKernel) return NULL;
+    }
+
+    int tokens = 1;
+    int keyDim = nK * kHd, valueDim = nV * vHd, convDim = 2 * keyDim + valueDim;
+    id<MTLBuffer> mixed = (__bridge id<MTLBuffer>)mixedPtr;
+    id<MTLBuffer> z = (__bridge id<MTLBuffer>)zPtr;
+    id<MTLBuffer> b = (__bridge id<MTLBuffer>)bPtr;
+    id<MTLBuffer> a = (__bridge id<MTLBuffer>)aPtr;
+    id<MTLBuffer> convWB = mg_gdn_shared(convW, (size_t)convDim * convKernel);
+    id<MTLBuffer> aLogB = mg_gdn_shared(aLog, nV);
+    id<MTLBuffer> dtBiasB = mg_gdn_shared(dtBias, nV);
+    id<MTLBuffer> normB = mg_gdn_shared(norm, vHd);
+    id<MTLBuffer> convOut = [gDev newBufferWithLength:(size_t)batch * convDim * sizeof(float) options:MTLResourceStorageModePrivate];
+    id<MTLBuffer> qNorm = [gDev newBufferWithLength:(size_t)batch * keyDim * sizeof(float) options:MTLResourceStorageModePrivate];
+    id<MTLBuffer> kNorm = [gDev newBufferWithLength:(size_t)batch * keyDim * sizeof(float) options:MTLResourceStorageModePrivate];
+    id<MTLBuffer> core = (__bridge id<MTLBuffer>)mg_graph_alloc_result(graph, batch * valueDim);
+    id<MTLCommandBuffer> command = (__bridge id<MTLCommandBuffer>)mg_graph_command_buffer(graph);
+    if (!mixed || !z || !b || !a || !convWB || !aLogB || !dtBiasB || !normB ||
+        !convOut || !qNorm || !kNorm || !core || !command) return NULL;
+
+    id<MTLComputeCommandEncoder> encoder = [command computeCommandEncoder];
+    if (encoder == nil) return NULL;
+    int qThreads = mg_gdn_threads(kHd);
+    int vThreads = mg_gdn_threads(vHd);
+    for (int row = 0; row < batch; ++row) {
+        NSUInteger mixedOffset = (NSUInteger)row * convDim * sizeof(float);
+        NSUInteger valueOffset = (NSUInteger)row * valueDim * sizeof(float);
+        NSUInteger headOffset = (NSUInteger)row * nV * sizeof(float);
+        NSUInteger keyOffset = (NSUInteger)row * keyDim * sizeof(float);
+
+        [encoder setComputePipelineState:gGDNConvPSO];
+        [encoder setBuffer:mixed offset:mixedOffset atIndex:0];
+        [encoder setBuffer:convWB offset:0 atIndex:1];
+        [encoder setBuffer:(__bridge id<MTLBuffer>)slots[row].conv offset:0 atIndex:2];
+        [encoder setBuffer:convOut offset:mixedOffset atIndex:3];
+        [encoder setBytes:&tokens length:sizeof(tokens) atIndex:4];
+        [encoder setBytes:&convDim length:sizeof(convDim) atIndex:5];
+        [encoder setBytes:&convKernel length:sizeof(convKernel) atIndex:6];
+        [encoder dispatchThreads:MTLSizeMake((NSUInteger)convDim, 1, 1)
+             threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+
+        [encoder setComputePipelineState:gGDNQKNormPSO];
+        [encoder setBuffer:convOut offset:mixedOffset atIndex:0];
+        [encoder setBuffer:qNorm offset:keyOffset atIndex:1];
+        [encoder setBuffer:kNorm offset:keyOffset atIndex:2];
+        [encoder setBytes:&tokens length:sizeof(tokens) atIndex:3];
+        [encoder setBytes:&convDim length:sizeof(convDim) atIndex:4];
+        [encoder setBytes:&nK length:sizeof(nK) atIndex:5];
+        [encoder setBytes:&kHd length:sizeof(kHd) atIndex:6];
+        [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nK, 1, 1)
+                 threadsPerThreadgroup:MTLSizeMake((NSUInteger)qThreads, 1, 1)];
+        [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+
+        [encoder setComputePipelineState:gGDNRecurrentPSO];
+        [encoder setBuffer:convOut offset:mixedOffset atIndex:0];
+        [encoder setBuffer:qNorm offset:keyOffset atIndex:1];
+        [encoder setBuffer:kNorm offset:keyOffset atIndex:2];
+        [encoder setBuffer:z offset:valueOffset atIndex:3];
+        [encoder setBuffer:b offset:headOffset atIndex:4];
+        [encoder setBuffer:a offset:headOffset atIndex:5];
+        [encoder setBuffer:aLogB offset:0 atIndex:6];
+        [encoder setBuffer:dtBiasB offset:0 atIndex:7];
+        [encoder setBuffer:normB offset:0 atIndex:8];
+        [encoder setBuffer:(__bridge id<MTLBuffer>)slots[row].recurrent offset:0 atIndex:9];
+        [encoder setBuffer:core offset:valueOffset atIndex:10];
+        [encoder setBytes:&tokens length:sizeof(tokens) atIndex:11];
+        [encoder setBytes:&convDim length:sizeof(convDim) atIndex:12];
+        [encoder setBytes:&nK length:sizeof(nK) atIndex:13];
+        [encoder setBytes:&nV length:sizeof(nV) atIndex:14];
+        [encoder setBytes:&kHd length:sizeof(kHd) atIndex:15];
+        [encoder setBytes:&vHd length:sizeof(vHd) atIndex:16];
+        [encoder setBytes:&eps length:sizeof(eps) atIndex:17];
+        [encoder dispatchThreadgroups:MTLSizeMake((NSUInteger)nV, 1, 1)
+                 threadsPerThreadgroup:MTLSizeMake((NSUInteger)vThreads, 1, 1)];
+        [encoder memoryBarrierWithScope:MTLBarrierScopeBuffers];
+    }
+    [encoder endEncoding];
+    return (__bridge void *)core;
+}
+
 int mg_gdn_state_seed(int owner, const float *conv, int convElems, const float *recurrent, int recurrentElems) {
     @autoreleasepool {
         if (owner < 0 || owner >= MG_GDN_MAX_OWNERS || recurrent == NULL) return 0;

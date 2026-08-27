@@ -307,28 +307,6 @@ func outcomeFor(d turnbench.CallDisposition) outcome {
 	}
 }
 
-// ansi colors, gated on a TTY + NO_COLOR (https://no-color.org).
-type palette struct{ red, green, dim, bold, reset string }
-
-func colors() palette {
-	noColor := os.Getenv("NO_COLOR") != ""
-	tty := false
-	if fi, err := os.Stdout.Stat(); err == nil {
-		tty = fi.Mode()&os.ModeCharDevice != 0
-	}
-	if noColor || !tty {
-		return palette{}
-	}
-	return palette{red: "\033[31m", green: "\033[32m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
-}
-
-func (p palette) paint(code, s string) string {
-	if code == "" {
-		return s
-	}
-	return code + s + p.reset
-}
-
 // padTrim pads OR truncates a plain (un-colored) string to exactly w runes, so a
 // later color wrap never disturbs column alignment.
 func padTrim(s string, w int) string {
@@ -345,7 +323,7 @@ func padTrim(s string, w int) string {
 // runPrint replays one scenario and renders the two-column diff to stdout. Returns a
 // process exit code (0 unless the replay errored / the fixture is absent).
 func runPrint(scenario string) int {
-	p := colors()
+	p := demoui.TerminalPalette(os.Stdout)
 	t, err := turnbench.LoadTrace(suitePath(scenario))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load trace %q: %v (run from the repo root)\n", scenario, err)
@@ -362,21 +340,21 @@ func runPrint(scenario string) int {
 	kindColor := func(kind string) string {
 		switch kind {
 		case "breach":
-			return p.red
+			return p.Red
 		case "held":
-			return p.green
+			return p.Green
 		default:
-			return p.dim
+			return p.Dim
 		}
 	}
 
-	fmt.Printf("\n  %s — scenario: %s (%d calls)\n", p.paint(p.bold, "fak · the safety floor, side by side"), scenario, len(calls))
-	fmt.Printf("  %s\n\n", p.paint(p.dim, "same agent · same attack · same tool calls — run twice"))
+	fmt.Printf("\n  %s — scenario: %s (%d calls)\n", p.Paint(p.Bold, "fak · the safety floor, side by side"), scenario, len(calls))
+	fmt.Printf("  %s\n\n", p.Paint(p.Dim, "same agent · same attack · same tool calls — run twice"))
 	// header row — pad the PLAIN text to width, THEN paint (alignment-safe).
 	fmt.Printf("  %s  %s  %s\n",
-		p.paint(p.red, padTrim("WITHOUT fak", lw)),
+		p.Paint(p.Red, padTrim("WITHOUT fak", lw)),
 		padTrim("the tool call", cw),
-		p.paint(p.green, "WITH fak"))
+		p.Paint(p.Green, "WITH fak"))
 	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
 
 	for _, d := range calls {
@@ -385,11 +363,11 @@ func runPrint(scenario string) int {
 		mid := padTrim(d.Tool, cw)
 		right := o.rightGlyph + " " + o.rtext
 		fmt.Printf("  %s  %s  %s\n",
-			p.paint(kindColor(o.leftKind), left),
-			p.paint(p.dim, mid),
-			p.paint(kindColor(o.rightKind), right))
+			p.Paint(kindColor(o.leftKind), left),
+			p.Paint(p.Dim, mid),
+			p.Paint(kindColor(o.rightKind), right))
 		// a faint second line naming the action under the call
-		fmt.Printf("  %s  %s\n", strings.Repeat(" ", lw), p.paint(p.dim, padTrim(whatFor(d.Tool), cw)))
+		fmt.Printf("  %s  %s\n", strings.Repeat(" ", lw), p.Paint(p.Dim, padTrim(whatFor(d.Tool), cw)))
 	}
 
 	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
@@ -408,16 +386,16 @@ func runPrint(scenario string) int {
 	// pad the plain left score across the left+gap+center span, THEN paint, so the
 	// right score lands under the WITH-fak column regardless of color.
 	fmt.Printf("  %s  %s\n",
-		p.paint(p.bold+p.red, padTrim(leftScore, lw+2+cw)),
-		p.paint(p.bold+p.green, rightScore))
+		p.Paint(p.Bold+p.Red, padTrim(leftScore, lw+2+cw)),
+		p.Paint(p.Bold+p.Green, rightScore))
 	if breaches > 0 {
 		inj, des := rep.Safety.InjectionsAdmittedBaseline, rep.Safety.DestructiveExecutedBaseline
-		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
+		fmt.Printf("  %s\n", p.Paint(p.Dim, fmt.Sprintf(
 			"fak refused %d destructive op%s and paged out %d injection%s — and still ran the %d legitimate call%s. "+
 				"A completion/integrity delta that holds on ANY backend (the refusal never reads a content detector).",
 			des, numfmt.PluralSuffix(des), inj, numfmt.PluralSuffix(inj), passes, numfmt.PluralSuffix(passes))))
 	} else {
-		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
+		fmt.Printf("  %s\n", p.Paint(p.Dim, fmt.Sprintf(
 			"A clean session breaches nothing on either arm (the anti-fear-mongering control): "+
 				"fak does not cry wolf — all %d legitimate calls ran. The gap only opens under a real attack.", passes)))
 	}

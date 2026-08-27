@@ -470,41 +470,21 @@ func runSelfcheck() int {
 
 // --- -print: the terminal twin -----------------------------------------------------------
 
-type palette struct{ red, green, blue, dim, bold, reset string }
-
-func colors() palette {
-	tty := false
-	if fi, err := os.Stdout.Stat(); err == nil {
-		tty = fi.Mode()&os.ModeCharDevice != 0
-	}
-	if os.Getenv("NO_COLOR") != "" || !tty {
-		return palette{}
-	}
-	return palette{red: "\033[31m", green: "\033[32m", blue: "\033[34m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
-}
-
-func (p palette) paint(code, s string) string {
-	if code == "" {
-		return s
-	}
-	return code + s + p.reset
-}
-
 // strip renders a one-line KV strip from a frame's cells.
-func strip(p palette, cells []Cell) string {
+func strip(p demoui.Palette, cells []Cell) string {
 	if len(cells) == 0 {
-		return p.paint(p.dim, "· (empty cache)")
+		return p.Paint(p.Dim, "· (empty cache)")
 	}
 	var b strings.Builder
 	for _, c := range cells {
 		var code string
 		switch c.Kind {
 		case "prefix":
-			code = p.green
+			code = p.Green
 		case "poison":
-			code = p.red
+			code = p.Red
 		case "query":
-			code = p.blue
+			code = p.Blue
 		}
 		glyph := c.Glyph
 		switch c.State {
@@ -515,51 +495,51 @@ func strip(p palette, cells []Cell) string {
 		case "flagged":
 			glyph = "!" + glyph
 		}
-		b.WriteString(p.paint(code, "["+glyph+"]"))
+		b.WriteString(p.Paint(code, "["+glyph+"]"))
 	}
 	return b.String()
 }
 
 func runPrint() int {
-	p := colors()
+	p := demoui.TerminalPalette(os.Stdout)
 	ev := runExperiment()
 	w := ev.Witness
 
-	fmt.Printf("\n  %s\n", p.paint(p.bold, "fak · Un-See It — the kernel deletes a poisoned tool result from the model's KV cache"))
-	fmt.Printf("  %s\n\n", p.paint(p.dim, w.Model))
+	fmt.Printf("\n  %s\n", p.Paint(p.Bold, "fak · Un-See It — the kernel deletes a poisoned tool result from the model's KV cache"))
+	fmt.Printf("  %s\n\n", p.Paint(p.Dim, w.Model))
 
 	curAct := 0
 	for _, fr := range ev.Frames {
 		if fr.Act != curAct {
 			curAct = fr.Act
 			title := map[int]string{1: "ACT 1 — Un-See It (write-time evict)", 2: "ACT 2 — The Surgeon's Cut (middle evict + re-RoPE)", 3: "ACT 3 — Too Late (the honest boundary)"}[fr.Act]
-			fmt.Printf("  %s\n", p.paint(p.bold, title))
+			fmt.Printf("  %s\n", p.Paint(p.Bold, title))
 		}
 		fmt.Printf("    %s\n", fr.Caption)
 		if len(fr.Cells) > 0 {
-			fmt.Printf("      %s   %s\n", strip(p, fr.Cells), p.paint(p.dim, fmt.Sprintf("len=%d", fr.CacheLen)))
+			fmt.Printf("      %s   %s\n", strip(p, fr.Cells), p.Paint(p.Dim, fmt.Sprintf("len=%d", fr.CacheLen)))
 		}
 		for _, ro := range fr.Readouts {
-			code := p.dim
+			code := p.Dim
 			switch ro.Verdict {
 			case "identical", "bit-exact":
-				code = p.green + p.bold
+				code = p.Green + p.Bold
 			case "contaminated", "flagged":
-				code = p.red + p.bold
+				code = p.Red + p.Bold
 			}
-			fmt.Printf("      %s %s\n", p.paint(p.dim, ro.Label+":"), p.paint(code, ro.Value+"  ["+ro.Verdict+"]"))
+			fmt.Printf("      %s %s\n", p.Paint(p.Dim, ro.Label+":"), p.Paint(code, ro.Value+"  ["+ro.Verdict+"]"))
 		}
 	}
 
-	fmt.Printf("\n  %s\n", p.paint(p.bold, "the witness (every number measured live this run):"))
-	fmt.Printf("    write-time evict  vs never-saw : %s  %s\n", p.paint(p.green+p.bold, sci(w.EvictVsNever)), p.paint(p.dim, "(bit-identical — the headline)"))
-	fmt.Printf("    poison kept       vs never-saw : %s  %s\n", p.paint(p.red, sci(w.PoisonVsNever)), p.paint(p.dim, "(contaminated control)"))
-	fmt.Printf("    late evict        vs never-saw : %s  %s\n", p.paint(p.red, sci(w.TooLateVsNever)), p.paint(p.dim, "(the bell you can't un-ring)"))
-	fmt.Printf("    reposition residual            : %s  %s\n", p.paint(p.green, sci(w.RepositionResid)), p.paint(p.dim, "(re-RoPE bit-exact, ≤1e-4)"))
+	fmt.Printf("\n  %s\n", p.Paint(p.Bold, "the witness (every number measured live this run):"))
+	fmt.Printf("    write-time evict  vs never-saw : %s  %s\n", p.Paint(p.Green+p.Bold, sci(w.EvictVsNever)), p.Paint(p.Dim, "(bit-identical — the headline)"))
+	fmt.Printf("    poison kept       vs never-saw : %s  %s\n", p.Paint(p.Red, sci(w.PoisonVsNever)), p.Paint(p.Dim, "(contaminated control)"))
+	fmt.Printf("    late evict        vs never-saw : %s  %s\n", p.Paint(p.Red, sci(w.TooLateVsNever)), p.Paint(p.Dim, "(the bell you can't un-ring)"))
+	fmt.Printf("    reposition residual            : %s  %s\n", p.Paint(p.Green, sci(w.RepositionResid)), p.Paint(p.Dim, "(re-RoPE bit-exact, ≤1e-4)"))
 
-	fmt.Printf("\n  %s\n", p.paint(p.bold, "honest fences:"))
+	fmt.Printf("\n  %s\n", p.Paint(p.Bold, "honest fences:"))
 	for _, fc := range ev.Fences {
-		fmt.Printf("    %s %s\n", p.paint(p.dim, "-"), p.paint(p.dim, fc))
+		fmt.Printf("    %s %s\n", p.Paint(p.Dim, "-"), p.Paint(p.Dim, fc))
 	}
 	fmt.Println()
 	return 0

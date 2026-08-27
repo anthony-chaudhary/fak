@@ -1,0 +1,56 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-27T21:50:36Z",
+  "issue": 9571,
+  "family": "browserless demo terminal palette contract",
+  "base_revision": "6f87f455433e2d624d003ffd0be638341e7b5ffa",
+  "paths": [
+    "internal/demoui/terminal.go",
+    "internal/demoui/terminal_test.go",
+    "cmd/ctxdemo/main.go",
+    "cmd/dropindemo/print.go",
+    "cmd/guarddemo/main.go",
+    "cmd/tokendemo/cli.go",
+    "cmd/turntaxdemo/main.go",
+    "cmd/unseedemo/main.go"
+  ],
+  "test": "go test ./internal/demoui ./cmd/ctxdemo ./cmd/dropindemo ./cmd/guarddemo ./cmd/tokendemo ./cmd/turntaxdemo ./cmd/unseedemo ./internal/architest -count=1; go test ./internal/architest -run '^(TestEveryPackageDeclaresTier|TestTierDeclarationsAreLive|TestReportedAndEnforcedUpwardEdgesStayIdentical|TestPrimitiveCannotImportFoundationComposite|TestRootImportsNothingInternal|TestKernelImportsOnlyAbi)$' -count=1; fak validate --ref 6f87f455433e2d624d003ffd0be638341e7b5ffa --mine <eight issue paths> --json",
+  "test_result": "PASS changed packages, scoped architecture invariants, build, vet, and scoped validation; full internal/architest was attempted and remains red only on unrelated pre-existing repository baselines",
+  "receipts": {
+    "before_sha256": "44a915fcd1589dfac7e1026f5b5a846589663feeafadd89e44afc69077e5b120",
+    "after_sha256": "1f2a64da3ddf9fc4f35bd9165b30f86b3d39a4e3ec7ed126f9cadca0e259b058",
+    "defect_set_normalization": "duplication defect line numbers removed before LC_ALL=C sort and comm",
+    "removed": [
+      "[extractable] clone x12 (~5 lines): cmd/agentbenchdemo/main.go, cmd/ctxdemo/main.go, cmd/ctxdemo/main.go, cmd/dropindemo/print.go (+8 more) — 'for i := 0; i < len(s); i++ {…'"
+    ],
+    "added": [],
+    "after_target_matches": []
+  },
+  "before": {
+    "score": -3.2,
+    "grade": "F",
+    "slop_debt": 181,
+    "duplication": 170,
+    "duplication_extractable": 14,
+    "duplication_local": 81,
+    "duplication_pair": 75,
+    "weighted_duplication": 92.0,
+    "dead_code": 6,
+    "comment_slop": 0,
+    "vacuous_tests": 5
+  },
+  "after": {
+    "score": -2.7,
+    "grade": "F",
+    "slop_debt": 180,
+    "duplication": 169,
+    "duplication_extractable": 13,
+    "duplication_local": 81,
+    "duplication_pair": 75,
+    "weighted_duplication": 91.0,
+    "dead_code": 6,
+    "comment_slop": 0,
+    "vacuous_tests": 5
+  },
+  "verdict": "PASS: one extractable duplication component was removed, no component was added, total hard debt strictly decreased, and no hard KPI increased"
+}

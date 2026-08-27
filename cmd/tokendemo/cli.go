@@ -271,24 +271,20 @@ func formatMs(ns int64) string {
 // -print: the terminal two-column diff (WITHOUT kernel vs WITH kernel).
 // ---------------------------------------------------------------------------
 
-type palette struct{ red, green, dim, bold, reset string }
+// palette preserves the package-local field names used by the three terminal
+// renderers while delegating the terminal and paint contract to demoui.
+type palette struct {
+	demoui.Palette
+	red, green, dim, bold string
+}
 
 func colors() palette {
-	tty := false
-	if fi, err := os.Stdout.Stat(); err == nil {
-		tty = fi.Mode()&os.ModeCharDevice != 0
-	}
-	if os.Getenv("NO_COLOR") != "" || !tty {
-		return palette{}
-	}
-	return palette{red: "\033[31m", green: "\033[32m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
+	p := demoui.TerminalPalette(os.Stdout)
+	return palette{Palette: p, red: p.Red, green: p.Green, dim: p.Dim, bold: p.Bold}
 }
 
 func (p palette) paint(code, s string) string {
-	if code == "" {
-		return s
-	}
-	return code + s + p.reset
+	return p.Paint(code, s)
 }
 
 // padTrim pads OR truncates a plain (un-colored) string to exactly w runes so a later

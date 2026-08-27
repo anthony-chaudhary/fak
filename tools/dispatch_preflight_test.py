@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Hermetic tests for tools/dispatch_preflight.py.
 
-The spawn gate composes four INDEPENDENT checks (host_check, account_check,
-kernel_alive, proc_worker_count). All of those shell out to other tools, so here
+The spawn gate composes its independent host, account, kernel, process-census,
+and system-commit checks. The live checks use OS/tool probes, so here
 we replace them on the module with synthetic results and assert the verdict
 logic â€” SPAWN_OK and every typed REFUSE_* â€” plus the pure helpers (_last_json,
 _int) and the cap = min(max_workers, dos target) rule. No subprocess runs.
@@ -39,6 +39,7 @@ AMBIENT_ENV_KNOBS = (
     "FAK_HOST_THREADS_PER_CORE",
     "FAK_HOST_THREADS_PER_WORKER",
     "FAK_SESSIONS_PER_ACCOUNT",
+    "FAK_SYSTEM_COMMIT_HEADROOM_MB",
 )
 
 # Set by the witness's own re-run of this module (AmbientKnobHermeticityTest) so the
@@ -119,7 +120,7 @@ def load_fleet_accounts(**knobs):
 
 
 def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res=None,
-                 seat=None, weekly=None, fak_bin=None):
+                 seat=None, weekly=None, fak_bin=None, commit_headroom=None):
     """Replace the shelling-out checks with constant synthetic results.
 
     ``host_res`` stubs the host-resource probe (#1337); the default is a roomy box
@@ -164,6 +165,11 @@ def patch_checks(mod, *, host=None, account=None, kernel=None, procs=0, host_res
     mod.host_resources = lambda: host_res
     mod.seat_check = lambda root, *, product=None: seat
     mod.weekly_cap_check = lambda root, **kw: weekly
+    commit_headroom = commit_headroom if commit_headroom is not None else {
+        "supported": True, "ok": True, "reason": "", "observed_bytes": 100,
+        "required_bytes": 10, "system_commit_bytes": 900,
+        "system_commit_limit": 1000}
+    mod.system_commit_headroom_check = lambda: commit_headroom
     fak_bin = fak_bin if fak_bin is not None else {
         "schema": mod.FAK_BIN_PROVENANCE_SCHEMA,
         "resolvers": {"preflight_gate": {"path": "/x/fak", "resolved": True,
@@ -206,6 +212,46 @@ class IntTest(unittest.TestCase):
         self.assertIsNone(mod._int(None))
         self.assertIsNone(mod._int("nope"))
         self.assertEqual(mod._int("nope", 0), 0)
+
+
+class SystemCommitHeadroomTest(unittest.TestCase):
+    def test_requirement_parser_matches_guard_fail_closed_contract(self) -> None:
+        for raw in ("", "0", "-1", "+1", "1GB", "17592186044416"):
+            mod = load(FAK_SYSTEM_COMMIT_HEADROOM_MB=raw)
+            self.assertEqual(mod.required_system_commit_headroom_bytes(),
+                             mod.DEFAULT_SYSTEM_COMMIT_HEADROOM_BYTES, raw)
+        mod = load(FAK_SYSTEM_COMMIT_HEADROOM_MB="456")
+        self.assertEqual(mod.required_system_commit_headroom_bytes(), 456 << 20)
+
+    def test_pure_low_exact_high_boundary(self) -> None:
+        mod = load()
+        for used, want_refuse in ((91, True), (90, True), (89, False)):
+            got = mod.evaluate_system_commit_headroom(
+                system_bytes=used, system_limit=100, required_bytes=10)
+            self.assertEqual(not got["ok"], want_refuse, got)
+            self.assertEqual(got["observed_bytes"], 100 - used)
+
+    def test_low_headroom_refuses_before_spawn_verdict(self) -> None:
+        mod = load()
+        patch_checks(mod, commit_headroom={
+            "supported": True, "ok": False, "reason": "SYSTEM_COMMIT_HEADROOM",
+            "observed_bytes": 9, "required_bytes": 10,
+            "system_commit_bytes": 91, "system_commit_limit": 100})
+        payload = run_eval(mod)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["verdict"], mod.REFUSE_SYSTEM_COMMIT_HEADROOM)
+        self.assertEqual(payload["system_commit_headroom"]["observed_bytes"], 9)
+        self.assertIn("fak recover SYSTEM_COMMIT_HEADROOM", payload["reason"])
+
+    def test_high_headroom_follows_normal_spawn_path(self) -> None:
+        mod = load()
+        patch_checks(mod, commit_headroom={
+            "supported": True, "ok": True, "reason": "",
+            "observed_bytes": 11, "required_bytes": 10,
+            "system_commit_bytes": 89, "system_commit_limit": 100})
+        payload = run_eval(mod)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["verdict"], mod.OK_VERDICT)
 
 
 class HostCheckProtectedTest(unittest.TestCase):

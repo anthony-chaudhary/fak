@@ -15,6 +15,7 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 		if rollup == nil {
 			copy := row
 			copy.SourcePaths = []string{row.SourcePath}
+			copy.ToolResults = append([]AuditToolResultRow(nil), row.ToolResults...)
 			copy.usageByID = cloneAuditUsage(row.usageByID)
 			copy.failureCounts = cloneAuditFailureCounts(row.failureCounts)
 			byID[key] = &copy
@@ -42,6 +43,7 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 		}
 		rollup.ToolCalls += row.ToolCalls
 		rollup.ToolErrors += row.ToolErrors
+		rollup.ToolResults = mergeAuditToolResultRows(rollup.ToolResults, row.ToolResults)
 		if rollup.failureCounts != nil && row.failureCounts != nil {
 			for signature, count := range row.failureCounts {
 				rollup.failureCounts[signature] += count

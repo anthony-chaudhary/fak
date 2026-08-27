@@ -26,6 +26,14 @@ func TestNoWaitBusyThenFree(t *testing.T) {
 
 	if _, err := Acquire(Options{Path: path, NoWait: true}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("second acquire while held: got %v, want ErrBusy", err)
+	} else {
+		var busy *BusyError
+		if !errors.As(err, &busy) {
+			t.Fatalf("second acquire error type = %T, want *BusyError", err)
+		}
+		if busy.Path != path || busy.PID != os.Getpid() {
+			t.Fatalf("busy metadata = path %q pid %d, want path %q pid %d", busy.Path, busy.PID, path, os.Getpid())
+		}
 	}
 
 	a.Release()
