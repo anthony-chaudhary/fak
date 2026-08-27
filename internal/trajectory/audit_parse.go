@@ -175,6 +175,9 @@ func parseClaudeAuditRecord(record map[string]any, line int, rel string, state *
 		state.row.TranscriptID = id
 	}
 	recordType, _ := record["type"].(string)
+	if _, supported := auditClaudeRowSubtypes[recordType]; !supported {
+		return
+	}
 	if recordType == "attachment" {
 		parseClaudeAuditHook(record, state)
 		return
@@ -308,6 +311,9 @@ func parseClaudeAuditHook(record map[string]any, state *auditParseState) {
 
 func parseCodexAuditRecord(record map[string]any, line int, rel string, state *auditParseState, refusals *[]AuditRefusalRow) {
 	recordType, _ := record["type"].(string)
+	if _, supported := auditCodexRowSubtypes[recordType]; !supported {
+		return
+	}
 	payload, _ := record["payload"].(map[string]any)
 	switch recordType {
 	case "session_meta":

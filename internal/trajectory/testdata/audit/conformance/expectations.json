@@ -1,0 +1,129 @@
+{
+  "schema": "fak-trajectory-attribution-conformance/1",
+  "fixtures": [
+    {
+      "name": "claude-all-subtypes",
+      "source": "claude",
+      "root": "claude/projects",
+      "path": "fak/claude-conformance.jsonl",
+      "features": ["empty_content", "future_unknown_types", "malformed_rows", "mirrors", "mixed_messages", "nested_malformed", "out_of_order_tools", "unicode"],
+      "coverage": {
+        "row_subtypes": ["assistant", "attachment", "user"],
+        "content_subtypes": ["reasoning", "text", "thinking", "tool_result", "tool_use"]
+      },
+      "expected_normalized_events": [
+        {"line": 1, "ordinal": 0, "subtype": "user/text", "category": "user_message", "content_bytes": 11, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained"},
+        {"line": 2, "ordinal": 0, "subtype": "assistant/text", "category": "assistant_message", "content_bytes": 6, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained"},
+        {"line": 2, "ordinal": 1, "subtype": "assistant/thinking", "category": "reasoning", "content_bytes": 4, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained"},
+        {"line": 2, "ordinal": 2, "subtype": "assistant/reasoning", "category": "reasoning", "content_bytes": 3, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained"},
+        {"line": 2, "ordinal": 3, "subtype": "assistant/tool_use", "category": "tool_call", "tool": "exec_command", "call_id": "call-mixed", "content_bytes": 17, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained"},
+        {"line": 3, "ordinal": 0, "subtype": "user/tool_result", "category": "tool_result", "call_id": "call-late", "content_bytes": 9, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained_pending_call_link"},
+        {"line": 4, "ordinal": 0, "subtype": "assistant/tool_use", "category": "tool_call", "tool": "exec_command", "call_id": "call-late", "content_bytes": 15, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained_resolved_pending_result"},
+        {"line": 5, "ordinal": 0, "subtype": "assistant/empty", "category": "assistant_message", "content_bytes": 0, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "empty_message_content", "decision": "retained_content_empty"},
+        {"line": 6, "ordinal": 0, "subtype": "user/tool_result", "category": "tool_result", "call_id": "call-mixed", "content_bytes": 4, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_content_block", "decision": "retained"},
+        {"line": 7, "ordinal": 0, "subtype": "attachment/hook_completed", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_attachment_envelope", "decision": "retained_storage"},
+        {"line": 8, "ordinal": 0, "subtype": "attachment/deferred_tools_delta", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_attachment_envelope", "decision": "retained_storage_mirror"},
+        {"line": 9, "ordinal": 0, "subtype": "assistant/empty", "category": "assistant_message", "content_bytes": 0, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "empty_message_content", "decision": "retained_content_empty"},
+        {"line": 10, "ordinal": 0, "subtype": "assistant/future_block_v99", "category": "visible_unknown", "content_bytes": 46, "visible": true, "visibility": "unresolved", "visibility_reason": "unknown_content_block_subtype", "decision": "retained_unknown"},
+        {"line": 11, "ordinal": 0, "subtype": "future_row_v99", "category": "", "content_bytes": 0, "visible": false, "visibility": "unresolved", "visibility_reason": "unknown_row_subtype", "decision": "retained_unknown"},
+        {"line": 12, "ordinal": 0, "subtype": "assistant/malformed", "category": "visible_unknown", "content_bytes": 0, "visible": true, "visibility": "unresolved", "visibility_reason": "malformed_message", "decision": "retained_unknown"}
+      ],
+      "expected_storage_rows": [
+        {"subtype": "attachment/deferred_tools_delta", "bytes": 123, "records": 1},
+        {"subtype": "attachment/hook_completed", "bytes": 109, "records": 1},
+        {"subtype": "future_row_v99", "bytes": 90, "records": 1}
+      ],
+      "expected_totals": {
+        "records": 13,
+        "usage_seen": 4,
+        "usage_exact": 4,
+        "usage_applied": 3,
+        "duplicate_usage": 1,
+        "refused_records": 1,
+        "tool_calls": 2,
+        "tool_errors": 1,
+        "tokens": {"input_tokens": 30, "output_tokens": 7, "cache_create_tokens": 3, "cache_read_tokens": 4},
+        "distribution_bytes": {"assistant_message": 6, "reasoning": 7, "tool_call": 32, "tool_result": 13, "user_message": 11, "visible_unknown": 46},
+        "tool_bytes": {"exec_command": 45},
+        "tool_calls_by_name": {"exec_command": 2},
+        "storage_bytes": 322
+      },
+      "expected_duplicate_decisions": [
+        {"line": 5, "kind": "usage", "identity": "a-late", "decision": "suppressed_exact_duplicate"},
+        {"line": 8, "kind": "mirror", "identity": "attachment/deferred_tools_delta", "decision": "retained_storage_mirror"}
+      ],
+      "expected_refusals": ["malformed_json"]
+    },
+    {
+      "name": "codex-all-subtypes",
+      "source": "codex",
+      "root": "codex/sessions",
+      "path": "2026/08/27/codex-conformance.jsonl",
+      "features": ["empty_content", "future_unknown_types", "malformed_rows", "mirrors", "nested_malformed", "out_of_order_tools", "unicode", "unknown_message_blocks"],
+      "coverage": {
+        "row_subtypes": ["event_msg", "response_item", "session_meta", "turn_context"],
+        "content_subtypes": ["custom_tool_call", "custom_tool_call_output", "function_call", "function_call_output", "message", "reasoning", "web_search_call"],
+        "message_block_subtypes": ["input_text", "output_text"],
+        "event_subtypes": ["agent_message", "item_completed", "item_started", "task_started", "token_count", "user_message"]
+      },
+      "expected_normalized_events": [
+        {"line": 1, "ordinal": 0, "subtype": "session_meta", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_row_envelope", "decision": "retained_storage"},
+        {"line": 2, "ordinal": 0, "subtype": "turn_context", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_row_envelope", "decision": "retained_storage"},
+        {"line": 3, "ordinal": 0, "subtype": "response_item/message/input_text", "category": "user_message", "content_bytes": 5, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_message_block", "decision": "retained"},
+        {"line": 4, "ordinal": 0, "subtype": "response_item/message/output_text", "category": "assistant_message", "content_bytes": 2, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_message_block", "decision": "retained"},
+        {"line": 5, "ordinal": 0, "subtype": "response_item/reasoning", "category": "reasoning", "content_bytes": 41, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_response_item_content", "decision": "retained"},
+        {"line": 6, "ordinal": 0, "subtype": "response_item/function_call_output", "category": "tool_result", "call_id": "call-late", "content_bytes": 9, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_response_item_content", "decision": "retained_pending_call_link"},
+        {"line": 7, "ordinal": 0, "subtype": "response_item/function_call", "category": "tool_call", "tool": "exec_command", "call_id": "call-late", "content_bytes": 15, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_response_item_content", "decision": "retained_resolved_pending_result"},
+        {"line": 8, "ordinal": 0, "subtype": "response_item/function_call", "category": "tool_call", "tool": "exec_command", "call_id": "call-late", "content_bytes": 15, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_response_item_content", "decision": "retained_duplicate_payload"},
+        {"line": 9, "ordinal": 0, "subtype": "response_item/custom_tool_call", "category": "tool_call", "tool": "edit_file", "call_id": "call-custom", "content_bytes": 16, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_response_item_content", "decision": "retained"},
+        {"line": 10, "ordinal": 0, "subtype": "response_item/custom_tool_call_output", "category": "tool_result", "call_id": "call-custom", "content_bytes": 37, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_response_item_content", "decision": "retained"},
+        {"line": 11, "ordinal": 0, "subtype": "response_item/web_search_call", "category": "tool_call", "tool": "web_search_call", "call_id": "web-1", "content_bytes": 5, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_response_item_content", "decision": "retained"},
+        {"line": 12, "ordinal": 0, "subtype": "event_msg/user_message", "category": "user_message", "content_bytes": 5, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_event_message_content", "decision": "retained_unlinked_mirror"},
+        {"line": 13, "ordinal": 0, "subtype": "event_msg/agent_message", "category": "assistant_message", "content_bytes": 2, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "known_event_message_content", "decision": "retained_unlinked_mirror"},
+        {"line": 14, "ordinal": 0, "subtype": "event_msg/item_started/CommandExecution", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_event_mirror", "decision": "retained_storage_mirror"},
+        {"line": 15, "ordinal": 0, "subtype": "event_msg/item_completed/CommandExecution", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_event_mirror", "decision": "retained_storage_mirror"},
+        {"line": 16, "ordinal": 0, "subtype": "event_msg/task_started", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_event_envelope", "decision": "retained_storage"},
+        {"line": 17, "ordinal": 0, "subtype": "event_msg/token_count", "category": "", "content_bytes": 0, "visible": false, "visibility": "explicit_storage_only", "visibility_reason": "known_event_envelope", "decision": "retained_storage"},
+        {"line": 18, "ordinal": 0, "subtype": "response_item/future_response_v99", "category": "visible_unknown", "content_bytes": 49, "visible": true, "visibility": "unresolved", "visibility_reason": "unknown_response_item_subtype", "decision": "retained_unknown"},
+        {"line": 19, "ordinal": 0, "subtype": "event_msg/future_event_v99", "category": "", "content_bytes": 0, "visible": false, "visibility": "unresolved", "visibility_reason": "unknown_event_message_subtype", "decision": "retained_unknown"},
+        {"line": 20, "ordinal": 0, "subtype": "future_row_v99", "category": "", "content_bytes": 0, "visible": false, "visibility": "unresolved", "visibility_reason": "unknown_row_subtype", "decision": "retained_unknown"},
+        {"line": 21, "ordinal": 0, "subtype": "response_item/message/empty", "category": "assistant_message", "content_bytes": 0, "visible": true, "visibility": "inferred_model_visible", "visibility_reason": "empty_message_content", "decision": "retained_content_empty"},
+        {"line": 22, "ordinal": 0, "subtype": "response_item/malformed", "category": "visible_unknown", "content_bytes": 0, "visible": true, "visibility": "unresolved", "visibility_reason": "malformed_response_item", "decision": "retained_unknown"},
+        {"line": 23, "ordinal": 0, "subtype": "response_item/message/future_message_block_v99", "category": "visible_unknown", "content_bytes": 61, "visible": true, "visibility": "unresolved", "visibility_reason": "unknown_message_block_subtype", "decision": "retained_unknown"}
+      ],
+      "expected_storage_rows": [
+        {"subtype": "event_msg/future_event_v99", "bytes": 75, "records": 1},
+        {"subtype": "event_msg/item_completed/CommandExecution", "bytes": 129, "records": 1},
+        {"subtype": "event_msg/item_started/CommandExecution", "bytes": 106, "records": 1},
+        {"subtype": "event_msg/task_started", "bytes": 103, "records": 1},
+        {"subtype": "event_msg/token_count", "bytes": 191, "records": 1},
+        {"subtype": "future_row_v99", "bytes": 54, "records": 1},
+        {"subtype": "session_meta", "bytes": 110, "records": 1},
+        {"subtype": "turn_context", "bytes": 59, "records": 1}
+      ],
+      "expected_totals": {
+        "records": 24,
+        "usage_seen": 1,
+        "usage_exact": 1,
+        "usage_applied": 1,
+        "duplicate_usage": 0,
+        "refused_records": 1,
+        "tool_calls": 2,
+        "tool_errors": 0,
+        "tokens": {"input_tokens": 23, "output_tokens": 7, "cache_create_tokens": 2, "cache_read_tokens": 5},
+        "distribution_bytes": {"assistant_message": 4, "reasoning": 41, "tool_call": 51, "tool_result": 46, "user_message": 10, "visible_unknown": 110},
+        "tool_bytes": {"edit_file": 53, "exec_command": 39, "web_search_call": 5},
+        "tool_calls_by_name": {"edit_file": 1, "exec_command": 2, "web_search_call": 1},
+        "storage_bytes": 827
+      },
+      "expected_duplicate_decisions": [
+        {"line": 8, "kind": "tool_call", "identity": "call-late", "decision": "suppressed_same_call_id_for_tool_count"},
+        {"line": 12, "kind": "mirror", "identity": "event_msg/user_message", "decision": "retained_unlinked_mirror"},
+        {"line": 13, "kind": "mirror", "identity": "event_msg/agent_message", "decision": "retained_unlinked_mirror"},
+        {"line": 14, "kind": "mirror", "identity": "event_msg/item_started/CommandExecution", "decision": "retained_storage_mirror"},
+        {"line": 15, "kind": "mirror", "identity": "event_msg/item_completed/CommandExecution", "decision": "retained_storage_mirror"}
+      ],
+      "expected_refusals": ["malformed_json"]
+    }
+  ]
+}

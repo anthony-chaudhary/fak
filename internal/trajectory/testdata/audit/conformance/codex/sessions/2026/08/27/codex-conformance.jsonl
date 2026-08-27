@@ -1,0 +1,24 @@
+{"type":"session_meta","payload":{"id":"codex-conformance","cli_version":"0.148.0","model_provider":"openai"}}
+{"type":"turn_context","payload":{"model":"codex-fixture"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi λ"}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}}
+{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"plan"}],"content":[]}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"call-late","output":"early ✓"}}
+{"type":"response_item","payload":{"type":"function_call","call_id":"call-late","name":"exec_command","arguments":"{\"cmd\":\"later\"}"}}
+{"type":"response_item","payload":{"type":"function_call","call_id":"call-late","name":"exec_command","arguments":"{\"cmd\":\"later\"}"}}
+{"type":"response_item","payload":{"type":"custom_tool_call","call_id":"call-custom","name":"edit_file","input":"{\"path\":\"λ.go\"}"}}
+{"type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-custom","output":[{"type":"input_text","text":"done"}]}}
+{"type":"response_item","payload":{"type":"web_search_call","id":"web-1","input":"query"}}
+{"type":"event_msg","payload":{"type":"user_message","message":"hi λ"}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"ok"}}
+{"type":"event_msg","payload":{"type":"item_started","item":{"type":"CommandExecution","id":"call-late"}}}
+{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"CommandExecution","id":"call-late","output":"early ✓"}}}
+{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1","model_context_window":258400}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":30,"cached_input_tokens":5,"cache_write_input_tokens":2,"output_tokens":7,"total_tokens":37}}}}
+{"type":"response_item","payload":{"type":"future_response_v99","content":"future"}}
+{"type":"event_msg","payload":{"type":"future_event_v99","value":"future"}}
+{"type":"future_row_v99","payload":{"value":"future"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[]}}
+{"type":"response_item","payload":"not-an-object"}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"future_message_block_v99","content":"unknown block"}]}}
+{"type":"response_item","payload":
