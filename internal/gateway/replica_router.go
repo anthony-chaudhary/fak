@@ -64,6 +64,18 @@ type ReplicaRouter struct {
 	Hedge *HedgePolicy
 }
 
+type reservedPlannerReplica struct {
+	replica     PlannerReplica
+	reservation *fleetReservation
+	prefix      []string
+}
+
+func (r reservedPlannerReplica) Release() {
+	if r.reservation != nil {
+		r.reservation.Release()
+	}
+}
+
 // NewReplicaRouter builds a static, in-process planner fleet. It is intentionally
 // policy-free: later residency/health work can choose smarter placement without changing
 // the gateway's Planner seam.
@@ -191,27 +203,52 @@ func (r *ReplicaRouter) pickDistinctReplica(primary string) (PlannerReplica, boo
 	return PlannerReplica{}, false
 }
 func (r *ReplicaRouter) Complete(ctx context.Context, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	repl, err := r.pickForMessages(messages)
+	route, err := r.reserveForMessages(messages)
 	if err != nil {
 		return nil, err
 	}
+	repl := route.replica
 	if r.Hedge == nil {
-		return repl.Planner.Complete(ctx, messages, tools, opts...)
+		return r.completeReserved(ctx, route, messages, tools, opts...)
 	}
 	if reason := hedgeIneligibility(r.Hedge, len(r.replicas), tools, opts); reason != "" {
 		r.observeHedgeAbstention(repl, reason)
-		return repl.Planner.Complete(ctx, messages, tools, opts...)
+		return r.completeReserved(ctx, route, messages, tools, opts...)
 	}
-	alternate, ok := r.pickDistinctReplica(repl.Name)
-	if !ok {
-		r.observeHedgeAbstention(repl, "no_distinct_admissible_replica")
-		return repl.Planner.Complete(ctx, messages, tools, opts...)
+	return r.completeHedged(ctx, route, messages, tools, opts...)
+}
+
+func (r *ReplicaRouter) completeReserved(ctx context.Context, route reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+	defer route.Release()
+	tried := make(map[string]struct{}, len(r.replicas))
+	for {
+		comp, err := route.replica.Planner.Complete(ctx, messages, tools, opts...)
+		if err == nil {
+			return comp, nil
+		}
+		if route.reservation == nil || !replicaFallbackAllowed(ctx, err) {
+			return nil, err
+		}
+		tried[route.replica.Name] = struct{}{}
+		next, retargetErr := r.retargetReserved(route.reservation, route.prefix, tried)
+		if retargetErr != nil {
+			if errors.Is(retargetErr, ErrNoWorkerForModel) {
+				return nil, retargetErr
+			}
+			return nil, fmt.Errorf("%w: every admissible worker failed: %w", ErrNoHealthyWorker, err)
+		}
+		route.replica = next
 	}
-	if alternate.Planner.Model() != repl.Planner.Model() {
-		r.observeHedgeAbstention(repl, "model_contract_mismatch")
-		return repl.Planner.Complete(ctx, messages, tools, opts...)
+}
+
+func replicaFallbackAllowed(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
 	}
-	return r.completeHedged(ctx, repl, alternate, messages, tools, opts...)
+	if ctx != nil && ctx.Err() != nil {
+		return false
+	}
+	return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 func (r *ReplicaRouter) StreamingSupported() bool {
@@ -228,15 +265,116 @@ func (r *ReplicaRouter) StreamingSupported() bool {
 }
 
 func (r *ReplicaRouter) CompleteStream(ctx context.Context, sink agent.StreamSink, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
-	repl, err := r.pickForMessages(messages)
+	route, err := r.reserveForMessages(messages)
 	if err != nil {
 		return nil, err
 	}
+	defer route.Release()
+	repl := route.replica
 	sp, ok := repl.Planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return nil, agent.ErrStreamingUnsupported
 	}
 	return sp.CompleteStream(ctx, sink, messages, tools, opts...)
+}
+
+func (r *ReplicaRouter) reserveForMessages(messages []agent.Message) (reservedPlannerReplica, error) {
+	var prefix []string
+	if r != nil && r.policy != nil {
+		prefix = prefixSegments(messages)
+	}
+	return r.reserve(prefix, nil)
+}
+
+func (r *ReplicaRouter) reserve(prefix []string, skip map[string]struct{}) (reservedPlannerReplica, error) {
+	return r.reserveOnEngine(prefix, skip, "")
+}
+
+func (r *ReplicaRouter) reserveOnEngine(prefix []string, skip map[string]struct{}, engine EngineKind) (reservedPlannerReplica, error) {
+	if r == nil || len(r.replicas) == 0 {
+		return reservedPlannerReplica{}, ErrReplicaRouterEmpty
+	}
+	if r.membership == nil {
+		repl, err := r.pick(prefix)
+		return reservedPlannerReplica{replica: repl, prefix: prefix}, err
+	}
+	byName := make(map[string]PlannerReplica, len(r.replicas))
+	allowed := make(map[string]struct{}, len(r.replicas))
+	for _, repl := range r.replicas {
+		byName[repl.Name] = repl
+		allowed[repl.Name] = struct{}{}
+	}
+	reservation, err := r.membership.reserveForModel(r.model, engine, allowed, skip, r.reservationPicker(prefix, byName))
+	if err != nil {
+		return reservedPlannerReplica{}, err
+	}
+	workerID := reservation.WorkerID()
+	repl, ok := byName[workerID]
+	if !ok {
+		reservation.Release()
+		return reservedPlannerReplica{}, ErrNoHealthyWorker
+	}
+	return reservedPlannerReplica{replica: repl, reservation: reservation, prefix: prefix}, nil
+}
+
+func (r *ReplicaRouter) retargetReserved(reservation *fleetReservation, prefix []string, skip map[string]struct{}) (PlannerReplica, error) {
+	byName := make(map[string]PlannerReplica, len(r.replicas))
+	allowed := make(map[string]struct{}, len(r.replicas))
+	for _, repl := range r.replicas {
+		byName[repl.Name] = repl
+		allowed[repl.Name] = struct{}{}
+	}
+	workerID, err := reservation.Retarget(r.model, allowed, skip, r.reservationPicker(prefix, byName))
+	if err != nil {
+		return PlannerReplica{}, err
+	}
+	repl, ok := byName[workerID]
+	if !ok {
+		reservation.Release()
+		return PlannerReplica{}, ErrNoHealthyWorker
+	}
+	return repl, nil
+}
+
+func (r *ReplicaRouter) reservationPicker(prefix []string, byName map[string]PlannerReplica) fleetReservationPick {
+	return func(statuses []WorkerStatus) (string, bool) {
+		candidates := make([]PlannerReplica, 0, len(statuses))
+		inflight := make(map[string]int, len(statuses))
+		for _, status := range statuses {
+			repl, ok := byName[status.Spec.ID]
+			if !ok {
+				continue
+			}
+			candidates = append(candidates, repl)
+			inflight[repl.Name] = status.Inflight
+		}
+		if len(candidates) == 0 {
+			return "", false
+		}
+		if r.policy != nil {
+			if chosen, ok := r.policy.Pick(candidates, prefix, func(name string) int { return inflight[name] }); ok {
+				if _, valid := inflight[chosen.Name]; valid {
+					return chosen.Name, true
+				}
+			}
+		}
+		return r.roundRobinCandidate(inflight)
+	}
+}
+
+func (r *ReplicaRouter) roundRobinCandidate(candidates map[string]int) (string, bool) {
+	if len(candidates) == 0 || len(r.replicas) == 0 {
+		return "", false
+	}
+	n := uint64(len(r.replicas))
+	start := r.next.Add(1) - 1
+	for i := uint64(0); i < n; i++ {
+		name := r.replicas[int((start+i)%n)].Name
+		if _, ok := candidates[name]; ok {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // pickForMessages derives the request's shared prefix from its messages (only when a

@@ -201,6 +201,23 @@ type FleetMembership struct {
 	events  []MembershipEvent
 }
 
+// fleetReservation is one logical request's occupancy booking. A retry retargets
+// the same reservation from the failed worker to an untried worker while holding
+// the membership lock, so there is never a selected-but-unbooked fallback. Release
+// is idempotent and never lets occupancy become negative.
+type fleetReservation struct {
+	mu       sync.Mutex
+	fleet    *FleetMembership
+	workerID string
+	engine   EngineKind
+	released bool
+}
+
+// fleetReservationPick runs while FleetMembership.mu is held. The statuses are
+// the complete admissible, allowed, untried candidate set and carry the exact
+// in-flight counts that the selected worker will be charged against.
+type fleetReservationPick func([]WorkerStatus) (workerID string, ok bool)
+
 // MembershipConfig tunes the health-loop hysteresis. Zero values fall back to
 // safe defaults (HealthyAfter=1, UnhealthyAfter=2) so a single missed beat does
 // not flap a worker out of the admissible set.
@@ -333,6 +350,150 @@ func (m *FleetMembership) Snapshot() []WorkerStatus {
 		}
 	}
 	return out
+}
+
+// reserveForModel atomically classifies the current roster, lets the router pick
+// from the resulting live load snapshot, validates that decision, and charges the
+// winner before releasing the membership lock. allowed restricts the registry to
+// replicas the calling router can actually dial; skip excludes prior failed
+// attempts. The picker must not call back into FleetMembership.
+func (m *FleetMembership) reserveForModel(model string, engine EngineKind, allowed, skip map[string]struct{}, pick fleetReservationPick) (*fleetReservation, error) {
+	if m == nil {
+		return nil, ErrNoHealthyWorker
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	workerID, err := m.reserveForModelLocked(model, engine, allowed, skip, pick)
+	if err != nil {
+		return nil, err
+	}
+	return &fleetReservation{fleet: m, workerID: workerID, engine: m.workers[workerID].spec.Engine}, nil
+}
+
+// reserveForModelLocked is reserveForModel's lock-held core.
+func (m *FleetMembership) reserveForModelLocked(model string, engine EngineKind, allowed, skip map[string]struct{}, pick fleetReservationPick) (string, error) {
+	ids, err := m.classifyForModelLocked(model)
+	if err != nil {
+		return "", err
+	}
+	statuses := make([]WorkerStatus, 0, len(ids))
+	candidates := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if allowed != nil {
+			if _, ok := allowed[id]; !ok {
+				continue
+			}
+		}
+		if _, tried := skip[id]; tried {
+			continue
+		}
+		w := m.workers[id]
+		if w == nil || !w.admissible() {
+			continue
+		}
+		if engine != "" && w.spec.Engine != engine {
+			continue
+		}
+		statuses = append(statuses, WorkerStatus{
+			Spec:     w.spec,
+			Health:   w.health,
+			Draining: w.draining,
+			Inflight: w.inflight,
+		})
+		candidates[id] = struct{}{}
+	}
+	if len(statuses) == 0 {
+		return "", ErrNoHealthyWorker
+	}
+	if pick == nil {
+		return "", ErrNoHealthyWorker
+	}
+	workerID, ok := pick(statuses)
+	if !ok {
+		return "", ErrNoHealthyWorker
+	}
+	if _, ok := candidates[workerID]; !ok {
+		return "", ErrNoHealthyWorker
+	}
+	w := m.workers[workerID]
+	if w == nil || !w.admissible() {
+		return "", ErrNoHealthyWorker
+	}
+	w.inflight++
+	return workerID, nil
+}
+
+// Engine returns the execution-engine class the reservation must retain across
+// fallback. A native booking can therefore move workers without crossing into an
+// external engine.
+func (r *fleetReservation) Engine() EngineKind {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.engine
+}
+
+// WorkerID returns the worker currently carrying the reservation.
+func (r *fleetReservation) WorkerID() string {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.released {
+		return ""
+	}
+	return r.workerID
+}
+
+// Retarget releases the failed physical attempt, records its membership failure,
+// and books the next worker as one lock-held transition. If no fallback can be
+// booked, the reservation is left released so a deferred Release stays a no-op.
+func (r *fleetReservation) Retarget(model string, allowed, skip map[string]struct{}, pick fleetReservationPick) (string, error) {
+	if r == nil || r.fleet == nil {
+		return "", ErrNoHealthyWorker
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.released {
+		return "", ErrNoHealthyWorker
+	}
+
+	m := r.fleet
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	failed := r.workerID
+	m.releaseLocked(failed)
+	m.markDispatchFailureLocked(failed)
+
+	workerID, err := m.reserveForModelLocked(model, r.engine, allowed, skip, pick)
+	if err != nil {
+		r.workerID = ""
+		r.released = true
+		return "", err
+	}
+	r.workerID = workerID
+	return workerID, nil
+}
+
+// Release frees the current occupancy booking exactly once.
+func (r *fleetReservation) Release() {
+	if r == nil || r.fleet == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.released {
+		return
+	}
+	r.fleet.mu.Lock()
+	r.fleet.releaseLocked(r.workerID)
+	r.fleet.mu.Unlock()
+	r.workerID = ""
+	r.released = true
 }
 
 // ProbeOnce runs the configured probe against every registered worker once and
@@ -475,13 +636,25 @@ func (m *FleetMembership) Acquire(id string) error {
 // its last in-flight request, the worker is removed (drain-before-remove complete).
 func (m *FleetMembership) Release(id string) {
 	m.withWorkerLockVoid(id, func(w *memberWorker) {
-		if w.inflight > 0 {
-			w.inflight--
-		}
-		if w.draining && w.inflight == 0 {
-			_ = m.removeLocked(id)
-		}
+		m.releaseWorkerLocked(id, w)
 	})
+}
+
+func (m *FleetMembership) releaseLocked(id string) {
+	w := m.workers[id]
+	if w == nil {
+		return
+	}
+	m.releaseWorkerLocked(id, w)
+}
+
+func (m *FleetMembership) releaseWorkerLocked(id string, w *memberWorker) {
+	if w.inflight > 0 {
+		w.inflight--
+	}
+	if w.draining && w.inflight == 0 {
+		_ = m.removeLocked(id)
+	}
 }
 
 // Pick returns the next admissible worker round-robin over the live admissible
@@ -639,7 +812,19 @@ func (m *FleetMembership) DispatchForModel(ctx context.Context, model string, se
 // emits a failover transition labeled with the worker the request moved off of.
 func (m *FleetMembership) markDispatchFailure(id string) {
 	m.withWorkerLockVoid(id, func(w *memberWorker) {
-		m.emit(MembershipEvent{Kind: EventFailover, WorkerID: id})
-		m.applyProbeLocked(w, false)
+		m.markDispatchFailureWorkerLocked(id, w)
 	})
+}
+
+func (m *FleetMembership) markDispatchFailureLocked(id string) {
+	w := m.workers[id]
+	if w == nil {
+		return
+	}
+	m.markDispatchFailureWorkerLocked(id, w)
+}
+
+func (m *FleetMembership) markDispatchFailureWorkerLocked(id string, w *memberWorker) {
+	m.emit(MembershipEvent{Kind: EventFailover, WorkerID: id})
+	m.applyProbeLocked(w, false)
 }

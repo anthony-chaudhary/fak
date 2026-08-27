@@ -132,7 +132,7 @@ type hedgeResult struct {
 	finished   time.Time
 }
 
-func (r *ReplicaRouter) completeHedged(ctx context.Context, primary, alternate PlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
+func (r *ReplicaRouter) completeHedged(ctx context.Context, primary reservedPlannerReplica, messages []agent.Message, tools []agent.ToolDef, opts ...agent.SampleOpt) (*agent.Completion, error) {
 	policy := r.Hedge
 	receipt := HedgeReceipt{
 		Schema:                  hedgeReceiptSchema,
@@ -141,7 +141,7 @@ func (r *ReplicaRouter) completeHedged(ctx context.Context, primary, alternate P
 		RequestedMode:           "selective_delayed_hedge",
 		RealizedMode:            "primary_only",
 		EligibilityVerdict:      "eligible",
-		Model:                   primary.Planner.Model(),
+		Model:                   primary.replica.Planner.Model(),
 		ProviderContract:        policy.ProviderContract,
 		Delay:                   policy.Delay,
 		Deadline:                policy.Deadline,
@@ -159,8 +159,8 @@ func (r *ReplicaRouter) completeHedged(ctx context.Context, primary, alternate P
 	pctx, pcancel := context.WithCancel(familyCtx)
 	defer pcancel()
 	result := make(chan hedgeResult, 2) // attempts may finish after the bounded drain
-	receipt.Primary = HedgeAttemptReceipt{Replica: primary.Name, Opened: true, StartedAt: time.Now()}
-	go runHedgeAttempt(pctx, 0, primary.Planner, result, messages, tools, opts...)
+	receipt.Primary = HedgeAttemptReceipt{Replica: primary.replica.Name, Opened: true, StartedAt: time.Now()}
+	go runHedgeAttempt(pctx, 0, primary, result, messages, tools, opts...)
 
 	timer := time.NewTimer(policy.Delay)
 	defer timer.Stop()
@@ -187,9 +187,9 @@ func (r *ReplicaRouter) completeHedged(ctx context.Context, primary, alternate P
 		return nil, familyCtx.Err()
 	}
 
-	if policy.SpareCapacity != nil && !policy.SpareCapacity() {
+	awaitPrimary := func(reason string) (*agent.Completion, error) {
 		receipt.EligibilityVerdict = "abstain"
-		receipt.AbstentionReason = "no_spare_capacity"
+		receipt.AbstentionReason = reason
 		select {
 		case res := <-result:
 			finishAttempt(&receipt.Primary, res, policy)
@@ -202,12 +202,35 @@ func (r *ReplicaRouter) completeHedged(ctx context.Context, primary, alternate P
 		}
 	}
 
+	if policy.SpareCapacity != nil && !policy.SpareCapacity() {
+		return awaitPrimary("no_spare_capacity")
+	}
+
+	var alternate reservedPlannerReplica
+	if r.membership == nil {
+		repl, ok := r.pickDistinctReplica(primary.replica.Name)
+		if !ok {
+			return awaitPrimary("no_distinct_admissible_replica")
+		}
+		alternate = reservedPlannerReplica{replica: repl, prefix: primary.prefix}
+	} else {
+		var err error
+		alternate, err = r.reserveOnEngine(primary.prefix, map[string]struct{}{primary.replica.Name: {}}, primary.reservation.Engine())
+		if err != nil {
+			return awaitPrimary("no_distinct_admissible_replica")
+		}
+	}
+	if alternate.replica.Planner.Model() != primary.replica.Planner.Model() {
+		alternate.Release()
+		return awaitPrimary("model_contract_mismatch")
+	}
+
 	hctx, hcancel := context.WithCancel(familyCtx)
 	defer hcancel()
 	receipt.RealizedMode = "hedged"
 	receipt.DuplicatePromptWork = 1
-	receipt.Hedge = HedgeAttemptReceipt{Replica: alternate.Name, Opened: true, StartedAt: time.Now()}
-	go runHedgeAttempt(hctx, 1, alternate.Planner, result, messages, tools, opts...)
+	receipt.Hedge = HedgeAttemptReceipt{Replica: alternate.replica.Name, Opened: true, StartedAt: time.Now()}
+	go runHedgeAttempt(hctx, 1, alternate, result, messages, tools, opts...)
 
 	var failures [2]hedgeResult
 	completed := 0
@@ -274,8 +297,9 @@ func drainLoser(result <-chan hedgeResult, timeout time.Duration, policy *HedgeP
 	receipt.DrainDuration = time.Since(started)
 }
 
-func runHedgeAttempt(ctx context.Context, index int, p agent.Planner, ch chan<- hedgeResult, m []agent.Message, t []agent.ToolDef, o ...agent.SampleOpt) {
-	c, e := p.Complete(ctx, m, t, o...)
+func runHedgeAttempt(ctx context.Context, index int, route reservedPlannerReplica, ch chan<- hedgeResult, m []agent.Message, t []agent.ToolDef, o ...agent.SampleOpt) {
+	defer route.Release()
+	c, e := route.replica.Planner.Complete(ctx, m, t, o...)
 	ch <- hedgeResult{index: index, completion: c, err: e, finished: time.Now()}
 }
 
