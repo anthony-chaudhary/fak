@@ -132,7 +132,10 @@ func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) e
 			if _, e := time.Parse(time.RFC3339Nano, p.FetchedAt); e != nil {
 				es = append(es, fmt.Errorf("%s page %d fetched_at must be RFC3339", s.Name, p.Number))
 			}
-			if p.StatusCode < 200 || p.StatusCode >= 300 {
+			disabledDiscussions := s.Name == "discussions" && s.Status == StatusComplete && len(s.Pages) == 1 && i == 0 &&
+				p.URL == s.Endpoint && p.StatusCode == 410 && p.ItemCount == 0 && p.Next == "" &&
+				p.Checksum == digest([]byte(discussionsDisabledPayload))
+			if (p.StatusCode < 200 || p.StatusCode >= 300) && !disabledDiscussions {
 				es = append(es, fmt.Errorf("%s page %d status code is not successful", s.Name, p.Number))
 			}
 			if i < len(s.Pages)-1 && p.Next != s.Pages[i+1].URL {

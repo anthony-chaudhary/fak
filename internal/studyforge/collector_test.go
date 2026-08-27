@@ -126,6 +126,104 @@ func TestCaptureRetriesAndResumesFirstMissingPage(t *testing.T) {
 	}
 }
 
+func TestCaptureAcceptsDiscussionsDisabledAsTerminalEmpty(t *testing.T) {
+	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/widget":
+			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/acme/widget/commits/main":
+			fmt.Fprint(w, `{"sha":"abc123"}`)
+		case "/repos/acme/widget/discussions":
+			w.Header().Set("X-GitHub-Request-Id", "disabled-fixture")
+			w.WriteHeader(http.StatusGone)
+			fmt.Fprint(w, discussionsDisabledPayload)
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+
+	c := NewCollector(server.Client())
+	c.BaseURL = server.URL
+	c.Now = func() time.Time { return cutoff }
+	got, err := c.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Receipt.Status != StatusComplete {
+		t.Fatalf("receipt status = %q", got.Receipt.Status)
+	}
+	discussions, ok := sourceByName(got.Receipt.Sources, "discussions")
+	if !ok {
+		t.Fatal("missing discussions receipt")
+	}
+	if discussions.Status != StatusComplete || discussions.Failure != "" || discussions.FetchedCount != 0 || discussions.NormalizedCount != 0 {
+		t.Fatalf("discussions receipt = %+v", discussions)
+	}
+	if len(discussions.Pages) != 1 {
+		t.Fatalf("discussion pages = %d", len(discussions.Pages))
+	}
+	page := discussions.Pages[0]
+	if page.StatusCode != http.StatusGone || page.ItemCount != 0 || page.Checksum != digest([]byte(discussionsDisabledPayload)) || page.RequestID != "disabled-fixture" {
+		t.Fatalf("disabled discussion page receipt = %+v", page)
+	}
+
+	tampered := cloneCorpus(got)
+	tamperedDiscussions, _ := sourceByName(tampered.Receipt.Sources, "discussions")
+	tamperedDiscussions.Pages[0].Checksum = digest([]byte(`{"message":"Gone"}`))
+	upsertSource(&tampered.Receipt.Sources, tamperedDiscussions)
+	refreshChecksums(&tampered)
+	if Validate(tampered) == nil {
+		t.Fatal("accepted a 410 receipt without the documented disabled-discussions evidence")
+	}
+}
+
+func TestCaptureRejectsOtherDiscussionsGoneResponses(t *testing.T) {
+	cases := map[string]string{
+		"unrelated":     `{"message":"Gone","documentation_url":"https://docs.github.com/rest","status":"410"}`,
+		"wrong message": `{"message":"Discussions are disabled","documentation_url":"https://docs.github.com/rest/repos/discussions#list-discussions-for-repository","status":"410"}`,
+		"extra field":   `{"message":"Discussions are disabled for this repo","documentation_url":"https://docs.github.com/rest/repos/discussions#list-discussions-for-repository","status":"410","extra":true}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/acme/widget":
+					fmt.Fprint(w, `{"default_branch":"main"}`)
+				case "/repos/acme/widget/commits/main":
+					fmt.Fprint(w, `{"sha":"abc123"}`)
+				case "/repos/acme/widget/discussions":
+					w.WriteHeader(http.StatusGone)
+					fmt.Fprint(w, body)
+				default:
+					fmt.Fprint(w, `[]`)
+				}
+			}))
+			defer server.Close()
+
+			c := NewCollector(server.Client())
+			c.BaseURL = server.URL
+			c.Now = func() time.Time { return cutoff }
+			got, err := c.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoff})
+			if err == nil || !strings.Contains(err.Error(), "discussions: GET") || !strings.Contains(err.Error(), "HTTP 410") {
+				t.Fatalf("error = %v", err)
+			}
+			discussions, ok := sourceByName(got.Receipt.Sources, "discussions")
+			if !ok || discussions.Status != StatusFailed || !strings.Contains(discussions.Failure, "HTTP 410") {
+				t.Fatalf("discussions receipt = %+v", discussions)
+			}
+			if got.Receipt.Status == StatusComplete {
+				t.Fatalf("receipt status = %q", got.Receipt.Status)
+			}
+		})
+	}
+}
+
 func TestValidateRejectsCorruptReceipts(t *testing.T) {
 	base := Corpus{Schema: CorpusSchema, Receipt: Receipt{Schema: ReceiptSchema, Repository: "o/r", Revision: "x", Cutoff: "2026-08-26T00:00:00Z", Status: StatusComplete}, Records: []Record{{Source: "issues", Kind: "issue", ID: 1}}}
 	for _, n := range SourceNames {

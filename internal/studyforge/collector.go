@@ -17,6 +17,10 @@ import (
 
 type sourceSpec struct{ name, path string }
 
+// GitHub returns this closed payload when the repository feature is disabled.
+// Its exact body digest remains in the page receipt so unrelated 410s stay closed.
+const discussionsDisabledPayload = `{"message":"Discussions are disabled for this repo","documentation_url":"https://docs.github.com/rest/repos/discussions#list-discussions-for-repository","status":"410"}`
+
 var sourceSpecs = []sourceSpec{
 	{"issues", "issues?state=all&sort=created&direction=asc&per_page=100&page=1"},
 	{"pulls", "pulls?state=all&sort=created&direction=asc&per_page=100&page=1"},
@@ -340,6 +344,19 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 	}
 	for next != "" {
 		body, hdr, status, err := c.get(ctx, next)
+		if err != nil && len(sr.Pages) == 0 && len(records) == 0 && next == sr.Endpoint && isDiscussionsDisabledResponse(sr.Name, status, body) {
+			page := PageReceipt{Number: 1, URL: next, Checksum: digest(body), FetchedAt: c.Now().UTC().Format(time.RFC3339Nano), StatusCode: status}
+			fillAPIHeaders(&page.RequestID, &page.ETag, &page.RateLimit, &page.RateRemain, &page.RateReset, hdr)
+			sr.Pages = append(sr.Pages, page)
+			sr.Status, sr.Failure = StatusComplete, ""
+			sr.CrawlEndedAt = c.Now().UTC().Format(time.RFC3339Nano)
+			if checkpoint != nil {
+				if err := checkpoint(sr, records); err != nil {
+					return sr, records, err
+				}
+			}
+			return sr, records, nil
+		}
 		if err != nil {
 			sr.Failure = err.Error()
 			if len(sr.Pages) == 0 {
@@ -428,6 +445,10 @@ func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records
 	}
 	sr.Status, sr.Failure = StatusComplete, ""
 	return sr, records, nil
+}
+
+func isDiscussionsDisabledResponse(source string, status int, body []byte) bool {
+	return source == "discussions" && status == http.StatusGone && string(body) == discussionsDisabledPayload
 }
 
 func (c *Collector) get(ctx context.Context, endpoint string) ([]byte, http.Header, int, error) {
