@@ -314,6 +314,41 @@ def test_duplication_behavior_gate_keeps_equivalent_generic_owners():
     assert len(cs.kpi_duplication(files)["defects"]) >= 1
 
 
+def _empty_struct_semantic_ratio(name: str, zero_result: int) -> str:
+    return f"""func {name}(seen map[string]struct{{}}, a, b float64) float64 {{
+    if b == 0 {{
+        return {zero_result}
+    }}
+    result := a / b
+    if result < 0 {{
+        result = -result
+    }}
+    if result > 100 {{
+        result = 100
+    }}
+    return result
+}}
+"""
+
+
+def test_duplication_behavior_gate_splits_divergent_empty_struct_owners():
+    files = {
+        "a.go": "package x\n" + _empty_struct_semantic_ratio("ratio", 1),
+        "b.go": "package x\n" + _empty_struct_semantic_ratio("rate", 0),
+    }
+    k = cs.kpi_duplication(files)
+    assert k["defects"] == [], k["defects"]
+    assert any("behavior-divergent" in row for row in k["soft"]), k["soft"]
+
+
+def test_duplication_behavior_gate_keeps_equivalent_empty_struct_owners():
+    files = {
+        "a.go": "package x\n" + _empty_struct_semantic_ratio("ratio", 0),
+        "b.go": "package x\n" + _empty_struct_semantic_ratio("rate", 0),
+    }
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
 def _function_value_semantic_ratio(name: str, zero_result: int) -> str:
     return f"""var {name} = func(a, b float64) float64 {{
     if b == 0 {{
