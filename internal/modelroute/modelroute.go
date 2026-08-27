@@ -82,6 +82,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/agentdescriptor"
 	"github.com/anthony-chaudhary/fak/internal/maputil"
 	"github.com/anthony-chaudhary/fak/internal/modelroute/inputtrigger"
 )
@@ -197,7 +198,8 @@ type Subject struct {
 	// a subject built by a seam that does not see a turn at all — which every Match
 	// on this field simply fails to match. It is a ROUTING HINT, never an
 	// authorization fact: see inputtrigger's package doc and AdmitTurn.
-	InputTrigger inputtrigger.Trigger `json:"input_trigger,omitempty"`
+	InputTrigger   inputtrigger.Trigger        `json:"input_trigger,omitempty"`
+	AgentOperation *agentdescriptor.Descriptor `json:"agent_operation,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +306,8 @@ type Match struct {
 	// vocabulary; unset is the wildcard). This is how a rule reads the trigger —
 	// the whole point of classifying once at ingress is that a policy never
 	// re-derives the shape from prompt text.
-	InputTrigger inputtrigger.Trigger `json:"input_trigger,omitempty"`
+	InputTrigger   inputtrigger.Trigger        `json:"input_trigger,omitempty"`
+	AgentOperation *agentdescriptor.Descriptor `json:"agent_operation,omitempty"`
 }
 
 // Matches reports whether the Subject satisfies the Match predicate.
@@ -375,6 +378,18 @@ type Decision struct {
 	RuleName string
 	Matched  bool
 	Plan     Plan
+}
+
+// OperationReceipt binds the independently variable A/M/F coordinates observed
+// at routing time to the selected rule without mutating durable agent identity.
+func (d Decision) OperationReceipt(operationID string) (agentdescriptor.OperationReceipt, error) {
+	if d.Subject.AgentOperation == nil {
+		return agentdescriptor.OperationReceipt{}, fmt.Errorf("modelroute: agent operation descriptor is required")
+	}
+	if err := d.Subject.AgentOperation.Validate(); err != nil {
+		return agentdescriptor.OperationReceipt{}, fmt.Errorf("modelroute: agent operation descriptor: %w", err)
+	}
+	return agentdescriptor.OperationReceipt{Schema: agentdescriptor.Schema, OperationID: operationID, Descriptor: *d.Subject.AgentOperation, RouteRule: d.RuleName}, nil
 }
 
 // Route classifies and selects: the first Rule whose Match fires returns its Plan;
