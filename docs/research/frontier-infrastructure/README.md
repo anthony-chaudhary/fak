@@ -130,8 +130,8 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **196 dated entries**, **191 unique source URLs**, and
-**161 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
+The current spine contains **197 dated entries**, **192 unique source URLs**, and
+**162 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
 and **2 explicit rumors**. FineServe, ServeGen, the one-year Chutes trace, OpenRouter geography, and
 SkyLB/SkyWalker now provide source-bounded production parameters, while confidence intervals, geography,

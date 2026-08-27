@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9354,
+  "latest_slice_issue": 9320,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 196,
+    "entry_count": 197,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -84,6 +84,7 @@
       "AWS / NVIDIA",
       "AWS Bedrock",
       "Agent workflow scheduling study",
+      "AgentSysBench",
       "Agentic OS research study",
       "Ai2",
       "Alibaba",
@@ -7588,6 +7589,57 @@
       ],
       "fak_implications": [
         "Track whether acquired serving technology persists as a product, library, team, or kernel contribution rather than treating the startup as simply active or failed."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "agentsysbench-2026",
+      "category": "workload_trace",
+      "entity": "AgentSysBench",
+      "topic": [
+        "agentic workload",
+        "workflow systems",
+        "sandbox state",
+        "tool caching",
+        "production trace"
+      ],
+      "published_at": "2026-08-20",
+      "event_at": "2026-08-20",
+      "source_title": "AgentSysBench: A Workload Characterization and Benchmark Suite for System-Level Evaluation of Agentic AI Applications",
+      "source_url": "https://arxiv.org/abs/2608.15127",
+      "source_kind": "benchmark paper with controlled experiments and production trace sidecar",
+      "evidence_class": "measured system workload plus production trace analysis",
+      "confidence": "high within the evaluated applications and trace; medium for broader agent populations",
+      "claim": "AgentSysBench profiles ten agentic applications and finds stateful non-LLM work dominates latency in half, sandbox working sets reach 28 GB per session, task latency differs by up to 32x, production state sits idle for minutes to hours, and redundant tool calls create measurable cache opportunity.",
+      "quantified": {
+        "applications": 10,
+        "applications_non_llm_latency_dominant": 5,
+        "sandbox_working_set_gb_peak_per_session": 28,
+        "intra_application_task_latency_divergence_x_max": 32,
+        "task_disaggregated_latency_reduction_fraction_range": [
+          0.29,
+          0.4
+        ],
+        "communication_aware_speedup_x_max": 4.5,
+        "state_offload_memory_reduction_x": 4.6,
+        "tool_cache_ttl_minutes": 10,
+        "redundant_search_calls_eliminated_fraction": 0.352,
+        "aggregate_search_latency_saved_fraction": 0.193
+      },
+      "assumptions": [
+        "Agent execution must be modeled as a component DAG with heterogeneous GPU, CPU, memory, network, sandbox, retrieval, and external-tool stages.",
+        "Production idle state lasting minutes to hours makes request-scoped teardown an inaccurate default."
+      ],
+      "contradictions_or_limits": [
+        "Ten applications are a benchmark suite, not a census of all agents; the production trace sidecar does not disclose universal session, tenant, geography, or retry distributions.",
+        "Reported optimization gains depend on the evaluated application mix, task graph, load levels, resource pool, cache TTL, and tool behavior."
+      ],
+      "fak_implications": [
+        "Benchmark end-to-end useful completion with non-LLM latency, sandbox memory, idle residency, state transfer, retries, and tool calls included.",
+        "Schedule by task/component affinity rather than treating every agent step as one homogeneous LLM request."
       ],
       "rumor": {
         "is_rumor": false,
