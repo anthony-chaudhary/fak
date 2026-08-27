@@ -69,12 +69,13 @@ type RequestSignals struct {
 }
 
 type DeviceSignals struct {
-	CoreClockMHz       *float64 `json:"core_clock_mhz,omitempty"`
-	MemoryClockMHz     *float64 `json:"memory_clock_mhz,omitempty"`
-	PowerWatts         *float64 `json:"power_watts,omitempty"`
-	TemperatureC       *float64 `json:"temperature_c,omitempty"`
-	ComputeUtilization *float64 `json:"compute_utilization,omitempty"`
-	Throttling         *bool    `json:"throttling,omitempty"`
+	CoreClockMHz                *float64 `json:"core_clock_mhz,omitempty"`
+	MemoryClockMHz              *float64 `json:"memory_clock_mhz,omitempty"`
+	PowerWatts                  *float64 `json:"power_watts,omitempty"`
+	TemperatureC                *float64 `json:"temperature_c,omitempty"`
+	ComputeUtilization          *float64 `json:"compute_utilization,omitempty"`
+	MemoryControllerUtilization *float64 `json:"memory_controller_utilization,omitempty"`
+	Throttling                  *bool    `json:"throttling,omitempty"`
 }
 
 type CapacitySignals struct {
@@ -108,6 +109,7 @@ type BandwidthSample struct {
 	Capacity   CapacitySignals     `json:"capacity"`
 	Transfer   TransferSignals     `json:"transfer"`
 	Software   SoftwareTraffic     `json:"software"`
+	Host       HostSignals         `json:"host"`
 }
 
 type TriggerConfig struct {
@@ -136,6 +138,7 @@ type BandwidthObservation struct {
 	Capacity    CapacitySignals     `json:"capacity"`
 	Transfer    TransferSignals     `json:"transfer"`
 	Software    SoftwareTraffic     `json:"software"`
+	Host        HostSignals         `json:"host"`
 	Bottleneck  Bottleneck          `json:"bottleneck"`
 	DeepCapture TriggerState        `json:"deep_capture"`
 }
@@ -184,7 +187,7 @@ func AnalyzeBandwidth(c BandwidthCapture) (BandwidthReport, error) {
 		report.Observations = append(report.Observations, BandwidthObservation{
 			Schema: BandwidthSchema, Engine: c.Engine, Phase: s.Phase, Shape: s.Shape,
 			Provenance: s.Provenance, Rooflines: s.Rooflines, Live: s.Live, Request: s.Request,
-			Device: s.Device, Capacity: s.Capacity, Transfer: s.Transfer, Software: s.Software,
+			Device: s.Device, Capacity: s.Capacity, Transfer: s.Transfer, Software: s.Software, Host: s.Host,
 			Bottleneck: bottleneck, DeepCapture: state,
 		})
 	}
@@ -210,7 +213,7 @@ func ClassifyBottleneck(s BandwidthSample) Bottleneck {
 	if atLeast(s.Transfer.Utilization, .85) {
 		return BottleneckTransfer
 	}
-	if atLeast(s.Live.Utilization, .85) {
+	if atLeast(s.Live.Utilization, .85) || atLeast(s.Device.MemoryControllerUtilization, .85) {
 		return BottleneckMemory
 	}
 	if atLeast(s.Device.ComputeUtilization, .85) {
@@ -225,7 +228,7 @@ func ObserveTrigger(state TriggerState, cfg TriggerConfig, s BandwidthSample) Tr
 	} else {
 		state.SymptomStreak = 0
 	}
-	resource := maxAvailable(s.Live.Utilization, s.Transfer.Utilization, s.Capacity.Utilization, s.Device.ComputeUtilization)
+	resource := maxAvailable(s.Live.Utilization, s.Transfer.Utilization, s.Capacity.Utilization, s.Device.ComputeUtilization, s.Device.MemoryControllerUtilization)
 	if resource != nil && *resource >= cfg.ResourceUtilization {
 		state.ResourceStreak++
 	} else {

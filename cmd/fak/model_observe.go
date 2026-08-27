@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
@@ -83,6 +84,9 @@ func cmdModelObserve(args []string) {
 }
 
 func runModelObserveBandwidth(args []string) error {
+	if len(args) > 0 && args[0] == "collect" {
+		return runModelObserveBandwidthCollect(args[1:])
+	}
 	fs := flag.NewFlagSet("model-observe bandwidth", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	input := fs.String("input", "", "read a fak-bandwidth-observation/1 capture from this JSON file")
@@ -124,6 +128,80 @@ func runModelObserveBandwidth(args []string) error {
 		enc.SetIndent("", "  ")
 	}
 	return enc.Encode(report)
+}
+func runModelObserveBandwidthCollect(args []string) error {
+	fs := flag.NewFlagSet("model-observe bandwidth collect", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	count := fs.Int("count", 1, "number of host samples")
+	interval := fs.Duration("interval", 100*time.Millisecond, "interval between host samples")
+	phase := fs.String("phase", "other", "request phase")
+	shape := fs.String("shape", "small", "request shape")
+	theoretical := fs.Float64("theoretical-gb-s", 0, "theoretical memory roofline in GB/s")
+	measured := fs.Float64("measured-gb-s", 0, "measured sustainable memory roofline in GB/s")
+	latency := fs.Float64("latency-ms", 0, "request latency in milliseconds")
+	promptTokens := fs.Int64("prompt-tokens", 0, "request prompt tokens")
+	completionTokens := fs.Int64("completion-tokens", 0, "request completion tokens")
+	logicalBytes := fs.Uint64("logical-bytes", 0, "logical software bytes")
+	physicalReadBytes := fs.Uint64("physical-read-bytes", 0, "software physical read bytes; not a DRAM counter")
+	physicalWriteBytes := fs.Uint64("physical-write-bytes", 0, "software physical write bytes; not a DRAM counter")
+	nvidiaDevice := fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0")
+	measureRoofline := fs.Bool("measure-host-roofline", false, "benchmark and record sustainable host-memory bandwidth")
+	rooflineBytes := fs.Uint64("roofline-bytes", 64<<20, "host roofline benchmark working set")
+	rooflineTrials := fs.Int("roofline-trials", 5, "host roofline benchmark trial count")
+	rooflineDuration := fs.Duration("roofline-duration", 100*time.Millisecond, "target duration per host roofline trial")
+	rooflineThreads := fs.Int("roofline-threads", 0, "parallel host roofline workers (default: GOMAXPROCS)")
+	output := fs.String("output", "", "write collection JSON to this path")
+	pretty := fs.Bool("pretty", true, "indent JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice)}
+	if *measureRoofline {
+		threads := *rooflineThreads
+		if threads == 0 {
+			threads = runtime.GOMAXPROCS(0)
+		}
+		o.MeasureHostRoofline = &modelperfobs.RooflineBenchmarkOptions{WorkingSetBytes: *rooflineBytes, Trials: *rooflineTrials, TargetDuration: *rooflineDuration, Threads: threads}
+	}
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "theoretical-gb-s":
+			o.TheoreticalGBS = theoretical
+		case "measured-gb-s":
+			o.MeasuredSustainableGBS = measured
+		case "latency-ms":
+			o.LatencyMS = latency
+		case "prompt-tokens":
+			o.PromptTokens = promptTokens
+		case "completion-tokens":
+			o.CompletionTokens = completionTokens
+		case "logical-bytes":
+			o.LogicalBytes = logicalBytes
+		case "physical-read-bytes":
+			o.PhysicalSoftwareRead = physicalReadBytes
+		case "physical-write-bytes":
+			o.PhysicalSoftwareWrite = physicalWriteBytes
+		}
+	})
+	collection, err := modelperfobs.CollectBandwidth(context.Background(), o)
+	if err != nil {
+		return err
+	}
+	w := io.Writer(os.Stdout)
+	var f *os.File
+	if *output != "" {
+		f, err = os.Create(*output)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		w = f
+	}
+	enc := json.NewEncoder(w)
+	if *pretty {
+		enc.SetIndent("", "  ")
+	}
+	return enc.Encode(collection)
 }
 func runModelObserveStateBench(args []string) error {
 	fs := flag.NewFlagSet("model-observe cache-state-bench", flag.ContinueOnError)

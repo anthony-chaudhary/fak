@@ -80,3 +80,46 @@ func TestModelObserveBandwidthJSONSpine(t *testing.T) {
 		t.Fatalf("unavailable transfer counter serialized as zero: %s", text)
 	}
 }
+
+func TestModelObserveBandwidthCollectSpine(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "collection.json")
+	if err := runModelObserveBandwidth([]string{"collect", "--count", "1", "--interval", "10ms", "--phase", "decode", "--shape", "small", "--theoretical-gb-s", "100", "--measured-gb-s", "80", "--output", output, "--pretty=false"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{`"schema":"fak-model-bandwidth-collection/1"`, `"engine":"fak-native"`, `"machine_class":"`, `"capture":{`, `"report":{`, `"selected_source":"measured-sustainable"`, `"dram_counters":false`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("collection missing %s: %s", want, text)
+		}
+	}
+	for _, forbidden := range []string{`"total_gb_s":0`, `"read_gb_s":0`, `"write_gb_s":0`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("unavailable DRAM counter serialized as zero: %s", text)
+		}
+	}
+	if strings.Contains(text, `"live":{"process_`) {
+		t.Fatalf("process signal mislabeled as live DRAM bandwidth: %s", text)
+	}
+}
+
+func TestModelObserveBandwidthMeasuresHostRoofline(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "collection.json")
+	args := []string{"collect", "--count", "1", "--interval", "10ms", "--phase", "other", "--shape", "small", "--theoretical-gb-s", "999", "--measure-host-roofline", "--roofline-bytes", "1048576", "--roofline-trials", "3", "--roofline-duration", "10ms", "--roofline-threads", "1", "--output", output, "--pretty=false"}
+	if err := runModelObserveBandwidth(args); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{`"schema":"fak-host-memory-roofline/1"`, `"scope":"host-memory"`, `"method":"parallel-copy"`, `"traffic_accounting":"read-plus-write-2-bytes-per-copied-byte"`, `"aggregation":"median"`, `"selected_source":"measured-sustainable"`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("collection missing %s: %s", want, text)
+		}
+	}
+}
