@@ -6,6 +6,13 @@ description: "A first-class, always-on assurance plane that proves — turn-by-t
 # EPIC #1147 — The self-tax plane
 
 > **Status:** OPEN · roll-up tracking note for epic [#1147](https://github.com/anthony-chaudhary/fak/issues/1147).
+> **Historical snapshot, not current work state.** Live GitHub read-back on 2026-08-27
+> shows #1147 and the T1-T13 issues named by this note (#1149, #1150, #1151, #1156,
+> #1159, #1162-#1166, #1168-#1170) closed. The `OPEN`, `pending`, and `blocker`
+> language below is retained as the design-time record; it must not drive current
+> dispatch. Use [`NATIVE-PERFORMANCE-CURRENT.md`](../benchmarks/NATIVE-PERFORMANCE-CURRENT.md)
+> for the active constraint portfolio.
+>
 > **Lanes:** spans `metrics`, `gateway`, `sessionobs`, `turnbench`, `adjudicator`, `docs`.
 > **Anchor standard:** [`net-true-value`](../standards/net-true-value.md) Question #2.
 > **Sibling (different axis):** [`track-b-performance-parity #306`](track-b-performance-parity-tracking-306.md)

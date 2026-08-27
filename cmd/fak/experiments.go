@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -29,6 +30,10 @@ func runExperiments(stdout, stderr io.Writer, argv []string) int {
 		return experimentsQuery(stdout, stderr, rest)
 	case "register":
 		return experimentsRegister(stdout, stderr, rest)
+	case "record":
+		return experimentsRecord(stdout, stderr, rest)
+	case "lookup":
+		return experimentsLookup(stdout, stderr, rest)
 	case "-h", "--help", "help":
 		experimentsUsage(stdout)
 		return 0
@@ -47,11 +52,150 @@ usage:
   fak experiments query --model <m> --backend <b>  query a (model, backend) cell for prior runs
   fak experiments register --id <id> --owner <o> --host <h> --models <m1,m2> --backends <b1,b2> [--artifact <path>]
                                             register a new experiment
+  fak experiments record --file <receipt.json> [--ledger <path>] [--json]
+                                            append a scoped result receipt
+  fak experiments lookup --file <identity.json> [--ledger <path>] [--json]
+                                            look up an exact hypothesis + identity
 
 Start here:
   fak experiments list                              see all experiments across all hosts
   fak experiments query --model qwen2.5-1.5b --backend cpu  check for existing runs
 `)
+}
+
+func experimentsRecord(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("experiments record", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var input, ledger string
+	var asJSON bool
+	fs.StringVar(&input, "file", "", "receipt JSON file")
+	fs.StringVar(&ledger, "ledger", "", "receipt ledger path")
+	fs.BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if input == "" {
+		fmt.Fprintln(stderr, "fak experiments record: --file is required")
+		return 2
+	}
+	var receipt experiments.Receipt
+	if err := decodeExperimentsJSONFile(input, &receipt); err != nil {
+		fmt.Fprintf(stderr, "fak experiments record: %v\n", err)
+		return 2
+	}
+	if receipt.Schema == "" {
+		receipt.Schema = experiments.ReceiptSchema
+	}
+	if receipt.EvidenceClass == "" {
+		receipt.EvidenceClass = experiments.EvidenceClassScreening
+	}
+	if receipt.RecordedAt == "" {
+		receipt.RecordedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	if ledger == "" {
+		ledger = filepath.Join(repoRoot(), experiments.ReceiptLedgerRel)
+	}
+	if err := experiments.AppendReceipt(ledger, receipt); err != nil {
+		fmt.Fprintf(stderr, "fak experiments record: %v\n", err)
+		return 2
+	}
+	if asJSON {
+		emitExperimentsJSON(stdout, receipt)
+		return 0
+	}
+	fmt.Fprintf(stdout, "Recorded receipt %s (%s)\n", receipt.ID, receipt.Verdict)
+	fmt.Fprintln(stdout, "  Evidence: screening (claim eligible: false)")
+	fmt.Fprintf(stdout, "  Hypothesis: %s\n", receipt.Hypothesis)
+	fmt.Fprintf(stdout, "  Scope: %s\n", receipt.Scope)
+	fmt.Fprintf(stdout, "  Revision: %s\n", receipt.Revision)
+	fmt.Fprintf(stdout, "  Environment: %s\n", receipt.Environment)
+	fmt.Fprintf(stdout, "  Environment digest: %s\n", receipt.EnvironmentDigest)
+	fmt.Fprintf(stdout, "  Artifact digest: %s\n", receipt.ArtifactDigest)
+	fmt.Fprintf(stdout, "  Next action: %s\n", receipt.NextAction)
+	return 0
+}
+
+func experimentsLookup(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("experiments lookup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var input, ledger string
+	var asJSON bool
+	fs.StringVar(&input, "file", "", "identity JSON file")
+	fs.StringVar(&ledger, "ledger", "", "receipt ledger path")
+	fs.BoolVar(&asJSON, "json", false, "emit machine-readable JSON")
+	if err := fs.Parse(argv); err != nil {
+		return 2
+	}
+	if input == "" {
+		fmt.Fprintln(stderr, "fak experiments lookup: --file is required")
+		return 2
+	}
+	var identity experiments.ReceiptIdentity
+	if err := decodeExperimentsJSONFile(input, &identity); err != nil {
+		fmt.Fprintf(stderr, "fak experiments lookup: %v\n", err)
+		return 2
+	}
+	if err := identity.Validate(); err != nil {
+		fmt.Fprintf(stderr, "fak experiments lookup: %v\n", err)
+		return 2
+	}
+	if ledger == "" {
+		ledger = filepath.Join(repoRoot(), experiments.ReceiptLedgerRel)
+	}
+	receipts, err := experiments.ReadReceiptLedger(ledger)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak experiments lookup: %v\n", err)
+		return 1
+	}
+	result := experiments.LookupReceipt(receipts, identity)
+	if asJSON {
+		emitExperimentsJSON(stdout, result)
+		return 0
+	}
+	renderExperimentLookup(stdout, result)
+	return 0
+}
+
+func decodeExperimentsJSONFile(path string, dst any) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	if dec.Decode(&struct{}{}) != io.EOF {
+		return errors.New("input must contain exactly one JSON object")
+	}
+	return nil
+}
+
+func renderExperimentLookup(w io.Writer, result experiments.LookupResult) {
+	switch result.Status {
+	case experiments.LookupExact:
+		r := result.Receipt
+		fmt.Fprintf(w, "Exact receipt %s\n", r.ID)
+		if result.MeasuredLoss {
+			fmt.Fprintln(w, "  Verdict: lost (measured loss within receipt scope)")
+		} else {
+			fmt.Fprintf(w, "  Verdict: %s (not a measured loss)\n", r.Verdict)
+		}
+		fmt.Fprintln(w, "  Evidence: screening (claim eligible: false)")
+		fmt.Fprintf(w, "  Scope: %s\n", r.Scope)
+		fmt.Fprintf(w, "  Revision: %s\n", r.Revision)
+		fmt.Fprintf(w, "  Environment: %s\n", r.Environment)
+		fmt.Fprintf(w, "  Environment digest: %s\n", r.EnvironmentDigest)
+		fmt.Fprintf(w, "  Artifact digest: %s\n", r.ArtifactDigest)
+		fmt.Fprintf(w, "  Next action: %s\n", r.NextAction)
+	case experiments.LookupIdentityMismatch:
+		fmt.Fprintf(w, "Identity mismatch: %d receipt(s) share the hypothesis, but none match all identity fields.\n", result.Matches)
+		fmt.Fprintln(w, "No measured loss applies to this identity.")
+	default:
+		fmt.Fprintln(w, "No receipt found for this hypothesis.")
+	}
 }
 
 type experimentsFlags struct {

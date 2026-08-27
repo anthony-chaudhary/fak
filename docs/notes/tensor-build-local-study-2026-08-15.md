@@ -56,6 +56,70 @@ The non-tree audit is explicit in the map's `non_tree_study` block:
 
 The refresh also corrects the original table's issue-number association: artifact reachability maps to **#6876**, work-class/token-cost attribution maps to **#6874**, and the negative experiment ledger maps to **#6875**.
 
+## Iterative experimentation update (2026-08-27)
+
+This update asks a narrower question prompted by #6875: how can performance work stay cheap and
+creative while it is searching, yet remain rigorous at the point where fak promotes a result or
+closes a claim? It extends this study instead of creating a second note because the TensorBuild
+candidate already owns scoped negative and inconclusive experiment memory.
+
+### Dated primary-source facts and inference
+
+| Kind | Observation | Transfer to fak |
+|---|---|---|
+| **SOURCE FACT — NIST** | The NIST/SEMATECH Engineering Statistics Handbook recommends a sequence of small experiments rather than one large experiment. Its first stage screens many possible factors; later focused experiments follow the direction found and characterize the optimum. The accompanying DOE checklist says to preserve raw data and record what happened. Observed 2026-08-27; pages last modified 2026-04-22. Sources: [iterative nature](https://www.itl.nist.gov/div898/handbook/pri/section2/pri223.htm) and [DOE steps](https://www.itl.nist.gov/div898/handbook/pri/section1/pri13.htm). | **INFERENCE:** exploration and claim closure need different evidence rungs. A cheap screen may choose the next experiment; it must not by itself close a performance claim. |
+| **SOURCE FACT — Google Benchmark** | At pinned revision [`6408acf50aa7a157a8bc561c367baef0721ccd38`](https://github.com/google/benchmark/blob/6408acf50aa7a157a8bc561c367baef0721ccd38/docs/user_guide.md), committed 2026-05-27, `--benchmark_dry_run` forces one iteration and one repetition to check that a benchmark runs. Full repetitions report summary statistics, while individual repetitions are reported by default and can remain in file output even when only aggregates are displayed. Observed 2026-08-27. | **INFERENCE:** a screening receipt should preserve what ran, its exact identity, and its outcome without pretending that one cheap run is stable performance evidence. Repetition, quality, noise, ambient-state, and matched-envelope gates remain promotion requirements. |
+
+**License disposition: INSPIRE-ONLY.** Google Benchmark is Apache-2.0 at the pinned revision, and
+NIST describes employee-authored works as generally outside US copyright protection. This update
+copies neither implementation nor expressive prose; it independently specifies only the staged
+mechanism.
+
+### Current-fak witness: PARTIAL overall
+
+- **PRESENT — strict promotion:** `internal/nativeperf/receipt.go` binds the exact artifact,
+  machine, revision, controls, repetitions, quality, memory, execution identity, commands, and
+  profiler artifacts. `internal/nativeperf/gate.go` admits only a comparable candidate under the
+  declared repetition, noise, quality, ambient-evidence, and throughput policy. This remains the
+  claim-closing boundary; `docs/native-inference-goal.md` likewise permits unmatched results for
+  diagnosis but not for closing a native-performance claim.
+- **PARTIAL — preserved exploration:** `internal/benchscore` already distinguishes accepted,
+  negative, and exploratory rows, while `internal/nativeperf/aggregate.go` preserves all
+  repetitions plus exclusion reasons. Those outcomes were not previously queryable by hypothesis
+  and exact revision/environment/artifact identity.
+- **ABSENT before #6875 — a reusable screening ledger:** `fak study search` returned no durable
+  record for `staged iterative performance experimentation`, `negative inconclusive experiment
+  ledger`, or `NIST design of experiments Google Benchmark repetitions`; `fak capabilities`
+  returned no on-point card. The older `fak experiments` registry could find model/backend
+  collisions but carried no hypothesis, verdict, evidence class, or supersession.
+
+The #6875 spine implements the missing screening rung without weakening promotion. Every
+`fak-experiment-receipt/1` row is `evidence_class=screening` and lookup reports
+`claim_eligible=false`. `won`, `lost`, `inconclusive`, and `invalid` stay distinct; a loss applies
+only to an exact hypothesis + revision + environment + environment digest + artifact digest.
+Identity mismatch is not a loss, and `next_action` turns a negative or inconclusive screen into a
+focused follow-up instead of a stop. Superseding receipts preserve the history as assumptions or
+environments change.
+
+The operator surface in the #6875 implementation is:
+
+```text
+fak experiments record --file <receipt.json> [--ledger <path>] [--json]
+fak experiments lookup --file <identity.json> [--ledger <path>] [--json]
+```
+
+The resulting boundary is **screen → focus → strict promotion**: record cheap scoped evidence;
+use exact lookup and `next_action` to choose the next run; then use the existing matched native
+performance receipt and `fak native-performance --gate gate-request.json` before making a promoted
+performance claim. Screening stays permissive enough to try new ideas, while the promotion seam
+keeps the full rigor in the one place where it changes what fak asserts or ships by default.
+
+Refresh this comparison when either NIST page's `Last-Modified` value changes, Google Benchmark
+changes its dry-run or repetition semantics, #6875 changes its receipt contract, or the native
+performance gate changes its claim-admission inputs. Expected rediscovery terms are `staged
+iterative performance experimentation`, `screening confirmatory promotion`, `benchmark dry run
+repetitions`, `negative inconclusive experiment ledger`, and `NIST DOE Google Benchmark`.
+
 ## Architecture map
 
 ### 1. Identity before optimization
@@ -112,17 +176,17 @@ This remains a watch candidate rather than a new issue: a registry-only change w
 
 ## Filed borrows
 
-### #6874 — typed artifact reachability from active claims to current proof
-
-Smallest spine: a checked manifest and `fak evidence reachability --json` that rejects duplicate/dangling IDs and reports active, superseded, and orphaned proof artifacts under named roots. This extends rather than duplicates #5937.
-
-### #6875 — attribute session token cost to work class and witnessed outcome
+### #6874 — attribute session token cost to work class and witnessed outcome
 
 Smallest spine: join existing session usage to `fak-worktype/1` and a minimal explicit outcome vocabulary, preserving classified-session and classified-token denominators. It observes before it optimizes.
 
-### #6876 — queryable scoped ledger for negative and inconclusive results
+### #6875 — queryable scoped ledger for negative and inconclusive results
 
 Smallest spine: append-only typed receipts keyed by hypothesis and relevant environment/revision/artifact identity, with `won`, `lost`, `inconclusive`, and `invalid` kept distinct. One existing real negative result must be migrated as the live witness.
+
+### #6876 — typed artifact reachability from active claims to current proof
+
+Smallest spine: a checked manifest and `fak evidence reachability --json` that rejects duplicate/dangling IDs and reports active, superseded, and orphaned proof artifacts under named roots. This extends rather than duplicates #5937.
 
 All three issues are labeled, milestoned to **Generation G1 - Next Gen**, and contain Core-through-line, Gold-plating-boundary, P1-P4, value frame, current-fak witness, and done conditions.
 

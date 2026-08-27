@@ -29,6 +29,19 @@ the matched envelope, and the authority row. llama.cpp can be selected explicitl
 benchmark, parity/reference, migration/interoperability, or borrowing aid; it never silently
 turns a failed or unsupported native run into a passing external result.
 
+### Current native-performance work
+
+[`benchmarks/NATIVE-PERFORMANCE-CURRENT.md`](benchmarks/NATIVE-PERFORMANCE-CURRENT.md) is the
+operational source of truth for the current constraint portfolio: measured drivers, evidence
+and authority owners, review dates, dependency-ready arms, collisions, and explicit exit
+conditions. `fak native-performance --current` emits the typed JSON snapshot and
+`fak native-performance --current-md` regenerates the readable projection.
+
+An active constraint names what limits a result now; its type and horizon say whether it is an
+evidence, correctness, dependency, capacity, or coordination limit and whether time alone may
+clear it. This status route does not mint benchmark results: immutable receipts and
+[`BENCHMARK-AUTHORITY.md`](../BENCHMARK-AUTHORITY.md) remain the measurement authority.
+
 ## Choose the outcome you need
 
 | Outcome | Applicable run path | Mechanism | Proof route |
