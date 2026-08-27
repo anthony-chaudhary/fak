@@ -13,12 +13,11 @@ func TestHandoffDrainsActiveCallAndRefusesNewAdmissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	spawned := make(chan [2]string, 1)
 	done := make(chan HandoffSnapshot, 1)
 	go func() {
 		done <- h.Drain(context.Background(), "session-7", "rev-new", func(_ context.Context, session, revision string) error {
-			if session != "session-7" || revision != "rev-new" {
-				t.Fatalf("successor identity = %q/%q", session, revision)
-			}
+			spawned <- [2]string{session, revision}
 			return nil
 		})
 	}()
@@ -35,6 +34,9 @@ func TestHandoffDrainsActiveCallAndRefusesNewAdmissions(t *testing.T) {
 	}
 	release()
 	got := <-done
+	if identity := <-spawned; identity != [2]string{"session-7", "rev-new"} {
+		t.Fatalf("successor identity = %q/%q", identity[0], identity[1])
+	}
 	if got.State != HandoffHandedOff || got.SessionID != "session-7" || got.Revision != "rev-new" {
 		t.Fatalf("snapshot = %+v", got)
 	}
