@@ -381,6 +381,10 @@ const usageCoreText = `usage:
   fak study-link validate --ledger PATH --index PATH --forge PATH --adjacency PATH --repo PATH
                 (build or validate the deterministic evidence ledger joining every
                  compact study cluster to witnessed FAK issues and repository artifacts.)
+  fak study-priority build --source-ledger PATH --ledger PATH --summary PATH
+  fak study-priority validate --source-ledger PATH --ledger PATH --summary PATH
+                (build or validate the versioned, hard-gated, dependency-respecting
+                 priority queue over every uncovered actionable study-link cluster.)
 `
 
 const usageOpsText = `  fak recall    [--dir DIR] [--out recall-report.json] [--query STR]

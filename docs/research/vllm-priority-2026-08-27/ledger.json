@@ -1,0 +1,359 @@
+{
+  "schema": "fak.study-priority-ledger/1",
+  "rubric": {
+    "version": "studyprio-rubric/1",
+    "minimum": 0,
+    "maximum": 5,
+    "dimensions": [
+      {
+        "name": "product_centrality",
+        "weight": 4,
+        "definition": "directness of the user-visible P1-P4 outcome on the fak kernel path"
+      },
+      {
+        "name": "fak_native_qwen3_8_impact",
+        "weight": 5,
+        "definition": "expected improvement to fak-native Qwen3.8 execution; reference engines earn no impact"
+      },
+      {
+        "name": "end_to_end_value",
+        "weight": 4,
+        "definition": "net-true value on the real path"
+      },
+      {
+        "name": "evidence_strength",
+        "weight": 3,
+        "definition": "specificity and reproducibility of source and fak evidence"
+      },
+      {
+        "name": "recurrence",
+        "weight": 2,
+        "definition": "frequency of the tax on supported workloads"
+      },
+      {
+        "name": "dependency_unlock",
+        "weight": 3,
+        "definition": "central blocked outcomes enabled"
+      },
+      {
+        "name": "implementation_cost",
+        "weight": -3,
+        "definition": "bounded engineering and integration effort"
+      },
+      {
+        "name": "hardware_witness_cost",
+        "weight": -2,
+        "definition": "accelerator and operating cost for the witness"
+      },
+      {
+        "name": "compatibility_risk",
+        "weight": -3,
+        "definition": "format, kernel, platform, quality, and rollback risk"
+      },
+      {
+        "name": "duplication_conflict_penalty",
+        "weight": -3,
+        "definition": "overlap with shipped/open work or conflicting inputs"
+      }
+    ],
+    "required_gates": [
+      "bounded-source-coverage",
+      "semantic-merge-integrity",
+      "fak-native-execution",
+      "qwen3.8-default",
+      "end-to-end-witness",
+      "no-llama.cpp-fallback"
+    ],
+    "tie_breaks": [
+      "dependencies before dependents",
+      "weighted score descending among ready candidates",
+      "centrality Core \u003e Enabling \u003e Stewardship \u003e Peripheral",
+      "candidate id ascending"
+    ]
+  },
+  "source": {
+    "path": "docs/research/vllm-fak-join-2026-08-27/ledger.json",
+    "sha256": "sha256:2e7b2a6c64a3b2a48a6a49db0bed2086e82327d4b41c150b3fa297f424b6413d",
+    "schema": "fak.study-join-ledger/1",
+    "source_revision": "anthony-chaudhary/fak@b4103047b27d94bcb5995bbcae912f99d661857f",
+    "cutoff": "2026-08-27T04:36:00Z",
+    "uncovered_actionable_count": 5
+  },
+  "candidates": [
+    {
+      "id": "allocator-fragmentation",
+      "title": "Measure and bound allocator fragmentation on the fak-native Qwen3.8 serve path",
+      "category": "memory-residency",
+      "horizon": "next",
+      "centrality": "Core",
+      "source_mappings": [
+        {
+          "cluster_id": "memory_residency:body:allocator-fragmentation",
+          "mechanism": "memory_residency",
+          "signal": "allocator fragmentation",
+          "rule": "mechanism.memory_residency.body",
+          "members_sha256": "sha256:dfbb2ef090870fb571e64f3ca1e844eb15fcb4f619d139adcbcdf98a7988b57c",
+          "evidence_sha256": "sha256:590b7300bf80baa4d29c6e6738bbf053a0e9551aa215bcd6e1483df6bb5263eb"
+        }
+      ],
+      "hard_gates": [
+        {
+          "name": "bounded-source-coverage",
+          "pass": true,
+          "evidence": "allocator input is retained once outside vLLM-IR"
+        },
+        {
+          "name": "semantic-merge-integrity",
+          "pass": true,
+          "evidence": "fragmentation is a residency/lifetime mechanism, not an IR or lowering spelling"
+        },
+        {
+          "name": "fak-native-execution",
+          "pass": true,
+          "evidence": "allocation, residency, scheduling, cache, and recovery remain fak-owned"
+        },
+        {
+          "name": "qwen3.8-default",
+          "pass": true,
+          "evidence": "default fragmentation envelope uses Qwen3.8"
+        },
+        {
+          "name": "end-to-end-witness",
+          "pass": true,
+          "evidence": "long-running receipt reports reserved/live bytes, quality, throughput, and recovery"
+        },
+        {
+          "name": "no-llama.cpp-fallback",
+          "pass": true,
+          "evidence": "llama.cpp is reference/borrow evidence only, never fallback"
+        }
+      ],
+      "dimensions": {
+        "product_centrality": 5,
+        "fak_native_qwen3_8_impact": 5,
+        "end_to_end_value": 4,
+        "evidence_strength": 4,
+        "recurrence": 4,
+        "dependency_unlock": 3,
+        "implementation_cost": 3,
+        "hardware_witness_cost": 5,
+        "compatibility_risk": 3,
+        "duplication_conflict_penalty": 0
+      },
+      "score": 62,
+      "dependencies": [],
+      "frame": {
+        "for": "operators sustaining variable-shape Qwen3.8 workloads in fak",
+        "problem": "fragmentation can strand accelerator memory and cause late admission failures while live tensors fit",
+        "today": "treat OOM or shrinking capacity as aggregate pressure without a fragmentation ratio",
+        "better_because": "separate reserved, live, reusable, and stranded bytes can drive an owned mitigation without conflating IR with lifetime",
+        "witness": "a fak-native Qwen3.8 churn receipt compares reserved/live bytes, fragmentation, throughput, quality, admission, and recovery"
+      },
+      "p1_p4": {
+        "p1_context": {
+          "status": "preserved",
+          "reason": "accounting must not evict useful KV state or duplicate residency"
+        },
+        "p2_net_value": {
+          "status": "advanced",
+          "reason": "witness counts overhead, reclaimed capacity, throughput, quality, and retries"
+        },
+        "p3_adaptation": {
+          "status": "advanced",
+          "reason": "allocator policy stays behind a bounded reversible seam"
+        },
+        "p4_operations": {
+          "status": "advanced",
+          "reason": "operators receive ratios, thresholds, refusal, and recovery"
+        }
+      },
+      "witness": {
+        "artifact": "fak-native Qwen3.8 allocator-churn receipt",
+        "command": "fak bench native --model Qwen3.8 --engine fak-native --allocator-churn --receipt \u003cpath\u003e",
+        "pass_condition": "bounded fragmentation with equal quality, net-true capacity/throughput, and recovery",
+        "engine": "fak-native",
+        "model": "Qwen3.8"
+      },
+      "execution": {
+        "engine": "fak-native",
+        "default_model": "Qwen3.8",
+        "llama_cpp_use": "reference-or-borrow-evidence-only",
+        "fallback_allowed": false
+      }
+    },
+    {
+      "id": "native-vllm-ir",
+      "title": "Lower fak-native Qwen3.8 execution through a stable vLLM-IR-shaped optimization seam",
+      "category": "architecture-runtime",
+      "horizon": "now",
+      "centrality": "Core",
+      "source_mappings": [
+        {
+          "cluster_id": "architecture_runtime:body:vllm-ir",
+          "mechanism": "architecture_runtime",
+          "signal": "vllm ir",
+          "rule": "mechanism.architecture_runtime.body",
+          "members_sha256": "sha256:f168d9723b9e417d195432b1ac11d3477244be91e8dafe6820b0937d6b51cdda",
+          "evidence_sha256": "sha256:aaaf72b53db61a4d320c61ea248c335f303f22dc73a71c1270a474136f640fb1"
+        },
+        {
+          "cluster_id": "architecture_runtime:label:vllm-ir",
+          "mechanism": "architecture_runtime",
+          "signal": "vllm-ir",
+          "rule": "mechanism.architecture_runtime.label",
+          "members_sha256": "sha256:5239e2505c171b2da28275bbcbeb1aafcdc3c6e191b98e52c83af103926e7dee",
+          "evidence_sha256": "sha256:07e04bd23c01f3c277071137b03e95d45ddfe4a27c50b5e3aa3eaa2ba1c315f3"
+        },
+        {
+          "cluster_id": "architecture_runtime:title:vllm-ir",
+          "mechanism": "architecture_runtime",
+          "signal": "vllm ir",
+          "rule": "mechanism.architecture_runtime.title",
+          "members_sha256": "sha256:d22f665db56bd2ae8e181eea77866bf8f69bdeb4a0b4567583af34688a83b98a",
+          "evidence_sha256": "sha256:d4030d749c3fa49b9ec49f7c4b2ea2da35135e83773c6a8ca449dc48f159cd6f"
+        },
+        {
+          "cluster_id": "kernels_compilation:label:vllm-ir",
+          "mechanism": "kernels_compilation",
+          "signal": "vllm-ir",
+          "rule": "mechanism.kernels_compilation.label",
+          "members_sha256": "sha256:b454a27aa032845f9a566d5fd24c3f58aadb7cd2cc82f7541d12c1861d9dcbff",
+          "evidence_sha256": "sha256:f4a9f2d726e3028f5e8c17f0e1319f19e0625ba5a6eaa7fad326d13656f78715"
+        }
+      ],
+      "merge_justification": "the three architecture-runtime rules and the kernels-compilation label name one vLLM-IR boundary between model execution and compiled kernel lowering; one candidate retains all four rule-specific mappings while avoiding four incompatible IR contracts",
+      "hard_gates": [
+        {
+          "name": "bounded-source-coverage",
+          "pass": true,
+          "evidence": "four retained vLLM-IR inputs; allocator fragmentation remains distinct"
+        },
+        {
+          "name": "semantic-merge-integrity",
+          "pass": true,
+          "evidence": "all four inputs normalize to one execution-to-kernel IR boundary with distinct cluster/rule/checksum mappings"
+        },
+        {
+          "name": "fak-native-execution",
+          "pass": true,
+          "evidence": "execution, lowering, scheduling, cache, memory, and kernels remain fak-owned"
+        },
+        {
+          "name": "qwen3.8-default",
+          "pass": true,
+          "evidence": "default implementation and quality envelope use Qwen3.8"
+        },
+        {
+          "name": "end-to-end-witness",
+          "pass": true,
+          "evidence": "fak-native serve receipt covers quality, latency, memory, counters, and rollback"
+        },
+        {
+          "name": "no-llama.cpp-fallback",
+          "pass": true,
+          "evidence": "llama.cpp is reference/borrow evidence only, never fallback"
+        }
+      ],
+      "dimensions": {
+        "product_centrality": 5,
+        "fak_native_qwen3_8_impact": 5,
+        "end_to_end_value": 5,
+        "evidence_strength": 4,
+        "recurrence": 4,
+        "dependency_unlock": 5,
+        "implementation_cost": 4,
+        "hardware_witness_cost": 4,
+        "compatibility_risk": 3,
+        "duplication_conflict_penalty": 1
+      },
+      "score": 68,
+      "dependencies": [],
+      "frame": {
+        "for": "operators running Qwen3.8 through fak-native inference",
+        "problem": "runtime and kernel optimizations lack one stable inspectable IR seam",
+        "today": "add one-off execution or kernel paths and use external engines only as references",
+        "better_because": "one owned IR contract unlocks repeated fak-native graph and kernel optimizations while preserving product ownership",
+        "witness": "a Qwen3.8 fak-native serve receipt names the IR lowering, matches accepted-token quality, reports net-true latency/memory, and proves rollback"
+      },
+      "p1_p4": {
+        "p1_context": {
+          "status": "preserved",
+          "reason": "the IR seam must not duplicate prompt, KV, or scheduler state"
+        },
+        "p2_net_value": {
+          "status": "advanced",
+          "reason": "net-true evidence includes lowering, verification, and recovery cost"
+        },
+        "p3_adaptation": {
+          "status": "advanced",
+          "reason": "a versioned bounded IR supports replaceable transforms and rollback"
+        },
+        "p4_operations": {
+          "status": "advanced",
+          "reason": "the real serve receipt exposes selection, counters, refusal, and rollback"
+        }
+      },
+      "witness": {
+        "artifact": "fak-native Qwen3.8 serve receipt",
+        "command": "fak bench native --model Qwen3.8 --engine fak-native --receipt \u003cpath\u003e",
+        "pass_condition": "equal accepted-token quality with net-true improvement, named engine, IR counters, and rollback",
+        "engine": "fak-native",
+        "model": "Qwen3.8"
+      },
+      "execution": {
+        "engine": "fak-native",
+        "default_model": "Qwen3.8",
+        "llama_cpp_use": "reference-or-borrow-evidence-only",
+        "fallback_allowed": false
+      }
+    }
+  ],
+  "queue": [
+    {
+      "rank": 1,
+      "candidate_id": "native-vllm-ir",
+      "score": 68,
+      "category": "architecture-runtime",
+      "horizon": "now",
+      "dependencies": null
+    },
+    {
+      "rank": 2,
+      "candidate_id": "allocator-fragmentation",
+      "score": 62,
+      "category": "memory-residency",
+      "horizon": "next",
+      "dependencies": null
+    }
+  ],
+  "sensitivity": {
+    "candidate_id": "native-vllm-ir",
+    "baseline_score": 68,
+    "steps": [
+      {
+        "dimension": "implementation_cost",
+        "from": 4,
+        "to": 5,
+        "adjusted_score": 65,
+        "queue_first": "native-vllm-ir",
+        "explanation": "raising implementation cost by one applies the -3 weight; vllm-ir remains first"
+      },
+      {
+        "dimension": "hardware_witness_cost",
+        "from": 4,
+        "to": 5,
+        "adjusted_score": 63,
+        "queue_first": "native-vllm-ir",
+        "explanation": "also raising hardware witness cost by one applies another -2; vllm-ir remains first by one point"
+      },
+      {
+        "dimension": "compatibility_risk",
+        "from": 3,
+        "to": 4,
+        "adjusted_score": 60,
+        "queue_first": "allocator-fragmentation",
+        "explanation": "also raising compatibility risk by one applies another -3 and flips the deterministic queue to allocator fragmentation"
+      }
+    ]
+  }
+}

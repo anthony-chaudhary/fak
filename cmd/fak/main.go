@@ -692,6 +692,9 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 	case "study-link":
 		// Deterministic evidence joins from study clusters to witnessed FAK work.
 		os.Exit(runStudyLink(os.Stdout, os.Stderr, args))
+	case "study-priority":
+		// Bounded, dependency-respecting prioritization of uncovered study joins.
+		os.Exit(runStudyPriority(os.Stdout, os.Stderr, args))
 	case "study-adjacency":
 		// Bounded cross-runtime adjacency manifest validation and rendering.
 		os.Exit(runStudyAdjacency(os.Stdout, os.Stderr, args))

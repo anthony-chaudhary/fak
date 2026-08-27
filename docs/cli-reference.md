@@ -1424,6 +1424,23 @@ captured issue existence and state, duplicate exact joins, repository paths, and
 checksums against the same four inputs. The checked-in vLLM/FAK result lives under
 `docs/research/vllm-fak-join-2026-08-27/`.
 
+## `fak study-priority`
+
+Build or validate the bounded queue derived from the uncovered actionable rows in a
+`study-link` ledger:
+
+```bash
+fak study-priority build --source-ledger docs/research/vllm-fak-join-2026-08-27/ledger.json --ledger docs/research/vllm-priority-2026-08-27/ledger.json --summary docs/research/vllm-priority-2026-08-27/README.md
+fak study-priority validate --source-ledger docs/research/vllm-fak-join-2026-08-27/ledger.json --ledger docs/research/vllm-priority-2026-08-27/ledger.json --summary docs/research/vllm-priority-2026-08-27/README.md
+```
+
+`build` applies the versioned rubric and separate hard gates, retains the stable
+source-cluster mapping for every candidate, and emits a deterministic dependency-respecting
+queue plus its Markdown review summary. `validate` recomputes the build from the same source
+ledger and rejects missing or duplicate source inputs, cycles, missing dependencies, gate
+violations, output drift, and checksum drift. Native-inference candidates remain fak-native;
+llama.cpp evidence is reference/borrowing evidence only and cannot authorize a fallback.
+
 ## `fak study-inventory`
 
 Render a deterministic local-checkout map for an exhaustive `study-repo` pass:
