@@ -149,7 +149,7 @@ from an old planning note when a current issue or authority disagrees.
    gate does not apply to it.
 
 Build-profile details and platform commands live in
-[`docs/dev-tooling.md`](docs/dev-tooling.md). `AGENTS.md` is the machine-oriented authority
+[`docs/dev-tooling.md`](docs/dev-tooling.md). Its [proof-depth matrix](docs/dev-tooling.md#match-proof-to-activation-depth) is authoritative for distinguishing a working overlay, prospective native link, committed tip, installed copy, and running activation; a pass at one depth never proves a later depth. `AGENTS.md` is the machine-oriented authority
 for shared-tree recovery, proof capture, and guarded commit mechanics.
 
 ## Route context
