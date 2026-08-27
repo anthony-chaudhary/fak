@@ -866,11 +866,15 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 	}
 	var w *metalgemm.Q4KWeight
 	raw := qt.raw
+	mappedAttempt := false
+	copiedUpload := false
 	if qt.lazy != nil {
 		if span, offset, ok := qt.mappedRaw(); ok {
+			mappedAttempt = true
 			w = metalgemm.UploadQ4KMappedSpan(span, offset, qt.out, qt.in)
 		}
 		if w == nil {
+			copiedUpload = true
 			var err error
 			raw, err = qt.materializeRaw()
 			if err != nil {
@@ -881,6 +885,18 @@ func (m *Model) metalQ4KWeight(name string, qt *q4kTensor) *metalgemm.Q4KWeight 
 	}
 	if w == nil {
 		w = metalgemm.UploadQ4K(raw, qt.out, qt.in)
+	}
+	if qt.lazy != nil {
+		switch {
+		case w == nil:
+			recordQ4KResidencyOutcome(m, name, qt.lazy.Bytes, q4kResidencyUploadFailure)
+		case mappedAttempt && !copiedUpload:
+			recordQ4KResidencyOutcome(m, name, qt.lazy.Bytes, q4kResidencyMappedSuccess)
+		case copiedUpload && len(qt.lazy.MappedSpan) > 0:
+			// The mapping was present but either descriptor validation or Metal aliasing declined,
+			// and the copied model-owned bytes subsequently uploaded successfully.
+			recordQ4KResidencyOutcome(m, name, qt.lazy.Bytes, q4kResidencyMappedDeclineCopiedUpload)
+		}
 	}
 	tbl[name] = w // cache nil too, so a failed upload doesn't retry every token
 	if qt.lazy == nil && w != nil && freeCPUCopyAfterUpload && !w.NoCopy() {

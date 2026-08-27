@@ -506,13 +506,14 @@ func TestAllFinite(t *testing.T) {
 }
 
 func testNativeProfileControls() map[string]string {
-	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+6)
+	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+7)
 	for key, value := range nativeProfileRequiredEnvironment {
 		controls[key] = value
 	}
 	for _, key := range nativeProfileDeniedEnvironment {
 		controls[key] = nativeProfileUnset
 	}
+	controls[nativeControlGGUFMMap] = "1"
 	controls[nativeControlFlagBudget] = "0"
 	controls[nativeControlLogicalCPUs] = strconv.Itoa(runtime.NumCPU())
 	controls[nativeControlGOMAXPROCS] = strconv.Itoa(runtime.GOMAXPROCS(0))
@@ -529,6 +530,8 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 		required[key] = value
 		declarations = append(declarations, key+"="+value)
 	}
+	required[nativeControlGGUFMMap] = "0"
+	declarations = append(declarations, nativeControlGGUFMMap+"=0")
 	lookup := func(key string) (string, bool) { value, ok := required[key]; return value, ok }
 	if _, err := nativeProfileControlEnvironment(lookup, declarations, 0); err != nil {
 		t.Fatalf("documented control envelope rejected: %v", err)
@@ -547,6 +550,7 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 		{name: "q8 gemm group", key: "FAK_Q8_GEMM_GROUP", value: "1"},
 		{name: "workers", key: "FAK_WORKERS", value: "4"},
 		{name: "budget env", key: "FAK_BUDGET", value: "0.5"},
+		{name: "mmap untyped", key: nativeControlGGUFMMap, value: "true"},
 		{name: "budget flag", budget: 0.5},
 		{name: "unknown fak control", declaration: "FAK_FUTURE_Q4K_SWITCH=1"},
 	}
@@ -574,6 +578,7 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 
 func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, nativeProfileReceipt) {
 	t.Helper()
+	t.Setenv("FAK_GGUF_MMAP", "1")
 	executionSession := metalgemm.NewExecutionSession()
 	executionSession.Record(metalgemm.ExecutionSnapshot{Events: []metalgemm.ExecutionEvent{{
 		Operation: metalgemm.ExecutionQ4KGEMM, CommandBufferID: 1, Committed: true,
@@ -615,6 +620,7 @@ func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, n
 	if err != nil {
 		t.Fatal(err)
 	}
+	q4kResidency := (&model.Model{}).Q4KResidencyReceipt()
 	receipt := nativeProfileReceipt{
 		Schema:        nativeProfileReceiptSchema,
 		ProfileSHA256: fmt.Sprintf("%x", profileSHA),
@@ -624,12 +630,13 @@ func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, n
 			Model:              "unsloth/Qwen3.8-27B-GGUF", ModelRevision: "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
 		},
 		ModelConfig: config, ModelConfigSHA256: configSHA,
-		Host:      nativeHostIdentity{GOOS: "darwin", GOARCH: "arm64", CPU: "Apple M3 Pro", MetalDevice: "Apple M3 Pro", GPUCores: 18, MemoryBytes: 36 << 30, MetalWorkingSetBytes: 1},
-		Source:    nativeSourceIdentity{Revision: strings.Repeat("a", 40)},
-		Binary:    nativeFileIdentity{Bytes: 123, SHA256: strings.Repeat("b", 64)},
-		Controls:  testNativeProfileControls(),
-		Execution: execution,
-		Fallbacks: model.MetalFallbackReceipt{Schema: "fak-metal-fallback-receipt/v1", Events: fallbackEvents, EventsSHA256: fallbackSHA},
+		Host:         nativeHostIdentity{GOOS: "darwin", GOARCH: "arm64", CPU: "Apple M3 Pro", MetalDevice: "Apple M3 Pro", GPUCores: 18, MemoryBytes: 36 << 30, MetalWorkingSetBytes: 1},
+		Source:       nativeSourceIdentity{Revision: strings.Repeat("a", 40)},
+		Binary:       nativeFileIdentity{Bytes: 123, SHA256: strings.Repeat("b", 64)},
+		Controls:     testNativeProfileControls(),
+		Execution:    execution,
+		Fallbacks:    model.MetalFallbackReceipt{Schema: "fak-metal-fallback-receipt/v1", Events: fallbackEvents, EventsSHA256: fallbackSHA},
+		Q4KResidency: &q4kResidency,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {
@@ -663,6 +670,14 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 	if err := validateNativeProfileReceipt(profileBytes, profile, receipt); err != nil {
 		t.Fatalf("valid receipt rejected: %v", err)
 	}
+	// The nested receipt is an additive, versioned extension. A companion produced by the older
+	// v1 writer omits it and retains its original binding shape, so readback stays compatible.
+	legacy := receipt
+	legacy.Q4KResidency = nil
+	legacy.BindingSHA256, _ = nativeReceiptBinding(legacy)
+	if err := validateNativeProfileReceipt(profileBytes, profile, legacy); err != nil {
+		t.Fatalf("legacy v1 receipt rejected: %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -677,6 +692,9 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 		{name: "fallback aggregate", edit: func(r *nativeProfileReceipt) { r.Fallbacks.PromisedCPUFallbacks++ }},
 		{name: "forced q8 upload", edit: func(r *nativeProfileReceipt) { r.Controls["FAK_METAL_Q8_UPLOAD"] = "1" }},
 		{name: "worker budget", edit: func(r *nativeProfileReceipt) { r.Controls[nativeControlWorkers] = "0" }},
+		{name: "residency count", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.MappedSuccess.Tensors++ }},
+		{name: "residency control", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.FAKGGUFMMap = "0" }},
+		{name: "residency digest", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.IntegritySHA256 = strings.Repeat("d", 64) }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -684,6 +702,8 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 			copy.ModelConfig = mapsClone(receipt.ModelConfig)
 			copy.Controls = mapsStringClone(receipt.Controls)
 			copy.Execution.Events = append([]metalgemm.ExecutionEvent(nil), receipt.Execution.Events...)
+			q4kResidencyCopy := *receipt.Q4KResidency
+			copy.Q4KResidency = &q4kResidencyCopy
 			test.edit(&copy)
 			if err := validateNativeProfileReceipt(profileBytes, profile, copy); err == nil {
 				t.Fatal("tampered receipt was accepted")
