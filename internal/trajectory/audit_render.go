@@ -28,6 +28,12 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
 	fmt.Fprintf(&out, "- Payload distribution unit: `%s` — %s\n", summary.DistributionUnit, summary.DistributionProvenance)
+	if len(summary.StorageDistribution) > 0 {
+		out.WriteString("\n## Transcript storage and telemetry overhead\n\n| Source | Subtype | Records | Serialized UTF-8 bytes | Source share |\n|---|---|---:|---:|---:|\n")
+		for _, r := range summary.StorageDistribution {
+			fmt.Fprintf(&out, "| `%s` | `%s` | %d | %d | %.1f%% |\n", r.Source, r.Subtype, r.Records, r.Bytes, r.Share*100)
+		}
+	}
 	if len(summary.Distribution) > 0 {
 		out.WriteString("\n## Token destination distribution\n\n| Category | UTF-8 bytes | Share |\n|---|---:|---:|\n")
 		for _, r := range summary.Distribution {

@@ -149,6 +149,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 	state.row.HookP95MS = auditPercentile(state.hookDurations, 95)
 	state.row.Distribution = distributionRows(state.distribution.categories)
 	state.row.ToolDistribution = toolDistributionRows(state.distribution.tools)
+	state.row.StorageDistribution = storageDistributionRows(state.distribution.storage)
 	if source == AuditSourceCodex && state.codexRawTotal != nil {
 		state.row.UsageRecords++
 		denominator.UsageRecordsApplied++
