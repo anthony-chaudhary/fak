@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/hooks"
@@ -44,46 +45,76 @@ const leaserefAnnounceTimeout = 60 * time.Second
 // announcements deliberately reuse the explicit announce verb's gh body-file edge.
 var ambientLeaserefAnnouncePost = postLeaserefAnnounce
 
+const (
+	ambientAnnounceSuccess = "success"
+	ambientAnnounceRefusal = "refusal"
+	ambientAnnounceError   = "error"
+)
+
+var ambientLeaserefAnnounceStderrMu sync.Mutex
+
+// reportAmbientLeaserefAnnounce preserves the existing human diagnostic while exposing a
+// stable, one-hot count on the command's existing stderr surface. Fixed field order lets
+// callers fold output deterministically without learning any lease or key material. A
+// single guarded write keeps the record intact when commands share a stderr writer.
+func reportAmbientLeaserefAnnounce(stderr io.Writer, message, outcome string) {
+	success, refusal, announceError := 0, 0, 0
+	switch outcome {
+	case ambientAnnounceSuccess:
+		success = 1
+	case ambientAnnounceRefusal:
+		refusal = 1
+	case ambientAnnounceError:
+		announceError = 1
+	}
+	entry := fmt.Sprintf("%s\nfak leaseref: ambient-announcement-outcomes success=%d refusal=%d error=%d\n",
+		message, success, refusal, announceError)
+	ambientLeaserefAnnounceStderrMu.Lock()
+	defer ambientLeaserefAnnounceStderrMu.Unlock()
+	_, _ = io.WriteString(stderr, entry)
+}
+
 // ambientLeaserefAnnounce publishes a public-safe projection after a successful local
-// lifecycle transition. It is opt-in and best-effort: every non-posting state is stated on
-// stderr, and no configuration or transport failure is returned to the lease operation.
-// The key itself is read only from a file; it is never accepted in argv or environment.
+// lifecycle transition. It is opt-in and best-effort: every invocation reports exactly
+// one public-safe outcome on stderr, and no configuration or transport failure is returned
+// to the lease operation. The key itself is read only from a file; it is never accepted in
+// argv or environment.
 func ambientLeaserefAnnounce(stderr io.Writer, dir, action string, rec leaseref.Record) {
 	mode, configured := os.LookupEnv("FAK_LEASEREF_ANNOUNCE")
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if !configured || mode == "" || mode == "0" || mode == "off" || mode == "false" || mode == "no" || mode == "disabled" {
-		fmt.Fprintln(stderr, "fak leaseref: public-safe issue announcement disabled (set FAK_LEASEREF_ANNOUNCE=on to opt in)")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: public-safe issue announcement disabled (set FAK_LEASEREF_ANNOUNCE=on to opt in)", ambientAnnounceRefusal)
 		return
 	}
 	if mode == "offline" {
-		fmt.Fprintln(stderr, "fak leaseref: public-safe issue announcement offline; local lease operation succeeded")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: public-safe issue announcement offline; local lease operation succeeded", ambientAnnounceRefusal)
 		return
 	}
 	if mode != "1" && mode != "on" && mode != "true" && mode != "yes" && mode != "enabled" {
-		fmt.Fprintln(stderr, "fak leaseref: WARNING: public-safe issue announcement disabled by an unrecognized FAK_LEASEREF_ANNOUNCE value")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement disabled by an unrecognized FAK_LEASEREF_ANNOUNCE value", ambientAnnounceRefusal)
 		return
 	}
 
 	issue, err := strconv.Atoi(strings.TrimSpace(os.Getenv("FAK_LEASEREF_ANNOUNCE_ISSUE")))
 	if err != nil || issue <= 0 {
-		fmt.Fprintln(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_ISSUE is missing or invalid")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_ISSUE is missing or invalid", ambientAnnounceRefusal)
 		return
 	}
 	repo := strings.TrimSpace(os.Getenv("FAK_LEASEREF_ANNOUNCE_REPO"))
 	if repo == "" {
-		fmt.Fprintln(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_REPO is missing")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_REPO is missing", ambientAnnounceRefusal)
 		return
 	}
 	keyFile := strings.TrimSpace(os.Getenv("FAK_LEASEREF_ANNOUNCE_KEY_FILE"))
 	if keyFile == "" {
-		fmt.Fprintln(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_KEY_FILE is missing")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: FAK_LEASEREF_ANNOUNCE_KEY_FILE is missing", ambientAnnounceRefusal)
 		return
 	}
 	key, err := os.ReadFile(pathutil.ExpandTilde(keyFile))
 	if err != nil || len(bytes.TrimSpace(key)) == 0 {
 		// Do not include the path or underlying error: secret-store paths and helper
 		// diagnostics do not belong in logs.
-		fmt.Fprintln(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: key file is unavailable or empty")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement not posted: key file is unavailable or empty", ambientAnnounceRefusal)
 		return
 	}
 	projected, err := leaseref.PublicSafeAnnounce(leaseref.AnnounceRecord{
@@ -91,17 +122,17 @@ func ambientLeaserefAnnounce(stderr io.Writer, dir, action string, rec leaseref.
 		Tree: rec.TreeGlobs, TTLSeconds: rec.TTLSeconds, Action: action,
 	}, bytes.TrimSpace(key))
 	if err != nil {
-		fmt.Fprintln(stderr, "fak leaseref: WARNING: public-safe issue announcement projection failed; local lease operation succeeded")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement projection failed; local lease operation succeeded", ambientAnnounceError)
 		return
 	}
 	body := hooks.ScrubHardwareNames(leaseref.RenderAnnounce(projected))
 	if err := ambientLeaserefAnnouncePost(dir, repo, issue, body); err != nil {
 		// Never print gh output here: even a hostile helper must not turn its diagnostics
 		// into a secret/log exfiltration edge.
-		fmt.Fprintln(stderr, "fak leaseref: WARNING: public-safe issue announcement post failed; local lease operation succeeded")
+		reportAmbientLeaserefAnnounce(stderr, "fak leaseref: WARNING: public-safe issue announcement post failed; local lease operation succeeded", ambientAnnounceError)
 		return
 	}
-	fmt.Fprintln(stderr, "fak leaseref: public-safe issue announcement posted")
+	reportAmbientLeaserefAnnounce(stderr, "fak leaseref: public-safe issue announcement posted", ambientAnnounceSuccess)
 }
 
 // runLeaserefAnnounce renders a lease transition (leaseref.RenderAnnounce — pure) and
