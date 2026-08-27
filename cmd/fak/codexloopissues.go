@@ -215,13 +215,8 @@ func runCodexLoopSyncIssues(stdout, stderr io.Writer, r codexLoopRecentReport, a
 		result.Synced = dogfoodissues.Sync(plan, opt.Repo, opt.Labels, opt.Runner)
 	}
 
-	if asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "fak sessions codex-loop: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, dogfoodissues.Render(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "fak sessions codex-loop", asJSON, result, dogfoodissues.Render(result)); code != 0 {
+		return code
 	}
 
 	if opt.Live {

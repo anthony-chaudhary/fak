@@ -137,13 +137,8 @@ func runLearningDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "learning-debt-dispatch: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, learningdebt.Render(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "learning-debt-dispatch", *asJSON, result, learningdebt.Render(result)); code != 0 {
+		return code
 	}
 	return exit
 }
