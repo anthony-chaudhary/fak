@@ -185,6 +185,13 @@ accepted task outcome, wall time, cost, and resource-time
 
 ## Geography and session locality
 
+The current evidence separates three different facts: OpenRouter measures time-varying
+regional **spend**, SkyLB/SkyWalker evaluates country-local diurnal demand and WAN-aware
+routing, and Chutes/ServeGen measure user/client temporal locality without geography.
+None licenses converting spend into request load, daily periodicity into timezone, or a
+regional system gain into a universal demand law. See
+[`geography-session-locality.md`](geography-session-locality.md).
+
 - **Regional arrivals are phase-shifted, not one global stationary process.** SkyWalker
   observes distinct diurnal peaks across six country groups. Use region/timezone-specific
   curves and sensitivity ranges; WildChat is not a provider production distribution.

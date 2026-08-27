@@ -174,6 +174,21 @@ Request share is not token share; exact prompt hits are not prefix-token hits;
 aggregate arrival curves are not per-client processes; and reconstruction error is
 not a population confidence interval.
 
+## Geography and session-locality parameter addendum
+
+| Source | Metric | Population / window | Parameters | Do not infer |
+|---|---|---|---|---|
+| OpenRouter | weekly regional spend share | >100T production tokens; source does not publish exact observation dates for this geography figure | North America <50% for most weeks; Europe about 15-22%; Asia about 13% initially and 31% most recently | Spend share is not request, token, user, tenant, or serving-region share |
+| SkyLB / SkyWalker | country-local demand and cross-region system result | WildChat-derived demand mapped across six countries; evaluation window and country denominators are source-specific | 1.12-2.06x throughput, 1.74-6.30x lower latency, 25% lower serving cost; round-robin peak KV imbalance 2.64x | System improvement is not a fitted geography distribution |
+| SageServe | multiregion placement envelope | >8M trace requests, four models, three regions | up to 25% GPU-hour savings and 80% lower scaling overhead | No tenant, timezone, or session distribution is disclosed |
+| Chutes | periodicity and reuse without geography | 365 days, 314,970 users | about 22% daily-periodic users; roughly half of repeated `(user, model)` requests within 0.1 s and 80% within 10 s | Daily periodicity cannot be assigned to a timezone or country |
+| ServeGen | client-composed daily demand | one day, 2,412 text clients | top 29 clients produce 90% of requests; client rates and CVs vary materially | Aggregate daily shape is not a regional or tenant distribution |
+
+The benchmark schema must therefore carry request origin, local time, billing geography,
+serving region, tenant, session, prefix, WAN latency, sovereignty eligibility, retries,
+and metric units separately. The fuller field contract is in
+[`geography-session-locality.md`](geography-session-locality.md).
+
 ## Agentic accounting additions
 
 | Variable | Production evidence | Modeling rule | Missing |
