@@ -16,7 +16,6 @@ description: "Index of fak research notes and captured stage witnesses, with the
 ## Active focus
 
 - [Related-system inventory maps](inventory/) — pinned local-checkout maps generated with `fak study-inventory` before deep `study-repo` borrowing, so broad source coverage has a concrete denominator.
-- [vLLM forge-corpus classification at the August 26, 2026 cutoff](vllm-classification-2026-08-26/) — `fak study-classify` turns a validated `study-forge` corpus into a checksum-bound full per-record artifact plus a bounded cluster index. Keep the full output in allocated scratch and commit only the compact index when it is useful. Cluster relationships mean shared rule evidence only; the classifier does not fabricate unavailable upstream links. See the [CLI contract](../cli-reference.md#fak-study-classify).
 
 - [Structured session intent](../notes/structured-session-intent-2026-08-18.md) — own-prompt inventory plus recent scheduler/hook research, with a validated minimum/target/maximum, trigger, recurrence, and lifecycle-hook declaration spine.
 
@@ -132,3 +131,9 @@ Use `fak workpattern list|source|trajectory|report` to consume the canonical see
 - [S8s/S8t natural multi-tool decision surface](micro-context-s8st-natural-multitool-surface.md) — five evidence classes show fixed/adaptive/parallel crossover by tool cost, with quality gated first.
 
 - [`tensor-build-local-study-2026-08-15.md`](../notes/tensor-build-local-study-2026-08-15.md) — deep, snapshot-pinned study of local TensorBuild: typed engine identity, evidence tiers, artifact liveness, agent/human control parity, and work-cost attribution; dedupes current fak coverage and files #6874-#6876.
+
+## Architecture and kernel studies
+
+- [Agent-serving composition architecture (2026-08-26)](agent-serving-composition-architecture-study-2026-08-26.md) — evidence-backed composition study and follow-on map.
+- [NVIDIA KVTC study](nvidia-kvtc-study.md) — upstream KV-transfer mechanism study and fak relevance map.
+
