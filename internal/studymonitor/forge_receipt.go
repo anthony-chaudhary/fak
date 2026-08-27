@@ -12,6 +12,19 @@ import (
 const StudyForgeReceiptSchema = "fak-studyforge-receipt/1"
 const studyForgeCorpusSchema = "fak-studyforge-corpus/1"
 
+const (
+	studyForgeEvidenceModeExactIdentity    = "exact_identity"
+	studyForgeEvidenceModeLegacyCountOnly  = "legacy_count_only"
+	studyForgeEvidenceExactIdentities      = "exact_identities"
+	studyForgeEvidenceExactCountOnly       = "exact_count_only"
+	studyForgeEvidenceUnavailable          = "unavailable"
+	studyForgeLegacyCountOnlyBasis         = "legacy_checkpoint_counts"
+	studyForgeLegacyCountOnlyReason        = "legacy_mixed_pull_identities_not_retained"
+	studyForgePolicyEvaluationAccepted     = "accepted"
+	studyForgePolicyEvaluationRejected     = "rejected"
+	studyForgePolicyEvaluationInconclusive = "compatible_unproven"
+)
+
 var requiredStudyForgeSources = []string{
 	"issues",
 	"pulls",
@@ -49,22 +62,30 @@ type StudyForgeSourceReceiptEvidence struct {
 }
 
 type StudyForgeNonAtomicDeltaEvidence struct {
-	Type                 string                            `json:"type"`
-	MixedSource          string                            `json:"mixed_source"`
-	DedicatedSource      string                            `json:"dedicated_source"`
-	IdentityBasis        string                            `json:"identity_basis"`
-	MixedCrawl           StudyForgeCrawlWindow             `json:"mixed_crawl"`
-	DedicatedCrawl       StudyForgeCrawlWindow             `json:"dedicated_crawl"`
-	MixedCount           int                               `json:"mixed_count"`
-	DedicatedCount       int                               `json:"dedicated_count"`
-	OverlapCount         int                               `json:"overlap_count"`
-	OnlyInMixedCount     int                               `json:"only_in_mixed_count"`
-	OnlyInDedicatedCount int                               `json:"only_in_dedicated_count"`
-	Overlap              []StudyForgeCrossEndpointIdentity `json:"overlap"`
-	OnlyInMixed          []StudyForgeCrossEndpointIdentity `json:"only_in_mixed"`
-	OnlyInDedicated      []StudyForgeCrossEndpointIdentity `json:"only_in_dedicated"`
-	Policy               *StudyForgeNonAtomicDeltaPolicy   `json:"policy"`
-	Accepted             bool                              `json:"accepted"`
+	Type                          string                            `json:"type"`
+	MixedSource                   string                            `json:"mixed_source"`
+	DedicatedSource               string                            `json:"dedicated_source"`
+	EvidenceMode                  string                            `json:"evidence_mode"`
+	EvidenceReason                string                            `json:"evidence_reason,omitempty"`
+	IdentityBasis                 string                            `json:"identity_basis"`
+	MixedEvidence                 string                            `json:"mixed_evidence"`
+	DedicatedEvidence             string                            `json:"dedicated_evidence"`
+	RelationEvidence              string                            `json:"relation_evidence"`
+	MixedCrawl                    StudyForgeCrawlWindow             `json:"mixed_crawl"`
+	DedicatedCrawl                StudyForgeCrawlWindow             `json:"dedicated_crawl"`
+	MixedCount                    int                               `json:"mixed_count"`
+	DedicatedCount                int                               `json:"dedicated_count"`
+	OverlapCount                  *int                              `json:"overlap_count,omitempty"`
+	OnlyInMixedCount              *int                              `json:"only_in_mixed_count,omitempty"`
+	OnlyInDedicatedCount          *int                              `json:"only_in_dedicated_count,omitempty"`
+	Overlap                       []StudyForgeCrossEndpointIdentity `json:"overlap"`
+	OnlyInMixed                   []StudyForgeCrossEndpointIdentity `json:"only_in_mixed"`
+	OnlyInDedicated               []StudyForgeCrossEndpointIdentity `json:"only_in_dedicated"`
+	SymmetricDifferenceLowerBound int                               `json:"symmetric_difference_lower_bound"`
+	SymmetricDifferenceUpperBound int                               `json:"symmetric_difference_upper_bound"`
+	Policy                        *StudyForgeNonAtomicDeltaPolicy   `json:"policy"`
+	Verdict                       string                            `json:"verdict"`
+	Accepted                      bool                              `json:"accepted"`
 }
 
 type StudyForgeCrossEndpointIdentity struct {
@@ -126,9 +147,6 @@ func ValidateStudyForgeReceiptEvidence(receipt StudyForgeReceiptEvidence, reposi
 	if _, err := time.Parse(time.RFC3339, receipt.Cutoff); err != nil {
 		return fmt.Errorf("cutoff must be RFC3339")
 	}
-	if receipt.Status != "complete" {
-		return fmt.Errorf("status must be complete, got %q", receipt.Status)
-	}
 	if strings.TrimSpace(receipt.IndexChecksum) == "" {
 		return fmt.Errorf("index_checksum is required")
 	}
@@ -149,11 +167,17 @@ func ValidateStudyForgeReceiptEvidence(receipt StudyForgeReceiptEvidence, reposi
 		if len(source.Pages) == 0 {
 			return fmt.Errorf("source %s pages must be positive", name)
 		}
-		if source.FetchedCount < 0 || source.NormalizedCount < 0 || source.UniqueCount < 0 {
+		if source.FetchedCount < 0 || source.NormalizedCount < 0 || source.UniqueCount < 0 || source.ClassifiedPullCount < 0 {
 			return fmt.Errorf("source %s counts must be non-negative", name)
+		}
+		if name != "issues" && source.ClassifiedPullCount != 0 {
+			return fmt.Errorf("source %s cannot classify mixed pull rows", name)
 		}
 		if source.FetchedCount < source.NormalizedCount {
 			return fmt.Errorf("source %s fetched_count is smaller than normalized_count", name)
+		}
+		if name == "issues" && (source.ClassifiedPullCount > source.FetchedCount || source.NormalizedCount > source.FetchedCount-source.ClassifiedPullCount) {
+			return fmt.Errorf("source issues fetched_count is smaller than normalized plus classified pull counts")
 		}
 		if source.NormalizedCount != source.UniqueCount {
 			return fmt.Errorf("source %s normalized_count does not match unique_count", name)
@@ -183,6 +207,12 @@ func ValidateStudyForgeReceiptEvidence(receipt StudyForgeReceiptEvidence, reposi
 	if err := validateStudyForgeNonAtomicDelta(receipt.NonAtomicDelta, *issues, *pulls); err != nil {
 		return err
 	}
+	if receipt.Status != "complete" {
+		return fmt.Errorf("status must be complete, got %q", receipt.Status)
+	}
+	if receipt.NonAtomicDelta != nil && !receipt.NonAtomicDelta.Accepted {
+		return fmt.Errorf("non_atomic_delta did not prove policy acceptance")
+	}
 	return nil
 }
 
@@ -193,9 +223,6 @@ func validateStudyForgeNonAtomicDelta(delta *StudyForgeNonAtomicDeltaEvidence, i
 	if delta.Type != "non_atomic_delta" || delta.MixedSource != "issues" || delta.DedicatedSource != "pulls" {
 		return fmt.Errorf("non_atomic_delta has invalid type or sources")
 	}
-	if delta.IdentityBasis != "captured_endpoint_rows" && delta.IdentityBasis != "legacy_checkpoint_projection" {
-		return fmt.Errorf("non_atomic_delta has invalid identity_basis")
-	}
 	for name, window := range map[string]StudyForgeCrawlWindow{"mixed": delta.MixedCrawl, "dedicated": delta.DedicatedCrawl} {
 		started, startErr := time.Parse(time.RFC3339Nano, window.StartedAt)
 		ended, endErr := time.Parse(time.RFC3339Nano, window.EndedAt)
@@ -203,7 +230,29 @@ func validateStudyForgeNonAtomicDelta(delta *StudyForgeNonAtomicDeltaEvidence, i
 			return fmt.Errorf("non_atomic_delta %s crawl window is invalid", name)
 		}
 	}
-	if delta.Overlap == nil || delta.OnlyInMixed == nil || delta.OnlyInDedicated == nil {
+	switch delta.EvidenceMode {
+	case studyForgeEvidenceModeExactIdentity:
+		return validateStudyForgeExactNonAtomicDelta(delta, issues, pulls, false)
+	case studyForgeEvidenceModeLegacyCountOnly:
+		return validateStudyForgeLegacyCountOnlyDelta(delta, issues, pulls)
+	case "":
+		if delta.Overlap != nil && delta.OnlyInMixed != nil && delta.OnlyInDedicated != nil && delta.OverlapCount != nil && delta.OnlyInMixedCount != nil && delta.OnlyInDedicatedCount != nil {
+			return validateStudyForgeExactNonAtomicDelta(delta, issues, pulls, true)
+		}
+		return fmt.Errorf("non_atomic_delta has invalid evidence_mode %q", delta.EvidenceMode)
+	default:
+		return fmt.Errorf("non_atomic_delta has invalid evidence_mode %q", delta.EvidenceMode)
+	}
+}
+
+func validateStudyForgeExactNonAtomicDelta(delta *StudyForgeNonAtomicDeltaEvidence, issues, pulls StudyForgeSourceReceiptEvidence, legacyShape bool) error {
+	validBasis := delta.IdentityBasis == "captured_endpoint_rows" || delta.IdentityBasis == "legacy_checkpoint_projection"
+	explicitProvenance := delta.EvidenceReason == "" && delta.MixedEvidence == studyForgeEvidenceExactIdentities && delta.DedicatedEvidence == studyForgeEvidenceExactIdentities && delta.RelationEvidence == studyForgeEvidenceExactIdentities
+	legacyProvenance := legacyShape && delta.EvidenceReason == "" && delta.MixedEvidence == "" && delta.DedicatedEvidence == "" && delta.RelationEvidence == ""
+	if !validBasis || (!explicitProvenance && !legacyProvenance) {
+		return fmt.Errorf("non_atomic_delta exact evidence has contradictory provenance")
+	}
+	if delta.OverlapCount == nil || delta.OnlyInMixedCount == nil || delta.OnlyInDedicatedCount == nil || delta.Overlap == nil || delta.OnlyInMixed == nil || delta.OnlyInDedicated == nil {
 		return fmt.Errorf("non_atomic_delta exact identity sets are required")
 	}
 	seenIdentities := make(map[int64]bool, len(delta.Overlap)+len(delta.OnlyInMixed)+len(delta.OnlyInDedicated))
@@ -218,17 +267,76 @@ func validateStudyForgeNonAtomicDelta(delta *StudyForgeNonAtomicDeltaEvidence, i
 			}
 		}
 	}
-	if delta.MixedCount != issues.ClassifiedPullCount || delta.DedicatedCount != pulls.NormalizedCount || delta.OverlapCount != len(delta.Overlap) || delta.OnlyInMixedCount != len(delta.OnlyInMixed) || delta.OnlyInDedicatedCount != len(delta.OnlyInDedicated) || delta.MixedCount != delta.OverlapCount+delta.OnlyInMixedCount || delta.DedicatedCount != delta.OverlapCount+delta.OnlyInDedicatedCount {
+	total := len(delta.OnlyInMixed) + len(delta.OnlyInDedicated)
+	validBounds := delta.SymmetricDifferenceLowerBound == total && delta.SymmetricDifferenceUpperBound == total
+	if legacyShape && delta.SymmetricDifferenceLowerBound == 0 && delta.SymmetricDifferenceUpperBound == 0 {
+		validBounds = true
+	}
+	if delta.MixedCount != issues.ClassifiedPullCount || delta.DedicatedCount != pulls.NormalizedCount || *delta.OverlapCount != len(delta.Overlap) || *delta.OnlyInMixedCount != len(delta.OnlyInMixed) || *delta.OnlyInDedicatedCount != len(delta.OnlyInDedicated) || delta.MixedCount != *delta.OverlapCount+*delta.OnlyInMixedCount || delta.DedicatedCount != *delta.OverlapCount+*delta.OnlyInDedicatedCount || !validBounds {
 		return fmt.Errorf("non_atomic_delta counts contradict endpoint evidence")
 	}
-	if delta.Policy == nil || delta.Policy.Type != "bounded_identity_delta" || delta.Policy.MaxOnlyInMixed < 0 || delta.Policy.MaxOnlyInDedicated < 0 || delta.Policy.MaxTotal < 0 || delta.Policy.MaxOnlyInMixed > 1000 || delta.Policy.MaxOnlyInDedicated > 1000 || delta.Policy.MaxTotal > 1000 {
+	if !validStudyForgeDeltaPolicy(delta.Policy) {
 		return fmt.Errorf("non_atomic_delta acceptance policy is missing or unbounded")
 	}
-	accepted := delta.OnlyInMixedCount <= delta.Policy.MaxOnlyInMixed && delta.OnlyInDedicatedCount <= delta.Policy.MaxOnlyInDedicated && delta.OnlyInMixedCount+delta.OnlyInDedicatedCount <= delta.Policy.MaxTotal
-	if !delta.Accepted || !accepted {
+	accepted := *delta.OnlyInMixedCount <= delta.Policy.MaxOnlyInMixed && *delta.OnlyInDedicatedCount <= delta.Policy.MaxOnlyInDedicated && total <= delta.Policy.MaxTotal
+	validVerdict := delta.Verdict == studyForgePolicyEvaluationAccepted || (legacyShape && delta.Verdict == "")
+	if !delta.Accepted || !accepted || !validVerdict {
 		return fmt.Errorf("non_atomic_delta policy did not accept the endpoint drift")
 	}
 	return nil
+}
+
+func validateStudyForgeLegacyCountOnlyDelta(delta *StudyForgeNonAtomicDeltaEvidence, issues, pulls StudyForgeSourceReceiptEvidence) error {
+	if delta.IdentityBasis != studyForgeLegacyCountOnlyBasis {
+		return fmt.Errorf("non_atomic_delta legacy count-only evidence has invalid identity_basis")
+	}
+	if delta.EvidenceReason != studyForgeLegacyCountOnlyReason {
+		return fmt.Errorf("non_atomic_delta legacy count-only reason must be %q", studyForgeLegacyCountOnlyReason)
+	}
+	if delta.MixedEvidence != studyForgeEvidenceExactCountOnly || delta.DedicatedEvidence != studyForgeEvidenceExactIdentities || delta.RelationEvidence != studyForgeEvidenceUnavailable {
+		return fmt.Errorf("non_atomic_delta legacy count-only evidence has contradictory provenance")
+	}
+	if delta.MixedCount != issues.ClassifiedPullCount || delta.DedicatedCount != pulls.NormalizedCount {
+		return fmt.Errorf("non_atomic_delta counts contradict endpoint evidence")
+	}
+	if delta.OverlapCount != nil || delta.OnlyInMixedCount != nil || delta.OnlyInDedicatedCount != nil || delta.Overlap != nil || delta.OnlyInMixed != nil || delta.OnlyInDedicated != nil {
+		return fmt.Errorf("non_atomic_delta legacy count-only identity sets must be unavailable, not empty or projected")
+	}
+	if delta.MixedCount > int(^uint(0)>>1)-delta.DedicatedCount {
+		return fmt.Errorf("non_atomic_delta endpoint counts overflow symmetric-difference bounds")
+	}
+	lower := delta.MixedCount - delta.DedicatedCount
+	if lower < 0 {
+		lower = -lower
+	}
+	upper := delta.MixedCount + delta.DedicatedCount
+	if delta.SymmetricDifferenceLowerBound != lower || delta.SymmetricDifferenceUpperBound != upper {
+		return fmt.Errorf("non_atomic_delta legacy count-only symmetric-difference bounds contradict endpoint counts")
+	}
+	if !validStudyForgeDeltaPolicy(delta.Policy) {
+		return fmt.Errorf("non_atomic_delta acceptance policy is missing or unbounded")
+	}
+
+	// Count-only evidence proves acceptance only when every possible symmetric
+	// difference is inside the policy. It proves rejection when even the lower
+	// bound is outside; the interval crossing the limit is explicitly
+	// inconclusive and cannot support a complete receipt.
+	onlyInMixedLower := max(delta.MixedCount-delta.DedicatedCount, 0)
+	onlyInDedicatedLower := max(delta.DedicatedCount-delta.MixedCount, 0)
+	evaluation := studyForgePolicyEvaluationInconclusive
+	if delta.MixedCount <= delta.Policy.MaxOnlyInMixed && delta.DedicatedCount <= delta.Policy.MaxOnlyInDedicated && upper <= delta.Policy.MaxTotal {
+		evaluation = studyForgePolicyEvaluationAccepted
+	} else if onlyInMixedLower > delta.Policy.MaxOnlyInMixed || onlyInDedicatedLower > delta.Policy.MaxOnlyInDedicated || lower > delta.Policy.MaxTotal {
+		evaluation = studyForgePolicyEvaluationRejected
+	}
+	if delta.Verdict != evaluation || delta.Accepted != (evaluation == studyForgePolicyEvaluationAccepted) {
+		return fmt.Errorf("non_atomic_delta legacy count-only verdict contradicts its bounds and policy")
+	}
+	return nil
+}
+
+func validStudyForgeDeltaPolicy(policy *StudyForgeNonAtomicDeltaPolicy) bool {
+	return policy != nil && policy.Type == "bounded_identity_delta" && policy.MaxOnlyInMixed >= 0 && policy.MaxOnlyInDedicated >= 0 && policy.MaxTotal >= 0 && policy.MaxOnlyInMixed <= 1000 && policy.MaxOnlyInDedicated <= 1000 && policy.MaxTotal <= 1000
 }
 
 func decodeStudyForgeReceiptEvidence(data []byte) (StudyForgeReceiptEvidence, error) {

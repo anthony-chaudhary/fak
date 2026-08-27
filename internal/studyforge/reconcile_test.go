@@ -16,6 +16,13 @@ import (
 	"time"
 )
 
+func pointedInt(value *int) int {
+	if value == nil {
+		return -1
+	}
+	return *value
+}
+
 func TestCaptureRecordsNonAtomicDeltaForConcurrentCreationAndDeletion(t *testing.T) {
 	corpus, err := captureReconciliationFixture(t, []int64{11, 12}, []int64{12, 13})
 	if err != nil {
@@ -25,10 +32,10 @@ func TestCaptureRecordsNonAtomicDeltaForConcurrentCreationAndDeletion(t *testing
 		t.Fatal(err)
 	}
 	delta := corpus.Receipt.NonAtomicDelta
-	if delta == nil || !delta.Accepted || delta.Type != NonAtomicDeltaType || delta.IdentityBasis != identityBasisCaptured {
+	if delta == nil || !delta.Accepted || delta.Type != NonAtomicDeltaType || delta.EvidenceMode != NonAtomicDeltaEvidenceModeExactIdentity || delta.IdentityBasis != identityBasisCaptured {
 		t.Fatalf("non_atomic_delta = %+v", delta)
 	}
-	if delta.MixedCount != 2 || delta.DedicatedCount != 2 || delta.OverlapCount != 1 || delta.OnlyInMixedCount != 1 || delta.OnlyInDedicatedCount != 1 {
+	if delta.MixedCount != 2 || delta.DedicatedCount != 2 || pointedInt(delta.OverlapCount) != 1 || pointedInt(delta.OnlyInMixedCount) != 1 || pointedInt(delta.OnlyInDedicatedCount) != 1 {
 		t.Fatalf("non_atomic_delta counts = %+v", delta)
 	}
 	assertIdentityIDs(t, delta.Overlap, 12)
@@ -57,7 +64,7 @@ func TestValidateRejectsMissingOrContradictoryNonAtomicDelta(t *testing.T) {
 	}{
 		{name: "missing", want: "require non_atomic_delta", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta = nil }},
 		{name: "contradictory set", want: "identity sets contradict", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.OnlyInDedicated[0].ID = 99 }},
-		{name: "contradictory count", want: "counts contradict", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.OverlapCount++ }},
+		{name: "contradictory count", want: "counts contradict", edit: func(c *Corpus) { *c.Receipt.NonAtomicDelta.OverlapCount++ }},
 		{name: "contradictory verdict", want: "accepted verdict contradicts", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.Accepted = false }},
 		{name: "unbounded policy", want: "policy is missing or exceeds", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.Policy.MaxTotal = DefaultNonAtomicDeltaLimit + 1 }},
 	}
@@ -69,6 +76,33 @@ func TestValidateRejectsMissingOrContradictoryNonAtomicDelta(t *testing.T) {
 				t.Fatalf("Validate error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateAcceptsAndRewritesAlreadyUpgradedExactLegacyProjection(t *testing.T) {
+	corpus, err := captureReconciliationFixture(t, []int64{11, 12}, []int64{12, 13})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delta := corpus.Receipt.NonAtomicDelta
+	delta.EvidenceMode = ""
+	delta.EvidenceReason = ""
+	delta.IdentityBasis = identityBasisLegacyProjection
+	delta.MixedEvidence = ""
+	delta.DedicatedEvidence = ""
+	delta.RelationEvidence = ""
+	delta.SymmetricDifferenceLowerBound = 0
+	delta.SymmetricDifferenceUpperBound = 0
+	delta.Verdict = ""
+	if err := Validate(corpus); err != nil {
+		t.Fatalf("already-upgraded exact corpus rejected: %v", err)
+	}
+	if err := reconcileNonAtomicDelta(&corpus); err != nil {
+		t.Fatalf("rewrite exact projection: %v", err)
+	}
+	got := corpus.Receipt.NonAtomicDelta
+	if got.EvidenceMode != NonAtomicDeltaEvidenceModeExactIdentity || got.IdentityBasis != identityBasisLegacyProjection || got.RelationEvidence != CrossEndpointEvidenceExactIdentities {
+		t.Fatalf("rewritten exact projection = %+v", got)
 	}
 }
 
@@ -182,17 +216,17 @@ func TestCaptureResumesLegacyCheckpointWithoutRefetchingCompleteEndpoints(t *tes
 	if issuesAfter != issuesBefore || pullsAfter != pullsBefore {
 		t.Fatalf("resume refetched complete endpoints: issues %d->%d pulls %d->%d", issuesBefore, issuesAfter, pullsBefore, pullsAfter)
 	}
-	if completed.Receipt.NonAtomicDelta == nil || completed.Receipt.NonAtomicDelta.IdentityBasis != identityBasisLegacyProjection {
+	if completed.Receipt.NonAtomicDelta == nil || completed.Receipt.NonAtomicDelta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly || completed.Receipt.NonAtomicDelta.IdentityBasis != identityBasisLegacyCountOnly {
 		t.Fatalf("legacy reconciliation evidence = %+v", completed.Receipt.NonAtomicDelta)
 	}
 	if len(checkpoints) == 0 {
 		t.Fatal("resume did not persist an upgraded checkpoint")
 	}
 	persistedIssues, _ := sourceByName(checkpoints[0].Receipt.Sources, "issues")
-	if len(persistedIssues.ClassifiedPullIdentities) != 1 || persistedIssues.ClassifiedPullIdentities[0].ID != 21 || persistedIssues.ClassifiedPullChecksum != identityDigest(persistedIssues.ClassifiedPullIdentities) {
-		t.Fatalf("first resumed checkpoint was not upgraded: %+v", persistedIssues)
+	if persistedIssues.ClassifiedPullIdentities != nil || persistedIssues.ClassifiedPullChecksum != "" {
+		t.Fatalf("first resumed checkpoint fabricated mixed identities: %+v", persistedIssues)
 	}
-	if checkpoints[0].Receipt.NonAtomicDelta == nil || checkpoints[0].Receipt.NonAtomicDelta.IdentityBasis != identityBasisLegacyProjection {
+	if checkpoints[0].Receipt.NonAtomicDelta == nil || checkpoints[0].Receipt.NonAtomicDelta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly {
 		t.Fatalf("first resumed checkpoint delta = %+v", checkpoints[0].Receipt.NonAtomicDelta)
 	}
 }
@@ -277,16 +311,15 @@ func TestCaptureMigratesLegacyCheckpointAfterCompletingPullCensus(t *testing.T) 
 	page1Before, issuesBefore := calls[page1Key], calls[issuesKey]
 	page2Before := calls["/repos/acme/widget/pulls?page=2"]
 	page3Before := calls["/repos/acme/widget/pulls?page=3"]
-	anyCheckpointBeforeUpgrade := false
+	anyCheckpointWithoutTypedEvidence := false
 	failPage2 = false
 	mu.Unlock()
 	var persisted []Corpus
 	completed, err := collector.Capture(context.Background(), CaptureRequest{
 		Owner: "acme", Repository: "widget", Cutoff: cutoff, Resume: &partial,
 		Checkpoint: func(c Corpus) error {
-			issues, _ := sourceByName(c.Receipt.Sources, "issues")
-			if len(issues.ClassifiedPullIdentities) == 0 {
-				anyCheckpointBeforeUpgrade = true
+			if c.Receipt.NonAtomicDelta == nil || c.Receipt.NonAtomicDelta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly {
+				anyCheckpointWithoutTypedEvidence = true
 			}
 			persisted = append(persisted, cloneCorpus(c))
 			return nil
@@ -303,17 +336,19 @@ func TestCaptureMigratesLegacyCheckpointAfterCompletingPullCensus(t *testing.T) 
 	if page1After != page1Before || issuesAfter != issuesBefore || page2After != page2Before+1 || page3After != page3Before+1 {
 		t.Fatalf("resume requests: issues %d->%d pull page1 %d->%d pull page2 %d->%d pull page3 %d->%d", issuesBefore, issuesAfter, page1Before, page1After, page2Before, page2After, page3Before, page3After)
 	}
-	if anyCheckpointBeforeUpgrade || len(persisted) == 0 {
-		t.Fatalf("persisted=%d checkpoint_before_upgrade=%t", len(persisted), anyCheckpointBeforeUpgrade)
+	if anyCheckpointWithoutTypedEvidence || len(persisted) == 0 {
+		t.Fatalf("persisted=%d checkpoint_without_typed_evidence=%t", len(persisted), anyCheckpointWithoutTypedEvidence)
 	}
 	issues, _ := sourceByName(completed.Receipt.Sources, "issues")
-	assertIdentityIDs(t, issues.ClassifiedPullIdentities, 31, 32)
-	if completed.Receipt.NonAtomicDelta == nil || completed.Receipt.NonAtomicDelta.IdentityBasis != identityBasisLegacyProjection {
+	if issues.ClassifiedPullIdentities != nil || issues.ClassifiedPullChecksum != "" {
+		t.Fatalf("completed legacy evidence fabricated mixed identities: %+v", issues)
+	}
+	if completed.Receipt.NonAtomicDelta == nil || completed.Receipt.NonAtomicDelta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly {
 		t.Fatalf("completed legacy delta = %+v", completed.Receipt.NonAtomicDelta)
 	}
 }
 
-func TestLegacyMixedPullMigrationRejectsAmbiguityBeforeRequests(t *testing.T) {
+func TestLegacyMixedPullMigrationNeverProjectsDedicatedIdentities(t *testing.T) {
 	corpus, err := captureReconciliationFixture(t, []int64{41}, []int64{41, 42})
 	if err != nil {
 		t.Fatal(err)
@@ -325,12 +360,123 @@ func TestLegacyMixedPullMigrationRejectsAmbiguityBeforeRequests(t *testing.T) {
 		return nil, errors.New("unexpected request")
 	})})
 	collector.BaseURL = corpus.Receipt.APIBase
-	_, err = collector.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoffTime(t, corpus.Receipt.Cutoff), Resume: &corpus})
-	if err == nil || !strings.Contains(err.Error(), "mixed pull evidence is ambiguous") {
-		t.Fatalf("Capture error = %v, want ambiguity failure", err)
+	completed, err := collector.Capture(context.Background(), CaptureRequest{Owner: "acme", Repository: "widget", Cutoff: cutoffTime(t, corpus.Receipt.Cutoff), Resume: &corpus})
+	if err != nil {
+		t.Fatalf("Capture error = %v", err)
 	}
 	if requests != 0 {
-		t.Fatalf("ambiguous resume made %d requests", requests)
+		t.Fatalf("terminal resume made %d requests", requests)
+	}
+	issues, _ := sourceByName(completed.Receipt.Sources, "issues")
+	if issues.ClassifiedPullIdentities != nil || issues.ClassifiedPullChecksum != "" {
+		t.Fatalf("dedicated identities were projected into mixed evidence: %+v", issues)
+	}
+	if delta := completed.Receipt.NonAtomicDelta; delta == nil || delta.RelationEvidence != CrossEndpointEvidenceUnavailable || delta.Overlap != nil || delta.OnlyInMixed != nil || delta.OnlyInDedicated != nil {
+		t.Fatalf("legacy relation evidence = %+v", delta)
+	}
+}
+
+func TestLegacyCountOnlyBoundsAndPolicyVerdicts(t *testing.T) {
+	tests := []struct {
+		name        string
+		mixed       int
+		dedicated   int
+		wantLower   int
+		wantUpper   int
+		wantVerdict string
+	}{
+		{name: "observed partial counts", mixed: 35528, dedicated: 34800, wantLower: 728, wantUpper: 70328, wantVerdict: NonAtomicDeltaVerdictCompatibleUnproven},
+		{name: "observed temporal drift", mixed: 35528, dedicated: 35504, wantLower: 24, wantUpper: 71032, wantVerdict: NonAtomicDeltaVerdictCompatibleUnproven},
+		{name: "absurd forced delta", mixed: 35528, dedicated: 34000, wantLower: 1528, wantUpper: 69528, wantVerdict: NonAtomicDeltaVerdictRejected},
+		{name: "small corpus proven", mixed: 10, dedicated: 9, wantLower: 1, wantUpper: 19, wantVerdict: NonAtomicDeltaVerdictAccepted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			corpus := Corpus{Records: make([]Record, tt.dedicated)}
+			for i := range corpus.Records {
+				corpus.Records[i].Source = "pulls"
+			}
+			reconcileLegacyCountOnlyDelta(&corpus,
+				SourceReceipt{Name: "issues", ClassifiedPullCount: tt.mixed},
+				SourceReceipt{Name: "pulls"},
+			)
+			delta := corpus.Receipt.NonAtomicDelta
+			if delta.SymmetricDifferenceLowerBound != tt.wantLower || delta.SymmetricDifferenceUpperBound != tt.wantUpper || delta.Verdict != tt.wantVerdict || delta.Accepted != (tt.wantVerdict == NonAtomicDeltaVerdictAccepted) {
+				t.Fatalf("delta = %+v", delta)
+			}
+			if delta.Overlap != nil || delta.OnlyInMixed != nil || delta.OnlyInDedicated != nil || delta.OverlapCount != nil || delta.OnlyInMixedCount != nil || delta.OnlyInDedicatedCount != nil {
+				t.Fatalf("count-only relation sets became available: %+v", delta)
+			}
+		})
+	}
+}
+
+func TestValidateLegacyCountOnlyRejectsContradictoryShapes(t *testing.T) {
+	base, err := captureReconciliationFixture(t, []int64{61}, []int64{61})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyizeMixedPullCheckpoint(&base)
+	if upgraded, err := upgradeLegacyMixedPullEvidence(&base); err != nil || !upgraded {
+		t.Fatalf("upgrade = %t, %v", upgraded, err)
+	}
+	if err := validateCheckpoint(base); err != nil {
+		t.Fatalf("valid count-only checkpoint rejected: %v", err)
+	}
+	tests := []struct {
+		name string
+		want string
+		edit func(*Corpus)
+	}{
+		{name: "forged reason", want: "contradictory provenance", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.EvidenceReason = "projected" }},
+		{name: "forged mixed identity", want: "explicitly unavailable", edit: func(c *Corpus) { c.Receipt.Sources[0].ClassifiedPullIdentities = []CrossEndpointIdentity{} }},
+		{name: "forged empty overlap", want: "must keep relation identity sets", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.Overlap = []CrossEndpointIdentity{} }},
+		{name: "forged bound", want: "bounds contradict counts", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.SymmetricDifferenceUpperBound++ }},
+		{name: "forged verdict", want: "verdict contradicts", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.Verdict = NonAtomicDeltaVerdictRejected }},
+		{name: "projection basis", want: "contradictory provenance", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.IdentityBasis = "legacy_checkpoint_projection" }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			corpus := cloneCorpus(base)
+			tt.edit(&corpus)
+			if err := validateCheckpoint(corpus); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validateCheckpoint error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLegacyCheckpointRecognitionIsExact(t *testing.T) {
+	base, err := captureReconciliationFixture(t, []int64{71}, []int64{71})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyizeMixedPullCheckpoint(&base)
+	issues, _ := sourceByName(base.Receipt.Sources, "issues")
+	if !isLegacyMixedPullCheckpoint(base.Receipt, issues) {
+		t.Fatal("precise legacy checkpoint was not recognized")
+	}
+	tests := []struct {
+		name string
+		edit func(*Receipt, *SourceReceipt)
+	}{
+		{name: "failed receipt", edit: func(r *Receipt, _ *SourceReceipt) { r.Status = StatusFailed }},
+		{name: "empty present identity list", edit: func(_ *Receipt, s *SourceReceipt) { s.ClassifiedPullIdentities = []CrossEndpointIdentity{} }},
+		{name: "present checksum", edit: func(_ *Receipt, s *SourceReceipt) { s.ClassifiedPullChecksum = identityDigest(nil) }},
+		{name: "zero classified count", edit: func(_ *Receipt, s *SourceReceipt) { s.ClassifiedPullCount = 0 }},
+		{name: "count contradiction", edit: func(_ *Receipt, s *SourceReceipt) { s.FetchedCount++ }},
+		{name: "typed evidence already present", edit: func(r *Receipt, _ *SourceReceipt) { r.NonAtomicDelta = &NonAtomicDeltaEvidence{} }},
+		{name: "missing pulls", edit: func(r *Receipt, _ *SourceReceipt) { r.Sources = r.Sources[:1] }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipt := cloneCorpus(base).Receipt
+			candidate, _ := sourceByName(receipt.Sources, "issues")
+			tt.edit(&receipt, &candidate)
+			if isLegacyMixedPullCheckpoint(receipt, candidate) {
+				t.Fatal("contradictory shape recognized as legacy")
+			}
+		})
 	}
 }
 

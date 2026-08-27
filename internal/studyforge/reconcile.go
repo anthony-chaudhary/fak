@@ -9,7 +9,11 @@ import (
 const (
 	identityBasisCaptured         = "captured_endpoint_rows"
 	identityBasisLegacyProjection = "legacy_checkpoint_projection"
+	identityBasisLegacyCountOnly  = "legacy_checkpoint_counts"
+	legacyCountOnlyReason         = "legacy_mixed_pull_identities_not_retained"
 )
+
+func intPointer(value int) *int { return &value }
 
 func identityFromRecord(record Record) CrossEndpointIdentity {
 	return CrossEndpointIdentity{ID: record.ID, Number: record.Number, NodeID: record.NodeID}
@@ -62,9 +66,10 @@ func defaultNonAtomicDeltaPolicy() NonAtomicDeltaPolicy {
 	}
 }
 
-// reconcileNonAtomicDelta derives the exact set relation once both endpoint
-// traversals are terminal. Legacy projection is deliberately handled by the
-// resume-only upgrade before this strict reconciler runs.
+// reconcileNonAtomicDelta derives the set relation once both endpoint
+// traversals are terminal. New captures use exact identities. A typed legacy
+// count-only marker stays count-only forever; dedicated identities must never
+// be projected into the missing mixed endpoint set.
 func reconcileNonAtomicDelta(corpus *Corpus) error {
 	issuesIndex, pullsIndex := -1, -1
 	for i := range corpus.Receipt.Sources {
@@ -86,6 +91,17 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 		return nil
 	}
 
+	if corpus.Receipt.NonAtomicDelta != nil && corpus.Receipt.NonAtomicDelta.EvidenceMode == NonAtomicDeltaEvidenceModeLegacyCountOnly {
+		reconcileLegacyCountOnlyDelta(corpus, *issues, *pulls)
+		switch corpus.Receipt.NonAtomicDelta.Verdict {
+		case NonAtomicDeltaVerdictAccepted:
+			return nil
+		case NonAtomicDeltaVerdictRejected:
+			return fmt.Errorf("legacy count-only non_atomic_delta rejected: symmetric_difference_lower_bound=%d limit=%d", corpus.Receipt.NonAtomicDelta.SymmetricDifferenceLowerBound, corpus.Receipt.NonAtomicDelta.Policy.MaxTotal)
+		default:
+			return fmt.Errorf("legacy count-only non_atomic_delta is compatible but unproven: symmetric_difference=%d..%d limit=%d", corpus.Receipt.NonAtomicDelta.SymmetricDifferenceLowerBound, corpus.Receipt.NonAtomicDelta.SymmetricDifferenceUpperBound, corpus.Receipt.NonAtomicDelta.Policy.MaxTotal)
+		}
+	}
 	basis := identityBasisCaptured
 	if corpus.Receipt.NonAtomicDelta != nil && corpus.Receipt.NonAtomicDelta.IdentityBasis == identityBasisLegacyProjection {
 		basis = identityBasisLegacyProjection
@@ -129,22 +145,29 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 	policy := defaultNonAtomicDeltaPolicy()
 	accepted := len(onlyMixed) <= policy.MaxOnlyInMixed && len(onlyDedicated) <= policy.MaxOnlyInDedicated && len(onlyMixed)+len(onlyDedicated) <= policy.MaxTotal
 	corpus.Receipt.NonAtomicDelta = &NonAtomicDeltaEvidence{
-		Type:                 NonAtomicDeltaType,
-		MixedSource:          "issues",
-		DedicatedSource:      "pulls",
-		IdentityBasis:        basis,
-		MixedCrawl:           CrawlWindow{StartedAt: issues.CrawlStartedAt, EndedAt: issues.CrawlEndedAt},
-		DedicatedCrawl:       CrawlWindow{StartedAt: pulls.CrawlStartedAt, EndedAt: pulls.CrawlEndedAt},
-		MixedCount:           len(mixed),
-		DedicatedCount:       len(dedicated),
-		OverlapCount:         len(overlap),
-		OnlyInMixedCount:     len(onlyMixed),
-		OnlyInDedicatedCount: len(onlyDedicated),
-		Overlap:              overlap,
-		OnlyInMixed:          onlyMixed,
-		OnlyInDedicated:      onlyDedicated,
-		Policy:               policy,
-		Accepted:             accepted,
+		Type:                          NonAtomicDeltaType,
+		MixedSource:                   "issues",
+		DedicatedSource:               "pulls",
+		EvidenceMode:                  NonAtomicDeltaEvidenceModeExactIdentity,
+		IdentityBasis:                 basis,
+		MixedEvidence:                 CrossEndpointEvidenceExactIdentities,
+		DedicatedEvidence:             CrossEndpointEvidenceExactIdentities,
+		RelationEvidence:              CrossEndpointEvidenceExactIdentities,
+		MixedCrawl:                    CrawlWindow{StartedAt: issues.CrawlStartedAt, EndedAt: issues.CrawlEndedAt},
+		DedicatedCrawl:                CrawlWindow{StartedAt: pulls.CrawlStartedAt, EndedAt: pulls.CrawlEndedAt},
+		MixedCount:                    len(mixed),
+		DedicatedCount:                len(dedicated),
+		OverlapCount:                  intPointer(len(overlap)),
+		OnlyInMixedCount:              intPointer(len(onlyMixed)),
+		OnlyInDedicatedCount:          intPointer(len(onlyDedicated)),
+		Overlap:                       overlap,
+		OnlyInMixed:                   onlyMixed,
+		OnlyInDedicated:               onlyDedicated,
+		SymmetricDifferenceLowerBound: len(onlyMixed) + len(onlyDedicated),
+		SymmetricDifferenceUpperBound: len(onlyMixed) + len(onlyDedicated),
+		Policy:                        policy,
+		Verdict:                       map[bool]string{true: NonAtomicDeltaVerdictAccepted, false: NonAtomicDeltaVerdictRejected}[accepted],
+		Accepted:                      accepted,
 	}
 	if !accepted {
 		return fmt.Errorf("non_atomic_delta exceeds policy: only_in_mixed=%d only_in_dedicated=%d total=%d limit=%d", len(onlyMixed), len(onlyDedicated), len(onlyMixed)+len(onlyDedicated), DefaultNonAtomicDeltaLimit)
@@ -152,11 +175,49 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 	return nil
 }
 
+func reconcileLegacyCountOnlyDelta(corpus *Corpus, issues, pulls SourceReceipt) {
+	mixedCount := issues.ClassifiedPullCount
+	dedicatedCount := len(recordsForSource(corpus.Records, "pulls"))
+	lower := mixedCount - dedicatedCount
+	if lower < 0 {
+		lower = -lower
+	}
+	upper := mixedCount + dedicatedCount
+	policy := defaultNonAtomicDeltaPolicy()
+	minimumOnlyMixed := max(mixedCount-dedicatedCount, 0)
+	minimumOnlyDedicated := max(dedicatedCount-mixedCount, 0)
+	verdict := NonAtomicDeltaVerdictCompatibleUnproven
+	if lower > policy.MaxTotal || minimumOnlyMixed > policy.MaxOnlyInMixed || minimumOnlyDedicated > policy.MaxOnlyInDedicated {
+		verdict = NonAtomicDeltaVerdictRejected
+	} else if upper <= policy.MaxTotal && mixedCount <= policy.MaxOnlyInMixed && dedicatedCount <= policy.MaxOnlyInDedicated {
+		verdict = NonAtomicDeltaVerdictAccepted
+	}
+	corpus.Receipt.NonAtomicDelta = &NonAtomicDeltaEvidence{
+		Type:                          NonAtomicDeltaType,
+		MixedSource:                   "issues",
+		DedicatedSource:               "pulls",
+		EvidenceMode:                  NonAtomicDeltaEvidenceModeLegacyCountOnly,
+		EvidenceReason:                legacyCountOnlyReason,
+		IdentityBasis:                 identityBasisLegacyCountOnly,
+		MixedEvidence:                 CrossEndpointEvidenceExactCountOnly,
+		DedicatedEvidence:             CrossEndpointEvidenceExactIdentities,
+		RelationEvidence:              CrossEndpointEvidenceUnavailable,
+		MixedCrawl:                    CrawlWindow{StartedAt: issues.CrawlStartedAt, EndedAt: issues.CrawlEndedAt},
+		DedicatedCrawl:                CrawlWindow{StartedAt: pulls.CrawlStartedAt, EndedAt: pulls.CrawlEndedAt},
+		MixedCount:                    mixedCount,
+		DedicatedCount:                dedicatedCount,
+		SymmetricDifferenceLowerBound: lower,
+		SymmetricDifferenceUpperBound: upper,
+		Policy:                        policy,
+		Verdict:                       verdict,
+		Accepted:                      verdict == NonAtomicDeltaVerdictAccepted,
+	}
+}
+
 // upgradeLegacyMixedPullEvidence performs the one-way pre-#9314 migration.
-// The old issues receipt retained the exact classified count while the pulls
-// source retained typed PR identities. Equality is the only uniquely
-// projectable case; a subset or superset would require guessing which IDs were
-// observed by the mixed endpoint and therefore fails closed.
+// The old issues receipt retained an exact classified count but no identities.
+// Once the pulls census is terminal, this records that asymmetry explicitly;
+// it never copies dedicated identities into the missing mixed set.
 func upgradeLegacyMixedPullEvidence(corpus *Corpus) (bool, error) {
 	issuesIndex, pullsIndex := -1, -1
 	for i := range corpus.Receipt.Sources {
@@ -170,39 +231,23 @@ func upgradeLegacyMixedPullEvidence(corpus *Corpus) (bool, error) {
 	if issuesIndex < 0 || pullsIndex < 0 || !isLegacyMixedPullCheckpoint(corpus.Receipt, corpus.Receipt.Sources[issuesIndex]) {
 		return false, nil
 	}
-	issues := corpus.Receipt.Sources[issuesIndex]
 	pulls := corpus.Receipt.Sources[pullsIndex]
 	if pulls.Status != StatusComplete {
 		return false, nil
 	}
 
 	pullRecords := recordsForSource(corpus.Records, "pulls")
-	if len(pullRecords) != issues.ClassifiedPullCount {
-		return false, fmt.Errorf("legacy checkpoint mixed pull evidence is ambiguous: classified_pull_count=%d dedicated_identity_count=%d", issues.ClassifiedPullCount, len(pullRecords))
-	}
-	identities := make([]CrossEndpointIdentity, 0, len(pullRecords))
 	for _, record := range pullRecords {
 		if record.ID <= 0 || record.Number <= 0 || record.NodeID == "" || record.Kind != "pull" || record.Source != "pulls" {
 			return false, fmt.Errorf("legacy checkpoint pull %d lacks an exact dedicated identity", record.ID)
 		}
-		identities = append(identities, identityFromRecord(record))
-	}
-	sortIdentities(identities)
-	if err := validateIdentityList("legacy checkpoint dedicated pulls", identities); err != nil {
-		return false, err
 	}
 
 	upgraded := cloneCorpus(*corpus)
 	for i := range upgraded.Receipt.Sources {
 		backfillCrawlWindow(&upgraded.Receipt.Sources[i])
 	}
-	upgradedIssues := &upgraded.Receipt.Sources[issuesIndex]
-	upgradedIssues.ClassifiedPullIdentities = identities
-	upgradedIssues.ClassifiedPullChecksum = identityDigest(identities)
-	upgraded.Receipt.NonAtomicDelta = &NonAtomicDeltaEvidence{IdentityBasis: identityBasisLegacyProjection}
-	if err := reconcileNonAtomicDelta(&upgraded); err != nil {
-		return false, fmt.Errorf("upgrade legacy mixed pull evidence: %w", err)
-	}
+	reconcileLegacyCountOnlyDelta(&upgraded, upgraded.Receipt.Sources[issuesIndex], upgraded.Receipt.Sources[pullsIndex])
 	*corpus = upgraded
 	return true, nil
 }
