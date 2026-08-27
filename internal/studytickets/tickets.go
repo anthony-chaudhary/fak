@@ -2,7 +2,11 @@
 package studytickets
 
 import (
+	"bytes"
+	"embed"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 )
 
@@ -18,44 +22,114 @@ const (
 )
 
 type Ticket struct {
-	ClusterID                                                                                                                 string
-	Disposition                                                                                                               Disposition
-	Issue                                                                                                                     int
-	Existing                                                                                                                  bool
-	Outcome, Source, For, Problem, Today, BetterBecause, Witness, Centrality, P1P4, Horizon, CloseCondition, NativeConstraint string
-	Dependencies                                                                                                              []string
+	ClusterID        string      `json:"cluster_id"`
+	CandidateID      string      `json:"candidate_id,omitempty"`
+	Disposition      Disposition `json:"disposition"`
+	Issue            int         `json:"issue,omitempty"`
+	Existing         bool        `json:"existing,omitempty"`
+	Outcome          string      `json:"outcome,omitempty"`
+	Source           string      `json:"source,omitempty"`
+	For              string      `json:"for,omitempty"`
+	Problem          string      `json:"problem,omitempty"`
+	Today            string      `json:"today,omitempty"`
+	BetterBecause    string      `json:"better_because,omitempty"`
+	Witness          string      `json:"witness,omitempty"`
+	Centrality       string      `json:"centrality,omitempty"`
+	P1P4             string      `json:"p1_p4,omitempty"`
+	Horizon          string      `json:"horizon,omitempty"`
+	CloseCondition   string      `json:"close_condition,omitempty"`
+	NativeConstraint string      `json:"native_constraint,omitempty"`
+	Dependencies     []string    `json:"dependencies,omitempty"`
 }
+
 type Audit struct {
-	Schema, Cutoff, SourceRevision, Checksum                  string
-	SourceCount, InaccessibleCount, CreatedCount, ReusedCount int
-	RefreshObligations                                        []string
-	Tickets                                                   []Ticket
+	Schema             string   `json:"schema"`
+	Cutoff             string   `json:"cutoff"`
+	SourceRevision     string   `json:"source_revision"`
+	Checksum           string   `json:"checksum"`
+	PriorityChecksum   string   `json:"priority_checksum,omitempty"`
+	SourceCount        int      `json:"source_count"`
+	InaccessibleCount  int      `json:"inaccessible_count"`
+	CreatedCount       int      `json:"created_count"`
+	ReusedCount        int      `json:"reused_count"`
+	RefreshObligations []string `json:"refresh_obligations"`
+	Tickets            []Ticket `json:"tickets"`
 }
+
+type ClosureSummary struct{ SourceClusters, ClassifiedClusters, QueueTickets, Created, Reused int }
 
 var ErrInvalid = errors.New("studytickets: closure audit invalid")
+var allowed = map[Disposition]bool{Selected: true, Matched: true, Deferred: true, Rejected: true, Landed: true, BenchmarkOnly: true}
+
+//go:embed testdata/closure-ledger.json
+var closureFS embed.FS
+
+func LoadClosureLedger() (Audit, error) {
+	raw, err := closureFS.ReadFile("testdata/closure-ledger.json")
+	if err != nil {
+		return Audit{}, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var a Audit
+	if err := dec.Decode(&a); err != nil {
+		return Audit{}, fmt.Errorf("decode closure ledger: %w", err)
+	}
+	if dec.More() {
+		return Audit{}, ErrInvalid
+	}
+	if err := Validate(a); err != nil {
+		return Audit{}, err
+	}
+	return a, nil
+}
+
+func Summary(a Audit) (ClosureSummary, error) {
+	if err := Validate(a); err != nil {
+		return ClosureSummary{}, err
+	}
+	q, err := Queue(a)
+	if err != nil {
+		return ClosureSummary{}, err
+	}
+	return ClosureSummary{len(a.Tickets), len(a.Tickets), len(q), a.CreatedCount, a.ReusedCount}, nil
+}
 
 func Validate(a Audit) error {
-	if a.Schema != "fak.study-ticket-audit/1" || a.Cutoff == "" || a.SourceRevision == "" || a.Checksum == "" || len(a.Tickets) != a.SourceCount {
+	if a.Schema != "fak.study-ticket-audit/1" || a.Cutoff == "" || a.SourceRevision == "" || a.Checksum == "" || a.PriorityChecksum == "" || len(a.Tickets) != a.SourceCount || len(a.RefreshObligations) == 0 || a.CreatedCount < 0 || a.ReusedCount < 0 {
 		return ErrInvalid
 	}
 	cluster := map[string]bool{}
-	issue := map[int]string{}
+	issues := map[int]string{}
 	selected := map[string]bool{}
+	created, reused := 0, 0
+	countedCandidates := map[string]bool{}
 	for _, t := range a.Tickets {
-		if t.ClusterID == "" || cluster[t.ClusterID] || t.Disposition == "" {
+		if t.ClusterID == "" || cluster[t.ClusterID] || !allowed[t.Disposition] {
 			return ErrInvalid
 		}
 		cluster[t.ClusterID] = true
 		if t.Disposition == Selected || t.Disposition == Matched {
-			if t.Issue <= 0 || t.Outcome == "" || t.Source == "" || t.For == "" || t.Problem == "" || t.Today == "" || t.BetterBecause == "" || t.Witness == "" || t.CloseCondition == "" {
+			if t.Issue <= 0 || t.CandidateID == "" || t.Outcome == "" || t.Source == "" || t.For == "" || t.Problem == "" || t.Today == "" || t.BetterBecause == "" || t.Witness == "" || t.Centrality == "" || t.P1P4 == "" || t.Horizon == "" || t.CloseCondition == "" || t.NativeConstraint == "" {
 				return ErrInvalid
 			}
-			if prior := issue[t.Issue]; prior != "" && prior != t.ClusterID {
+			if prior := issues[t.Issue]; prior != "" && prior != t.CandidateID {
 				return ErrInvalid
 			}
-			issue[t.Issue] = t.ClusterID
+			issues[t.Issue] = t.CandidateID
 			selected[t.ClusterID] = true
+			if !countedCandidates[t.CandidateID] {
+				countedCandidates[t.CandidateID] = true
+				if t.Existing {
+					reused++
+				} else {
+					created++
+				}
+			}
 		}
+	}
+	if created != a.CreatedCount || reused != a.ReusedCount {
+		return ErrInvalid
 	}
 	for _, t := range a.Tickets {
 		for _, d := range t.Dependencies {
@@ -69,9 +143,10 @@ func Validate(a Audit) error {
 	}
 	return nil
 }
+
 func Queue(a Audit) ([]Ticket, error) {
-	if e := Validate(a); e != nil {
-		return nil, e
+	if err := Validate(a); err != nil {
+		return nil, err
 	}
 	by := map[string]Ticket{}
 	for _, t := range a.Tickets {
@@ -95,8 +170,8 @@ func Queue(a Audit) ([]Ticket, error) {
 		sort.Strings(deps)
 		for _, d := range deps {
 			if _, ok := by[d]; ok {
-				if e := visit(d); e != nil {
-					return e
+				if err := visit(d); err != nil {
+					return err
 				}
 			}
 		}
@@ -108,10 +183,15 @@ func Queue(a Audit) ([]Ticket, error) {
 	for id := range by {
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	sort.Slice(ids, func(i, j int) bool {
+		if by[ids[i]].Issue == by[ids[j]].Issue {
+			return ids[i] < ids[j]
+		}
+		return by[ids[i]].Issue < by[ids[j]].Issue
+	})
 	for _, id := range ids {
-		if e := visit(id); e != nil {
-			return nil, e
+		if err := visit(id); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
