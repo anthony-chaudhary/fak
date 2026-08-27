@@ -23,7 +23,7 @@ func gather(root string) ([]KPI, map[string]int) {
 	}
 	llmsPresent := present(llmsFile)
 	llmsFullPresent := present(llmsFullFile)
-	idPresent, idMissing := findIdentity(texts)
+	idEvidence, idMissing := findIdentityEvidence(texts)
 	var deadLinks []string
 	for _, doc := range orientationDocs {
 		if !present(doc) {
@@ -144,7 +144,7 @@ func gather(root string) ([]KPI, map[string]int) {
 		kpiAgentsEntrypoint(agentsText, present(agentsFile)),
 		kpiAgentConfig(missingAgentConfigs(configPresent)),
 		kpiLLMSMap(llmsPresent, llmsFullPresent),
-		kpiIdentityStatement(idPresent, idMissing),
+		kpiIdentityStatementWithEvidence(idEvidence, idMissing),
 		kpiEntryLinksResolve(deadLinks),
 		kpiFirstCommand(fcFound, fcWhere),
 		kpiFirstCommandRuns(fcrFound, fcrPolicyOK, fcrPolicyRef, fcrNeedsKey),

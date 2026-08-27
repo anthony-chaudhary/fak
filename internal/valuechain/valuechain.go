@@ -10,7 +10,10 @@ import (
 	"strings"
 )
 
-const Schema = "fak-value-chain/1"
+const (
+	Schema                        = "fak-value-chain/1"
+	valueChainUnwitnessedAdvisory = "VALUECHAIN_UNWITNESSED"
+)
 
 type Manifest struct {
 	Schema   string    `json:"schema"`
@@ -177,6 +180,8 @@ func Audit(m Manifest, in Input) (Report, error) {
 	paired := map[string]map[string]bool{}
 	stageCount := map[string]int{}
 	invocationOutcomes := OutcomeCounts{}
+	usageWitnessed := false
+	outcomeWitnessed := false
 	for _, o := range in.Observations {
 		if o.ID == "" || seenObs[o.ID] {
 			return Report{}, fmt.Errorf("duplicate or empty observation id %q", o.ID)
@@ -201,6 +206,9 @@ func Audit(m Manifest, in Input) (Report, error) {
 		default:
 			return Report{}, fmt.Errorf("observation %q has invalid invocation_outcome %q", o.ID, o.InvocationOutcome)
 		}
+		if o.InvocationOutcome != "" {
+			outcomeWitnessed = true
+		}
 		if o.Turns < 0 {
 			return Report{}, fmt.Errorf("observation %q has negative turns", o.ID)
 		}
@@ -211,6 +219,12 @@ func Audit(m Manifest, in Input) (Report, error) {
 			if *o.CostUSD < 0 {
 				return Report{}, fmt.Errorf("observation %q has negative cost_usd", o.ID)
 			}
+		}
+		if o.Turns > 0 || o.CostUSD != nil {
+			usageWitnessed = true
+		}
+		if len(o.Outcomes) > 0 {
+			outcomeWitnessed = true
 		}
 		for id, value := range o.Outcomes {
 			if math.IsNaN(value) || math.IsInf(value, 0) {
@@ -261,6 +275,9 @@ func Audit(m Manifest, in Input) (Report, error) {
 		}
 	}
 	rep := Report{Schema: Schema, Name: m.Name, InvocationOutcomes: invocationOutcomes}
+	if !usageWitnessed || (len(outcomes) > 0 && !outcomeWitnessed) {
+		rep.Warnings = append(rep.Warnings, valueChainUnwitnessedAdvisory)
+	}
 	for _, s := range m.Stages {
 		status := "ABSENT"
 		if stageCount[s.ID] > 0 {

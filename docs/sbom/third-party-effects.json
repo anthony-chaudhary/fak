@@ -356,6 +356,18 @@
     },
     {
       "class": "subprocess_tool",
+      "reference": "amd-smi",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "bash",
       "consumer_domains": [
         "internal"
@@ -420,7 +432,8 @@
       "class": "subprocess_tool",
       "reference": "docker",
       "consumer_domains": [
-        "cmd"
+        "cmd",
+        "internal"
       ],
       "status": "used",
       "pin": "host_provided",
@@ -642,6 +655,18 @@
     },
     {
       "class": "subprocess_tool",
+      "reference": "rdci",
+      "consumer_domains": [
+        "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
       "reference": "schtasks.exe",
       "consumer_domains": [
         "cmd"
@@ -658,6 +683,18 @@
       "consumer_domains": [
         "cmd",
         "internal"
+      ],
+      "status": "used",
+      "pin": "host_provided",
+      "digest": "",
+      "license_record": "none",
+      "enforcement": "internal/architest/effects_register_test.go (inventory only: a new effect must be registered; no version or digest drift check)"
+    },
+    {
+      "class": "subprocess_tool",
+      "reference": "system_profiler",
+      "consumer_domains": [
+        "cmd"
       ],
       "status": "used",
       "pin": "host_provided",

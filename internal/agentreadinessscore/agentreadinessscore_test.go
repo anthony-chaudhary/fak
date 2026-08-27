@@ -262,9 +262,9 @@ func TestFindIdentityRequiredInEveryDoc(t *testing.T) {
 
 func TestFindIdentityRecognizesExistingFrontDoorLanguage(t *testing.T) {
 	texts := map[string]string{
-		"AGENTS.md": "## What this project is\n\n**fak** is an *agent kernel*: one Go binary.",
+		"AGENTS.md": strings.Repeat("operating rule\n", 55) + "## What this project is\n\n**fak** is an *agent kernel*: one Go binary that sits between an AI agent and the tools it calls.",
 		llmsFile:    "fak is an agent kernel.",
-		"README.md": "# fak — configure your agents\n\nfak lets you run your agents with a small configuration chosen for this task, while one boundary manages their context, models, tools, and record.",
+		"README.md": "# fak — configure your agents for the task at hand\n\nAI agents can do more work than one fixed set of prompts, tools, permissions, and model settings can handle well. fak gives each task a small configuration. One boundary then manages context, models, tools, and the record of what happened.",
 	}
 	if present, missing := findIdentity(texts); len(missing) != 0 || !sameSet(present, identityDocs) {
 		t.Fatalf("front-door identity present=%v missing=%v, want all present", present, missing)
@@ -273,6 +273,47 @@ func TestFindIdentityRecognizesExistingFrontDoorLanguage(t *testing.T) {
 	texts["README.md"] = "# fak\n\nFast, safe, and flexible."
 	if _, missing := findIdentity(texts); !reflect.DeepEqual(missing, []string{"README.md"}) {
 		t.Fatalf("slogan-only README missing=%v, want [README.md]", missing)
+	}
+}
+
+func TestIdentityRecognitionStaysSemanticAndReportsEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		statement string
+		want      bool
+	}{
+		{"explicit category", "fak is an agent kernel that handles every tool call.", true},
+		{"equivalent action", "fak helps you run an agent while managing its context and tools.", true},
+		{"task configuration plus boundary", "fak gives each task a small configuration. One boundary then manages context, models, tools, and the record.", true},
+		{"slogan", "fak is fast, safe, and flexible.", false},
+		{"capability list", "fak supports configurations, context, models, tools, permissions, and records.", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := identityStatementMatches(tc.statement); got != tc.want {
+				t.Fatalf("identityStatementMatches(%q) = %v, want %v", tc.statement, got, tc.want)
+			}
+		})
+	}
+
+	texts := map[string]string{
+		"AGENTS.md": strings.Repeat("operating rule\n", 55) + "## What this project is\n\n**fak** is an *agent kernel*.",
+		llmsFile:    "`fak` is an agent kernel.",
+		"README.md": "# fak\n\nfak gives each task a small configuration. One boundary then manages context, models, tools, and the record.",
+	}
+	evidence, missing := findIdentityEvidence(texts)
+	if len(missing) != 0 || len(evidence) != len(identityDocs) {
+		t.Fatalf("evidence=%+v missing=%v, want three matches", evidence, missing)
+	}
+	kpi := kpiIdentityStatementWithEvidence(evidence, missing)
+	for _, want := range []string{"AGENTS.md:58", "llms.txt:1", "README.md:3"} {
+		if !strings.Contains(kpi.Detail, want) {
+			t.Errorf("detail %q missing matched location %q", kpi.Detail, want)
+		}
+	}
+
+	missingKPI := kpiIdentityStatementWithEvidence(nil, []string{"README.md"})
+	if len(missingKPI.Defects) != 1 || !strings.Contains(missingKPI.Defects[0], "first 50 lines or under a named identity heading") {
+		t.Fatalf("missing diagnostic = %+v", missingKPI)
 	}
 }
 func TestMissingGuardrailsDetectsGaps(t *testing.T) {
@@ -1136,12 +1177,28 @@ func TestLivePayloadIsWellFormed(t *testing.T) {
 	if len(p.KPIs) != len(kpiWeights) {
 		t.Fatalf("live payload has %d KPIs, want the weighted set of %d", len(p.KPIs), len(kpiWeights))
 	}
+	var identity *KPI
 	for _, k := range p.KPIs {
 		if k.Kpi == "" || k.Group == "" {
 			t.Errorf("KPI missing kpi/group: %+v", k)
 		}
 		if k.Defects == nil || k.Soft == nil {
 			t.Errorf("KPI %q must carry non-nil defects/soft slices (JSON [] not null)", k.Kpi)
+		}
+		if k.Kpi == "identity_statement" {
+			k := k
+			identity = &k
+		}
+	}
+	if identity == nil {
+		t.Fatal("live payload has no identity_statement KPI")
+	}
+	if identity.Score != 100 || len(identity.Defects) != 0 {
+		t.Fatalf("live identity KPI = %+v, want the three current front doors recognized", *identity)
+	}
+	for _, doc := range identityDocs {
+		if !strings.Contains(identity.Detail, doc+":") {
+			t.Errorf("live identity detail %q does not cite %s", identity.Detail, doc)
 		}
 	}
 	frontier := corpusInt(p.Corpus, "experience_frontier")

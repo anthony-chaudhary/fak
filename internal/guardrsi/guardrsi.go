@@ -112,15 +112,8 @@ type Iteration struct {
 	KeepRevertRule  string         `json:"keep_revert_rule"`
 }
 
-type KPIResult struct {
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	Hard   bool   `json:"hard"`
-	Weight int    `json:"weight"`
-	Axis   string `json:"axis"`
-	Passed bool   `json:"passed"`
-	Detail string `json:"detail"`
-}
+// KPIResult is the binary scorecard criterion shape shared by the Go-native cards.
+type KPIResult = scorecard.BinaryResult
 
 func JournalPaths(root, explicit string) []string {
 	if explicit != "" {
@@ -442,21 +435,6 @@ const (
 	realizedAxisWeight = 0.6
 )
 
-// toKPI converts one maturity/realized KPIResult into the shared kernel's scorecard.KPI: a
-// HARD failure becomes a Defect (counted debt), a SOFT (non-hard) failure becomes a Soft
-// advisory (never debt) -- exactly mirroring the pre-kernel kpiPayloads mapping.
-func toKPI(r KPIResult, axisWeight float64) (scorecard.KPI, float64) {
-	k := scorecard.KPI{Key: r.Key, Group: r.Axis, Detail: r.Detail}
-	if r.Passed {
-		k.Score = 100
-	} else if r.Hard {
-		k.Defects = []string{r.Key + ": " + r.Detail}
-	} else {
-		k.Soft = []string{r.Key + ": " + r.Detail}
-	}
-	return k, axisWeight * float64(r.Weight)
-}
-
 // BuildScorecard folds the guard-RSI loop's maturity/realized KPIs into the control-pane
 // payload via the shared pkg/scorecard kernel (#1511), mirroring internal/conflationscore.
 // The KPIs, their hard/soft classification, their weights, and the resulting composite/grade
@@ -466,24 +444,17 @@ func BuildScorecard(root string) scorecard.Payload {
 	maturity := maturityResults(ctx)
 	realized := realizedResults(ctx)
 
-	kpis := make([]scorecard.KPI, 0, len(maturity)+len(realized))
-	weights := make(map[string]float64, len(maturity)+len(realized))
-	for _, r := range maturity {
-		k, w := toKPI(r, maturityAxisWeight)
-		kpis = append(kpis, k)
-		weights[k.Key] = w
-	}
-	for _, r := range realized {
-		k, w := toKPI(r, realizedAxisWeight)
-		kpis = append(kpis, k)
-		weights[k.Key] = w
-	}
+	all := append(append([]KPIResult{}, maturity...), realized...)
+	kpis, weights := scorecard.ProjectBinaryScaled(all, map[string]float64{
+		"maturity": maturityAxisWeight,
+		"realized": realizedAxisWeight,
+	}, nil)
 
-	mScore := axisScore(maturity)
-	rScore := axisScore(realized)
+	mScore := scorecard.BinaryAxisScore(maturity)
+	rScore := scorecard.BinaryAxisScore(realized)
 
 	var hardFail []KPIResult
-	for _, r := range append(append([]KPIResult{}, maturity...), realized...) {
+	for _, r := range all {
 		if r.Hard && !r.Passed {
 			hardFail = append(hardFail, r)
 		}
@@ -614,20 +585,6 @@ func auditDetail(c context) string {
 		return fmt.Sprintf("%d real adjudicated row(s) across %d journal(s) -- the verdict loop can bank a kept iteration on our own usage", c.auditRows, c.auditJournals)
 	}
 	return "0 real rows -- the loop cannot close yet (" + c.auditDiagnose + ")"
-}
-
-func axisScore(rows []KPIResult) int {
-	total, got := 0, 0
-	for _, r := range rows {
-		total += r.Weight
-		if r.Passed {
-			got += r.Weight
-		}
-	}
-	if total == 0 {
-		return 0
-	}
-	return int(math.Round(100 * float64(got) / float64(total)))
 }
 
 func configHome() string {

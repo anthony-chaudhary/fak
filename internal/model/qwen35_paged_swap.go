@@ -32,8 +32,19 @@ func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) ([]byte, error) {
 			return nil, fmt.Errorf("model: Qwen hybrid swap layer %d row geometry mismatch", l)
 		}
 	}
-	var payload bytes.Buffer
-	e := qwenSwapEncoder{w: &payload}
+	if c.linear == nil {
+		return nil, errors.New("model: Qwen hybrid swap missing linear state")
+	}
+	blocks := qwenSwapCeilDiv(n, blockTokens)
+	bodyBytes, err := qwenHybridSwapBodyBytes(c, blockTokens, full, blocks, stride)
+	if err != nil {
+		return nil, err
+	}
+	if bodyBytes > int(^uint(0)>>1)-sha256.Size {
+		return nil, errors.New("model: Qwen hybrid swap size overflow")
+	}
+	payload := make([]byte, bodyBytes+sha256.Size)
+	e := qwenSwapEncoder{buf: payload[:bodyBytes]}
 	e.bytes([]byte(qwenHybridPagedSwapMagic))
 	e.u32(1)
 	e.config(cfg)
@@ -41,10 +52,6 @@ func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) ([]byte, error) {
 	e.integer(n)
 	e.ints(c.pos)
 	e.ints(full)
-	blocks := 0
-	if n > 0 {
-		blocks = (n + blockTokens - 1) / blockTokens
-	}
 	e.integer(blocks)
 	for b := 0; b < blocks; b++ {
 		for _, l := range full {
@@ -60,9 +67,6 @@ func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) ([]byte, error) {
 			}
 		}
 	}
-	if c.linear == nil {
-		return nil, errors.New("model: Qwen hybrid swap missing linear state")
-	}
 	e.integer(len(c.linear.layers))
 	for l := range c.linear.layers {
 		st := c.linear.layers[l]
@@ -72,13 +76,17 @@ func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) ([]byte, error) {
 	if e.err != nil {
 		return nil, e.err
 	}
-	sum := sha256.Sum256(payload.Bytes())
-	return append(payload.Bytes(), sum[:]...), nil
+	if e.off != bodyBytes {
+		return nil, errors.New("model: internal Qwen hybrid swap size mismatch")
+	}
+	sum := sha256.Sum256(payload[:bodyBytes])
+	copy(payload[bodyBytes:], sum[:])
+	return payload, nil
 }
 
 // QwenHybridKVCacheFromHost validates and restores a Qwen swap blob into a fresh cache.
-// Validation completes before NewKVCache allocates the destination, so refusal cannot
-// partially mutate a live cache or leak paged allocations.
+// The destination remains private until every validation passes, so refusal cannot
+// partially mutate or publish a live cache.
 func QwenHybridKVCacheFromHost(cfg Config, data []byte) (*KVCache, error) {
 	if !cfg.IsQwen35Hybrid() {
 		return nil, errors.New("model: Qwen hybrid restore requires a Qwen hybrid config")
@@ -91,7 +99,7 @@ func QwenHybridKVCacheFromHost(cfg Config, data []byte) (*KVCache, error) {
 	if !bytes.Equal(got, want[:]) {
 		return nil, errors.New("model: Qwen hybrid swap checksum mismatch")
 	}
-	d := qwenSwapDecoder{r: bytes.NewReader(body)}
+	d := qwenSwapDecoder{buf: body}
 	if string(d.bytes()) != qwenHybridPagedSwapMagic {
 		return nil, errors.New("model: invalid Qwen hybrid swap blob")
 	}
@@ -109,22 +117,34 @@ func QwenHybridKVCacheFromHost(cfg Config, data []byte) (*KVCache, error) {
 	if blockTokens <= 0 || n < 0 || len(pos) != n || !qwenSwapEqualInts(full, expectedFull) || blocks != qwenSwapCeilDiv(n, blockTokens) {
 		return nil, errors.New("model: Qwen hybrid swap geometry mismatch")
 	}
-	k := make([][]float32, len(full))
-	kr := make([][]float32, len(full))
-	v := make([][]float32, len(full))
+	rowFloats, ok := qwenSwapSizeProduct(n, stride)
+	if !ok {
+		return nil, errors.New("model: Qwen hybrid swap geometry mismatch")
+	}
+	pageFloats, ok := qwenSwapSizeProduct(blocks, len(full), 3, blockTokens, stride)
+	if !ok {
+		return nil, errors.New("model: Qwen hybrid swap geometry mismatch")
+	}
+	if pageFloats > d.remaining()/4 {
+		return nil, io.ErrUnexpectedEOF
+	}
+	out := newQwenHybridSwapCache(cfg)
+	out.pos = pos
+	for _, l := range full {
+		out.K[l] = make([]float32, rowFloats)
+		out.Kraw[l] = make([]float32, rowFloats)
+		out.V[l] = make([]float32, rowFloats)
+	}
 	for b := 0; b < blocks; b++ {
-		for fi := range full {
-			for pi, dst := range [][][]float32{k, kr, v} {
-				_ = pi
-				rows := d.f32raw(blockTokens * stride)
-				live := n - b*blockTokens
-				if live > blockTokens {
-					live = blockTokens
-				}
-				if live < 0 {
-					live = 0
-				}
-				dst[fi] = append(dst[fi], rows[:live*stride]...)
+		rowStart := b * blockTokens
+		live := min(blockTokens, n-rowStart)
+		liveFloats := live * stride
+		paddingFloats := (blockTokens - live) * stride
+		for _, l := range full {
+			for _, dst := range [][]float32{out.K[l], out.Kraw[l], out.V[l]} {
+				start := rowStart * stride
+				d.f32rawInto(dst[start : start+liveFloats])
+				d.skipF32(paddingFloats)
 			}
 		}
 	}
@@ -132,48 +152,47 @@ func QwenHybridKVCacheFromHost(cfg Config, data []byte) (*KVCache, error) {
 	if layerCount != cfg.NumLayers {
 		return nil, errors.New("model: Qwen hybrid swap linear layer count mismatch")
 	}
-	conv := make([][][]float32, layerCount)
-	rec := make([][][]float32, layerCount)
 	_, _, _, _, _, _, convDim := cfg.linearAttnDims()
 	for l := 0; l < layerCount; l++ {
-		conv[l] = d.f32rows()
-		rec[l] = d.f32rows()
+		conv := d.f32rows()
+		rec := d.f32rows()
 		if cfg.isLinearAttnLayer(l) {
-			if len(rec[l]) != cfg.LinearNumValueHeads {
+			if len(rec) != cfg.LinearNumValueHeads {
 				return nil, fmt.Errorf("model: Qwen hybrid swap recurrent geometry mismatch at layer %d", l)
 			}
-			for _, row := range rec[l] {
+			for _, row := range rec {
 				if len(row) != cfg.LinearKeyHeadDim*cfg.LinearValueHeadDim {
 					return nil, fmt.Errorf("model: Qwen hybrid swap recurrent row mismatch at layer %d", l)
 				}
 			}
-			if len(conv[l]) > max(0, cfg.LinearConvKernelDim-1) {
+			if len(conv) > max(0, cfg.LinearConvKernelDim-1) {
 				return nil, fmt.Errorf("model: Qwen hybrid swap conv window mismatch at layer %d", l)
 			}
-			for _, row := range conv[l] {
+			for _, row := range conv {
 				if len(row) != convDim {
 					return nil, fmt.Errorf("model: Qwen hybrid swap conv row mismatch at layer %d", l)
 				}
 			}
-		} else if len(conv[l]) != 0 || len(rec[l]) != 0 {
+		} else if len(conv) != 0 || len(rec) != 0 {
 			return nil, fmt.Errorf("model: Qwen hybrid swap state on full-attention layer %d", l)
 		}
+		out.linear.layers[l].conv, out.linear.layers[l].recurrent = conv, rec
 	}
 	if d.err != nil {
 		return nil, d.err
 	}
-	if d.r.Len() != 0 {
+	if d.remaining() != 0 {
 		return nil, errors.New("model: trailing Qwen hybrid swap bytes")
 	}
-	out := NewKVCache(cfg)
-	out.pos = append([]int(nil), pos...)
-	for fi, l := range full {
-		out.K[l], out.Kraw[l], out.V[l] = k[fi], kr[fi], v[fi]
-	}
-	for l := range out.linear.layers {
-		out.linear.layers[l].conv, out.linear.layers[l].recurrent = conv[l], rec[l]
-	}
 	return out, nil
+}
+
+func newQwenHybridSwapCache(cfg Config) *KVCache {
+	leanCfg := cfg
+	leanCfg.LinearNumValueHeads = 0
+	out := NewKVCache(leanCfg)
+	out.cfg = cfg
+	return out
 }
 
 func qwenFullAttentionLayers(cfg Config) []int {
@@ -189,7 +208,7 @@ func qwenSwapCeilDiv(n, d int) int {
 	if n == 0 {
 		return 0
 	}
-	return (n + d - 1) / d
+	return 1 + (n-1)/d
 }
 func qwenSwapEqualInts(a, b []int) bool {
 	if len(a) != len(b) {
@@ -203,28 +222,135 @@ func qwenSwapEqualInts(a, b []int) bool {
 	return true
 }
 
-type qwenSwapEncoder struct {
-	w   io.Writer
+func qwenHybridSwapBodyBytes(c *KVCache, blockTokens int, full []int, blocks, stride int) (int, error) {
+	s := qwenSwapSizer{}
+	s.bytes(len(qwenHybridPagedSwapMagic))
+	s.add(4) // format version
+	for range 9 {
+		s.add(8)
+	}
+	s.add(8) // layer-type count
+	for _, layerType := range c.cfg.LayerTypes {
+		s.bytes(len(layerType))
+	}
+	s.add(16) // blockTokens and live token count
+	s.ints(c.pos)
+	s.ints(full)
+	s.add(8) // padded block count
+	pageFloats, ok := qwenSwapSizeProduct(blocks, len(full), 3, blockTokens, stride)
+	if !ok {
+		return 0, errors.New("model: Qwen hybrid swap size overflow")
+	}
+	pageBytes, ok := qwenSwapSizeProduct(pageFloats, 4)
+	if !ok {
+		return 0, errors.New("model: Qwen hybrid swap size overflow")
+	}
+	s.add(pageBytes)
+	s.add(8) // linear layer count
+	for l := range c.linear.layers {
+		s.f32rows(c.linear.layers[l].conv)
+		s.f32rows(c.linear.layers[l].recurrent)
+	}
+	if s.err != nil {
+		return 0, s.err
+	}
+	return s.n, nil
+}
+
+type qwenSwapSizer struct {
+	n   int
 	err error
 }
 
-func (e *qwenSwapEncoder) write(v any) {
-	if e.err == nil {
-		e.err = binary.Write(e.w, binary.LittleEndian, v)
+func (s *qwenSwapSizer) add(n int) {
+	if s.err != nil {
+		return
+	}
+	if n < 0 || n > int(^uint(0)>>1)-s.n {
+		s.err = errors.New("model: Qwen hybrid swap size overflow")
+		return
+	}
+	s.n += n
+}
+
+func (s *qwenSwapSizer) bytes(n int) {
+	s.add(8)
+	s.add(n)
+}
+
+func (s *qwenSwapSizer) ints(v []int) {
+	s.add(8)
+	n, ok := qwenSwapSizeProduct(len(v), 8)
+	if !ok {
+		s.err = errors.New("model: Qwen hybrid swap size overflow")
+		return
+	}
+	s.add(n)
+}
+
+func (s *qwenSwapSizer) f32rows(rows [][]float32) {
+	s.add(8)
+	for _, row := range rows {
+		s.add(8)
+		n, ok := qwenSwapSizeProduct(len(row), 4)
+		if !ok {
+			s.err = errors.New("model: Qwen hybrid swap size overflow")
+			return
+		}
+		s.add(n)
 	}
 }
-func (e *qwenSwapEncoder) u32(v uint32) { e.write(v) }
+
+func qwenSwapSizeProduct(values ...int) (int, bool) {
+	product := 1
+	maxInt := int(^uint(0) >> 1)
+	for _, value := range values {
+		if value < 0 || value != 0 && product > maxInt/value {
+			return 0, false
+		}
+		product *= value
+	}
+	return product, true
+}
+
+type qwenSwapEncoder struct {
+	buf []byte
+	off int
+	err error
+}
+
+func (e *qwenSwapEncoder) take(n int) []byte {
+	if e.err != nil {
+		return nil
+	}
+	if n < 0 || n > len(e.buf)-e.off {
+		e.err = io.ErrShortBuffer
+		return nil
+	}
+	out := e.buf[e.off : e.off+n]
+	e.off += n
+	return out
+}
+
+func (e *qwenSwapEncoder) u32(v uint32) {
+	if b := e.take(4); b != nil {
+		binary.LittleEndian.PutUint32(b, v)
+	}
+}
+
 func (e *qwenSwapEncoder) integer(v int) {
 	if v < 0 {
 		e.err = errors.New("model: negative Qwen hybrid swap value")
 		return
 	}
-	e.write(uint64(v))
+	if b := e.take(8); b != nil {
+		binary.LittleEndian.PutUint64(b, uint64(v))
+	}
 }
 func (e *qwenSwapEncoder) bytes(v []byte) {
 	e.integer(len(v))
-	if e.err == nil {
-		_, e.err = e.w.Write(v)
+	if b := e.take(len(v)); b != nil {
+		copy(b, v)
 	}
 }
 func (e *qwenSwapEncoder) ints(v []int) {
@@ -234,14 +360,26 @@ func (e *qwenSwapEncoder) ints(v []int) {
 	}
 }
 func (e *qwenSwapEncoder) f32raw(v []float32) {
-	for _, x := range v {
-		e.write(math.Float32bits(x))
+	n, ok := qwenSwapSizeProduct(len(v), 4)
+	if !ok {
+		e.err = errors.New("model: Qwen hybrid swap size overflow")
+		return
+	}
+	b := e.take(n)
+	if b == nil {
+		return
+	}
+	for i, x := range v {
+		binary.LittleEndian.PutUint32(b[i*4:], math.Float32bits(x))
 	}
 }
 func (e *qwenSwapEncoder) zeros(n int) {
-	for i := 0; i < n; i++ {
-		e.write(uint32(0))
+	bytes, ok := qwenSwapSizeProduct(n, 4)
+	if !ok {
+		e.err = errors.New("model: Qwen hybrid swap size overflow")
+		return
 	}
+	e.take(bytes) // The exact-sized destination is zero-initialized.
 }
 func (e *qwenSwapEncoder) f32rows(v [][]float32) {
 	e.integer(len(v))
@@ -261,21 +399,24 @@ func (e *qwenSwapEncoder) config(c Config) {
 }
 
 type qwenSwapDecoder struct {
-	r   *bytes.Reader
+	buf []byte
+	off int
 	err error
 }
+
+func (d *qwenSwapDecoder) remaining() int { return len(d.buf) - d.off }
 
 func (d *qwenSwapDecoder) take(n int) []byte {
 	if d.err != nil {
 		return nil
 	}
-	if n < 0 || n > d.r.Len() {
+	if n < 0 || n > d.remaining() {
 		d.err = io.ErrUnexpectedEOF
 		return nil
 	}
-	b := make([]byte, n)
-	_, d.err = io.ReadFull(d.r, b)
-	return b
+	out := d.buf[d.off : d.off+n]
+	d.off += n
+	return out
 }
 func (d *qwenSwapDecoder) u32() uint32 {
 	b := d.take(4)
@@ -299,30 +440,50 @@ func (d *qwenSwapDecoder) integer() int {
 func (d *qwenSwapDecoder) bytes() []byte { return d.take(d.integer()) }
 func (d *qwenSwapDecoder) ints() []int {
 	n := d.integer()
-	if n < 0 || n > d.r.Len()/8 {
+	if n < 0 || n > d.remaining()/8 {
 		d.err = io.ErrUnexpectedEOF
 		return nil
 	}
 	out := make([]int, n)
+	b := d.take(n * 8)
 	for i := range out {
-		out[i] = d.integer()
+		v := binary.LittleEndian.Uint64(b[i*8:])
+		if v > uint64(^uint(0)>>1) {
+			d.err = errors.New("model: Qwen hybrid swap integer overflow")
+			return nil
+		}
+		out[i] = int(v)
 	}
 	return out
 }
 func (d *qwenSwapDecoder) f32raw(n int) []float32 {
-	if n < 0 || n > d.r.Len()/4 {
+	if n < 0 || n > d.remaining()/4 {
 		d.err = io.ErrUnexpectedEOF
 		return nil
 	}
 	out := make([]float32, n)
-	for i := range out {
-		out[i] = math.Float32frombits(d.u32())
-	}
+	d.f32rawInto(out)
 	return out
+}
+func (d *qwenSwapDecoder) f32rawInto(out []float32) {
+	b := d.take(len(out) * 4)
+	if b == nil {
+		return
+	}
+	for i := range out {
+		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
+	}
+}
+func (d *qwenSwapDecoder) skipF32(n int) {
+	if n < 0 || n > d.remaining()/4 {
+		d.err = io.ErrUnexpectedEOF
+		return
+	}
+	d.take(n * 4)
 }
 func (d *qwenSwapDecoder) f32rows() [][]float32 {
 	n := d.integer()
-	if n < 0 || n > d.r.Len()/8 {
+	if n < 0 || n > d.remaining()/8 {
 		d.err = io.ErrUnexpectedEOF
 		return nil
 	}

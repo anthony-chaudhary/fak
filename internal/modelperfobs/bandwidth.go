@@ -53,11 +53,20 @@ type Rooflines struct {
 	SelectedSource         string   `json:"selected_source,omitempty"`
 }
 
+// BandwidthScope identifies whose counters a live rate represents. A phase
+// label can temporally align a package/system observation with a request, but
+// it does not narrow shared traffic to that process or model.
+type BandwidthScope struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id,omitempty"`
+}
+
 type LiveBandwidth struct {
-	ReadGBS     *float64 `json:"read_gb_s,omitempty"`
-	WriteGBS    *float64 `json:"write_gb_s,omitempty"`
-	TotalGBS    *float64 `json:"total_gb_s,omitempty"`
-	Utilization *float64 `json:"utilization,omitempty"`
+	ReadGBS     *float64        `json:"read_gb_s,omitempty"`
+	WriteGBS    *float64        `json:"write_gb_s,omitempty"`
+	TotalGBS    *float64        `json:"total_gb_s,omitempty"`
+	Utilization *float64        `json:"utilization,omitempty"`
+	Scope       *BandwidthScope `json:"scope,omitempty"`
 }
 
 type RequestSignals struct {

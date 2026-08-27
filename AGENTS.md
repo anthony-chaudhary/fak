@@ -248,8 +248,8 @@ The detailed recovery for a refusal is intentionally paged: query the token belo
 ### If the kernel refuses you (recover, don't fight it)
 
 A guard refusal names a token from the closed `[reasons.*]` vocabulary in
-[`dos.toml`](dos.toml). Query that source instead of carrying the full recovery
-cookbook in every agent context:
+[`dos.toml`](dos.toml). Run `dos man wedge <TOKEN> --explain` instead of carrying
+the full recovery cookbook in every agent context:
 
 ```bash
 dos man wedge <TOKEN> --explain  # summary, category, fix, and references

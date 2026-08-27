@@ -770,8 +770,9 @@ func newRooflineMeasurement(o RooflineBenchmarkOptions, schema string, budget ti
 }
 
 // ApplyHostRooflineMeasurement attaches a host-memory benchmark artifact and
-// applies its selected roofline only to observations whose provenance is the
-// host-memory collector. Device observations retain no host measured roofline.
+// applies its selected roofline only to live host, imported host-controller,
+// or package/system Apple observations. Device observations retain no host
+// measured roofline.
 func ApplyHostRooflineMeasurement(collection *BandwidthCollection, measurement RooflineMeasurement) error {
 	if collection == nil {
 		return fmt.Errorf("bandwidth collection is nil")
@@ -783,6 +784,12 @@ func ApplyHostRooflineMeasurement(collection *BandwidthCollection, measurement R
 	if artifact != nil && artifact.Scope.Kind != "system" {
 		return fmt.Errorf("host memory roofline requires system-aggregate host counter scope, got %s", artifact.Scope.Kind)
 	}
+	appleArtifact := collection.AppleMemoryArtifact
+	if appleArtifact != nil {
+		if err := validateAppleMemoryScope(appleArtifact.Scope); err != nil {
+			return fmt.Errorf("host memory roofline requires system/package Apple memory scope: %w", err)
+		}
+	}
 	capture := collection.Capture
 	capture.Samples = append([]BandwidthSample(nil), collection.Capture.Samples...)
 	matching := make([]int, 0, len(capture.Samples))
@@ -793,12 +800,22 @@ func ApplyHostRooflineMeasurement(collection *BandwidthCollection, measurement R
 			(sample.Provenance.Source == "host-controller-direct-bytes" || sample.Provenance.Source == "host-controller-converted-events") &&
 			sample.Provenance.Device == "host-memory" &&
 			sample.Provenance.Collector == artifact.Provider && sample.Provenance.SampledAt == artifact.CaptureEndedAt
-		if isLiveHost || isImportedHostController {
+		isImportedAppleMemory := appleArtifact != nil &&
+			(sample.Provenance.Source == "apple-memory-direct-byte-rates" || sample.Provenance.Source == "apple-memory-monotonic-byte-deltas") &&
+			sample.Provenance.Device == "apple-unified-memory" &&
+			sample.Provenance.Collector == appleArtifact.Provider && sample.Provenance.SampledAt == appleArtifact.CaptureEndedAt &&
+			sample.Live.Scope != nil &&
+			(sample.Live.Scope.Kind == "system" || sample.Live.Scope.Kind == "package") &&
+			sample.Live.Scope.Kind == appleArtifact.Scope.Kind && sample.Live.Scope.ID == appleArtifact.Scope.ID
+		if isLiveHost || isImportedHostController || isImportedAppleMemory {
 			matching = append(matching, i)
 		}
 	}
 	if artifact != nil && len(matching) != 1 {
 		return fmt.Errorf("system host controller artifact matches %d imported samples, want exactly one", len(matching))
+	}
+	if appleArtifact != nil && len(matching) != 1 {
+		return fmt.Errorf("system/package Apple memory artifact matches %d imported samples, want exactly one", len(matching))
 	}
 	for _, i := range matching {
 		capture.Samples[i].Rooflines.MeasuredSustainableGBS = cloneFloat(&measurement.MeasuredSustainableGBS)

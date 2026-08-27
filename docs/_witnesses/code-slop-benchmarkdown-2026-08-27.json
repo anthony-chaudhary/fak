@@ -1,0 +1,58 @@
+{
+  "schema": "fak-code-slop-witness/1",
+  "generated_at": "2026-08-27T22:44:09Z",
+  "issue": 9604,
+  "family": "TerminalBench and ToolSandbox adapter-report Markdown layout",
+  "base_revision": "b1539ebc20503c634bca4cb364f12472cdc5fb1c",
+  "paths": [
+    "internal/benchmarkdown/report.go",
+    "internal/benchmarkdown/report_test.go",
+    "internal/architest/architest_test.go",
+    "internal/terminalbench/markdown.go",
+    "internal/terminalbench/markdown_test.go",
+    "internal/terminalbench/testdata/render_markdown.golden.md",
+    "internal/toolsandbox/markdown.go",
+    "internal/toolsandbox/markdown_test.go",
+    "internal/toolsandbox/testdata/render_markdown.golden.md",
+    "docs/_witnesses/code-slop-benchmarkdown-2026-08-27.json"
+  ],
+  "test": "go test ./internal/benchmarkdown ./internal/terminalbench ./internal/toolsandbox ./internal/architest -count=1; fak validate --ref b1539ebc20503c634bca4cb364f12472cdc5fb1c --mine <each witnessed path> --test-run <scope-relevant tests> --json",
+  "test_result": "PASS for the three changed product packages and scope-relevant architecture tests; full architest remains base-red on unrelated existing architecture baselines",
+  "before": {
+    "score": -2.7,
+    "grade": "F",
+    "slop_debt": 180,
+    "duplication": 169,
+    "extractable_duplication": 12,
+    "local_duplication": 81,
+    "pair_duplication": 76,
+    "weighted_duplication": 90.5,
+    "dead_code": 6,
+    "vacuous_tests": 5
+  },
+  "after": {
+    "score": -2.2,
+    "grade": "F",
+    "slop_debt": 179,
+    "duplication": 168,
+    "extractable_duplication": 11,
+    "local_duplication": 81,
+    "pair_duplication": 76,
+    "weighted_duplication": 89.5,
+    "dead_code": 6,
+    "vacuous_tests": 5
+  },
+  "receipts": {
+    "scorecard_command": "python3 tools/code_slop_scorecard.py --no-toolchain --json",
+    "before_sha256": "e6e29a3654147982f555f115f44dd9dd6a8b9b7691ae517f93077a31fad5f210",
+    "after_sha256": "ca9b2be63ee2f6aa069b2f4ce579ffd9fc96ce3ca60b9056db0797da7a645a90",
+    "normalized_before_hard_sha256": "513ac0c84b6c13a1969d6990c76cdd5f312c7586b3d43c315ddc706fb19f1bf1",
+    "normalized_after_hard_sha256": "fcb43038db9560bfd641ff6247b70142c92e2390b19ea1ef93684f5b520ea13c",
+    "normalization": "replace Go source line numbers with LINE, prefix each defect with its KPI, and LC_ALL=C sort",
+    "removed_hard": [
+      "duplication: [extractable] clone x32 (~6 lines), rooted at cmd/glmdsatput/main.go and internal/agenticbench/markdown.go"
+    ],
+    "added_hard": []
+  },
+  "verdict": "PASS: the original extractable x32 row disappeared; duplication and total hard debt each decreased by one; no HARD defect was added and every other measured HARD axis stayed unchanged"
+}

@@ -59,27 +59,11 @@ const (
 	passShare = 0.90
 )
 
-// KPIResult is one graded criterion. Identical shape to conceptusage.KPIResult /
-// dogfoodscore.KPIResult so the three scorecards render and fold the same way.
-type KPIResult struct {
-	Key    string `json:"key"`
-	Label  string `json:"label"`
-	Hard   bool   `json:"hard"`
-	Weight int    `json:"weight"`
-	Axis   string `json:"axis"`
-	Passed bool   `json:"passed"`
-	Detail string `json:"detail"`
-}
+// KPIResult aliases the shared binary criterion shape while preserving this package's API.
+type KPIResult = scorecard.BinaryResult
 
-type KPIPayload struct {
-	KPI     string   `json:"kpi"`
-	Group   string   `json:"group"`
-	Score   int      `json:"score"`
-	Value   float64  `json:"value"`
-	Detail  string   `json:"detail"`
-	Defects []string `json:"defects"`
-	Soft    []string `json:"soft"`
-}
+// KPIPayload aliases the shared stable JSON projection while preserving this package's API.
+type KPIPayload = scorecard.BinaryPayload
 
 // Evidence is the raw, re-derived-from-disk corpus the KPIs read. Exported so a
 // caller (the verb, a test) can inspect exactly what was counted. Every field is a
@@ -348,50 +332,9 @@ var axisWeights = map[string]float64{
 	"dogfood":     dogfoodWeight,
 }
 
-// toKPI converts one KPIResult into a scorecard.KPI, preserving the HARD/SOFT split
-// (Fold sums len(Defects) as debt; Soft entries never gate). Score is 100/0 per-row
-// exactly as kpiPayloads has always rendered it.
-func toKPI(r KPIResult) scorecard.KPI {
-	k := scorecard.KPI{Key: r.Key, Group: r.Axis, Detail: r.Detail}
-	if r.Passed {
-		k.Score = 100
-	} else if r.Hard {
-		k.Defects = []string{r.Key + ": " + r.Detail}
-	} else {
-		k.Soft = []string{r.Key + ": " + r.Detail}
-	}
-	return k
-}
-
-// kpiWeights derives the shared kernel's per-KPI weight (keyed by KPI Key, since Fold
-// tries Group before Key and every row's Group is its shared axis name) from each
-// row's own within-axis Weight and that axis's top-level weight. Scaling each row's
-// weight by axisWeight/axisWeightSum reproduces, bit-for-bit, the two-level weighted
-// mean this card has always computed (per-axis weighted share of axisScore, then the
-// three axes combined by durability/self-report/dogfood weight) as a SINGLE weighted
-// mean over all rows -- which is exactly what scorecard.Fold's weightedMean takes.
-func kpiWeights(all []KPIResult) map[string]float64 {
-	axisWeightSum := map[string]float64{}
-	for _, r := range all {
-		axisWeightSum[r.Axis] += float64(r.Weight)
-	}
-	w := make(map[string]float64, len(all))
-	for _, r := range all {
-		sum := axisWeightSum[r.Axis]
-		if sum == 0 {
-			continue
-		}
-		w[r.Key] = axisWeights[r.Axis] * float64(r.Weight) / sum
-	}
-	return w
-}
-
 func Build(opts Options) ScorecardPayload {
 	opts = opts.normalize()
-	root, _ := filepath.Abs(opts.Root)
-	if root == "" {
-		root = opts.Root
-	}
+	root := scorecard.WorkspaceRoot(opts.Root)
 	ev := gatherEvidence(opts)
 
 	durability := durabilityResults(ev)
@@ -399,9 +342,9 @@ func Build(opts Options) ScorecardPayload {
 	dogfood := dogfoodResults(ev)
 	all := append(append(append([]KPIResult{}, durability...), selfReport...), dogfood...)
 
-	dScore := axisScore(durability)
-	sScore := axisScore(selfReport)
-	gScore := axisScore(dogfood)
+	dScore := scorecard.BinaryAxisScore(durability)
+	sScore := scorecard.BinaryAxisScore(selfReport)
+	gScore := scorecard.BinaryAxisScore(dogfood)
 	// composite is rounded to an int BEFORE grading, exactly as this card has always
 	// done (GradeLetter graded the already-rounded display value, not the raw mean) --
 	// preserved here so porting onto the shared kernel cannot shift a grade at a
@@ -409,10 +352,7 @@ func Build(opts Options) ScorecardPayload {
 	composite := int(math.Round(durabilityWeight*float64(dScore) + selfReportWeight*float64(sScore) + dogfoodWeight*float64(gScore)))
 	grade := scorecard.GradeStd(float64(composite))
 
-	kpis := make([]scorecard.KPI, len(all))
-	for i, r := range all {
-		kpis[i] = toKPI(r)
-	}
+	kpis, weights := scorecard.ProjectBinary(all, axisWeights, nil)
 
 	var hardFail []KPIResult
 	for _, r := range all {
@@ -448,7 +388,7 @@ func Build(opts Options) ScorecardPayload {
 	// to the pre-port fold; ExtraCorpus likewise overrides the kernel-written score
 	// (Round1 of the raw mean) with the same int composite this card has always
 	// reported, and loopscore_debt/grade with the values just derived.
-	p := scorecard.Fold(Schema, kpis, "loopscore_debt", kpiWeights(all), scorecard.Messages{
+	p := scorecard.Fold(Schema, kpis, "loopscore_debt", weights, scorecard.Messages{
 		Grade:           func(float64) string { return grade },
 		Finding:         finding,
 		FindingClean:    finding,
@@ -483,7 +423,7 @@ func Build(opts Options) ScorecardPayload {
 		NextAction: p.NextAction,
 		Workspace:  root,
 		Corpus:     p.Corpus,
-		KPIs:       kpiPayloads(all),
+		KPIs:       scorecard.BinaryPayloads(all),
 		Durability: durability,
 		SelfReport: selfReport,
 		Dogfood:    dogfood,
@@ -592,31 +532,6 @@ func Compare(current ScorecardPayload, baseline map[string]any) string {
 }
 
 // ---- small helpers (mirror conceptusage/dogfoodscore idiom) -----------------------
-
-func axisScore(rows []KPIResult) int {
-	total, got := 0, 0
-	for _, r := range rows {
-		total += r.Weight
-		if r.Passed {
-			got += r.Weight
-		}
-	}
-	if total == 0 {
-		return 0
-	}
-	return int(math.Round(100 * float64(got) / float64(total)))
-}
-
-// kpiPayloads renders the local KPIPayload JSON shape from the same per-row
-// hard/soft judgment toKPI uses for the shared kernel, so the two can never drift.
-func kpiPayloads(rows []KPIResult) []KPIPayload {
-	out := make([]KPIPayload, 0, len(rows))
-	for _, r := range rows {
-		sk := toKPI(r)
-		out = append(out, KPIPayload{KPI: sk.Key, Group: sk.Group, Score: int(sk.Score), Value: scorecard.Round3(scorecard.ValueFromScore(sk.Score)), Detail: sk.Detail, Defects: sk.Defects, Soft: sk.Soft})
-	}
-	return out
-}
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
 	return KPIResult{Key: key, Label: label, Hard: hard, Weight: weight, Axis: axis, Passed: passed, Detail: detail}
