@@ -37,6 +37,7 @@ const (
 type Refusal struct {
 	Schema string        `json:"schema"`
 	Reason RefusalReason `json:"reason"`
+	Phase  string        `json:"phase"`
 	Axis   string        `json:"axis"`
 	Detail string        `json:"detail"`
 }
@@ -48,6 +49,7 @@ func (r *Refusal) Error() string {
 type ReleaseManifest struct {
 	Schema         string              `json:"schema"`
 	Release        ReleaseIdentity     `json:"release"`
+	Rollback       string              `json:"rollback"`
 	Source         SourcePin           `json:"source"`
 	Artifact       ArtifactPin         `json:"artifact"`
 	Descriptor     DescriptorInput     `json:"descriptor"`
@@ -74,6 +76,7 @@ type ArtifactPin struct {
 	SHA256             string `json:"sha256"`
 	TokenizerSHA256    string `json:"tokenizer_sha256"`
 	ChatTemplateSHA256 string `json:"chat_template_sha256"`
+	ContextSHA256      string `json:"context_sha256"`
 }
 
 type DescriptorInput struct {
@@ -124,6 +127,7 @@ type Packet struct {
 	Engine                  string              `json:"engine"`
 	ExternalRuntimeFallback bool                `json:"external_runtime_fallback"`
 	Release                 ReleaseIdentity     `json:"release"`
+	Rollback                string              `json:"rollback"`
 	Source                  SourcePin           `json:"source"`
 	Artifact                ArtifactPin         `json:"artifact"`
 	Descriptor              DescriptorPacket    `json:"descriptor"`
@@ -219,6 +223,9 @@ func CompileManifest(raw []byte) (Packet, error) {
 	if manifest.Release.EvidenceClass != "pinned-release" && manifest.Release.EvidenceClass != "synthetic-non-claiming" {
 		return Packet{}, refuse(RefusalManifestInvalid, "release.evidence_class", "must be pinned-release or synthetic-non-claiming")
 	}
+	if strings.TrimSpace(manifest.Rollback) == "" {
+		return Packet{}, refuse(RefusalManifestInvalid, "rollback", "an explicit rollback action is required")
+	}
 	if err := validatePins(manifest); err != nil {
 		return Packet{}, err
 	}
@@ -272,7 +279,7 @@ func CompileManifest(raw []byte) (Packet, error) {
 
 	packet := Packet{
 		Schema: PacketSchema, ManifestDigest: hex.EncodeToString(manifestSum[:]), Engine: "fak-native",
-		ExternalRuntimeFallback: false, Release: manifest.Release, Source: manifest.Source, Artifact: manifest.Artifact,
+		ExternalRuntimeFallback: false, Release: manifest.Release, Rollback: manifest.Rollback, Source: manifest.Source, Artifact: manifest.Artifact,
 		Descriptor: descriptorPacket(descriptor), SemanticDeltas: manifest.SemanticDeltas,
 		Obligations: manifest.Obligations, Coupling: couplingPacket(report),
 	}
@@ -294,7 +301,7 @@ func CompileManifestJSON(raw []byte) ([]byte, error) {
 }
 
 func refuse(reason RefusalReason, axis, detail string) error {
-	return &Refusal{Schema: RefusalSchema, Reason: reason, Axis: axis, Detail: detail}
+	return &Refusal{Schema: RefusalSchema, Reason: reason, Phase: "pre-allocation", Axis: axis, Detail: detail}
 }
 
 func validatePins(m ReleaseManifest) error {
@@ -313,6 +320,7 @@ func validatePins(m ReleaseManifest) error {
 		"artifact.sha256":               m.Artifact.SHA256,
 		"artifact.tokenizer_sha256":     m.Artifact.TokenizerSHA256,
 		"artifact.chat_template_sha256": m.Artifact.ChatTemplateSHA256,
+		"artifact.context_sha256":       m.Artifact.ContextSHA256,
 	} {
 		if !isHexLen(value, 64) {
 			return refuse(RefusalPinInvalid, axis, "must be a 64-character hexadecimal digest")
@@ -423,6 +431,7 @@ func normalizeManifest(m *ReleaseManifest) {
 	m.Release.Family = normalizeToken(m.Release.Family)
 	m.Release.Revision = strings.TrimSpace(m.Release.Revision)
 	m.Release.EvidenceClass = normalizeToken(m.Release.EvidenceClass)
+	m.Rollback = strings.TrimSpace(m.Rollback)
 	m.Source.URI = strings.TrimSpace(m.Source.URI)
 	m.Source.Revision = strings.ToLower(strings.TrimSpace(m.Source.Revision))
 	m.Source.ManifestSHA256 = strings.ToLower(strings.TrimSpace(m.Source.ManifestSHA256))
@@ -430,6 +439,7 @@ func normalizeManifest(m *ReleaseManifest) {
 	m.Artifact.SHA256 = strings.ToLower(strings.TrimSpace(m.Artifact.SHA256))
 	m.Artifact.TokenizerSHA256 = strings.ToLower(strings.TrimSpace(m.Artifact.TokenizerSHA256))
 	m.Artifact.ChatTemplateSHA256 = strings.ToLower(strings.TrimSpace(m.Artifact.ChatTemplateSHA256))
+	m.Artifact.ContextSHA256 = strings.ToLower(strings.TrimSpace(m.Artifact.ContextSHA256))
 	m.Descriptor.Aliases = normalizeAliases(m.Descriptor.Aliases)
 	m.Descriptor.Topology = normalizeList(m.Descriptor.Topology)
 	for i := range m.Descriptor.State {

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,7 +23,6 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/metrics"
-	"github.com/anthony-chaudhary/fak/internal/newmodel"
 	"github.com/anthony-chaudhary/fak/internal/policy"
 	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 	"github.com/anthony-chaudhary/fak/internal/toollint"
@@ -543,91 +541,7 @@ func embeddedGGUFTokenizer(ggufPath string) (*tokenizer.Tokenizer, error) {
 }
 
 func cmdNewModel(argv []string) {
-	fs := flag.NewFlagSet("new-model", flag.ExitOnError)
-	fs.SetOutput(os.Stderr)
-	family := fs.String("family", "", "family name, lowercase (e.g. myfamily)")
-	topology := fs.String("topology", "identity", "topology: prenorm, postnorm, parallel, or identity")
-	dryRun := fs.Bool("dry-run", false, "print scaffold without writing files")
-	fromManifest := fs.String("from-manifest", "", "compile a pinned offline release manifest into a read-only onboarding packet")
-	asJSON := fs.Bool("json", false, "emit the result as JSON")
-	if err := fs.Parse(argv); err != nil {
-		os.Exit(2)
+	if code := runNewModel(os.Stdout, os.Stderr, argv); code != 0 {
+		os.Exit(code)
 	}
-	if *fromManifest != "" {
-		var incompatible []string
-		fs.Visit(func(f *flag.Flag) {
-			switch f.Name {
-			case "family", "topology", "dry-run":
-				incompatible = append(incompatible, "--"+f.Name)
-			}
-		})
-		if len(incompatible) != 0 || !*asJSON {
-			fmt.Fprintln(os.Stderr, "fak new-model: --from-manifest requires --json and cannot be combined with --family, --topology, or --dry-run")
-			fmt.Fprintln(os.Stderr, "usage: fak new-model --from-manifest <file> --json")
-			os.Exit(2)
-		}
-		if code := runNewModelManifest(os.Stdout, os.Stderr, *fromManifest); code != 0 {
-			os.Exit(code)
-		}
-		return
-	}
-
-	if *family == "" {
-		fmt.Fprintln(os.Stderr, "fak new-model: --family is required")
-		fmt.Fprintln(os.Stderr, "usage: fak new-model (--family <name> [--topology <topology>] [--dry-run] | --from-manifest <file>) [--json]")
-		os.Exit(2)
-	}
-
-	res, err := newmodel.Run(newmodel.Scaffold{
-		Family:   *family,
-		Topology: *topology,
-		DryRun:   *dryRun,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fak new-model: %v\n", err)
-		os.Exit(1)
-	}
-
-	if *asJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		enc.Encode(res)
-		return
-	}
-
-	fmt.Printf("=== Scaffolding model family '%s' (topology: %s) ===\n\n", res.Family, res.Topology)
-	fmt.Println("Files to edit:")
-	for _, e := range res.Edits {
-		fmt.Printf("  - %s\n", e)
-	}
-	fmt.Println("\nNext steps:")
-	for _, s := range res.NextSteps {
-		fmt.Printf("%s\n", s)
-	}
-}
-
-func runNewModelManifest(stdout, stderr io.Writer, path string) int {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak new-model: read manifest: %v\n", err)
-		return 1
-	}
-	packet, err := newmodel.CompileManifestJSON(raw)
-	if err != nil {
-		var refusal *newmodel.Refusal
-		if errors.As(err, &refusal) {
-			encoded, marshalErr := json.MarshalIndent(refusal, "", "  ")
-			if marshalErr == nil {
-				fmt.Fprintln(stderr, string(encoded))
-				return 1
-			}
-		}
-		fmt.Fprintf(stderr, "fak new-model: compile manifest: %v\n", err)
-		return 1
-	}
-	if _, err := stdout.Write(packet); err != nil {
-		fmt.Fprintf(stderr, "fak new-model: write packet: %v\n", err)
-		return 1
-	}
-	return 0
 }

@@ -1,8 +1,9 @@
 {
   "schema": "fak.new-model-manifest/1",
   "release": {"id": "synthetic-qwen38-family", "family": "qwen38", "revision": "synthetic-contract-v1", "evidence_class": "synthetic-non-claiming"},
+  "rollback": "discard this read-only packet and retain the previous native descriptor",
   "source": {"uri": "fixture://synthetic/qwen38/config.json", "revision": "ffffffffffffffffffffffffffffffffffffffff", "manifest_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
-  "artifact": {"uri": "fixture://synthetic/qwen38/model.gguf", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "tokenizer_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "chat_template_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+  "artifact": {"uri": "fixture://synthetic/qwen38/model.gguf", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "tokenizer_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "chat_template_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "context_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"},
   "descriptor": {"aliases": ["Qwen3_8ForCausalLM"], "topology": ["decoder", "hybrid_attention"], "state": [{"kind": "kv", "shape": [32, 128], "bytes_per_element": 2}], "quantization": ["q4_k_m"], "storage": ["gguf"], "tokenizer": ["bpe"], "tools": ["json_tools"], "multimodal": ["text_only"], "backends": ["metal"], "kernels": ["gated_delta_net"], "envelopes": ["m3_pro_p32_t64"], "oracles": ["semantic_answer_quality_v2"], "readiness": ["manifest_only"], "migration": ["retain_previous_native_descriptor"], "forbidden": []},
   "semantic_deltas": [{"axis": "attention", "value": "state_space_v9"}],
   "obligations": [

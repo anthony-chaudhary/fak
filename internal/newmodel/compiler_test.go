@@ -38,8 +38,11 @@ func TestManifestCompilerDeterministicWitness(t *testing.T) {
 	if packet.Release.EvidenceClass != "synthetic-non-claiming" {
 		t.Fatalf("fixture evidence class = %q, want synthetic-non-claiming", packet.Release.EvidenceClass)
 	}
-	if packet.ManifestDigest == "" || packet.Source.ManifestSHA256 == "" || packet.Artifact.SHA256 == "" || packet.Artifact.TokenizerSHA256 == "" || packet.Artifact.ChatTemplateSHA256 == "" {
+	if packet.ManifestDigest == "" || packet.Source.ManifestSHA256 == "" || packet.Artifact.SHA256 == "" || packet.Artifact.TokenizerSHA256 == "" || packet.Artifact.ChatTemplateSHA256 == "" || packet.Artifact.ContextSHA256 == "" {
 		t.Fatalf("packet lost a pinned digest: %+v", packet)
+	}
+	if packet.Rollback == "" {
+		t.Fatal("packet lost the explicit rollback action")
 	}
 	if err := modeldescriptor.Validate(packet.Descriptor.ModelDescriptor()); err != nil {
 		t.Fatalf("emitted descriptor does not validate through modeldescriptor: %v", err)
@@ -64,7 +67,7 @@ func TestManifestCompilerDeterministicWitness(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			_, err := CompileManifestJSON(fixture(t, path))
 			var refusal *Refusal
-			if !errors.As(err, &refusal) || refusal.Reason != reason || refusal.Axis != "attention" {
+			if !errors.As(err, &refusal) || refusal.Reason != reason || refusal.Phase != "pre-allocation" || refusal.Axis != "attention" {
 				t.Fatalf("refusal = %#v, err = %v; want reason %s on attention", refusal, err, reason)
 			}
 		})
@@ -76,11 +79,22 @@ func TestManifestCompilerNormalizesStateAndRejectsNegativeCoupling(t *testing.T)
 	if err := json.Unmarshal(fixture(t, "qwen38-valid.json"), &manifest); err != nil {
 		t.Fatal(err)
 	}
+	withoutRollback := manifest
+	withoutRollback.Rollback = ""
+	raw, err := json.Marshal(withoutRollback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = CompileManifest(raw)
+	var refusal *Refusal
+	if !errors.As(err, &refusal) || refusal.Reason != RefusalManifestInvalid || refusal.Axis != "rollback" {
+		t.Fatalf("missing rollback refusal = %#v, err = %v", refusal, err)
+	}
 	manifest.Descriptor.State = []modeldescriptor.Geometry{
 		{Kind: " KV_State ", Shape: []int{32, 128}, BytesPerElement: 2},
 		{Kind: "GDN_State", Shape: []int{64}, BytesPerElement: 4},
 	}
-	raw, err := json.Marshal(manifest)
+	raw, err = json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +112,7 @@ func TestManifestCompilerNormalizesStateAndRejectsNegativeCoupling(t *testing.T)
 		t.Fatal(err)
 	}
 	_, err = CompileManifest(raw)
-	var refusal *Refusal
+	refusal = nil
 	if !errors.As(err, &refusal) || refusal.Reason != RefusalManifestInvalid || refusal.Axis != "coupling.counts.core_switches" {
 		t.Fatalf("negative coupling refusal = %#v, err = %v", refusal, err)
 	}

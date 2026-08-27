@@ -12,11 +12,11 @@ import (
 func TestNewModelManifestReadOnlyJSONPath(t *testing.T) {
 	path := filepath.Join("..", "..", "internal", "newmodel", "testdata", "qwen38-valid.json")
 	var first, second, stderr bytes.Buffer
-	if code := runNewModelManifest(&first, &stderr, path); code != 0 {
+	if code := runNewModel(&first, &stderr, []string{"--from-manifest", path, "--json"}); code != 0 {
 		t.Fatalf("first compile exit=%d stderr=%s", code, stderr.String())
 	}
 	stderr.Reset()
-	if code := runNewModelManifest(&second, &stderr, path); code != 0 {
+	if code := runNewModel(&second, &stderr, []string{"--from-manifest", path, "--json"}); code != 0 {
 		t.Fatalf("second compile exit=%d stderr=%s", code, stderr.String())
 	}
 	if !bytes.Equal(first.Bytes(), second.Bytes()) {
@@ -33,7 +33,7 @@ func TestNewModelManifestReadOnlyJSONPath(t *testing.T) {
 	stderr.Reset()
 	var refused bytes.Buffer
 	bad := filepath.Join("..", "..", "internal", "newmodel", "testdata", "qwen38-unknown-delta.json")
-	if code := runNewModelManifest(&refused, &stderr, bad); code != 1 {
+	if code := runNewModel(&refused, &stderr, []string{"--from-manifest", bad, "--json"}); code != 3 {
 		t.Fatalf("unknown delta exit=%d stdout=%s stderr=%s", code, refused.String(), stderr.String())
 	}
 	if refused.Len() != 0 {
@@ -43,7 +43,7 @@ func TestNewModelManifestReadOnlyJSONPath(t *testing.T) {
 	if err := json.Unmarshal(stderr.Bytes(), &refusal); err != nil {
 		t.Fatal(err)
 	}
-	if refusal.Reason != newmodel.RefusalUnknownSemanticDelta || refusal.Axis != "attention" {
+	if refusal.Reason != newmodel.RefusalUnknownSemanticDelta || refusal.Phase != "pre-allocation" || refusal.Axis != "attention" {
 		t.Fatalf("refusal = %+v", refusal)
 	}
 }

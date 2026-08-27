@@ -6,6 +6,7 @@
     "revision": "synthetic-contract-v1",
     "evidence_class": "synthetic-non-claiming"
   },
+  "rollback": "discard this read-only packet and retain the previous native descriptor",
   "source": {
     "uri": "fixture://synthetic/qwen38/config.json",
     "revision": "ffffffffffffffffffffffffffffffffffffffff",
@@ -15,7 +16,8 @@
     "uri": "fixture://synthetic/qwen38/model.gguf",
     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "tokenizer_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "chat_template_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    "chat_template_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "context_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
   },
   "descriptor": {
     "aliases": ["Qwen3_8ForCausalLM", "qwen3.8", "qwen38"],

@@ -34,7 +34,11 @@ The manifest pins four identities before any support work begins:
 - the source URI and immutable source revision;
 - the source-manifest SHA-256;
 - the exact model artifact SHA-256; and
-- the tokenizer and chat-template SHA-256 values.
+- the tokenizer, chat-template, and context-configuration SHA-256 values.
+
+The manifest also requires an explicit rollback action. Because intake is read-only, the action
+normally says to discard the packet and retain the previous native descriptor; later consumers must
+carry that action forward rather than inventing an implicit rollback after state changes.
 
 It also declares architecture aliases, the dimensions consumed by `internal/modeldescriptor`, a
 closed list of semantic deltas, the still-open semantic/oracle/backend/test/docs/performance
