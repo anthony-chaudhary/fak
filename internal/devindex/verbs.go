@@ -348,6 +348,7 @@ var verbManifest = []Verb{
 	{Name: "steering", Synopsis: "the steerability Slack surface for #steering-guard (status/report/alert/pin)", Lane: "cmd"},
 	{Name: "stopfailure", Synopsis: "operator surface for .dos/stop-failures breaker markers (plan/reset-stale/clear-reviewed)", Lane: "cmd"},
 	{Name: "study-inventory", Synopsis: "render a deterministic local checkout map for exhaustive study-repo passes", Lane: "cmd"},
+	{Name: "study-forge", Synopsis: "capture and validate deterministic paginated GitHub forge corpora", Lane: "cmd"},
 	{Name: "study-monitor", Synopsis: "report recurring research sources that are due for another study pass", Lane: "cmd"},
 	{Name: "superloop", Synopsis: "operator-intent meta-loop: walk a set of member loops/scorecards/gardens worst-first (list/explain/walk)", Lane: "cmd"},
 	{Name: "support", Synopsis: "per-cell support read-out: one line per model x backend cell (rung.regime.target.next-action)", Lane: "cmd"},

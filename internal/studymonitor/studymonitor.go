@@ -59,6 +59,7 @@ type Repository struct {
 type InventoryContract struct {
 	Mode               string                    `json:"mode,omitempty"`
 	MapPath            string                    `json:"map_path,omitempty"`
+	ForgeReceiptPath   string                    `json:"forge_receipt_path,omitempty"`
 	IndexedRevision    string                    `json:"indexed_revision,omitempty"`
 	SourceClasses      []string                  `json:"source_classes,omitempty"`
 	SourceEvidence     []InventorySourceEvidence `json:"source_evidence,omitempty"`
@@ -88,6 +89,7 @@ type InventoryRow struct {
 	Status               string                    `json:"status"`
 	Mode                 string                    `json:"mode"`
 	MapPath              string                    `json:"map_path,omitempty"`
+	ForgeReceiptPath     string                    `json:"forge_receipt_path,omitempty"`
 	IndexedRevision      string                    `json:"indexed_revision,omitempty"`
 	SubsystemCount       int                       `json:"subsystem_count,omitempty"`
 	CandidateCount       int                       `json:"candidate_count,omitempty"`
@@ -100,6 +102,7 @@ type InventoryRow struct {
 	MissingSourceClasses []string                  `json:"missing_source_classes,omitempty"`
 	Ready                bool                      `json:"ready"`
 	Reasons              []string                  `json:"reasons,omitempty"`
+	forgeReceiptValid    bool
 }
 
 type Report struct {
@@ -218,6 +221,7 @@ func buildInventoryReport(registry Registry, repoRoot string) InventoryReport {
 		var inventoryMap *InventoryMap
 		if repoRoot != "" {
 			inventoryMap = validateInventoryMapFile(&row, repo, repoRoot)
+			row.forgeReceiptValid = validateStudyForgeReceiptFile(&row, repo, repoRoot)
 		}
 		finalizeInventoryRow(&row, repo, inventoryMap)
 		if !row.Ready {
@@ -360,6 +364,7 @@ func inventoryBaseRow(repo Repository) InventoryRow {
 	}
 	if repo.Inventory != nil {
 		row.MapPath = strings.TrimSpace(repo.Inventory.MapPath)
+		row.ForgeReceiptPath = strings.TrimSpace(repo.Inventory.ForgeReceiptPath)
 		row.IndexedRevision = strings.TrimSpace(repo.Inventory.IndexedRevision)
 		row.SubsystemCount = repo.Inventory.SubsystemCount
 		row.CandidateCount = repo.Inventory.CandidateCount
@@ -405,6 +410,9 @@ func finalizeInventoryRow(row *InventoryRow, repo Repository, inventoryMap *Inve
 
 func inventorySatisfiedSourceClasses(row *InventoryRow, inventoryMap *InventoryMap) map[string]bool {
 	satisfied := map[string]bool{}
+	if row.forgeReceiptValid {
+		satisfied["open_closed_issues_prs_discussions"] = true
+	}
 	if inventoryMap != nil {
 		for _, class := range inventoryMap.SourceClasses {
 			name := strings.TrimSpace(class.Class)
@@ -432,6 +440,9 @@ func validateInventoryDeclaredSourceClasses(row *InventoryRow, inventoryMap *Inv
 		return
 	}
 	for _, class := range row.SourceClasses {
+		if class == "open_closed_issues_prs_discussions" && row.forgeReceiptValid {
+			continue
+		}
 		if inventoryMapSatisfiesSourceClass(inventoryMap, class) || inventoryEvidenceSatisfiesSourceClass(row.SourceEvidence, class) {
 			continue
 		}

@@ -1,73 +1,159 @@
 # Frontier-lab and regional census
 
-**As of:** 2026-08-26. This roster prevents an English-language U.S.-lab sample from being
-mistaken for the whole frontier field. A checked name means at least one dated source is
-already represented in [`../index.json`](../index.json); unchecked names remain explicit
-research debt.
+**As of:** 2026-08-26
+**Parent issues:** [#9300](https://github.com/anthony-chaudhary/fak/issues/9300), [#9313](https://github.com/anthony-chaudhary/fak/issues/9313)
+**Authority:** [`../index.json`](../index.json)
 
-## United States and global U.S.-headquartered labs
+## Result first
 
-- [x] OpenAI — Stargate, multi-cloud/silicon capacity, user scale, supply-chain RFP.
-- [x] Anthropic — AWS/Google/Azure/Fluidstack capacity, heterogeneous serving, energy.
-- [x] xAI — Colossus, training/RL scale, user-channel scale.
-- [ ] Google DeepMind — separate model-training, inference, and Gemini product-demand ledger.
-- [ ] Meta GenAI / FAIR — Llama training/inference cluster and Meta AI demand ledger.
-- [ ] Microsoft AI — first-party model training and Copilot demand, separate from Azure supply.
-- [ ] Amazon AGI / Nova — first-party model training and Alexa/Nova demand, separate from AWS.
-- [ ] Apple Foundation Models — device/cloud split and Private Cloud Compute assumptions.
-- [ ] NVIDIA model teams — Nemotron/reasoning model workload separate from platform claims.
-- [ ] Cohere — enterprise retrieval/agent demand and private-deployment footprint.
-- [ ] AI2 — OLMo training infrastructure and open-data reproducibility.
-- [ ] Reflection AI, Safe Superintelligence, Thinking Machines Lab, Periodic Labs, Lila Sciences,
-  World Labs, Physical Intelligence, Skild AI — private-lab compute and workload assumptions.
+The current index now contains **47 frontier-lab entries** within a **140-entry**
+corpus. This pass adds primary-source coverage for major U.S./Canadian labs and for
+China, Israel, the Middle East, India, Japan, Korea, and Southeast Asia. It reduces a
+strong OpenAI/Anthropic bias, but it does **not** make the global census complete.
 
-## China and Chinese-origin labs/platforms
+The new evidence strengthens four expectations:
 
-- [x] DeepSeek — V3 training cluster/economics and hardware co-design.
-- [x] Alibaba Qwen — reasoning-mode/budget model; broader cloud demand remains open.
-- [x] Moonshot AI / Kimi — H800/RoCE training topology.
-- [x] MiniMax — one-million-token multimodal/agent capability; production mix remains open.
-- [ ] ByteDance / Doubao / Seed — training fleet, Volcano Engine inference, consumer traffic.
-- [ ] Baidu / ERNIE — Kunlun/custom silicon, cloud/user distribution, inference economics.
-- [ ] Tencent / Hunyuan — mixed silicon, cloud/product traffic, WeChat integration.
-- [ ] Zhipu AI / Z.ai — training/inference footprint and government/enterprise channels.
-- [ ] 01.AI, Baichuan, StepFun, ModelBest, Infinigence AI — current model and capacity state.
-- [ ] Huawei / Pangu / Ascend ecosystem — cluster topology, export-control substitution,
-  networking, software stack, and delivered goodput.
+1. **One endpoint is often several workload classes.** Reasoning controls, modality,
+   language, and agent/tool modes change output length, latency, memory, and batchability.
+2. **Active parameters are not a deployment receipt.** MoE expert count/routing,
+   quantization, total parameters, host boundary, KV compression, and network topology
+   all matter.
+3. **Regional and sovereign labs optimize different envelopes.** Data locality,
+   language/tokenization, edge/private deployment, and national compute programs can be
+   first-order constraints.
+4. **Training disclosure is uneven.** Ai2 gives a physical 1,280-H100 cluster and MFU;
+   many other labs publish only model architecture or benchmark claims. Unknown stays
+   unknown.
 
-## Europe, Canada, and Israel
+## Extraction contract
 
-- [x] Mistral AI — European vertically integrated compute, training cluster, lifecycle metrics.
-- [ ] Black Forest Labs — image/video generation serving and compute footprint.
-- [ ] Aleph Alpha — sovereign enterprise deployment assumptions.
-- [ ] Stability AI — image/video workload and financial/organizational history.
-- [ ] Poolside, H Company, LightOn, Bioptimus, Kyutai — coding/agent/science/audio demand.
-- [ ] Cohere and Vector Institute ecosystem — Canadian enterprise/research capacity.
-- [ ] AI21 Labs — long-context/enterprise serving and cloud distribution.
-- [ ] Hugging Face — inference endpoints, model popularity, and open-model distribution telemetry.
+A checked row means the index contains at least one dated source with the fields below.
+It does not mean complete organizational coverage.
 
-## Middle East, India, Japan, Korea, and Southeast Asia
+| Field | What to capture |
+|---|---|
+| Identity | Lab, parent, headquarters/region, and relevant cloud or sovereign program. |
+| Model/workload | Model family, modality, reasoning/tool mode, context, and target product workload. |
+| Physical envelope | Accelerator SKU/count, node/host boundary, topology, memory/quantization, power, and region when disclosed. |
+| Scale | Total/active parameters, experts, training tokens, users, requests, or production traffic—never substitute one for another. |
+| Lifecycle | Research, preview, released, API, on-device, private-cloud, in production, or planned. |
+| Evidence | Primary source first; retain official statement, vendor claim, measurement, report, or rumor labels. |
+| Limits | Missing denominator, undisclosed cluster, author benchmark, maximum-versus-prevalence, and traffic uncertainty. |
+| fak use | Concrete benchmark, scheduler, routing, cache, hardware, or trust-boundary implication. |
 
-- [ ] TII / Falcon, G42/Core42, Inception, HUMAIN — sovereign capacity, model demand,
-  international partnerships, and energy/export-control boundaries.
-- [ ] Saudi AI programs beyond HUMAIN and UAE programs beyond G42/TII.
-- [ ] Jio, Yotta, Sarvam AI, Krutrim, Ola ecosystem — Indian language/userbase and capacity.
-- [ ] NTT, Sakana AI, Preferred Networks, SoftBank model programs — Japanese capacity and users.
-- [ ] NAVER HyperCLOVA, LG EXAONE, Samsung, SK Telecom — Korean chips/cloud/user channels.
-- [ ] SEA regional model providers and sovereign programs.
+## Checked labs and current evidence
 
-## Per-lab extraction contract
+### United States and Canada
 
-For every lab, seek and record:
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | OpenAI | Stargate/site, Oracle/NVIDIA, user-scale, and capacity announcements. | Physical installed/healthy fleet, workload mix, tenant concentration, and plan-to-goodput conversion. |
+| Checked | Anthropic | AWS/Google/Azure partnerships, multicloud failure evidence, U.S. infrastructure investment, and usage research. | Provider traffic shares, physical fleet, cache/batch distributions, and regional failover. |
+| Checked | xAI | Colossus/Grok model and financing claims. | Physical SKU census behind H100-equivalent totals, healthy capacity, utilization, and request/token distributions. |
+| Checked | Google DeepMind | Gemini 3.1 Flash-Lite: TPU/JAX/Pathways training, 1M input, 64K output, high-volume/latency-sensitive positioning, and five distribution channels. | TPU generation/count, pod topology, production model mix, batch/concurrency, and neutral goodput. |
+| Checked | Meta | Llama 4 MoE active/total parameter and host-fit envelope; existing datacenter and capex evidence. | Production expert skew, fleet share, Meta AI request/token distribution, and quality-constrained serving economics. |
+| Checked | Amazon Nova | Nova 2 family, configurable extended thinking, multimodality, and up-to-1M context. | Training/serving hardware, mode-selection shares, Bedrock traffic, and output-length tails. |
+| Checked | Apple | Roughly 3B on-device model, 2-bit QAT, KV sharing, server Parallel-Track MoE, and Private Cloud Compute split. | Server size/fleet, request routing share, concurrency, and production latency. |
+| Checked | Cohere | Command A enterprise/agentic and 256K-context positioning. | Neutral efficiency reproduction, private-deployment fleet, customer/tenant traffic, and regional demand. |
+| Checked | Ai2 | OLMo 2 32B trained to 6T tokens on 160 × 8 H100 nodes; >1,800 tokens/s/GPU and ~38% MFU. | Net wall-clock availability/cost and inference demand; training throughput is not serving goodput. |
+| Checked | Microsoft Research Phi | Phi-4-reasoning 14B inference-time-compute model; compact open-weight reasoning envelope. | Physical training/serving cluster, first-party traffic, reasoning-length distribution, and neutral goodput. |
+| Unchecked | NVIDIA model research | NVIDIA appears as platform/partner, not as a separately audited model lab. | Nemotron model training and deployed inference envelope. |
+| Unchecked | Databricks/MosaicML, Essential AI, Reflection AI, Safe Superintelligence, Thinking Machines, World Labs | No dedicated primary-source entries. | Model status, cluster/funding-to-capacity conversion, product workload, and deployment state. |
 
-1. physical and normalized accelerator counts, topology, site/region, network, and memory;
-2. announced/contracted/online/healthy/active/goodput capacity states;
-3. training, post-training/RL, evaluation, and inference allocation;
-4. user/channel counts **plus** request, token, tenant, geography, modality, and seasonality;
-5. batching, prefill/decode, KV reuse, routing, SLO, quantization, and reasoning budgets;
-6. capex, leases, purchase obligations, cloud commitments, energy, water, and delivery dates;
-7. incidents, failures, delays, cancellations, acquisitions, licensing, and personnel signals;
-8. source class, confidence, contradiction, and rumor lifecycle.
+### China
 
-A lab is not “covered” by one chip-count announcement. It is covered only when its supply,
-demand shape, operating assumptions, and evidence gaps are all visible.
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | DeepSeek | V3 training cluster/economics and hardware/architecture reflections. | Current fleet, export-control response, production traffic, and post-release capacity. |
+| Checked | Alibaba Qwen | Qwen3 reasoning-budget evidence plus Alibaba Cloud/cache entries. | Physical Qwen training/serving cluster, product traffic, and reasoning-mode shares. |
+| Checked | Moonshot AI | Kimi K2 model/cluster evidence. | Production request distribution, utilization, cache behavior, and financing-to-capacity lifecycle. |
+| Checked | MiniMax | M3 1M-context coding/multimodal release. | Context prevalence, cluster hardware, traffic, compaction, and serving cost. |
+| Checked | ByteDance Seed | Seed1.5-VL 532M vision encoder + 20B-active MoE, GUI/game agent tasks, and Volcano Engine availability. | Total parameters, cluster hardware, Doubao/Volcano traffic, modality share, and production routing. |
+| Checked | Baidu | ERNIE 5.0 PaddlePaddle hybrid parallelism, FP8 activation storage, adaptive offload, and separated tokenizer/backbone nodes. | Cluster size/SKU, net training efficiency, serving topology, and ERNIE traffic. |
+| Checked | Tencent | Hunyuan-Large 389B total/52B active, 256K context, mixed routing, and KV compression. | Expert-load distribution, cluster, deployed fleet, and service economics. |
+| Checked | Z.ai / Zhipu AI | GLM-4.5 355B total/32B active, 23T training tokens, and hybrid thinking/direct modes. | Cluster hardware, mode-selection rates, API traffic, and independent benchmark reproduction. |
+| Checked | Huawei Cloud Pangu | Pangu 5.0 tiers above 1B/10B/100B/1T parameters and >400 scenarios across >30 industries. | Ascend cluster topology, model-tier traffic, requests/users, batch/cache behavior, and neutral deployment evidence. |
+| Unchecked | 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime, iFlytek, Meituan, Xiaomi | No dedicated current entries. | Model releases, physical compute, adoption, deployment, and lifecycle evidence. |
+
+### Europe
+
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | Mistral AI | Mistral Compute, model training, environmental LCA, and cross-cloud distribution. | Physical cluster and utilization, API/private mix, tenant concentration, and sovereign-cloud economics. |
+| Unchecked | Aleph Alpha, Black Forest Labs, Helsing, Kyutai, LightOn, Poolside, Silo AI/AMD | No dedicated primary-source model/infrastructure entries. | Training/serving envelopes, acquisitions/ownership effects, and production traffic. |
+| Unchecked | UK labs beyond DeepMind | No dedicated census for Stability AI, Synthesia, Wayve, or university/sovereign programs. | Model scope, compute, financing, and deployment state. |
+
+### Israel
+
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | AI21 Labs | Jamba 1.5 hybrid SSM-Transformer MoE, 256K effective context, single-GPU/one-node fit claims, and quantized deployment envelope. | Production concurrency, traffic, hardware mix, and neutral long-context throughput. |
+| Unchecked | AI research/product labs at NVIDIA Israel and other private firms | No dedicated entries. | Lab boundaries, model programs, and physical deployment. |
+
+### Middle East
+
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | Technology Innovation Institute (UAE) | Falcon Arabic and Falcon-H1 sovereign-language, hybrid Transformer/Mamba, multilingual, edge-to-enterprise positioning. | Training cluster, production traffic, per-tier throughput/energy, and independent performance. |
+| Partial | G42 / Inception / MBZUAI (UAE) | G42 appears in Stargate UAE, but no dedicated Jais, K2, or model-lab entry. | Model training/serving envelope, national cluster allocation, and product demand. |
+| Unchecked | Saudi SDAIA/ALLaM and other sovereign programs | No dedicated entry. | Primary model sources, compute allocation, language traffic, and deployment. |
+
+### India
+
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | Sarvam AI | 30B/105B 128-expert models trained in India on IndiaAI compute, 16T/12T tokens, with named production products. | Physical cluster/allocation, request volumes, traffic mix, goodput, and independent performance. |
+| Unchecked | Krutrim, BharatGen, Soket AI, Gnani, CoRover, IIT/research consortia | No dedicated entries. | Model families, IndiaAI allocation, language/token distributions, and production state. |
+
+### Japan
+
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | Sakana AI | Composition/model-merging, automated AI science, edge-efficient model strategy, and enterprise deployment claims. | Model and cluster scale, measured energy, customer traffic, and repeatable production outcomes. |
+| Checked | NTT tsuzumi | 0.6B CPU and 7B single-GPU Japanese enterprise deployment tiers. | Hardware SKU, quantization, context, production latency/concurrency, and demand. |
+| Unchecked | Preferred Networks, Fujitsu, SoftBank/SAKURA, AIST and university programs | No dedicated model-lab entries. | Domestic accelerator/cloud use, training runs, sovereign programs, and service traffic. |
+
+### Korea
+
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | NAVER Cloud | HyperCLOVA X THINK: 6T Korean/English tokens, 128K context, reasoning/length-control training, and multimodal/agentic targets. | Parameter/cluster size, production demand, language mix, and serving economics. |
+| Checked | LG AI Research | EXAONE 4.0 32B professional + 1.2B on-device hybrid reasoning/direct family with tool use. | Cluster, traffic, mode selection, device latency, and neutral efficiency. |
+| Unchecked | Samsung, SK Telecom, Kakao Brain/related programs | No dedicated entries. | Gauss/A.X/Kakao model and cluster envelopes, product traffic, and lifecycle. |
+
+### Southeast Asia
+
+| Status | Lab | Evidence now indexed | What remains unknown |
+|---|---|---|---|
+| Checked | Sea AI Lab | Sailor2: stated production preference for 8B/20B tiers, 1B speculative-decoding/research tier, ~500B continued-pretraining tokens, and 15 languages. | Request counts, tenant/language shares, speculative acceptance, hardware, and deployed goodput. |
+| Checked | AI Singapore SEA-LION | v4.5 multilingual/multimodal/agentic family for >11 SEA languages with custom speculative decoder. | Model size, hardware, acceptance distribution, traffic, and language/user shares. |
+| Unchecked | Grab, GoTo, SCB10X, VinAI, regional sovereign programs | SCB10X appears only as a Sailor2 collaborator; no dedicated lab entries. | Model programs, compute, product demand, and country/language distributions. |
+
+## Cross-lab parameter observations
+
+| Dimension | Evidence in this batch | Safe expectation |
+|---|---|---|
+| Reasoning mode | Amazon Nova 2, GLM-4.5, HyperCLOVA X THINK | Treat reasoning selection as a workload variable with separate output/SLO distributions. |
+| MoE | Llama 4, Seed1.5-VL, Hunyuan-Large, GLM-4.5, Sarvam | Capture total/active parameters, expert count, routing skew, memory, and topology; active parameters alone are insufficient. |
+| Long context | Gemini 1M/64K output; Nova up to 1M; Command A/Jamba/Hunyuan/HyperCLOVA 128K–256K | Capability ceiling is not prevalence. Benchmark token-time, KV occupancy, compaction, and multi-tenant concurrency. |
+| Device/private cloud | Apple on-device + Private Cloud Compute; TII/Sakana edge claims | Route by trust and resource boundary; do not collapse device and datacenter economics. |
+| Regional language | Falcon Arabic, Sarvam, HyperCLOVA, Sailor2 | Measure tokenizer expansion, language mix, data locality, and locale-specific SLOs. |
+| Physical training receipt | Ai2 OLMo: 1,280 H100s, GPUDirect-TCPXO, >1,800 tokens/s/GPU, ~38% MFU | Prefer physical SKU/topology/utilization receipts over “equivalent” counts. Training evidence still does not prove serving demand. |
+| Speculative decoding | Sailor2 1B tier named for speculative decoding | Measure acceptance, verifier cost, draft placement, and net goodput under regional-language workloads. |
+
+## Remaining priority queue
+
+1. NVIDIA Nemotron plus Microsoft first-party deployment/traffic evidence.
+2. Huawei Ascend physical envelope, 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime,
+   iFlytek, Meituan, and Xiaomi.
+3. G42/Inception Jais/Nanda deployment evidence and Saudi ALLaM/SDAIA sovereign programs.
+4. Samsung Gauss, SKT A.X, and Kakao-related Korean programs.
+5. Preferred Networks, Fujitsu, SoftBank/SAKURA, and Japanese public compute.
+6. Grab/GoTo, SCB10X, VinAI, and regional sovereign initiatives.
+7. Europe beyond Mistral and DeepMind, plus private U.S./Canadian labs.
+8. For every checked lab: a second pass on failures, cancellations, users/requests,
+   physical serving hardware, geography, and lifecycle from release to active goodput.
+
+The census remains **partial** until that queue and the broader
+[`../coverage-audit.md`](../coverage-audit.md) requirements are closed with primary
+sources and explicit unknowns.

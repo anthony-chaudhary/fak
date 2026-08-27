@@ -40,3 +40,51 @@ material claims belong in [`index.json`](index.json) with a dated source.
 5. Calling every GPU lessor a differentiated cloud or every chip startup deployed.
 6. Treating multiple articles copied from one leak as independent rumor corroboration.
 7. Ignoring private debt, take-or-pay contracts, and power-delivery risk.
+
+## Lifecycle outcomes beyond funding and launches
+
+| Company / asset | Initial category | Observed outcome | What survives | What failed or changed |
+|---|---|---|---|---|
+| Untether AI | In-memory/RISC-V AI accelerator | Shutdown, engineering-team transfer to AMD, later bankruptcy | Engineering talent may continue inside AMD. | Standalone company and product support ended; reported liabilities exceeded assets. |
+| Replicate | Hosted model execution/API | Joined Cloudflare | Brand and API were promised to continue; model execution primitives gain network/platform integration. | Independent ownership; transaction economics and long-term product boundary are undisclosed. |
+| SchedMD / Slurm | Cluster scheduling/workload management | Acquired by NVIDIA | Slurm is promised to remain open source and vendor-neutral. | Independent vendor governance; neutrality must be observed, not assumed. |
+| Groq IP/team | Inference accelerator/cloud | Non-exclusive NVIDIA license plus reported key-talent transfer | Groq remained operational; licensing was not described as a full acquisition. | Independent roadmap, staffing, and competitive boundary may change. |
+
+### Failure and acquisition extraction contract
+
+For each future event, record separately:
+
+```text
+legal entity / team / IP / product / customer contracts / support / brand
+announced / signed / closed / integrated / discontinued / bankrupt
+transaction value / assets / liabilities / runway if public
+customer migration and compatibility path
+open-source governance and hardware neutrality
+later outcome check
+```
+
+Do not label an acquihire, IP license, minority investment, product acquisition, or
+bankruptcy as a full-company acquisition unless the source says so.
+
+## Alternative-infrastructure census additions
+
+| Company | Category | Evidence state | Quantified evidence | Main denominator risk |
+|---|---|---|---|---|
+| Lambda | Neocloud / AI factory | Multi-year Microsoft contract announced; fleet financing expanded | Tens of thousands of NVIDIA GPUs including GB300 NVL72; >$1.5B Series E and later $1B credit facility in adjacent disclosures | Contract, financing, target GW, installed GPUs, accepted service, and useful goodput differ. |
+| Applied Digital | Power-first AI datacenter developer/operator | Polaris Forge 1 Building 2 Phase 1 reported Ready for Service | 75 MW new RFS; 175 MW campus live; 400 MW contracted full build | Live critical IT MW does not reveal installed customer compute, PUE, utilization, or goodput. |
+| Lightmatter | Photonic scale-up interconnect | M1000 described as production-ready/validated hardware | 4,000 mm² die complex; 34 chiplets; 1,024 SerDes lanes; 256 fibers; up to 114 Tbps | Peak component bandwidth and production-ready labeling do not prove shipments or application goodput. |
+| Celestial AI | Photonic fabric startup | Acquired by Marvell; transaction closed February 2026 | $1B cash-balance reduction; ~27M new diluted shares; projected $500M annualized run rate in FY2028 Q4 and $1B in FY2029 Q4 | Purchase price and earnout are not product shipment, qualification, or technical validation. |
+| Fireworks AI | Inference platform | Large financing plus company-reported production scale | $1.505B Series D; $17.5B valuation; >$1B annualized run rate; >40T tokens/day; >95% customer-specialized | Company token/revenue definitions, customer concentration, physical fleet, cache, quality, margin, and profitability are undisclosed. |
+
+### Category-specific checks
+
+- **Neocloud:** contracted GPUs/MW, financing ownership, delivery/acceptance, customer
+  concentration, accelerator mix, utilization, and gross margin.
+- **Datacenter developer:** grid/utility MW, critical IT MW, RFS/commissioned/live phase,
+  tenant equipment installation, PUE/water/cooling, and lease versus active revenue.
+- **Optical/network startup:** sample/validation/qualification/shipment state, yield,
+  protocol/topology, power/BER, customer integration, and application goodput.
+- **Inference platform:** token definition, input/output/cache split, model/customer mix,
+  hardware ownership, quality/SLO, revenue recognition, and profitability.
+- **Acquisition:** announced versus closed, cash/stock/earnout, product continuity,
+  integration, shipment/revenue milestones, and later impairment or shutdown.

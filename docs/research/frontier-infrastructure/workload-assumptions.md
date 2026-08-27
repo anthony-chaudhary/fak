@@ -85,3 +85,88 @@ Public sources still do not adequately reveal:
 
 Until these are measured, benchmark sweeps must expose the assumption ranges rather than
 present one guessed distribution as “the frontier workload.”
+
+## Serving and cluster mechanism envelope
+
+| Mechanism | Evidence now indexed | When it may help | Required counter-evidence before defaulting |
+|---|---|---|---|
+| Monolithic autoscaling | Simple model replicas remain the common baseline. | Stable model/workload mix; low control complexity; fast replica start. | Phase imbalance, long model load, heterogeneous hardware, or SLOs that require separate prefill/decode capacity. |
+| Phase-specific autoscaling | NVIDIA Dynamo Planner scales prefill/decode replicas; HeteroScale reports production coordination at tens-of-thousands-GPU scale. | Prefill and decode demand diverge and topology/forecast signals are accurate. | Forecast error, cold-start and model-load time, network bottlenecks, failure recovery, and pool fragmentation. |
+| Operator-level scaling | 2026 operator-level study questions model replica as the scaling unit. | Fine-grained operators have separable bottlenecks and low state/transfer overhead. | Orchestration, model-state duplication, transfer, recovery, and debugging cost exceed saved capacity. |
+| Aggregated prefill/decode | TaiChi reports an advantage under tight TTFT and relaxed TPOT regimes. | Interference is tolerable; first-token latency dominates; transfer overhead would be high. | Decode jitter, long outputs, strict TPOT, and queue interference. |
+| Disaggregated prefill/decode | Dynamo/llm-d/TaiChi/TokenScale expose separate pools and KV transfer. | Strict decode SLO, phase-specific hardware, reusable prefill, or scaling asymmetry beats transfer/control cost. | Short prompts/outputs, weak fabric, small batches, KV transfer, extra failure domains, and underfilled pools. |
+| Hybrid aggregation/disaggregation | TaiChi reports up to 77% benchmark goodput gain under balanced SLOs. | Traffic mixes contain both TTFT- and TPOT-sensitive requests and the scheduler can shift latency safely. | Maximum result is not universal; baseline, SLO mix, hardware, and scheduler overhead must match. |
+| Token-work autoscaling | TokenScale reports higher SLO attainment and 4–14% lower cost in production-trace experiments. | Request counts/GPU utilization lag token work and burst backpressure. | Metric robustness under model churn, multimodality, failures, speculative decoding, and heterogeneous accelerators. |
+| Prefix-aware routing and KV offload | llm-d, Dynamo, CacheRoute, Aliyun, Chutes, and Copilot evidence. | Prefix reuse is predictable enough to beat load imbalance and transfer/index overhead. | Cache staleness, privacy, fragmentation, routing skew, multi-tier latency, and policy-dependent realized hits. |
+| Topology-aware heterogeneous placement | Dynamo DSX, AWS topology scheduling, HeteroScale, and training reliability evidence. | Communication-heavy phases and mixed accelerators/network tiers dominate. | Placement delay, fragmentation, gang-size constraints, failure domain coupling, and cross-generation quality/performance differences. |
+| Tenant fairness/admission | Multi-tenant admission studies and token-pool research expose responsibility boundaries. | Shared fleets have priorities, quotas, budgets, or noisy-neighbor risk. | Per-tenant objectives, starvation, burst credits, cached-work ownership, cancellation, and auditability are still under-measured in production. |
+
+### Default decision record
+
+For every serving experiment, record:
+
+```text
+model + precision + quality
+hardware SKU/count + topology + fabric
+aggregated / disaggregated / hybrid phase layout
+replica/operator scaling unit
+arrival, prompt, output, prefix, tenant, and failure distributions
+batch/admission/fairness policy
+TTFT / TPOT(ITL) / E2E SLO and attainment
+KV transfer, cache indexing, control, startup, recovery, and verification overhead
+accepted goodput / cost / energy
+```
+
+The mechanism with the highest peak throughput is not necessarily the mechanism with the
+highest SLO-satisfied, quality-constrained goodput.
+
+## Agentic workflow boundary
+
+A model request is often the wrong scheduling/accounting unit for an agent. The current
+production traces and systems work support a wider envelope:
+
+```text
+user task
+  -> session / turn
+  -> workflow DAG
+  -> model call(s) + tool call(s) + sandbox/runtime work
+  -> retries / compaction / cache lookup / policy checks
+  -> accepted task outcome
+```
+
+| Agent assumption | Evidence | Benchmark consequence |
+|---|---|---|
+| Workflow DAGs matter | Parrot and workflow-aware scheduling treat dependent model/tool stages and critical paths explicitly. | Replay fan-out/fan-in, sequential dependencies, shared prefixes, and tool queues; report task completion, not only model latency. |
+| Runtime and OS state matter | Agentic-OS research makes context, memory, tools, storage, policy, and concurrent agents first-class. | Include sandbox/container start, idle retention, filesystem/process state, authorization, and recovery overhead. |
+| Tool reuse differs from KV reuse | Semantic tool-result caching targets repeated or near-duplicate tool calls with freshness and side-effect constraints. | Record tool/args/result/freshness/tenant/side effects; never reuse mutating results by semantic similarity alone. |
+| Model speed can be non-critical-path | Copilot and TraceLab expose long alternating model/tool loops, idle state, failures, and retries. | Measure critical-path share and optimize the dominant stage; a faster decoder may not reduce task time. |
+| Failures amplify whole workflows | Copilot reports 9% of turns with tool failure and retry loops up to 4× compute. | Replay partial failure, compensation, idempotency, retry budgets, and abandoned work. |
+| Session state consumes capacity while idle | Copilot reports multi-minute average container/KV idle windows. | Account for retained KV, containers, files, and leases across idle gaps; request-only utilization is incomplete. |
+
+### Required agent receipt
+
+```text
+session / turn / workflow identifiers
+DAG stages and critical path
+model + tool + sandbox + storage + network time
+input/output/cached/compacted tokens
+container/KV/filesystem state and idle lifetime
+tool success, side effect, freshness, retry, and idempotency
+policy/admission/fairness outcome
+accepted task outcome, wall time, cost, and resource-time
+```
+
+## Geography and session locality
+
+- **Regional arrivals are phase-shifted, not one global stationary process.** SkyWalker
+  observes distinct diurnal peaks across six country groups. Use region/timezone-specific
+  curves and sensitivity ranges; WildChat is not a provider production distribution.
+- **Cross-region pooling is constrained.** WAN latency, residency/export policy, carbon,
+  failure domains, data movement, and session/KV locality can dominate spare capacity.
+- **Agent sessions create hotspots.** Cache-affinity routing can strand idle replicas while
+  a few session-owning replicas queue. Balance projected session work against reuse.
+- **Idle KV needs a lifetime policy.** Tool gaps make uniform pinning waste memory and
+  uniform eviction waste prefill. Compare TTL, offload, migration, and eviction with
+  reload, queue, fairness, and abandonment included.
+- **SLO class and geography interact.** Latency-sensitive and elastic/batch work can use
+  different regions and provisioning types only when data, quality, and deadlines allow.
