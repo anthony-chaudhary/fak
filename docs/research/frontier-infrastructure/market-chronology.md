@@ -238,3 +238,25 @@ Resolution discipline: confirming one claim fragment does not confirm the rest. 
 OpenAI entry now records a reported observation for the confirmed departure and keeps
 strategic interpretation bounded. The other two remain rumors/watch items until their
 transaction or price terms are confirmed, refuted, or expire.
+## Remote-browser lifecycle benchmark slice — 2026-08-27
+
+- Steel BrowserBench commit `847e4ed604764ce8b887265709ddb2d1c3c5f020`, authored
+  2026-01-15, is the pinned official repository source. Its README, sequential runner, package
+  lock, and committed results provide five provider-bounded 5,000-attempt lifecycle samples.
+- The actual result windows differ: Steel 2025-11-06; Hyperbrowser and AnchorBrowser
+  2025-11-05 to 2025-11-06; Kernel 2026-01-10 to 2026-01-11; Browserbase 2026-01-12 to
+  2026-01-13. Those date and SDK-version boundaries are not merged into a timeless provider
+  ranking.
+- Steel, Kernel, Browserbase, and Hyperbrowser each report 5,000 successful samples out of
+  5,000 attempts. AnchorBrowser reports 4,867/5,000 (97.34%) with 133 session-create failures.
+  The Kernel file also contains one successful row with a null release timing, so only 4,999
+  rows have a complete four-stage timing tuple.
+- BrowserBench's mean stages are create, Playwright CDP connection, DOMContentLoaded page
+  navigation, and release. Its total mean/median/p95/p99 cover the create→connect→goto→release
+  lifecycle, not browser-ready, task-complete, or full agent-session latency.
+- The sample is benchmark evidence, not production agent telemetry. Attempt rate is not
+  concurrency, queue depth, or throughput; successful samples are not user sessions, tasks,
+  actions, observations, or tool calls; means are not stage-tail or failure distributions.
+- The unresolved production browser/desktop trajectory gap remains action/tool-call
+  distributions, observation bytes, resets, full session duration, escalations, user
+  populations, and retry/failure/tail distributions.

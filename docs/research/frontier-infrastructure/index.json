@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9373,
+  "latest_slice_issue": 9375,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 248,
+    "entry_count": 253,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -248,6 +248,11 @@
       "SkyWalker cross-region study",
       "SpecInfer",
       "Speculative decoding",
+      "Steel BrowserBench / AnchorBrowser",
+      "Steel BrowserBench / Browserbase",
+      "Steel BrowserBench / Hyperbrowser",
+      "Steel BrowserBench / Kernel",
+      "Steel BrowserBench / Steel",
       "StepFun",
       "TIE scheduling study",
       "TSMC",
@@ -295,7 +300,8 @@
       "China and export-control coverage, sovereign AI programs, standards, regulatory changes, and regional supply chains.",
       "A systematic rumor chronology with original source, independent corroboration graph, later confirmation/refutation, and expiry.",
       "Automated link checking, schema validation as a committed Go leaf, and scheduled refresh; the manual contradiction matrix exists but project-level reconciliation remains incomplete.",
-      "Representative production retry, server/client fallback, and client-side speculative-decoding outcome distributions remain unavailable in the reviewed primary sources."
+      "Representative production retry, server/client fallback, and client-side speculative-decoding outcome distributions remain unavailable in the reviewed primary sources.",
+      "Production browser and desktop-agent trajectories remain missing: action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, and retry/failure/tail distributions."
     ]
   },
   "entries": [
@@ -9706,6 +9712,326 @@
         "Forecast ledgers should retain forecast family, study year, target year, included load classes, and sensitivity status for every grid-demand number.",
         "Transmission-capacity models should separate recommended or planned facilities from permitted, constructed, energized, and operational assets.",
         "Batch-process loads should be added only through a dated final forecast or project-level evidence, not by combining raw queue nameplate with econometric demand."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "browserbench-steel-lifecycle-2026",
+      "category": "workload_trace",
+      "entity": "Steel BrowserBench / Steel",
+      "topic": [
+        "remote_browser",
+        "browser_lifecycle_benchmark",
+        "execution_envelope",
+        "latency",
+        "reliability"
+      ],
+      "published_at": "2026-01-15",
+      "event_at": "2025-11-06",
+      "source_title": "Steel BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020: README, runner, package lock, and results/steel.jsonl",
+      "source_url": "https://github.com/steel-dev/browserbench/blob/847e4ed604764ce8b887265709ddb2d1c3c5f020/results/steel.jsonl",
+      "source_kind": "official_repository",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "At pinned BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020, the committed steel result file records 5,000 sequential remote-browser lifecycle attempts during 2025-11-06T05:37:07.009Z to 2025-11-06T06:52:26.679Z. The repository README reports 5,000 successful samples (100%) with mean create, CDP connect, DOMContentLoaded navigation, release, and four-stage total latencies of 181.57, 174.64, 490.29, 47.62, and 894.13 ms. All 5,000 committed rows are successful and contain all four stage timings.",
+      "quantified": {
+        "repository_commit": "847e4ed604764ce8b887265709ddb2d1c3c5f020",
+        "commit_authored_at": "2026-01-15T00:20:49-05:00",
+        "runner_client_region": "AWS EC2 us-east-1",
+        "navigation_target": "https://google.com/",
+        "warmups_per_provider_excluded": 10,
+        "provider_sdk_version": "steel-sdk 0.14.0",
+        "test_window_utc": "2025-11-06T05:37:07.009Z to 2025-11-06T06:52:26.679Z",
+        "attempts": 5000,
+        "successful_lifecycle_samples": 5000,
+        "success_rate": "100%",
+        "failed_attempts": 0,
+        "mean_session_creation_ms": 181.57,
+        "mean_cdp_connect_ms": 174.64,
+        "mean_domcontentloaded_navigation_ms": 490.29,
+        "mean_session_release_ms": 47.62,
+        "mean_total_create_connect_goto_release_ms": 894.13,
+        "total_median_ms": 867.0,
+        "total_p95_ms": 1090.0,
+        "total_p99_ms": 1340.05
+      },
+      "assumptions": [
+        "The repository tree, README, runner, package lock, and committed JSONL result at commit 847e4ed604764ce8b887265709ddb2d1c3c5f020 are treated as one pinned benchmark artifact.",
+        "The README summary is treated as a reproducible description of the committed sample, not as live provider telemetry.",
+        "Stage means and total quantiles retain the runner definitions and provider/test-window boundary; no cross-provider normalization beyond the repository methodology is inferred."
+      ],
+      "contradictions_or_limits": [
+        "This is a benchmark lifecycle sample from the committed BrowserBench corpus, not production telemetry or a production agent trajectory.",
+        "Create/start, browser readiness, CDP connection, first-page navigation, task completion, and release are distinct boundaries; the runner measures create, Playwright connectOverCDP, page.goto(..., waitUntil=\"domcontentloaded\"), and release, but does not establish a separate browser-ready time or task-complete time.",
+        "The run count is attempts and the success count is successful lifecycle samples; neither is a count of users, user sessions, agent tasks, actions, observations, or tool calls.",
+        "The sequential runner, Kernel retry-on-429 behavior, and Browserbase approximately three-second cycle floor do not measure provider concurrency, queue depth, or steady-state throughput. Attempt rate must not be relabeled as any of those quantities.",
+        "Mean stage latency is not p50, p95, p99, or a failure distribution. The README total table supplies total median/p95/p99 only for this sample and does not expose stage-tail or retry distributions.",
+        "One provider SDK version, test window, AWS us-east-1 client, target page, and repository commit do not establish universal provider performance.",
+        "A hosted remote-browser lifecycle is not a desktop-computer trajectory and does not measure action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, or retry/failure/tail distributions for production browser or desktop agents."
+      ],
+      "fak_implications": [
+        "Represent a remote-browser execution envelope as typed stage boundaries plus attempt/success accounting; do not collapse lifecycle latency into agent task latency.",
+        "Preserve provider, SDK version, repository pin, test window, client region, target page, warm-up policy, throttling/retry behavior, and missing-stage values before using the sample for scheduling or timeout experiments.",
+        "Use these bounded benchmark values only as lifecycle priors. Production browser/desktop capacity planning still requires trajectory-level action, tool-call, observation-byte, reset, session-duration, escalation, retry, failure, tail, and user-population measurements."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "browserbench-kernel-lifecycle-2026",
+      "category": "workload_trace",
+      "entity": "Steel BrowserBench / Kernel",
+      "topic": [
+        "remote_browser",
+        "browser_lifecycle_benchmark",
+        "execution_envelope",
+        "latency",
+        "reliability"
+      ],
+      "published_at": "2026-01-15",
+      "event_at": "2026-01-11",
+      "source_title": "Steel BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020: README, runner, package lock, and results/kernel.jsonl",
+      "source_url": "https://github.com/steel-dev/browserbench/blob/847e4ed604764ce8b887265709ddb2d1c3c5f020/results/kernel.jsonl",
+      "source_kind": "official_repository",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "At pinned BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020, the committed kernel result file records 5,000 sequential remote-browser lifecycle attempts during 2026-01-10T21:51:06.716Z to 2026-01-11T06:11:00.966Z. The repository README reports 5,000 successful samples (100%) with mean create, CDP connect, DOMContentLoaded navigation, release, and four-stage total latencies of 36.64, 288.30, 434.15, 34.77, and 793.84 ms. All 5,000 rows are marked successful; one successful row has a null release timing, so only 4,999 successful rows have all four stage values and support a complete stage-sum total.",
+      "quantified": {
+        "repository_commit": "847e4ed604764ce8b887265709ddb2d1c3c5f020",
+        "commit_authored_at": "2026-01-15T00:20:49-05:00",
+        "runner_client_region": "AWS EC2 us-east-1",
+        "navigation_target": "https://google.com/",
+        "warmups_per_provider_excluded": 10,
+        "provider_sdk_version": "@onkernel/sdk 0.18.0",
+        "test_window_utc": "2026-01-10T21:51:06.716Z to 2026-01-11T06:11:00.966Z",
+        "attempts": 5000,
+        "successful_lifecycle_samples": 5000,
+        "success_rate": "100%",
+        "failed_attempts": 0,
+        "mean_session_creation_ms": 36.64,
+        "mean_cdp_connect_ms": 288.3,
+        "mean_domcontentloaded_navigation_ms": 434.15,
+        "mean_session_release_ms": 34.77,
+        "mean_total_create_connect_goto_release_ms": 793.84,
+        "total_median_ms": 776.0,
+        "total_p95_ms": 1006.0,
+        "total_p99_ms": 1105.0
+      },
+      "assumptions": [
+        "The repository tree, README, runner, package lock, and committed JSONL result at commit 847e4ed604764ce8b887265709ddb2d1c3c5f020 are treated as one pinned benchmark artifact.",
+        "The README summary is treated as a reproducible description of the committed sample, not as live provider telemetry.",
+        "Stage means and total quantiles retain the runner definitions and provider/test-window boundary; no cross-provider normalization beyond the repository methodology is inferred."
+      ],
+      "contradictions_or_limits": [
+        "This is a benchmark lifecycle sample from the committed BrowserBench corpus, not production telemetry or a production agent trajectory.",
+        "Create/start, browser readiness, CDP connection, first-page navigation, task completion, and release are distinct boundaries; the runner measures create, Playwright connectOverCDP, page.goto(..., waitUntil=\"domcontentloaded\"), and release, but does not establish a separate browser-ready time or task-complete time.",
+        "The run count is attempts and the success count is successful lifecycle samples; neither is a count of users, user sessions, agent tasks, actions, observations, or tool calls.",
+        "The sequential runner, Kernel retry-on-429 behavior, and Browserbase approximately three-second cycle floor do not measure provider concurrency, queue depth, or steady-state throughput. Attempt rate must not be relabeled as any of those quantities.",
+        "Mean stage latency is not p50, p95, p99, or a failure distribution. The README total table supplies total median/p95/p99 only for this sample and does not expose stage-tail or retry distributions.",
+        "One provider SDK version, test window, AWS us-east-1 client, target page, and repository commit do not establish universal provider performance.",
+        "A hosted remote-browser lifecycle is not a desktop-computer trajectory and does not measure action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, or retry/failure/tail distributions for production browser or desktop agents."
+      ],
+      "fak_implications": [
+        "Represent a remote-browser execution envelope as typed stage boundaries plus attempt/success accounting; do not collapse lifecycle latency into agent task latency.",
+        "Preserve provider, SDK version, repository pin, test window, client region, target page, warm-up policy, throttling/retry behavior, and missing-stage values before using the sample for scheduling or timeout experiments.",
+        "Use these bounded benchmark values only as lifecycle priors. Production browser/desktop capacity planning still requires trajectory-level action, tool-call, observation-byte, reset, session-duration, escalation, retry, failure, tail, and user-population measurements."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "browserbench-browserbase-lifecycle-2026",
+      "category": "workload_trace",
+      "entity": "Steel BrowserBench / Browserbase",
+      "topic": [
+        "remote_browser",
+        "browser_lifecycle_benchmark",
+        "execution_envelope",
+        "latency",
+        "reliability"
+      ],
+      "published_at": "2026-01-15",
+      "event_at": "2026-01-13",
+      "source_title": "Steel BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020: README, runner, package lock, and results/browserbase.jsonl",
+      "source_url": "https://github.com/steel-dev/browserbench/blob/847e4ed604764ce8b887265709ddb2d1c3c5f020/results/browserbase.jsonl",
+      "source_kind": "official_repository",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "At pinned BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020, the committed browserbase result file records 5,000 sequential remote-browser lifecycle attempts during 2026-01-12T23:08:19.110Z to 2026-01-13T07:29:07.295Z. The repository README reports 5,000 successful samples (100%) with mean create, CDP connect, DOMContentLoaded navigation, release, and four-stage total latencies of 212.83, 1,794.42, 745.08, 214.55, and 2,966.87 ms. All 5,000 committed rows are successful and contain all four stage timings; the runner enforces an approximately three-second floor per full Browserbase cycle to avoid rate-limit bursts.",
+      "quantified": {
+        "repository_commit": "847e4ed604764ce8b887265709ddb2d1c3c5f020",
+        "commit_authored_at": "2026-01-15T00:20:49-05:00",
+        "runner_client_region": "AWS EC2 us-east-1",
+        "navigation_target": "https://google.com/",
+        "warmups_per_provider_excluded": 10,
+        "provider_sdk_version": "@browserbasehq/sdk 2.6.0",
+        "test_window_utc": "2026-01-12T23:08:19.110Z to 2026-01-13T07:29:07.295Z",
+        "attempts": 5000,
+        "successful_lifecycle_samples": 5000,
+        "success_rate": "100%",
+        "failed_attempts": 0,
+        "mean_session_creation_ms": 212.83,
+        "mean_cdp_connect_ms": 1794.42,
+        "mean_domcontentloaded_navigation_ms": 745.08,
+        "mean_session_release_ms": 214.55,
+        "mean_total_create_connect_goto_release_ms": 2966.87,
+        "total_median_ms": 2888.0,
+        "total_p95_ms": 3886.0,
+        "total_p99_ms": 4309.12
+      },
+      "assumptions": [
+        "The repository tree, README, runner, package lock, and committed JSONL result at commit 847e4ed604764ce8b887265709ddb2d1c3c5f020 are treated as one pinned benchmark artifact.",
+        "The README summary is treated as a reproducible description of the committed sample, not as live provider telemetry.",
+        "Stage means and total quantiles retain the runner definitions and provider/test-window boundary; no cross-provider normalization beyond the repository methodology is inferred."
+      ],
+      "contradictions_or_limits": [
+        "This is a benchmark lifecycle sample from the committed BrowserBench corpus, not production telemetry or a production agent trajectory.",
+        "Create/start, browser readiness, CDP connection, first-page navigation, task completion, and release are distinct boundaries; the runner measures create, Playwright connectOverCDP, page.goto(..., waitUntil=\"domcontentloaded\"), and release, but does not establish a separate browser-ready time or task-complete time.",
+        "The run count is attempts and the success count is successful lifecycle samples; neither is a count of users, user sessions, agent tasks, actions, observations, or tool calls.",
+        "The sequential runner, Kernel retry-on-429 behavior, and Browserbase approximately three-second cycle floor do not measure provider concurrency, queue depth, or steady-state throughput. Attempt rate must not be relabeled as any of those quantities.",
+        "Mean stage latency is not p50, p95, p99, or a failure distribution. The README total table supplies total median/p95/p99 only for this sample and does not expose stage-tail or retry distributions.",
+        "One provider SDK version, test window, AWS us-east-1 client, target page, and repository commit do not establish universal provider performance.",
+        "A hosted remote-browser lifecycle is not a desktop-computer trajectory and does not measure action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, or retry/failure/tail distributions for production browser or desktop agents."
+      ],
+      "fak_implications": [
+        "Represent a remote-browser execution envelope as typed stage boundaries plus attempt/success accounting; do not collapse lifecycle latency into agent task latency.",
+        "Preserve provider, SDK version, repository pin, test window, client region, target page, warm-up policy, throttling/retry behavior, and missing-stage values before using the sample for scheduling or timeout experiments.",
+        "Use these bounded benchmark values only as lifecycle priors. Production browser/desktop capacity planning still requires trajectory-level action, tool-call, observation-byte, reset, session-duration, escalation, retry, failure, tail, and user-population measurements."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "browserbench-hyperbrowser-lifecycle-2026",
+      "category": "workload_trace",
+      "entity": "Steel BrowserBench / Hyperbrowser",
+      "topic": [
+        "remote_browser",
+        "browser_lifecycle_benchmark",
+        "execution_envelope",
+        "latency",
+        "reliability"
+      ],
+      "published_at": "2026-01-15",
+      "event_at": "2025-11-06",
+      "source_title": "Steel BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020: README, runner, package lock, and results/hyperbrowser.jsonl",
+      "source_url": "https://github.com/steel-dev/browserbench/blob/847e4ed604764ce8b887265709ddb2d1c3c5f020/results/hyperbrowser.jsonl",
+      "source_kind": "official_repository",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "At pinned BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020, the committed hyperbrowser result file records 5,000 sequential remote-browser lifecycle attempts during 2025-11-05T16:34:26.511Z to 2025-11-06T10:44:52.875Z. The repository README reports 5,000 successful samples (100%) with mean create, CDP connect, DOMContentLoaded navigation, release, and four-stage total latencies of 1,731.63, 347.60, 377.89, 1,199.98, and 3,657.11 ms. All 5,000 committed rows are successful and contain all four stage timings.",
+      "quantified": {
+        "repository_commit": "847e4ed604764ce8b887265709ddb2d1c3c5f020",
+        "commit_authored_at": "2026-01-15T00:20:49-05:00",
+        "runner_client_region": "AWS EC2 us-east-1",
+        "navigation_target": "https://google.com/",
+        "warmups_per_provider_excluded": 10,
+        "provider_sdk_version": "@hyperbrowser/sdk 0.71.0",
+        "test_window_utc": "2025-11-05T16:34:26.511Z to 2025-11-06T10:44:52.875Z",
+        "attempts": 5000,
+        "successful_lifecycle_samples": 5000,
+        "success_rate": "100%",
+        "failed_attempts": 0,
+        "mean_session_creation_ms": 1731.63,
+        "mean_cdp_connect_ms": 347.6,
+        "mean_domcontentloaded_navigation_ms": 377.89,
+        "mean_session_release_ms": 1199.98,
+        "mean_total_create_connect_goto_release_ms": 3657.11,
+        "total_median_ms": 3665.5,
+        "total_p95_ms": 5338.0,
+        "total_p99_ms": 6695.05
+      },
+      "assumptions": [
+        "The repository tree, README, runner, package lock, and committed JSONL result at commit 847e4ed604764ce8b887265709ddb2d1c3c5f020 are treated as one pinned benchmark artifact.",
+        "The README summary is treated as a reproducible description of the committed sample, not as live provider telemetry.",
+        "Stage means and total quantiles retain the runner definitions and provider/test-window boundary; no cross-provider normalization beyond the repository methodology is inferred."
+      ],
+      "contradictions_or_limits": [
+        "This is a benchmark lifecycle sample from the committed BrowserBench corpus, not production telemetry or a production agent trajectory.",
+        "Create/start, browser readiness, CDP connection, first-page navigation, task completion, and release are distinct boundaries; the runner measures create, Playwright connectOverCDP, page.goto(..., waitUntil=\"domcontentloaded\"), and release, but does not establish a separate browser-ready time or task-complete time.",
+        "The run count is attempts and the success count is successful lifecycle samples; neither is a count of users, user sessions, agent tasks, actions, observations, or tool calls.",
+        "The sequential runner, Kernel retry-on-429 behavior, and Browserbase approximately three-second cycle floor do not measure provider concurrency, queue depth, or steady-state throughput. Attempt rate must not be relabeled as any of those quantities.",
+        "Mean stage latency is not p50, p95, p99, or a failure distribution. The README total table supplies total median/p95/p99 only for this sample and does not expose stage-tail or retry distributions.",
+        "One provider SDK version, test window, AWS us-east-1 client, target page, and repository commit do not establish universal provider performance.",
+        "A hosted remote-browser lifecycle is not a desktop-computer trajectory and does not measure action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, or retry/failure/tail distributions for production browser or desktop agents."
+      ],
+      "fak_implications": [
+        "Represent a remote-browser execution envelope as typed stage boundaries plus attempt/success accounting; do not collapse lifecycle latency into agent task latency.",
+        "Preserve provider, SDK version, repository pin, test window, client region, target page, warm-up policy, throttling/retry behavior, and missing-stage values before using the sample for scheduling or timeout experiments.",
+        "Use these bounded benchmark values only as lifecycle priors. Production browser/desktop capacity planning still requires trajectory-level action, tool-call, observation-byte, reset, session-duration, escalation, retry, failure, tail, and user-population measurements."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "browserbench-anchorbrowser-lifecycle-2026",
+      "category": "workload_trace",
+      "entity": "Steel BrowserBench / AnchorBrowser",
+      "topic": [
+        "remote_browser",
+        "browser_lifecycle_benchmark",
+        "execution_envelope",
+        "latency",
+        "reliability"
+      ],
+      "published_at": "2026-01-15",
+      "event_at": "2025-11-06",
+      "source_title": "Steel BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020: README, runner, package lock, and results/anchorbrowser.jsonl",
+      "source_url": "https://github.com/steel-dev/browserbench/blob/847e4ed604764ce8b887265709ddb2d1c3c5f020/results/anchorbrowser.jsonl",
+      "source_kind": "official_repository",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "claim": "At pinned BrowserBench commit 847e4ed604764ce8b887265709ddb2d1c3c5f020, the committed anchorbrowser result file records 5,000 sequential remote-browser lifecycle attempts during 2025-11-05T17:35:22.143Z to 2025-11-06T09:05:04.543Z. The repository README reports 4,867 successful samples (97.34%) with mean create, CDP connect, DOMContentLoaded navigation, release, and four-stage total latencies of 3,796.55, 184.29, 1,259.66, 2,760.79, and 8,001.29 ms. The committed file contains 5,000 attempts: 4,867 successful complete lifecycle rows and 133 failures at session_create with no browser available.",
+      "quantified": {
+        "repository_commit": "847e4ed604764ce8b887265709ddb2d1c3c5f020",
+        "commit_authored_at": "2026-01-15T00:20:49-05:00",
+        "runner_client_region": "AWS EC2 us-east-1",
+        "navigation_target": "https://google.com/",
+        "warmups_per_provider_excluded": 10,
+        "provider_sdk_version": "anchorbrowser 0.8.3",
+        "test_window_utc": "2025-11-05T17:35:22.143Z to 2025-11-06T09:05:04.543Z",
+        "attempts": 5000,
+        "successful_lifecycle_samples": 4867,
+        "success_rate": "97.34%",
+        "failed_attempts": 133,
+        "mean_session_creation_ms": 3796.55,
+        "mean_cdp_connect_ms": 184.29,
+        "mean_domcontentloaded_navigation_ms": 1259.66,
+        "mean_session_release_ms": 2760.79,
+        "mean_total_create_connect_goto_release_ms": 8001.29,
+        "total_median_ms": 7919.0,
+        "total_p95_ms": 11561.0,
+        "total_p99_ms": 13957.14
+      },
+      "assumptions": [
+        "The repository tree, README, runner, package lock, and committed JSONL result at commit 847e4ed604764ce8b887265709ddb2d1c3c5f020 are treated as one pinned benchmark artifact.",
+        "The README summary is treated as a reproducible description of the committed sample, not as live provider telemetry.",
+        "Stage means and total quantiles retain the runner definitions and provider/test-window boundary; no cross-provider normalization beyond the repository methodology is inferred."
+      ],
+      "contradictions_or_limits": [
+        "This is a benchmark lifecycle sample from the committed BrowserBench corpus, not production telemetry or a production agent trajectory.",
+        "Create/start, browser readiness, CDP connection, first-page navigation, task completion, and release are distinct boundaries; the runner measures create, Playwright connectOverCDP, page.goto(..., waitUntil=\"domcontentloaded\"), and release, but does not establish a separate browser-ready time or task-complete time.",
+        "The run count is attempts and the success count is successful lifecycle samples; neither is a count of users, user sessions, agent tasks, actions, observations, or tool calls.",
+        "The sequential runner, Kernel retry-on-429 behavior, and Browserbase approximately three-second cycle floor do not measure provider concurrency, queue depth, or steady-state throughput. Attempt rate must not be relabeled as any of those quantities.",
+        "Mean stage latency is not p50, p95, p99, or a failure distribution. The README total table supplies total median/p95/p99 only for this sample and does not expose stage-tail or retry distributions.",
+        "One provider SDK version, test window, AWS us-east-1 client, target page, and repository commit do not establish universal provider performance.",
+        "A hosted remote-browser lifecycle is not a desktop-computer trajectory and does not measure action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, or retry/failure/tail distributions for production browser or desktop agents."
+      ],
+      "fak_implications": [
+        "Represent a remote-browser execution envelope as typed stage boundaries plus attempt/success accounting; do not collapse lifecycle latency into agent task latency.",
+        "Preserve provider, SDK version, repository pin, test window, client region, target page, warm-up policy, throttling/retry behavior, and missing-stage values before using the sample for scheduling or timeout experiments.",
+        "Use these bounded benchmark values only as lifecycle priors. Production browser/desktop capacity planning still requires trajectory-level action, tool-call, observation-byte, reset, session-duration, escalation, retry, failure, tail, and user-population measurements."
       ],
       "rumor": {
         "is_rumor": false

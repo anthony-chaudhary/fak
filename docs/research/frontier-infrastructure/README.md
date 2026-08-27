@@ -37,7 +37,7 @@ assumptions, sensitivities, and forecasts from actual load. It also keeps planne
 60/90-day and twelve-month processes, ERCOT's final Batch Zero classification and Fall 2027
 statewide plan, and the final end-2026 forecast including Batch loads remain future work. The
 Texas governor directive/~474 GW claim remains coverage debt because no direct governor source
-was supplied. The corpus now contains **248 entries**, **243 unique URLs**, and **210 entity
+was supplied. The corpus now contains **253 entries**, **248 unique URLs**, and **215 entity
 labels**.
 
 ## Latest slice: Chinese platform envelopes (#9362)
@@ -250,6 +250,39 @@ roughly bimodal; daily and weekly periodicity coexists with short and sustained 
 and traffic changes abruptly after model releases. When a benchmark uses a Zipf, Poisson,
 lognormal, Pareto, Hawkes, or MMPP assumption, it must name the fitted population
 or label the distribution as synthetic.
+
+## Bounded remote-browser execution-envelope slice (#9375)
+
+The pinned official source is Steel BrowserBench commit
+`847e4ed604764ce8b887265709ddb2d1c3c5f020`, authored 2026-01-15. Its README,
+runner, package lock, and committed result files describe sequential lifecycle samples from an
+AWS EC2 client in `us-east-1`, navigating first to `https://google.com/`, with 10 warm-ups
+per provider excluded. The five indexed records retain their distinct provider SDK and test
+windows: Steel (`steel-sdk` 0.14.0, 2025-11-06), Kernel (`@onkernel/sdk` 0.18.0,
+2026-01-10 to 2026-01-11), Browserbase (`@browserbasehq/sdk` 2.6.0, 2026-01-12 to
+2026-01-13), Hyperbrowser (`@hyperbrowser/sdk` 0.71.0, 2025-11-05 to 2025-11-06), and
+AnchorBrowser (`anchorbrowser` 0.8.3, 2025-11-05 to 2025-11-06). Each committed file has
+5,000 attempts. Steel, Kernel, Browserbase, and Hyperbrowser report 5,000 successful samples;
+AnchorBrowser reports 4,867 successful samples and 133 `session_create` failures (97.34%).
+
+The record boundary is deliberately narrow:
+
+- a benchmark lifecycle sample is not production telemetry or a production agent trajectory;
+- create/start, browser ready, CDP connected, page navigated, task complete, and release are
+  different states; BrowserBench measures create, `connectOverCDP`, DOMContentLoaded
+  navigation, and release, but not separate browser-ready or task-complete times;
+- an attempt or successful sample is not a user session, task, action, observation, or tool call;
+- attempt rate is not concurrency, queue depth, or throughput; the runner is sequential, retries
+  Kernel create calls after 429s, and imposes an approximately three-second Browserbase cycle
+  floor;
+- mean stage latency is not p50/p95/p99 or a failure distribution; only total lifecycle
+  median/p95/p99 are reported for the bounded samples; and
+- one provider/version/date/client-region/target-page result is not universal performance, nor
+  is a hosted remote-browser lifecycle a desktop-computer trajectory.
+
+The browser/desktop production gap remains explicit: no reviewed primary source supplies
+action/tool-call distributions, observation bytes, reset distributions, full session duration,
+escalations, user populations, or production retry/failure/tail distributions.
 
 ## Validation
 

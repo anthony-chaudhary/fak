@@ -26,8 +26,8 @@ classification, forecast inclusion, completed study, approval, construction, ene
 live load remain separate states. The New York GEIS/report processes, final Batch Zero outputs,
 Fall 2027 statewide transmission plan, and end-2026 forecast including Batch loads remain future
 work. The Texas-governor directive/~474 GW claim remains explicit coverage debt because no
-direct governor source was supplied. **Exact indexed totals: 248 entries, 243 unique URLs, and
-210 entity labels.**
+direct governor source was supplied. **Exact indexed totals: 253 entries, 248 unique URLs, and
+215 entity labels.**
 
 Issue #9325 adds an opened Modine/Airedale cooling factory, a >$4B 2027-2029
 capacity reservation with $165M upfront funding, and a shipping Schneider prefabricated
@@ -153,20 +153,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **207** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **202** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **170** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 19; `frontier_lab` 59; `hardware_supply` 1; `hyperscaler` 16; `market_signal` 23; `policy_regulation` 8; `serving_system` 29; `standard` 3; `supply_chain` 24; `workload_model` 3; `workload_trace` 12. |
-| Evidence classes used | **25** | Machine-derived counts now include `official_statement` 93, `vendor_claim` 31, `benchmark_measurement` 17, `reported_observation` 15, `production_measurement` 11, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 21 entries across 17 other bounded lifecycle/benchmark/specification labels. |
-| Confidence labels | **16** | Exact labels include `high` 126, `medium_high` 58, `medium` 9, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **207/207 published; 207/207 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **253** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **248** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **215** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 62; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 24; `policy_regulation` 14; `serving_system` 40; `standard` 3; `supply_chain` 31; `workload_model` 8; `workload_trace` 21. |
+| Evidence classes used | **48** | Machine-derived counts now include `official_statement` 95, `vendor_claim` 31, `benchmark_measurement` 22, `reported_observation` 15, `production_measurement` 13, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 58 entries across 40 other bounded lifecycle/benchmark/specification labels. |
+| Confidence labels | **16** | Exact labels include `high` 170, `medium_high` 58, `medium` 11, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **253/253 published; 253/253 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 207 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 253 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -428,6 +428,35 @@ dates, affected hardware/services, implementation status, and later amendments.
 | Vendor claims | **31 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **21 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **2 entries** | Watch-only until independently corroborated or resolved. |
+
+## Remote-browser execution-envelope slice (#9375)
+
+**Bounded coverage added:** five `workload_trace` records from the official Steel BrowserBench
+repository pinned at commit `847e4ed604764ce8b887265709ddb2d1c3c5f020` (2026-01-15).
+The records cover the committed 5,000-attempt samples for Steel, Kernel, Browserbase,
+Hyperbrowser, and AnchorBrowser, including exact successful-sample counts/rates, mean create,
+CDP-connect, DOMContentLoaded-navigation, release, and total lifecycle latency, plus total
+median/p95/p99. Provider SDK versions and actual result-file test windows remain separate.
+
+**Method boundary:** the README is a benchmark summary reproducible from committed JSONL, not
+production telemetry. The runner executes sequential lifecycle attempts from AWS EC2
+`us-east-1`, excludes 10 warm-ups/provider, retries Kernel create after 429s, and gives
+Browserbase an approximately three-second full-cycle floor. Consequently, run rate does not
+measure concurrency, queue depth, or throughput. Create/start is not browser ready; browser
+ready is not CDP connected; CDP connected is not page navigated; page navigated is not task
+complete; task complete is not release. Successful samples are not users, sessions, tasks,
+actions, observations, or tool calls. Mean stage values are not stage p50/p95/p99 or failure
+distributions.
+
+**Known data anomaly retained:** the Kernel result file marks all 5,000 attempts successful, but
+one successful row has `session_release_ms: null`; only 4,999 successful rows contain all four
+stage values. The README's rounded stage and total summaries are indexed as published rather
+than silently repairing that row.
+
+**Unretired gap:** hosted remote-browser lifecycle data does not characterize desktop-computer
+trajectories. Production action/tool-call distributions, observation bytes, resets, full
+session duration, escalations, user populations, and retry/failure/tail distributions remain
+unavailable in the reviewed primary sources.
 
 ## Preserved explicit gaps
 
