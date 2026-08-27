@@ -30,20 +30,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **170** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **165** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **137** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 19; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 18; `policy_regulation` 5; `serving_system` 25; `standard` 2; `supply_chain` 17; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 84; `vendor_claim` 24; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 16; `analyst_estimate` 5; `synthetic_experiment` 6; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 109; `medium_high` 51; `medium` 8; `low` 2. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **170/170 published; 170/170 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **175** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **170** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **142** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 19; `frontier_lab` 47; `hyperscaler` 16; `market_signal` 19; `policy_regulation` 5; `serving_system` 25; `standard` 3; `supply_chain` 20; `workload_model` 3; `workload_trace` 8. |
+| Evidence classes used | **10** | `official_statement` 86; `vendor_claim` 27; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 16; `analyst_estimate` 5; `synthetic_experiment` 6; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
+| Confidence labels | **4** | `high` 111; `medium_high` 54; `medium` 8; `low` 2. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **175/175 published; 175/175 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 170 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 175 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -114,9 +114,11 @@ subsequent delay/cancellation resolution.
 announcements; architectural recognition that accelerator availability alone does not
 set cluster capacity.
 
+**Present but incomplete:** VAST/CoreWeave DPU data-plane deployment claims, WEKA storage/memory GA, Arista 1.6T product availability, and XPO specification/density evidence now bound storage and network lifecycle states.
+
 **Missing or shallow:** supplier-by-supplier HBM output and allocation, CoWoS/advanced
 packaging capacity, substrates, optics/transceivers, switch silicon, cables, NICs,
-object/block storage, checkpoint paths, lead times, yields, shipment versus installed
+object/block storage shipments and production checkpoint paths, lead times, yields, shipment versus installed
 states, and China/regional supply chains. Electrical equipment is similarly sparse.
 
 **Proof needed for complete:** component/vendor ledgers with physical units, time
@@ -290,8 +292,8 @@ dates, affected hardware/services, implementation status, and later amendments.
 |---|---|---|
 | Production measurement/observation | **17 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
 | Benchmark/synthetic | **22 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **84 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
-| Vendor claims | **24 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
+| Official statements | **86 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Vendor claims | **27 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **21 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
 | Rumor | **2 entries** | Watch-only until independently corroborated or resolved. |
 

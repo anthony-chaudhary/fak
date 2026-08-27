@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T20:32:00-07:00",
+  "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9330,
+  "latest_slice_issue": 9331,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 170,
+    "entry_count": 175,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -102,6 +102,8 @@
       "Anthropic / Nscale",
       "Apple",
       "Applied Digital",
+      "Arista Networks",
+      "Arista XPO MSA",
       "Baidu",
       "BurstGPT v1.1",
       "ByteDance Seed",
@@ -204,7 +206,10 @@
       "Ultra Ethernet Consortium",
       "Untether AI",
       "Untether AI / AMD",
+      "VAST Data",
+      "VAST Data / NVIDIA / CoreWeave",
       "Vertiv",
+      "WEKA",
       "Z.ai / Zhipu AI",
       "llm-d / Google",
       "xAI",
@@ -6422,6 +6427,203 @@
       "fak_implications": [
         "Track product-specific factory/testing capacity and regional export allocation.",
         "Do not convert supplier backlog growth into datacenter MW or interconnection completion."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "vast-bluefield-coreweave-2024",
+      "category": "supply_chain",
+      "entity": "VAST Data / NVIDIA / CoreWeave",
+      "topic": [
+        "storage",
+        "dpu",
+        "data_movement",
+        "deployment",
+        "multi_tenant"
+      ],
+      "published_at": "2024-03-12",
+      "event_at": "2024-03-12",
+      "source_title": "VAST Data Unveils New Data Center Architecture for the AI Factory",
+      "source_url": "https://www.vastdata.com/press-releases/vast-nvidia-bluefield-architecture-for-ai-factory",
+      "source_kind": "official_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "VAST and NVIDIA described a BlueField-3 DPU architecture that embeds stateless storage/database services in every GPU server and said it was being tested and deployed first at CoreWeave, with claimed reductions in independent infrastructure footprint and power.",
+      "quantified": {
+        "claimed_vast_infrastructure_power_and_footprint_reduction_pct": 70,
+        "claimed_net_energy_savings_pct_gt": 5,
+        "target_scale_gpus": "hundreds_of_thousands"
+      },
+      "assumptions": [
+        "Data services, DPUs, storage, and database processing can be integrated into GPU servers rather than isolated storage nodes."
+      ],
+      "contradictions_or_limits": [
+        "Deployment and efficiency figures are vendor claims without neutral production workload, hardware, capacity, uptime, or cost disclosure.",
+        "Target scale and being tested/deployed do not quantify installed prevalence or useful application goodput."
+      ],
+      "fak_implications": [
+        "Track data path, DPU services, protocol, isolation, storage/network resource share, and measured end-to-end GPU utilization.",
+        "Count storage/database/DPU power and failures in AI-factory receipts."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "vast-series-f-storage-scale-2026",
+      "category": "market_signal",
+      "entity": "VAST Data",
+      "topic": [
+        "storage",
+        "funding",
+        "bookings",
+        "carr",
+        "gpu_environment_claim"
+      ],
+      "published_at": "2026-04-22",
+      "event_at": "2026-04-22",
+      "source_title": "VAST Data Valued at $30 Billion as AI Drives a New Infrastructure Stack",
+      "source_url": "https://www.vastdata.com/press-releases/vast-series-f-financing-at-30-billion-valuation",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "VAST announced a Series F at a $30B valuation with approximately $1B of primary and secondary transaction value, more than $4B cumulative bookings, and more than $500M committed ARR, while claiming its platform supports environments spanning millions of GPUs.",
+      "quantified": {
+        "valuation_usd": 30000000000,
+        "transaction_value_usd_approx": 1000000000,
+        "cumulative_bookings_usd_gt": 4000000000,
+        "committed_arr_usd_gt": 500000000,
+        "claimed_supported_gpu_scale": "millions_globally"
+      },
+      "assumptions": [
+        "Storage/data-platform economics and support continuity can become strategic at multi-cloud AI-factory scale."
+      ],
+      "contradictions_or_limits": [
+        "Company-reported bookings, CARR, profitability, and GPU-environment claims are not audited here and do not reveal storage traffic, capacity, customer concentration, or deployed goodput.",
+        "Funding and valuation are not product throughput or installed storage capacity."
+      ],
+      "fak_implications": [
+        "Track data-platform customer concentration, workload, bytes/IOPS/bandwidth, GPU linkage, support, and profitability independently.",
+        "Do not convert supported GPU claims or bookings into storage throughput."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "arista-7060xe7-16t-2026",
+      "category": "supply_chain",
+      "entity": "Arista Networks",
+      "topic": [
+        "networking",
+        "1_6t",
+        "ai_fabric",
+        "liquid_cooling",
+        "availability"
+      ],
+      "published_at": "2026-06-09",
+      "event_at": "2026-06-09",
+      "source_title": "Arista Introduces Next-Generation 1.6Terabit Portfolio for AI Fabrics",
+      "source_url": "https://investors.arista.com/Communications/Press-Releases-and-Events/Press-Release-Detail/2026/Arista-Introduces-Next-Generation-1-6Terabit-Portfolio-for-AI-Fabrics/default.aspx",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "Arista announced 7060XE7 1.6T Ethernet platforms with about 100 Tbps system bandwidth, air- and liquid-cooled configurations, low-power optics, congestion/load-balancing features, and availability windows from Q4 2026 through Q1 2027.",
+      "quantified": {
+        "system_bandwidth_tbps_approx": 100,
+        "port_speed_tbps": 1.6,
+        "lpo_power_reduction_pct_approx": 60,
+        "air_cooled_64x16t_availability": "Q4 2026",
+        "liquid_cooled_64x16t_availability": "Q1 2027",
+        "air_cooled_128x800g_availability": "Q1 2027"
+      },
+      "assumptions": [
+        "AI fabric product availability, cooling, optics, congestion, and retry features evolve as one rack-scale system."
+      ],
+      "contradictions_or_limits": [
+        "Announced availability and specifications do not prove shipment volume, interoperability, field reliability, congestion behavior, or application goodput.",
+        "Peak port/system bandwidth ignores protocol, topology, collectives, failures, and workload imbalance."
+      ],
+      "fak_implications": [
+        "Record switch SKU, ports, optics, cooling, NOS, protocol features, availability, shipment, and deployed topology.",
+        "Benchmark collective/application goodput and failure recovery, not peak bandwidth."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "arista-xpo-msa-2026",
+      "category": "standard",
+      "entity": "Arista XPO MSA",
+      "topic": [
+        "optics",
+        "liquid_cooling",
+        "msa",
+        "rack_density",
+        "specification_lifecycle"
+      ],
+      "published_at": "2026-03-12",
+      "event_at": "2026-03-12",
+      "source_title": "Arista Announces XPO High Density Liquid Cooled Pluggable Optics",
+      "source_url": "https://www.arista.com/en/company/news/press-release/23697-pr-20260311",
+      "source_kind": "official_standard",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Arista announced the XPO multi-source agreement for a 64-channel, liquid-cooled pluggable optics module with 12.8 Tbps capacity, 204.8 Tbps per OCP rack unit, and cold-plate cooling up to 400 W per module.",
+      "quantified": {
+        "module_bandwidth_tbps": 12.8,
+        "rack_unit_front_panel_density_tbps": 204.8,
+        "density_improvement_vs_1600g_osfp": 4,
+        "module_cooling_watts_up_to": 400
+      },
+      "assumptions": [
+        "Optical form factors, thermal integration, density, serviceability, and multi-vendor ecosystems are coupled at AI-fabric scale."
+      ],
+      "contradictions_or_limits": [
+        "An MSA announcement and live demonstrations do not establish production qualification, shipment, interoperability, yield, field reliability, or application goodput.",
+        "Density figures do not include switch/rack power, fiber routing, protocol, and topology overhead."
+      ],
+      "fak_implications": [
+        "Track specification, participating vendors, qualification, shipment, deployment, and interoperability separately.",
+        "Include optics cooling and serviceability in rack/site constraints."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "weka-neuralmesh-ga-2026",
+      "category": "supply_chain",
+      "entity": "WEKA",
+      "topic": [
+        "storage",
+        "memory_extension",
+        "general_availability",
+        "agentic_workload",
+        "data_platform"
+      ],
+      "published_at": "2026-03-16",
+      "event_at": "2026-03-16",
+      "source_title": "NeuralMesh AI Factory Data Platform for Agentic ROI",
+      "source_url": "https://www.weka.io/news/neuralmesh-aidp",
+      "source_kind": "official_product_release",
+      "evidence_class": "vendor_claim",
+      "confidence": "medium_high",
+      "claim": "WEKA announced general availability of NeuralMesh as an enterprise AI data platform spanning storage and memory-system functions for training, inference, and agentic workloads.",
+      "quantified": {},
+      "assumptions": [
+        "Storage and memory-extension systems are increasingly packaged as one AI data plane for checkpoint, data, and agent-state movement."
+      ],
+      "contradictions_or_limits": [
+        "General availability does not disclose production shipment volume, workload mix, bytes/IOPS/bandwidth, cache hit, failures, or independent application goodput.",
+        "Vendor platform scope does not prove that storage or memory is the bottleneck for a given workload."
+      ],
+      "fak_implications": [
+        "Record storage/memory tier, checkpoint and agent-state path, capacity, bandwidth, latency, topology, failure, and workload.",
+        "Benchmark end-to-end training/inference/task completion with data movement included."
       ],
       "rumor": {
         "is_rumor": false
