@@ -9,7 +9,8 @@
       "distinction": "These are the values carried by ExecutionEngine, not the ExecutionEngine evidence field itself, the generic engine dispatch interface, a backend/device choice, or permission to fall back between runtimes.",
       "distinct_from": [
         "gateway-engine-execution-engine",
-        "engine"
+        "engine",
+        "gateway-engine-native-engine-descriptor"
       ],
       "aliases": [
         "EngineFakNative",

@@ -1,0 +1,22 @@
+{
+  "rows": [
+    {
+      "id": "gateway-engine-native-engine-descriptor",
+      "canonical": "NativeEngine (model descriptor execution identity)",
+      "family": "gateway-engine",
+      "kind": "config",
+      "definition": "The modeldescriptor field that pins an onboarding descriptor to fak-native execution before compatibility validation.",
+      "distinction": "This descriptor compatibility field is not the campaign ExecutionEngine evidence axis, a backend/device selector, or permission to fall back to an external runtime.",
+      "distinct_from": [
+        "gateway-engine-execution-engine-values"
+      ],
+      "aliases": [],
+      "grounding": "NativeEngine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

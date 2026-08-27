@@ -1,0 +1,67 @@
+{
+  "schema": "fak.new-model-release-manifest/1",
+  "release_id": "qwen3.8-27b-q4-k-m-r1",
+  "source": {
+    "repository": "github.com/QwenLM/Qwen3.5",
+    "revision": "pinned-qwen38-family-fixture-r1",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "artifact": {
+    "id": "qwen3.8-27b-q4-k-m.gguf",
+    "format": "gguf",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "execution": {
+    "engine": "fak-native",
+    "external_fallback": false
+  },
+  "descriptor": {
+    "id": "qwen3.8-27b-q4-k-m",
+    "revision": "1",
+    "trust": "witnessed",
+    "aliases": ["Qwen3_5ForConditionalGeneration", "qwen-3.8"],
+    "topology": ["hybrid-attention", "dense-mlp"],
+    "state": [
+      {"kind": "kv", "shape": [64, 128], "bytes_per_element": 2},
+      {"kind": "gdn", "shape": [64, 128], "bytes_per_element": 4}
+    ],
+    "quantization": ["q4_k_m"],
+    "storage": ["gguf"],
+    "tokenizer": ["qwen-bpe"],
+    "tools": ["json-tools"],
+    "multimodal": ["text"],
+    "backends": ["cpu", "cuda", "metal"],
+    "kernels": ["gdn-recurrence", "q4-k-gemv"],
+    "envelopes": ["qwen38-27b-q4k-cold-decode"],
+    "oracles": ["exact-output-qwen38-control"],
+    "readiness": ["descriptor-validated"],
+    "migration": ["rollback-to-unregistered"],
+    "forbidden": [["hybrid-attention", "external-runtime-fallback"]]
+  },
+  "semantic_deltas": [
+    {"axis": "architecture_alias", "value": "qwen3.5-family", "status": "resolved", "resolution": "descriptor.aliases"},
+    {"axis": "attention_state", "value": "hybrid-kv-gdn", "status": "resolved", "resolution": "descriptor.state"}
+  ],
+  "obligations": [
+    {"kind": "oracle", "target": "exact-output:qwen38-control-v1", "status": "open"},
+    {"kind": "backend", "target": "cuda:full-forward", "status": "open"},
+    {"kind": "test", "target": "internal/model:qwen38-conformance", "status": "open"},
+    {"kind": "docs", "target": "docs/supported/models.md:qwen38", "status": "open"},
+    {"kind": "performance", "target": "nativeperf:qwen38-cold-decode", "status": "open"}
+  ],
+  "coupling": {
+    "core_switches": 0,
+    "outside_leaf_files": 1,
+    "architecture_branches": 0,
+    "duplicated_lifecycle": 0,
+    "duplicated_metrics": 0,
+    "budget": {
+      "core_switches": 0,
+      "outside_leaf_files": 1,
+      "architecture_branches": 0,
+      "duplicated_lifecycle": 0,
+      "duplicated_metrics": 0
+    }
+  },
+  "rollback": "discard the packet and retain the prior unregistered model state"
+}
