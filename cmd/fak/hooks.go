@@ -291,6 +291,10 @@ func enabledGateNames(gs []hooks.Gate) []string {
 func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("hooks pre-commit", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprintln(stderr, "usage: fak hooks pre-commit [--root DIR] [--json]")
+		fmt.Fprintln(stderr, "managed issue workers: FAK_THOUGHT_CHECK_MODE=enforce|observe|off (default enforce)")
+	}
 	root := fs.String("root", "", "repo root (default: git toplevel from cwd)")
 	asJSON := fs.Bool("json", false, "emit findings as JSON")
 	if !parseFlags(fs, argv) {
@@ -311,6 +315,28 @@ func runHooksPreCommit(stdout, stderr io.Writer, argv []string) int {
 			return exitBoundedFailOpen
 		}
 		return 2 // not in a repo => could-not-run => fall through to python
+	}
+
+	// A managed issue worker must carry one current, valid Top-5 review before any
+	// repository commit. This is deliberately outside the ordinary fail-open gate
+	// registry: missing/stale/duplicate review state and GitHub/auth/network failures
+	// fail CLOSED for the one issue named by FLEET_RESOLVE_ISSUE. Unbound operator
+	// commits take the byte-identical path below. The shared hook deadline bounds the
+	// complete issue+viewer+comments transcript, not each network call independently.
+	thoughtCtx, cancelThought := context.WithDeadline(context.Background(), hookDeadline)
+	thoughtAdmission := managedWorkerThoughtCheckAdmission(thoughtCtx, r)
+	cancelThought()
+	if thoughtAdmission.Required {
+		if thoughtAdmission.Mode == "observe" {
+			_ = writeThoughtCheckJSON(stderr, thoughtAdmission)
+		} else if thoughtAdmission.Blocks() {
+			if *asJSON {
+				_ = writeThoughtCheckJSON(stdout, thoughtAdmission)
+			} else {
+				fmt.Fprintf(stderr, "%s: managed issue #%d commit refused: %s\n", managedThoughtCheckReason, thoughtAdmission.Issue, thoughtAdmission.Reason)
+			}
+			return 1
+		}
 	}
 
 	// Bound the PROLOGUE. ReadStagedDiff spawns ~5 index-taking git reads and used to run with

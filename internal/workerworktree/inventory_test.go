@@ -1,6 +1,7 @@
 package workerworktree
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -8,6 +9,199 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestLoadIntentReturnsDurableUniqueIssueBinding(t *testing.T) {
+	wt := filepath.Join(t.TempDir(), "fak-worker-wt-issue")
+	message := "feat(test): durable binding (#9568) (fak test)\n\nSigned-off-by: Test <test@example.invalid>"
+	if err := SaveIntent(wt, "abc123", message, []string{"z.txt", `dir\a.txt`, "z.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	in, err := LoadIntent(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Schema != inventorySchema || in.IssueNumber != 9568 || in.Message != message ||
+		!reflect.DeepEqual(in.Paths, []string{"dir/a.txt", "z.txt"}) {
+		t.Fatalf("loaded intent = %+v", in)
+	}
+	if err := SaveIntent(wt, "abc123", message, []string{"z.txt", `dir\a.txt`}); err != nil {
+		t.Fatalf("byte-identical canonical replay failed: %v", err)
+	}
+	if err := SaveIntent(wt, "abc123", message, []string{"new.txt", "z.txt", `dir\a.txt`}); err != nil {
+		t.Fatalf("monotonic coordinator path expansion failed: %v", err)
+	}
+	expanded, err := LoadIntent(wt)
+	if err != nil || !reflect.DeepEqual(expanded.Paths, []string{"dir/a.txt", "new.txt", "z.txt"}) {
+		t.Fatalf("expanded intent = %+v err=%v", expanded, err)
+	}
+	if err := SaveIntent(wt, "abc123", message, []string{"z.txt"}); err == nil || !strings.Contains(err.Error(), "may expand but not remove") {
+		t.Fatalf("path contraction error = %v", err)
+	}
+	if err := SaveIntent(wt, "abc123", "feat(test): substitute (#17) (fak test)", []string{"new.txt", "z.txt", `dir\a.txt`}); err == nil || !strings.Contains(err.Error(), "different coordinator metadata") {
+		t.Fatalf("intent replacement error = %v", err)
+	}
+}
+
+func TestIntentIssueBindingAllowsZeroAndRejectsMalformedOrMultiple(t *testing.T) {
+	wt := filepath.Join(t.TempDir(), "fak-worker-wt-nonissue")
+	message := "chore(test): non-issue maintenance (fak test)\n\nBody mention #999 is not the signed subject."
+	if err := SaveIntent(wt, "abc123", message, []string{"a.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	in, err := LoadIntent(wt)
+	if err != nil || in.IssueNumber != 0 {
+		t.Fatalf("non-issue intent = %+v err=%v", in, err)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		subject string
+		want    string
+	}{
+		{"zero", "fix: invalid (#0)", "malformed"},
+		{"letters", "fix: invalid (#oops)", "malformed"},
+		{"mixed", "fix: invalid (#12x)", "malformed"},
+		{"multiple", "fix: ambiguous (#12) and (#13)", "at most one"},
+		{"duplicate", "fix: ambiguous (#12) and again #12", "at most one"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := filepath.Join(t.TempDir(), "worker")
+			err := SaveIntent(candidate, "abc123", tc.subject, []string{"a.txt"})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("SaveIntent(%q) error = %v, want %q", tc.subject, err, tc.want)
+			}
+			if _, statErr := os.Stat(intentPath(candidate)); !os.IsNotExist(statErr) {
+				t.Fatalf("invalid intent persisted: stat error=%v", statErr)
+			}
+		})
+	}
+}
+
+func TestLoadIntentFailsClosedOnMetadataOrMessageTamper(t *testing.T) {
+	newIntent := func(t *testing.T) string {
+		t.Helper()
+		wt := filepath.Join(t.TempDir(), "worker")
+		if err := SaveIntent(wt, "abc123", "fix(test): bind (#9568) (fak test)", []string{"a.txt"}); err != nil {
+			t.Fatal(err)
+		}
+		return wt
+	}
+
+	t.Run("stored issue", func(t *testing.T) {
+		wt := newIntent(t)
+		raw, err := os.ReadFile(intentPath(wt))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var in Intent
+		if err := json.Unmarshal(raw, &in); err != nil {
+			t.Fatal(err)
+		}
+		in.IssueNumber = 17
+		raw, err = json.MarshalIndent(in, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(intentPath(wt), append(raw, '\n'), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadIntent(wt); err == nil || !strings.Contains(err.Error(), "does not match") {
+			t.Fatalf("stored issue tamper error = %v", err)
+		}
+	})
+
+	t.Run("message mirror", func(t *testing.T) {
+		wt := newIntent(t)
+		if err := os.WriteFile(messagePath(wt), []byte("fix(test): redirect (#17) (fak test)\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadIntent(wt); err == nil || !strings.Contains(err.Error(), "message mirror") {
+			t.Fatalf("message mirror tamper error = %v", err)
+		}
+	})
+
+	t.Run("unknown schema field", func(t *testing.T) {
+		wt := newIntent(t)
+		raw, err := os.ReadFile(intentPath(wt))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw = []byte(strings.Replace(string(raw), "\n}", ",\n  \"future\": true\n}", 1))
+		if err := os.WriteFile(intentPath(wt), raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadIntent(wt); err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("unknown field error = %v", err)
+		}
+	})
+}
+
+func TestLoadIntentMigratesStrictV1Fixture(t *testing.T) {
+	writeV1 := func(t *testing.T, extra map[string]any) (string, string) {
+		t.Helper()
+		wt := filepath.Join(t.TempDir(), "legacy-worker")
+		message := "fix(test): legacy binding (#9568) (fak test)"
+		legacy := map[string]any{
+			"schema": inventorySchemaV1, "path": wt, "base_sha": "abc123",
+			"message": message, "paths": []string{"a.txt"},
+		}
+		for key, value := range extra {
+			legacy[key] = value
+		}
+		if err := os.MkdirAll(intentDir(wt), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.MarshalIndent(legacy, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(intentPath(wt), append(raw, '\n'), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(messagePath(wt), []byte(message+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return wt, message
+	}
+
+	t.Run("normalize and persist v2", func(t *testing.T) {
+		wt, message := writeV1(t, nil)
+		loaded, err := LoadIntent(wt)
+		if err != nil || loaded.Schema != inventorySchema || loaded.IssueNumber != 9568 {
+			t.Fatalf("normalized legacy intent = %+v err=%v", loaded, err)
+		}
+		if err := SaveIntent(wt, "abc123", message, []string{"a.txt"}); err != nil {
+			t.Fatalf("monotonic v1 migration failed: %v", err)
+		}
+		raw, err := os.ReadFile(intentPath(wt))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), inventorySchema) || !strings.Contains(string(raw), `"issue_number": 9568`) {
+			t.Fatalf("persisted migration is not v2: %s", raw)
+		}
+		if migrated, err := LoadIntent(wt); err != nil || migrated.IssueNumber != 9568 {
+			t.Fatalf("migrated intent = %+v err=%v", migrated, err)
+		}
+	})
+
+	t.Run("reject non-v1 field", func(t *testing.T) {
+		wt, _ := writeV1(t, map[string]any{"issue_number": 17})
+		if _, err := LoadIntent(wt); err == nil || !strings.Contains(err.Error(), "non-v1 issue_number") {
+			t.Fatalf("legacy added-field error = %v", err)
+		}
+	})
+
+	t.Run("reject mirror tamper", func(t *testing.T) {
+		wt, _ := writeV1(t, nil)
+		if err := os.WriteFile(messagePath(wt), []byte("fix(test): redirected (#17) (fak test)\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadIntent(wt); err == nil || !strings.Contains(err.Error(), "message mirror") {
+			t.Fatalf("legacy mirror tamper error = %v", err)
+		}
+	})
+}
 
 func TestInventoryLandReadyIsReadOnlyAndExact(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
