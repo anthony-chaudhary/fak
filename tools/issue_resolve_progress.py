@@ -47,6 +47,7 @@ import datetime as dt
 import json
 import subprocess
 import sys
+import re
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +66,8 @@ import issue_resolve_dispatch as loop_writer  # noqa: E402  (canonical fak loop 
 SCHEMA = "fleet-issue-resolve-progress/1"
 RUNS_DIRNAME = ".dispatch-runs"
 PROGRESS_LOG = "progress.jsonl"
+DIRECT_CLOSURES_FILE = "progress-direct-closures.json"
+FAK_TRAILER_RE = re.compile(r"\(fak [^)]+\)", re.IGNORECASE)
 BASELINE_FILE = "progress-baseline.json"
 LOOP_ID = "issue-resolve-progress"
 # The close-arm stamps this phrase into every close comment; we count only closes
@@ -158,6 +161,92 @@ def save_baseline(runs_dir: Path, open_now: int) -> dict[str, Any]:
     base = {"baseline_open": open_now, "recorded_utc": _now()}
     (runs_dir / BASELINE_FILE).write_text(json.dumps(base, indent=2), encoding="utf-8")
     return base
+
+
+def fold_direct_closures(runs_dir: Path) -> int:
+    """Count durable, independently witnessed worker closures once per issue."""
+    path = runs_dir / DIRECT_CLOSURES_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    rows = data.get("closures", []) if isinstance(data, dict) else []
+    return len({int(row["issue"]) for row in rows
+                if isinstance(row, dict) and row.get("issue")})
+
+
+def reconcile_direct_closures(
+    root: Path, runs_dir: Path, audit: dict[str, Any], *,
+    baseline_utc: str | None,
+) -> int:
+    """Persist pushed, witnessed direct worker closures absent from close-arm history.
+
+    Worker prose is never evidence: candidates come from dispatcher witness receipts,
+    then git ancestry, resolving subject/trailer, GitHub CLOSED state, and closedAt are
+    independently read back. The ledger is keyed by issue, making repeated audits safe.
+    """
+    path = runs_dir / DIRECT_CLOSURES_FILE
+    try:
+        existing = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        existing = {"schema": "fleet-direct-closures/1", "closures": []}
+    rows = existing.get("closures", []) if isinstance(existing, dict) else []
+    known = {int(row["issue"]) for row in rows
+             if isinstance(row, dict) and row.get("issue")}
+    states = {int(row.get("number") or 0): str(row.get("state") or "").upper()
+              for row in audit.get("issues", []) if isinstance(row, dict)}
+    baseline = baseline_utc or "9999-12-31T23:59:59Z"
+    changed = False
+    for witness in sorted(runs_dir.glob("resolve-*.witness")):
+        try:
+            rec = json.loads(witness.read_text(encoding="utf-8"))
+            issue = int(rec.get("issue") or 0)
+            sha = str(rec.get("sha") or "")
+        except (OSError, ValueError, TypeError):
+            continue
+        if rec.get("claim") != "CLAIM_WITNESSED" or not issue or not sha or issue in known:
+            continue
+        if states.get(issue) != "CLOSED":
+            continue
+        ancestry = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", sha, "origin/main"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        if ancestry.returncode != 0:
+            continue
+        subject_run = subprocess.run(
+            ["git", "show", "-s", "--format=%s", sha], cwd=root,
+            capture_output=True, text=True, check=False,
+        )
+        subject = subject_run.stdout.strip()
+        if subject_run.returncode != 0 or f"#{issue}" not in subject or not FAK_TRAILER_RE.search(subject):
+            continue
+        gh = subprocess.run(
+            ["gh", "issue", "view", str(issue), "--json", "state,closedAt,comments"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        try:
+            remote = json.loads(gh.stdout) if gh.returncode == 0 else {}
+        except ValueError:
+            remote = {}
+        closed_at = str(remote.get("closedAt") or "")
+        comments = remote.get("comments") or []
+        closed_by_arm = any(
+            "Closed by the DOS dispatch loop's close-resolved arm" in str(comment.get("body") or "")
+            for comment in comments if isinstance(comment, dict)
+        )
+        if (str(remote.get("state") or "").upper() != "CLOSED" or not closed_at
+                or closed_at < baseline or closed_by_arm):
+            continue
+        rows.append({"issue": issue, "sha": sha, "closed_at": closed_at,
+                     "witness": witness.name})
+        known.add(issue)
+        changed = True
+    if changed:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        payload = {"schema": "fleet-direct-closures/1", "closures": rows}
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return len(known)
 
 
 def fold_closed_history(runs_dir: Path) -> int:
@@ -377,7 +466,10 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
         closed_now = close_result.get("closed", 0) if live else 0
 
     # Durable proof metric: total closed by the loop across all ticks (+ this one).
-    closed_total = fold_closed_history(runs_dir) + closed_now
+    direct_closed = reconcile_direct_closures(
+        root, runs_dir, audit, baseline_utc=(baseline or {}).get("recorded_utc"),
+    )
+    closed_total = fold_closed_history(runs_dir) + closed_now + direct_closed
     # Operator visibility for the issue-contract spawn gate (#2637): fold the durable
     # count of operator-forced gate bypasses into the progress ledger so a bypassed
     # readiness guard shows up in the aggregate curve the operator watches, not only
@@ -414,7 +506,8 @@ def evaluate(root: Path, *, target: int, do_close: bool, live: bool,
         "closures_toward_target": closures_toward_target,
         "closures_target_remaining": closures_target_remaining,
         "witnessed_open": len(witnessed), "witnessed_numbers": witnessed[:50],
-        "closed_now": closed_now, "closed_by_loop_total": closed_total,
+        "closed_now": closed_now, "direct_closed_total": direct_closed,
+        "closed_by_loop_total": closed_total,
         "contract_forced_bypass_total": forced_bypass_total,
         "close_live": live if do_close else None,
         "close_result": close_result,

@@ -54,6 +54,77 @@ class FoldsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(mod.fold_closed_history(Path(d)), 0)
 
+    def test_reconcile_direct_closures_is_witnessed_and_deduplicated(self) -> None:
+        mod = load()
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            runs = root / ".dispatch-runs"
+            runs.mkdir()
+            (runs / "resolve-77-run.witness").write_text(json.dumps({
+                "claim": "CLAIM_WITNESSED", "issue": 77, "sha": "abc123",
+            }), encoding="utf-8")
+            audit = {"issues": [{"number": 77, "state": "CLOSED"}]}
+            calls: list[list[str]] = []
+
+            def fake_run(args, **kwargs):
+                calls.append(args)
+                if args[:3] == ["git", "merge-base", "--is-ancestor"]:
+                    return type("R", (), {"returncode": 0, "stdout": ""})()
+                if args[:2] == ["git", "show"]:
+                    return type("R", (), {"returncode": 0, "stdout": "fix(x): done (#77) (fak tools)\n"})()
+                return type("R", (), {"returncode": 0, "stdout": json.dumps({
+                    "state": "CLOSED", "closedAt": "2026-08-27T10:00:00Z",
+                })})()
+
+            mod.subprocess.run = fake_run
+            self.assertEqual(mod.reconcile_direct_closures(
+                root, runs, audit, baseline_utc="2026-08-21T00:00:00Z"), 1)
+            first_calls = len(calls)
+            self.assertEqual(mod.reconcile_direct_closures(
+                root, runs, audit, baseline_utc="2026-08-21T00:00:00Z"), 1)
+            self.assertEqual(len(calls), first_calls)
+            self.assertEqual(mod.fold_direct_closures(runs), 1)
+
+    def test_reconcile_direct_closures_excludes_unproven_candidates(self) -> None:
+        mod = load()
+        cases = [
+            ("CLAIM_NO_COMMIT", "CLOSED", 0, "fix(x): done (#77) (fak tools)",
+             "CLOSED", "2026-08-27T10:00:00Z"),
+            ("CLAIM_WITNESSED", "OPEN", 0, "fix(x): done (#77) (fak tools)",
+             "OPEN", ""),
+            ("CLAIM_WITNESSED", "CLOSED", 1, "fix(x): done (#77) (fak tools)",
+             "CLOSED", "2026-08-27T10:00:00Z"),
+            ("CLAIM_WITNESSED", "CLOSED", 0, "fix(x): done (#77)",
+             "CLOSED", "2026-08-27T10:00:00Z"),
+            ("CLAIM_WITNESSED", "CLOSED", 0, "fix(x): done (#77) (fak tools)",
+             "CLOSED", "2026-08-20T10:00:00Z"),
+        ]
+        for claim, audit_state, ancestor_rc, subject, remote_state, closed_at in cases:
+            with self.subTest(claim=claim, audit_state=audit_state,
+                              ancestor_rc=ancestor_rc, subject=subject,
+                              remote_state=remote_state, closed_at=closed_at):
+                with tempfile.TemporaryDirectory() as d:
+                    root = Path(d)
+                    runs = root / ".dispatch-runs"
+                    runs.mkdir()
+                    (runs / "resolve-77-run.witness").write_text(json.dumps({
+                        "claim": claim, "issue": 77, "sha": "abc123",
+                    }), encoding="utf-8")
+
+                    def fake_run(args, **kwargs):
+                        if args[:3] == ["git", "merge-base", "--is-ancestor"]:
+                            return type("R", (), {"returncode": ancestor_rc, "stdout": ""})()
+                        if args[:2] == ["git", "show"]:
+                            return type("R", (), {"returncode": 0, "stdout": subject})()
+                        return type("R", (), {"returncode": 0, "stdout": json.dumps({
+                            "state": remote_state, "closedAt": closed_at,
+                        })})()
+
+                    mod.subprocess.run = fake_run
+                    self.assertEqual(mod.reconcile_direct_closures(
+                        root, runs, {"issues": [{"number": 77, "state": audit_state}]},
+                        baseline_utc="2026-08-21T00:00:00Z"), 0)
+
     def test_baseline_recorded_once(self) -> None:
         mod = load()
         with tempfile.TemporaryDirectory() as d:
