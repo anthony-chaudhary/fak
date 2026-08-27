@@ -1,21 +1,24 @@
 package committedtree
 
 import (
-	"archive/tar"
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 func TestExtractPreservesRawBlobBytes(t *testing.T) {
 	for _, autocrlf := range []string{"true", "false"} {
 		t.Run("autocrlf="+autocrlf, func(t *testing.T) {
-			repo := t.TempDir()
-			runGit(t, repo, "init", "--quiet")
-			runGit(t, repo, "config", "user.name", "Committed Tree Test")
-			runGit(t, repo, "config", "user.email", "committed-tree@example.invalid")
+			repo := initRepo(t)
 			runGit(t, repo, "config", "core.autocrlf", autocrlf)
 
 			body := []byte("line one\nline two\n")
@@ -45,66 +48,116 @@ func TestExtractPreservesRawBlobBytes(t *testing.T) {
 	}
 }
 
+func TestExtractUsesBoundedGitProcessesAtScale(t *testing.T) {
+	repo := initRepo(t)
+	filesDir := filepath.Join(repo, "files")
+	if err := os.MkdirAll(filesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 256 {
+		name := filepath.Join(filesDir, fmt.Sprintf("file-%03d.txt", i))
+		if err := os.WriteFile(name, []byte(fmt.Sprintf("payload-%03d\n", i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, repo, "add", "files")
+	symlinkBlob := strings.TrimSpace(string(runGitInput(t, repo, []byte("../escape"), "hash-object", "-w", "--stdin")))
+	runGit(t, repo, "update-index", "--add", "--cacheinfo", "120000,"+symlinkBlob+",ignored-link")
+	runGit(t, repo, "commit", "--quiet", "-m", "scale fixture")
+
+	var operations []string
+	command := func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		for _, arg := range args {
+			switch arg {
+			case "archive", "ls-tree", "cat-file":
+				operations = append(operations, arg)
+			}
+		}
+		return windowgate.CommandContext(ctx, name, args...)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	if err := extractWithCommand(ctx, repo, "HEAD", dir, command); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"ls-tree", "cat-file"}; !slices.Equal(operations, want) {
+		t.Fatalf("git operations = %v, want %v", operations, want)
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "ignored-link")); !os.IsNotExist(err) {
+		t.Fatalf("symlink was materialized: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "files", "file-255.txt"))
+	if err != nil || string(got) != "payload-255\n" {
+		t.Fatalf("last file = %q, err=%v", got, err)
+	}
+}
+
+func TestParseTreeEntriesPreservesModesAndTypes(t *testing.T) {
+	data := []byte("100755 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\tbin/tool\x00" +
+		"120000 blob bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tlink\x00" +
+		"160000 commit cccccccccccccccccccccccccccccccccccccccc\tsubmodule\x00")
+	entries, err := parseTreeEntries(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("entry count = %d, want 3", len(entries))
+	}
+	if !entries[0].regular || entries[0].mode.Perm() != 0o755 {
+		t.Fatalf("executable entry = %+v", entries[0])
+	}
+	if entries[1].regular || entries[2].regular {
+		t.Fatalf("symlink/gitlink classified as regular: %+v", entries[1:])
+	}
+}
+
+func TestValidateTreeEntriesRejectsTraversal(t *testing.T) {
+	entries := []treeEntry{{path: "safe"}, {path: "../escape"}}
+	if err := validateTreeEntries(t.TempDir(), entries); err == nil {
+		t.Fatal("expected traversal rejection")
+	}
+}
+
+func TestExtractCleansTemporaryDirectoryOnError(t *testing.T) {
+	repo := initRepo(t)
+	tempRoot := t.TempDir()
+	t.Setenv("TMPDIR", tempRoot)
+	t.Setenv("TMP", tempRoot)
+	t.Setenv("TEMP", tempRoot)
+	if _, err := Extract(repo, "missing-object"); err == nil {
+		t.Fatal("expected extraction failure")
+	}
+	entries, err := os.ReadDir(tempRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary extraction directory leaked: %v", entries)
+	}
+}
+
+func initRepo(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runGit(t, repo, "init", "--quiet")
+	runGit(t, repo, "config", "user.name", "Committed Tree Test")
+	runGit(t, repo, "config", "user.email", "committed-tree@example.invalid")
+	return repo
+}
+
 func runGit(t *testing.T, repo string, args ...string) []byte {
 	t.Helper()
+	return runGitInput(t, repo, nil, args...)
+}
+
+func runGitInput(t *testing.T, repo string, input []byte, args ...string) []byte {
+	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+	cmd.Stdin = bytes.NewReader(input)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 	return out
-}
-
-func TestUntarRejectsTraversal(t *testing.T) {
-	var b bytes.Buffer
-	tw := tar.NewWriter(&b)
-	if err := tw.WriteHeader(&tar.Header{Name: "../escape", Mode: 0o644, Size: 1, Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write([]byte("x")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := untar(&b, t.TempDir()); err == nil {
-		t.Fatal("expected traversal rejection")
-	}
-}
-
-func TestUntarDoesNotMaterializeSymlink(t *testing.T) {
-	var b bytes.Buffer
-	tw := tar.NewWriter(&b)
-	if err := tw.WriteHeader(&tar.Header{Name: "link", Linkname: "../escape", Mode: 0o777, Typeflag: tar.TypeSymlink}); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	root := t.TempDir()
-	if err := untar(&b, root); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Lstat(filepath.Join(root, "link")); !os.IsNotExist(err) {
-		t.Fatalf("symlink was materialized: %v", err)
-	}
-}
-
-func TestUntarMaterializesRegularFile(t *testing.T) {
-	var b bytes.Buffer
-	tw := tar.NewWriter(&b)
-	body := []byte("package x\n")
-	if err := tw.WriteHeader(&tar.Header{Name: "x/x.go", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	_, _ = tw.Write(body)
-	_ = tw.Close()
-	root := t.TempDir()
-	if err := untar(&b, root); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(filepath.Join(root, "x", "x.go"))
-	if err != nil || !bytes.Equal(got, body) {
-		t.Fatalf("got=%q err=%v", got, err)
-	}
 }

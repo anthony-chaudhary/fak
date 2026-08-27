@@ -3,13 +3,13 @@
 package committedtree
 
 import (
-	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -32,7 +32,7 @@ func Resolve(repo, ref string) (string, error) {
 }
 
 // Extract resolves no refs: object must already identify a commit or tree that
-// git archive accepts. The caller owns the returned temporary directory.
+// git ls-tree accepts. The caller owns the returned temporary directory.
 func Extract(repo, object string) (string, error) {
 	dir, err := os.MkdirTemp("", "fak-committed-tree-*")
 	if err != nil {
@@ -48,189 +48,46 @@ func Extract(repo, object string) (string, error) {
 }
 
 func extract(ctx context.Context, repo, object, dir string) error {
-	cmd := windowgate.CommandContext(ctx, "git", "-C", repo, "archive", "--format=tar", object)
-	windowgate.ConfigureBackgroundCommand(cmd)
-	stdout, err := cmd.StdoutPipe()
+	return extractWithCommand(ctx, repo, object, dir, windowgate.CommandContext)
+}
+
+type commandContextFunc func(context.Context, string, ...string) *exec.Cmd
+
+type treeEntry struct {
+	path    string
+	oid     string
+	mode    os.FileMode
+	regular bool
+}
+
+func extractWithCommand(ctx context.Context, repo, object, dir string, command commandContextFunc) error {
+	entries, err := listTree(ctx, repo, object, command)
 	if err != nil {
 		return err
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("git archive start: %w", err)
-	}
-	regularPaths, untarErr := untarRegularPaths(stdout, dir)
-	if untarErr != nil {
-		_ = cmd.Process.Kill()
-	}
-	_, _ = io.Copy(io.Discard, stdout)
-	waitErr := cmd.Wait()
-	switch {
-	case ctx.Err() != nil:
-		return fmt.Errorf("git archive timed out after %s: %w", defaultTimeout, ctx.Err())
-	case untarErr != nil:
-		return fmt.Errorf("untar archive: %w", untarErr)
-	case waitErr != nil:
-		return fmt.Errorf("git archive: %w (%s)", waitErr, strings.TrimSpace(stderr.String()))
-	}
-	if err := restoreRawBlobs(ctx, repo, object, dir, regularPaths); err != nil {
+	if err := validateTreeEntries(dir, entries); err != nil {
 		return err
 	}
-	return nil
+	return materializeRawBlobs(ctx, repo, dir, entries, command)
 }
 
-func untar(r io.Reader, dir string) error {
-	_, err := untarRegularPaths(r, dir)
-	return err
-}
-
-func untarRegularPaths(r io.Reader, dir string) ([]string, error) {
-	tr := tar.NewReader(r)
-	var regularPaths []string
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return regularPaths, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		target, err := safeJoin(dir, hdr.Name)
-		if err != nil {
-			return nil, err
-		}
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return nil, err
-			}
-		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return nil, err
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, os.FileMode(hdr.Mode)&0o777|0o600)
-			if err != nil {
-				return nil, err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				_ = f.Close()
-				return nil, err
-			}
-			if err := f.Close(); err != nil {
-				return nil, err
-			}
-			regularPaths = append(regularPaths, hdr.Name)
-		}
-	}
-}
-
-// restoreRawBlobs keeps git archive as the source of entry selection and file
-// modes, but replaces regular-file payloads with bytes read directly from the
-// object database. Git archive otherwise applies checkout conversions such as
-// core.autocrlf on Windows, so its payload is not necessarily the Git blob.
-func restoreRawBlobs(ctx context.Context, repo, object, dir string, paths []string) error {
-	blobs, err := listBlobs(ctx, repo, object)
-	if err != nil {
-		return err
-	}
-	cmd := windowgate.CommandContext(ctx, "git", "-C", repo, "cat-file", "--batch")
-	windowgate.ConfigureBackgroundCommand(cmd)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("git cat-file start: %w", err)
-	}
-	abort := func() {
-		_ = stdin.Close()
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}
-	br := bufio.NewReader(stdout)
-	for _, path := range paths {
-		oid, ok := blobs[path]
-		if !ok {
-			abort()
-			return fmt.Errorf("git archive regular file %q has no blob", path)
-		}
-		if _, err := io.WriteString(stdin, oid+"\n"); err != nil {
-			abort()
-			return fmt.Errorf("git cat-file request %q: %w", path, err)
-		}
-		header, err := br.ReadString('\n')
-		if err != nil {
-			abort()
-			return fmt.Errorf("git cat-file header %q: %w", path, err)
-		}
-		fields := strings.Fields(header)
-		if len(fields) != 3 || fields[1] != "blob" {
-			abort()
-			return fmt.Errorf("git cat-file header %q: %q", path, strings.TrimSpace(header))
-		}
-		size, err := strconv.ParseInt(fields[2], 10, 64)
-		if err != nil || size < 0 {
-			abort()
-			return fmt.Errorf("git cat-file size %q: %q", path, fields[2])
-		}
-		target, err := safeJoin(dir, path)
-		if err != nil {
-			abort()
-			return err
-		}
-		f, err := os.OpenFile(target, os.O_WRONLY|os.O_TRUNC, 0)
-		if err != nil {
-			abort()
-			return err
-		}
-		_, copyErr := io.CopyN(f, br, size)
-		closeErr := f.Close()
-		terminator, terminatorErr := br.ReadByte()
-		if copyErr != nil {
-			abort()
-			return fmt.Errorf("git cat-file blob %q: %w", path, copyErr)
-		}
-		if closeErr != nil {
-			abort()
-			return closeErr
-		}
-		if terminatorErr != nil || terminator != '\n' {
-			abort()
-			return fmt.Errorf("git cat-file terminator %q: %w", path, terminatorErr)
-		}
-	}
-	if err := stdin.Close(); err != nil {
-		abort()
-		return err
-	}
-	if err := cmd.Wait(); err != nil {
-		if ctx.Err() != nil {
-			return fmt.Errorf("git extraction timed out after %s: %w", defaultTimeout, ctx.Err())
-		}
-		return fmt.Errorf("git cat-file: %w (%s)", err, strings.TrimSpace(stderr.String()))
-	}
-	return nil
-}
-
-func listBlobs(ctx context.Context, repo, object string) (map[string]string, error) {
-	cmd := windowgate.CommandContext(ctx, "git", "-C", repo, "ls-tree", "-r", "-z", "--full-tree", object)
+func listTree(ctx context.Context, repo, object string, command commandContextFunc) ([]treeEntry, error) {
+	cmd := command(ctx, "git", "-C", repo, "ls-tree", "-r", "-z", "--full-tree", object)
 	windowgate.ConfigureBackgroundCommand(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("git extraction timed out after %s: %w", defaultTimeout, ctx.Err())
+			return nil, extractionTimeout(ctx)
 		}
 		return nil, fmt.Errorf("git ls-tree: %w (%s)", err, strings.TrimSpace(stderr.String()))
 	}
-	blobs := make(map[string]string)
+	return parseTreeEntries(out)
+}
+
+func parseTreeEntries(out []byte) ([]treeEntry, error) {
+	var entries []treeEntry
 	for len(out) > 0 {
 		end := bytes.IndexByte(out, 0)
 		if end < 0 {
@@ -246,11 +103,133 @@ func listBlobs(ctx context.Context, repo, object string) (map[string]string, err
 		if len(fields) != 3 {
 			return nil, fmt.Errorf("git ls-tree: malformed metadata %q", parts[0])
 		}
-		if fields[1] == "blob" {
-			blobs[string(parts[1])] = fields[2]
+		mode, err := strconv.ParseUint(fields[0], 8, 32)
+		if err != nil {
+			return nil, fmt.Errorf("git ls-tree: malformed mode %q", fields[0])
+		}
+		entries = append(entries, treeEntry{
+			path:    string(parts[1]),
+			oid:     fields[2],
+			mode:    os.FileMode(mode & 0o777),
+			regular: fields[1] == "blob" && mode&0o170000 == 0o100000,
+		})
+	}
+	return entries, nil
+}
+
+func validateTreeEntries(dir string, entries []treeEntry) error {
+	for _, entry := range entries {
+		if _, err := safeJoin(dir, entry.path); err != nil {
+			return err
 		}
 	}
-	return blobs, nil
+	return nil
+}
+
+// materializeRawBlobs consumes each regular file exactly once from one batch
+// process. Tree modes choose the on-disk permissions; symlink blobs and gitlinks
+// remain ignored, matching the previous archive extractor's safety boundary.
+func materializeRawBlobs(ctx context.Context, repo, dir string, entries []treeEntry, command commandContextFunc) error {
+	regularCount := 0
+	for _, entry := range entries {
+		if entry.regular {
+			regularCount++
+		}
+	}
+	if regularCount == 0 {
+		return nil
+	}
+
+	cmd := command(ctx, "git", "-C", repo, "cat-file", "--batch")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("git cat-file start: %w", err)
+	}
+	waited := false
+	defer func() {
+		if !waited {
+			_ = stdin.Close()
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	}()
+	commandError := func(err error) error {
+		if ctx.Err() != nil {
+			return extractionTimeout(ctx)
+		}
+		return err
+	}
+
+	br := bufio.NewReader(stdout)
+	for _, entry := range entries {
+		if !entry.regular {
+			continue
+		}
+		if _, err := io.WriteString(stdin, entry.oid+"\n"); err != nil {
+			return commandError(fmt.Errorf("git cat-file request %q: %w", entry.path, err))
+		}
+		header, err := br.ReadString('\n')
+		if err != nil {
+			return commandError(fmt.Errorf("git cat-file header %q: %w", entry.path, err))
+		}
+		fields := strings.Fields(header)
+		if len(fields) != 3 || fields[1] != "blob" {
+			return fmt.Errorf("git cat-file header %q: %q", entry.path, strings.TrimSpace(header))
+		}
+		size, err := strconv.ParseInt(fields[2], 10, 64)
+		if err != nil || size < 0 {
+			return fmt.Errorf("git cat-file size %q: %q", entry.path, fields[2])
+		}
+		target, err := safeJoin(dir, entry.path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, entry.mode.Perm()|0o600)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.CopyN(f, br, size)
+		closeErr := f.Close()
+		terminator, terminatorErr := br.ReadByte()
+		if copyErr != nil {
+			return commandError(fmt.Errorf("git cat-file blob %q: %w", entry.path, copyErr))
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if terminatorErr != nil || terminator != '\n' {
+			return commandError(fmt.Errorf("git cat-file terminator %q: %w", entry.path, terminatorErr))
+		}
+	}
+	if err := stdin.Close(); err != nil {
+		return commandError(err)
+	}
+	waitErr := cmd.Wait()
+	waited = true
+	if waitErr != nil {
+		if ctx.Err() != nil {
+			return extractionTimeout(ctx)
+		}
+		return fmt.Errorf("git cat-file: %w (%s)", waitErr, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+func extractionTimeout(ctx context.Context) error {
+	return fmt.Errorf("git extraction timed out after %s: %w", defaultTimeout, ctx.Err())
 }
 
 func safeJoin(root, name string) (string, error) {
