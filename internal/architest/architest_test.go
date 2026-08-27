@@ -727,6 +727,8 @@ var tier = map[string]int{
 	"studytickets":               2,
 	"microfleeteconomics":        1,
 	"placementtax":               1,
+	"localappcert":               1, // stdlib-only deterministic Mac certification-matrix validator (#9157).
+	"localapphelper":             2, // authenticated app-scoped helper admission boundary (#9149).
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }
