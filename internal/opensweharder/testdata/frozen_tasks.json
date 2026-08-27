@@ -1,0 +1,10 @@
+{
+  "schema": "fak-openswe-harder-fixture/1",
+  "mode": "simulated_frozen_fixture",
+  "tasks": [
+    {"id":"open-swe-001","source":"open-swe","difficulty":2,"accepted":true,"baseline_pass":true,"candidate_pass":true,"reversal_pass":true},
+    {"id":"open-swe-002","source":"open-swe","difficulty":3,"accepted":true,"baseline_pass":false,"candidate_pass":true,"reversal_pass":false},
+    {"id":"swe-smith-hard-001","source":"swe-smith","difficulty":5,"accepted":true,"baseline_pass":false,"candidate_pass":true,"reversal_pass":false},
+    {"id":"swe-smith-hard-rejected","source":"swe-smith","difficulty":5,"accepted":false,"baseline_pass":false,"candidate_pass":false,"reversal_pass":false}
+  ]
+}
