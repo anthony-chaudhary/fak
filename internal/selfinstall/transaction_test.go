@@ -7,6 +7,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/launchshim"
 )
 
 func TestRunTransactionSharedSourceUpdatesAllTargets(t *testing.T) {
@@ -171,6 +174,54 @@ func TestRunTransactionRejectsInvalidCopiesBeforeMutation(t *testing.T) {
 			assertTransactionContents(t, target, "old")
 			assertNoTransactionDebris(t, dir)
 		})
+	}
+}
+
+func TestLaunchTransactionHoldsPriorAtReplacementBoundary(t *testing.T) {
+	dir := t.TempDir()
+	source := writeTransactionFile(t, dir, "source", "new")
+	target := writeTransactionFile(t, dir, "target", "old")
+
+	replacementEntered := make(chan struct{})
+	releaseReplacement := make(chan struct{})
+	resultc := make(chan TransactionResult, 1)
+	go func() {
+		resultc <- RunLaunchTransaction([]Copy{{Source: source, Target: target}}, target, func(source, target string) error {
+			close(replacementEntered)
+			<-releaseReplacement
+			return OSSwap(source, target)
+		})
+	}()
+	<-replacementEntered
+
+	selected, err := launchshim.ResolveExecutable(target, launchshim.UpdatePolicyPrior, time.Second)
+	if err != nil || selected != LaunchPriorPath(target) {
+		t.Fatalf("prior selected=%q err=%v, want %q", selected, err, LaunchPriorPath(target))
+	}
+	assertTransactionContents(t, selected, "old")
+	if _, err := launchshim.ResolveExecutable(target, launchshim.UpdatePolicyFail, time.Second); err == nil || !strings.Contains(err.Error(), "self-update is replacing") {
+		t.Fatalf("strict failure=%v", err)
+	}
+
+	close(releaseReplacement)
+	if result := <-resultc; reflect.TypeOf(result) != reflect.TypeOf(Updated{}) {
+		t.Fatalf("transaction result=%#v, want Updated", result)
+	}
+	selected, err = launchshim.ResolveExecutable(target, launchshim.UpdatePolicyWait, time.Second)
+	if err != nil || selected != target {
+		t.Fatalf("completed transaction selected=%q err=%v, want %q", selected, err, target)
+	}
+	assertTransactionContents(t, target, "new")
+	assertTransactionContents(t, LaunchPriorPath(target), "old")
+	if _, err := os.Stat(launchshim.UpdateStatePath(target)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("launch state remains after completion: %v", err)
+	}
+}
+
+func TestLaunchPriorPathKeepsWindowsExecutableSuffix(t *testing.T) {
+	got := LaunchPriorPath(filepath.Join("dir", "fak.exe"))
+	if filepath.Ext(got) != ".exe" || !strings.Contains(filepath.Base(got), "self-update-prior") {
+		t.Fatalf("prior path=%q", got)
 	}
 }
 
