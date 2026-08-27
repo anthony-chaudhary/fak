@@ -73,7 +73,7 @@ func cmdSelfUpdate(argv []string) {
 	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
 	// local tree is always ahead-or-behind with peer WIP, and origin/main is the verified
 	// line we actually want guards converged on.
-	_, _ = selfinstall.RealRunner(context.Background(), repoRoot, "git", "fetch", "origin", "--quiet")
+	selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
 	headRev := repoRevOf(repoRoot, "origin/main")
 
 	// Whose freshness are we judging? When --target names a DIFFERENT binary (the scheduler
@@ -125,8 +125,9 @@ func cmdSelfUpdate(argv []string) {
 		reportAsideFootprint(installTargetOr(*target))
 		// The whole role table, not just this one binary: a host is converged only when EVERY
 		// declared hot copy holds origin/main, and --check is where an operator asks that.
-		printHotCopyAudit(selfUpdateAudit(repoRoot, headRev))
-		emitSelfUpdateOutcome(outcomeCheckOnly, installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict))
+		audit := selfUpdateAudit(repoRoot, headRev)
+		printHotCopyAudit(audit)
+		emitSelfUpdateCheckOutcome(installTargetOr(*target), fmt.Sprintf("%s/%s", verdict, skew.Verdict), verdict, audit.Converged)
 		return
 	}
 	// Decide whether to build (see selfUpdateShouldBuild for the SELF/FLEET asymmetry). An
@@ -152,6 +153,16 @@ func cmdSelfUpdate(argv []string) {
 	}
 
 	performSelfUpdate(repoRoot, headRev, target, companionPaths, strings.TrimSpace(*handoffSession), *handoffTimeout, fs.Args())
+}
+
+// selfUpdateFetchOrigin refreshes the remote-tracking ref only for an update run. A fetch writes
+// Git metadata even when the worktree is untouched, so --check deliberately observes the current
+// origin/main ref without fetching and remains strictly non-mutating.
+func selfUpdateFetchOrigin(ctx context.Context, runner selfinstall.Runner, repoRoot string, checkOnly bool) {
+	if checkOnly {
+		return
+	}
+	_, _ = runner(ctx, repoRoot, "git", "fetch", "origin", "--quiet")
 }
 
 // selfUpdateHost roots the hot-copy role table on this host: the checkout we build from, the
@@ -344,6 +355,49 @@ func emitSelfUpdateOutcome(cause selfUpdateOutcome, target, detail string) {
 	fmt.Fprintln(selfUpdateProgress, line)
 }
 
+// selfUpdateCheckStatus is the closed JSON status vocabulary for --check. The revision verdict
+// takes precedence because a normal update also re-censuses and converges writable hot copies.
+// Hot-copy divergence therefore describes the narrower case where the checked target itself is
+// current but at least one other declared copy is not.
+type selfUpdateCheckStatus string
+
+const (
+	selfUpdateCheckCurrent   selfUpdateCheckStatus = "current"
+	selfUpdateCheckStale     selfUpdateCheckStatus = "stale"
+	selfUpdateCheckDivergent selfUpdateCheckStatus = "divergent"
+)
+
+type selfUpdateCheckPosture struct {
+	Status      selfUpdateCheckStatus
+	NextCommand string
+}
+
+func classifySelfUpdateCheck(freshness binstamp.Freshness, hotCopiesConverged bool) selfUpdateCheckPosture {
+	switch {
+	case freshness != binstamp.Fresh:
+		return selfUpdateCheckPosture{Status: selfUpdateCheckStale, NextCommand: "fak self-update"}
+	case !hotCopiesConverged:
+		return selfUpdateCheckPosture{Status: selfUpdateCheckDivergent, NextCommand: "fak self-update --force"}
+	default:
+		return selfUpdateCheckPosture{Status: selfUpdateCheckCurrent, NextCommand: "fak version"}
+	}
+}
+
+// emitSelfUpdateCheckOutcome keeps the human outcome vocabulary stable while making the JSON
+// receipt stateful: "current" is reserved for a fresh target and a converged hot-copy audit.
+func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshness, hotCopiesConverged bool) {
+	if selfUpdateJSON == nil {
+		emitSelfUpdateOutcome(outcomeCheckOnly, target, detail)
+		return
+	}
+	posture := classifySelfUpdateCheck(freshness, hotCopiesConverged)
+	receipt := newSelfUpdateReceipt(outcomeCheckOnly, target, detail)
+	receipt.Status = string(posture.Status)
+	receipt.NextCommand = posture.NextCommand
+	_ = json.NewEncoder(selfUpdateJSON).Encode(receipt)
+	selfUpdateJSON = nil
+}
+
 const selfUpdateReceiptSchema = "fak.self-update.receipt/v1"
 
 type selfUpdateReceipt struct {
@@ -416,6 +470,15 @@ func newSelfUpdateReceipt(cause selfUpdateOutcome, target, detail string) selfUp
 		status, rollbackStatus, nextCommand = "rollback_failed", "failed", "fak self-update --check"
 	case outcomeBusy:
 		status, nextCommand = "busy", "fak self-update"
+	case outcomeCheckOnly:
+		// A check-only receipt describes freshness rather than an installation effect.
+		// Comparing the two revisions keeps the JSON contract honest for operators and
+		// automation: a stale, non-mutating check must not claim the binary is current.
+		if oldRevision, newRevision := strings.TrimSpace(selfUpdateReceiptOldRevision), strings.TrimSpace(selfUpdateReceiptNewRevision); oldRevision != "" && newRevision != "" && oldRevision != newRevision {
+			status, nextCommand = string(selfUpdateCheckStale), "fak self-update"
+		}
+	case outcomeHotCopyDivergent:
+		status, nextCommand = string(selfUpdateCheckDivergent), "fak self-update --force"
 	case outcomeHandoffRefused:
 		status, nextCommand = "handoff_refused", "fak self-update --check"
 	case selfUpdateOutcome("restart_required"):

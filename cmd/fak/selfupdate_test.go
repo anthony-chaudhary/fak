@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -258,6 +259,110 @@ func TestSelfUpdateReceiptPostures(t *testing.T) {
 				t.Fatalf("action/targets missing: %+v", receipt)
 			}
 		})
+	}
+}
+
+func TestSelfUpdateCheckOnlyReceiptReportsStaleRevision(t *testing.T) {
+	selfUpdateReceiptOldRevision = "oldrev"
+	selfUpdateReceiptNewRevision = "newrev"
+	t.Cleanup(func() {
+		selfUpdateReceiptOldRevision = ""
+		selfUpdateReceiptNewRevision = ""
+	})
+
+	receipt := newSelfUpdateReceipt(outcomeCheckOnly, "bin/fak", "")
+	if receipt.Status != "stale" {
+		t.Fatalf("check-only stale status = %q, want stale", receipt.Status)
+	}
+	if receipt.NextCommand != "fak self-update" {
+		t.Fatalf("check-only stale next_command = %q, want fak self-update", receipt.NextCommand)
+	}
+	if receipt.Attempted != 0 || receipt.Changed != 0 {
+		t.Fatalf("check-only receipt mutated targets: attempted=%d changed=%d", receipt.Attempted, receipt.Changed)
+	}
+}
+
+func TestSelfUpdateCheckOnlyReceiptReportsCurrentRevision(t *testing.T) {
+	selfUpdateReceiptOldRevision = "samerev"
+	selfUpdateReceiptNewRevision = "samerev"
+	t.Cleanup(func() {
+		selfUpdateReceiptOldRevision = ""
+		selfUpdateReceiptNewRevision = ""
+	})
+
+	receipt := newSelfUpdateReceipt(outcomeCheckOnly, "bin/fak", "")
+	if receipt.Status != "current" || receipt.NextCommand != "fak version" {
+		t.Fatalf("check-only current receipt = status %q next %q", receipt.Status, receipt.NextCommand)
+	}
+}
+
+func TestSelfUpdateHotCopyDivergentReceiptIsActionable(t *testing.T) {
+	receipt := newSelfUpdateReceipt(outcomeHotCopyDivergent, "bin/fak", "")
+	if receipt.Status != "divergent" || receipt.NextCommand != "fak self-update --force" {
+		t.Fatalf("divergent receipt = status %q next %q", receipt.Status, receipt.NextCommand)
+	}
+}
+
+func TestEmitSelfUpdateCheckJSONPostures(t *testing.T) {
+	oldCorrelation := selfUpdateCorrelationID
+	oldProgress, oldJSON := selfUpdateProgress, selfUpdateJSON
+	selfUpdateCorrelationID = func() string { return "corr-check" }
+	t.Cleanup(func() {
+		selfUpdateCorrelationID = oldCorrelation
+		selfUpdateProgress, selfUpdateJSON = oldProgress, oldJSON
+	})
+
+	cases := []struct {
+		name      string
+		freshness binstamp.Freshness
+		converged bool
+		status    selfUpdateCheckStatus
+		next      string
+	}{
+		{"fresh and converged", binstamp.Fresh, true, selfUpdateCheckCurrent, "fak version"},
+		{"revision differs", binstamp.Stale, true, selfUpdateCheckStale, "fak self-update"},
+		{"revision differs and copies diverge", binstamp.Stale, false, selfUpdateCheckStale, "fak self-update"},
+		{"hot copies diverge", binstamp.Fresh, false, selfUpdateCheckDivergent, "fak self-update --force"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout strings.Builder
+			selfUpdateJSON = &stdout
+			selfUpdateProgress = io.Discard
+			selfUpdateReceiptOldRevision = "oldrev"
+			selfUpdateReceiptNewRevision = "newrev"
+
+			emitSelfUpdateCheckOutcome("bin/fak", "check-only", tc.freshness, tc.converged)
+
+			var receipt selfUpdateReceipt
+			if err := json.Unmarshal([]byte(stdout.String()), &receipt); err != nil {
+				t.Fatalf("receipt is not JSON: %v: %q", err, stdout.String())
+			}
+			if receipt.Status != string(tc.status) || receipt.NextCommand != tc.next {
+				t.Fatalf("status/next_command = %q/%q, want %q/%q", receipt.Status, receipt.NextCommand, tc.status, tc.next)
+			}
+			if receipt.Changed != 0 || receipt.Attempted != 0 {
+				t.Fatalf("check receipt reports mutation: %+v", receipt)
+			}
+		})
+	}
+}
+
+func TestSelfUpdateCheckDoesNotFetchOrigin(t *testing.T) {
+	var calls []string
+	runner := func(_ context.Context, dir, name string, args ...string) (string, bool) {
+		calls = append(calls, strings.Join(append([]string{dir, name}, args...), " "))
+		return "", true
+	}
+
+	selfUpdateFetchOrigin(context.Background(), runner, "repo", true)
+	if len(calls) != 0 {
+		t.Fatalf("--check invoked mutating fetch: %v", calls)
+	}
+
+	selfUpdateFetchOrigin(context.Background(), runner, "repo", false)
+	if len(calls) != 1 || calls[0] != "repo git fetch origin --quiet" {
+		t.Fatalf("update fetch calls = %v", calls)
 	}
 }
 

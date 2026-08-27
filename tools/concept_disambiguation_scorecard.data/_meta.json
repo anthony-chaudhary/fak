@@ -8683,6 +8683,11 @@
           "category": "incidental",
           "reason": "Provider admission method, not the kernel policy preflight concept.",
           "token": "PreflightQwen35GDNSequence"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal receipt mapping record for existing self-update outcomes; it does not introduce a new operator capability or policy concept.",
+          "token": "selfUpdateCheckPosture"
         }
       ],
       "exclude": [
@@ -8865,6 +8870,7 @@
         "runpolicysourceselftest",
         "schedLauncherPosture",
         "schedulerPolicyResult",
+        "selfUpdateCheckPosture",
         "semanticAdjudicator",
         "semanticConsensus",
         "semanticGold",
