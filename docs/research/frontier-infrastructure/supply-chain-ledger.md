@@ -248,3 +248,29 @@ investment / factory announcement
 
 Transformer MVA, switchgear ratings, HVDC/FACTS equipment, generation MW, facility MW,
 and critical IT MW remain distinct physical units.
+
+## Storage and network delivery additions
+
+| Evidence date | Entity / system | Observed state | Quantified envelope | Missing production join |
+|---|---|---|---|---|
+| 2024-03-12 | VAST / NVIDIA / CoreWeave BlueField architecture | Vendor said testing and first deployment were underway | Claimed 70% VAST-infrastructure footprint/power reduction and >5% net energy savings; target hundreds of thousands of GPUs | Installed prevalence, storage load, DPU resource use, failures, cost, and neutral application goodput. |
+| 2026-04-22 | VAST Series F/business scale | Financing and company-reported commercial scale | $30B valuation; ~$1B transaction; >$4B bookings; >$500M CARR; claimed millions-of-GPUs environments | Audited customer/workload mix, storage capacity/traffic, concentration, and platform-to-GPU goodput. |
+| 2026-03-16 | WEKA NeuralMesh | General availability | Enterprise storage/memory platform for training, inference, and agents | Shipments/deployments, bytes/IOPS/bandwidth, memory hit, failures, and application goodput. |
+| 2026-06-09 | Arista 7060XE7 | Product portfolio announced; availability Q4 2026–Q1 2027 | ~100 Tbps/system; 1.6T ports; air/liquid variants; claimed ~60% LPO power reduction | Shipment, multi-vendor interoperability, field reliability, topology, congestion, and collective goodput. |
+| 2026-03-12 | Arista XPO MSA | Specification/MSA plus demonstrations | 12.8 Tbps/module; 204.8 Tbps/OCP RU; 4× density; up to 400 W module cooling | Qualification, yield, shipment, interoperability, field service, and deployed application performance. |
+
+### Data-movement lifecycle
+
+```text
+architecture / standard
+  -> reference implementation
+  -> product announcement / GA
+  -> qualification and interoperability
+  -> shipment / deployment
+  -> workload integration
+  -> bytes + IOPS + bandwidth + latency + error evidence
+  -> checkpoint / training / inference / agent goodput
+```
+
+Peak bandwidth, storage bookings, supported-GPU claims, and general availability remain
+separate from end-to-end data-plane performance.
