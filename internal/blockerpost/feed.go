@@ -86,8 +86,8 @@ func FoldIssues(issues []Issue, label, repoURL string) Blocker {
 		b.ActionURL = backlogURL(repoURL, label)
 	} else {
 		b.Severity = SeverityStatus
-		b.Title = fmt.Sprintf("%d owned blocker(s)", len(ordered))
-		b.Detail = fmt.Sprintf("%d open `%s` issue(s), all assigned — ownership is recorded; consult each issue for current progress and next action.", len(ordered), label)
+		b.Title = fmt.Sprintf("%d blocker(s) have owners", len(ordered))
+		b.Detail = fmt.Sprintf("%d open `%s` issue(s); every issue has at least one assignee — ownership recorded.", len(ordered), label)
 	}
 
 	shown := ordered
@@ -101,26 +101,6 @@ func FoldIssues(issues []Issue, label, repoURL string) Blocker {
 		b.Lines = append(b.Lines, fmt.Sprintf("…and %d more (unowned-first)", len(ordered)-len(shown)))
 	}
 	return b
-}
-
-// FoldIssuesUnavailable renders a fail-closed blocker-feed result. It is deliberately
-// separate from FoldIssues(nil, ...): nil is a valid successful zero-result query and
-// therefore clear, while an unavailable or invalid source is UNKNOWN and non-green.
-// The caller owns failing the producing run and must not post this as a normal feed.
-func FoldIssuesUnavailable(label, detail string) Blocker {
-	if label == "" {
-		label = "blocked"
-	}
-	detail = strings.TrimSpace(detail)
-	if detail == "" {
-		detail = "the configured GitHub blocker source could not be evaluated"
-	}
-	return Blocker{
-		Severity: SeverityUnknown,
-		Title:    "blocker source unavailable",
-		Detail:   fmt.Sprintf("UNKNOWN: %s. No all-clear was evaluated.", detail),
-		Ref:      fmt.Sprintf("label:%s", label),
-	}
 }
 
 // issueLine renders one issue row: number + title, then either the assignees or an

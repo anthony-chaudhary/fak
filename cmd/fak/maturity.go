@@ -173,13 +173,8 @@ func runMaturityRoute(stdout, stderr io.Writer, argv []string) int {
 		result.Synced = maturity.SyncIssuePlan(plan, *repo, []string(labels), nil)
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "fak maturity route: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, maturity.RenderIssueResult(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "fak maturity route", *asJSON, result, maturity.RenderIssueResult(result)); code != 0 {
+		return code
 	}
 
 	if *live {

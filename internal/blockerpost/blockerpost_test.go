@@ -190,22 +190,6 @@ func TestClearBlockerIsGreenAndQuiet(t *testing.T) {
 	}
 }
 
-func TestUnknownBlockerIsNonGreenAndQuiet(t *testing.T) {
-	b := FoldIssuesUnavailable("blocked", "configured label does not exist")
-	got := b.Text()
-	for _, want := range []string{":warning:", "UNKNOWN", "No all-clear was evaluated"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("unknown blocker missing %q:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, ":white_check_mark:") || strings.Contains(got, "all clear") {
-		t.Fatalf("unknown blocker MUST NOT look clear:\n%s", got)
-	}
-	if strings.Contains(got, "<!here>") || strings.Contains(blocksText(b), "<!here>") {
-		t.Fatalf("unknown source diagnostic MUST NOT page:\n%s", got)
-	}
-}
-
 // --- feed fold --------------------------------------------------------------
 
 func TestFoldIssuesEmptyIsClear(t *testing.T) {
@@ -215,20 +199,6 @@ func TestFoldIssuesEmptyIsClear(t *testing.T) {
 	}
 	if !strings.Contains(b.Text(), "no standing blockers") {
 		t.Fatalf("clear fold missing the all-clear headline:\n%s", b.Text())
-	}
-}
-
-func TestFoldIssuesUnavailableIsDistinctFromSuccessfulEmpty(t *testing.T) {
-	clear := FoldIssues(nil, "blocked", "")
-	unknown := FoldIssuesUnavailable("blocked", "gh issue list failed")
-	if clear.Severity != SeverityClear {
-		t.Fatalf("successful empty severity = %q, want clear", clear.Severity)
-	}
-	if unknown.Severity != SeverityUnknown {
-		t.Fatalf("unavailable source severity = %q, want unknown", unknown.Severity)
-	}
-	if strings.Contains(unknown.Text(), "no standing blockers") {
-		t.Fatalf("unavailable source reused clear headline:\n%s", unknown.Text())
 	}
 }
 
@@ -270,14 +240,14 @@ func TestFoldIssuesAllOwnedIsBackgroundStatus(t *testing.T) {
 		t.Fatalf("all-owned blockers should be background status, got %q", b.Severity)
 	}
 	if strings.Contains(b.Text(), "<!here>") {
-		t.Fatalf("an all-owned (in-progress) fold MUST NOT page:\n%s", b.Text())
+		t.Fatalf("an all-owned fold MUST NOT page:\n%s", b.Text())
 	}
-	got := b.Text()
-	if !strings.Contains(got, "ownership is recorded") || !strings.Contains(got, "consult each issue") {
-		t.Fatalf("all-owned fold should state only what assignment proves:\n%s", got)
+	got := strings.ToLower(b.Text())
+	if !strings.Contains(got, "have owners") || !strings.Contains(got, "ownership recorded") {
+		t.Fatalf("all-owned fold should state only the witnessed ownership fact:\n%s", b.Text())
 	}
 	if strings.Contains(got, "in progress") || strings.Contains(got, "no action needed") {
-		t.Fatalf("all-owned fold inferred progress/action state from assignment:\n%s", got)
+		t.Fatalf("all-owned fold inferred progress or completion from assignment alone:\n%s", b.Text())
 	}
 }
 

@@ -30,8 +30,6 @@ var releaseStatusStableRE = regexp.MustCompile(`^stable/.+`)
 
 var releaseStatusRunJSON = releaseStatusRunPythonJSON
 var releaseStatusNow = func() time.Time { return time.Now().UTC() }
-var releaseStatusRunGHJSON = releaseStatusRunExternalJSON
-var releaseStatusRunGHText = releaseStatusRunExternalText
 
 type releaseStatusOptions struct {
 	AsJSON           bool
@@ -523,117 +521,6 @@ func releaseStatusIsRelevantDirtyPath(path string) bool {
 	return false
 }
 
-func releaseStatusCIDiagnosis(root string, decision, contextPayload map[string]any) map[string]any {
-	workflow, row, source, snapshotSource := releaseStatusEffectiveCIRun(decision, contextPayload)
-	if len(row) == 0 {
-		return map[string]any{"status": "unavailable", "kind": "missing_ci_run", "stage": "selection", "action": "inspect_ci", "scope": source, "snapshot_source": snapshotSource, "workflow": releaseStatusNilIfEmpty(workflow), "reason": "effective CI signal did not name an exact decisive run"}
-	}
-	conclusion := strings.ToLower(releaseStatusString(row["conclusion"]))
-	decisionIsRed := releaseStatusContains(releaseStatusStringSlice(decision["blockers"]), "CI_BASE_RED") || strings.EqualFold(releaseStatusString(releaseStatusMap(decision["ci_signal"])["status"]), "red")
-	if conclusion != "failure" && conclusion != "timed_out" && conclusion != "startup_failure" && conclusion != "cancelled" && conclusion != "action_required" {
-		if decisionIsRed {
-			return map[string]any{"status": "unavailable", "kind": "snapshot_mismatch", "stage": "selection", "action": "inspect_ci", "scope": source, "snapshot_source": snapshotSource, "workflow": workflow, "run": row, "reason": fmt.Sprintf("CI_BASE_RED selected %s run, but its carried conclusion is %s", workflow, releaseStatusFirstString(conclusion, releaseStatusString(row["status"])))}
-		}
-		return map[string]any{"status": "not_failed", "scope": source, "snapshot_source": snapshotSource, "workflow": workflow, "run": row, "reason": fmt.Sprintf("selected %s run conclusion is %s", workflow, releaseStatusFirstString(conclusion, releaseStatusString(row["status"])))}
-	}
-	runID := int64(releaseStatusInt(row["database_id"]))
-	if runID == 0 {
-		runID = int64(releaseStatusInt(row["databaseId"]))
-	}
-	if runID == 0 {
-		return map[string]any{"status": "unavailable", "kind": "missing_run_id", "stage": "selection", "action": "inspect_ci", "scope": source, "snapshot_source": snapshotSource, "workflow": workflow, "run": row, "reason": "selected failing CI signal omitted database_id; refusing to query gh run 0"}
-	}
-	run := releasestatus.CIRun{DatabaseID: runID, HeadSHA: releaseStatusFirstString(releaseStatusString(row["head_sha"]), releaseStatusString(row["headSha"])), URL: releaseStatusString(row["url"]), Conclusion: conclusion}
-	jobsDoc, err := releaseStatusRunGHJSON(root, 30*time.Second, "gh", "run", "view", strconv.FormatInt(runID, 10), "--json", "jobs")
-	if err != nil {
-		return map[string]any{"status": "unavailable", "kind": "jobs_unavailable", "stage": "diagnosis", "action": "inspect_ci", "scope": source, "snapshot_source": snapshotSource, "workflow": workflow, "run": row, "reason": err.Error()}
-	}
-	jobs := releaseStatusMapSlice(releaseStatusMap(jobsDoc)["jobs"])
-	failedSteps, jobsBrief, logs := []string{}, []any{}, []string{}
-	for _, job := range jobs {
-		steps := releaseStatusFailedStepNames(job)
-		failedSteps = append(failedSteps, steps...)
-		jobID := releaseStatusInt(job["databaseId"])
-		jobsBrief = append(jobsBrief, map[string]any{"id": jobID, "name": job["name"], "status": job["status"], "conclusion": job["conclusion"], "failed_steps": steps})
-		jobConclusion := strings.ToLower(releaseStatusString(job["conclusion"]))
-		if jobID == 0 || (jobConclusion != "failure" && jobConclusion != "timed_out" && jobConclusion != "startup_failure" && jobConclusion != "cancelled" && jobConclusion != "action_required") {
-			continue
-		}
-		if raw, logErr := releaseStatusRunGHText(root, 30*time.Second, "gh", "run", "view", strconv.FormatInt(runID, 10), "--job", strconv.Itoa(jobID), "--log-failed"); logErr == nil {
-			logs = append(logs, string(raw))
-		}
-	}
-	diagnosis := releasestatus.DiagnoseCIFailure(workflow, run, failedSteps, strings.Join(logs, "\n"))
-	out := releaseStatusStructMap(diagnosis)
-	out["scope"], out["jobs"] = source, jobsBrief
-	out["snapshot_source"] = snapshotSource
-	return out
-}
-
-func releaseStatusEffectiveCIRun(decision, contextPayload map[string]any) (string, map[string]any, string, string) {
-	source := strings.TrimSuffix(releaseStatusString(decision["ci_source"]), "+ancestor")
-	key := "ci_on_head"
-	if source == "fast" {
-		key = "ci_fast"
-	} else if source == "" {
-		source = "whole"
-	}
-	if signal := releaseStatusMap(decision["ci_signal"]); len(signal) > 0 {
-		workflow := releaseStatusString(signal["workflow"])
-		if workflow == "" {
-			if source == "fast" {
-				workflow = "ci-fast.yml"
-			} else {
-				workflow = "ci.yml"
-			}
-		}
-		return workflow, releaseStatusMap(signal["latest_trunk_ci"]), source, "decision"
-	}
-	// Verdicts written before ci_signal was added remain readable, but the JSON
-	// makes this second-snapshot compatibility path explicit.
-	signal := releaseStatusMap(contextPayload[key])
-	workflow := releaseStatusString(signal["workflow"])
-	if workflow == "" {
-		if source == "fast" {
-			workflow = "ci-fast.yml"
-		} else {
-			workflow = "ci.yml"
-		}
-	}
-	return workflow, releaseStatusMap(signal["latest_trunk_ci"]), source, "context_fallback"
-}
-
-func releaseStatusFailedStepNames(job map[string]any) []string {
-	out := []string{}
-	for _, step := range releaseStatusMapSlice(job["steps"]) {
-		switch strings.ToLower(releaseStatusString(step["conclusion"])) {
-		case "failure", "cancelled", "timed_out", "action_required":
-			if name := strings.TrimSpace(releaseStatusString(step["name"])); name != "" {
-				out = append(out, name)
-			}
-		}
-	}
-	return out
-}
-
-func releaseStatusMapSlice(value any) []map[string]any {
-	rows, _ := value.([]any)
-	out := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		if m, ok := row.(map[string]any); ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-func releaseStatusStructMap(value any) map[string]any {
-	b, _ := json.Marshal(value)
-	var out map[string]any
-	_ = json.Unmarshal(b, &out)
-	return out
-}
-
 func releaseStatusGitHubReleaseView(root, tag string, skip bool) map[string]any {
 	if skip {
 		return map[string]any{"status": "skipped", "tag": releaseStatusNilIfEmpty(tag)}
@@ -876,13 +763,21 @@ func releaseStatusNextAction(decision, stable, dirty, ciDiag, branchRegime map[s
 	}
 	if releaseStatusContains(blockers, "CI_BASE_RED") {
 		if releaseStatusString(ciDiag["action"]) == "fix_ci_billing" {
-			return map[string]any{"kind": "fix_ci_billing", "detail": releaseStatusString(ciDiag["detail"])}
+			return map[string]any{"kind": "fix_ci_billing", "detail": releaseStatusFirstString(releaseStatusString(ciDiag["summary"]), releaseStatusString(ciDiag["reason"]), "restore GitHub Actions billing before cutting a release")}
 		}
-		summary := releaseStatusMap(ciDiag["summary"])
-		if packages := releaseStatusInt(summary["package_count"]); packages > 0 {
-			return map[string]any{"kind": "fix_ci", "detail": fmt.Sprintf("%d package(s), %d unique test(s) failed in %s; run `fak release status --json` for dispatchable work_units", packages, releaseStatusInt(summary["test_count"]), releaseStatusString(ciDiag["workflow"]))}
+		detail := releaseStatusString(ciDiag["summary"])
+		if unit := releaseStatusCIFirstWorkUnit(ciDiag); len(unit) > 0 {
+			detail = releaseStatusFirstString(detail, "fix the decisive CI failure") + "; start with `" + releaseStatusString(unit["reproduce"]) + "`"
+		} else if cause := releaseStatusCIFirstCause(ciDiag); len(cause) > 0 {
+			detail = releaseStatusFirstString(detail, releaseStatusString(cause["detail"]))
+			if inspect := releaseStatusFirstString(releaseStatusString(cause["inspect_command"]), releaseStatusString(ciDiag["inspect_command"])); inspect != "" {
+				detail += "; inspect with `" + inspect + "`"
+			}
 		}
-		return map[string]any{"kind": "fix_ci", "detail": "fix current main ci.yml failure before cutting a release"}
+		if detail != "" {
+			return map[string]any{"kind": "fix_ci", "detail": detail}
+		}
+		return map[string]any{"kind": "fix_ci", "detail": "fix the decisive main CI failure before cutting a release"}
 	}
 	if releaseStatusContains(blockers, "CI_RETRY_TO_GREEN") {
 		return map[string]any{"kind": "pause_auto_release", "detail": "latest green ci.yml run was a retry; set FAK_AUTO_RELEASE=0 or confirm a fresh green run before cutting a release"}
@@ -965,11 +860,14 @@ func renderReleaseStatus(status map[string]any) string {
 	shadowCutover := releaseStatusMap(status["shadow_cutover"])
 	lines := []string{
 		fmt.Sprintf("release-status: %s - %s", strings.ToUpper(releaseStatusFirstString(releaseStatusString(decision["decision"]), "unknown")), releaseStatusString(decision["reason"])),
+	}
+	lines = append(lines, releaseStatusCIDiagnosisLines(releaseStatusMap(rolling["ci_diagnosis"]))...)
+	lines = append(lines,
 		fmt.Sprintf("  last tag: %s", releaseStatusFirstString(releaseStatusString(rolling["last_tag"]), "(none)")),
 		releaseStatusRenderBranchRegime(branchRegime),
 		releaseStatusRenderShadowCutover(shadowCutover),
 		fmt.Sprintf("  commits since tag: %d", releaseStatusInt(rolling["commits_since_tag"])),
-	}
+	)
 	if line := releaseStatusRenderContents(releaseStatusMap(rolling["contents"])); line != "" {
 		lines = append(lines, line)
 	}
@@ -1065,18 +963,6 @@ func releaseStatusSemverTags(root string, merged bool) []string {
 }
 
 func releaseStatusRunExternalJSON(root string, timeout time.Duration, name string, args ...string) (any, error) {
-	out, err := releaseStatusRunExternalText(root, timeout, name, args...)
-	if err != nil {
-		return nil, err
-	}
-	var doc any
-	if jerr := json.Unmarshal(out, &doc); jerr != nil {
-		return nil, fmt.Errorf("%s %s emitted non-JSON: %s", name, strings.Join(args, " "), strings.TrimSpace(string(out)))
-	}
-	return doc, nil
-}
-
-func releaseStatusRunExternalText(root string, timeout time.Duration, name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -1086,7 +972,11 @@ func releaseStatusRunExternalText(root string, timeout time.Duration, name strin
 	if err != nil {
 		return nil, fmt.Errorf("%s %s: %w (%s)", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
-	return out, nil
+	var doc any
+	if jerr := json.Unmarshal(out, &doc); jerr != nil {
+		return nil, fmt.Errorf("%s %s emitted non-JSON: %s", name, strings.Join(args, " "), strings.TrimSpace(string(out)))
+	}
+	return doc, nil
 }
 
 func releaseStatusRunExternalJSONObject(root string, timeout time.Duration, name string, args ...string) (map[string]any, error) {

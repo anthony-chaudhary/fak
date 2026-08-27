@@ -16,6 +16,7 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 			copy := row
 			copy.SourcePaths = []string{row.SourcePath}
 			copy.usageByID = cloneAuditUsage(row.usageByID)
+			copy.failureCounts = cloneAuditFailureCounts(row.failureCounts)
 			byID[key] = &copy
 			continue
 		}
@@ -41,13 +42,24 @@ func canonicalAuditTranscripts(raw []AuditTranscriptRow) ([]AuditTranscriptRow, 
 		}
 		rollup.ToolCalls += row.ToolCalls
 		rollup.ToolErrors += row.ToolErrors
-		rollup.RepeatedFailures += row.RepeatedFailures
+		if rollup.failureCounts != nil && row.failureCounts != nil {
+			for signature, count := range row.failureCounts {
+				rollup.failureCounts[signature] += count
+			}
+		} else {
+			rollup.failureCounts = nil
+			rollup.RepeatedFailures += row.RepeatedFailures
+		}
+		rollup.ExpectedWaitTimeouts += row.ExpectedWaitTimeouts
 		rollup.MutationChurn += row.MutationChurn
 	}
 	out := make([]AuditTranscriptRow, 0, len(byID))
 	for _, row := range byID {
 		sort.Strings(row.SourcePaths)
 		row.SourcePath = row.SourcePaths[0]
+		if row.failureCounts != nil {
+			row.RepeatedFailures = auditRepeatedFailureCount(row.failureCounts)
+		}
 		out = append(out, *row)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -63,6 +75,17 @@ func cloneAuditUsage(src map[string]AuditTokens) map[string]AuditTokens {
 	dst := make(map[string]AuditTokens, len(src))
 	for id, usage := range src {
 		dst[id] = usage
+	}
+	return dst
+}
+
+func cloneAuditFailureCounts(src map[string]int) map[string]int {
+	if src == nil {
+		return nil
+	}
+	dst := make(map[string]int, len(src))
+	for signature, count := range src {
+		dst[signature] = count
 	}
 	return dst
 }

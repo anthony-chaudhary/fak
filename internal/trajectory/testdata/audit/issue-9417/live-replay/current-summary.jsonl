@@ -1,0 +1,1 @@
+{"schema":"fak-trajectory-audit/1","kind":"summary","sessions":3679,"tool_calls":277518,"tool_errors":24017,"repeated_failures":0,"repeated_failure_semantics":"actionable-identical-failed-action/2","repeated_failure_normalization":"per_session","expected_wait_timeouts":523}

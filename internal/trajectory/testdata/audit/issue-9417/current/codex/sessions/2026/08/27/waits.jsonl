@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"issue-9417-codex-waits","cli_version":"0.0.0-fixture"}}
+{"type":"response_item","payload":{"type":"function_call","call_id":"wait-1","name":"multi_agent_v1.wait_agent","arguments":"{\"targets\":[\"worker-1\"],\"timeout_ms\":1000}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"wait-1","output":"{\"status\":{},\"timed_out\":true}"}}
+{"type":"response_item","payload":{"type":"function_call","call_id":"wait-2","name":"multi_agent_v1.wait_agent","arguments":"{\"targets\":[\"worker-1\"],\"timeout_ms\":1000}"}}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"wait-2","output":"{\"status\":{},\"timed_out\":true}"}}
