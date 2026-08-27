@@ -149,6 +149,31 @@ func bindLoadedModelWeights(f *benchFlags, m *model.Model) bool {
 	return true
 }
 
+// runWithTransferredWeightLifetime keeps streamed checkpoint ownership live for a terminal
+// operation such as the native-performance capture, then closes it before returning. main also
+// retains its process-wide deferred guard; weightCloseOnce makes both the success return and an
+// ensuing f.exit error path converge on exactly one Model.CloseWeights call.
+func runWithTransferredWeightLifetime(f *benchFlags, run func() error) (err error) {
+	defer func() {
+		if closeErr := f.closeTransferredWeights(); closeErr != nil {
+			if err == nil {
+				err = fmt.Errorf("close streamed Q4_K checkpoint: %w", closeErr)
+			} else {
+				err = fmt.Errorf("%w; close streamed Q4_K checkpoint: %v", err, closeErr)
+			}
+		}
+	}()
+	return run()
+}
+
+// onceFinishNativeProfile lets the success path time teardown explicitly while the deferred
+// error-path guard uses the same operation. The execution state must be gone before the caller
+// returns to runWithTransferredWeightLifetime, which owns the mapped checkpoint close.
+func onceFinishNativeProfile(finish func()) func() {
+	var once sync.Once
+	return func() { once.Do(finish) }
+}
+
 // applyBudget re-resolves the matmul worker count after init from a -budget flag (the
 // env-driven default was already read at package load). FAK_WORKERS is an explicit
 // absolute override, so honor it over a fractional -budget rather than silently ignoring it.
@@ -168,9 +193,6 @@ func applyBudget(budget float64) {
 func validateFlagCombinations(f *benchFlags) error {
 	if streamQ4KEnabled(f) && (*f.gguf == "" || !*f.q4k) {
 		return fmt.Errorf("-stream-q4k requires exact -gguf and -q4k")
-	}
-	if streamQ4KEnabled(f) && *f.nativeProfileOut != "" {
-		return fmt.Errorf("-stream-q4k is not yet admitted into the strict -native-performance-profile control envelope")
 	}
 	if *f.nativeProfileReadback != "" && *f.nativeProfileOut != "" {
 		return fmt.Errorf("-native-performance-readback and -native-performance-profile are mutually exclusive")

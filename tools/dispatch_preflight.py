@@ -93,6 +93,8 @@ REFUSE_NO_SEAT = "REFUSE_NO_SEAT"    # seat pool depleted: every seat leased to 
 REFUSE_AT_CAP = "REFUSE_AT_CAP"      # live workers already at/over the operator/dos cap
 REFUSE_INSPECT = "REFUSE_INSPECT"    # a check could not run (fail-safe → refuse)
 REFUSE_WEEKLY_CAPPED = "REFUSE_WEEKLY_CAPPED"  # routed account hit a weekly-limit 429; cooling until reset (#2610)
+REFUSE_FAK_BIN_STALE = "REFUSE_FAK_BIN_STALE"
+REFUSE_FAK_BIN_PROVENANCE = "REFUSE_FAK_BIN_PROVENANCE"
 
 def _env_pos_int(name: str, default: int) -> int:
     """A positive-int env override, falling back to ``default`` on unset/garbage.
@@ -391,6 +393,44 @@ def fak_build_identity(path: str | Path | None, *,
     return row
 
 
+def repository_build_relation(root: Path, build: str) -> dict[str, Any]:
+    """Classify one clean build against committed HEAD using Git ancestry."""
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
+                              timeout=20, check=False,
+                              creationflags=_no_window_creationflags())
+
+    head_p = git("rev-parse", "--verify", "HEAD^{commit}")
+    head = head_p.stdout.strip() if head_p.returncode == 0 else ""
+    observed_p = git("rev-parse", "--verify", f"{build}^{{commit}}") if build else None
+    observed = observed_p.stdout.strip() if observed_p and observed_p.returncode == 0 else ""
+    row = {"expected_head": head, "observed_build": observed or build,
+           "relation": "UNKNOWN"}
+    if not head or not observed:
+        row["error"] = ((head_p.stderr if not head else observed_p.stderr) or
+                        "revision unavailable in repository history").strip()[-200:]
+        return row
+    row["observed_build"] = observed
+    if observed == head:
+        row["relation"] = "MATCH"
+        return row
+    behind = git("merge-base", "--is-ancestor", observed, head)
+    if behind.returncode == 0:
+        row["relation"] = "BEHIND"
+        return row
+    if behind.returncode not in (0, 1):
+        row["error"] = (behind.stderr or "ancestry unavailable").strip()[-200:]
+        return row
+    ahead = git("merge-base", "--is-ancestor", head, observed)
+    if ahead.returncode == 0:
+        row["relation"] = "AHEAD"
+    elif ahead.returncode == 1:
+        row["relation"] = "DIVERGED"
+    else:
+        row["error"] = (ahead.stderr or "ancestry unavailable").strip()[-200:]
+    return row
+
+
 def fak_bin_resolutions(root: Path, env: dict[str, str] | None = None,
                         ) -> dict[str, str | None]:
     """resolver name -> the ABSOLUTE `fak` path it picks on this host, right now.
@@ -439,6 +479,13 @@ def fak_bin_provenance(root: Path, env: dict[str, str] | None = None, *,
     keys = {(r.get("build_key"), r.get("build"))
             for r in rows.values() if r.get("build_key")}
     builds = sorted({str(r["build"]) for r in rows.values() if r.get("build")})
+    resolved_count = sum(1 for r in rows.values() if r.get("resolved"))
+    override = str((env if env is not None else os.environ).get(
+        "FAK_PREFLIGHT_ALLOW_BIN_SKEW", "")).strip().lower() in ("1", "true", "yes", "on")
+    repository = {"expected_head": "", "observed_build": builds[0] if len(builds) == 1 else "",
+                  "relation": "UNRESOLVED" if any(not r.get("resolved") for r in rows.values()) else "UNKNOWN"}
+    if len(builds) == 1 and len(keys) <= 1 and not any(r.get("dirty") for r in rows.values()):
+        repository = repository_build_relation(root, builds[0])
     return {
         "schema": FAK_BIN_PROVENANCE_SCHEMA,
         "resolvers": rows,
@@ -448,6 +495,12 @@ def fak_bin_provenance(root: Path, env: dict[str, str] | None = None, *,
         "agree": len(keys) <= 1,
         "dirty": sorted(n for n, r in rows.items() if r.get("dirty")),
         "unresolved": sorted(n for n, r in rows.items() if not r.get("resolved")),
+        "resolved_count": resolved_count,
+        "expected_head": repository.get("expected_head"),
+        "observed_build": repository.get("observed_build"),
+        "repository_relation": repository.get("relation"),
+        "repository_error": repository.get("error"),
+        "historical_override": override,
     }
 
 
@@ -470,6 +523,24 @@ def fak_bin_warnings(prov: dict[str, Any]) -> list[str]:
             f"FAK_BIN_DISAGREEMENT: {prov.get('distinct_builds')} different `fak` "
             f"builds are in play on one tick — {detail}")
     return lines
+
+
+def repository_binary_refusal(prov: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the typed repository-freshness refusal, before launch side effects."""
+    if int(prov.get("resolved_count") or 0) < 2 or not prov.get("agree") or prov.get("dirty"):
+        return None
+    relation = str(prov.get("repository_relation") or "").upper()
+    if relation in ("", "MATCH", "UNRESOLVED"):
+        return None
+    observed = str(prov.get("observed_build") or "unknown")[:12]
+    expected = str(prov.get("expected_head") or "unknown")[:12]
+    recovery = "run `fak self-update --force --root .` and retry"
+    if relation == "BEHIND":
+        return (REFUSE_FAK_BIN_STALE,
+                f"installed fak build {observed} is behind committed HEAD {expected}; {recovery}")
+    return (REFUSE_FAK_BIN_PROVENANCE,
+            f"installed fak build {observed} has repository relation {relation} to committed "
+            f"HEAD {expected}; {recovery}")
 
 
 def record_fak_bin_provenance(root: Path, prov: dict[str, Any],
@@ -503,6 +574,11 @@ def record_fak_bin_provenance(root: Path, prov: dict[str, Any],
             "agree": prov.get("agree"),
             "dirty": prov.get("dirty"),
             "builds": prov.get("builds"),
+            "expected_head": prov.get("expected_head"),
+            "observed_build": prov.get("observed_build"),
+            "repository_relation": prov.get("repository_relation"),
+            "repository_error": prov.get("repository_error"),
+            "historical_override": prov.get("historical_override"),
             "resolvers": {n: {k: r.get(k) for k in ("path", "build", "dirty", "build_key")}
                           for n, r in rows.items()},
         }
@@ -2030,6 +2106,13 @@ def evaluate(root: Path, *, max_workers: int, work_kind: str, product: str,
         reason = (f"safe to spawn: host clean, account '{acct.get('tag')}' "
                   f"(t{acct.get('tier')}) free, {live}/{cap} live (headroom {headroom})")
 
+    bin_refusal = repository_binary_refusal(fak_bin)
+    if verdict == OK_VERDICT and bin_refusal:
+        if fak_bin.get("historical_override"):
+            reason += (f" (bin freshness ADMITTED BY OVERRIDE — {bin_refusal[1]}; "
+                       "FAK_PREFLIGHT_ALLOW_BIN_SKEW=1)")
+        else:
+            verdict, reason = bin_refusal
     ok = verdict == OK_VERDICT
     # Bind the verdict to the build that produced it. Recorded (not just returned)
     # because the tick payload projects preflight through an ALLOWLIST, so a new key
