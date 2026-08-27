@@ -1,5 +1,16 @@
 # Frontier infrastructure and workload expectations index
 
+## Latest slice: NVIDIA / Hugging Face acquisition-report lifecycle (#9383)
+
+One open rumor record now preserves the August 2026 report lifecycle without promoting it
+to transaction fact. Business Insider reported NVIDIA–Hugging Face talks above $13B and
+said no deal had been reached; The Information later reported a $12.9B agreement. Neither
+company had announced or confirmed signing as of 2026-08-27, and a reported agreement is
+not a completed acquisition. Signing or party announcement, transaction structure and
+terms, regulatory conditions, and close remain explicitly unresolved through the
+2026-11-30 review date. The dated source and independence audit is in
+[`source-register.md`](source-register.md).
+
 ## Latest slice: production distribution evidence (#9381)
 
 Four existing records now carry variable- and denominator-specific audits for BurstGPT/Azure OpenAI, Chutes Year-in-Serving, ServeGen, and Alibaba Cloud Model Studio KV-cache. The audit distinguishes empirical distributions, explicit fitted models, statistical fit/tests, and synthetic generator assumptions. No entries or entities were added. ServeGen v3 supplies bounded, variable-specific fitted families, but public evidence still does not support one universal Zipf, lognormal, Pareto, Poisson, Hawkes, or MMPP workload law.
@@ -24,6 +35,7 @@ views are:
 - [`filings-ledger.md`](filings-ledger.md) — normalized hyperscaler capex and accounting-boundary evidence;
 - [`supply-chain-ledger.md`](supply-chain-ledger.md) — power, grid, cooling, water, construction, HBM, packaging, optics, networking, and electrical bottlenecks;
 - [`market-chronology.md`](market-chronology.md) — completed events, future announcements, partnerships, funding, and rumors;
+- [`source-register.md`](source-register.md) — dated original reports, independence boundaries, official-party checks, and refresh triggers for report lifecycles;
 - [`startups-landscape.md`](startups-landscape.md) — startup and alternative-infrastructure map;
 - [`refresh-protocol.md`](refresh-protocol.md) — how to extend the ledger without laundering claims.
 
@@ -233,11 +245,11 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **266 dated entries**, **259 unique source URLs**, and
-**223 distinct entity labels** across **13 categories** spanning frontier labs,
+The current spine contains **267 dated entries**, **260 unique source URLs**, and
+**224 distinct entity labels** across **13 categories** spanning frontier labs,
 hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
-and **2 explicit rumors**. FineServe, ServeGen, the one-year Chutes trace, OpenRouter geography, and
+and **3 explicit rumors**. FineServe, ServeGen, the one-year Chutes trace, OpenRouter geography, and
 SkyLB/SkyWalker now provide source-bounded production parameters. Azure OpenAI /
 BurstGPT adds 10.31M requests over 213 days with daily/weekly periodicity, token tails,
 separated failures, and multi-duration burst examples; Splitwise adds one-day Conversation

@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
   "updated_at": "2026-08-27",
-  "issue": 9382,
+  "issue": 9383,
   "root_issue": 9269,
-  "latest_slice_issue": 9382,
+  "latest_slice_issue": 9383,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 266,
+    "entry_count": 267,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -205,6 +205,7 @@
       "NVIDIA / Coherent",
       "NVIDIA / Groq",
       "NVIDIA / HBM suppliers",
+      "NVIDIA / Hugging Face",
       "NVIDIA / Lumentum",
       "NVIDIA / SchedMD",
       "NVIDIA DSX",
@@ -10520,6 +10521,50 @@
         "Unknown runtime topology and batching must remain explicit rather than normalized from aggregate hardware."
       ],
       "rumor": false
+    },
+    {
+      "id": "nvidia-hugging-face-acquisition-report-2026",
+      "category": "market_signal",
+      "entity": "NVIDIA / Hugging Face",
+      "topic": [
+        "acquisition",
+        "model_distribution_platform",
+        "rumor"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "Nvidia Agrees to Buy Open Source AI Platform Hugging Face For $12.9 Billion",
+      "source_url": "https://www.theinformation.com/articles/nvidia-agrees-buy-open-source-model-repository-hugging-face-12-9-billion",
+      "source_kind": "credible_reporting",
+      "evidence_class": "rumor",
+      "confidence": "low",
+      "claim": "Business Insider reported that NVIDIA and Hugging Face had discussed an acquisition valuing Hugging Face above $13B and had not reached a deal; The Information later reported that NVIDIA agreed to buy Hugging Face for $12.9B. As of August 27, 2026, neither party had publicly announced or confirmed a signed agreement, and no completed acquisition was established.",
+      "quantified": {
+        "reported_talks_valuation_usd_gt": 13000000000,
+        "reported_agreement_value_usd": 12900000000
+      },
+      "assumptions": [
+        "Control of a major model and dataset distribution platform could affect ecosystem neutrality and infrastructure routing, but no ownership or operational change is assumed before a completed transaction is evidenced."
+      ],
+      "contradictions_or_limits": [
+        "Business Insider's 2026-08-27T00:34:46Z report said the companies had not reached a deal and talks could fail; The Information's later August 26 PDT report said an agreement existed. The reports describe different states and neither is a party announcement.",
+        "No NVIDIA or Hugging Face announcement confirming signing was found by the 2026-08-27 cutoff; a reported agreement is not evidence of execution, public announcement, or current ownership.",
+        "Transaction structure and terms, including consideration form, adjustments, governance, approvals, conditions, termination rights, and operating commitments, remain undisclosed and are not inferred.",
+        "Regulatory conditions, filings, review jurisdictions, remedies, closing timetable, and close remain unresolved."
+      ],
+      "fak_implications": [
+        "Track model-distribution ownership and platform-neutrality risk as a watch item, but do not change provider, hardware, or continuity assumptions from this report alone.",
+        "Preserve talks, reported agreement, party announcement or signing, regulatory clearance, and close as separate lifecycle states."
+      ],
+      "rumor": {
+        "is_rumor": true,
+        "origin": "Independent Business Insider and The Information reporting on successive but conflicting transaction states",
+        "corroboration": "Business Insider reported detailed talks above $13B with no deal; The Information later reported a $12.9B agreement. TechCrunch documented both accounts and said neither company had responded. This corroborates acquisition activity as a report lifecycle, not a signed or completed transaction.",
+        "status": "reported_agreement_open",
+        "last_checked_at": "2026-08-27",
+        "expires_at": "2026-11-30",
+        "resolution": "Open. Exact unresolved fields are signing or party announcement, transaction structure and terms, regulatory conditions, and close. Resolve only with primary party or regulatory evidence, or mark expired_unresolved after the review date."
+      }
     }
   ]
 }

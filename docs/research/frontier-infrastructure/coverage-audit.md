@@ -1,5 +1,19 @@
 # Frontier infrastructure coverage audit
 
+## Issue #9383 delta
+
+- Added one `market_signal` rumor record for the NVIDIA / Hugging Face August 2026
+  acquisition-report lifecycle.
+- Preserved the independently sourced conflict: Business Insider reported talks above
+  $13B with no deal, while The Information later reported a $12.9B agreement.
+- Checked NVIDIA's official news archive and Hugging Face's official blog through
+  2026-08-27; no party announcement confirming signing or closing was found.
+- Kept signing or party announcement, transaction structure and terms, regulatory
+  conditions, and close unresolved, with `last_checked_at` 2026-08-27 and expiry
+  2026-11-30.
+- Totals rise to **267 entries**, **260 unique source URLs**, **224 entity labels**, and
+  **3 explicit rumors**; `market_signal` rises to **25**.
+
 ## Issue #9381 delta
 
 - Revised four existing primary-trace records rather than duplicating them: BurstGPT/Azure OpenAI, Chutes Year-in-Serving, ServeGen, and Alibaba Cloud Model Studio KV-cache.
@@ -49,8 +63,8 @@ classification, forecast inclusion, completed study, approval, construction, ene
 live load remain separate states. The New York GEIS/report processes, final Batch Zero outputs,
 Fall 2027 statewide transmission plan, and end-2026 forecast including Batch loads remain future
 work. The Texas-governor directive/~474 GW claim remains explicit coverage debt because no
-direct governor source was supplied. **Exact indexed totals: 266 entries, 259 unique URLs, and
-223 entity labels.**
+direct governor source was supplied. **Exact indexed totals: 267 entries, 260 unique URLs, and
+224 entity labels.**
 
 Issue #9325 adds an opened Modine/Airedale cooling factory, a >$4B 2027-2029
 capacity reservation with $165M upfront funding, and a shipping Schneider prefabricated
@@ -176,20 +190,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **266** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **259** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **223** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 65; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 24; `policy_regulation` 14; `serving_system` 45; `standard` 3; `supply_chain` 31; `workload_model` 13; `workload_trace` 21. |
-| Evidence classes used | **48** | Machine-derived counts now include `official_statement` 99, `vendor_claim` 31, `benchmark_measurement` 22, `reported_observation` 15, `production_measurement` 12, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 63 entries across 40 other bounded lifecycle/benchmark/specification labels. |
-| Confidence labels | **16** | Exact labels include `high` 179, `medium_high` 57, `medium` 11, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **266/266 published; 266/266 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
-| Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
+| Entries | **267** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **260** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **224** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 65; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 25; `policy_regulation` 14; `serving_system` 45; `standard` 3; `supply_chain` 31; `workload_model` 13; `workload_trace` 21. |
+| Evidence classes used | **48** | Machine-derived counts now include `official_statement` 99, `vendor_claim` 31, `benchmark_measurement` 27, `reported_observation` 15, `production_measurement` 12, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 64 entries across 40 other bounded lifecycle/benchmark/specification labels. |
+| Confidence labels | **16** | Exact labels include `high` 184, `medium_high` 57, `medium` 11, `low` 3, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **267/267 published; 267/267 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Explicit rumors | **3** | All are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 266 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 267 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -402,9 +416,9 @@ deployment/acquisition/failure states and periodic resolution checks.
 
 ### 12. Rumors and resolution history — **Unverified**
 
-**Present:** **2** open rumor entries are explicitly labeled and kept out of factual capacity totals. The OpenAI personnel-departure entry moved to reported observation after primary spokesperson confirmation, while its strategic interpretation remains bounded.
+**Present:** **3** open rumor entries are explicitly labeled and kept out of factual capacity totals. The OpenAI personnel-departure entry moved to reported observation after primary spokesperson confirmation, while its strategic interpretation remains bounded.
 
-**Present:** each open rumor has a state, last-check date, expiry, corroboration note, and fragment-level resolution. Anthropic–Decart talks are independently corroborated but unclosed; the NVIDIA price direction is partially corroborated while magnitude/scope remain unverified.
+**Present:** each open rumor has a state, last-check date, expiry, corroboration note, and fragment-level resolution. Anthropic–Decart talks are independently corroborated but unclosed; the NVIDIA price direction is partially corroborated while magnitude/scope remain unverified; and the NVIDIA–Hugging Face record preserves conflicting talks/agreement reports without inferring signing, terms, regulatory clearance, or close.
 
 **Missing:** complete original-source lineage, circular-republication detection,
 independent corroboration graph, claim-fragment matching, and later
@@ -445,12 +459,12 @@ dates, affected hardware/services, implementation status, and later amendments.
 
 | Evidence tier | Current condition | Consequence |
 |---|---|---|
-| Production measurement/observation | **17 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
-| Benchmark/synthetic | **23 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
-| Official statements | **93 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
+| Production measurement/observation | **20 entries; valuable but narrow** | Strongest demand evidence is concentrated in coding-agent and selected serving workloads. Do not universalize it. |
+| Benchmark/synthetic | **33 entries** | Useful for mechanism and break-even hypotheses; not proof of installed production prevalence. |
+| Official statements | **99 entries** | Strong for what an entity said or filed, not for future delivery or neutral performance. |
 | Vendor claims | **31 entries** | Retain exact envelope and reproduce before using as a fak gain claim. |
 | Analyst/reported evidence | **21 entries** | Useful for market/site visibility; denominators and original datasets require checking. |
-| Rumor | **2 entries** | Watch-only until independently corroborated or resolved. |
+| Rumor | **3 entries** | Watch-only until primary evidence resolves the claimed lifecycle state. |
 
 ## Remote-browser execution-envelope slice (#9375)
 

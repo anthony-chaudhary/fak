@@ -91,6 +91,7 @@ announced/future products, reported negotiations, and unconfirmed rumors.
 | 2026-08-25 | Reported OpenAI datacenter leadership change | **Rumor/reported personnel and strategy signal** | Build-versus-lease strategy and organizational execution may change delivery | Official account and full strategic interpretation absent. |
 | 2026-08-26 | AWS–NVIDIA two-million-GPU plan | Future 2027–2028 product/capacity plan | Fleets mix Blackwell/Rubin generations, custom silicon, and secure government capacity | Manufacturing, power, delivery, and demand can change planned counts. |
 | 2026-08-26 | Anthropic–Nscale reported $45B lease | Reported contract/future project | Long-duration neocloud leases couple startup finance with dedicated generation | Planned West Virginia facility and 2027 start are prospective. |
+| 2026-08-26 | NVIDIA–Hugging Face acquisition reports | **Rumor/reported agreement; unconfirmed by parties** | Ownership of a central model-distribution platform could affect neutrality, portability, and hardware routing | Business Insider reported talks above $13B with no deal; The Information later reported a $12.9B agreement. Signing/announcement, terms, regulatory conditions, and close are unresolved. |
 
 ### 2026-07-14 — New York orders a qualified state-permit abeyance for large data centers
 
@@ -134,6 +135,7 @@ announced/future products, reported negotiations, and unconfirmed rumors.
 | NVIDIA warned major customers of >15% AI-server price increases due to memory/HBM pressure | Industry reporting relayed by Tom’s Hardware, 2026-08-23 | Low | Broad memory-price pressure exists; specific customer notice not independently confirmed here | Review on official pricing, customer filing, or 2026-10-31. |
 | Anthropic was in talks to acquire Decart for about $6B | Bloomberg reporting/video, 2026-08-13 | Low | Later outlets repeated the report; independent sourcing not established | Resolve on signed/terminated transaction or 2026-11-13. |
 | OpenAI datacenter chief left amid reorganization and more lease/cloud use | Wall Street Journal, 2026-08-25 | Low | No complete primary confirmation of strategic interpretation | Resolve on OpenAI statement/leadership update or 2026-10-25. |
+| NVIDIA reportedly agreed to buy Hugging Face for $12.9B after talks above $13B | Business Insider and The Information, 2026-08-26 PDT | Low | Two independently sourced reports establish a report lifecycle but conflict on whether a deal had been reached; TechCrunch reported no party response | Resolve on party announcement/signing, regulatory evidence, termination, close, or 2026-11-30. |
 
 A rumor expires from active planning relevance if its review date passes without new primary or
 independently sourced evidence. Keep the historical entry, mark its outcome, and never silently
@@ -196,6 +198,7 @@ separately.
 | NVIDIA AI-server price-hike notice | Open / unverified | 2026-08-26 | 2026-11-30 | Confirm only with NVIDIA/customer primary evidence or multiple genuinely independent reports. |
 | Anthropic–Decart infrastructure talks | Open / unverified | 2026-08-26 | 2026-11-30 | A later Anthropic infrastructure deal is not confirmation unless Decart and the claim terms match. |
 | OpenAI datacenter leadership/strategy report | Open / unverified | 2026-08-26 | 2026-11-30 | Separate personnel departure confirmation from inferred strategic impact. |
+| NVIDIA–Hugging Face reported agreement | Open / reported agreement, party-unconfirmed | 2026-08-27 | 2026-11-30 | Resolve signing or announcement, transaction structure/terms, regulatory conditions, and close separately; do not treat the report as current ownership. |
 
 Expiry means **remove from active architectural assumptions**, not delete history. A
 later check must mark each claim `confirmed`, `partially_confirmed`, `refuted`, or
@@ -222,9 +225,11 @@ later check must mark each claim `confirmed`, `partially_confirmed`, `refuted`, 
 
 - **NVIDIA memory-price direction corroborated, magnitude still open.** NVIDIA's August 26 fiscal-Q2-2027 materials/call corroborate extreme memory-cost pressure and planned product price increases. They do not confirm the reported >15% magnitude, customer notices, named Grace Blackwell/Vera Rubin configurations, or shipment scope. Status remains `partially_corroborated_open`; expiry remains 2026-11-30.
 - **Anthropic / Decart talks remain open.** Bloomberg-origin reporting is independently echoed by Reuters, Axios, and Israeli technology reporting, but neither company has announced a signed or completed deal as of August 27. Status remains `independently_corroborated_open`; expiry remains 2026-11-30.
+- **NVIDIA / Hugging Face report lifecycle remains open.** Business Insider reported detailed talks above $13B with no deal at 2026-08-27T00:34:46Z; The Information later reported a $12.9B agreement at 6:26 p.m. PDT on August 26. NVIDIA's news archive and Hugging Face's official blog contained no signing or acquisition announcement at the August 27 cutoff, and TechCrunch reported that neither party had responded. Status is `reported_agreement_open`; expiry is 2026-11-30. Signing/announcement, transaction structure/terms, regulatory conditions, and close remain unresolved.
 
-This check resolves neither rumor into fact. It tightens the corroboration graph and preserves
-the exact fields still missing.
+This check resolves none of these rumors into completed fact. It tightens the corroboration
+graph and preserves the exact fields still missing. The NVIDIA / Hugging Face source lineage,
+publication times, and independence limits are in [`source-register.md`](source-register.md).
 
 ## Rumor resolution update — 2026-08-26
 
