@@ -61,9 +61,13 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		expectedEndpoints[spec.name] = c.repoURL(req.Owner, req.Repository, spec.path)
 	}
 	corpus := Corpus{Schema: CorpusSchema, Receipt: Receipt{Schema: ReceiptSchema, Repository: full, Cutoff: req.Cutoff.Format(time.RFC3339Nano), APIBase: c.BaseURL, StartedAt: c.Now().UTC().Format(time.RFC3339Nano), Status: StatusPartial}}
+	legacyResume := false
 	if req.Resume != nil {
 		corpus = cloneCorpus(*req.Resume)
-		if err := validateResume(corpus, full, req.Cutoff, c.BaseURL, expectedEndpoints); err != nil {
+		if issues, ok := sourceByName(corpus.Receipt.Sources, "issues"); ok {
+			legacyResume = isLegacyMixedPullCheckpoint(corpus.Receipt, issues)
+		}
+		if err := validateResume(corpus, full, req.Cutoff, c.BaseURL, expectedEndpoints, legacyResume); err != nil {
 			return Corpus{}, err
 		}
 		if err := validateResumeRevisionEvidence(corpus); err != nil {
@@ -76,11 +80,21 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		for i := range corpus.Receipt.Sources {
 			backfillCrawlWindow(&corpus.Receipt.Sources[i])
 		}
+		if legacyResume {
+			upgraded, err := upgradeLegacyMixedPullEvidence(&corpus)
+			if err != nil {
+				return Corpus{}, fmt.Errorf("invalid resume: %w", err)
+			}
+			legacyResume = !upgraded
+		}
 	}
 
 	acceptedSinceCheckpoint := 0
 	persist := func(force bool) error {
-		if req.Checkpoint == nil || (!force && acceptedSinceCheckpoint < checkpointEvery) {
+		// A legacy checkpoint remains valid only as resume input. Do not expose a
+		// half-migrated snapshot to the ordinary strict writer; the first
+		// checkpoint after exact projection persists the upgraded representation.
+		if legacyResume || req.Checkpoint == nil || (!force && acceptedSinceCheckpoint < checkpointEvery) {
 			return nil
 		}
 		snapshot := cloneCorpus(corpus)
@@ -121,12 +135,21 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		records := recordsForSource(corpus.Records, spec.name)
 		other := recordsExceptSource(corpus.Records, spec.name)
 		checkpointFailed := false
+		var resumeUpgradeErr error
 		updated, got, collectErr := c.collectSource(ctx, sr, records, req.Cutoff, func(progress SourceReceipt, sourceRecords []Record) error {
 			corpus.Records = append(append([]Record(nil), other...), sourceRecords...)
 			upsertSource(&corpus.Receipt.Sources, progress)
 			sortCorpus(&corpus)
 			corpus.Receipt.Status = StatusPartial
 			corpus.Receipt.CompletedAt = ""
+			if legacyResume {
+				upgraded, err := upgradeLegacyMixedPullEvidence(&corpus)
+				if err != nil {
+					resumeUpgradeErr = err
+					return err
+				}
+				legacyResume = !upgraded
+			}
 			reconcileErr := reconcileNonAtomicDelta(&corpus)
 			if completeSourceCount(corpus.Receipt.Sources) == len(SourceNames) && reconcileErr == nil {
 				corpus.Receipt.Status = StatusComplete
@@ -142,6 +165,11 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		})
 		corpus.Records = append(other, got...)
 		upsertSource(&corpus.Receipt.Sources, updated)
+		if resumeUpgradeErr != nil {
+			sortCorpus(&corpus)
+			refreshChecksums(&corpus)
+			return corpus, fmt.Errorf("%s: %w", spec.name, resumeUpgradeErr)
+		}
 		if checkpointFailed {
 			sortCorpus(&corpus)
 			refreshChecksums(&corpus)
@@ -166,7 +194,12 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		if err := Validate(corpus); err != nil {
 			return corpus, err
 		}
-	} else if err := validateCheckpoint(corpus); err != nil {
+	} else if err := func() error {
+		if legacyResume {
+			return validateResumeCheckpoint(corpus)
+		}
+		return validateCheckpoint(corpus)
+	}(); err != nil {
 		return corpus, errors.Join(errors.Join(failures...), err)
 	}
 	if err := persist(true); err != nil {

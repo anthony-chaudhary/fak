@@ -9,6 +9,16 @@ import (
 
 // Read loads and validates a corpus or partial resume checkpoint.
 func Read(path string) (Corpus, error) {
+	return readCorpus(path, validateCheckpoint)
+}
+
+// ReadResume loads either a current checkpoint or the one exact legacy shape
+// that Capture can upgrade on resume. It does not mutate or rewrite the file.
+func ReadResume(path string) (Corpus, error) {
+	return readCorpus(path, validateResumeCheckpoint)
+}
+
+func readCorpus(path string, validate func(Corpus) error) (Corpus, error) {
 	b, e := os.ReadFile(path)
 	if e != nil {
 		return Corpus{}, e
@@ -17,7 +27,7 @@ func Read(path string) (Corpus, error) {
 	if e = json.Unmarshal(b, &c); e != nil {
 		return Corpus{}, fmt.Errorf("decode corpus: %w", e)
 	}
-	if e = validateCheckpoint(c); e != nil {
+	if e = validate(c); e != nil {
 		return Corpus{}, e
 	}
 	return c, nil

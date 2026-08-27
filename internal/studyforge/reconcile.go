@@ -2,10 +2,8 @@ package studyforge
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
-	"time"
 )
 
 const (
@@ -65,11 +63,8 @@ func defaultNonAtomicDeltaPolicy() NonAtomicDeltaPolicy {
 }
 
 // reconcileNonAtomicDelta derives the exact set relation once both endpoint
-// traversals are terminal. A legacy partial checkpoint may not contain the
-// mixed identities introduced by #9314; in that one compatibility case the
-// already-normalized dedicated rows provide a declared count-compatible
-// projection. The identity_basis field keeps that migration evidence distinct
-// from identities captured directly from endpoint rows.
+// traversals are terminal. Legacy projection is deliberately handled by the
+// resume-only upgrade before this strict reconciler runs.
 func reconcileNonAtomicDelta(corpus *Corpus) error {
 	issuesIndex, pullsIndex := -1, -1
 	for i := range corpus.Receipt.Sources {
@@ -97,16 +92,6 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 	}
 	mixed := append([]CrossEndpointIdentity(nil), issues.ClassifiedPullIdentities...)
 	dedicated := pullRecordIdentities(recordsForSource(corpus.Records, "pulls"))
-	if len(mixed) == 0 && issues.ClassifiedPullCount > 0 {
-		var err error
-		mixed, err = projectLegacyMixedIdentities(*issues, dedicated, recordsForSource(corpus.Records, "pulls"))
-		if err != nil {
-			return err
-		}
-		basis = identityBasisLegacyProjection
-		issues.ClassifiedPullIdentities = append([]CrossEndpointIdentity(nil), mixed...)
-		issues.ClassifiedPullChecksum = identityDigest(mixed)
-	}
 	sortIdentities(mixed)
 	sortIdentities(dedicated)
 
@@ -167,28 +152,57 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 	return nil
 }
 
-func projectLegacyMixedIdentities(issues SourceReceipt, dedicated []CrossEndpointIdentity, pullRecords []Record) ([]CrossEndpointIdentity, error) {
-	want := issues.ClassifiedPullCount
-	if want == len(dedicated) {
-		return append([]CrossEndpointIdentity(nil), dedicated...), nil
-	}
-	if want < 0 || want > len(dedicated) {
-		return nil, errors.New("legacy checkpoint lacks enough mixed pull identity evidence")
-	}
-	endedAt, err := time.Parse(time.RFC3339Nano, issues.CrawlEndedAt)
-	if err != nil {
-		return nil, errors.New("legacy checkpoint mixed crawl end is required for identity projection")
-	}
-	projected := make([]CrossEndpointIdentity, 0, want)
-	for _, record := range pullRecords {
-		createdAt, parseErr := time.Parse(time.RFC3339, record.CreatedAt)
-		if parseErr != nil || !createdAt.After(endedAt) {
-			projected = append(projected, identityFromRecord(record))
+// upgradeLegacyMixedPullEvidence performs the one-way pre-#9314 migration.
+// The old issues receipt retained the exact classified count while the pulls
+// source retained typed PR identities. Equality is the only uniquely
+// projectable case; a subset or superset would require guessing which IDs were
+// observed by the mixed endpoint and therefore fails closed.
+func upgradeLegacyMixedPullEvidence(corpus *Corpus) (bool, error) {
+	issuesIndex, pullsIndex := -1, -1
+	for i := range corpus.Receipt.Sources {
+		switch corpus.Receipt.Sources[i].Name {
+		case "issues":
+			issuesIndex = i
+		case "pulls":
+			pullsIndex = i
 		}
 	}
-	if len(projected) != want {
-		return nil, fmt.Errorf("legacy checkpoint mixed identities are not uniquely projectable: count=%d temporal_candidates=%d", want, len(projected))
+	if issuesIndex < 0 || pullsIndex < 0 || !isLegacyMixedPullCheckpoint(corpus.Receipt, corpus.Receipt.Sources[issuesIndex]) {
+		return false, nil
 	}
-	sortIdentities(projected)
-	return projected, nil
+	issues := corpus.Receipt.Sources[issuesIndex]
+	pulls := corpus.Receipt.Sources[pullsIndex]
+	if pulls.Status != StatusComplete {
+		return false, nil
+	}
+
+	pullRecords := recordsForSource(corpus.Records, "pulls")
+	if len(pullRecords) != issues.ClassifiedPullCount {
+		return false, fmt.Errorf("legacy checkpoint mixed pull evidence is ambiguous: classified_pull_count=%d dedicated_identity_count=%d", issues.ClassifiedPullCount, len(pullRecords))
+	}
+	identities := make([]CrossEndpointIdentity, 0, len(pullRecords))
+	for _, record := range pullRecords {
+		if record.ID <= 0 || record.Number <= 0 || record.NodeID == "" || record.Kind != "pull" || record.Source != "pulls" {
+			return false, fmt.Errorf("legacy checkpoint pull %d lacks an exact dedicated identity", record.ID)
+		}
+		identities = append(identities, identityFromRecord(record))
+	}
+	sortIdentities(identities)
+	if err := validateIdentityList("legacy checkpoint dedicated pulls", identities); err != nil {
+		return false, err
+	}
+
+	upgraded := cloneCorpus(*corpus)
+	for i := range upgraded.Receipt.Sources {
+		backfillCrawlWindow(&upgraded.Receipt.Sources[i])
+	}
+	upgradedIssues := &upgraded.Receipt.Sources[issuesIndex]
+	upgradedIssues.ClassifiedPullIdentities = identities
+	upgradedIssues.ClassifiedPullChecksum = identityDigest(identities)
+	upgraded.Receipt.NonAtomicDelta = &NonAtomicDeltaEvidence{IdentityBasis: identityBasisLegacyProjection}
+	if err := reconcileNonAtomicDelta(&upgraded); err != nil {
+		return false, fmt.Errorf("upgrade legacy mixed pull evidence: %w", err)
+	}
+	*corpus = upgraded
+	return true, nil
 }
