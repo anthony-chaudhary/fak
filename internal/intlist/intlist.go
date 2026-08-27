@@ -28,3 +28,12 @@ func Parse(s string) []int {
 	}
 	return out
 }
+
+// Concat joins parts in order into a fresh slice without modifying the inputs.
+func Concat(parts ...[]int) []int {
+	var out []int
+	for _, part := range parts {
+		out = append(out, part...)
+	}
+	return out
+}

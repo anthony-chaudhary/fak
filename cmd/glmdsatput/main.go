@@ -29,18 +29,13 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/benchids"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 func lcgIDs(n, vocab int) []int {
-	ids := make([]int, n)
-	state := uint64(2463534242)
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
+	return benchids.LCG(n, vocab, 0)
 }
 
 func medianMS(ds []time.Duration) float64 {

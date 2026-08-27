@@ -35,6 +35,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/deletioncert"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/journal"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 	"github.com/anthony-chaudhary/fak/internal/model"
@@ -395,11 +396,7 @@ func stepGreedy(s *model.Session, logits []float32, n int) []int {
 // ---- small utilities --------------------------------------------------------
 
 func concat(parts ...[]int) []int {
-	var out []int
-	for _, p := range parts {
-		out = append(out, p...)
-	}
-	return out
+	return intlist.Concat(parts...)
 }
 
 func maxAbsIntDelta(a, b []int) int {

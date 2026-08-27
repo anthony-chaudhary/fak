@@ -33,23 +33,18 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
+	"github.com/anthony-chaudhary/fak/internal/benchids"
 	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"strconv"
 )
 
 func lcgIDs(n, vocab, seed int) []int {
-	ids := make([]int, n)
-	state := uint64(2463534242 + seed)
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
+	return benchids.LCGFromState(n, vocab, uint64(2463534242+seed))
 }
 
 func minDur(ds []time.Duration) time.Duration {

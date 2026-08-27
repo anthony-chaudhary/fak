@@ -54,16 +54,17 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/appversion"
 	"github.com/anthony-chaudhary/fak/internal/benchcli"
+	"github.com/anthony-chaudhary/fak/internal/benchids"
 	"github.com/anthony-chaudhary/fak/internal/intlist"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
-	"strconv"
 )
 
 // bestLiveB / bestLiveC run the live arms `reps` times and keep the least-contended (min)
@@ -172,13 +173,7 @@ func loadModel(dir, hf, synthetic string, lean bool) (*model.Model, string, erro
 }
 
 func lcgIDs(n, vocab int, seed uint64) []int {
-	ids := make([]int, n)
-	state := 2463534242 + seed
-	for i := 0; i < n; i++ {
-		state = (state*1103515245 + 12345) & 0x7fffffff
-		ids[i] = int(state % uint64(vocab))
-	}
-	return ids
+	return benchids.LCG(n, vocab, seed)
 }
 
 func minDur(ds []time.Duration) time.Duration {
