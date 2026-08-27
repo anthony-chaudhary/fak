@@ -34,15 +34,15 @@ const Schema = "fak.guard-route.v1"
 // DefaultReasonThreshold is the minimum count of a single denial reason before
 // that reason bucket is route-worthy. Below it, one or two denials of the same
 // reason are advisory noise, not a finding worth a queue row -- only a denial
-// reason that RECURS clears the bar. Honesty-holes (blank reason on a DENY, an
-// out-of-vocabulary verdict) route regardless of count: even one is a defect the
-// loop exists to close.
+// reason that RECURS clears the bar. Honesty-holes (a child crash, blank reason
+// on a DENY, or out-of-vocabulary verdict) route regardless of count: even one
+// is a defect the loop exists to close.
 const DefaultReasonThreshold = 3
 
 // Severity tokens, aligned with the findings_route.py ladder (P3<P2<P1<P0).
 const (
 	SevP2 = "P2" // an advisory recurring denial reason
-	SevP1 = "P1" // a real honesty-hole (unexplained block / unknown verdict)
+	SevP1 = "P1" // a real honesty-hole (child crash / unexplained block / unknown verdict)
 )
 
 // RouteDecision is the pure verdict over a session's fold + worst bucket: should
@@ -86,6 +86,15 @@ func Decide(fold guardrsi.Fold, bucket guardrsi.Bucket, threshold int) RouteDeci
 	}
 
 	switch {
+	case bucket.Bucket == "child_crash" && bucket.Count > 0:
+		d.Route = true
+		d.Severity = SevP1
+		d.FileIssue = true
+		d.CauseKey = "guard-journal:child_crash"
+		d.Pattern = "guard-child-crash"
+		d.Item = fmt.Sprintf("%d supervised child crash row(s) reached the journal -- harden the crash path so the guarded session survives", bucket.Count)
+		d.Reason = "honesty-hole: a supervised child crashed (" + bucket.Lever + ")"
+
 	case bucket.Bucket == "blank_reason_on_deny":
 		d.Route = true
 		d.Severity = SevP1

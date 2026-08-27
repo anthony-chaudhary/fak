@@ -34,6 +34,19 @@ func TestDecideOverBuckets(t *testing.T) {
 			wantCause: "guard-journal:unknown_verdict",
 		},
 		{
+			name:      "child crash -> P1 + issue",
+			fold:      guardrsi.Fold{TotalRows: 8, ChildCrash: 2},
+			bucket:    guardrsi.Bucket{Bucket: "child_crash", Count: 2, Lever: "harden supervision"},
+			wantRoute: true, wantSev: SevP1, wantIssue: true,
+			wantCause: "guard-journal:child_crash",
+		},
+		{
+			name:      "zero-count child crash -> no route",
+			fold:      guardrsi.Fold{TotalRows: 8},
+			bucket:    guardrsi.Bucket{Bucket: "child_crash", Count: 0, Lever: "no crashes"},
+			wantRoute: false,
+		},
+		{
 			name:      "recurring denial at threshold -> P2 queue-only",
 			fold:      guardrsi.Fold{TotalRows: 10},
 			bucket:    guardrsi.Bucket{Bucket: "reason:POLICY_BLOCK", Count: 3, Lever: "floor"},

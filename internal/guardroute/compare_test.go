@@ -17,10 +17,10 @@ func TestCompareLocalKeepsGuardRouteAlternativesExplicit(t *testing.T) {
 			t.Fatalf("unwitnessed measured: %+v", a)
 		}
 	}
-	if a := r.Arms[0]; !a.Correct || a.Passed != 5 {
+	if a := r.Arms[0]; !a.Correct || a.Passed != 6 {
 		t.Fatalf("native: %+v", a)
 	}
-	if a := r.Arms[1]; a.Correct || a.MissedRoutes != 3 {
+	if a := r.Arms[1]; a.Correct || a.MissedRoutes != 4 {
 		t.Fatalf("baseline: %+v", a)
 	}
 }
