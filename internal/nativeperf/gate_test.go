@@ -257,3 +257,35 @@ func TestGateRejectsCompetingAmbientAuthorities(t *testing.T) {
 		t.Fatalf("mixed receipt: %+v %v", verdict, err)
 	}
 }
+
+func TestGateUsesCleanOnlyStatisticsAndRefusesTooFewClean(t *testing.T) {
+	r := gateRequest(t)
+	r.Policy.RequireAmbientEvidence = true
+	r.Policy.MinimumCleanRepetitions = 2
+	addAmbient(t, &r.LastAccepted, AmbientClean)
+	addAmbient(t, &r.Candidate, AmbientClean)
+	r.LastAccepted.AmbientEvidence[1] = testAmbient(t, AmbientInvestigate)
+	r.Candidate.AmbientEvidence[1] = testAmbient(t, AmbientInvestigate)
+	r.LastAccepted.Repetitions[0].TokensPerSecond = 100
+	r.LastAccepted.Repetitions[1].TokensPerSecond = 1
+	r.LastAccepted.Repetitions[2].TokensPerSecond = 100
+	r.Candidate.Repetitions[0].TokensPerSecond = 101
+	r.Candidate.Repetitions[1].TokensPerSecond = 1000
+	r.Candidate.Repetitions[2].TokensPerSecond = 101
+
+	v, err := Gate(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Classification != GatePass || v.AcceptedMeanTokensPerS != 100 || v.CandidateMeanTokensPerS != 101 {
+		t.Fatalf("clean-only gate=%+v", v)
+	}
+	if v.AcceptedSamples.AllSample.Included != 3 || v.AcceptedSamples.CleanOnly.Included != 2 || len(v.CandidateSamples.Exclusions) != 1 {
+		t.Fatalf("sample provenance missing: accepted=%+v candidate=%+v", v.AcceptedSamples, v.CandidateSamples)
+	}
+
+	r.Policy.MinimumCleanRepetitions = 3
+	if _, err := Gate(r); err == nil || !strings.Contains(err.Error(), "rerun with clean ambient attestations") {
+		t.Fatalf("insufficient clean samples err=%v", err)
+	}
+}
