@@ -127,7 +127,7 @@ func buildReleaseStatus(root string, opts releaseStatusOptions) map[string]any {
 		lastTag = rollingTags[len(rollingTags)-1]
 	}
 	dirty := releaseStatusDirtySummary(root)
-	ciDiag := releaseStatusCIDiagnosis(root)
+	ciDiag := releaseStatusCIDiagnosis(root, decision, contextPayload)
 	branchRegime := releaseStatusBranchRegimeMap(releaseStatusBranchRegime(root, lastTag))
 	cutPlan := releaseStatusCutPlan(root, opts)
 	status := map[string]any{
@@ -521,31 +521,6 @@ func releaseStatusIsRelevantDirtyPath(path string) bool {
 	return false
 }
 
-func releaseStatusCIDiagnosis(root string) map[string]any {
-	head := releaseStatusGitOutput(root, "rev-parse", "HEAD")
-	if head == "" {
-		return map[string]any{"status": "unavailable", "reason": "could not resolve HEAD"}
-	}
-	run, err := releaseStatusRunExternalJSON(root, 30*time.Second, "gh", "run", "list", "--workflow", "ci.yml", "--commit", head, "--limit", "1", "--json", "databaseId,headSha,status,conclusion,displayTitle,url")
-	scope := "head"
-	row := releaseStatusFirstArrayObject(run)
-	if err != nil || len(row) == 0 {
-		run, err = releaseStatusRunExternalJSON(root, 30*time.Second, "gh", "run", "list", "--workflow", "ci.yml", "--branch", "main", "--status", "completed", "--limit", "1", "--json", "databaseId,headSha,status,conclusion,displayTitle,url")
-		scope = "latest_trunk"
-		row = releaseStatusFirstArrayObject(run)
-	}
-	if err != nil {
-		return map[string]any{"status": "unavailable", "reason": err.Error()}
-	}
-	if len(row) == 0 {
-		return map[string]any{"status": "none", "reason": "no ci.yml run found for HEAD or latest main"}
-	}
-	if releaseStatusString(row["conclusion"]) != "failure" {
-		return map[string]any{"status": "not_failed", "scope": scope, "run": row, "reason": fmt.Sprintf("%s ci.yml run conclusion is %s", scope, releaseStatusFirstString(releaseStatusString(row["conclusion"]), releaseStatusString(row["status"])))}
-	}
-	return map[string]any{"status": "undifferentiated", "scope": scope, "run": row, "kind": "unknown", "action": "inspect_ci", "detail": "ci.yml is red, but no job annotation was available"}
-}
-
 func releaseStatusGitHubReleaseView(root, tag string, skip bool) map[string]any {
 	if skip {
 		return map[string]any{"status": "skipped", "tag": releaseStatusNilIfEmpty(tag)}
@@ -788,9 +763,21 @@ func releaseStatusNextAction(decision, stable, dirty, ciDiag, branchRegime map[s
 	}
 	if releaseStatusContains(blockers, "CI_BASE_RED") {
 		if releaseStatusString(ciDiag["action"]) == "fix_ci_billing" {
-			return map[string]any{"kind": "fix_ci_billing", "detail": releaseStatusString(ciDiag["detail"])}
+			return map[string]any{"kind": "fix_ci_billing", "detail": releaseStatusFirstString(releaseStatusString(ciDiag["summary"]), releaseStatusString(ciDiag["reason"]), "restore GitHub Actions billing before cutting a release")}
 		}
-		return map[string]any{"kind": "fix_ci", "detail": "fix current main ci.yml failure before cutting a release"}
+		detail := releaseStatusString(ciDiag["summary"])
+		if unit := releaseStatusCIFirstWorkUnit(ciDiag); len(unit) > 0 {
+			detail = releaseStatusFirstString(detail, "fix the decisive CI failure") + "; start with `" + releaseStatusString(unit["reproduce"]) + "`"
+		} else if cause := releaseStatusCIFirstCause(ciDiag); len(cause) > 0 {
+			detail = releaseStatusFirstString(detail, releaseStatusString(cause["detail"]))
+			if inspect := releaseStatusFirstString(releaseStatusString(cause["inspect_command"]), releaseStatusString(ciDiag["inspect_command"])); inspect != "" {
+				detail += "; inspect with `" + inspect + "`"
+			}
+		}
+		if detail != "" {
+			return map[string]any{"kind": "fix_ci", "detail": detail}
+		}
+		return map[string]any{"kind": "fix_ci", "detail": "fix the decisive main CI failure before cutting a release"}
 	}
 	if releaseStatusContains(blockers, "CI_RETRY_TO_GREEN") {
 		return map[string]any{"kind": "pause_auto_release", "detail": "latest green ci.yml run was a retry; set FAK_AUTO_RELEASE=0 or confirm a fresh green run before cutting a release"}
@@ -873,11 +860,14 @@ func renderReleaseStatus(status map[string]any) string {
 	shadowCutover := releaseStatusMap(status["shadow_cutover"])
 	lines := []string{
 		fmt.Sprintf("release-status: %s - %s", strings.ToUpper(releaseStatusFirstString(releaseStatusString(decision["decision"]), "unknown")), releaseStatusString(decision["reason"])),
+	}
+	lines = append(lines, releaseStatusCIDiagnosisLines(releaseStatusMap(rolling["ci_diagnosis"]))...)
+	lines = append(lines,
 		fmt.Sprintf("  last tag: %s", releaseStatusFirstString(releaseStatusString(rolling["last_tag"]), "(none)")),
 		releaseStatusRenderBranchRegime(branchRegime),
 		releaseStatusRenderShadowCutover(shadowCutover),
 		fmt.Sprintf("  commits since tag: %d", releaseStatusInt(rolling["commits_since_tag"])),
-	}
+	)
 	if line := releaseStatusRenderContents(releaseStatusMap(rolling["contents"])); line != "" {
 		lines = append(lines, line)
 	}
