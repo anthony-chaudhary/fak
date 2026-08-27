@@ -121,6 +121,14 @@ Expiry means **remove from active architectural assumptions**, not delete histor
 later check must mark each claim `confirmed`, `partially_confirmed`, `refuted`, or
 `expired_unresolved`, with exact claim fragments and sources.
 
+## Rumor resolution update — 2026-08-27
+
+- **NVIDIA memory-price direction corroborated, magnitude still open.** NVIDIA's August 26 fiscal-Q2-2027 materials/call corroborate extreme memory-cost pressure and planned product price increases. They do not confirm the reported >15% magnitude, customer notices, named Grace Blackwell/Vera Rubin configurations, or shipment scope. Status remains `partially_corroborated_open`; expiry remains 2026-11-30.
+- **Anthropic / Decart talks remain open.** Bloomberg-origin reporting is independently echoed by Reuters, Axios, and Israeli technology reporting, but neither company has announced a signed or completed deal as of August 27. Status remains `independently_corroborated_open`; expiry remains 2026-11-30.
+
+This check resolves neither rumor into fact. It tightens the corroboration graph and preserves
+the exact fields still missing.
+
 ## Rumor resolution update — 2026-08-26
 
 | Claim | Resolution state | Confirmed or corroborated fragment | Still unverified |

@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9318,
+  "latest_slice_issue": 9354,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -1464,7 +1464,7 @@
         "HBM availability and price can become a system-level accelerator bottleneck."
       ],
       "contradictions_or_limits": [
-        "The cost-pressure and general price-increase direction are corroborated; the specific >15% magnitude and affected systems remain unconfirmed by NVIDIA primary materials.",
+        "NVIDIA corroborated memory pressure and planned price increases, but not the reported >15% magnitude or exact affected systems/customers.",
         "Reported server-system prices may include OEM, memory configuration, and delivery-window effects rather than one NVIDIA chip list price."
       ],
       "fak_implications": [
@@ -1473,11 +1473,11 @@
       "rumor": {
         "is_rumor": true,
         "origin": "industry reporting relayed by Tom's Hardware",
-        "corroboration": "NVIDIA earnings commentary corroborated extreme memory costs and planned product price increases; it did not confirm the reported >15% magnitude or exact customer/configuration claims.",
+        "corroboration": "NVIDIA fiscal-Q2-2027 earnings materials and the August 26 call corroborate extreme memory-cost pressure and planned product price increases; they do not confirm the reported >15% magnitude, customer notices, named configurations, or shipment scope.",
         "status": "partially_corroborated_open",
-        "last_checked_at": "2026-08-26",
+        "last_checked_at": "2026-08-27",
         "expires_at": "2026-11-30",
-        "resolution": "Direction partially corroborated; magnitude and scope remain unverified."
+        "resolution": "Direction corroborated by NVIDIA primary materials on August 26, 2026; magnitude and configuration/customer scope remain unverified."
       }
     },
     {
@@ -2656,11 +2656,11 @@
       "rumor": {
         "is_rumor": true,
         "origin": "Bloomberg reporting summarized in Bloomberg Technology video",
-        "corroboration": "Reuters independently reported the talks after Bloomberg; both companies declined to comment. The final price, terms, and closing remain unconfirmed.",
+        "corroboration": "Bloomberg, Reuters, Axios, and Israeli technology reporting describe talks; neither Anthropic nor Decart announced a signed or completed transaction by August 27, 2026.",
         "status": "independently_corroborated_open",
-        "last_checked_at": "2026-08-26",
+        "last_checked_at": "2026-08-27",
         "expires_at": "2026-11-30",
-        "resolution": "Talks corroborated; transaction not confirmed or closed as of the last check."
+        "resolution": "Talks remain independently corroborated but open; the roughly $6B term, final scope, signing, closing, and integration remain unconfirmed."
       }
     },
     {
