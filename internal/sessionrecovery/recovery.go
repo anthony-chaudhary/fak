@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -561,6 +562,27 @@ func FinalizeReceipt(req Request, state, reason string, now time.Time) error {
 type Launcher interface{ Launch(Request) error }
 type VisibleLauncher struct{ TerminalBin string }
 
+type visibleLaunchPlan struct {
+	bin   string
+	args  []string
+	dir   string
+	stdin string
+}
+
+const terminalAppleScript = `on run argv
+	set workingDirectory to item 1 of argv
+	set executablePath to item 2 of argv
+	set commandText to "cd -- " & quoted form of workingDirectory & " && exec " & quoted form of executablePath
+	repeat with argumentIndex from 3 to count of argv
+		set commandText to commandText & " " & quoted form of (item argumentIndex of argv)
+	end repeat
+	tell application "Terminal"
+		activate
+		do script commandText
+	end tell
+end run
+`
+
 func (l VisibleLauncher) Launch(req Request) error {
 	if len(req.Argv) == 0 {
 		return errors.New("visible launch: empty argv")
@@ -569,18 +591,54 @@ func (l VisibleLauncher) Launch(req Request) error {
 	if err != nil {
 		return fmt.Errorf("visible launch: resolve %q: %w", req.Argv[0], err)
 	}
-	bin := l.TerminalBin
-	if bin == "" {
-		bin = "wt.exe"
+	plan, err := planVisibleLaunch(runtime.GOOS, l.TerminalBin, req, command)
+	if err != nil {
+		return err
 	}
-	args := []string{"-w", "new", "new-tab", "--startingDirectory", req.CWD, "--", command}
-	args = append(args, req.Argv[1:]...)
-	cmd := exec.Command(bin, args...)
-	cmd.Dir = req.CWD
+	cmd := exec.Command(plan.bin, plan.args...)
+	cmd.Dir = plan.dir
+	if plan.stdin != "" {
+		cmd.Stdin = strings.NewReader(plan.stdin)
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("visible launch: %w", err)
 	}
 	return cmd.Process.Release()
+}
+
+func planVisibleLaunch(goos, terminalBin string, req Request, command string) (visibleLaunchPlan, error) {
+	switch goos {
+	case "darwin":
+		bin := terminalBin
+		if bin == "" {
+			bin = "/usr/bin/osascript"
+		}
+		// A program file of "-" makes every following value run-handler data.
+		// The AppleScript source is constant; cwd, command, and arguments never
+		// cross into source text and are shell-quoted by AppleScript at runtime.
+		args := []string{"-", req.CWD, command}
+		args = append(args, req.Argv[1:]...)
+		return visibleLaunchPlan{bin: bin, args: args, dir: req.CWD, stdin: terminalAppleScript}, nil
+	case "windows":
+		bin := terminalBin
+		if bin == "" {
+			bin = "wt.exe"
+		}
+		return windowsVisibleLaunchPlan(bin, req, command), nil
+	default:
+		if terminalBin == "" {
+			return visibleLaunchPlan{}, fmt.Errorf("visible launch: unsupported platform %q without an injected terminal", goos)
+		}
+		// TerminalBin has historically meant a Windows-Terminal-compatible
+		// launcher. Preserve that explicit injection contract on other hosts.
+		return windowsVisibleLaunchPlan(terminalBin, req, command), nil
+	}
+}
+
+func windowsVisibleLaunchPlan(bin string, req Request, command string) visibleLaunchPlan {
+	args := []string{"-w", "new", "new-tab", "--startingDirectory", req.CWD, "--", command}
+	args = append(args, req.Argv[1:]...)
+	return visibleLaunchPlan{bin: bin, args: args, dir: req.CWD}
 }
 
 func Witness(before, after InventoryReport, threadID string) string {
