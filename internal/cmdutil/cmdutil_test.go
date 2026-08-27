@@ -78,6 +78,34 @@ func TestLCGIDs(t *testing.T) {
 	}
 }
 
+func TestCapPositive(t *testing.T) {
+	cases := []struct {
+		n, cap, want int
+	}{
+		{8, 4, 4},
+		{4, 8, 4},
+		{0, 8, 1},
+		{-3, 0, 1},
+	}
+	for _, tc := range cases {
+		if got := CapPositive(tc.n, tc.cap); got != tc.want {
+			t.Errorf("CapPositive(%d, %d) = %d, want %d", tc.n, tc.cap, got, tc.want)
+		}
+	}
+}
+
+func TestMaxAbsDiffF32(t *testing.T) {
+	if got := MaxAbsDiffF32([]float32{1, -4, 3}, []float32{1, 2, 2.5}); got != 6 {
+		t.Errorf("MaxAbsDiffF32 = %v, want 6", got)
+	}
+	if got := MaxAbsDiffF32([]float32{1, 2, 100}, []float32{1, 2}); got != 0 {
+		t.Errorf("shorter-input comparison = %v, want 0", got)
+	}
+	if got := MaxAbsDiffF32(nil, []float32{5}); got != 0 {
+		t.Errorf("nil input comparison = %v, want 0", got)
+	}
+}
+
 func equalInts(a, b []int) bool {
 	if len(a) != len(b) {
 		return false

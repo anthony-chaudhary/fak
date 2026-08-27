@@ -16,6 +16,7 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		status = "supported"
 	}
 	fmt.Fprintf(&out, "Broad efficiency conclusions: **%s** (refusals: %d).\n\n", status, result.ConclusionStatus.RefusalCount)
+	fmt.Fprintf(&out, "Transcript schema drift: %d change(s), %d breaking.\n\n", result.ConclusionStatus.SchemaDriftCount, result.ConclusionStatus.BreakingSchemaDrift)
 	fmt.Fprintf(&out, "Schema: `%s`\n\n", AuditSchema)
 	out.WriteString("## Exact totals\n\n")
 	fmt.Fprintf(&out, "- Sources: %d; sessions: %d; files scanned: %d/%d; records: %d.\n", summary.Sources, summary.Transcripts, summary.FilesScanned, summary.FilesDiscovered, summary.Records)
@@ -30,6 +31,20 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
 	fmt.Fprintf(&out, "- Payload distribution unit: `%s` — %s\n", summary.DistributionUnit, summary.DistributionProvenance)
+	out.WriteString("\n## Transcript schema drift\n\n")
+	if len(result.SchemaDrift) == 0 {
+		out.WriteString("No event-type or field-shape drift from the checked-in baseline.\n")
+	} else {
+		out.WriteString("| Source/event | Baseline builds | Current builds | Change | Compatibility | Fields | Proposed update |\n")
+		out.WriteString("|---|---|---|---|---|---|---|\n")
+		for _, row := range result.SchemaDrift {
+			fields := append([]string(nil), row.AdditiveFields...)
+			fields = append(fields, row.BreakingChanges...)
+			fmt.Fprintf(&out, "| %s/`%s` | %s | %s | `%s` | **%s** | %s | %s |\n",
+				row.Source, escapeAuditMarkdown(row.EventType), auditBuildsMarkdown(row.BaselineBuilds), auditBuildsMarkdown(row.CurrentBuilds),
+				row.Change, row.Compatibility, escapeAuditMarkdown(strings.Join(fields, "; ")), escapeAuditMarkdown(row.ProposedAction))
+		}
+	}
 	if len(summary.StorageDistribution) > 0 {
 		out.WriteString("\n## Transcript storage and telemetry overhead\n\n| Source | Subtype | Records | Serialized UTF-8 bytes | Source share |\n|---|---|---:|---:|---:|\n")
 		for _, r := range summary.StorageDistribution {
@@ -137,6 +152,29 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		return fmt.Errorf("trajectory audit: write markdown: %w", err)
 	}
 	return nil
+}
+
+func auditBuildsMarkdown(builds []AuditBuildIdentity) string {
+	if len(builds) == 0 {
+		return "n/a"
+	}
+	values := make([]string, 0, len(builds))
+	for _, build := range builds {
+		harness := build.Harness
+		if build.HarnessBuild != "" {
+			harness += "@" + build.HarnessBuild
+		}
+		provider := build.Provider
+		if build.ProviderBuild != "" {
+			provider += "@" + build.ProviderBuild
+		}
+		if provider != "" {
+			values = append(values, "`"+provider+" / "+harness+"`")
+		} else {
+			values = append(values, "`"+harness+"`")
+		}
+	}
+	return strings.Join(values, "<br>")
 }
 
 func auditFloat(value *float64, digits int) string {
