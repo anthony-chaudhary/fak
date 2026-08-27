@@ -15,6 +15,11 @@ import (
 
 const qwenTopContributorConcentrationThreshold = 0.50
 
+const (
+	auditRepeatedFailureSemantics     = "actionable-identical-failed-action/2"
+	auditRepeatedFailureNormalization = "per_session"
+)
+
 // AuditSchema versions every row emitted by the cross-harness efficiency audit.
 const AuditSchema = "fak-trajectory-audit/1"
 
@@ -91,24 +96,26 @@ type AuditDenominatorRow struct {
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
 type AuditTranscriptRow struct {
-	Schema              string                 `json:"schema"`
-	Kind                string                 `json:"kind"`
-	Source              string                 `json:"source"`
-	TranscriptID        string                 `json:"session_id"`
-	SourcePath          string                 `json:"source_path"`
-	Models              []string               `json:"models"`
-	Tokens              AuditTokens            `json:"tokens"`
-	ToolCalls           int                    `json:"tool_calls"`
-	ToolErrors          int                    `json:"tool_errors"`
-	Distribution        []AuditDistributionRow `json:"distribution,omitempty"`
-	ToolDistribution    []AuditDistributionRow `json:"tool_distribution,omitempty"`
-	RepeatedFailures    int                    `json:"repeated_failures"`
-	MutationChurn       int                    `json:"mutation_churn"`
-	MutationChurnEvents []QwenMutationChurn    `json:"mutation_churn_events,omitempty"`
-	HookP95MS           *int64                 `json:"hook_p95_ms"`
-	UsageRecords        int                    `json:"usage_records"`
-	SourcePaths         []string               `json:"source_paths,omitempty"`
-	usageByID           map[string]AuditTokens
+	Schema               string                 `json:"schema"`
+	Kind                 string                 `json:"kind"`
+	Source               string                 `json:"source"`
+	TranscriptID         string                 `json:"session_id"`
+	SourcePath           string                 `json:"source_path"`
+	Models               []string               `json:"models"`
+	Tokens               AuditTokens            `json:"tokens"`
+	ToolCalls            int                    `json:"tool_calls"`
+	ToolErrors           int                    `json:"tool_errors"`
+	Distribution         []AuditDistributionRow `json:"distribution,omitempty"`
+	ToolDistribution     []AuditDistributionRow `json:"tool_distribution,omitempty"`
+	RepeatedFailures     int                    `json:"repeated_failures"`
+	ExpectedWaitTimeouts int                    `json:"expected_wait_timeouts"`
+	MutationChurn        int                    `json:"mutation_churn"`
+	MutationChurnEvents  []QwenMutationChurn    `json:"mutation_churn_events,omitempty"`
+	HookP95MS            *int64                 `json:"hook_p95_ms"`
+	UsageRecords         int                    `json:"usage_records"`
+	SourcePaths          []string               `json:"source_paths,omitempty"`
+	usageByID            map[string]AuditTokens
+	failureCounts        map[string]int
 }
 
 // AuditBottleneckRow ranks sessions by exact accounted tokens. DominantBucket
@@ -145,6 +152,10 @@ type AuditSummaryRow struct {
 	InputOutputRatio                    *float64               `json:"input_output_ratio"`
 	PromptWriteFraction                 *float64               `json:"prompt_write_fraction"`
 	RepeatedFailures                    int                    `json:"repeated_failures"`
+	RepeatedFailuresPerSession          *float64               `json:"repeated_failures_per_session"`
+	RepeatedFailureSemantics            string                 `json:"repeated_failure_semantics"`
+	RepeatedFailureNormalization        string                 `json:"repeated_failure_normalization"`
+	ExpectedWaitTimeouts                int                    `json:"expected_wait_timeouts"`
 	MutationChurn                       int                    `json:"mutation_churn"`
 	HookP95MS                           *int64                 `json:"hook_p95_ms"`
 	DistinctTranscripts                 int                    `json:"distinct_transcripts"`
@@ -168,14 +179,27 @@ type AuditSummaryRow struct {
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
 type AuditDeltaRow struct {
-	Schema     string   `json:"schema"`
-	Kind       string   `json:"kind"`
-	Metric     string   `json:"metric"`
-	Current    *float64 `json:"current"`
-	Baseline   *float64 `json:"baseline"`
-	Delta      *float64 `json:"delta"`
-	Comparable bool     `json:"comparable"`
-	Regression bool     `json:"regression"`
+	Schema               string   `json:"schema"`
+	Kind                 string   `json:"kind"`
+	Metric               string   `json:"metric"`
+	Current              *float64 `json:"current"`
+	Baseline             *float64 `json:"baseline"`
+	Delta                *float64 `json:"delta"`
+	RawCurrent           *int     `json:"raw_current,omitempty"`
+	RawBaseline          *int     `json:"raw_baseline,omitempty"`
+	CurrentExposure      *int     `json:"current_exposure,omitempty"`
+	BaselineExposure     *int     `json:"baseline_exposure,omitempty"`
+	Normalization        string   `json:"normalization,omitempty"`
+	RawComparable        *bool    `json:"raw_comparable,omitempty"`
+	NormalizedCurrent    *float64 `json:"normalized_current,omitempty"`
+	NormalizedBaseline   *float64 `json:"normalized_baseline,omitempty"`
+	NormalizedDelta      *float64 `json:"normalized_delta,omitempty"`
+	NormalizedComparable *bool    `json:"normalized_comparable,omitempty"`
+	NormalizedRegression *bool    `json:"normalized_regression,omitempty"`
+	Comparable           bool     `json:"comparable"`
+	ComparabilityStatus  string   `json:"comparability_status"`
+	ComparabilityReason  string   `json:"comparability_reason,omitempty"`
+	Regression           bool     `json:"regression"`
 }
 
 // AuditRefusalRow names a transcript shape the parser refused to estimate.
@@ -427,7 +451,10 @@ func auditUserText(record map[string]any) string {
 }
 
 func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTranscriptRow, hookDurations []int64) AuditSummaryRow {
-	summary := AuditSummaryRow{Schema: AuditSchema, Kind: "summary", Sources: len(denominators), Transcripts: len(transcripts)}
+	summary := AuditSummaryRow{
+		Schema: AuditSchema, Kind: "summary", Sources: len(denominators), Transcripts: len(transcripts),
+		RepeatedFailureSemantics: auditRepeatedFailureSemantics, RepeatedFailureNormalization: auditRepeatedFailureNormalization,
+	}
 	for _, row := range denominators {
 		summary.FilesDiscovered += row.FilesDiscovered
 		summary.FilesScanned += row.FilesScanned
@@ -444,6 +471,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	for _, transcript := range transcripts {
 		summary.Tokens.add(transcript.Tokens)
 		summary.RepeatedFailures += transcript.RepeatedFailures
+		summary.ExpectedWaitTimeouts += transcript.ExpectedWaitTimeouts
 		summary.MutationChurn += transcript.MutationChurn
 		summary.ToolCalls += transcript.ToolCalls
 		summary.ToolErrors += transcript.ToolErrors
@@ -515,6 +543,10 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 		v := float64(summary.ToolErrors) / float64(summary.ToolCalls)
 		summary.ToolErrorFraction = &v
 	}
+	if summary.Transcripts > 0 {
+		repeated := float64(summary.RepeatedFailures) / float64(summary.Transcripts)
+		summary.RepeatedFailuresPerSession = &repeated
+	}
 	sort.Slice(accountedTokens, func(i, j int) bool { return accountedTokens[i] > accountedTokens[j] })
 	if total := summary.Tokens.accountedTotal(); total > 0 {
 		var top int64
@@ -584,7 +616,6 @@ func dominantAuditBucket(tokens AuditTokens) (string, int64) {
 }
 
 func auditBaselineDeltas(current, baseline AuditSummaryRow) []AuditDeltaRow {
-	floatOfInt := func(v int) *float64 { f := float64(v); return &f }
 	floatOfInt64 := func(v *int64) *float64 {
 		if v == nil {
 			return nil
@@ -595,20 +626,85 @@ func auditBaselineDeltas(current, baseline AuditSummaryRow) []AuditDeltaRow {
 	return []AuditDeltaRow{
 		newAuditDelta("input_output_ratio", current.InputOutputRatio, baseline.InputOutputRatio),
 		newAuditDelta("prompt_write_fraction", current.PromptWriteFraction, baseline.PromptWriteFraction),
-		newAuditDelta("repeated_failures", floatOfInt(current.RepeatedFailures), floatOfInt(baseline.RepeatedFailures)),
+		newAuditRepeatedFailureDelta(current, baseline),
 		newAuditDelta("hook_p95_ms", floatOfInt64(current.HookP95MS), floatOfInt64(baseline.HookP95MS)),
 	}
 }
 
 func newAuditDelta(metric string, current, baseline *float64) AuditDeltaRow {
-	row := AuditDeltaRow{Schema: AuditSchema, Kind: "baseline_delta", Metric: metric, Current: current, Baseline: baseline}
+	row := AuditDeltaRow{
+		Schema: AuditSchema, Kind: "baseline_delta", Metric: metric, Current: current, Baseline: baseline,
+		ComparabilityStatus: "missing_value",
+	}
 	if current == nil || baseline == nil {
 		return row
 	}
 	delta := *current - *baseline
 	row.Delta = &delta
 	row.Comparable = true
+	row.ComparabilityStatus = "comparable"
 	row.Regression = delta > 0
+	return row
+}
+
+func newAuditRepeatedFailureDelta(current, baseline AuditSummaryRow) AuditDeltaRow {
+	rawCurrent, rawBaseline := current.RepeatedFailures, baseline.RepeatedFailures
+	currentExposure, baselineExposure := current.Transcripts, baseline.Transcripts
+	rawComparable := false
+	normalizedComparable, normalizedRegression := false, false
+	currentRawValue, baselineRawValue := float64(rawCurrent), float64(rawBaseline)
+	row := AuditDeltaRow{
+		Schema: AuditSchema, Kind: "baseline_delta", Metric: "repeated_failures",
+		Current: &currentRawValue, Baseline: &baselineRawValue,
+		RawCurrent: &rawCurrent, RawBaseline: &rawBaseline,
+		CurrentExposure: &currentExposure, BaselineExposure: &baselineExposure,
+		Normalization: current.RepeatedFailureNormalization, RawComparable: &rawComparable,
+		NormalizedComparable: &normalizedComparable, NormalizedRegression: &normalizedRegression,
+		ComparabilityStatus: "semantics_mismatch",
+		ComparabilityReason: "baseline must explicitly carry the same repeated-failure classification and normalization semantics",
+	}
+	if current.Transcripts > 0 {
+		value := float64(current.RepeatedFailures) / float64(current.Transcripts)
+		row.NormalizedCurrent = &value
+	}
+	if baseline.Transcripts > 0 {
+		value := float64(baseline.RepeatedFailures) / float64(baseline.Transcripts)
+		row.NormalizedBaseline = &value
+	}
+	if current.RepeatedFailureSemantics != auditRepeatedFailureSemantics ||
+		baseline.RepeatedFailureSemantics != current.RepeatedFailureSemantics ||
+		current.RepeatedFailureNormalization != auditRepeatedFailureNormalization ||
+		baseline.RepeatedFailureNormalization != current.RepeatedFailureNormalization {
+		return row
+	}
+	if current.Transcripts <= 0 || baseline.Transcripts <= 0 {
+		row.ComparabilityStatus = "missing_exposure"
+		row.ComparabilityReason = "per-session comparison requires non-zero current and baseline session exposure"
+		return row
+	}
+	currentRate := float64(current.RepeatedFailures) / float64(current.Transcripts)
+	baselineRate := float64(baseline.RepeatedFailures) / float64(baseline.Transcripts)
+	normalizedDelta := currentRate - baselineRate
+	row.NormalizedCurrent = &currentRate
+	row.NormalizedBaseline = &baselineRate
+	row.NormalizedDelta = &normalizedDelta
+	normalizedComparable = true
+	normalizedRegression = normalizedDelta > 0
+	row.NormalizedComparable = &normalizedComparable
+	row.NormalizedRegression = &normalizedRegression
+	rawComparable = current.Transcripts == baseline.Transcripts
+	row.RawComparable = &rawComparable
+	if rawComparable {
+		rawDelta := currentRawValue - baselineRawValue
+		row.Delta = &rawDelta
+		row.Comparable = true
+		row.Regression = rawDelta > 0
+		row.ComparabilityStatus = "raw_and_normalized"
+		row.ComparabilityReason = "raw counts share equal session exposure; normalized_regression uses the per-session rate"
+	} else {
+		row.ComparabilityStatus = "normalized_only"
+		row.ComparabilityReason = "raw counts have unequal session exposure; only the per-session rate is comparable"
+	}
 	return row
 }
 

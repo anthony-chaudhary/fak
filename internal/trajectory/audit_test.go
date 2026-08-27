@@ -237,13 +237,22 @@ func TestAuditVersionedJSONLMarkdownAndBaseline(t *testing.T) {
 	hook := int64(100)
 	baseline := &AuditSummaryRow{
 		Schema: AuditSchema, Kind: "summary", InputOutputRatio: &ioRatio,
-		PromptWriteFraction: &cacheBurden, RepeatedFailures: 0, HookP95MS: &hook,
+		PromptWriteFraction: &cacheBurden, RepeatedFailures: 0, Transcripts: 1, ToolCalls: 5, HookP95MS: &hook,
+		RepeatedFailureSemantics: auditRepeatedFailureSemantics, RepeatedFailureNormalization: auditRepeatedFailureNormalization,
 	}
 	result := runPinnedAudit(t, baseline)
 	if len(result.Baseline) != 4 {
 		t.Fatalf("baseline rows = %d, want 4", len(result.Baseline))
 	}
 	for _, row := range result.Baseline {
+		if row.Metric == "repeated_failures" {
+			if row.Comparable || row.Regression || row.RawComparable == nil || *row.RawComparable ||
+				row.NormalizedComparable == nil || !*row.NormalizedComparable || row.NormalizedRegression == nil || !*row.NormalizedRegression ||
+				row.NormalizedDelta == nil || *row.NormalizedDelta <= 0 {
+				t.Fatalf("normalized repeated-failure delta = %+v, want raw-incomparable normalized regression", row)
+			}
+			continue
+		}
 		if !row.Comparable || !row.Regression || row.Delta == nil || *row.Delta <= 0 {
 			t.Fatalf("baseline delta = %+v, want positive regression", row)
 		}
@@ -305,6 +314,190 @@ func TestAuditVersionedJSONLMarkdownAndBaseline(t *testing.T) {
 	}
 	if loaded.InputOutputRatio == nil || *loaded.InputOutputRatio != ioRatio {
 		t.Fatalf("loaded baseline = %+v", loaded)
+	}
+}
+
+func TestAuditSeparatesExpectedWaitTimeoutsAndNormalizesRegression(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-9417")
+	baseline, err := RunAudit(AuditOptions{Sources: []AuditSource{{
+		Name: AuditSourceClaude, Root: filepath.Join(root, "baseline", "claude", "projects"), RootLabel: "claude/projects",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := RunAudit(AuditOptions{
+		Sources: []AuditSource{
+			{Name: AuditSourceClaude, Root: filepath.Join(root, "current", "claude", "projects"), RootLabel: "claude/projects"},
+			{Name: AuditSourceCodex, Root: filepath.Join(root, "current", "codex", "sessions"), RootLabel: "codex/sessions"},
+		},
+		Baseline: &baseline.Summary,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Summary.Transcripts != 4 || current.Summary.ToolCalls != 11 {
+		t.Fatalf("current exposure = sessions:%d calls:%d, want 4/11", current.Summary.Transcripts, current.Summary.ToolCalls)
+	}
+	if current.Summary.ToolErrors != 4 || current.Summary.RepeatedFailures != 3 {
+		t.Fatalf("current actionable failures = errors:%d repeats:%d, want 4/3", current.Summary.ToolErrors, current.Summary.RepeatedFailures)
+	}
+	if current.Summary.ExpectedWaitTimeouts != 6 || current.Summary.RepeatedFailuresPerSession == nil || *current.Summary.RepeatedFailuresPerSession != 0.75 {
+		t.Fatalf("current wait/rate classification = waits:%d rate:%v, want 6/0.75", current.Summary.ExpectedWaitTimeouts, current.Summary.RepeatedFailuresPerSession)
+	}
+	transcripts := make(map[string]AuditTranscriptRow, len(current.Transcripts))
+	for _, row := range current.Transcripts {
+		transcripts[row.TranscriptID] = row
+	}
+	waits := transcripts["issue-9417-current-waits"]
+	if waits.ToolCalls != 4 || waits.ExpectedWaitTimeouts != 4 || waits.ToolErrors != 0 || waits.RepeatedFailures != 0 {
+		t.Fatalf("bounded namespaced wait_agent polling = %+v, want calls/waits/errors/repeats 4/4/0/0", waits)
+	}
+	codexWaits := transcripts["issue-9417-codex-waits"]
+	if codexWaits.ToolCalls != 2 || codexWaits.ExpectedWaitTimeouts != 2 || codexWaits.ToolErrors != 0 || codexWaits.RepeatedFailures != 0 {
+		t.Fatalf("Codex bounded wait_agent polling = %+v, want calls/waits/errors/repeats 2/2/0/0", codexWaits)
+	}
+	failures := transcripts["issue-9417-current-failures"]
+	if failures.ToolCalls != 4 || failures.ExpectedWaitTimeouts != 0 || failures.ToolErrors != 4 || failures.RepeatedFailures != 3 {
+		t.Fatalf("identical non-wait timeout failures = %+v, want calls/waits/errors/repeats 4/0/4/3", failures)
+	}
+	var repeatedDelta AuditDeltaRow
+	for _, row := range current.Baseline {
+		if row.Metric == "repeated_failures" {
+			repeatedDelta = row
+		}
+	}
+	if repeatedDelta.RawCurrent == nil || *repeatedDelta.RawCurrent != 3 || repeatedDelta.RawBaseline == nil || *repeatedDelta.RawBaseline != 1 ||
+		repeatedDelta.CurrentExposure == nil || *repeatedDelta.CurrentExposure != 4 || repeatedDelta.BaselineExposure == nil || *repeatedDelta.BaselineExposure != 1 {
+		t.Fatalf("repeated-failure raw counts/exposure = %+v, want 3/1 over 4/1", repeatedDelta)
+	}
+	if repeatedDelta.RawComparable == nil || *repeatedDelta.RawComparable || repeatedDelta.Comparable || repeatedDelta.Regression ||
+		repeatedDelta.NormalizedComparable == nil || !*repeatedDelta.NormalizedComparable ||
+		repeatedDelta.NormalizedRegression == nil || *repeatedDelta.NormalizedRegression ||
+		repeatedDelta.ComparabilityStatus != "normalized_only" {
+		t.Fatalf("unequal exposure comparability = %+v, want raw-incomparable normalized non-regression", repeatedDelta)
+	}
+	if repeatedDelta.Current == nil || *repeatedDelta.Current != 3 || repeatedDelta.Baseline == nil || *repeatedDelta.Baseline != 1 || repeatedDelta.Delta != nil ||
+		repeatedDelta.NormalizedCurrent == nil || *repeatedDelta.NormalizedCurrent != 0.75 ||
+		repeatedDelta.NormalizedBaseline == nil || *repeatedDelta.NormalizedBaseline != 1 ||
+		repeatedDelta.NormalizedDelta == nil || *repeatedDelta.NormalizedDelta != -0.25 {
+		t.Fatalf("normalized repeated-failure delta = %+v, want 0.75 - 1 = -0.25", repeatedDelta)
+	}
+	waitSummary := summarizeAudit(nil, []AuditTranscriptRow{waits, codexWaits}, nil)
+	waitDelta := auditBaselineDeltas(waitSummary, baseline.Summary)[2]
+	if waitDelta.NormalizedComparable == nil || !*waitDelta.NormalizedComparable || waitDelta.NormalizedRegression == nil || *waitDelta.NormalizedRegression ||
+		waitDelta.NormalizedCurrent == nil || *waitDelta.NormalizedCurrent != 0 {
+		t.Fatalf("expected waits alone created a regression verdict: %+v", waitDelta)
+	}
+	cleanSummary := summarizeAudit(nil, []AuditTranscriptRow{{TranscriptID: "clean"}}, nil)
+	failureSummary := summarizeAudit(nil, []AuditTranscriptRow{failures}, nil)
+	failureDelta := auditBaselineDeltas(failureSummary, cleanSummary)[2]
+	if !failureDelta.Comparable || !failureDelta.Regression ||
+		failureDelta.NormalizedComparable == nil || !*failureDelta.NormalizedComparable ||
+		failureDelta.NormalizedRegression == nil || !*failureDelta.NormalizedRegression {
+		t.Fatalf("identical failed action lost its regression verdict: %+v", failureDelta)
+	}
+
+	var jsonl bytes.Buffer
+	if err := WriteAuditJSONL(&jsonl, current); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"expected_wait_timeouts":6`, `"repeated_failures_per_session":0.75`,
+		`"repeated_failure_semantics":"actionable-identical-failed-action/2"`,
+		`"current":3`, `"baseline":1`, `"delta":null`, `"raw_current":3`, `"raw_baseline":1`,
+		`"current_exposure":4`, `"baseline_exposure":1`, `"normalization":"per_session"`,
+		`"raw_comparable":false`, `"normalized_current":0.75`, `"normalized_baseline":1`,
+		`"normalized_delta":-0.25`, `"normalized_comparable":true`, `"normalized_regression":false`,
+		`"comparable":false`, `"comparability_status":"normalized_only"`, `"regression":false`,
+	} {
+		if !strings.Contains(jsonl.String(), want) {
+			t.Fatalf("JSONL missing %q:\n%s", want, jsonl.String())
+		}
+	}
+
+	var markdown bytes.Buffer
+	if err := WriteAuditMarkdown(&markdown, current); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Repeated failures: 3/4 sessions (0.7500 per session); expected bounded wait_agent timeouts: 6",
+		"| repeated_failures | 3 / 1 | 0.7500 / 1.0000 | per_session (4 / 1) | -0.2500 | normalized_only (raw comparable: false, normalized comparable: true): raw counts have unequal session exposure; only the per-session rate is comparable | false |",
+	} {
+		if !strings.Contains(markdown.String(), want) {
+			t.Fatalf("markdown missing %q:\n%s", want, markdown.String())
+		}
+	}
+}
+
+func TestAuditRepeatedFailureDeltaRefusesLegacyBaselineSemantics(t *testing.T) {
+	currentRatio, baselineRatio := 2.0, 1.0
+	current := AuditSummaryRow{
+		InputOutputRatio: &currentRatio, RepeatedFailures: 3, Transcripts: 4, ToolCalls: 8,
+		RepeatedFailureSemantics: auditRepeatedFailureSemantics, RepeatedFailureNormalization: auditRepeatedFailureNormalization,
+	}
+	legacy := AuditSummaryRow{InputOutputRatio: &baselineRatio, RepeatedFailures: 1, Transcripts: 2, ToolCalls: 2}
+	deltas := auditBaselineDeltas(current, legacy)
+	if !deltas[0].Comparable || !deltas[0].Regression || deltas[0].ComparabilityStatus != "comparable" {
+		t.Fatalf("unrelated ratio delta must remain comparable: %+v", deltas[0])
+	}
+	repeated := deltas[2]
+	if repeated.Metric != "repeated_failures" || repeated.Comparable || repeated.Regression || repeated.ComparabilityStatus != "semantics_mismatch" {
+		t.Fatalf("legacy repeated-failure baseline did not fail closed: %+v", repeated)
+	}
+	if repeated.RawCurrent == nil || *repeated.RawCurrent != 3 || repeated.RawBaseline == nil || *repeated.RawBaseline != 1 ||
+		repeated.Current == nil || *repeated.Current != 3 || repeated.Baseline == nil || *repeated.Baseline != 1 || repeated.Delta != nil ||
+		repeated.NormalizedCurrent == nil || *repeated.NormalizedCurrent != 0.75 ||
+		repeated.NormalizedBaseline == nil || *repeated.NormalizedBaseline != 0.5 || repeated.NormalizedDelta != nil ||
+		repeated.NormalizedComparable == nil || *repeated.NormalizedComparable ||
+		repeated.NormalizedRegression == nil || *repeated.NormalizedRegression {
+		t.Fatalf("legacy baseline raw/current-normalized rendering = %+v", repeated)
+	}
+}
+
+func TestAuditPrivacySafeLiveReplayFailsClosedAgainstLegacyBaseline(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-9417", "live-replay")
+	current, err := ReadAuditBaseline(filepath.Join(root, "current-summary.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := ReadAuditBaseline(filepath.Join(root, "baseline-summary.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Transcripts != 3679 || current.ToolCalls != 277518 || current.ExpectedWaitTimeouts != 523 || current.RepeatedFailures != 0 {
+		t.Fatalf("privacy-safe current replay = %+v", current)
+	}
+	repeated := auditBaselineDeltas(*current, *baseline)[2]
+	if repeated.RawCurrent == nil || *repeated.RawCurrent != 0 || repeated.RawBaseline == nil || *repeated.RawBaseline != 12 ||
+		repeated.CurrentExposure == nil || *repeated.CurrentExposure != 3679 ||
+		repeated.BaselineExposure == nil || *repeated.BaselineExposure != 889 ||
+		repeated.Comparable || repeated.Regression || repeated.ComparabilityStatus != "semantics_mismatch" ||
+		repeated.NormalizedComparable == nil || *repeated.NormalizedComparable ||
+		repeated.NormalizedRegression == nil || *repeated.NormalizedRegression {
+		t.Fatalf("privacy-safe legacy comparison did not fail closed: %+v", repeated)
+	}
+}
+
+func TestAuditExpectedWaitTimeoutClassifierIsToolSpecific(t *testing.T) {
+	timeout := map[string]any{"status": map[string]any{}, "timed_out": true}
+	for _, name := range []string{"wait_agent", "functions.wait_agent", "tools/wait_agent", "mcp:wait_agent", "mcp__dos__wait_agent"} {
+		if !auditExpectedWaitTimeout(auditToolCall{name: name}, timeout) {
+			t.Errorf("namespaced bounded wait %q was not classified as expected", name)
+		}
+	}
+	for _, test := range []struct {
+		name   string
+		output any
+	}{
+		{name: "exec_command", output: timeout},
+		{name: "not_wait_agent", output: timeout},
+		{name: "wait_agent", output: map[string]any{"status": "failed", "error": "unknown worker"}},
+		{name: "wait_agent", output: map[string]any{"timed_out": true, "status": "failed", "error": "worker crashed"}},
+		{name: "wait_agent", output: "timeout waiting for the worker service"},
+	} {
+		if auditExpectedWaitTimeout(auditToolCall{name: test.name}, test.output) {
+			t.Errorf("non-expected outcome for %q was classified as bounded polling: %#v", test.name, test.output)
+		}
 	}
 }
 

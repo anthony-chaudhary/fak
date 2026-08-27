@@ -24,7 +24,9 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 	}
 	fmt.Fprintf(&out, "- Input: %d; output: %d; cache create: %d; cache read: %d exact tokens.\n", summary.Tokens.InputTokens, summary.Tokens.OutputTokens, summary.Tokens.CacheCreateTokens, summary.Tokens.CacheReadTokens)
 	fmt.Fprintf(&out, "- Input:output ratio: %s; cache-create burden: %s.\n", auditFloat(summary.InputOutputRatio, 3), auditPercent(summary.PromptWriteFraction))
-	fmt.Fprintf(&out, "- Repeated failures: %d; mutation churn: %d; hook p95: %s ms.\n", summary.RepeatedFailures, summary.MutationChurn, auditInt(summary.HookP95MS))
+	fmt.Fprintf(&out, "- Repeated failures: %d/%d sessions (%s per session); expected bounded wait_agent timeouts: %d; mutation churn: %d; hook p95: %s ms.\n",
+		summary.RepeatedFailures, summary.Transcripts, auditFloat(summary.RepeatedFailuresPerSession, 4), summary.ExpectedWaitTimeouts, summary.MutationChurn, auditInt(summary.HookP95MS))
+	fmt.Fprintf(&out, "- Repeated-failure semantics: `%s`; normalization: `%s`.\n", summary.RepeatedFailureSemantics, summary.RepeatedFailureNormalization)
 	fmt.Fprintf(&out, "- Distinct transcripts: %d; duplicate fragments: %d; empty-usage files: %d.\n", summary.DistinctTranscripts, summary.DuplicateFragments, summary.EmptyUsageFiles)
 	fmt.Fprintf(&out, "- Tool errors: %d/%d (%s); top-10 token concentration: %s.\n", summary.ToolErrors, summary.ToolCalls, auditPercent(summary.ToolErrorFraction), auditPercent(summary.TopTenTokenFraction))
 	fmt.Fprintf(&out, "- Payload distribution unit: `%s` — %s\n", summary.DistributionUnit, summary.DistributionProvenance)
@@ -95,10 +97,12 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 
 	if len(result.Baseline) > 0 {
 		out.WriteString("\n## Baseline deltas\n\n")
-		out.WriteString("| Metric | Current | Baseline | Delta | Comparable | Regression |\n")
-		out.WriteString("|---|---:|---:|---:|---:|---:|\n")
+		out.WriteString("| Metric | Raw current / baseline | Compared current / baseline | Normalization (current / baseline exposure) | Delta | Comparability | Regression |\n")
+		out.WriteString("|---|---:|---:|---|---:|---|---:|\n")
 		for _, row := range result.Baseline {
-			fmt.Fprintf(&out, "| %s | %s | %s | %s | %t | %t |\n", row.Metric, auditFloat(row.Current, 4), auditFloat(row.Baseline, 4), auditFloat(row.Delta, 4), row.Comparable, row.Regression)
+			fmt.Fprintf(&out, "| %s | %s | %s / %s | %s | %s | %s | %t |\n",
+				row.Metric, auditRawCounts(row), auditFloat(auditDeltaComparedCurrent(row), 4), auditFloat(auditDeltaComparedBaseline(row), 4),
+				auditDeltaNormalization(row), auditFloat(auditDeltaComparedDelta(row), 4), auditDeltaComparability(row), auditDeltaComparedRegression(row))
 		}
 	}
 
@@ -139,6 +143,69 @@ func auditInt(value *int64) string {
 		return "n/a"
 	}
 	return fmt.Sprintf("%d", *value)
+}
+
+func auditRawCounts(row AuditDeltaRow) string {
+	if row.RawCurrent == nil || row.RawBaseline == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%d / %d", *row.RawCurrent, *row.RawBaseline)
+}
+
+func auditDeltaNormalization(row AuditDeltaRow) string {
+	if row.Normalization == "" {
+		return "as_reported"
+	}
+	if row.CurrentExposure == nil || row.BaselineExposure == nil {
+		return row.Normalization
+	}
+	return fmt.Sprintf("%s (%d / %d)", row.Normalization, *row.CurrentExposure, *row.BaselineExposure)
+}
+
+func auditDeltaComparability(row AuditDeltaRow) string {
+	status := row.ComparabilityStatus
+	if status == "" {
+		status = "not_comparable"
+	}
+	if row.RawComparable != nil {
+		status += fmt.Sprintf(" (raw comparable: %t", *row.RawComparable)
+		if row.NormalizedComparable != nil {
+			status += fmt.Sprintf(", normalized comparable: %t", *row.NormalizedComparable)
+		}
+		status += ")"
+	}
+	if row.ComparabilityReason != "" {
+		status += ": " + row.ComparabilityReason
+	}
+	return status
+}
+
+func auditDeltaComparedCurrent(row AuditDeltaRow) *float64 {
+	if row.NormalizedCurrent != nil {
+		return row.NormalizedCurrent
+	}
+	return row.Current
+}
+
+func auditDeltaComparedBaseline(row AuditDeltaRow) *float64 {
+	if row.NormalizedBaseline != nil {
+		return row.NormalizedBaseline
+	}
+	return row.Baseline
+}
+
+func auditDeltaComparedDelta(row AuditDeltaRow) *float64 {
+	if row.NormalizedDelta != nil {
+		return row.NormalizedDelta
+	}
+	return row.Delta
+}
+
+func auditDeltaComparedRegression(row AuditDeltaRow) bool {
+	if row.NormalizedRegression != nil {
+		return *row.NormalizedRegression
+	}
+	return row.Regression
 }
 
 func escapeAuditMarkdown(value string) string {
