@@ -1375,6 +1375,13 @@ summary  = "A dispatch or worker launch would overlap a live lease/region and ri
 fix      = "Run the arbiter and wait, repartition, or pick a disjoint lane/region before launching. Floor: `dos arbitrate` / lane lease checks."
 see_also = ["dos arbitrate", "dos top", "tools/dos_fleet_lease.py"]
 
+[reasons.SYSTEM_COMMIT_HEADROOM]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "A managed worker launch was refused before lease acquisition or child creation because the host's observed operating-system commit headroom is at or below the guard's required reserve."
+fix      = "Let an in-flight managed worker finish and rerun preflight, or place the work on another sanctioned fleet node. Do not lower FAK_SYSTEM_COMMIT_HEADROOM_MB, kill unrelated processes, or retry-loop around the guard. Floor: `fak recover SYSTEM_COMMIT_HEADROOM`."
+see_also = ["internal/procguard", "tools/dispatch_preflight.py", "cmd/fak/guard_child_resource.go", "fak recover SYSTEM_COMMIT_HEADROOM"]
+
 # The bare-commit-sweep pre-commit gate (#3615): the hook-layer sibling of safecommit's
 # path-scoped PRESTAGED_PATH_OVERLAP guard. That guard only runs inside `fak commit` and is
 # scoped to the DECLARED pathspec, so it cannot see a raw `git commit` / `git add -A && git

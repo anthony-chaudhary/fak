@@ -22,7 +22,6 @@ import (
 const (
 	guardResourcePollDefault    = time.Second
 	guardTreeCommitDefault      = uint64(64) << 30
-	guardSystemHeadroomDefault  = uint64(16) << 30
 	guardTreeRSSFallback        = uint64(4) << 30
 	guardTreeRSSMinimum         = uint64(1) << 30
 	guardResourceDetailMaxBytes = 512
@@ -90,7 +89,7 @@ type guardResourceReceipt struct {
 func guardResourcePolicyFromEnv() guardResourcePolicy {
 	metric := procguard.MemoryMetricCommit
 	maxTree := guardTreeCommitDefault
-	headroom := guardSystemHeadroomDefault
+	headroom := procguard.RequiredSystemCommitHeadroom(os.Getenv)
 	if runtime.GOOS == "darwin" {
 		metric = procguard.MemoryMetricRSS
 		hostBytes, _ := procguard.HostPhysicalMemoryBytes()
@@ -109,9 +108,6 @@ func guardResourcePolicyFromEnv() guardResourcePolicy {
 	}
 	if n, ok := parseGuardResourceMegabytes(override); ok {
 		p.MaxTreeBytes = n
-	}
-	if n, ok := parseGuardResourceMegabytes(strings.TrimSpace(os.Getenv("FAK_SYSTEM_COMMIT_HEADROOM_MB"))); ok {
-		p.MinSystemHeadroom = n
 	}
 	if d, err := time.ParseDuration(strings.TrimSpace(os.Getenv("FAK_CHILD_RESOURCE_POLL"))); err == nil && d >= 100*time.Millisecond {
 		p.PollInterval = d
@@ -146,9 +142,8 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 	for _, process := range s.Processes {
 		d.OwnedPIDs = append(d.OwnedPIDs, process.PID)
 	}
-	if s.SystemLimit >= s.SystemBytes {
-		d.HeadroomBytes = s.SystemLimit - s.SystemBytes
-	}
+	headroom := procguard.EvaluateSystemCommitHeadroom(s, p.MinSystemHeadroom)
+	d.HeadroomBytes = headroom.ObservedBytes
 	if len(s.Processes) > 0 {
 		sort.Slice(s.Processes, func(i, j int) bool { return s.Processes[i].Bytes > s.Processes[j].Bytes })
 		d.Offender = s.Processes[0]
@@ -158,9 +153,9 @@ func decideGuardResource(p guardResourcePolicy, s procguard.MemorySnapshot) guar
 		d.Reason = "CHILD_TREE_" + strings.ToUpper(string(s.Metric)) + "_LIMIT"
 		return d
 	}
-	if s.Metric == procguard.MemoryMetricCommit && p.MinSystemHeadroom > 0 && s.SystemLimit > 0 && d.HeadroomBytes <= p.MinSystemHeadroom {
+	if headroom.Refuse {
 		d.Stop = true
-		d.Reason = "SYSTEM_COMMIT_HEADROOM"
+		d.Reason = headroom.Reason
 	}
 	return d
 }
