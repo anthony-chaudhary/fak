@@ -59,6 +59,7 @@ type KVCacheEvent struct {
 	Worker string
 	Op     residencyOp
 	Prefix []string
+	Tier   OverlapTier
 }
 
 // ExternalKVCacheEventBatch is the field-only shape the Track-A bridge consumes
@@ -122,13 +123,14 @@ type workerResidency struct {
 	capacity int
 	order    []string            // LRU join-keys, least- → most-recently-used
 	held     map[string][]string // join-key → prefix segments
+	tiers    map[string]OverlapTier
 }
 
 func newWorkerResidency(capacity int) *workerResidency {
 	if capacity < 1 {
 		capacity = 1
 	}
-	return &workerResidency{capacity: capacity, held: make(map[string][]string, capacity)}
+	return &workerResidency{capacity: capacity, held: make(map[string][]string, capacity), tiers: make(map[string]OverlapTier, capacity)}
 }
 
 func residencyKey(prefix []string) string { return strings.Join(prefix, "\x1f") }
@@ -266,9 +268,20 @@ func (x *PrefixResidencyIndex) Ingest(ev KVCacheEvent) {
 	w := x.workerLocked(ev.Worker)
 	if ev.Op == ResidentDrop {
 		w.drop(ev.Prefix)
+		for key := range w.tiers {
+			if key == residencyKey(ev.Prefix) {
+				delete(w.tiers, key)
+			}
+		}
 		return
 	}
 	w.admit(append([]string(nil), ev.Prefix...))
+	key := residencyKey(ev.Prefix)
+	if _, ok := DefaultTierWeights().weightFor(ev.Tier); ok {
+		w.tiers[key] = ev.Tier
+	} else {
+		delete(w.tiers, key)
+	}
 }
 
 // IngestExternalKVCacheEvents folds one external serving-engine KV-event batch into
@@ -374,6 +387,43 @@ func (x *PrefixResidencyIndex) Overlap(worker string, prefix []string) int {
 	return 0
 }
 
+// TierOverlap returns contiguous held runs tagged with verified tier provenance.
+func (x *PrefixResidencyIndex) TierOverlap(worker string, prefix []string) []TierHeldOverlap {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	w := x.workers[worker]
+	if w == nil {
+		return nil
+	}
+	ov := w.overlap(prefix)
+	if ov == 0 {
+		return nil
+	}
+	var tier OverlapTier
+	found := false
+	best := -1
+	for key, held := range w.held {
+		n := strmatch.CommonSlicePrefixLen(held, prefix)
+		if n < ov || n <= best {
+			continue
+		}
+		t, ok := w.tiers[key]
+		if !ok {
+			continue
+		}
+		best, tier, found = n, t, true
+	}
+	if !found {
+		return nil
+	}
+	return []TierHeldOverlap{{Tier: tier, Blocks: ov}}
+}
+
+// ObserveTier records live residency with explicit cache-tier provenance.
+func (x *PrefixResidencyIndex) ObserveTier(worker string, prefix []string, tier OverlapTier) {
+	x.Ingest(KVCacheEvent{Worker: worker, Prefix: prefix, Tier: tier, Op: ResidentAdd})
+}
+
 // Occupancy is a worker's resident distinct-prefix count — the bounded load term the
 // scorer's cold placement uses to fill the fleet evenly before any worker evicts.
 func (x *PrefixResidencyIndex) Occupancy(worker string) int {
@@ -437,9 +487,11 @@ func DefaultSkewThreshold() SkewThreshold { return SkewThreshold{AbsLoad: 8, Rel
 // target. Past the documented SkewThreshold it drops locality entirely and routes by
 // load alone. Safe for concurrent use.
 type CacheAwarePolicy struct {
-	mu    sync.Mutex
-	index *PrefixResidencyIndex
-	skew  SkewThreshold
+	mu          sync.Mutex
+	index       *PrefixResidencyIndex
+	skew        SkewThreshold
+	tierEnabled bool
+	tierWeights TierWeights
 }
 
 // NewCacheAwarePolicy builds the policy over a residency index (a fresh one is created
@@ -456,6 +508,39 @@ func NewCacheAwarePolicy(index *PrefixResidencyIndex, skew SkewThreshold) *Cache
 		skew.RelLoad = def.RelLoad
 	}
 	return &CacheAwarePolicy{index: index, skew: skew}
+}
+
+// WithTierWeightedOverlap enables live tier-aware credit. Invalid weights fail closed;
+// passing enabled=false is the rollback path to the historical raw-overlap score.
+func (p *CacheAwarePolicy) WithTierWeightedOverlap(enabled bool, weights TierWeights) *CacheAwarePolicy {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tierEnabled = enabled
+	p.tierWeights = weights
+	return p
+}
+
+type TierRouteContribution struct {
+	Worker     string
+	RawOverlap int
+	Held       []TierHeldOverlap
+	Credit     float64
+	Load       int
+	Score      float64
+	Enabled    bool
+	Engine     string
+	Model      string
+}
+
+func (p *CacheAwarePolicy) TierContribution(worker string, prefix []string, ext func(string) int) TierRouteContribution {
+	load := p.effectiveLoad(worker, ext)
+	raw := p.index.Overlap(worker, prefix)
+	held := p.index.TierOverlap(worker, prefix)
+	credit := float64(raw)
+	if p.tierEnabled {
+		credit = TierWeightedOverlapCredit(p.tierWeights, held)
+	}
+	return TierRouteContribution{worker, raw, held, credit, load, ScoreWithTierWeightedOverlap(credit, load), p.tierEnabled, "fak_native", "Qwen3.8"}
 }
 
 // Index exposes the underlying residency index so callers can attach emitters (Ingest
@@ -478,8 +563,7 @@ func (p *CacheAwarePolicy) effectiveLoad(worker string, ext func(string) int) in
 // inverse-load = 1/(1+load) so a zero-load worker scores its full overlap and load
 // only ever discounts. A cold worker (overlap 0) scores 0.
 func (p *CacheAwarePolicy) score(worker string, prefix []string, ext func(string) int) float64 {
-	ov := float64(p.index.Overlap(worker, prefix))
-	return ov / float64(1+p.effectiveLoad(worker, ext))
+	return p.TierContribution(worker, prefix, ext).Score
 }
 
 // pickWorker is the name-level core the PlannerReplica adapter and the measurement
@@ -518,15 +602,15 @@ func (p *CacheAwarePolicy) pickWorker(workers []string, prefix []string, ext fun
 // break to the lighter-loaded worker, then to the lower worker id (deterministic).
 func (p *CacheAwarePolicy) localityTarget(workers []string, prefix []string, ext func(string) int) string {
 	best := workers[0]
-	bestOv, bestLoad := p.index.Overlap(best, prefix), p.effectiveLoad(best, ext)
+	bestScore, bestLoad := p.score(best, prefix, ext), p.effectiveLoad(best, ext)
 	for _, w := range workers[1:] {
-		ov, load := p.index.Overlap(w, prefix), p.effectiveLoad(w, ext)
+		score, load := p.score(w, prefix, ext), p.effectiveLoad(w, ext)
 		switch {
-		case ov > bestOv:
-			best, bestOv, bestLoad = w, ov, load
-		case ov == bestOv && load < bestLoad:
+		case score > bestScore:
+			best, bestScore, bestLoad = w, score, load
+		case score == bestScore && load < bestLoad:
 			best, bestLoad = w, load
-		case ov == bestOv && load == bestLoad && w < best:
+		case score == bestScore && load == bestLoad && w < best:
 			best = w
 		}
 	}

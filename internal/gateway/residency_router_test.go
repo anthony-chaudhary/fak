@@ -246,3 +246,57 @@ func TestReplicaRouterCacheAwarePolicyPinsByResidency(t *testing.T) {
 		}
 	}
 }
+
+func TestCacheAwarePolicyTierWeightedLiveRouting(t *testing.T) {
+	idx := NewPrefixResidencyIndex(8)
+	prefix := []string{"a", "b"}
+	idx.ObserveTier("device", prefix, TierDevice)
+	idx.ObserveTier("host", prefix, TierHost)
+	idx.ObserveTier("disk", prefix, TierDisk)
+	p := NewCacheAwarePolicy(idx, DefaultSkewThreshold()).WithTierWeightedOverlap(true, DefaultTierWeights())
+	if got := p.localityTarget([]string{"disk", "host", "device"}, prefix, nil); got != "device" {
+		t.Fatalf("tier route=%q, want device", got)
+	}
+	d := p.TierContribution("device", prefix, nil)
+	h := p.TierContribution("host", prefix, nil)
+	k := p.TierContribution("disk", prefix, nil)
+	if !(d.Score > h.Score && h.Score > k.Score) {
+		t.Fatalf("scores device=%v host=%v disk=%v", d.Score, h.Score, k.Score)
+	}
+	if d.Engine != "fak_native" || d.Model != "Qwen3.8" || !d.Enabled {
+		t.Fatalf("receipt=%+v", d)
+	}
+}
+
+func TestCacheAwarePolicyTierUnknownZeroAndRollback(t *testing.T) {
+	idx := NewPrefixResidencyIndex(8)
+	prefix := []string{"shared"}
+	idx.Ingest(KVCacheEvent{Worker: "unknown", Prefix: prefix, Tier: OverlapTier(99), Op: ResidentAdd})
+	idx.ObserveTier("host", prefix, TierHost)
+	zero := DefaultTierWeights()
+	zero.Host = 0
+	p := NewCacheAwarePolicy(idx, DefaultSkewThreshold()).WithTierWeightedOverlap(true, zero)
+	if got := p.TierContribution("unknown", prefix, nil); got.Credit != 0 || got.Score != 0 {
+		t.Fatalf("unknown credited: %+v", got)
+	}
+	if got := p.TierContribution("host", prefix, nil); got.Credit != 0 || got.Score != 0 {
+		t.Fatalf("zero tier credited: %+v", got)
+	}
+	p.WithTierWeightedOverlap(false, zero)
+	if got := p.TierContribution("unknown", prefix, nil); got.Credit != 1 || got.Score <= 0 || got.Enabled {
+		t.Fatalf("rollback=%+v", got)
+	}
+}
+
+func TestPrefixResidencyTierRemovedWithPrefix(t *testing.T) {
+	idx := NewPrefixResidencyIndex(8)
+	p := []string{"a", "b"}
+	idx.ObserveTier("w", p, TierDevice)
+	if got := idx.TierOverlap("w", p); len(got) != 1 || got[0].Blocks != 2 {
+		t.Fatalf("held=%+v", got)
+	}
+	idx.Ingest(KVCacheEvent{Worker: "w", Prefix: p, Op: ResidentDrop})
+	if got := idx.TierOverlap("w", p); len(got) != 0 {
+		t.Fatalf("stale tier=%+v", got)
+	}
+}
