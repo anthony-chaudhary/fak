@@ -130,11 +130,16 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **204 dated entries**, **199 unique source URLs**, and
-**167 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
+The current spine contains **207 dated entries**, **202 unique source URLs**, and
+**170 distinct entity labels** across **13 categories** spanning frontier labs,
+hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
 and **2 explicit rumors**. FineServe, ServeGen, the one-year Chutes trace, OpenRouter geography, and
-SkyLB/SkyWalker now provide source-bounded production parameters, while confidence intervals, geography,
+SkyLB/SkyWalker now provide source-bounded production parameters. Azure OpenAI /
+BurstGPT adds 10.31M requests over 213 days with daily/weekly periodicity, token tails,
+separated failures, and multi-duration burst examples; Splitwise adds one-day Conversation
+and Coding traces; Huawei Atlas 900 A3 adds a vendor reference topology rather than a
+deployment receipt. Confidence intervals, geography,
 retries, speculative acceptance, session/tool-call distributions, and comparable
 denominators remain explicit gaps. It is broad, but it is not entity-complete. The
 requirement-level verdict is in [`coverage-audit.md`](coverage-audit.md); the detailed
@@ -149,13 +154,14 @@ Immediate next slices:
 5. expand the [`market-chronology.md`](market-chronology.md) with startup failures, cancellations, and resolved rumors;
 6. add committed schema/link validation and scheduled refresh after the ledger schema stabilizes.
 
-The clearest workload-distribution evidence so far is not a universal Zipf law. It is a
-set of **heavy-tailed, category-dependent, nonstationary** behaviors: model popularity
+The clearest workload-distribution evidence so far is not a universal law. It is a
+set of **category-dependent, heavy-tailed, bursty, multimodal, nonstationary** behaviors: model popularity
 and user-model affinity evolve over months; KV-prefix reuse is skewed but differs between
 consumer and API traffic; coding-agent tool calls are heavily tailed; output lengths are
 strongly right-skewed even for identical prompts; request-pod cache affinity can be
-roughly bimodal; and traffic changes abruptly after model releases. When a benchmark uses
-a Zipf, Poisson, lognormal, Pareto, or MMPP assumption, it must name the fitted population
+roughly bimodal; daily and weekly periodicity coexists with short and sustained bursts;
+and traffic changes abruptly after model releases. When a benchmark uses a Zipf, Poisson,
+lognormal, Pareto, Hawkes, or MMPP assumption, it must name the fitted population
 or label the distribution as synthetic.
 
 ## Validation

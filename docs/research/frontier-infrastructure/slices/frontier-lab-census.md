@@ -6,7 +6,7 @@
 
 ## Result first
 
-The current index now contains **47 frontier-lab entries** within a **140-entry**
+The current index contains **59 frontier-lab entries** within a **207-entry**
 corpus. This pass adds primary-source coverage for major U.S./Canadian labs and for
 China, Israel, the Middle East, India, Japan, Korea, and Southeast Asia. It reduces a
 strong OpenAI/Anthropic bias, but it does **not** make the global census complete.
@@ -72,7 +72,7 @@ It does not mean complete organizational coverage.
 | Checked | Baidu | ERNIE 5.0 PaddlePaddle hybrid parallelism, FP8 activation storage, adaptive offload, and separated tokenizer/backbone nodes. | Cluster size/SKU, net training efficiency, serving topology, and ERNIE traffic. |
 | Checked | Tencent | Hunyuan-Large 389B total/52B active, 256K context, mixed routing, and KV compression. | Expert-load distribution, cluster, deployed fleet, and service economics. |
 | Checked | Z.ai / Zhipu AI | GLM-4.5 355B total/32B active, 23T training tokens, and hybrid thinking/direct modes. | Cluster hardware, mode-selection rates, API traffic, and independent benchmark reproduction. |
-| Checked | Huawei Cloud Pangu | Pangu 5.0 tiers above 1B/10B/100B/1T parameters and >400 scenarios across >30 industries. | Ascend cluster topology, model-tier traffic, requests/users, batch/cache behavior, and neutral deployment evidence. |
+| Checked | Huawei Cloud Pangu | Pangu 5.0 tiers above 1B/10B/100B/1T parameters and >400 scenarios across >30 industries; the separate Atlas 900 A3 SuperPoD vendor specification names 384 Ascend NPUs, 300 TB HBM, 48 PFLOPS dense BF16, 16.1 PB/s HBM bandwidth, 7.2 PB/s scale-up bandwidth, and 96 cabinets. | Built/installed/healthy/schedulable deployment, power/cooling, model-tier traffic, requests/users, batch/cache behavior, and neutral goodput. |
 | Partial | 01.AI | Yi-34B-200K model card: 34B parameters, 200K advertised context, 5B-token long-context continuation. | Physical compute, neutral long-context serving results, production traffic, and lifecycle evidence. |
 | Partial | StepFun | Step3 release: 321B total / 38B active multimodal MoE and attention/FFN disaggregation design. | Training cluster, neutral matched efficiency, shipped serving topology, adoption, and traffic. |
 | Unchecked | Baichuan, iFlytek, Meituan | No dedicated current entries. | Model releases, physical compute, adoption, deployment, and lifecycle evidence. |
@@ -151,8 +151,8 @@ It does not mean complete organizational coverage.
 ## Remaining priority queue
 
 1. NVIDIA Nemotron plus Microsoft first-party deployment/traffic evidence.
-2. Huawei Ascend physical envelope, 01.AI, StepFun, Baichuan, Shanghai AI Lab, SenseTime,
-   iFlytek, Meituan, and Xiaomi.
+2. Huawei Ascend deployment and power/cooling receipts, 01.AI, StepFun, Baichuan,
+   Shanghai AI Lab, SenseTime, iFlytek, Meituan, and Xiaomi.
 3. G42/Inception Jais/Nanda deployment evidence and Saudi ALLaM/SDAIA sovereign programs.
 4. Samsung Gauss, SKT A.X, and Kakao-related Korean programs.
 5. Preferred Networks, Fujitsu, SoftBank/SAKURA, and Japanese public compute.

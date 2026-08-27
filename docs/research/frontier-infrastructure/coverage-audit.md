@@ -48,6 +48,13 @@ concentration, multimodal prompt sizes, reasoning-budget tails, user/model caden
 prefix reuse, and load imbalance. This evidence remains anonymized, provider-specific,
 window-scoped, and partly figure-read; it does not establish a universal fitted law.
 
+Issue #9360 adds two source-bounded Azure production traces and one Huawei Ascend hardware
+specification. BurstGPT contributes 10.31M requests over 213 days, daily/weekly
+periodicity, long-tailed tokens, separated GPT-4 failures, and multi-duration burst case
+studies; Splitwise contributes one-day Conversation and Coding token/rate distributions.
+The Atlas 900 A3 row is a 384-NPU, 96-cabinet vendor reference topology, not proof of a
+built, healthy, schedulable production system, and it does not disclose power or cooling.
+
 ## Status vocabulary
 
 | Status | Meaning |
@@ -65,20 +72,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **204** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **199** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **167** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 19; `frontier_lab` 59; `hyperscaler` 16; `market_signal` 19; `policy_regulation` 5; `serving_system` 25; `standard` 3; `supply_chain` 20; `workload_model` 3; `workload_trace` 8. |
-| Evidence classes used | **10** | `official_statement` 86; `vendor_claim` 27; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 16; `analyst_estimate` 5; `synthetic_experiment` 6; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
-| Confidence labels | **4** | `high` 111; `medium_high` 54; `medium` 8; `low` 2. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **187/187 published; 187/187 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **207** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **202** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **170** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 19; `frontier_lab` 59; `hardware_supply` 1; `hyperscaler` 16; `market_signal` 23; `policy_regulation` 8; `serving_system` 29; `standard` 3; `supply_chain` 24; `workload_model` 3; `workload_trace` 12. |
+| Evidence classes used | **25** | Machine-derived counts now include `official_statement` 93, `vendor_claim` 31, `benchmark_measurement` 17, `reported_observation` 15, `production_measurement` 11, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 21 entries across 17 other bounded lifecycle/benchmark/specification labels. |
+| Confidence labels | **16** | Exact labels include `high` 126, `medium_high` 58, `medium` 9, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **207/207 published; 207/207 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 187 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 207 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -233,6 +240,13 @@ profiled clients; FineServe quantifies second-scale burst concentration; Chutes 
 one-year model/user evolution; Aliyun, Chutes, and Copilot expose distinct cache-reuse
 shapes. These are provider-specific observations, not universal tenant laws.
 
+**Present but incomplete:** Azure OpenAI / BurstGPT adds 10.31M requests over 213 days,
+daily and weekly periodicity, long-tailed tokens, and case-study bursts at 400 req/s for
+10 seconds, 100 req/s for 60 seconds, and 15 req/s for 600 seconds. Splitwise adds one
+day of empirical Conversation and Coding token/rate distributions. Four services are not
+all Azure traffic, the burst examples are not quantiles, and one-day samples cannot
+establish universal tenant, geography, session, or drift parameters.
+
 **Present but incomplete:** SkyWalker adds six-country diurnal phase evidence; SageServe adds a >8M-request, 3-region mixed-SLO envelope; SMetric and Continuum add session-locality and tool-gap state. These are study-specific, not universal provider distributions.
 
 **Missing:** exact tenant traffic shares; provider production geography/timezone weights; diurnal and weekly
@@ -252,10 +266,10 @@ variation **1.09**, CV above 1 for **78.6%** of examined workloads, top-decile s
 burstiness/arrival modeling. [`workload-parameters.md`](workload-parameters.md) records
 exact parameters available from selected sources.
 
-**Unverified:** any universal Zipf law. Current evidence supports category-dependent,
-heavy-tailed, bursty, and nonstationary behavior. It does not prove one Zipf exponent,
-lognormal fit, Pareto fit, or MMPP for users, tenants, prompts, prefixes, outputs, and
-arrivals collectively.
+**Unverified:** any universal distribution law. Current evidence supports
+category-dependent, heavy-tailed, bursty, multimodal, and nonstationary behavior. It does
+not prove one Zipf, lognormal, Pareto, Poisson, Hawkes, or MMPP law for users, tenants,
+prompts, prefixes, outputs, and arrivals collectively.
 
 **Missing:** fitted parameters, estimator, goodness-of-fit, confidence interval, sample
 population, and drift window for every cited workload paper and every random variable.

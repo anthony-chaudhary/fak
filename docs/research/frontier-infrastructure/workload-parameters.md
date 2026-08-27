@@ -15,6 +15,8 @@ popularity, fixed token lengths.” The source-level claims and limitations rema
 | FineServe | Global commercial model marketplace | Multi-model production requests; 100K-request task sample, 20K silver labels | architecture/scale, arrivals, input/output tokens, task intent, longitudinal model availability | Marketplace traffic differs from first-party apps; some raw counts/parameters are withheld. |
 | Aliyun KVCache “in the wild” | Consumer and developer-API production services | Two real workload families | prefix reuse, reuse probability/time, request category, single-turn and multi-turn reuse | One cloud provider; business-sensitive population and all raw distributions are not public. |
 | Chutes one-year trace | Open multi-model production platform over one year | Full longitudinal model/user trace promised with paper | model popularity, long tail, user-model affinity, cache/load-balancing implications | Open marketplace/platform, not closed frontier first-party products. |
+| Azure OpenAI / BurstGPT | Four Azure OpenAI-powered services over 213 days | 10.31M requests: GPT-4 8.69M; GPT-3.5 0.95M; ChatGPT 0.30M; GPT-4o 0.16M | service, arrivals, users for selected days, input/output tokens, periodicity, bursts, separated failures | Four traces are not all Azure traffic; day-4 users are not total users; burst examples are not quantiles. |
+| Microsoft Azure / Splitwise | Two production services over one day: Conversation and Coding | A few thousand requests per service | empirical input/output token distributions and request rates | One day and small samples; no universal tenant/geography/session distribution or disclosed model weights. |
 | BurstGPT v1.1 | Production trace used for capacity work | 5.29M raw requests over 121 days; 5.19M completed | timestamps, input/output tokens, concurrency, failures | Earlier language-model trace; later multimodal/reasoning/agent workloads differ materially. |
 
 ## Measured parameters that change system design
@@ -120,24 +122,27 @@ production papers. It does not turn reported observations into universal fitted 
 | GitHub Copilot coding agent | First week of June 2026; 3.2M users; 13.5M sessions; 95.1M turns; 760.5M LLM calls; 774.7M tool calls | Average session prefix-cached share 90%; only 7.8% of sessions compacted but those held 44% of tokens; 9% of turns had a tool failure; retries can amplify compute up to 4×; five archetypes span about 23K–1.1M tokens/turn. | Replay session structure, model switches, compaction, tool failure, and retries; sample archetype before token volume. | Tenant/company concentration, geography, weekday/hour curve, reasoning-mode choice, and speculative acceptance. |
 | TraceLab coding agents | About eight months; 43 developers; ~4,300 sessions; ~350K LLM steps; ~430K tool calls | Mean 8.8 LLM calls and 10.8 tool calls per request; mean completion 4.3 minutes and P90 above 6.4 minutes; tool-call counts are heavy-tailed. | Preserve long-lived alternating tool/model loops and idle KV/container windows. | Population representativeness, per-developer shares, geography, exact tail fit, and production failure/retry rates. |
 | Output-length uncertainty experiment | 1,000 LMSYS prompts × 100 generations each | Average skewness 3.10; mean CV 1.09; CV >1 for 78.6%; top decile 35.7% of generated length; P90/P50 4.62; P99/P50 10.77. | Use prompt-conditioned stochastic output length and reserve for tail token-time, not only request count. | Production sampling policy, user/tenant population, arrival process, and cross-model drift. |
+| Azure OpenAI / BurstGPT | 213 days; 10.31M requests; four services | Daily and weekly periodicity; dominant period about one day; long-tailed tokens; case-study bursts of 400 req/s for 10 s, 100 req/s for 60 s, and 15 req/s for 600 s; GPT-4 failure fractions about 0.068 instance, 0.034 trigger/context exceed, and 0.005 content policy. | Preserve service mix, daily/weekly cycles, token tails, multiple burst durations, and separate failure classes. | All-Azure denominator, total users, burst quantiles, geography, tenant weights, and fitted family parameters. |
+| Microsoft Azure / Splitwise | One day; two production services; a few thousand requests each | Conversation and Coding expose distinct empirical input/output token distributions and rates. | Replay the two service classes separately when testing prefill/decode balance or phase splitting. | Longer-window drift, tenants, geography, sessions, disclosed model weights, and deployed-cluster proof. |
 
 ### What the corpus can and cannot say about Zipf
 
 - **Supported:** popularity, load, token lengths, tool counts, and reuse can be skewed,
-  heavy-tailed, bursty, bimodal, and time-varying.
+  category-dependent, heavy-tailed, bursty, bimodal, multimodal, and time-varying.
 - **Unsupported:** one global Zipf exponent for users, tenants, models, prefixes,
   sessions, or token volume.
 - **Required before using Zipf:** name the random variable and population; fit the
   exponent and cutoff; report estimator, goodness of fit, confidence interval, time
   window, and drift; compare against lognormal, Pareto, and alternatives.
-- **Benchmark fallback:** if those fields are absent, label Zipf/Pareto/lognormal/MMPP
-  inputs as synthetic sensitivity scenarios rather than production measurements.
+- **Benchmark fallback:** if those fields are absent, label Zipf/Pareto/lognormal/Poisson/
+  Hawkes/MMPP inputs as synthetic sensitivity scenarios rather than production measurements.
 
 ### Directly observed versus still missing
 
 | Variable | Current evidence | Status |
 |---|---|---|
 | Request arrival and burst | Billions of requests across ServeGen, FineServe, and Chutes; second-scale extremes and release-driven drift are observed. | Partial: raw regional/tenant fits are not public. |
+| Periodicity and multi-duration bursts | Azure OpenAI / BurstGPT reports daily and weekly periodicity plus 10-second, 60-second, and 600-second burst case studies. | Partial: examples are not quantiles and four services are not all Azure traffic. |
 | Model popularity | One-year Chutes evolution and broad long-tail model coverage. | Partial: no stable universal rank exponent. |
 | Tenant/client concentration | ServeGen identifies 29 dynamic top clients among 2,412 profiled clients. | Partial: exact traffic shares and identities are unavailable. |
 | Prefix popularity/reuse | Aliyun category-conditioned reuse, Chutes bimodal realized cache fractions, Copilot session reuse. | Partial: policy-independent opportunity and cross-tenant fits are missing. |
@@ -157,6 +162,8 @@ of the three sources reports population confidence intervals.
 | Source | Variable | Population | Window | Estimator / metric | Family or empirical form | Parameters | Fit quality / selection | Confidence interval | Drift | Missing fields |
 |---|---|---|---|---|---|---|---|---|---|---|
 | FineServe | arrivals | Global marketplace requests to 29 open-source models and 9 task intents | 23 days; 300-second bins for short-horizon signals | CV and mean squared successive difference; per-workload candidate comparison | Poisson-family, negative-binomial-family, self-exciting / Hawkes, and Markov-modulated candidates | No universal parameter vector reported | Selected family varies by model, scale, and task; no universal winner | Not reported | Architecture, scale, task, and time dependent | Request denominator, geography, tenant shares, retries, and CIs |
+| Azure OpenAI / BurstGPT | service arrivals, tokens, users, and failures | Four Azure OpenAI-powered services | 213 days | Empirical request counts, periodicity, token distributions, burst case studies, and failure fractions | Daily/weekly periodic empirical trace with long-tailed tokens | 10.31M requests; dominant period about 1 day; bursts 400 req/s × 10 s, 100 req/s × 60 s, 15 req/s × 600 s; GPT-4 failure fractions about 0.068/0.034/0.005 by separated class | No universal parametric family or burst quantiles reported | Not reported | Daily and weekly periodicity reported | All-Azure denominator, total users, geography, tenant shares, burst quantiles, and CIs |
+| Microsoft Azure / Splitwise | input/output tokens and rates | Conversation and Coding production services | One day | Empirical distributions and rates | Service-conditioned empirical distributions | A few thousand requests per service | No universal fit reported | Not reported | Not measurable from one day | Tenants, geography, sessions, longer drift, model weights, and deployed-cluster receipt |
 | FineServe | dense-model token geometry | Same trace, dense-model requests | 23 days | Conditional median / trend read from figure | Piecewise empirical envelope | Approx. output peak 620 tokens at 1,500 input; stable near 165 at input >=5,000 | No parametric fit reported | Not reported | Not reported | Per-bin counts and uncertainty |
 | FineServe | MoE token geometry | Same trace, MoE-model requests | 23 days | Conditional median / trend read from figure | Piecewise empirical envelope | Approx. 100 output at 500 input; 290 at 5,000; maximum near 400 at input >=8,000 | No parametric fit reported | Not reported | Not reported | Per-bin counts and uncertainty |
 | FineServe | task-conditioned output | Programme, Science, Law, Social, and Writing intents | 23 days | Conditional trend read from figure | Peaked or approximately flat empirical curves | Approx. Programme `(input peak 1,100, output peak 950, tail 520)`; Science `(1,200, 860, 540)`; Law `(750, 620, 280)`; Social flat near 140; Writing flat near 155 | No parametric fit reported | Not reported | Task dependence reported; temporal drift not reported | Per-task denominators and uncertainty |

@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T20:52:00-07:00",
+  "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9325,
+  "latest_slice_issue": 9360,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -28,7 +28,8 @@
     "reported_estimate",
     "reported_observation",
     "inference",
-    "rumor"
+    "rumor",
+    "vendor_specification"
   ],
   "confidence_levels": [
     "high",
@@ -56,12 +57,13 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 204,
+    "entry_count": 207,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
       "datacenter_physical",
       "frontier_lab",
+      "hardware_supply",
       "hyperscaler",
       "market_signal",
       "policy_regulation",
@@ -107,6 +109,7 @@
       "Applied Digital",
       "Arista Networks",
       "Arista XPO MSA",
+      "Azure OpenAI / BurstGPT",
       "Baidu",
       "BurstGPT v1.1",
       "ByteDance Seed",
@@ -138,6 +141,7 @@
       "HUMAIN / SDAIA",
       "HeteroScale production study",
       "Hitachi Energy",
+      "Huawei Atlas 900 A3 SuperPoD",
       "Huawei Cloud Pangu",
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
@@ -156,6 +160,7 @@
       "Marvell / Celestial AI",
       "Meta",
       "Microsoft",
+      "Microsoft Azure / Splitwise",
       "Microsoft Research Mnemosyne",
       "Microsoft Research Phi",
       "MiniMax",
@@ -7916,6 +7921,160 @@
       ],
       "fak_implications": [
         "Separate reference design, order, factory integration, shipment, site assembly, commissioning, and accepted/live capacity for modular data halls."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "burstgpt-azure-openai-2026",
+      "category": "workload_trace",
+      "entity": "Azure OpenAI / BurstGPT",
+      "topic": [
+        "production_workload_trace",
+        "arrival_periodicity",
+        "burstiness",
+        "token_lengths",
+        "failure_classes"
+      ],
+      "published_at": "2026-08-25",
+      "event_at": "2026-08-25",
+      "source_title": "BurstGPT: A Real-World Workload Dataset to Optimize LLM Serving Systems",
+      "source_url": "https://arxiv.org/abs/2401.17644",
+      "source_kind": "research_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "BurstGPT reports 10.31M requests across 213 days and four Azure OpenAI-powered services, with daily and weekly periodicity, long-tailed token lengths, separated GPT-4 failure classes, and case-study bursts spanning high-rate seconds to lower-rate minutes.",
+      "quantified": {
+        "requests": 10310000,
+        "trace_days": 213,
+        "services": 4,
+        "gpt4_requests": 8690000,
+        "gpt35_requests": 950000,
+        "chatgpt_requests": 300000,
+        "gpt4o_requests": 160000,
+        "gpt4_instance_failure_fraction_approx": 0.068,
+        "gpt4_trigger_or_context_exceed_failure_fraction_approx": 0.034,
+        "gpt4_content_policy_failure_fraction_approx": 0.005,
+        "day4_users_approx": 3000,
+        "dominant_period_days": 1,
+        "case_study_bursts": [
+          {
+            "requests_per_second": 400,
+            "duration_seconds": 10
+          },
+          {
+            "requests_per_second": 100,
+            "duration_seconds": 60
+          },
+          {
+            "requests_per_second": 15,
+            "duration_seconds": 600
+          }
+        ]
+      },
+      "assumptions": [
+        "Replay should preserve service identity, daily and weekly periodicity, long-tailed token geometry, and multiple burst durations rather than fitting one stationary aggregate process.",
+        "Failure classes should remain separate because instance, trigger/context, and content-policy outcomes imply different recovery and capacity costs."
+      ],
+      "contradictions_or_limits": [
+        "The dataset contains four Azure OpenAI-powered traces, not all Azure OpenAI traffic.",
+        "The approximately 3,000 users are reported for day 4 and are not a total-user count.",
+        "The 400 requests/s for 10 s, 100 requests/s for 60 s, and 15 requests/s for 600 s bursts are case studies, not population quantiles.",
+        "GPT-4 instance, trigger/context-exceed, and content-policy failure fractions are separated and must not be merged into one interchangeable failure rate."
+      ],
+      "fak_implications": [
+        "Add source-bounded daily and weekly seasonality plus multi-duration burst scenarios to workload replay.",
+        "Condition token work, failure handling, and capacity receipts on service and failure class rather than requests alone."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "splitwise-azure-traces-2023",
+      "category": "workload_trace",
+      "entity": "Microsoft Azure / Splitwise",
+      "topic": [
+        "production_workload_trace",
+        "conversation_service",
+        "coding_service",
+        "token_distributions",
+        "request_rates"
+      ],
+      "published_at": "2024-03-13",
+      "event_at": "2023-11-11",
+      "source_title": "Splitwise: Efficient Generative LLM Inference Using Phase Splitting",
+      "source_url": "https://arxiv.org/abs/2311.18677",
+      "source_kind": "research_paper",
+      "evidence_class": "production_measurement",
+      "confidence": "high",
+      "claim": "Splitwise characterizes one day from two production Azure LLM services—Conversation, similar to ChatGPT, and Coding, similar to GPT-4—with a few thousand requests each and empirical input-token, output-token, and request-rate distributions, without disclosing model weights.",
+      "quantified": {
+        "production_services": 2,
+        "trace_days": 1,
+        "requests_per_service": "a few thousand",
+        "conversation_service_comparison": "similar to ChatGPT",
+        "coding_service_comparison": "similar to GPT-4"
+      },
+      "assumptions": [
+        "Conversation and coding traffic should be replayed as separate empirical workload classes with their own input/output token distributions and rates.",
+        "Phase-splitting conclusions must retain the profiled model, hardware, topology, and simulated scheduling envelope."
+      ],
+      "contradictions_or_limits": [
+        "The traces cover one day and only a few thousand requests per service.",
+        "They do not establish universal tenant, geography, seasonality, or session distributions.",
+        "Simulation and profiling results are not proof of a deployed production cluster, and the model weights are not disclosed."
+      ],
+      "fak_implications": [
+        "Keep conversation and coding traces distinct when evaluating prefill/decode balance and phase placement.",
+        "Require deployed-cluster receipts before treating a simulation or profile-based gain as production goodput."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "huawei-atlas-900-a3-superpod-2025",
+      "category": "hardware_supply",
+      "entity": "Huawei Atlas 900 A3 SuperPoD",
+      "topic": [
+        "ascend_accelerator_pod",
+        "scale_up_topology",
+        "hbm_capacity",
+        "memory_bandwidth",
+        "reference_specification"
+      ],
+      "published_at": "2025-04-28",
+      "event_at": "2025-04-28",
+      "source_title": "Huawei Atlas 900 A3 SuperPoD",
+      "source_url": "https://e.huawei.com/cn/products/computing/ascend/atlas-900-a3-superpod",
+      "source_kind": "vendor_product_page",
+      "evidence_class": "vendor_specification",
+      "confidence": "medium",
+      "claim": "Huawei specifies an Atlas 900 A3 SuperPoD reference topology with 384 Ascend NPUs across 96 cabinets, 300 TB of HBM, 48 PFLOPS dense BF16, 16.1 PB/s aggregate HBM bandwidth, and 7.2 PB/s scale-up bandwidth.",
+      "quantified": {
+        "ascend_npus": 384,
+        "hbm_tb": 300,
+        "dense_bf16_pflops": 48,
+        "hbm_bandwidth_pb_per_s": 16.1,
+        "scale_up_bandwidth_pb_per_s": 7.2,
+        "cabinets": 96
+      },
+      "assumptions": [
+        "Ascend hardware should be represented as a topology and memory/fabric envelope, not converted into an NVIDIA-equivalent chip count.",
+        "Reference specifications are upstream of installed, healthy, schedulable, and useful-goodput-producing capacity."
+      ],
+      "contradictions_or_limits": [
+        "This is a vendor reference topology and specification, not a neutral benchmark or proof of a built, installed, healthy, schedulable production system.",
+        "The source does not disclose power or cooling requirements."
+      ],
+      "fak_implications": [
+        "Add Ascend-native hardware/topology envelopes to scheduling and communication benchmark matrices.",
+        "Require deployment lifecycle, power/cooling, software, health, and quality-constrained goodput receipts before counting production capacity."
       ],
       "rumor": {
         "is_rumor": false,

@@ -36,6 +36,8 @@ output lengths, tools, or geography.
 - **Keep aggregate arrivals separate from client arrivals.** ServeGen's aggregate daily curve coexists with large cross-client rate and burstiness differences.
 - **Partition text, multimodal, reasoning, and agentic traffic.** Modality counts, reasoning budgets, multi-turn sessions, and tool-mediated pauses create different service-time and locality processes.
 - **Treat stationary fits as window-scoped.** A one-day reconstruction, a 23-day fit, and a 365-day evolving trace answer different questions; monthly drift invalidates a single frozen default.
+- **Preserve source-bounded periodicity and burst scales.** Azure OpenAI / BurstGPT adds daily and weekly periodicity plus 10-second, 60-second, and 600-second burst examples, but those examples are not quantiles and four services are not all Azure traffic.
+- **Separate service and failure classes.** Splitwise's Conversation and Coding traces have distinct empirical token/rate shapes, while BurstGPT separates instance, trigger/context-exceed, and content-policy failures; neither supports one universal service or retry process.
 
 ### Production benchmark class matrix
 
@@ -54,6 +56,10 @@ Do not collapse this matrix into one Zipf-plus-Poisson default. Record the
 population, observation window, estimator, selected family, parameters, fit
 quality, confidence interval, and drift for every generated trace; write `not
 reported` rather than manufacturing missing evidence.
+
+The preserved conclusion is category-specific: observed workloads are
+**category-dependent, heavy-tailed, bursty, multimodal, and nonstationary**. The corpus
+does not support a universal Zipf, lognormal, Pareto, Poisson, Hawkes, or MMPP law.
 
 ## Serving assumptions
 
