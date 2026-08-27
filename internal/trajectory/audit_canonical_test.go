@@ -60,3 +60,24 @@ func TestCanonicalAuditTranscriptsRefusesAmbiguousCodexFragments(t *testing.T) {
 		t.Fatalf("refusals = %#v", refusals)
 	}
 }
+
+func TestCanonicalAuditTranscriptsMergesToolResultRows(t *testing.T) {
+	raw := []AuditTranscriptRow{
+		{Source: AuditSourceClaude, TranscriptID: "same", SourcePath: "a.jsonl", ToolResults: []AuditToolResultRow{{Name: "mcp__x__read", Bytes: 7, Results: 1, Success: 1}}},
+		{Source: AuditSourceClaude, TranscriptID: "same", SourcePath: "b.jsonl", ToolResults: []AuditToolResultRow{{Name: "mcp__x__read", Bytes: 5, Results: 1, Errors: 1}, {Name: "unmatched", Bytes: 3, Results: 1, Unmatched: 1}}},
+	}
+	canonical, refusals := canonicalAuditTranscripts(raw)
+	if len(refusals) != 0 || len(canonical) != 1 {
+		t.Fatalf("canonical=%+v refusals=%+v", canonical, refusals)
+	}
+	got := auditToolResultByName(canonical[0].ToolResults, "mcp__x__read")
+	if got.Bytes != 12 || got.Results != 2 || got.Success != 1 || got.Errors != 1 {
+		t.Fatalf("merged result = %+v", got)
+	}
+	if auditToolResultByName(canonical[0].ToolResults, "unmatched").Unmatched != 1 {
+		t.Fatalf("unmatched result lost: %+v", canonical[0].ToolResults)
+	}
+	if raw[0].ToolResults[0].Bytes != 7 {
+		t.Fatalf("raw rows mutated: %+v", raw)
+	}
+}

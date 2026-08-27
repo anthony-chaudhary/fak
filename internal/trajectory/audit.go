@@ -109,6 +109,7 @@ type AuditTranscriptRow struct {
 	ToolErrors           int                    `json:"tool_errors"`
 	Distribution         []AuditDistributionRow `json:"distribution,omitempty"`
 	ToolDistribution     []AuditDistributionRow `json:"tool_distribution,omitempty"`
+	ToolResults          []AuditToolResultRow   `json:"tool_results,omitempty"`
 	StorageDistribution  []AuditStorageRow      `json:"storage_distribution,omitempty"`
 	RepeatedFailures     int                    `json:"repeated_failures"`
 	ExpectedWaitTimeouts int                    `json:"expected_wait_timeouts"`
@@ -171,6 +172,7 @@ type AuditSummaryRow struct {
 	DistributionProvenance              string                 `json:"distribution_provenance"`
 	Distribution                        []AuditDistributionRow `json:"distribution,omitempty"`
 	ToolDistribution                    []AuditDistributionRow `json:"tool_distribution,omitempty"`
+	ToolResults                         []AuditToolResultRow   `json:"tool_results,omitempty"`
 	StorageUnit                         string                 `json:"storage_unit"`
 	StorageDistribution                 []AuditStorageRow      `json:"storage_distribution,omitempty"`
 	ToolErrorFraction                   *float64               `json:"tool_error_fraction"`
@@ -511,6 +513,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	accountedTokens := make([]int64, 0, len(transcripts))
 	categoryTotals := map[string]int64{}
 	toolTotals := map[string]*AuditDistributionRow{}
+	var toolResultGroups [][]AuditToolResultRow
 	storageTotals := map[string]*AuditStorageRow{}
 	for _, transcript := range transcripts {
 		summary.Tokens.add(transcript.Tokens)
@@ -541,6 +544,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 			t.Bytes += r.Bytes
 			t.Calls += r.Calls
 		}
+		toolResultGroups = append(toolResultGroups, transcript.ToolResults)
 		if transcript.Tokens.accountedTotal() == 0 {
 			summary.EmptyUsageFiles++
 		}
@@ -591,6 +595,7 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	summary.DistributionProvenance = "deterministic model-visible content UTF-8 bytes; storage/event envelopes reported separately; not provider-billed per-block tokens"
 	summary.Distribution = distributionRows(categoryTotals)
 	summary.ToolDistribution = toolDistributionRows(toolTotals)
+	summary.ToolResults = mergeAuditToolResultRows(toolResultGroups...)
 	summary.StorageUnit = AuditStorageUnit
 	summary.StorageDistribution = storageDistributionRows(storageTotals)
 	summary.DistinctTranscripts = len(transcriptIDs)
