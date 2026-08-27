@@ -41,6 +41,41 @@ func TestSelectBroadPreviewStillExcludesDeadExec(t *testing.T) {
 	}
 }
 
+func TestSelectAdmitsOnlyExactDeadCodexCLI(t *testing.T) {
+	const deadID = "93380001-0000-4000-8000-000000000001"
+	const liveID = "93380002-0000-4000-8000-000000000002"
+	const completedID = "93380003-0000-4000-8000-000000000003"
+	const unknownID = "93380004-0000-4000-8000-000000000004"
+	const claudeID = "93380005-0000-4000-8000-000000000005"
+	const unidentifiedID = "93380006-0000-4000-8000-000000000006"
+	report := InventoryReport{Sessions: []Session{
+		{Thread: &Thread{ID: deadID, Source: " CLI ", CWD: `C:\work\fak`}, Harness: ProviderCodex, HarnessSource: "legacy_codex_inventory", LatestTurn: &Turn{Status: "inProgress"}},
+		{Thread: &Thread{ID: liveID, Source: "cli", CWD: `C:\work\fak`}, Harness: ProviderCodex, HarnessSource: "legacy_codex_inventory", LatestTurn: &Turn{Status: "inProgress"}, ProcessTrees: []ProcessTree{{RootPID: 42, HasCodex: true}}},
+		{Thread: &Thread{ID: completedID, Source: "cli", CWD: `C:\work\fak`}, Harness: ProviderCodex, HarnessSource: "legacy_codex_inventory", LatestTurn: &Turn{Status: "completed"}},
+		{Thread: &Thread{ID: unknownID, Source: "cli", CWD: `C:\work\fak`}, Harness: ProviderCodex, HarnessSource: "legacy_codex_inventory"},
+		{Thread: &Thread{ID: claudeID, Source: "cli", CWD: `C:\work\fak`}, Harness: ProviderClaude, HarnessSource: "session_registration", LatestTurn: &Turn{Status: "inProgress"}},
+		{Thread: &Thread{ID: unidentifiedID, Source: "cli", CWD: `C:\work\fak`}, LatestTurn: &Turn{Status: "inProgress"}},
+	}}
+	threads := map[string]bool{deadID: true, liveID: true, completedID: true, unknownID: true, claudeID: true, unidentifiedID: true}
+	got := Select(report, Options{ManagerBin: "fak", CodexBin: "codex", Threads: threads, Limit: len(threads), ReceiptDir: t.TempDir()})
+	if len(got) != len(threads) {
+		t.Fatalf("requests=%+v", got)
+	}
+	byID := make(map[string]Request, len(got))
+	for _, req := range got {
+		byID[req.ThreadID] = req
+	}
+	wantArgv := []string{"fak", "guard", "--", "codex", "exec", "--cd", `C:\work\fak`, "resume", deadID}
+	if dead := byID[deadID]; dead.Status != "candidate" || dead.Provider != ProviderCodex || !reflect.DeepEqual(dead.Argv, wantArgv) {
+		t.Fatalf("dead Codex cli request=%+v want argv=%q", dead, wantArgv)
+	}
+	for _, id := range []string{liveID, completedID, unknownID, claudeID, unidentifiedID} {
+		if req := byID[id]; req.Status == "candidate" || len(req.Argv) != 0 {
+			t.Errorf("nonlaunchable cli row %s became actionable: %+v", id, req)
+		}
+	}
+}
+
 func TestSelectExplicitIneligibleAndMissingThreadsReturnReasons(t *testing.T) {
 	report := InventoryReport{Sessions: []Session{{Thread: &Thread{ID: "done", Source: "interactive_tui", CWD: `C:\work\fak`}, LatestTurn: &Turn{Status: "completed"}}}}
 	got := Select(report, Options{Threads: map[string]bool{"done": true, "missing": true}, Limit: 2})

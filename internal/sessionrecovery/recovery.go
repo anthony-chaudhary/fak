@@ -279,6 +279,16 @@ func recoveryEligibility(row Session, explicit bool) (string, string) {
 	if !strings.EqualFold(row.LatestTurn.Status, "inProgress") {
 		return "refused", "latest_turn_" + strings.ToLower(strings.TrimSpace(row.LatestTurn.Status))
 	}
+	if strings.EqualFold(strings.TrimSpace(row.Thread.Source), "cli") {
+		provider, harnessSource := selectedHarness(row)
+		// Current Codex state_5 rows use source=cli. Admit that label only when
+		// inventory supplied an exact Codex harness identity and UUID; the legacy
+		// source fallback must not turn an otherwise unknown cli row into Codex.
+		if provider == ProviderCodex && harnessSource != "legacy_source" && isUUID(row.Thread.ID) {
+			return "candidate", ""
+		}
+		return "refused", "source_not_resumable:" + row.Thread.Source
+	}
 	switch row.Thread.Source {
 	case "interactive_tui", "resume_wrapper":
 		return "candidate", ""
