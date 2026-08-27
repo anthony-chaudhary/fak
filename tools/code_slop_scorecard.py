@@ -519,10 +519,18 @@ def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, in
 
 
 def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
-    """Return lexical Go function spans as (start, end, signature, body)."""
+    """Return lexical Go function spans as (start, end, signature, body).
+
+    Package-scope named function values are callable owners too: several command seams
+    assign an injectable implementation with ``var name = func(...)``. Recognizing that
+    narrow form keeps an ownerless function value from bypassing behavior confirmation
+    for an otherwise heterogeneous clone group.
+    """
     starts = re.finditer(
-        r"(?m)^\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*"
-        r"(?:\s*\[[^\n]*\])?\s*\([^\n{}]*\)"
+        r"(?m)^(?:"
+        r"\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*(?:\s*\[[^\n]*\])?"
+        r"|var\s+[A-Za-z_]\w*\s*=\s*func"
+        r")\s*\([^\n{}]*\)"
         r"(?:\s*\([^\n{}]*\)|\s+[^\n{]+)?\s*\{", text)
     out: list[tuple[int, int, str, str]] = []
     for m in starts:
