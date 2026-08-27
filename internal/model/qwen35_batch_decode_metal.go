@@ -11,19 +11,13 @@ func init() { qwen35HybridQ4KBatchStep = stepBatchQwen35HybridQ4KMetal }
 func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bool) {
 	B, m, cfg := len(ids), bs.M, bs.M.Cfg
 	H, hd, nH, nKV := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads
-	if B < 4 || B > 8 || !metalgemm.Available() || len(bs.Seqs) != B || cfg.AttnOutputGate == false {
+	if B < 4 || B > 8 || !metalgemm.Available() || len(bs.Seqs) != B || cfg.ModelType != "qwen3_5_text" || !cfg.AttnOutputGate || !cfg.QKNorm || cfg.rotaryDim() < 2 {
 		return nil, false
 	}
 	for _, s := range bs.Seqs {
 		if s == nil || s.M != m || s.Backend != nil || !s.Q4K || !s.MetalQ4K || s.qwen35HAL == nil || !s.qwen35HAL.decodeAccepted || s.Cache == nil {
 			return nil, false
 		}
-	}
-	if _, err := qwen38MetalQ8RuntimeNames(cfg); err != nil {
-		return nil, false
-	}
-	if m.promoteMetalQ8Residency() != nil {
-		return nil, false
 	}
 	// Resolve every required resident handle before mutating any lane.
 	type layerWeights struct {
@@ -36,6 +30,11 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 	for l := range lw {
 		p := func(s string) string { return layerName(l, s) }
 		if cfg.isLinearAttnLayer(l) {
+			for _, name := range []string{p("linear_attn.conv1d.weight"), p("linear_attn.A_log"), p("linear_attn.dt_bias"), p("linear_attn.norm.weight")} {
+				if !m.has(name) {
+					return nil, false
+				}
+			}
 			n := []string{p("linear_attn.in_proj_qkv.weight"), p("linear_attn.in_proj_z.weight"), p("linear_attn.in_proj_b.weight"), p("linear_attn.in_proj_a.weight"), p("linear_attn.out_proj.weight")}
 			h := qwen35BatchQ8Handles(m, n)
 			if len(h) != 5 {
@@ -54,10 +53,8 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 			lw[l].full = &w
 			lw[l].out = o
 		}
-		for _, norm := range []string{p("input_layernorm.weight"), p("post_attention_layernorm.weight")} {
-			if !m.has(norm) {
-				return nil, false
-			}
+		if !m.has(p("input_layernorm.weight")) || !m.has(p("post_attention_layernorm.weight")) {
+			return nil, false
 		}
 		if cfg.isLinearAttnLayer(l) {
 			for _, s := range bs.Seqs {
@@ -96,8 +93,11 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 	if !m.has("model.norm.weight") {
 		return nil, false
 	}
-	headName := m.headName()
-	headQT := m.q4kw[headName]
+	headName := m.q4kHeadName()
+	headQT := m.q4khead
+	if headQT == nil {
+		headQT = m.q4kw[headName]
+	}
 	if headQT == nil {
 		return nil, false
 	}
@@ -157,7 +157,7 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 			}
 			cosv, sinv := qwen35BatchRope(cfg, l, max+1)
 			p := func(x string) string { return layerName(l, x) }
-			res, r, accepted, err := metalgemm.RunQwen35FullAttentionDecodeBatch(metalgemm.Qwen35FullAttentionBatchRequest{Input: Xn, Weights: *w.full, Lanes: lanes, QNorm: m.tensor(p("self_attn.q_norm.weight")), KNorm: m.tensor(p("self_attn.k_norm.weight")), Cos: cosv, Sin: sinv, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd, RotaryDim: cfg.RopeDim(), Scale: cfg.attnScale(), QKNormEpsilon: eps, Gain1p: cfg.NormGain1p, QKNorm: true})
+			res, r, accepted, err := metalgemm.RunQwen35FullAttentionDecodeBatch(metalgemm.Qwen35FullAttentionBatchRequest{Input: Xn, Weights: *w.full, Lanes: lanes, QNorm: m.tensor(p("self_attn.q_norm.weight")), KNorm: m.tensor(p("self_attn.k_norm.weight")), Cos: cosv, Sin: sinv, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd, RotaryDim: cfg.rotaryDim(), Scale: cfg.attnScale(), QKNormEpsilon: cfg.qkNormEps(), Gain1p: cfg.NormGain1p, QKNorm: cfg.QKNorm})
 			if err != nil {
 				if accepted || shared > 0 {
 					panic(err)
@@ -184,7 +184,8 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 			X[i] += attn[i]
 		}
 		Xn2 := make([]float32, B*H)
-		normalizeBatchRows(Xn2, X, m.tensor(layerName(l, "post_attention_layernorm.weight")), nil, B, H, eps, cfg, false)
+		postName := layerName(l, "post_attention_layernorm.weight")
+		normalizeBatchRows(Xn2, X, m.tensor(postName), nil, B, H, eps, cfg, false)
 		g, u := make([]float32, B*cfg.IntermediateSize), make([]float32, B*cfg.IntermediateSize)
 		w.gate.GEMVBatch(Xn2, B, g)
 		w.up.GEMVBatch(Xn2, B, u)
@@ -212,18 +213,20 @@ func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bo
 }
 
 func qwen35BatchQ8Handles(m *Model, names []string) []*metalgemm.Q8Weight {
-	metalQ4KMu.Lock()
-	defer metalQ4KMu.Unlock()
-	t := metalQ8KW[m]
 	out := make([]*metalgemm.Q8Weight, len(names))
-	for i, n := range names {
-		out[i] = t[n]
+	for i, name := range names {
+		qt := m.q8w[name]
+		if qt == nil {
+			return nil
+		}
+		out[i] = m.metalQ8Weight(name, qt)
 		if out[i] == nil {
 			return nil
 		}
 	}
 	return out
 }
+
 func joinQwen35Rows(rows [][]float32, w int) []float32 {
 	out := make([]float32, len(rows)*w)
 	for i, r := range rows {
@@ -232,7 +235,7 @@ func joinQwen35Rows(rows [][]float32, w int) []float32 {
 	return out
 }
 func qwen35BatchRope(cfg Config, layer, n int) ([]float32, []float32) {
-	rot := cfg.RopeDim()
+	rot := cfg.rotaryDim()
 	c := make([]float32, n*rot/2)
 	s := make([]float32, len(c))
 	inv := cachedInvFreq(cfg, layer)
