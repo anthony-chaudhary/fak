@@ -189,6 +189,19 @@ serving region, tenant, session, prefix, WAN latency, sovereignty eligibility, r
 and metric units separately. The fuller field contract is in
 [`geography-session-locality.md`](geography-session-locality.md).
 
+## Serving mechanism parameter addendum
+
+| Source | Model / hardware envelope | Mechanism | Reported result | Required receipt fields |
+|---|---|---|---|---|
+| Orca | Transformer models through 175B; 2022 distributed GPU stack | iteration-level scheduling and selective batching | up to 36.9x throughput at the same latency versus FasterTransformer | scheduler version, model, parallelism, active sequences, arrival/length trace, latency target |
+| vLLM | A100 40GB and A10G 24GB evaluations; ShareGPT and sampling traces | PagedAttention / block-based KV allocation | 2-4x throughput at comparable latency versus FasterTransformer and Orca | block size, useful/reserved KV bytes, fragmentation, sharing, eviction, concurrency |
+| Sarathi-Serve | Mistral-7B on one A100; Falcon-180B on 64 A100s | chunked prefill and stall-free batching | 2.6x capacity versus vLLM in the Mistral case; 6.3x versus Orca and 4.3x versus vLLM in the Falcon case | chunk size, TTFT/TPOT SLO, prefill/decode mix, scheduler overhead, fairness |
+| DistServe | evaluated models, GPU groups, traces, and TTFT/TPOT SLOs | prefill/decode disaggregation | up to 7.4x request rate or 12.6x tighter SLO | phase allocation, topology, KV-transfer bytes/time, utilization, stranded capacity, SLO attainment |
+
+Do not multiply these maxima. They use different years, baselines, models, hardware, traces,
+and SLOs. The benchmark question is the current break-even surface, not whether a mechanism
+once beat an older stack.
+
 ## Agentic system-envelope addendum
 
 | Source | Population | Measured envelope | System implication | Missing distribution |
