@@ -200,8 +200,8 @@ func TestCaptureResumesLegacyCheckpointWithoutRefetchingCompleteEndpoints(t *tes
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
-		case "/repos/acme/widget/commits/main":
-			fmt.Fprint(w, `{"sha":"legacy-revision"}`)
+		case "/repos/acme/widget/commits":
+			fmt.Fprint(w, `[{"sha":"legacy-revision"}]`)
 		case "/repos/acme/widget/issues":
 			writeRows(w, []int64{21}, true)
 		case "/repos/acme/widget/pulls":
@@ -294,8 +294,8 @@ func TestCaptureMigratesLegacyCheckpointAfterCompletingPullCensus(t *testing.T) 
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
-		case "/repos/acme/widget/commits/main":
-			fmt.Fprint(w, `{"sha":"legacy-page-revision"}`)
+		case "/repos/acme/widget/commits":
+			fmt.Fprint(w, `[{"sha":"legacy-page-revision"}]`)
 		case "/repos/acme/widget/issues":
 			writeRows(w, []int64{31, 32}, true)
 		case "/repos/acme/widget/pulls":
@@ -644,8 +644,8 @@ func captureReconciliationFixture(t *testing.T, mixed, dedicated []int64) (Corpu
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
-		case "/repos/acme/widget/commits/main":
-			fmt.Fprint(w, `{"sha":"delta-revision"}`)
+		case "/repos/acme/widget/commits":
+			fmt.Fprint(w, `[{"sha":"delta-revision"}]`)
 		case "/repos/acme/widget/issues":
 			writeRows(w, mixed, true)
 		case "/repos/acme/widget/pulls":

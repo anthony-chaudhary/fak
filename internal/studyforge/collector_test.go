@@ -19,8 +19,8 @@ func TestCapturePaginatesClassifiesCutsOffAndIsDeterministic(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
-		case "/repos/acme/widget/commits/main":
-			fmt.Fprint(w, `{"sha":"abc123"}`)
+		case "/repos/acme/widget/commits":
+			fmt.Fprint(w, `[{"sha":"abc123"}]`)
 		case "/repos/acme/widget/issues":
 			if r.URL.Query().Get("page") == "1" {
 				w.Header().Set("Link", `<`+server.URL+`/repos/acme/widget/issues?page=2>; rel="next"`)
@@ -72,6 +72,56 @@ func TestCapturePaginatesClassifiesCutsOffAndIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestCapturePinsDefaultBranchRevisionAtInclusiveCutoff(t *testing.T) {
+	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	const historicalRevision = "revision-at-cutoff"
+	var liveHeadCalls int
+	var revisionRequestURI string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/acme/widget":
+			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/acme/widget/commits/main":
+			liveHeadCalls++
+			fmt.Fprint(w, `{"sha":"post-cutoff-live-head"}`)
+		case "/repos/acme/widget/commits":
+			revisionRequestURI = r.URL.RequestURI()
+			w.Header().Set("X-GitHub-Request-Id", "cutoff-revision-request")
+			fmt.Fprint(w, `[{"sha":"`+historicalRevision+`","commit":{"committer":{"date":"2026-08-26T12:00:00Z"}}}]`)
+		default:
+			fmt.Fprint(w, `[]`)
+		}
+	}))
+	defer server.Close()
+
+	collector := NewCollector(server.Client())
+	collector.BaseURL = server.URL
+	collector.Now = func() time.Time { return cutoff.Add(time.Hour) }
+	corpus, err := collector.Capture(context.Background(), CaptureRequest{
+		Owner: "acme", Repository: "widget", Cutoff: cutoff,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := corpus.Receipt.Revision; got != historicalRevision {
+		t.Fatalf("revision = %q, want historical cutoff revision %q", got, historicalRevision)
+	}
+	if liveHeadCalls != 0 {
+		t.Fatalf("capture resolved post-cutoff live head %d time(s)", liveHeadCalls)
+	}
+	const wantRequestURI = "/repos/acme/widget/commits?per_page=1&sha=main&until=2026-08-26T12%3A00%3A00Z"
+	if revisionRequestURI != wantRequestURI {
+		t.Fatalf("revision request = %q, want %q", revisionRequestURI, wantRequestURI)
+	}
+	if len(corpus.Receipt.API) != 2 {
+		t.Fatalf("API receipts = %+v", corpus.Receipt.API)
+	}
+	receipt := corpus.Receipt.API[1]
+	if receipt.Purpose != "revision" || receipt.URL != server.URL+wantRequestURI || receipt.RequestID != "cutoff-revision-request" {
+		t.Fatalf("revision API evidence = %+v", receipt)
+	}
+}
+
 func TestCaptureRetriesAndResumesFirstMissingPage(t *testing.T) {
 	cutoff := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	var mu sync.Mutex
@@ -85,8 +135,8 @@ func TestCaptureRetriesAndResumesFirstMissingPage(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/o/r":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
-		case "/repos/o/r/commits/main":
-			fmt.Fprint(w, `{"sha":"rev"}`)
+		case "/repos/o/r/commits":
+			fmt.Fprint(w, `[{"sha":"rev"}]`)
 		case "/repos/o/r/issues":
 			if r.URL.Query().Get("page") == "1" {
 				w.Header().Set("Link", `<`+server.URL+`/repos/o/r/issues?page=2>; rel="next"`)
@@ -132,8 +182,8 @@ func TestCaptureAcceptsDiscussionsDisabledAsTerminalEmpty(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
-		case "/repos/acme/widget/commits/main":
-			fmt.Fprint(w, `{"sha":"abc123"}`)
+		case "/repos/acme/widget/commits":
+			fmt.Fprint(w, `[{"sha":"abc123"}]`)
 		case "/repos/acme/widget/discussions":
 			w.Header().Set("X-GitHub-Request-Id", "disabled-fixture")
 			w.WriteHeader(http.StatusGone)
@@ -195,8 +245,8 @@ func TestCaptureRejectsOtherDiscussionsGoneResponses(t *testing.T) {
 				switch r.URL.Path {
 				case "/repos/acme/widget":
 					fmt.Fprint(w, `{"default_branch":"main"}`)
-				case "/repos/acme/widget/commits/main":
-					fmt.Fprint(w, `{"sha":"abc123"}`)
+				case "/repos/acme/widget/commits":
+					fmt.Fprint(w, `[{"sha":"abc123"}]`)
 				case "/repos/acme/widget/discussions":
 					w.WriteHeader(http.StatusGone)
 					fmt.Fprint(w, body)

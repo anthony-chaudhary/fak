@@ -121,7 +121,7 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 	}
 
 	if req.Resume == nil {
-		revision, api, err := c.resolveRevision(ctx, req.Owner, req.Repository)
+		revision, api, err := c.resolveRevision(ctx, req.Owner, req.Repository, req.Cutoff)
 		corpus.Receipt.API = api
 		if err != nil {
 			corpus.Receipt.Status = StatusFailed
@@ -249,8 +249,7 @@ func validateResumeRevisionEvidence(c Corpus) error {
 	if repositoryReceipt.URL != repositoryURL {
 		return errors.New("repository API receipt contradicts checkpoint repository")
 	}
-	revisionPrefix := repositoryURL + "/commits/"
-	if !strings.HasPrefix(revisionReceipt.URL, revisionPrefix) || strings.TrimPrefix(revisionReceipt.URL, revisionPrefix) == "" {
+	if !validRevisionReceiptURL(revisionReceipt.URL, repositoryURL, c.Receipt.Cutoff) {
 		return errors.New("revision API receipt contradicts checkpoint repository")
 	}
 	for _, receipt := range []*APIReceipt{repositoryReceipt, revisionReceipt} {
@@ -259,6 +258,30 @@ func validateResumeRevisionEvidence(c Corpus) error {
 		}
 	}
 	return nil
+}
+
+func validRevisionReceiptURL(receiptURL, repositoryURL, cutoff string) bool {
+	// Checkpoints created before cutoff-aware revision resolution record the
+	// historical get-a-commit request. Keep those pins resumable without
+	// rewriting their evidence.
+	legacyPrefix := repositoryURL + "/commits/"
+	if strings.HasPrefix(receiptURL, legacyPrefix) && strings.TrimPrefix(receiptURL, legacyPrefix) != "" {
+		return true
+	}
+
+	parsed, err := url.Parse(receiptURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+	expected, err := url.Parse(repositoryURL + "/commits")
+	if err != nil || parsed.Scheme != expected.Scheme || parsed.Host != expected.Host || parsed.Path != expected.Path {
+		return false
+	}
+	query := parsed.Query()
+	if len(query) != 3 || query.Get("sha") == "" || query.Get("per_page") != "1" || query.Get("until") != cutoff {
+		return false
+	}
+	return len(query["sha"]) == 1 && len(query["per_page"]) == 1 && len(query["until"]) == 1
 }
 
 func escapeRepository(repository string) string {
@@ -287,7 +310,7 @@ func (c *Collector) defaults() {
 	}
 }
 
-func (c *Collector) resolveRevision(ctx context.Context, owner, repo string) (string, []APIReceipt, error) {
+func (c *Collector) resolveRevision(ctx context.Context, owner, repo string, cutoff time.Time) (string, []APIReceipt, error) {
 	metaURL := c.repoURL(owner, repo, "")
 	body, hdr, status, err := c.get(ctx, metaURL)
 	api := []APIReceipt{apiReceipt("repository", metaURL, body, hdr, status, c.Now())}
@@ -300,19 +323,26 @@ func (c *Collector) resolveRevision(ctx context.Context, owner, repo string) (st
 	if err := json.Unmarshal(body, &meta); err != nil || meta.DefaultBranch == "" {
 		return "", api, errors.New("repository metadata missing default_branch")
 	}
-	commitURL := c.repoURL(owner, repo, "commits/"+url.PathEscape(meta.DefaultBranch))
+	query := url.Values{}
+	query.Set("sha", meta.DefaultBranch)
+	query.Set("until", cutoff.UTC().Format(time.RFC3339Nano))
+	query.Set("per_page", "1")
+	commitURL := c.repoURL(owner, repo, "commits") + "?" + query.Encode()
 	body, hdr, status, err = c.get(ctx, commitURL)
 	api = append(api, apiReceipt("revision", commitURL, body, hdr, status, c.Now()))
 	if err != nil {
 		return "", api, fmt.Errorf("repository revision: %w", err)
 	}
-	var commit struct {
+	var commits []struct {
 		SHA string `json:"sha"`
 	}
-	if err := json.Unmarshal(body, &commit); err != nil || commit.SHA == "" {
+	if err := json.Unmarshal(body, &commits); err != nil {
+		return "", api, errors.New("repository revision response is not a commit list")
+	}
+	if len(commits) == 0 || commits[0].SHA == "" {
 		return "", api, errors.New("repository revision missing sha")
 	}
-	return commit.SHA, api, nil
+	return commits[0].SHA, api, nil
 }
 
 func (c *Collector) collectSource(ctx context.Context, sr SourceReceipt, records []Record, cutoff time.Time, checkpoint func(SourceReceipt, []Record) error) (SourceReceipt, []Record, error) {

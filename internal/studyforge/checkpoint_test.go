@@ -46,8 +46,8 @@ func newCheckpointFixture(t *testing.T) *checkpointFixture {
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
-		case "/repos/acme/widget/commits/main":
-			fmt.Fprintf(w, `{"sha":%q}`, liveRevision)
+		case "/repos/acme/widget/commits":
+			fmt.Fprintf(w, `[{"sha":%q}]`, liveRevision)
 		case "/repos/acme/widget/issues":
 			page := r.URL.Query().Get("page")
 			switch page {
@@ -225,7 +225,7 @@ func TestCaptureResumeRetainsCheckpointRevisionAndAPIProvenance(t *testing.T) {
 	}
 	originalAPI := append([]APIReceipt(nil), partial.Receipt.API...)
 	metadataURI := "/repos/acme/widget"
-	revisionURI := "/repos/acme/widget/commits/main"
+	revisionURI := "/repos/acme/widget/commits?per_page=1&sha=main&until=2026-08-26T12%3A00%3A00Z"
 	metadataBefore := fixture.callCount(metadataURI)
 	revisionBefore := fixture.callCount(revisionURI)
 	if metadataBefore != 1 || revisionBefore != 1 {
@@ -394,6 +394,9 @@ func TestCaptureRejectsResumeIdentityAndSourceOrderMismatchBeforeRequests(t *tes
 		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "repository API receipt contradicts checkpoint repository"},
 		{name: "contradictory revision receipt", mutate: func(c *Corpus) {
 			c.Receipt.API[1].URL = fixture.server.URL + "/repos/acme/other/commits/main"
+		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "revision API receipt contradicts checkpoint repository"},
+		{name: "revision receipt cutoff", mutate: func(c *Corpus) {
+			c.Receipt.API[1].URL = fixture.server.URL + "/repos/acme/widget/commits?per_page=1&sha=main&until=2026-08-26T12%3A00%3A01Z"
 		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "revision API receipt contradicts checkpoint repository"},
 		{name: "source order", mutate: func(c *Corpus) {
 			c.Receipt.Sources[0], c.Receipt.Sources[1] = c.Receipt.Sources[1], c.Receipt.Sources[0]
