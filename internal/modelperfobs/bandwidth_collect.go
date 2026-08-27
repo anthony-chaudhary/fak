@@ -95,16 +95,17 @@ type CollectionOptions struct {
 	MeasureHostRoofline    *RooflineBenchmarkOptions
 }
 type BandwidthCollection struct {
-	Schema              string                `json:"schema"`
-	Engine              string                `json:"engine"`
-	MachineClass        string                `json:"machine_class"`
-	Collector           string                `json:"collector"`
-	IntervalMS          int64                 `json:"interval_ms"`
-	Availability        CollectorAvailability `json:"availability"`
-	Capture             BandwidthCapture      `json:"capture"`
-	Report              BandwidthReport       `json:"report"`
-	RooflineMeasurement *RooflineMeasurement  `json:"roofline_measurement,omitempty"`
-	ProfileReceipt      *NVIDIAProfileReceipt `json:"profile_receipt,omitempty"`
+	Schema                 string                  `json:"schema"`
+	Engine                 string                  `json:"engine"`
+	MachineClass           string                  `json:"machine_class,omitempty"`
+	Collector              string                  `json:"collector"`
+	IntervalMS             int64                   `json:"interval_ms"`
+	Availability           CollectorAvailability   `json:"availability"`
+	Capture                BandwidthCapture        `json:"capture"`
+	Report                 BandwidthReport         `json:"report"`
+	RooflineMeasurement    *RooflineMeasurement    `json:"roofline_measurement,omitempty"`
+	ProfileReceipt         *NVIDIAProfileReceipt   `json:"profile_receipt,omitempty"`
+	HostControllerArtifact *HostControllerArtifact `json:"host_controller_artifact,omitempty"`
 }
 type hostSnapshot struct {
 	at           time.Time

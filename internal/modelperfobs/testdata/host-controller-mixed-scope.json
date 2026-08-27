@@ -1,0 +1,24 @@
+{
+  "schema": "fak-host-controller-counter-import/1",
+  "provider": "fixture-imc",
+  "scope": {"kind": "socket", "id": "0"},
+  "capture": {"started_at": "2026-08-27T10:00:00Z", "ended_at": "2026-08-27T10:00:01Z"},
+  "counters": [
+    {
+      "direction": "read", "event": "dram_read_bytes", "unit": "bytes",
+      "scope": {"kind": "socket", "id": "0"}, "running_ratio": 1,
+      "snapshots": [
+        {"captured_at": "2026-08-27T10:00:00Z", "value": 100},
+        {"captured_at": "2026-08-27T10:00:01Z", "value": 200, "reset_observed": false}
+      ]
+    },
+    {
+      "direction": "write", "event": "dram_write_bytes", "unit": "bytes",
+      "scope": {"kind": "socket", "id": "1"}, "running_ratio": 1,
+      "snapshots": [
+        {"captured_at": "2026-08-27T10:00:00Z", "value": 100},
+        {"captured_at": "2026-08-27T10:00:01Z", "value": 200, "reset_observed": false}
+      ]
+    }
+  ]
+}

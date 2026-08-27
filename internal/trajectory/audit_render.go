@@ -49,6 +49,15 @@ func WriteAuditMarkdown(w io.Writer, result AuditResult) error {
 		}
 		fmt.Fprintf(&out, "\n`%s`\n", CompactAuditDistributionLine(summary.Distribution, summary.ToolDistribution, 100))
 	}
+	if len(summary.ToolResults) > 0 {
+		out.WriteString("\n### Tool result outcomes\n\n| Tool | Subtype | Results | Success | Errors | Timeouts | Truncated | Unknown | Unmatched | Exit 0/nonzero/unknown | Duration known/total ms | Output channel stdout/stderr/combined/unknown | UTF-8 bytes |\n|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+		for _, r := range summary.ToolResults {
+			fmt.Fprintf(&out, "| `%s` | `%s` | %d | %d | %d | %d | %d | %d | %d | %d/%d/%d | %d/%d | %d/%d/%d/%d | %d |\n",
+				escapeAuditMarkdown(r.Name), escapeAuditMarkdown(r.Subtype), r.Results, r.Success, r.Errors, r.Timeouts, r.Truncated, r.Unknown, r.Unmatched,
+				r.ExitZero, r.ExitNonzero, r.Results-r.ExitKnown, r.DurationKnown, r.DurationMS,
+				r.Stdout, r.Stderr, r.CombinedOutput, r.ChannelUnknown, r.Bytes)
+		}
+	}
 	if summary.QwenTopContributorTokenFraction == nil {
 		out.WriteString("- Qwen top-contributor token concentration: unknown (no Qwen token usage).\n")
 	} else {
