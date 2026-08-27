@@ -70,9 +70,11 @@ func ImplGo(name string, register bool) string {
 func TestGo(name string) string {
 	return "package " + name + "\n\n" +
 		"import \"testing\"\n\n" +
-		"func TestReady(t *testing.T) {\n" +
+		"// TestSpine drives the generated leaf's real surface end to end. Keep this\n" +
+		"// representative path working while the proof envelope expands around it.\n" +
+		"func TestSpine(t *testing.T) {\n" +
 		"\tif !Ready() {\n" +
-		"\t\tt.Fatal(\"Ready() should report true for the generated skeleton\")\n" +
+		"\t\tt.Fatal(\"generated leaf spine did not reach Ready\")\n" +
 		"\t}\n" +
 		"}\n"
 }
@@ -265,9 +267,11 @@ func Apply(opts Options) (Report, error) {
 		report.Edits = append(report.Edits, "dos.toml (concurrency lane)")
 	}
 	report.NextSteps = []string{
-		"implement the leaf in internal/" + name + "/" + name + ".go",
-		"go test ./internal/" + name + " ./internal/architest",
-		"the architest gate now enforces this leaf's tier on every CI run",
+		"1. name the end-to-end outcome and implement its smallest applied path through the real seam in internal/" + name + "/" + name + ".go",
+		"2. go test ./internal/" + name + " ./internal/architest to capture the working spine test or command that drives the real " + name + " object end to end",
+		"3. fak-dev issue fanout --title \"<feature>\" --leaf " + name + " --spine <commit|command|doc> --json",
+		"4. expand the exhaustive proof envelope around that spine: failure paths, edge cases, platforms, concurrency, and soak",
+		"5. measure the end-to-end baseline before optimizing, then keep only a net-true gain",
 	}
 	// Nudge toward the minimum-correct tier at creation (#4045): the skeleton
 	// imports only abi (when registered) or nothing, so declaring above foundation
