@@ -91,6 +91,66 @@ GROUP BY model;
   identify the bottleneck, so the report says `missing-stream-timing` rather
   than inventing a diagnosis.
 
+## NVIDIA HBM counter profile
+
+For a deep NVIDIA profile, collect the two cumulative DRAM-byte counters and
+kernel duration from a single device. Raw output, base units, and metric names
+are part of the import contract:
+
+```bash
+ncu --csv --page raw --print-units base --print-metric-name name \
+  --devices 0 \
+  --metrics dram__bytes_read.sum,dram__bytes_write.sum,gpu__time_duration.sum \
+  --log-file _scratch/modelperfobs/nvidia-hbm-ncu.csv \
+  fak <the same fak-native workload and arguments used by the benchmark>
+```
+
+Record the profile window at capture time, then import it rather than using the
+later file-parse time:
+
+```bash
+fak model-observe bandwidth collect \
+  --nvidia-ncu-csv _scratch/modelperfobs/nvidia-hbm-ncu.csv \
+  --device "NVIDIA H100 80GB HBM3 (0)" \
+  --capture-start 2026-08-27T10:00:00Z \
+  --capture-end 2026-08-27T10:01:00Z \
+  --phase decode --shape large \
+  --theoretical-gb-s 3350 \
+  --device-roofline-gb-s 3100 \
+  --output _scratch/modelperfobs/nvidia-hbm.json
+```
+
+The importer groups rows by launch ID, requires one
+`dram__bytes_read.sum`, `dram__bytes_write.sum`, and
+`gpu__time_duration.sum` base-unit value per launch, then divides cumulative
+bytes by cumulative nanoseconds. One byte per nanosecond is one decimal GB/s.
+Missing or duplicate metrics, mixed processes, mixed hosts, and mixed devices
+fail closed.
+`N/A` and `[Not Supported]` make only the affected direction unavailable; total
+bandwidth and utilization remain unavailable unless both directions exist.
+Unavailable values are omitted from the JSON rather than serialized as zero.
+The CSV `Device` column is a profiler
+device ID on current Nsight Compute versions; the receipt keeps it separate
+from the operator-declared `--device` label. When an older CSV lacks that
+column, the label remains explicitly operator-declared provenance. Capture one
+device with `--devices` and retain the `.ncu-rep` if an independently
+inspectable device identity is required.
+
+`--device-roofline-gb-s` is reserved for a matched, measured roofline from the
+same NVIDIA device and operating envelope. The host-memory `--measured-gb-s`
+flag is rejected in profile-import mode so a CPU copy result cannot become an
+HBM utilization denominator. Host sampling, token, latency, software-byte, and
+interval flags are also rejected rather than silently ignored by the importer.
+
+This is profiled-kernel active-time bandwidth, not request-wall-time throughput.
+Nsight Compute may replay kernels and has substantial profiling overhead, so
+pair the counter capture with an otherwise matched uninstrumented latency and
+throughput run. The CSV identifies a process and counters; it does not prove
+that the process used the fak-native engine. The receipt therefore records
+`engine=fak-native` as operator-asserted, not CSV-proven. In particular,
+`nvidia-smi utilization.memory` remains memory-controller active-time and is
+never multiplied by a roofline or placed in `LiveBandwidth`.
+
 ## Metric semantics
 
 The names follow the request-level practice documented by vLLM's metrics design:
@@ -123,4 +183,3 @@ request-level cause. A generic Prometheus adapter may omit request labels and
 still retain honest cohort evidence; distributed tracing is optional.
 
 Source studied 2026-08-21: [vLLM metrics design](https://github.com/vllm-project/vllm/blob/main/docs/design/metrics.md).
-
