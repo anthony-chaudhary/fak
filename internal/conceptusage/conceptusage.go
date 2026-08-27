@@ -444,13 +444,7 @@ func axisKPIs(rows []KPIResult, axisWeight float64, weights map[string]float64) 
 			score = 100.0
 		}
 		k := scorecard.KPI{Key: r.Key, Group: r.Axis, Score: score, Detail: r.Detail}
-		if !r.Passed {
-			if r.Hard {
-				k.Defects = []string{r.Key + ": " + r.Detail}
-			} else {
-				k.Soft = []string{r.Key + ": " + r.Detail}
-			}
-		}
+		k.Defects, k.Soft = resultFindings(r)
 		out = append(out, k)
 		w := float64(r.Weight)
 		if total > 0 {
@@ -659,14 +653,24 @@ func kpiPayloads(rows []KPIResult) []KPIPayload {
 		if r.Passed {
 			k.Score = 100
 			k.Value = 1
-		} else if r.Hard {
-			k.Defects = []string{r.Key + ": " + r.Detail}
-		} else {
-			k.Soft = []string{r.Key + ": " + r.Detail}
 		}
+		k.Defects, k.Soft = resultFindings(r)
 		out = append(out, k)
 	}
 	return out
+}
+
+// resultFindings owns the hard/soft projection shared by every scorecard view.
+// Passed results carry no finding; failed results appear in exactly one channel.
+func resultFindings(r KPIResult) (defects, soft []string) {
+	if r.Passed {
+		return nil, nil
+	}
+	finding := []string{r.Key + ": " + r.Detail}
+	if r.Hard {
+		return finding, nil
+	}
+	return nil, finding
 }
 
 func result(key, axis string, hard bool, weight int, label string, passed bool, detail string) KPIResult {
