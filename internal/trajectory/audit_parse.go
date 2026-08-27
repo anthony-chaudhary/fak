@@ -48,6 +48,9 @@ type auditParseState struct {
 	toolErrorEvents       []QwenToolErrorEvent
 	toolErrorAttributions []qwenToolErrorAttribution
 	distribution          auditDistribution
+	buildIdentity         AuditBuildIdentity
+	buildIdentities       map[AuditBuildIdentity]struct{}
+	schemaShapes          map[string]auditShapeSet
 }
 
 type auditCodexRawTokens struct {
@@ -76,6 +79,9 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		failureCounts:   map[string]int{},
 		mutationCounts:  map[string]int{},
 		claudeUsageByID: map[string]AuditTokens{},
+		buildIdentity:   AuditBuildIdentity{Harness: source},
+		buildIdentities: map[AuditBuildIdentity]struct{}{},
+		schemaShapes:    map[string]auditShapeSet{},
 	}
 	var refusals []AuditRefusalRow
 	scanner := bufio.NewScanner(file)
@@ -97,6 +103,8 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 			denominator.RefusedRecords++
 			continue
 		}
+		observeAuditBuildIdentity(source, record, &state)
+		observeAuditEventShape(record, &state)
 		recordType, _ := record["type"].(string)
 		if recordType == "" {
 			recordType = "<missing>"
@@ -137,6 +145,12 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		state.row.Models = append(state.row.Models, model)
 	}
 	sort.Strings(state.row.Models)
+	state.row.BuildIdentities = make([]AuditBuildIdentity, 0, len(state.buildIdentities))
+	for identity := range state.buildIdentities {
+		state.row.BuildIdentities = append(state.row.BuildIdentities, identity)
+	}
+	state.row.BuildIdentities = appendAuditBuilds(nil, state.row.BuildIdentities...)
+	state.row.schemaShapes = state.schemaShapes
 	state.row.failureCounts = cloneAuditFailureCounts(state.failureCounts)
 	state.row.RepeatedFailures = auditRepeatedFailureCount(state.failureCounts)
 	state.row.MutationChurnEvents = DetectQwenMutationChurn(state.mutationEvents)

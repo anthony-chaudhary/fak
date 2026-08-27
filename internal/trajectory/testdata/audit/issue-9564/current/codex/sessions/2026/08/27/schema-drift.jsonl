@@ -1,0 +1,7 @@
+{"timestamp":"2026-08-27T00:01:00Z","type":"session_meta","payload":{"id":"issue-9564-codex","cli_version":"2.0.0-fixture","model_provider":"openai","provider_version":"responses-v2"}}
+{"timestamp":"2026-08-27T00:01:01Z","type":"turn_context","payload":{"model":"gpt-5.6-codex","turn_id":"turn-9564","reasoning_effort":"high"}}
+{"timestamp":"2026-08-27T00:01:02Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rg fixture\"}","call_id":"call-1"}}
+{"timestamp":"2026-08-27T00:01:03Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-1","output":"{\"exit_code\":0,\"output\":\"ok\"}"}}
+{"timestamp":"2026-08-27T00:01:04Z","type":"response_item","payload":{"type":"custom_tool_call","name":"edit_file","input":"{\"path\":\"codex.go\"}","call_id":"call-2","status":"completed"}}
+{"timestamp":"2026-08-27T00:01:05Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"call-2","output":[{"type":"input_text","text":"ok"}]}}
+{"timestamp":"2026-08-27T00:01:06Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"cached_input_tokens":5,"cache_write_input_tokens":2,"output_tokens":3,"total_tokens":23},"total_token_usage":{"input_tokens":20,"cached_input_tokens":5,"cache_write_input_tokens":2,"output_tokens":3,"total_tokens":23}}}}
