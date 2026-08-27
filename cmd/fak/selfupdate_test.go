@@ -32,6 +32,18 @@ func resetSelfUpdateProgressForTest() {
 	selfUpdateProgressState.Unlock()
 }
 
+func resetSelfUpdateTimingForTest() {
+	selfUpdateTimingState.Lock()
+	selfUpdateTimingState.initialized = false
+	selfUpdateTimingState.finished = false
+	selfUpdateTimingState.started = time.Time{}
+	selfUpdateTimingState.phaseStarted = time.Time{}
+	selfUpdateTimingState.active = ""
+	selfUpdateTimingState.elapsed = nil
+	selfUpdateTimingState.snapshot = selfUpdateTimingSnapshot{}
+	selfUpdateTimingState.Unlock()
+}
+
 func TestSelfUpdateProgressIsMonotonicAndCompletesOnlyAtOutcome(t *testing.T) {
 	oldProgress := selfUpdateProgress
 	var stderr strings.Builder
@@ -440,16 +452,39 @@ func TestSelfUpdateCheckDoesNotFetchOrigin(t *testing.T) {
 func TestEmitSelfUpdateJSONIsOneObjectWithoutProse(t *testing.T) {
 	oldCorrelation := selfUpdateCorrelationID
 	oldProgress, oldJSON := selfUpdateProgress, selfUpdateJSON
+	oldNow := selfUpdateTimingNow
 	selfUpdateCorrelationID = func() string { return "corr-123" }
+	base := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	times := []time.Time{
+		base,
+		base.Add(10 * time.Millisecond),
+		base.Add(50 * time.Millisecond),
+		base.Add(70 * time.Millisecond),
+	}
+	timeCall := 0
+	selfUpdateTimingNow = func() time.Time {
+		if timeCall >= len(times) {
+			t.Fatalf("timing seam called %d times; want at most %d", timeCall+1, len(times))
+		}
+		now := times[timeCall]
+		timeCall++
+		return now
+	}
 	t.Cleanup(func() {
 		selfUpdateCorrelationID = oldCorrelation
 		selfUpdateProgress, selfUpdateJSON = oldProgress, oldJSON
+		selfUpdateTimingNow = oldNow
+		resetSelfUpdateProgressForTest()
+		resetSelfUpdateTimingForTest()
 	})
 
 	var stdout, stderr strings.Builder
 	selfUpdateJSON = &stdout
 	selfUpdateProgress = &stderr
 	resetSelfUpdateProgressForTest()
+	beginSelfUpdateTiming()
+	startSelfUpdatePhase(selfUpdatePhaseBuild)
+	startSelfUpdatePhase(selfUpdatePhaseVet)
 	reportSelfUpdateProgress(82, "installing verified binaries")
 	emitSelfUpdateOutcome(outcomeBusy, "bin/fak", "single-flight lock held")
 	if strings.Count(stdout.String(), "\n") != 1 {
@@ -467,7 +502,34 @@ func TestEmitSelfUpdateJSONIsOneObjectWithoutProse(t *testing.T) {
 	if receipt.Status != "busy" {
 		t.Fatalf("status = %q", receipt.Status)
 	}
-	if got := stderr.String(); !strings.Contains(got, "progress=82%") || !strings.Contains(got, "progress=100%") || strings.Contains(stdout.String(), "installing verified binaries") {
+	if receipt.TotalMS != 70 || receipt.PhaseMS.Check != 10 || receipt.PhaseMS.Build != 40 || receipt.PhaseMS.Vet != 20 {
+		t.Fatalf("deterministic timing receipt = %+v", receipt)
+	}
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout.String()), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var phases map[string]int64
+	if err := json.Unmarshal(envelope["phase_ms"], &phases); err != nil {
+		t.Fatalf("phase_ms is not an object: %v", err)
+	}
+	wantPhases := []string{"check", "lock", "cleanup", "prepare", "companion", "build", "vet", "smoke", "install", "verify", "handoff"}
+	if len(phases) != len(wantPhases) {
+		t.Fatalf("phase_ms keys = %v; want stable %v", phases, wantPhases)
+	}
+	for _, phase := range wantPhases {
+		if _, ok := phases[phase]; !ok {
+			t.Errorf("phase_ms missing stable key %q: %v", phase, phases)
+		}
+	}
+	if timeCall != len(times) {
+		t.Fatalf("timing seam calls = %d, want %d", timeCall, len(times))
+	}
+	if got := stderr.String(); !strings.Contains(got, "progress=82%") ||
+		!strings.Contains(got, "progress=100%") ||
+		!strings.Contains(got, "timing total_ms=70 dominant_phase=build dominant_ms=40") ||
+		strings.Contains(stdout.String(), "installing verified binaries") ||
+		strings.Contains(stdout.String(), "dominant_phase") {
 		t.Fatalf("progress routing: stdout=%q stderr=%q", stdout.String(), got)
 	}
 }
