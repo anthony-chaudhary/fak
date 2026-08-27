@@ -19,6 +19,18 @@ import (
 // linear-attention layer. All five handles are retained for the whole operation.
 type Qwen35DecodeWeights struct {
 	InQKV, InZ, InB, InA, Out *Q8Weight
+	MLPActivation, MLPUp      *Q4KWeight
+	MLPDownQ4                 *Q4KWeight
+	MLPDownQ6                 *Q6KWeight
+}
+
+// Qwen35DecodeBlock extends the mixer graph across the surrounding pre-norm
+// residual block. The two norm vectors and four GDN vectors are immutable
+// operation constants; projection weights are already resident device handles.
+type Qwen35DecodeBlock struct {
+	InputNorm, MLPNorm []float32
+	RMSNormEpsilon     float32
+	NormGain1p         bool
 }
 
 // Qwen35DecodeRequest describes the exact P=1 Gated-DeltaNet mixer. Input is
@@ -28,6 +40,7 @@ type Qwen35DecodeRequest struct {
 	Weights                        Qwen35DecodeWeights
 	State                          *GDNState
 	Panel                          GDNPanel
+	Block                          *Qwen35DecodeBlock
 	InjectPostSubmitFailureForTest bool
 }
 
@@ -36,8 +49,10 @@ type Qwen35DecodeRequest struct {
 // includes the two activation quantizers and resident GDN encoder.
 type Qwen35DecodeReceipt struct {
 	CommandBuffers, Commits, CompletionWaits                    int
-	ProjectionDispatches, Quantizers, GDNEncoders               int
-	InputUploads, FinalReadbacks                                int
+	ProjectionDispatches, MixerProjectionDispatches             int
+	MLPProjectionDispatches, Quantizers, GDNEncoders            int
+	RMSNormEncoders, ResidualAddEncoders, SwiGLUEncoders        int
+	InputUploads, ConstantUploads, FinalReadbacks               int
 	IntermediateReadbacks, StateH2DTransfers, StateD2HTransfers int
 	Encoders                                                    int
 	Committed, CompletedWait                                    bool
@@ -70,6 +85,9 @@ func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35Deco
 	if err := validateLockedQwen35DecodeWeights(req.Weights, len(req.Input), geometry); err != nil {
 		return nil, Qwen35DecodeReceipt{}, false, err
 	}
+	if err := validateQwen35DecodeBlock(req); err != nil {
+		return nil, Qwen35DecodeReceipt{}, false, err
+	}
 
 	graph, err := BeginProjectionGraph(req.Input, nil, nil, 1, len(req.Input))
 	if err != nil {
@@ -83,7 +101,14 @@ func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35Deco
 	if err != nil {
 		return nil, receipt, false, err
 	}
-	quantizedInput, err := graph.QuantizeQ8(input)
+	mixerInput := input
+	if req.Block != nil {
+		mixerInput, err = graph.RMSNorm(input, req.Block.InputNorm, req.Block.RMSNormEpsilon, req.Block.NormGain1p)
+		if err != nil {
+			return nil, receipt, false, err
+		}
+	}
+	quantizedInput, err := graph.QuantizeQ8(mixerInput)
 	if err != nil {
 		return nil, receipt, false, err
 	}
@@ -106,22 +131,91 @@ func RunQwen35Decode(req Qwen35DecodeRequest) (out []float32, receipt Qwen35Deco
 	if err != nil {
 		return nil, receipt, false, err
 	}
+	if req.Block != nil {
+		if err = graph.AddInPlace(input, result); err != nil {
+			return nil, receipt, false, err
+		}
+		var mlpInput *GraphResult
+		mlpInput, err = graph.RMSNorm(input, req.Block.MLPNorm, req.Block.RMSNormEpsilon, req.Block.NormGain1p)
+		if err != nil {
+			return nil, receipt, false, err
+		}
+		var gate, up, down *GraphResult
+		gate, err = graph.EncodeQ4KFrom(req.Weights.MLPActivation, mlpInput)
+		if err != nil {
+			return nil, receipt, false, err
+		}
+		up, err = graph.EncodeQ4KFrom(req.Weights.MLPUp, mlpInput)
+		if err != nil {
+			return nil, receipt, false, err
+		}
+		if err = graph.SwiGLUInPlace(gate, up); err != nil {
+			return nil, receipt, false, err
+		}
+		if req.Weights.MLPDownQ4 != nil {
+			down, err = graph.EncodeQ4KFrom(req.Weights.MLPDownQ4, gate)
+		} else {
+			down, err = graph.EncodeQ6KFrom(req.Weights.MLPDownQ6, gate)
+		}
+		if err != nil {
+			return nil, receipt, false, err
+		}
+		if err = graph.AddInPlace(input, down); err != nil {
+			return nil, receipt, false, err
+		}
+		result = input
+	}
 	outputs, graphReceipt, err := graph.FinishRead(result)
 	accepted = graphReceipt.Committed
+	projectionDispatches, mlpProjectionDispatches := 5, 0
+	rmsNormEncoders, residualAddEncoders, swiGLUEncoders := 0, 0, 0
+	constantUploads := 4
+	wantEncoders := 8
+	if req.Block != nil {
+		projectionDispatches, mlpProjectionDispatches = 8, 3
+		rmsNormEncoders, residualAddEncoders, swiGLUEncoders = 2, 2, 1
+		constantUploads, wantEncoders = 6, 16
+	}
 	receipt = Qwen35DecodeReceipt{
 		CommandBuffers: 1, Commits: decodeBoolInt(graphReceipt.Committed), CompletionWaits: decodeBoolInt(graphReceipt.CompletedWait),
-		ProjectionDispatches: 5, Quantizers: 2, GDNEncoders: 1,
-		InputUploads: 1, FinalReadbacks: graphReceipt.HostReadbacks,
+		ProjectionDispatches: projectionDispatches, MixerProjectionDispatches: 5, MLPProjectionDispatches: mlpProjectionDispatches,
+		Quantizers: 2, GDNEncoders: 1, RMSNormEncoders: rmsNormEncoders, ResidualAddEncoders: residualAddEncoders, SwiGLUEncoders: swiGLUEncoders,
+		InputUploads: 1, ConstantUploads: constantUploads, FinalReadbacks: graphReceipt.HostReadbacks,
 		Encoders: graphReceipt.Encoders, Committed: graphReceipt.Committed, CompletedWait: graphReceipt.CompletedWait,
 	}
 	if err != nil {
 		return nil, receipt, accepted, err
 	}
 	if len(outputs) != 1 || len(outputs[0]) != req.Weights.Out.Out || !receipt.Committed || !receipt.CompletedWait ||
-		receipt.Encoders != 8 || receipt.FinalReadbacks != 1 {
+		receipt.Encoders != wantEncoders || receipt.FinalReadbacks != 1 {
 		return nil, receipt, true, fmt.Errorf("metalgemm: incomplete Qwen decode mixer receipt: %+v", receipt)
 	}
 	return outputs[0], receipt, true, nil
+}
+
+func validateQwen35DecodeBlock(req Qwen35DecodeRequest) error {
+	if req.Block == nil {
+		return nil
+	}
+	hidden := len(req.Input)
+	if len(req.Block.InputNorm) != hidden || len(req.Block.MLPNorm) != hidden ||
+		req.Block.RMSNormEpsilon <= 0 || req.Block.RMSNormEpsilon != req.Panel.RMSNormEpsilon {
+		return &GDNDeclinedError{Reason: "invalid Qwen decode block normalization"}
+	}
+	gate, up := req.Weights.MLPActivation, req.Weights.MLPUp
+	if gate == nil || up == nil || gate.id < 0 || up.id < 0 || gate.In != hidden || up.In != hidden || gate.Out <= 0 || up.Out != gate.Out {
+		return &GDNDeclinedError{Reason: "invalid resident Q4_K gate/up projection"}
+	}
+	if (req.Weights.MLPDownQ4 == nil) == (req.Weights.MLPDownQ6 == nil) {
+		return &GDNDeclinedError{Reason: "Qwen decode block requires exactly one resident down projection"}
+	}
+	if down := req.Weights.MLPDownQ4; down != nil && (down.id < 0 || down.In != gate.Out || down.Out != hidden) {
+		return &GDNDeclinedError{Reason: "invalid resident Q4_K down projection"}
+	}
+	if down := req.Weights.MLPDownQ6; down != nil && (down.id < 0 || down.In != gate.Out || down.Out != hidden) {
+		return &GDNDeclinedError{Reason: "invalid resident Q6_K down projection"}
+	}
+	return nil
 }
 
 func decodeBoolInt(v bool) int {
