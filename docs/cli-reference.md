@@ -1552,3 +1552,7 @@ fak server down --dir DIR --json
 
 
 --gate FILE strictly decodes an envelope-scoped gate request, compares the candidate to the last accepted witnessed receipt, and emits pass/investigate/regression plus suspect module revisions and a guarded bisect packet. Regression exits 3. Policy, cadence, override, and rollback evidence are defined in [the regression-gate contract](benchmarks/NATIVE-PERFORMANCE-REGRESSION-GATE.md).
+
+### Token destination distribution
+
+`fak trajectory audit` records two deliberately separate views: provider-exact request-level input/output/cache token buckets, and a deterministic transcript-payload distribution measured in UTF-8 bytes. The latter shows user messages, assistant messages, reasoning, tool calls, tool results, other records, and a per-tool ranking in JSONL and Markdown. It is an attribution signal—not per-block billed tokens, which providers do not expose. `trajectory.CompactAuditDistributionLine` supplies the stable width-bounded line used by terminal/TUI status surfaces.

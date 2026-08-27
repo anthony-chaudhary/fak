@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
@@ -48,6 +49,7 @@ func cmdSelfUpdate(argv []string) {
 	pinnedBin := fs.String("pinned-bin", "", "the binary path a scheduled-task registration REVIEWED and pinned; refuse to run when the executing binary has drifted from it (#6508)")
 	_ = fs.Parse(argv)
 	beginSelfUpdateOutput(*jsonMode)
+	reportSelfUpdateProgress(5, "checking installed binary provenance")
 
 	// Scheduled-task provenance skew, checked BEFORE anything else: the task pinned one
 	// reviewed absolute path at registration, and a tick executing anything else — or executing
@@ -73,6 +75,7 @@ func cmdSelfUpdate(argv []string) {
 	// Compare against origin/main, not local HEAD: on a permanently-dirty shared trunk the
 	// local tree is always ahead-or-behind with peer WIP, and origin/main is the verified
 	// line we actually want guards converged on.
+	reportSelfUpdateProgress(10, "reading origin/main revision")
 	selfUpdateFetchOrigin(context.Background(), selfinstall.RealRunner, repoRoot, *check)
 	headRev := repoRevOf(repoRoot, "origin/main")
 
@@ -101,6 +104,7 @@ func cmdSelfUpdate(argv []string) {
 	// binstamp.Compare collapses BOTH into Stale, so the old `verdict == Stale` rule would
 	// rebuild origin/main straight OVER a newer dev binary. AssessStamp reuses the stamp we
 	// already resolved (the target's, in fleet mode) and the origin/main we just fetched.
+	reportSelfUpdateProgress(15, "comparing installed and origin/main revisions")
 	skew := versionskew.AssessStamp(context.Background(), selfinstall.RealRunner, repoRoot, "origin/main", stamp)
 
 	stampRev := stamp.Revision
@@ -272,15 +276,42 @@ func prepareFakDevUpdate(ctx context.Context, buildDir string, targets []string,
 	candidate := filepath.Join(os.TempDir(), fmt.Sprintf("fak-dev-selfupdate-%d%s", os.Getpid(), filepath.Ext(targets[0])))
 	_ = os.Remove(candidate)
 	stamp := "-X github.com/anthony-chaudhary/fak/internal/appversion.BuildCommit=" + headRev
+	stopHeartbeat := startSelfUpdateHeartbeat(40, "building fak-dev companion")
 	if out, ok := selfinstall.RealRunner(ctx, buildDir, "go", "build", "-trimpath", "-buildvcs=true", "-ldflags", stamp, "-o", candidate, "./cmd/fak-dev"); !ok {
+		stopHeartbeat()
 		return "", nil, fmt.Errorf("build fak-dev companion: %s", strings.TrimSpace(out))
 	}
+	stopHeartbeat()
+	stopHeartbeat = startSelfUpdateHeartbeat(46, "verifying fak-dev companion")
 	out, ok := selfinstall.RealRunner(ctx, buildDir, candidate, "version")
+	stopHeartbeat()
 	if !ok || !strings.Contains(out, "build: "+headRev) {
 		_ = os.Remove(candidate)
 		return "", nil, fmt.Errorf("smoke fak-dev companion: expected build %s, got %q", headRev, strings.TrimSpace(out))
 	}
 	return candidate, targets, nil
+}
+
+// selfUpdateGateRunner exposes the gated install ladder's actual blocking operation instead
+// of flattening build, vet, and smoke into one long ambiguous wait.
+func selfUpdateGateRunner(ctx context.Context, dir, name string, args ...string) (string, bool) {
+	percent := 0
+	operation := ""
+	switch {
+	case name == "go" && len(args) > 0 && args[0] == "build":
+		percent, operation = 55, "building fak candidate"
+	case name == "go" && len(args) > 0 && args[0] == "vet":
+		percent, operation = 70, "vetting fak candidate"
+	case len(args) == 1 && args[0] == "version":
+		percent, operation = 78, "smoke-verifying fak candidate"
+	}
+	if percent == 0 {
+		return selfinstall.RealRunner(ctx, dir, name, args...)
+	}
+	stopHeartbeat := startSelfUpdateHeartbeat(percent, operation)
+	out, ok := selfinstall.RealRunner(ctx, dir, name, args...)
+	stopHeartbeat()
+	return out, ok
 }
 
 // selfUpdateOutcome is the closed vocabulary of self-update tick outcomes.
@@ -341,6 +372,7 @@ func selfUpdateTransactionDetail(err error, rollbackErrors []error) string {
 // scheduler's "Last Result" is one overwritten integer with no history, so a tick that leaves
 // only an exit code cannot answer "when did the fleet binary last actually advance?".
 func emitSelfUpdateOutcome(cause selfUpdateOutcome, target, detail string) {
+	finishSelfUpdateProgress(cause)
 	if selfUpdateJSON != nil {
 		receipt := newSelfUpdateReceipt(cause, target, detail)
 		_ = json.NewEncoder(selfUpdateJSON).Encode(receipt)
@@ -390,6 +422,7 @@ func emitSelfUpdateCheckOutcome(target, detail string, freshness binstamp.Freshn
 		emitSelfUpdateOutcome(outcomeCheckOnly, target, detail)
 		return
 	}
+	finishSelfUpdateProgress(outcomeCheckOnly)
 	posture := classifySelfUpdateCheck(freshness, hotCopiesConverged)
 	receipt := newSelfUpdateReceipt(outcomeCheckOnly, target, detail)
 	receipt.Status = string(posture.Status)
@@ -422,7 +455,7 @@ type selfUpdateReceiptTarget struct {
 	Path string `json:"path"`
 }
 
-var selfUpdateProgress io.Writer = os.Stdout
+var selfUpdateProgress io.Writer = os.Stderr
 var selfUpdateJSON io.Writer
 var selfUpdateCorrelationID = randomSelfUpdateCorrelationID
 var selfUpdateReceiptOldRevision string
@@ -432,20 +465,101 @@ var selfUpdateReceiptAttempted int
 var selfUpdateReceiptChanged int
 var selfUpdateReceiptHandoff *selfUpdateHandoffReceipt
 
+var selfUpdateProgressState struct {
+	sync.Mutex
+	percent   int
+	operation string
+}
+
+const selfUpdateHeartbeatInterval = 15 * time.Second
+
+// selfUpdateHeartbeatWait is a seam for deterministic captured tests. Production waits at
+// most once per interval; tests can release exact ticks without sleeping.
+var selfUpdateHeartbeatWait = func(stop <-chan struct{}, interval time.Duration) bool {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-stop:
+		return false
+	}
+}
+
+// reportSelfUpdateProgress emits a useful current operation with an honest overall estimate.
+// Ordinary work is capped below 100; only finishSelfUpdateProgress may publish completion.
+func reportSelfUpdateProgress(percent int, operation string) {
+	selfUpdateProgressState.Lock()
+	defer selfUpdateProgressState.Unlock()
+	if percent > 99 {
+		percent = 99
+	}
+	if percent < selfUpdateProgressState.percent {
+		return
+	}
+	operation = strings.TrimSpace(operation)
+	if percent == selfUpdateProgressState.percent && operation == selfUpdateProgressState.operation {
+		return
+	}
+	selfUpdateProgressState.percent = percent
+	selfUpdateProgressState.operation = operation
+	fmt.Fprintf(selfUpdateProgress, "self-update: progress=%d%% operation=%q\n", percent, operation)
+}
+
+func finishSelfUpdateProgress(cause selfUpdateOutcome) {
+	selfUpdateProgressState.Lock()
+	defer selfUpdateProgressState.Unlock()
+	if selfUpdateProgressState.percent == 100 {
+		return
+	}
+	selfUpdateProgressState.percent = 100
+	selfUpdateProgressState.operation = "terminal outcome: " + string(cause)
+	fmt.Fprintf(selfUpdateProgress, "self-update: progress=100%% operation=%q\n", selfUpdateProgressState.operation)
+}
+
+// startSelfUpdateHeartbeat holds the current percent steady while a blocking operation runs.
+// The fixed 15-second lower bound keeps the signal useful without turning slow builds into spam.
+func startSelfUpdateHeartbeat(percent int, operation string) func() {
+	reportSelfUpdateProgress(percent, operation)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for selfUpdateHeartbeatWait(stop, selfUpdateHeartbeatInterval) {
+			selfUpdateProgressState.Lock()
+			currentPercent := selfUpdateProgressState.percent
+			currentOperation := selfUpdateProgressState.operation
+			if currentPercent == percent && currentOperation == strings.TrimSpace(operation) {
+				fmt.Fprintf(selfUpdateProgress, "self-update: progress=%d%% operation=%q heartbeat=true\n", currentPercent, currentOperation)
+			}
+			selfUpdateProgressState.Unlock()
+		}
+	}()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(stop)
+			<-done
+		})
+	}
+}
+
 func beginSelfUpdateOutput(enabled bool) {
-	selfUpdateProgress = os.Stdout
+	selfUpdateProgress = os.Stderr
 	selfUpdateJSON = nil
+	selfUpdateProgressState.Lock()
+	selfUpdateProgressState.percent = 0
+	selfUpdateProgressState.operation = ""
+	selfUpdateProgressState.Unlock()
 	selfUpdateReceiptOldRevision = ""
 	selfUpdateReceiptNewRevision = ""
 	selfUpdateReceiptTargets = nil
 	selfUpdateReceiptAttempted = 0
 	selfUpdateReceiptChanged = 0
 	selfUpdateReceiptHandoff = nil
-	if !enabled {
-		return
+	if enabled {
+		selfUpdateJSON = os.Stdout
 	}
-	selfUpdateProgress = os.Stderr
-	selfUpdateJSON = os.Stdout
 }
 
 func randomSelfUpdateCorrelationID() string {

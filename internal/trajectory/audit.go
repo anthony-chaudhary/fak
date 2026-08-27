@@ -91,21 +91,23 @@ type AuditDenominatorRow struct {
 
 // AuditTranscriptRow is one queryable, content-free transcript rollup.
 type AuditTranscriptRow struct {
-	Schema              string              `json:"schema"`
-	Kind                string              `json:"kind"`
-	Source              string              `json:"source"`
-	TranscriptID        string              `json:"session_id"`
-	SourcePath          string              `json:"source_path"`
-	Models              []string            `json:"models"`
-	Tokens              AuditTokens         `json:"tokens"`
-	ToolCalls           int                 `json:"tool_calls"`
-	ToolErrors          int                 `json:"tool_errors"`
-	RepeatedFailures    int                 `json:"repeated_failures"`
-	MutationChurn       int                 `json:"mutation_churn"`
-	MutationChurnEvents []QwenMutationChurn `json:"mutation_churn_events,omitempty"`
-	HookP95MS           *int64              `json:"hook_p95_ms"`
-	UsageRecords        int                 `json:"usage_records"`
-	SourcePaths         []string            `json:"source_paths,omitempty"`
+	Schema              string                 `json:"schema"`
+	Kind                string                 `json:"kind"`
+	Source              string                 `json:"source"`
+	TranscriptID        string                 `json:"session_id"`
+	SourcePath          string                 `json:"source_path"`
+	Models              []string               `json:"models"`
+	Tokens              AuditTokens            `json:"tokens"`
+	ToolCalls           int                    `json:"tool_calls"`
+	ToolErrors          int                    `json:"tool_errors"`
+	Distribution        []AuditDistributionRow `json:"distribution,omitempty"`
+	ToolDistribution    []AuditDistributionRow `json:"tool_distribution,omitempty"`
+	RepeatedFailures    int                    `json:"repeated_failures"`
+	MutationChurn       int                    `json:"mutation_churn"`
+	MutationChurnEvents []QwenMutationChurn    `json:"mutation_churn_events,omitempty"`
+	HookP95MS           *int64                 `json:"hook_p95_ms"`
+	UsageRecords        int                    `json:"usage_records"`
+	SourcePaths         []string               `json:"source_paths,omitempty"`
 	usageByID           map[string]AuditTokens
 }
 
@@ -126,38 +128,42 @@ type AuditBottleneckRow struct {
 
 // AuditSummaryRow is the machine-wide exact rollup and baseline input.
 type AuditSummaryRow struct {
-	Schema                              string      `json:"schema"`
-	Kind                                string      `json:"kind"`
-	Sources                             int         `json:"sources"`
-	Transcripts                         int         `json:"sessions"`
-	RawFragments                        int         `json:"raw_fragments"`
-	CanonicalTranscripts                int         `json:"canonical_transcripts"`
-	FilesDiscovered                     int         `json:"files_discovered"`
-	FilesScanned                        int         `json:"files_scanned"`
-	FixtureFilesExcluded                int         `json:"fixture_files_excluded"`
-	FilesMatched                        int         `json:"files_matched,omitempty"`
-	Records                             int         `json:"records"`
-	UsageRecordsExact                   int         `json:"usage_records_exact"`
-	RefusedRecords                      int         `json:"refused_records"`
-	Tokens                              AuditTokens `json:"tokens"`
-	InputOutputRatio                    *float64    `json:"input_output_ratio"`
-	PromptWriteFraction                 *float64    `json:"prompt_write_fraction"`
-	RepeatedFailures                    int         `json:"repeated_failures"`
-	MutationChurn                       int         `json:"mutation_churn"`
-	HookP95MS                           *int64      `json:"hook_p95_ms"`
-	DistinctTranscripts                 int         `json:"distinct_transcripts"`
-	DuplicateFragments                  int         `json:"duplicate_fragments"`
-	EmptyUsageFiles                     int         `json:"empty_usage_files"`
-	ToolCalls                           int         `json:"tool_calls"`
-	ToolErrors                          int         `json:"tool_errors"`
-	ToolErrorFraction                   *float64    `json:"tool_error_fraction"`
-	TopTenTokenFraction                 *float64    `json:"top_ten_token_fraction"`
-	QwenTopContributor                  *string     `json:"qwen_top_contributor"`
-	QwenTopContributorTokens            *int64      `json:"qwen_top_contributor_tokens"`
-	QwenTotalTokens                     *int64      `json:"qwen_total_tokens"`
-	QwenTopContributorTokenFraction     *float64    `json:"qwen_top_contributor_token_fraction"`
-	QwenTokenConcentrationThreshold     float64     `json:"qwen_token_concentration_threshold"`
-	QwenTopContributorTokenConcentrated *bool       `json:"qwen_top_contributor_token_concentrated"`
+	Schema                              string                 `json:"schema"`
+	Kind                                string                 `json:"kind"`
+	Sources                             int                    `json:"sources"`
+	Transcripts                         int                    `json:"sessions"`
+	RawFragments                        int                    `json:"raw_fragments"`
+	CanonicalTranscripts                int                    `json:"canonical_transcripts"`
+	FilesDiscovered                     int                    `json:"files_discovered"`
+	FilesScanned                        int                    `json:"files_scanned"`
+	FixtureFilesExcluded                int                    `json:"fixture_files_excluded"`
+	FilesMatched                        int                    `json:"files_matched,omitempty"`
+	Records                             int                    `json:"records"`
+	UsageRecordsExact                   int                    `json:"usage_records_exact"`
+	RefusedRecords                      int                    `json:"refused_records"`
+	Tokens                              AuditTokens            `json:"tokens"`
+	InputOutputRatio                    *float64               `json:"input_output_ratio"`
+	PromptWriteFraction                 *float64               `json:"prompt_write_fraction"`
+	RepeatedFailures                    int                    `json:"repeated_failures"`
+	MutationChurn                       int                    `json:"mutation_churn"`
+	HookP95MS                           *int64                 `json:"hook_p95_ms"`
+	DistinctTranscripts                 int                    `json:"distinct_transcripts"`
+	DuplicateFragments                  int                    `json:"duplicate_fragments"`
+	EmptyUsageFiles                     int                    `json:"empty_usage_files"`
+	ToolCalls                           int                    `json:"tool_calls"`
+	ToolErrors                          int                    `json:"tool_errors"`
+	DistributionUnit                    string                 `json:"distribution_unit"`
+	DistributionProvenance              string                 `json:"distribution_provenance"`
+	Distribution                        []AuditDistributionRow `json:"distribution,omitempty"`
+	ToolDistribution                    []AuditDistributionRow `json:"tool_distribution,omitempty"`
+	ToolErrorFraction                   *float64               `json:"tool_error_fraction"`
+	TopTenTokenFraction                 *float64               `json:"top_ten_token_fraction"`
+	QwenTopContributor                  *string                `json:"qwen_top_contributor"`
+	QwenTopContributorTokens            *int64                 `json:"qwen_top_contributor_tokens"`
+	QwenTotalTokens                     *int64                 `json:"qwen_total_tokens"`
+	QwenTopContributorTokenFraction     *float64               `json:"qwen_top_contributor_token_fraction"`
+	QwenTokenConcentrationThreshold     float64                `json:"qwen_token_concentration_threshold"`
+	QwenTopContributorTokenConcentrated *bool                  `json:"qwen_top_contributor_token_concentrated"`
 }
 
 // AuditDeltaRow compares one higher-is-worse metric with a prior summary.
@@ -433,12 +439,26 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 	}
 	transcriptIDs := make(map[string]struct{}, len(transcripts))
 	accountedTokens := make([]int64, 0, len(transcripts))
+	categoryTotals := map[string]int64{}
+	toolTotals := map[string]*AuditDistributionRow{}
 	for _, transcript := range transcripts {
 		summary.Tokens.add(transcript.Tokens)
 		summary.RepeatedFailures += transcript.RepeatedFailures
 		summary.MutationChurn += transcript.MutationChurn
 		summary.ToolCalls += transcript.ToolCalls
 		summary.ToolErrors += transcript.ToolErrors
+		for _, r := range transcript.Distribution {
+			categoryTotals[r.Name] += r.Bytes
+		}
+		for _, r := range transcript.ToolDistribution {
+			t := toolTotals[r.Name]
+			if t == nil {
+				t = &AuditDistributionRow{Name: r.Name}
+				toolTotals[r.Name] = t
+			}
+			t.Bytes += r.Bytes
+			t.Calls += r.Calls
+		}
 		if transcript.Tokens.accountedTotal() == 0 {
 			summary.EmptyUsageFiles++
 		}
@@ -485,6 +505,10 @@ func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTrans
 			summary.QwenTopContributorTokenConcentrated = &concentrated
 		}
 	}
+	summary.DistributionUnit = AuditDistributionUnit
+	summary.DistributionProvenance = "deterministic transcript UTF-8 bytes; not provider-billed per-block tokens"
+	summary.Distribution = distributionRows(categoryTotals)
+	summary.ToolDistribution = toolDistributionRows(toolTotals)
 	summary.DistinctTranscripts = len(transcriptIDs)
 	summary.DuplicateFragments = summary.Transcripts - summary.DistinctTranscripts
 	if summary.ToolCalls > 0 {

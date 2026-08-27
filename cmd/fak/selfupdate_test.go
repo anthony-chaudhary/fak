@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
@@ -23,6 +23,77 @@ func init() {
 	}
 	_, _ = os.Stdout.WriteString("fak test helper\nbuild: " + selfUpdateProbeHelperRev + "\n")
 	os.Exit(0)
+}
+
+func resetSelfUpdateProgressForTest() {
+	selfUpdateProgressState.Lock()
+	selfUpdateProgressState.percent = 0
+	selfUpdateProgressState.operation = ""
+	selfUpdateProgressState.Unlock()
+}
+
+func TestSelfUpdateProgressIsMonotonicAndCompletesOnlyAtOutcome(t *testing.T) {
+	oldProgress := selfUpdateProgress
+	var stderr strings.Builder
+	selfUpdateProgress = &stderr
+	resetSelfUpdateProgressForTest()
+	t.Cleanup(func() {
+		selfUpdateProgress = oldProgress
+		resetSelfUpdateProgressForTest()
+	})
+
+	reportSelfUpdateProgress(10, "checking provenance")
+	reportSelfUpdateProgress(45, "building candidate")
+	reportSelfUpdateProgress(30, "late stale update")  // regressions are ignored
+	reportSelfUpdateProgress(100, "verifying install") // non-terminal work is capped
+	finishSelfUpdateProgress(outcomeInstalled)
+
+	want := "" +
+		"self-update: progress=10% operation=\"checking provenance\"\n" +
+		"self-update: progress=45% operation=\"building candidate\"\n" +
+		"self-update: progress=99% operation=\"verifying install\"\n" +
+		"self-update: progress=100% operation=\"terminal outcome: installed\"\n"
+	if got := stderr.String(); got != want {
+		t.Fatalf("captured progress mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestSelfUpdateHeartbeatUsesDeterministicBoundedSeam(t *testing.T) {
+	oldProgress, oldWait := selfUpdateProgress, selfUpdateHeartbeatWait
+	var stderr strings.Builder
+	selfUpdateProgress = &stderr
+	resetSelfUpdateProgressForTest()
+	ready := make(chan struct{})
+	calls := 0
+	selfUpdateHeartbeatWait = func(stop <-chan struct{}, interval time.Duration) bool {
+		if interval != selfUpdateHeartbeatInterval {
+			t.Errorf("heartbeat interval = %v, want %v", interval, selfUpdateHeartbeatInterval)
+		}
+		calls++
+		if calls <= 2 {
+			return true
+		}
+		close(ready) // two emitted ticks, then block until the operation ends
+		<-stop
+		return false
+	}
+	t.Cleanup(func() {
+		selfUpdateProgress = oldProgress
+		selfUpdateHeartbeatWait = oldWait
+		resetSelfUpdateProgressForTest()
+	})
+
+	stop := startSelfUpdateHeartbeat(55, "building fak candidate")
+	<-ready
+	stop()
+
+	want := "" +
+		"self-update: progress=55% operation=\"building fak candidate\"\n" +
+		"self-update: progress=55% operation=\"building fak candidate\" heartbeat=true\n" +
+		"self-update: progress=55% operation=\"building fak candidate\" heartbeat=true\n"
+	if got := stderr.String(); got != want {
+		t.Fatalf("captured heartbeat mismatch\ngot:\n%s\nwant:\n%s", got, want)
+	}
 }
 
 // TestSelfUpdateShouldBuild pins the proceed decision, and in particular the case binstamp
@@ -378,7 +449,8 @@ func TestEmitSelfUpdateJSONIsOneObjectWithoutProse(t *testing.T) {
 	var stdout, stderr strings.Builder
 	selfUpdateJSON = &stdout
 	selfUpdateProgress = &stderr
-	fmt.Fprintln(selfUpdateProgress, "self-update: checking transaction")
+	resetSelfUpdateProgressForTest()
+	reportSelfUpdateProgress(82, "installing verified binaries")
 	emitSelfUpdateOutcome(outcomeBusy, "bin/fak", "single-flight lock held")
 	if strings.Count(stdout.String(), "\n") != 1 {
 		t.Fatalf("stdout must contain exactly one JSON line: %q", stdout.String())
@@ -395,7 +467,7 @@ func TestEmitSelfUpdateJSONIsOneObjectWithoutProse(t *testing.T) {
 	if receipt.Status != "busy" {
 		t.Fatalf("status = %q", receipt.Status)
 	}
-	if got := stderr.String(); !strings.Contains(got, "checking transaction") || strings.Contains(stdout.String(), "checking transaction") {
+	if got := stderr.String(); !strings.Contains(got, "progress=82%") || !strings.Contains(got, "progress=100%") || strings.Contains(stdout.String(), "installing verified binaries") {
 		t.Fatalf("progress routing: stdout=%q stderr=%q", stdout.String(), got)
 	}
 }

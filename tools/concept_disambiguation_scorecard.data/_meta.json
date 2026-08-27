@@ -3291,6 +3291,11 @@
           "category": "incidental",
           "reason": "Typed ambient-baseline verdict used by the native performance gate; it applies the existing investigate outcome rather than introducing a new guard or gate concept.",
           "token": "AmbientInvestigate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Test seam for observing self-update gate progress; not a new guard or gate domain concept.",
+          "token": "selfUpdateGateRunner"
         }
       ],
       "exclude": [
@@ -3687,6 +3692,7 @@
         "runRegressionSuite",
         "saveGuardSelfTightenOverlay",
         "selectorGateway",
+        "selfUpdateGateRunner",
         "semanticGate",
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
@@ -12052,6 +12058,11 @@
           "category": "incidental",
           "reason": "specific CLI renderer, not a reusable render-materialization concept",
           "token": "renderSessionJournalAudit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Narrow trajectory-audit compact presentation helper; no new render/materialize domain concept.",
+          "token": "renderauditdistributioncompact"
         }
       ],
       "id": "render-materialize",
@@ -12133,6 +12144,7 @@
         "renderValidate",
         "renderVelocityLeg",
         "renderWorkpattern",
+        "renderauditdistributioncompact",
         "rendercanonicalentry",
         "rendered",
         "renderidentitypage",
