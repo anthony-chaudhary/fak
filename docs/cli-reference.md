@@ -745,6 +745,26 @@ advisory visibility only: it neither grants a lease nor detects overlap between 
 spellings. Omit `--public-safe-key-file` only for a coordination issue whose readers may see
 the raw holder and tree values.
 
+Successful `acquire`, `renew`, and `release` operations can post this public-safe record
+ambiently. This is opt-in and configured only through environment/configuration (never a
+secret command-line value):
+
+```sh
+export FAK_LEASEREF_ANNOUNCE=on
+export FAK_LEASEREF_ANNOUNCE_ISSUE=123
+export FAK_LEASEREF_ANNOUNCE_REPO=OWNER/REPO
+export FAK_LEASEREF_ANNOUNCE_KEY_FILE=~/.config/fak/lease-announce.key
+```
+
+The key-file variable names a file; the key itself must not be placed in argv, environment,
+JSON, logs, issue comments, or the repository. The default/unset state is explicitly
+**disabled**. Set `FAK_LEASEREF_ANNOUNCE=offline` to explicitly suppress the network edge;
+a missing/unreadable/empty key is reported explicitly and no comment is attempted. A `gh`
+post failure emits only a sanitized warning and can never reverse, mask, or change the exit
+status of the already-successful local lease operation. Comments expose transition timing,
+generation, TTL, action, and scope count as described above, but no raw IDs, holder names,
+paths, key, repository target, or key-file path.
+
 `audit` is the read-only counterpart of `reap`: it classifies every lease live-vs-expired and
 emits the `fak garden` control-pane envelope (`ok`/`verdict`/`reason`, `verdict ACTION` when an
 expired lease lingers) **without deleting anything**. Keeping the report (`audit`) and the

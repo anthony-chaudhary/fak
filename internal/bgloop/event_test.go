@@ -1,4 +1,4 @@
-package bgloop
+package bgloop_test
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+
+	. "github.com/anthony-chaudhary/fak/internal/bgloop"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/dormancy"
@@ -26,7 +28,7 @@ func TestScheduleWakeCohortSpreadsHundredWithoutRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	window := 10 * time.Second
-	scheduler := EventScheduler{RegistryPath: path, Clock: eventFakeClock{now: now}, JitterWindow: window}
+	scheduler := EventScheduler{RegistryPath: path, Store: loopmgr.BGLoopStore{}, Clock: eventFakeClock{now: now}, JitterWindow: window}
 	deadlines, err := scheduler.ScheduleWakeCohort(ids, now)
 	if err != nil {
 		t.Fatal(err)
@@ -63,10 +65,10 @@ func TestAuthenticatedEventReconstitutesDormantLoopThroughGate(t *testing.T) {
 	}
 	ranGate, admittedRuntime, fired := false, false, false
 	gate := rehydrate.NewGate(rehydrate.NewRungAt(rehydrate.StalePlan, dormancy.Cold, func(context.Context) rehydrate.Verdict { ranGate = true; return rehydrate.Clear() }))
-	scheduler := EventScheduler{RegistryPath: path, Gate: gate, Clock: eventFakeClock{now: time.Now()}, Admit: func(_ context.Context, req WakeRequest) (func(), error) {
+	scheduler := EventScheduler{RegistryPath: path, Gate: rehydrate.BGLoopGate{Gate: gate}, Store: loopmgr.BGLoopStore{}, Clock: eventFakeClock{now: time.Now()}, Admit: func(_ context.Context, req WakeRequest) (func(), error) {
 		admittedRuntime = req.Cause == "authenticated_event" && req.Principal == "event:source"
 		return nil, nil
-	}, Fire: func(_ context.Context, job loopmgr.Job) error { fired = job.JobID() == "dormant"; return nil }}
+	}, Fire: func(_ context.Context, job Job) error { fired = job.JobID() == "dormant"; return nil }}
 	admission, err := scheduler.DeliverEvent(context.Background(), Event{JobID: "dormant", Principal: "event:source", SignatureVerified: true, Horizon: dormancy.Cold})
 	if err != nil {
 		t.Fatal(err)
@@ -84,15 +86,15 @@ func TestEventWakeRejectsUnauthenticatedOrRehydrationRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	fired := false
-	scheduler := EventScheduler{RegistryPath: path, Fire: func(context.Context, loopmgr.Job) error { fired = true; return nil }}
+	scheduler := EventScheduler{RegistryPath: path, Store: loopmgr.BGLoopStore{}, Fire: func(context.Context, Job) error { fired = true; return nil }}
 	if _, err := scheduler.DeliverEvent(context.Background(), Event{JobID: "dormant"}); !errors.Is(err, ErrUnauthenticatedEvent) {
 		t.Fatalf("error=%v, want unauthenticated", err)
 	}
-	scheduler.Gate = rehydrate.NewGate(rehydrate.NewRungAt(rehydrate.StalePlan, dormancy.Cold, func(context.Context) rehydrate.Verdict {
+	scheduler.Gate = rehydrate.BGLoopGate{Gate: rehydrate.NewGate(rehydrate.NewRungAt(rehydrate.StalePlan, dormancy.Cold, func(context.Context) rehydrate.Verdict {
 		return rehydrate.Refuse(rehydrate.StalePlan, "policy drift")
-	}))
+	}))}
 	admission, err := scheduler.DeliverEvent(context.Background(), Event{JobID: "dormant", Principal: "event:source", SignatureVerified: true, Horizon: dormancy.Cold})
-	if err == nil || admission.Admitted || admission.RefusedBy != rehydrate.StalePlan || fired {
+	if err == nil || admission.Admitted || admission.RefusedBy != string(rehydrate.StalePlan) || fired {
 		t.Fatalf("admission=%+v err=%v fired=%v", admission, err, fired)
 	}
 }

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-
-	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 )
 
 // Clock is the time boundary used by durable wake scheduling. Tests can advance
@@ -24,7 +22,7 @@ func (WallClock) Now() time.Time                         { return time.Now() }
 func (WallClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // WakeFunc reconstitutes one persisted loop when its durable alarm becomes due.
-type WakeFunc func(context.Context, loopmgr.Job) error
+type WakeFunc func(context.Context, Job) error
 
 // DurableScheduler stores alarms in loopmgr's registry rather than holding a
 // sleeping goroutine per loop. A new scheduler over the same registry re-arms
@@ -33,40 +31,31 @@ type DurableScheduler struct {
 	path  string
 	clock Clock
 	wake  WakeFunc
+	store RegistryStore
 	mu    sync.Mutex
 }
 
-func NewDurableScheduler(path string, clock Clock, wake WakeFunc) (*DurableScheduler, error) {
+func NewDurableScheduler(path string, clock Clock, store RegistryStore, wake WakeFunc) (*DurableScheduler, error) {
 	if clock == nil {
 		clock = WallClock{}
+	}
+	if store == nil {
+		return nil, errors.New("durable registry store is required")
 	}
 	if wake == nil {
 		return nil, errors.New("durable wake callback is required")
 	}
-	if _, err := loopmgr.LoadRegistry(path); err != nil {
+	if err := store.Validate(path); err != nil {
 		return nil, err
 	}
-	return &DurableScheduler{path: path, clock: clock, wake: wake}, nil
+	return &DurableScheduler{path: path, clock: clock, wake: wake, store: store}, nil
 }
 
 // SleepUntil atomically records an absolute wake deadline on an existing loop.
-func (s *DurableScheduler) SleepUntil(jobID string, at time.Time, duty *loopmgr.DutyCycle) error {
+func (s *DurableScheduler) SleepUntil(jobID string, at time.Time, duty DutyCycle) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, err := loopmgr.LoadRegistry(s.path)
-	if err != nil {
-		return err
-	}
-	job, ok := r.Get(jobID)
-	if !ok {
-		return fmt.Errorf("loop registry has no job %q", jobID)
-	}
-	job.WakeAtUnixNano = at.UTC().UnixNano()
-	job.Duty = duty
-	if err := r.Put(job, s.clock.Now()); err != nil {
-		return err
-	}
-	return loopmgr.SaveRegistry(s.path, r)
+	return s.store.SetWake(s.path, jobID, at, duty, s.clock.Now())
 }
 
 // Poll re-arms persisted alarms, firing every due alarm at most once. A due
@@ -74,43 +63,33 @@ func (s *DurableScheduler) SleepUntil(jobID string, at time.Time, duty *loopmgr.
 func (s *DurableScheduler) Poll(ctx context.Context) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, err := loopmgr.LoadRegistry(s.path)
+	wakes, err := s.store.ArmedWakes(s.path)
 	if err != nil {
 		return 0, err
 	}
 	now := s.clock.Now().UTC()
 	fired := 0
-	changed := false
-	for _, job := range r.ArmedJobs() {
-		if job.WakeAtUnixNano == 0 || now.Before(time.Unix(0, job.WakeAtUnixNano)) {
+	for _, wake := range wakes {
+		if wake.WakeAt.IsZero() || now.Before(wake.WakeAt) {
 			continue
 		}
-		if job.Duty != nil && !job.Duty.Active(now) {
-			next, err := job.Duty.NextOn(now)
+		if wake.Duty != nil && !wake.Duty.Active(now) {
+			next, err := wake.Duty.NextOn(now)
 			if err != nil {
-				return fired, fmt.Errorf("job %q duty cycle: %w", job.JobID(), err)
+				return fired, fmt.Errorf("job %q duty cycle: %w", wake.Job.JobID(), err)
 			}
-			job.WakeAtUnixNano = next.UnixNano()
-			if err := r.Put(job, now); err != nil {
+			if err := s.store.MoveWake(s.path, wake.Job.JobID(), next, now); err != nil {
 				return fired, err
 			}
-			changed = true
 			continue
 		}
-		if err := s.wake(ctx, job); err != nil {
-			return fired, fmt.Errorf("wake job %q: %w", job.JobID(), err)
+		if err := s.wake(ctx, wake.Job); err != nil {
+			return fired, fmt.Errorf("wake job %q: %w", wake.Job.JobID(), err)
 		}
-		job.WakeAtUnixNano = 0
-		if err := r.Put(job, now); err != nil {
+		if err := s.store.ClearWake(s.path, wake.Job.JobID(), now); err != nil {
 			return fired, err
 		}
 		fired++
-		changed = true
-	}
-	if changed {
-		if err := loopmgr.SaveRegistry(s.path, r); err != nil {
-			return fired, err
-		}
 	}
 	return fired, nil
 }
@@ -123,18 +102,17 @@ func (s *DurableScheduler) Run(ctx context.Context) error {
 		if _, err := s.Poll(ctx); err != nil {
 			return err
 		}
-		r, err := loopmgr.LoadRegistry(s.path)
+		wakes, err := s.store.ArmedWakes(s.path)
 		if err != nil {
 			return err
 		}
 		var next time.Time
-		for _, job := range r.ArmedJobs() {
-			if job.WakeAtUnixNano == 0 {
+		for _, wake := range wakes {
+			if wake.WakeAt.IsZero() {
 				continue
 			}
-			at := time.Unix(0, job.WakeAtUnixNano)
-			if next.IsZero() || at.Before(next) {
-				next = at
+			if next.IsZero() || wake.WakeAt.Before(next) {
+				next = wake.WakeAt
 			}
 		}
 		if next.IsZero() {

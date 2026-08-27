@@ -4,18 +4,16 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
-
-	"github.com/anthony-chaudhary/fak/internal/snapshot"
 )
 
 func TestQuestionEffectBoundaryReplay(t *testing.T) {
-	shown := snapshot.QuestionState{
+	shown := QuestionState{
 		Question:          "Approve deployment?",
 		RelevantEvidence:  []byte("artifact=abc"),
 		GoverningRevision: "policy-r7",
 		AuthorityTenure:   "oncall-42",
 	}
-	receipt, err := snapshot.NewQuestionReceipt(shown)
+	receipt, err := NewQuestionReceipt(shown)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +22,7 @@ func TestQuestionEffectBoundaryReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changed := func(update func(*snapshot.QuestionState)) snapshot.QuestionState {
+	changed := func(update func(*QuestionState)) QuestionState {
 		state := shown
 		state.RelevantEvidence = append([]byte(nil), shown.RelevantEvidence...)
 		update(&state)
@@ -33,19 +31,19 @@ func TestQuestionEffectBoundaryReplay(t *testing.T) {
 	cases := []struct {
 		name    string
 		receipt []byte
-		current snapshot.QuestionState
-		want    snapshot.ReceiptCheck
+		current QuestionState
+		want    ReceiptCheck
 	}{
-		{"missing", nil, shown, snapshot.ReceiptCheck{Refusal: snapshot.ReceiptMissing, Cause: string(QuestionReceiptOmitted)}},
-		{"malformed", []byte(`{"version":1}`), shown, snapshot.ReceiptCheck{Refusal: snapshot.ReceiptMalformed, Cause: string(QuestionReceiptShapeInvalid)}},
-		{"question changed", valid, changed(func(s *snapshot.QuestionState) { s.Question = "Approve another deployment?" }), snapshot.ReceiptCheck{Refusal: snapshot.ReceiptStale, Cause: string(QuestionReceiptQuestionChanged)}},
-		{"evidence changed", valid, changed(func(s *snapshot.QuestionState) { s.RelevantEvidence = []byte("artifact=def") }), snapshot.ReceiptCheck{Refusal: snapshot.ReceiptStale, Cause: string(QuestionReceiptEvidenceChanged)}},
-		{"governing input changed", valid, changed(func(s *snapshot.QuestionState) { s.GoverningRevision = "policy-r8" }), snapshot.ReceiptCheck{Refusal: snapshot.ReceiptStale, Cause: string(QuestionReceiptGoverningInputChanged)}},
-		{"authority changed", valid, changed(func(s *snapshot.QuestionState) { s.AuthorityTenure = "oncall-43" }), snapshot.ReceiptCheck{Refusal: snapshot.ReceiptStale, Cause: string(QuestionReceiptAuthorityChanged)}},
-		{"unchanged", valid, shown, snapshot.ReceiptCheck{Accepted: true}},
+		{"missing", nil, shown, ReceiptCheck{Refusal: ReceiptMissing, Cause: string(QuestionReceiptOmitted)}},
+		{"malformed", []byte(`{"version":1}`), shown, ReceiptCheck{Refusal: ReceiptMalformed, Cause: string(QuestionReceiptShapeInvalid)}},
+		{"question changed", valid, changed(func(s *QuestionState) { s.Question = "Approve another deployment?" }), ReceiptCheck{Refusal: ReceiptStale, Cause: string(QuestionReceiptQuestionChanged)}},
+		{"evidence changed", valid, changed(func(s *QuestionState) { s.RelevantEvidence = []byte("artifact=def") }), ReceiptCheck{Refusal: ReceiptStale, Cause: string(QuestionReceiptEvidenceChanged)}},
+		{"governing input changed", valid, changed(func(s *QuestionState) { s.GoverningRevision = "policy-r8" }), ReceiptCheck{Refusal: ReceiptStale, Cause: string(QuestionReceiptGoverningInputChanged)}},
+		{"authority changed", valid, changed(func(s *QuestionState) { s.AuthorityTenure = "oncall-43" }), ReceiptCheck{Refusal: ReceiptStale, Cause: string(QuestionReceiptAuthorityChanged)}},
+		{"unchanged", valid, shown, ReceiptCheck{Accepted: true}},
 		// Queue depth, clock, and other external state are intentionally not
 		// inputs to QuestionState, so their changes cannot invalidate a receipt.
-		{"unrelated external state changed", valid, shown, snapshot.ReceiptCheck{Accepted: true}},
+		{"unrelated external state changed", valid, shown, ReceiptCheck{Accepted: true}},
 	}
 
 	for _, consumer := range []string{"interactive", "headless"} {
@@ -84,7 +82,7 @@ func TestQuestionEffectBoundaryReplay(t *testing.T) {
 }
 
 func TestQuestionEffectBoundaryInvalidCurrentStateRefusesWithoutEffect(t *testing.T) {
-	receipt, err := snapshot.NewQuestionReceipt(snapshot.QuestionState{
+	receipt, err := NewQuestionReceipt(QuestionState{
 		Question: "question", GoverningRevision: "policy", AuthorityTenure: "authority",
 	})
 	if err != nil {
@@ -97,8 +95,8 @@ func TestQuestionEffectBoundaryInvalidCurrentStateRefusesWithoutEffect(t *testin
 
 	var boundary QuestionEffectBoundary
 	effects := 0
-	got := boundary.Apply(raw, snapshot.QuestionState{}, func() { effects++ })
-	want := snapshot.ReceiptCheck{Refusal: snapshot.ReceiptMalformed, Cause: string(QuestionReceiptOrStateInvalid)}
+	got := boundary.Apply(raw, QuestionState{}, func() { effects++ })
+	want := ReceiptCheck{Refusal: ReceiptMalformed, Cause: string(QuestionReceiptOrStateInvalid)}
 	if got != want || effects != 0 {
 		t.Fatalf("check = %+v, effects = %d; want %+v and zero", got, effects, want)
 	}
