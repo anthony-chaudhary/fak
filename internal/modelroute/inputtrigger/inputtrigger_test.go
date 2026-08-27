@@ -1,6 +1,10 @@
 package inputtrigger
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // TestClassify is the table the classifier's contract lives in: every arm, the empty
 // turn, the mixed turns, the precedence between arms, and — the load-bearing half — the
@@ -150,5 +154,75 @@ func TestClassifyOnlyEverAnswersAKnownTrigger(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestAdmitTurnImmutableReceiptAndReplay(t *testing.T) {
+	metadata := map[string]string{
+		"attempt":       "2",
+		"authorization": "Bearer must-never-reach-a-receipt",
+	}
+	trigger, err := AdmitTurn(
+		[]Message{{Role: RoleUser, Content: "retry this turn"}},
+		&Explicit{
+			Classification: UserMessage,
+			Provenance:     ProvenanceRetry,
+			Metadata:       metadata,
+		},
+	)
+	if err != nil {
+		t.Fatalf("AdmitTurn: %v", err)
+	}
+	metadata["attempt"] = "999"
+	metadata["late"] = "mutation"
+	raw, err := json.Marshal(trigger)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, secret := range []string{"Bearer must-never", "authorization", "999", "late", "retry this turn"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("redacted trigger receipt leaked %q: %s", secret, raw)
+		}
+	}
+	replayed, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if replayed.Classification() != UserMessage ||
+		replayed.Provenance() != ProvenanceRetry ||
+		replayed.MetadataCount() != 2 {
+		t.Fatalf("replayed trigger = %q/%q metadata=%d",
+			replayed.Classification(), replayed.Provenance(), replayed.MetadataCount())
+	}
+}
+
+func TestAdmitTurnCompatibilityAndInvalidExplicit(t *testing.T) {
+	compat, err := AdmitTurn([]Message{{Role: RoleTool, ToolCallID: "call_1"}}, nil)
+	if err != nil {
+		t.Fatalf("compatibility admission: %v", err)
+	}
+	if compat.Classification() != ToolResult || compat.Provenance() != ProvenanceCompatibilityMissing {
+		t.Fatalf("compatibility trigger = %q/%q", compat.Classification(), compat.Provenance())
+	}
+
+	for name, explicit := range map[string]*Explicit{
+		"unknown classification": {
+			Classification: "tool-result",
+			Provenance:     ProvenanceExplicit,
+		},
+		"classification mismatch": {
+			Classification: ToolResult,
+			Provenance:     ProvenanceExplicit,
+		},
+		"invalid provenance": {
+			Classification: UserMessage,
+			Provenance:     "trusted",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := AdmitTurn([]Message{{Role: RoleUser, Content: "hello"}}, explicit); err == nil {
+				t.Fatal("invalid explicit trigger admitted")
+			}
+		})
 	}
 }

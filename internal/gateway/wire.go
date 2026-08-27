@@ -7,6 +7,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/modelroute/inputtrigger"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 	"github.com/anthony-chaudhary/fak/internal/toolshape"
@@ -377,6 +378,9 @@ type ChatRequest struct {
 type FakRequestExt struct {
 	NativeInferenceReceipt bool `json:"native_inference_receipt,omitempty"`
 	NativeDecodeTokenIDs   bool `json:"native_decode_token_ids,omitempty"`
+	// InputTrigger is validated against the real message envelope before the
+	// gateway creates the immutable value used by request routing.
+	InputTrigger *inputtrigger.Explicit `json:"input_trigger,omitempty"`
 }
 
 func (r ChatRequest) GuidedDecodeFields() map[string]json.RawMessage {
@@ -573,6 +577,7 @@ type FakExt struct {
 	// NativeInferenceReceipt is emitted only for an explicitly requested,
 	// successfully measured in-kernel turn.
 	NativeInferenceReceipt *agent.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
+	InputTriggerRoute      *InputTriggerRouteReceipt     `json:"input_trigger_route,omitempty"`
 	// NativeDecodeTokenIDs is emitted only alongside an explicitly requested
 	// native decode trace and carries the ordered committed token IDs.
 	NativeDecodeTokenIDs *agent.NativeDecodeTokenIDs `json:"native_decode_token_ids,omitempty"`

@@ -29,7 +29,16 @@
 // model-route spine, and the agent loop can all share the one taxonomy.
 package inputtrigger
 
-import "strings"
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+	"unicode/utf8"
+)
 
 // Trigger is the closed, typed vocabulary of turn-input shapes. It is CLOSED
 // deliberately: a new shape is a new constant plus a Classify arm plus a test, never a
@@ -165,4 +174,206 @@ func Classify(turn []Message) Trigger {
 		return SystemOnly
 	}
 	return Other
+}
+
+// Schema is the immutable ingress-trigger receipt schema.
+const Schema = "fak.input-trigger/1"
+
+const (
+	MaxMetadataEntries  = 8
+	MaxMetadataKeyBytes = 32
+	MaxMetadataValBytes = 128
+)
+
+// Provenance names how the gateway learned the causal trigger. It is closed so
+// route receipts have bounded cardinality and cannot become free-text log
+// channels.
+type Provenance string
+
+const (
+	ProvenanceExplicit             Provenance = "caller_explicit"
+	ProvenanceRetry                Provenance = "retry"
+	ProvenanceCompatibilityMissing Provenance = "compatibility_missing"
+)
+
+// KnownProvenance reports whether p is in the closed ingress provenance set.
+func KnownProvenance(p Provenance) bool {
+	switch p {
+	case ProvenanceExplicit, ProvenanceRetry, ProvenanceCompatibilityMissing:
+		return true
+	}
+	return false
+}
+
+// Explicit is the untrusted wire form accepted from a fak-aware caller.
+type Explicit struct {
+	Classification Trigger           `json:"classification"`
+	Provenance     Provenance        `json:"provenance"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+}
+
+// UnmarshalJSON rejects additive guesses at the explicit trust boundary.
+func (e *Explicit) UnmarshalJSON(data []byte) error {
+	type explicitWire Explicit
+	var wire explicitWire
+	if err := decodeStrict(data, &wire); err != nil {
+		return fmt.Errorf("input_trigger: %w", err)
+	}
+	decoded := Explicit(wire)
+	if err := validateExplicit(decoded); err != nil {
+		return err
+	}
+	*e = decoded
+	return nil
+}
+
+// InputTrigger is the validated immutable value created at gateway ingress. All
+// fields are unexported and caller metadata is reduced to a bounded count.
+type InputTrigger struct {
+	classification Trigger
+	provenance     Provenance
+	metadataCount  int
+}
+
+// AdmitTurn classifies the turn exactly once. A nil explicit value is the
+// compatibility path; an explicit classification must match the observed
+// envelope, including for retry provenance.
+func AdmitTurn(turn []Message, explicit *Explicit) (InputTrigger, error) {
+	classification := Classify(turn)
+	if explicit == nil {
+		return InputTrigger{
+			classification: classification,
+			provenance:     ProvenanceCompatibilityMissing,
+		}, nil
+	}
+	if err := validateExplicit(*explicit); err != nil {
+		return InputTrigger{}, err
+	}
+	if explicit.Classification != classification {
+		return InputTrigger{}, errors.New("input_trigger: explicit classification does not match ingress classification")
+	}
+	return InputTrigger{
+		classification: classification,
+		provenance:     explicit.Provenance,
+		metadataCount:  len(explicit.Metadata),
+	}, nil
+}
+
+func (t InputTrigger) Classification() Trigger { return t.classification }
+func (t InputTrigger) Provenance() Provenance  { return t.provenance }
+func (t InputTrigger) MetadataCount() int      { return t.metadataCount }
+func (t InputTrigger) Validate() error {
+	if !Known(t.classification) {
+		return errors.New("input_trigger: unknown classification")
+	}
+	if !KnownProvenance(t.provenance) {
+		return errors.New("input_trigger: unknown provenance")
+	}
+	if t.metadataCount < 0 || t.metadataCount > MaxMetadataEntries {
+		return fmt.Errorf("input_trigger: metadata count %d exceeds limit %d", t.metadataCount, MaxMetadataEntries)
+	}
+	if t.provenance == ProvenanceCompatibilityMissing && t.metadataCount != 0 {
+		return errors.New("input_trigger: compatibility-missing trigger cannot carry metadata")
+	}
+	return nil
+}
+
+type metadataReceipt struct {
+	Entries  int  `json:"entries"`
+	Redacted bool `json:"redacted"`
+}
+
+type triggerReceipt struct {
+	Schema         string           `json:"schema"`
+	Classification Trigger          `json:"classification"`
+	Provenance     Provenance       `json:"provenance"`
+	Metadata       *metadataReceipt `json:"metadata,omitempty"`
+}
+
+// MarshalJSON emits only the closed classification/provenance plus a redacted
+// metadata count.
+func (t InputTrigger) MarshalJSON() ([]byte, error) {
+	if err := t.Validate(); err != nil {
+		return nil, err
+	}
+	wire := triggerReceipt{
+		Schema:         Schema,
+		Classification: t.classification,
+		Provenance:     t.provenance,
+	}
+	if t.metadataCount > 0 {
+		wire.Metadata = &metadataReceipt{Entries: t.metadataCount, Redacted: true}
+	}
+	return json.Marshal(wire)
+}
+
+// Parse validates the bounded receipt form during replay.
+func Parse(data []byte) (InputTrigger, error) {
+	var wire triggerReceipt
+	if err := decodeStrict(data, &wire); err != nil {
+		return InputTrigger{}, fmt.Errorf("input_trigger: parse receipt: %w", err)
+	}
+	if wire.Schema != Schema {
+		return InputTrigger{}, errors.New("input_trigger: unexpected receipt schema")
+	}
+	t := InputTrigger{classification: wire.Classification, provenance: wire.Provenance}
+	if wire.Metadata != nil {
+		if wire.Metadata.Entries <= 0 || !wire.Metadata.Redacted {
+			return InputTrigger{}, errors.New("input_trigger: receipt metadata must be a positive redacted count")
+		}
+		t.metadataCount = wire.Metadata.Entries
+	}
+	if err := t.Validate(); err != nil {
+		return InputTrigger{}, err
+	}
+	return t, nil
+}
+
+func validateExplicit(e Explicit) error {
+	if !Known(e.Classification) {
+		return errors.New("input_trigger: unknown explicit classification")
+	}
+	switch e.Provenance {
+	case ProvenanceExplicit, ProvenanceRetry:
+	default:
+		return errors.New("input_trigger: invalid explicit provenance")
+	}
+	return validateMetadata(e.Metadata)
+}
+
+func validateMetadata(metadata map[string]string) error {
+	if len(metadata) > MaxMetadataEntries {
+		return fmt.Errorf("input_trigger: metadata has %d entries, limit is %d", len(metadata), MaxMetadataEntries)
+	}
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for i, key := range keys {
+		value := metadata[key]
+		if key == "" || !utf8.ValidString(key) || len(key) > MaxMetadataKeyBytes {
+			return fmt.Errorf("input_trigger: metadata key %d is empty, invalid UTF-8, or exceeds %d bytes", i+1, MaxMetadataKeyBytes)
+		}
+		if !utf8.ValidString(value) || len(value) > MaxMetadataValBytes {
+			return fmt.Errorf("input_trigger: metadata value %d is invalid UTF-8 or exceeds %d bytes", i+1, MaxMetadataValBytes)
+		}
+	}
+	return nil
+}
+
+func decodeStrict(data []byte, target any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(target); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values are not allowed")
+		}
+		return err
+	}
+	return nil
 }

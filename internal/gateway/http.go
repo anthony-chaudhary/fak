@@ -537,6 +537,21 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	if rejectInvalidSampling(w, validateSampling(req)) {
 		return
 	}
+	// Stamp the causal input on the untouched wire envelope before admission
+	// transforms, request routing, planner selection, or model execution.
+	inputTriggerRoute, routedModel, err := s.admitAndRouteChatInputTrigger(req)
+	if err != nil {
+		if errors.Is(err, errInvalidExplicitInputTrigger) {
+			writeErr(w, http.StatusBadRequest, "invalid input_trigger")
+			return
+		}
+		s.logf("gateway: input-trigger request route failed: %v", err)
+		writeErr(w, http.StatusInternalServerError, "input-trigger request routing failed")
+		return
+	}
+	if routedModel != "" {
+		req.Model = routedModel
+	}
 	receiptRequested := req.Fak != nil && req.Fak.NativeInferenceReceipt
 	decodeTraceRequested := req.FakDecodeTrace
 	decodeTokenIDsRequested := req.Fak != nil && req.Fak.NativeDecodeTokenIDs
@@ -596,7 +611,7 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// still synthesizes a stream for stream=true. streamChatLive returns false having
 	// written nothing when it cannot stream, so the fall-through is safe.
 	if req.Stream {
-		if s.streamChatLive(ctx, w, req, reqModel, reqTrace, sessionTurn, resultAdmissions) {
+		if s.streamChatLive(ctx, w, req, reqModel, reqTrace, sessionTurn, resultAdmissions, inputTriggerRoute) {
 			return
 		}
 	}
@@ -699,6 +714,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, "configured planner cannot produce a native inference receipt")
 		return
 	}
+	if inputTriggerRoute != nil && comp.NativeInference != nil &&
+		(comp.NativeInference.Engine != TurnIngressEngine ||
+			comp.NativeInference.Model != TurnIngressModel ||
+			comp.NativeInference.FallbackActive) {
+		s.logf("gateway: input-trigger route execution identity mismatch")
+		writeErr(w, http.StatusBadGateway, "fak-native route execution identity mismatch")
+		return
+	}
 	if decodeTraceRequested && comp.DecodeTrace == nil {
 		writeErr(w, http.StatusBadGateway, "fak-native planner did not produce a decode trace")
 		return
@@ -726,8 +749,11 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Usage:   comp.Usage,
 	}
 	redactions := wireRedactionsFrom(comp.PreSendRedactionRecords)
-	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 {
+	if len(adjs) > 0 || len(resultAdmissions) > 0 || len(redactions) > 0 || inputTriggerRoute != nil {
 		resp.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, Redactions: redactions}
+	}
+	if inputTriggerRoute != nil {
+		resp.Fak.InputTriggerRoute = inputTriggerRoute
 	}
 	if comp.NativeInference != nil {
 		if resp.Fak == nil {

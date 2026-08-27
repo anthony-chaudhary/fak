@@ -34,7 +34,7 @@ import (
 // error before any byte hit the wire); false when the configured planner cannot
 // stream this wire, in which case it has written NOTHING and the caller falls back to
 // the buffered+synthesized path.
-func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission) bool {
+func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req ChatRequest, reqModel, reqTrace string, sessionTurn servedSessionTurn, resultAdmissions []ResultAdmission, inputTriggerRoute *InputTriggerRouteReceipt) bool {
 	sp, ok := s.planner.(agent.StreamingPlanner)
 	if !ok || !sp.StreamingSupported() {
 		return false
@@ -212,8 +212,8 @@ func (s *Server) streamChatLive(ctx context.Context, w http.ResponseWriter, req 
 	}
 	usage := comp.Usage
 	final := chunk(ChatDelta{}, &finish, &usage)
-	if len(adjs) > 0 || len(resultAdmissions) > 0 {
-		final.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions}
+	if len(adjs) > 0 || len(resultAdmissions) > 0 || inputTriggerRoute != nil {
+		final.Fak = &FakExt{Adjudications: adjs, ResultAdmissions: resultAdmissions, InputTriggerRoute: inputTriggerRoute}
 	}
 	_ = writeSSEData(w, final)
 	writeSSEDone(w, flusher)
