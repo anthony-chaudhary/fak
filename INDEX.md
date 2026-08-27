@@ -987,6 +987,7 @@ These reader-facing references complement the curated paths above. They are grou
 ### docs / research
 
 - [agent customization index](docs/research/agent-customization-index.md)
+- [Codex UserPromptSubmit live dogfood 2026 08 26](docs/notes/CODEX-USERPROMPTSUBMIT-DOGFOOD-2026-08-26.md)
 - [agent skill portability 2026 08 14](docs/notes/agent-skill-portability-2026-08-14.md)
 - [agent zero study 2026 08 18](docs/notes/agent-zero-study-2026-08-18.md)
 - [managed context cognitive load baseline 2026 08 13](docs/notes/managed-context-cognitive-load-baseline-2026-08-13.md)
