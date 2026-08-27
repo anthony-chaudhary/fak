@@ -70,6 +70,7 @@ const (
 	guardCodexCLIUsageReason         = "CODEX_CLI_USAGE"
 	guardCodexInvalidJSONReason      = "CODEX_INVALID_JSON"
 	guardChildStderrCaptureLimit     = 64 << 10
+	guardChildStdoutCaptureLimit     = 64 << 10
 )
 
 // guardChildStderrCapture preserves the child's stderr stream while retaining a bounded prefix
@@ -125,6 +126,101 @@ func guardCaptureChildStderr(child *exec.Cmd, agentName string) *guardChildStder
 	return capture
 }
 
+// guardChildStdoutCapture preserves the complete JSONL stream while retaining only its bounded
+// tail for terminal-event classification. Codex writes turn.failed after all preceding events,
+// so a prefix would lose the only actionable event in a long turn. As with stderr, Write delegates
+// first and records only the bytes accepted by the original sink.
+type guardChildStdoutCapture struct {
+	mu   sync.Mutex
+	dst  io.Writer
+	data []byte
+}
+
+func newGuardChildStdoutCapture(dst io.Writer) *guardChildStdoutCapture {
+	if dst == nil {
+		dst = io.Discard
+	}
+	return &guardChildStdoutCapture{dst: dst}
+}
+
+func (c *guardChildStdoutCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n, err := c.dst.Write(p)
+	if n <= 0 {
+		return n, err
+	}
+	accepted := p[:n]
+	if len(accepted) >= guardChildStdoutCaptureLimit {
+		c.data = append(c.data[:0], accepted[len(accepted)-guardChildStdoutCaptureLimit:]...)
+	} else {
+		overflow := len(c.data) + len(accepted) - guardChildStdoutCaptureLimit
+		if overflow > 0 {
+			copy(c.data, c.data[overflow:])
+			c.data = c.data[:len(c.data)-overflow]
+		}
+		c.data = append(c.data, accepted...)
+	}
+	return n, err
+}
+
+func (c *guardChildStdoutCapture) String() string {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return string(c.data)
+}
+
+// guardIsCodexExecJSONCommand keys capture off semantic argv, not the executable name alone.
+// Codex root configuration overrides may precede the exact exec subcommand; every other root
+// command and interactive shape keeps its original stdout writer untouched.
+func guardIsCodexExecJSONCommand(command []string, agentName string) bool {
+	if len(command) == 0 || guardAgentBaseName(agentName) != "codex" || guardAgentBaseName(command[0]) != "codex" {
+		return false
+	}
+	args := command[1:]
+	execAt := -1
+	for i := 0; i < len(args); {
+		switch arg := args[i]; {
+		case arg == "exec":
+			execAt = i
+			i = len(args)
+		case arg == "-c" || arg == "--config" || arg == "--enable" || arg == "--disable":
+			if i+1 >= len(args) {
+				return false
+			}
+			i += 2
+		case strings.HasPrefix(arg, "--config=") || strings.HasPrefix(arg, "--enable=") || strings.HasPrefix(arg, "--disable="):
+			i++
+		default:
+			return false
+		}
+	}
+	if execAt < 0 {
+		return false
+	}
+	for _, arg := range args[execAt+1:] {
+		if arg == "--" {
+			return false
+		}
+		if arg == "--json" {
+			return true
+		}
+	}
+	return false
+}
+
+func guardCaptureChildStdout(child *exec.Cmd, command []string, agentName string) *guardChildStdoutCapture {
+	if child == nil || !guardIsCodexExecJSONCommand(command, agentName) {
+		return nil
+	}
+	capture := newGuardChildStdoutCapture(child.Stdout)
+	child.Stdout = capture
+	return capture
+}
+
 // guardIsCodexCLIUsageFailure recognizes only the observed Codex exec parse contract: a real
 // exit 2 accompanied by both its unexpected-argument diagnostic and exact usage line. Exit 2 by
 // itself remains a generic crash because Go panics and unrelated commands can use the same code.
@@ -154,7 +250,7 @@ func guardIsCodexCLIUsageFailure(runErr error, childState *os.ProcessState, agen
 // observed in #9481: exit 1 plus a turn.failed JSON event classified as "other" whose message
 // is the stable function-argument JSON parser diagnostic. Requiring all four fields keeps an
 // unrelated exit 1, a generic "other" error, and unstructured prose on the bounded restart path.
-func guardIsCodexInvalidJSONFailure(runErr error, childState *os.ProcessState, agentName, capturedStderr string) bool {
+func guardIsCodexInvalidJSONFailure(runErr error, childState *os.ProcessState, agentName, capturedStdout string) bool {
 	if guardAgentBaseName(agentName) != "codex" {
 		return false
 	}
@@ -169,7 +265,7 @@ func guardIsCodexInvalidJSONFailure(runErr error, childState *os.ProcessState, a
 			CodexErrorInfo string `json:"codex_error_info"`
 		} `json:"error"`
 	}
-	for _, raw := range strings.Split(capturedStderr, "\n") {
+	for _, raw := range strings.Split(capturedStdout, "\n") {
 		var event turnFailedEvent
 		if json.Unmarshal([]byte(strings.TrimSpace(raw)), &event) != nil {
 			continue
@@ -178,11 +274,29 @@ func guardIsCodexInvalidJSONFailure(runErr error, childState *os.ProcessState, a
 			continue
 		}
 		const diagnostic = "failed to parse function arguments: EOF while parsing an object at line "
-		if strings.HasPrefix(event.Error.Message, diagnostic) && strings.Contains(event.Error.Message[len(diagnostic):], " column ") {
+		if !strings.HasPrefix(event.Error.Message, diagnostic) {
+			continue
+		}
+		coordinates := strings.TrimPrefix(event.Error.Message, diagnostic)
+		line, column, ok := strings.Cut(coordinates, " column ")
+		if ok && guardPositiveDecimal(line) && guardPositiveDecimal(column) {
 			return true
 		}
 	}
 	return false
+}
+
+func guardPositiveDecimal(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	n, err := strconv.ParseUint(value, 10, 64)
+	return err == nil && n > 0
 }
 
 // guardRefuseCodexCLIUsage records one durable, typed terminal witness. The caller then enters
@@ -202,8 +316,8 @@ func guardRefuseCodexCLIUsage(runErr error, childState *os.ProcessState, agentNa
 // guardRefuseCodexInvalidJSON records only the typed terminal reason; the captured Codex event
 // remains on the original child stream and never enters the audit journal. The caller preserves
 // the original exit-1 error while stopping before generic crash-restart admission.
-func guardRefuseCodexInvalidJSON(runErr error, childState *os.ProcessState, agentName, traceID string, capturedStderr string, started time.Time, auditJournal *journal.Journal, stderr io.Writer) bool {
-	if !guardIsCodexInvalidJSONFailure(runErr, childState, agentName, capturedStderr) {
+func guardRefuseCodexInvalidJSON(runErr error, childState *os.ProcessState, agentName, traceID string, capturedStdout string, started time.Time, auditJournal *journal.Journal, stderr io.Writer) bool {
+	if !guardIsCodexInvalidJSONFailure(runErr, childState, agentName, capturedStdout) {
 		return false
 	}
 	appendGuardChildExitWitnessWithReason(auditJournal, guardAgentBaseName(agentName), traceID, runErr, childState, started, guardCodexInvalidJSONReason)
