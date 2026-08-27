@@ -66,6 +66,11 @@ func cmdModelObserve(args []string) {
 		if err := modelperfobs.WriteMarkdown(os.Stdout, s); err != nil {
 			os.Exit(1)
 		}
+	case "bandwidth":
+		if err := runModelObserveBandwidth(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "model-observe:", err)
+			os.Exit(1)
+		}
 	case "cache-state-bench":
 		if err := runModelObserveStateBench(args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "model-observe:", err)
@@ -77,6 +82,49 @@ func cmdModelObserve(args []string) {
 	}
 }
 
+func runModelObserveBandwidth(args []string) error {
+	fs := flag.NewFlagSet("model-observe bandwidth", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	input := fs.String("input", "", "read a fak-bandwidth-observation/1 capture from this JSON file")
+	output := fs.String("output", "", "write the analyzed JSON report to this path (default: stdout)")
+	pretty := fs.Bool("pretty", true, "indent JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *input == "" {
+		return fmt.Errorf("bandwidth requires --input FILE")
+	}
+	f, err := os.Open(*input)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	dec := json.NewDecoder(f)
+	dec.DisallowUnknownFields()
+	var capture modelperfobs.BandwidthCapture
+	if err := dec.Decode(&capture); err != nil {
+		return err
+	}
+	report, err := modelperfobs.AnalyzeBandwidth(capture)
+	if err != nil {
+		return err
+	}
+	w := io.Writer(os.Stdout)
+	var out *os.File
+	if *output != "" {
+		out, err = os.Create(*output)
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		w = out
+	}
+	enc := json.NewEncoder(w)
+	if *pretty {
+		enc.SetIndent("", "  ")
+	}
+	return enc.Encode(report)
+}
 func runModelObserveStateBench(args []string) error {
 	fs := flag.NewFlagSet("model-observe cache-state-bench", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -125,6 +173,7 @@ func runModelObserveStateBench(args []string) error {
 func modelObserveUsage() string {
 	return "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE]\n" +
 		"       fak model-observe report --input FILE [--format md|json]\n" +
+		"       fak model-observe bandwidth --input FILE [--output FILE --pretty=true]\n" +
 		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
 		"       fak model-observe cache-state-bench --verify FILE"
 }

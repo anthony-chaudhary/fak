@@ -55,3 +55,28 @@ func TestModelObserveStateBenchSpine(t *testing.T) {
 		t.Fatalf("cache-state report = verdict %q, arms %d", report.Verdict, len(report.Arms))
 	}
 }
+
+func TestModelObserveBandwidthJSONSpine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bandwidth.json")
+	output := filepath.Join(t.TempDir(), "report.json")
+	data := `{"schema":"fak-model-bandwidth/1","engine":"fak-native","trigger":{"symptom_window":2,"resource_window":2,"latency_threshold_ms":100,"resource_utilization":0.8},"samples":[{"phase":"decode","shape":"small","provenance":{"source":"synthetic-test","machine":"fixture-host","device":"cpu-ddr5","collector":"fixture"},"rooflines":{"theoretical_gb_s":100,"measured_sustainable_gb_s":80},"live":{"read_gb_s":70,"write_gb_s":2},"request":{"latency_ms":120,"completion_tokens":1},"device":{},"capacity":{},"transfer":{},"software":{}},{"phase":"decode","shape":"small","provenance":{"source":"synthetic-test","machine":"fixture-host","device":"cpu-ddr5","collector":"fixture"},"rooflines":{"theoretical_gb_s":100,"measured_sustainable_gb_s":80},"live":{"read_gb_s":72,"write_gb_s":2},"request":{"latency_ms":125,"completion_tokens":1},"device":{},"capacity":{},"transfer":{},"software":{}}]}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runModelObserveBandwidth([]string{"--input", path, "--output", output, "--pretty=false"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{`"schema":"fak-model-bandwidth/1"`, `"engine":"fak-native"`, `"selected_source":"measured-sustainable"`, `"write_gb_s":2`, `"transfer":{}`, `"triggered":true`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("report missing %s: %s", want, text)
+		}
+	}
+	if strings.Contains(text, `"host_to_device_gb_s":0`) {
+		t.Fatalf("unavailable transfer counter serialized as zero: %s", text)
+	}
+}
