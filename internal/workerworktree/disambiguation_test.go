@@ -1,12 +1,60 @@
 package workerworktree
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
+)
+
+func stubDisambiguationReader(fn func(repo, tree string) DisambiguationWitness) boundedReader {
+	return func(_ context.Context, repo, tree string, _ func(string)) DisambiguationWitness {
+		return fn(repo, tree)
+	}
+}
+
+type manualDeadlineContext struct {
+	done chan struct{}
+}
+
+func newManualDeadlineContext() *manualDeadlineContext {
+	return &manualDeadlineContext{done: make(chan struct{})}
+}
+
+func (c *manualDeadlineContext) Deadline() (time.Time, bool) { return time.Unix(0, 0), true }
+func (c *manualDeadlineContext) Done() <-chan struct{}       { return c.done }
+func (c *manualDeadlineContext) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+func (c *manualDeadlineContext) Value(any) any { return nil }
+func (c *manualDeadlineContext) expire()       { close(c.done) }
+
+func writeDisambiguationFixture(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", rel, err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
+	}
+}
 
 func TestVerifyAppliedDisambiguationRejectsStaleBaseCollision(t *testing.T) {
 	old := readDisambiguation
 	defer func() { readDisambiguation = old }()
 	calls := 0
-	readDisambiguation = func(repo, tree string) DisambiguationWitness {
+	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
 		calls++
 		w := DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, FamilyCoverage: map[string]float64{"loop": 100}}
 		if calls == 3 {
@@ -15,7 +63,7 @@ func TestVerifyAppliedDisambiguationRejectsStaleBaseCollision(t *testing.T) {
 			w.Detail = "duplicate canonical row collision"
 		}
 		return w
-	}
+	})
 	got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
 	if ok || got.PostApply.SemanticValid || got.PostApply.Detail == "" {
 		t.Fatalf("collision accepted: %+v", got)
@@ -25,7 +73,7 @@ func TestVerifyAppliedDisambiguationRejectsConcurrentCorpusGap(t *testing.T) {
 	old := readDisambiguation
 	defer func() { readDisambiguation = old }()
 	calls := 0
-	readDisambiguation = func(repo, tree string) DisambiguationWitness {
+	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
 		calls++
 		w := DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, CoverageDebt: 0, FamilyCoverage: map[string]float64{"loop": 100}}
 		if calls == 3 {
@@ -35,7 +83,7 @@ func TestVerifyAppliedDisambiguationRejectsConcurrentCorpusGap(t *testing.T) {
 			w.Detail = "loop: newtoken unpositioned"
 		}
 		return w
-	}
+	})
 	got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
 	if ok || got.PostApply.CoverageDebt != 1 {
 		t.Fatalf("gap accepted: %+v", got)
@@ -44,9 +92,9 @@ func TestVerifyAppliedDisambiguationRejectsConcurrentCorpusGap(t *testing.T) {
 func TestVerifyAppliedDisambiguationRecordsThreeWitnesses(t *testing.T) {
 	old := readDisambiguation
 	defer func() { readDisambiguation = old }()
-	readDisambiguation = func(repo, tree string) DisambiguationWitness {
+	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
 		return DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, FamilyCoverage: map[string]float64{"loop": 100}}
-	}
+	})
 	got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
 	if !ok || got.Before.Tree != "HEAD" || got.Worktree.Tree != "HEAD" || got.PostApply.Tree != "candidate" {
 		t.Fatalf("witnesses=%+v ok=%v", got, ok)
@@ -77,7 +125,7 @@ func TestVerifyAppliedDisambiguationFreshnessIsNonRegression(t *testing.T) {
 			old := readDisambiguation
 			defer func() { readDisambiguation = old }()
 			calls := 0
-			readDisambiguation = func(repo, tree string) DisambiguationWitness {
+			readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
 				calls++
 				w := DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, CoverageDebt: 0, FamilyCoverage: map[string]float64{"loop": 100}}
 				if calls == 1 {
@@ -87,7 +135,7 @@ func TestVerifyAppliedDisambiguationFreshnessIsNonRegression(t *testing.T) {
 					w.Fresh = tc.postFresh
 				}
 				return w
-			}
+			})
 			_, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
 			if ok != tc.wantOK {
 				t.Fatalf("freshness non-regression: got ok=%v want %v (before.Fresh=%v post.Fresh=%v)", ok, tc.wantOK, tc.beforeFresh, tc.postFresh)
@@ -121,7 +169,7 @@ func TestVerifyAppliedDisambiguationClarityIsNonRegression(t *testing.T) {
 			old := readDisambiguation
 			defer func() { readDisambiguation = old }()
 			calls := 0
-			readDisambiguation = func(repo, tree string) DisambiguationWitness {
+			readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
 				calls++
 				w := DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, CoverageDebt: 0, FamilyCoverage: map[string]float64{"loop": 100}}
 				if calls == 1 {
@@ -133,11 +181,154 @@ func TestVerifyAppliedDisambiguationClarityIsNonRegression(t *testing.T) {
 					w.ClarityDebt = tc.postClarityDebt
 				}
 				return w
-			}
+			})
 			got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
 			if ok != tc.wantOK {
 				t.Fatalf("clarity non-regression: got ok=%v want %v (before clean=%v debt=%d; post clean=%v debt=%d; witness=%+v)", ok, tc.wantOK, tc.beforeCriticalClean, tc.beforeClarityDebt, tc.postCriticalClean, tc.postClarityDebt, got)
 			}
 		})
+	}
+}
+
+func TestCheckDisambiguationInvariantContextPreservesFreshnessAndCoverage(t *testing.T) {
+	oldScorecard := runAnalyzer
+	defer func() { runAnalyzer = oldScorecard }()
+
+	root := t.TempDir()
+	writeDisambiguationFixture(t, root, conceptcatalog.GeneratedReadme, "readme\r\n")
+	writeDisambiguationFixture(t, root, conceptcatalog.GeneratedIndex, "index\n")
+	writeDisambiguationFixture(t, root, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":[]}`)
+
+	runAnalyzer = func(ctx context.Context, gotRoot, generated string) ([]byte, error) {
+		if gotRoot != root {
+			t.Fatalf("scorecard root = %q, want %q", gotRoot, root)
+		}
+		writeDisambiguationFixture(t, generated, "README.md", "readme\n")
+		writeDisambiguationFixture(t, generated, "INDEX.md", "index\n")
+		return []byte(`{
+			"ok": true,
+			"reason": "",
+			"corpus": {
+				"coverage_debt": 1,
+				"clarity_defects": 0,
+				"coverage": {
+					"coverage_pct": 87.5,
+					"per_family": [
+						{"family":"loop","discovered":4,"covered":3}
+					]
+				}
+			}
+		}`), nil
+	}
+	var phases []string
+	inv, err := checkInvariantBounded(context.Background(), root, func(phase string) {
+		phases = append(phases, phase)
+	})
+	if err != nil {
+		t.Fatalf("context-aware invariant: %v", err)
+	}
+	if !inv.Freshness.Fresh || !inv.SemanticValid || !inv.CriticalClean ||
+		inv.ClarityDebt != 0 || inv.Coverage != 87.5 || inv.CoverageDebt != 1 ||
+		inv.FamilyCoverage["loop"] != 75 {
+		t.Fatalf("invariant fields regressed: %+v", inv)
+	}
+	wantPhases := []string{"scorecard-command", "generated-freshness", "catalog-validation", "scorecard-decode"}
+	if !reflect.DeepEqual(phases, wantPhases) {
+		t.Fatalf("subphases = %v, want %v", phases, wantPhases)
+	}
+}
+
+func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing.T) {
+	oldArchive := runDisambiguationArchive
+	oldScorecard := runAnalyzer
+	oldContext := newDeadline
+	oldTimeout := disambiguationTimeout
+	defer func() {
+		runDisambiguationArchive = oldArchive
+		runAnalyzer = oldScorecard
+		newDeadline = oldContext
+		disambiguationTimeout = oldTimeout
+	}()
+
+	manual := newManualDeadlineContext()
+	disambiguationTimeout = 37 * time.Second
+	newDeadline = func(time.Duration) (context.Context, context.CancelFunc) {
+		return manual, func() {}
+	}
+	runDisambiguationArchive = func(context.Context, string, string) ([]byte, error) {
+		return make([]byte, 1024), nil // empty but valid tar stream
+	}
+	scorecardStarted := make(chan struct{})
+	scorecardCanceled := make(chan error, 1)
+	runAnalyzer = func(ctx context.Context, root, generated string) ([]byte, error) {
+		close(scorecardStarted)
+		<-ctx.Done()
+		scorecardCanceled <- ctx.Err()
+		return nil, ctx.Err()
+	}
+
+	g := isolatedHappyFake()
+	msg := writeMsg(t, "fix(workerland): bound disambiguation (fak workerworktree)")
+	type outcome struct {
+		result  Result
+		handled bool
+	}
+	outcomeCh := make(chan outcome, 1)
+	go func() {
+		res, handled := landIsolated(
+			"/repo",
+			"/worker",
+			"diff --git a/tools/concept_disambiguation_scorecard.data/rows-loop-family.json b/tools/concept_disambiguation_scorecard.data/rows-loop-family.json\n@@\n-old\n+new\n",
+			msg,
+			[]string{"tools/concept_disambiguation_scorecard.data/rows-loop-family.json"},
+			g.run,
+			g.runEnv,
+		)
+		outcomeCh <- outcome{result: res, handled: handled}
+	}()
+
+	select {
+	case <-scorecardStarted:
+	case <-time.After(time.Second):
+		t.Fatal("scorecard witness command did not start")
+	}
+	manual.expire()
+
+	var got outcome
+	select {
+	case got = <-outcomeCh:
+	case <-time.After(time.Second):
+		t.Fatal("land did not return after the disambiguation deadline")
+	}
+	select {
+	case err := <-scorecardCanceled:
+		if err != context.DeadlineExceeded {
+			t.Fatalf("scorecard cancellation = %v, want deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scorecard command seam did not observe cancellation")
+	}
+
+	if !got.handled || got.result.OK || got.result.Committed || got.result.Applied {
+		t.Fatalf("timeout must be a handled pre-CAS refusal: handled=%v result=%+v", got.handled, got.result)
+	}
+	if got.result.Disambiguation == nil || got.result.Disambiguation.Before.Diagnostic == nil {
+		t.Fatalf("typed timeout diagnostic missing: %+v", got.result.Disambiguation)
+	}
+	diagnostic := got.result.Disambiguation.Before.Diagnostic
+	if diagnostic.Code != DisambiguationTimeoutCode || diagnostic.Witness != "before" || diagnostic.Subphase != "scorecard-command" || diagnostic.TimeoutMS != 37_000 {
+		t.Fatalf("timeout diagnostic = %+v", diagnostic)
+	}
+	if !strings.Contains(got.result.Detail, DisambiguationTimeoutCode) || !strings.Contains(got.result.Detail, `"subphase":"scorecard-command"`) {
+		t.Fatalf("compact refusal detail does not carry typed timeout/subphase: %s", got.result.Detail)
+	}
+	if len(g.envCallsWithPrefix("commit-tree")) != 0 ||
+		len(g.callsWithPrefix("update-ref")) != 0 ||
+		len(g.callsWithPrefix("checkout")) != 0 ||
+		len(g.callsWithPrefix("reset")) != 0 {
+		t.Fatalf("timeout crossed the pre-CAS boundary: calls=%v envCalls=%v", g.calls, g.envCalls)
+	}
+	if g.lastEnv["GIT_INDEX_FILE"] == "" {
+		t.Fatalf("pre-timeout index construction must remain isolated: env=%v", g.lastEnv)
 	}
 }
