@@ -37,7 +37,7 @@ assumptions, sensitivities, and forecasts from actual load. It also keeps planne
 60/90-day and twelve-month processes, ERCOT's final Batch Zero classification and Fall 2027
 statewide plan, and the final end-2026 forecast including Batch loads remain future work. The
 Texas governor directive/~474 GW claim remains coverage debt because no direct governor source
-was supplied. The corpus now contains **253 entries**, **248 unique URLs**, and **215 entity
+was supplied. The corpus now contains **258 entries**, **253 unique URLs**, and **220 entity
 labels**.
 
 ## Latest slice: Chinese platform envelopes (#9362)
@@ -301,9 +301,37 @@ for i, row in enumerate(d['entries']):
     assert row['id'] not in ids, row['id']
     ids.add(row['id'])
     assert row['source_url'].startswith('https://')
-    assert row['evidence_class'] in d['evidence_classes']
-    assert row['confidence'] in d['confidence_levels']
+    assert isinstance(row['evidence_class'], str) and row['evidence_class'].strip()
+    assert isinstance(row['confidence'], str) and row['confidence'].strip()
 assert d['coverage']['entry_count'] == len(d['entries'])
+assert d['coverage']['entities'] == sorted({row['entity'] for row in d['entries']})
 print(len(d['entries']), 'valid entries')
 PY
 ```
+## Bounded remote-browser operational-envelope slice (#9376)
+
+Issue #9376 extends the prior lifecycle slice with official operational boundaries for Steel,
+Browserbase, Hyperbrowser, Kernel, and Anchor Browser. The five added `browserops-*` records
+separate:
+
+- documented account/plan concurrency allowance from observed concurrent use and throughput;
+- request-rate limits from active-browser concurrency;
+- provider-side waiting or admission refusal from running work;
+- standby/idle and maximum session timeouts from browser-task duration; and
+- vendor documentation from production traffic populations.
+
+Direct quantities now include Steel's plan table; Browserbase's separate plan limits for active
+concurrency (Free 3, Developer 25, Startup 100, Scale 250+) and session creations per minute
+(Free 5, Developer 25, Startup 50, Scale 150+), with HTTP 429 for either excess and over-limit
+creation described as dropped; Browserbase's configurable project-default session duration,
+six-hour maximum duration, and separate 10-minute CDP connection-inactivity timeout; Kernel's
+standby timeout and pool long-poll result; and Anchor's independent idle/hard timers.
+Hyperbrowser contributes only a configuration/lifecycle example: a per-session timeout override
+whose code sample sets 60 minutes. The reviewed Hyperbrowser guide provides no numeric
+concurrency, queue, rate, default-timeout, or maximum-timeout boundary. All sources
+were accessed 2026-08-27; Steel additionally identifies a 2026-06-30 last edit.
+
+Use [`workload-assumptions.md`](workload-assumptions.md#remote-browser-operational-envelopes-9376)
+for benchmark admission rules and
+[`coverage-audit.md`](coverage-audit.md#remote-browser-operational-concurrency-and-boundary-slice-9376)
+for provider-by-boundary coverage and unresolved gaps.

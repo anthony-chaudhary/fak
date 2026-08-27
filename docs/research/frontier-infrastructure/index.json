@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9375,
+  "latest_slice_issue": 9376,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 253,
+    "entry_count": 258,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -97,6 +97,7 @@
       "Alphabet",
       "Amazon",
       "Ampere Computing / SoftBank",
+      "Anchor Browser",
       "Anthropic",
       "Anthropic / AWS",
       "Anthropic / Decart",
@@ -114,6 +115,7 @@
       "Baichuan 2",
       "Baidu",
       "Broadcom Tomahawk 6",
+      "Browserbase",
       "Builder.ai",
       "BurstGPT v1.1",
       "ByteDance Seed",
@@ -156,6 +158,7 @@
       "Hitachi Energy",
       "Huawei Atlas 900 A3 SuperPoD",
       "Huawei Cloud Pangu",
+      "Hyperbrowser",
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
       "IndiaAI Mission",
@@ -163,6 +166,7 @@
       "International Energy Agency",
       "Johnson Controls",
       "Kakao",
+      "Kernel",
       "LG AI Research",
       "LMSYS-Chat-1M",
       "Lambda",
@@ -248,6 +252,7 @@
       "SkyWalker cross-region study",
       "SpecInfer",
       "Speculative decoding",
+      "Steel",
       "Steel BrowserBench / AnchorBrowser",
       "Steel BrowserBench / Browserbase",
       "Steel BrowserBench / Hyperbrowser",
@@ -10037,6 +10042,196 @@
         "is_rumor": false
       },
       "checked_at": "2026-08-27"
+    },
+    {
+      "id": "browserops-steel-plan-envelope-2026",
+      "category": "workload_model",
+      "entity": "Steel",
+      "topic": "remote-browser operational concurrency, rate, and maximum-session plan envelope",
+      "published_at": "2026-06-30",
+      "event_at": "2026-06-30",
+      "source_title": "Steel Pricing/Limits",
+      "source_url": "https://docs.steel.dev/overview/pricinglimits",
+      "source_kind": "official_documentation",
+      "evidence_class": "vendor_specification",
+      "confidence": "high",
+      "claim": "Steel documents plan-level concurrent-browser, request-rate, and maximum-session allowances: Launch 10 concurrent sessions, 60 requests/minute, and 15-minute maximum sessions; Scale 100, 600 requests/minute, and 1 hour; Enterprise 1,000+ concurrent sessions, custom requests/minute, and up to 24 hours.",
+      "quantified": {
+        "launch_concurrent_browser_sessions": 10,
+        "scale_concurrent_browser_sessions": 100,
+        "enterprise_concurrent_browser_sessions_minimum": 1000,
+        "launch_requests_per_minute": 60,
+        "scale_requests_per_minute": 600,
+        "launch_max_session_minutes": 15,
+        "scale_max_session_minutes": 60,
+        "enterprise_max_session_hours_upper_bound": 24,
+        "accessed_at": "2026-08-27"
+      },
+      "assumptions": [
+        "The pricing page is a current official plan specification; its documented allowances are not measurements of observed concurrency or throughput."
+      ],
+      "contradictions_or_limits": [
+        "Requests per minute is a rate boundary, not a concurrency count.",
+        "1,000+ is an open-ended Enterprise allowance, not a measured production population.",
+        "Maximum session time is a lifecycle ceiling, not task duration.",
+        "The page does not document queue behavior when a concurrency allowance is exhausted."
+      ],
+      "fak_implications": [
+        "Keep remote-browser worker admission plan-aware and represent request-rate and running-session limits as separate resources.",
+        "Do not derive browser-task throughput or production population from plan allowances."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "browserops-browserbase-admission-envelope-2026",
+      "category": "workload_model",
+      "entity": "Browserbase",
+      "topic": "remote-browser concurrency, creation-rate admission, and timeout boundaries",
+      "published_at": "2026-08-27",
+      "event_at": "2026-08-27",
+      "source_title": "Browserbase Concurrency management, Timeouts, and Manage a browser session",
+      "source_url": "https://docs.browserbase.com/optimizations/concurrency/overview.md",
+      "source_kind": "official_documentation",
+      "evidence_class": "vendor_specification",
+      "confidence": "high",
+      "claim": "Browserbase publishes separate plan boundaries for maximum concurrently active browsers (Free 3, Developer 25, Startup 100, Scale 250+) and session creations per 60-second period (Free 5, Developer 25, Startup 50, Scale 150+). Reaching either limit returns HTTP 429; over-limit session creation is described as effectively dropped rather than queued. Session duration uses a configurable project default and has a 6-hour maximum. Separately, a CDP connection is closed after 10 minutes without CDP commands; that connection-inactivity bound is not the session-duration limit.",
+      "quantified": {
+        "max_concurrent_browsers_by_plan": {
+          "Free": 3,
+          "Developer": 25,
+          "Startup": 100,
+          "Scale": "250+"
+        },
+        "session_creation_limit_per_minute_by_plan": {
+          "Free": 5,
+          "Developer": 25,
+          "Startup": 50,
+          "Scale": "150+"
+        },
+        "over_limit_http_status": 429,
+        "over_limit_creation_disposition": "effectively dropped",
+        "maximum_session_duration_hours": 6,
+        "cdp_inactivity_timeout_minutes": 10,
+        "project_default_session_timeout": "configurable",
+        "accessed_at": "2026-08-27",
+        "timeout_source": "https://docs.browserbase.com/platform/browser/long-sessions/timeouts.md",
+        "manage_session_source": "https://docs.browserbase.com/platform/browser/getting-started/manage-browser-session.md"
+      },
+      "assumptions": [
+        "The two cited official documentation pages describe the hosted Browserbase service as accessed on 2026-08-27."
+      ],
+      "contradictions_or_limits": [
+        "Active-browser concurrency and session creations per minute are distinct limits and must not be conflated.",
+        "HTTP 429 is an admission refusal; over-limit session creation is described as dropped, not provider-side queued execution.",
+        "The project default session duration is configurable; the cited pages do not support a universal 5-minute default.",
+        "The 10-minute CDP inactivity timeout governs a connection with no CDP commands, not total browser-session duration.",
+        "Session-duration settings are lifecycle bounds, not task-duration distributions or throughput rates."
+      ],
+      "fak_implications": [
+        "Represent active concurrency and per-minute creation rate as separate Browserbase admission controls.",
+        "Treat HTTP 429 as explicit backpressure and honor retry guidance rather than assuming a provider-side queue.",
+        "Configure session duration independently from CDP connection heartbeat or inactivity handling."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "browserops-kernel-idle-and-pool-envelope-2026",
+      "category": "workload_model",
+      "entity": "Kernel",
+      "topic": "remote-browser standby timeout and pool long-poll admission envelope",
+      "published_at": "2026-08-27",
+      "event_at": "2026-08-27",
+      "source_title": "Kernel Termination & Timeouts and Acquire a browser from the pool",
+      "source_url": "https://kernel.sh/docs/browsers/termination.md",
+      "source_kind": "official_documentation",
+      "evidence_class": "vendor_specification",
+      "confidence": "high",
+      "claim": "Kernel documents a standby-triggered browser deletion timeout of 60 seconds by default, configurable up to 72 hours. Its pool acquire API is a long-poll: it returns immediately when a browser is available or HTTP 204 when the poll times out, after which the client should retry.",
+      "quantified": {
+        "default_standby_timeout_seconds": 60,
+        "maximum_standby_timeout_hours": 72,
+        "pool_poll_timeout_http_status": 204,
+        "accessed_at": "2026-08-27",
+        "companion_pool_source": "https://kernel.sh/docs/api-reference/browser-pools/acquire-a-browser-from-the-pool.md"
+      },
+      "assumptions": [
+        "The termination page and pool API reference are current official Kernel documentation as accessed on 2026-08-27."
+      ],
+      "contradictions_or_limits": [
+        "The 60-second timer starts only after standby; it is not a total task-duration limit.",
+        "A long-polling acquisition endpoint is an admission/wait mechanism, not evidence that queued requests are running.",
+        "No public numeric organization or project concurrency quantity was found in these pages."
+      ],
+      "fak_implications": [
+        "Model standby reclamation separately from task deadlines.",
+        "Count a pool request as waiting until acquisition succeeds; retry after 204 without recording a running browser."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "browserops-hyperbrowser-configuration-lifecycle-example-2026",
+      "category": "workload_model",
+      "entity": "Hyperbrowser",
+      "topic": "remote-browser timeout configuration/lifecycle example",
+      "published_at": "2026-08-27",
+      "event_at": "2026-08-27",
+      "source_title": "Hyperbrowser Session Timeouts",
+      "source_url": "https://hyperbrowser.ai/docs/guides/session-timeouts",
+      "source_kind": "official_documentation",
+      "evidence_class": "vendor_specification",
+      "confidence": "high",
+      "claim": "Hyperbrowser documents that each browser session uses the team default session timeout unless the request supplies timeoutMinutes; the official configuration example sets 60 minutes. The reviewed public guide does not state a default value, maximum value, concurrency allowance, queueing rule, or API rate boundary.",
+      "quantified": {
+        "documented_timeout_example_minutes": 60,
+        "accessed_at": "2026-08-27"
+      },
+      "assumptions": [
+        "Treat the 60-minute code sample only as an example accepted by the documented API, not as a default, maximum, plan allowance, or observed task duration."
+      ],
+      "contradictions_or_limits": [
+        "The 60-minute value is only a configuration example, not a default, maximum, plan allowance, marketing concurrency claim, or observed task duration.",
+        "No public numeric Hyperbrowser concurrency, queue depth/wait, request-rate boundary, default timeout, or maximum timeout was directly supported by the official guide reviewed.",
+        "A configurable session timeout is a lifecycle control, not evidence of task duration or achieved concurrent use."
+      ],
+      "fak_implications": [
+        "Keep Hyperbrowser concurrency, admission/queueing, rate, default-timeout, and maximum-timeout cells unknown until primary evidence supplies them.",
+        "If a benchmark sets timeoutMinutes explicitly, record that configured value separately from measured task duration and termination cause."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "browserops-anchor-timeout-envelope-2026",
+      "category": "workload_model",
+      "entity": "Anchor Browser",
+      "topic": "remote-browser idle and maximum-duration timeout envelope",
+      "published_at": "2026-08-27",
+      "event_at": "2026-08-27",
+      "source_title": "Anchor Browser Session Timeout",
+      "source_url": "https://docs.anchorbrowser.io/advanced/session-timeout.md",
+      "source_kind": "official_documentation",
+      "evidence_class": "vendor_specification",
+      "confidence": "high",
+      "claim": "Anchor Browser documents two independent session timers: idle_timeout defaults to 5 minutes after the last browser connection disconnects and may be disabled with -1; max_duration defaults to 180 minutes, has no documented upper limit, and terminates the session regardless of activity. The first condition reached ends the session.",
+      "quantified": {
+        "default_idle_timeout_minutes": 5,
+        "idle_timeout_disable_value": -1,
+        "default_max_duration_minutes": 180,
+        "documented_max_duration_upper_limit": null,
+        "accessed_at": "2026-08-27"
+      },
+      "assumptions": [
+        "The official timeout page defines hosted-session lifecycle semantics as accessed on 2026-08-27."
+      ],
+      "contradictions_or_limits": [
+        "Idle timeout starts after disconnection and is not task duration.",
+        "No upper limit is a documentation statement, not evidence of infinite practical duration.",
+        "No robust public numeric concurrency, request-rate, or queue boundary was found in the reviewed official pages."
+      ],
+      "fak_implications": [
+        "Track Anchor idle reclamation and hard lifetime as separate timers.",
+        "Do not use either timeout as a workload-duration distribution."
+      ],
+      "rumor": false
     }
   ]
 }

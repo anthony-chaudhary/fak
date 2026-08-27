@@ -26,8 +26,8 @@ classification, forecast inclusion, completed study, approval, construction, ene
 live load remain separate states. The New York GEIS/report processes, final Batch Zero outputs,
 Fall 2027 statewide transmission plan, and end-2026 forecast including Batch loads remain future
 work. The Texas-governor directive/~474 GW claim remains explicit coverage debt because no
-direct governor source was supplied. **Exact indexed totals: 253 entries, 248 unique URLs, and
-215 entity labels.**
+direct governor source was supplied. **Exact indexed totals: 258 entries, 253 unique URLs, and
+220 entity labels.**
 
 Issue #9325 adds an opened Modine/Airedale cooling factory, a >$4B 2027-2029
 capacity reservation with $165M upfront funding, and a shipping Schneider prefabricated
@@ -153,20 +153,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **253** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Entries | **258** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
 | Unique source URLs | **248** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
 | Distinct entity labels | **215** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
 | Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 62; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 24; `policy_regulation` 14; `serving_system` 40; `standard` 3; `supply_chain` 31; `workload_model` 8; `workload_trace` 21. |
 | Evidence classes used | **48** | Machine-derived counts now include `official_statement` 95, `vendor_claim` 31, `benchmark_measurement` 22, `reported_observation` 15, `production_measurement` 13, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 58 entries across 40 other bounded lifecycle/benchmark/specification labels. |
 | Confidence labels | **16** | Exact labels include `high` 170, `medium_high` 58, `medium` 11, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **253/253 published; 253/253 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Date fields | **258/258 published; 258/258 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 253 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 258 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -496,3 +496,35 @@ the open work is:
 5. Add failure/acquisition/cancellation and rumor-resolution histories.
 6. Only after the schema stabilizes, consider a committed Go validation leaf for field,
    uniqueness, link, lifecycle, and coverage checks.
+## Remote-browser operational concurrency and boundary slice (#9376)
+
+This bounded refresh adds five official-documentation records to `index.json`:
+
+- `browserops-steel-plan-envelope-2026` — plan concurrency, request-rate, and max-session
+  quantities;
+- `browserops-browserbase-admission-envelope-2026` — distinct plan concurrency and per-minute
+  creation limits, HTTP 429 admission refusal, configurable session duration, six-hour maximum,
+  and separate 10-minute CDP inactivity timeout;
+- `browserops-kernel-idle-and-pool-envelope-2026` — standby timeout range and pool long-poll
+  timeout behavior;
+- `browserops-hyperbrowser-configuration-lifecycle-example-2026` — a 60-minute timeout
+  configuration example, with no plan or production-population inference;
+- `browserops-anchor-timeout-envelope-2026` — independent idle and maximum-duration timers.
+
+### Boundary coverage
+
+| Boundary | Steel | Browserbase | Hyperbrowser | Kernel | Anchor Browser |
+|---|---:|---:|---:|---:|---:|
+| numeric documented concurrency allowance | yes | Free 3; Developer 25; Startup 100; Scale 250+ active browsers | not found | organization/project mechanism documented, quantity not public in reviewed page | not found |
+| explicit admission/queue behavior | not found | HTTP 429 when either active concurrency or per-minute creation limit is reached; over-limit creation is dropped, not queued | not found | pool acquire long-poll; HTTP 204 on poll timeout | not found |
+| numeric request-rate boundary | 60/min Launch; 600/min Scale | session creations/min: Free 5; Developer 25; Startup 50; Scale 150+ | not found | not found | not found |
+| numeric lifecycle timeout | 15 min / 1 h / up to 24 h by plan | configurable project default; 6 h maximum session duration; separate 10 min CDP inactivity timeout | 60 min configuration example only; default and maximum not found | 60 s standby default; up to 72 h | 5 min idle default; 180 min hard default |
+
+All pages were accessed 2026-08-27. Steel's page states `Last Edit: June 30th, 2026`;
+no stable release or repository commit was exposed for the other mutable documentation pages.
+
+**Unretired gaps:** no reviewed official source supplies observed provider concurrency,
+throughput, production occupancy, or task-duration distributions. Public numeric queue depth,
+queue wait distribution, and universal concurrency quantities remain absent for most providers.
+These absences are retained as gaps rather than inferred from pricing, API rate limits, timeout
+settings, or anecdotal usage.

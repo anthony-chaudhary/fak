@@ -263,3 +263,32 @@ regional system gain into a universal demand law. See
   reload, queue, fairness, and abandonment included.
 - **SLO class and geography interact.** Latency-sensitive and elastic/batch work can use
   different regions and provisioning types only when data, quality, and deadlines allow.
+## Remote-browser operational envelopes (#9376)
+
+Treat hosted browser capacity as four distinct controls. Never collapse them into one
+"browser scale" number.
+
+| Provider | Directly documented operational quantity | Correct use | Boundary that remains |
+|---|---|---|---|
+| Steel | Launch: 10 concurrent sessions, 60 requests/minute, 15-minute max session; Scale: 100, 600 requests/minute, 1-hour max; Enterprise: 1,000+ concurrent sessions, custom request rate, up to 24-hour max | account-plan admission and lifecycle ceilings | allowance is not observed concurrency or throughput; no public queue behavior found |
+| Browserbase | active concurrency: Free 3, Developer 25, Startup 100, Scale 250+; session creations/min: Free 5, Developer 25, Startup 50, Scale 150+; either excess returns HTTP 429 and over-limit creation is dropped; project-default session duration is configurable, maximum duration is 6 hours; CDP connections close after 10 minutes without commands | model active concurrency and creation rate as separate admission controls; reject/back off on 429; configure session duration separately from CDP heartbeat/inactivity handling | 429 does not mean queued; the 10-minute CDP inactivity timeout is a connection bound, not session duration |
+| Kernel | standby deletion defaults to 60 seconds and permits up to 72 hours; pool acquire long-polls and returns HTTP 204 on poll timeout | distinguish idle reclamation from waiting-for-capacity; retry a timed-out poll without counting it as running | pool wait is not running work; no public numeric concurrency allowance found |
+| Hyperbrowser | session timeout is configurable per request; official code example sets `timeoutMinutes: 60` | record 60 minutes only when reproducing that configuration example; otherwise load an explicitly chosen timeout | 60 minutes is not a default, maximum, plan allowance, or observed duration; no numeric concurrency, queue, or request-rate boundary found in the reviewed guide |
+| Anchor Browser | idle timeout defaults to 5 minutes after disconnect and can be disabled with `-1`; hard `max_duration` defaults to 180 minutes and has no documented upper bound | operate independent idle and hard-lifetime timers; end at the first timer reached | neither timer is task duration; no robust public concurrency/rate quantity found |
+
+Source pages were accessed 2026-08-27. Steel's pricing page identifies a 2026-06-30 last
+edit. The other reviewed pages expose mutable documentation rather than a stable release or
+commit identifier, so the access date is the evidence pin.
+
+### Admission rules for benchmark workloads
+
+- **Allowance is configuration, not a sample.** A plan's concurrent-session allowance bounds
+  how many starts fak may admit; it does not prove that many sessions were observed running.
+- **Rate and concurrency use separate buckets.** Requests/minute constrains request starts;
+  concurrent sessions constrains active browsers. One cannot substitute for the other.
+- **Waiting is not running.** A Kernel pool long-poll remains queued/waiting until it returns a
+  browser. Browserbase HTTP 429 is refusal/backpressure for either active concurrency or per-minute creation rate, not a queued session; over-limit creation is described as dropped.
+- **Timeouts are lifecycle controls.** Standby/idle timeouts and maximum session lifetimes do
+  not define browser-task duration. Report task duration from the task witness only.
+- **Provider specifications are not populations.** These records describe account or API
+  envelopes, not production traffic distributions, fleet occupancy, or achieved throughput.
