@@ -279,7 +279,7 @@ func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
 	Xnorm := make([]float32, B*H)
 	for b := 0; b < B; b++ {
 		copy(Xnorm[b*H:(b+1)*H], m.finalNorm(X[b*H:(b+1)*H]))
-		bs.Seqs[b].Cache.pos = append(bs.Seqs[b].Cache.pos, posB[b])
+		bs.Seqs[b].Cache.appendPosition(posB[b], ids[b])
 	}
 	// the 113 MB tied-embedding head streamed ONCE for all B users — the single biggest
 	// per-token weight, and so the single biggest batching beneficiary at decode.
@@ -461,7 +461,7 @@ func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
 		} else {
 			rmsnormInto(Xnorm[b*H:(b+1)*H], X[b*H:(b+1)*H], normW, eps)
 		}
-		bs.Seqs[b].Cache.pos = append(bs.Seqs[b].Cache.pos, posB[b])
+		bs.Seqs[b].Cache.appendPosition(posB[b], ids[b])
 	}
 	Logits := grow(db.Logits, B*cfg.VocabSize)
 	db.Logits = Logits

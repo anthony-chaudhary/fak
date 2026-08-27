@@ -9,14 +9,15 @@ package model
 // slices; pos[] records each entry's absolute RoPE position so eviction can compact
 // the cache and relabel subsequent positions to equal a run that never saw the span.
 type KVCache struct {
-	cfg    Config
-	K      [][]float32 // [layer] -> flat, NumKVHeads*HeadDim per cached position (post-RoPE)
-	Kraw   [][]float32 // [layer] -> the SAME entries pre-RoPE, so a span can be repositioned
-	V      [][]float32
-	pos    []int // absolute position of each cached entry (shared across layers)
-	linear *linearAttnCache
-	glm    *glmDsaKVCache
-	msa    *minimaxKVCache // MiniMax-M3 lightning-indexer key cache (sparse layers only)
+	cfg     Config
+	K       [][]float32 // [layer] -> flat, NumKVHeads*HeadDim per cached position (post-RoPE)
+	Kraw    [][]float32 // [layer] -> the SAME entries pre-RoPE, so a span can be repositioned
+	V       [][]float32
+	pos     []int // absolute position of each cached entry (shared across layers)
+	lineage tokenLineage
+	linear  *linearAttnCache
+	glm     *glmDsaKVCache
+	msa     *minimaxKVCache // MiniMax-M3 lightning-indexer key cache (sparse layers only)
 }
 
 // NewKVCache allocates an empty cache for a model. Kraw (pre-RoPE K) is kept so that
@@ -174,6 +175,8 @@ func (c *KVCache) evictGLMDsa(from, end int) int {
 // eviction paths; onMoved carries the one part that legitimately differs (the
 // per-cache-family re-derivation). Returns the count removed (end - from).
 func (c *KVCache) compactPositions(from, end int, onMoved func(i int)) int {
+	residentLen := len(c.pos)
+	c.lineage.evict(from, end, residentLen)
 	c.pos = append(c.pos[:from], c.pos[end:]...)
 	for i := range c.pos {
 		if c.pos[i] != i {
@@ -201,12 +204,13 @@ func (c *KVCache) CloneWithReserve(extraPositions int) *KVCache {
 	}
 	extraFloats := extraPositions * c.kvStride()
 	n := &KVCache{
-		cfg:    c.cfg,
-		K:      make([][]float32, len(c.K)),
-		Kraw:   make([][]float32, len(c.Kraw)),
-		V:      make([][]float32, len(c.V)),
-		pos:    cloneIntsWithReserve(c.pos, extraPositions),
-		linear: c.linear.clone(),
+		cfg:     c.cfg,
+		K:       make([][]float32, len(c.K)),
+		Kraw:    make([][]float32, len(c.Kraw)),
+		V:       make([][]float32, len(c.V)),
+		pos:     cloneIntsWithReserve(c.pos, extraPositions),
+		lineage: c.lineage.clone(extraPositions),
+		linear:  c.linear.clone(),
 	}
 	if c.glm != nil {
 		n.glm = c.glm.cloneWithReserve(c.cfg, extraPositions)
@@ -230,6 +234,7 @@ func (c *KVCache) Reserve(extraPositions int) {
 	}
 	extraFloats := extraPositions * c.kvStride()
 	c.pos = reserveInts(c.pos, extraPositions)
+	c.lineage.reserve(extraPositions)
 	for l := range c.K {
 		c.K[l] = reserveFloat32(c.K[l], extraFloats)
 		c.Kraw[l] = reserveFloat32(c.Kraw[l], extraFloats)

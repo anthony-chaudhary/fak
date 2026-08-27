@@ -227,7 +227,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 			cos, sin := ropeRowForLayer(cfg, l, pos)
 			x = s.blockStep(l, pos, x, cos, sin, mat)
 		}
-		s.Cache.pos = append(s.Cache.pos, pos)
+		s.Cache.appendPosition(pos, id)
 		if tap != nil {
 			tap.writeMeta(cfg, H, pos)
 		}
@@ -352,7 +352,7 @@ func (s *Session) tokenHiddenQ(id, pos int) (out []float32) {
 			tap.dumpLayer(l, layerKindLabel(cfg, l), x)
 		}
 	}
-	s.Cache.pos = append(s.Cache.pos, pos)
+	s.Cache.appendPosition(pos, id)
 	if tap != nil {
 		tap.writeMeta(cfg, H, pos)
 	}
@@ -564,7 +564,7 @@ func (s *Session) prefillBatchedQ(ids []int) []float32 {
 	}
 
 	for t := 0; t < P; t++ {
-		s.Cache.pos = append(s.Cache.pos, base+t)
+		s.Cache.appendPosition(base+t, ids[t])
 	}
 	if qprofOn {
 		total := time.Since(t0)

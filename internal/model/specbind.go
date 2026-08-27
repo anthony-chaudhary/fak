@@ -81,8 +81,8 @@ func SpecDecodeGreedy(target, drafter *Session, prompt []int, n, k int) (polymod
 		Rollback: func(evictKV int) {
 			// Roll the rejected draft suffix out of both caches bit-exactly. base+accepted ==
 			// base+(draftLen-evictKV): AcceptGreedy's EvictKV is the rejected count draftLen-accepted.
-			target.Cache.Evict(tBase+(draftLen-evictKV), evictKV)
-			drafter.Cache.Evict(dBase+(draftLen-evictKV), evictKV)
+			target.evictKV(tBase+(draftLen-evictKV), evictKV)
+			drafter.evictKV(dBase+(draftLen-evictKV), evictKV)
 		},
 	})
 }
@@ -112,7 +112,7 @@ func SpecDecodeGreedyWithDrafter(target *Session, prompt []int, n, k int, drafte
 		MaxNewTokens: n,
 		MaxDraft:     k,
 		Rollback: func(evictKV int) {
-			target.Cache.Evict(targetBase+(draftLen-evictKV), evictKV)
+			target.evictKV(targetBase+(draftLen-evictKV), evictKV)
 		},
 	})
 }

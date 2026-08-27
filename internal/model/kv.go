@@ -42,13 +42,14 @@ func (m *Model) SessionFromPrefix(prefix *KVCache) *Session {
 // sessions Cache is sufficient. Device hybrid sessions additionally carry attention
 // KV and recurrent Qwen state; keeping all three in one owner prevents partial restores.
 type PrefixSnapshot struct {
-	owner   *Session
-	epoch   uint64
-	Cache   *KVCache
-	halKV   compute.KVStore
-	qwen35  *qwen35HALState
-	Backend compute.Backend
-	Tokens  int
+	owner      *Session
+	epoch      uint64
+	Cache      *KVCache
+	halKV      compute.KVStore
+	halLineage tokenLineage
+	qwen35     *qwen35HALState
+	Backend    compute.Backend
+	Tokens     int
 }
 
 // PrefixSnapshot captures a deep clone suitable for shared-prefix admission.
@@ -65,7 +66,7 @@ func (s *Session) PrefixSnapshot() (*PrefixSnapshot, error) {
 		// halKV plus recurrent tensors.
 		tokens = s.halKV.Len()
 	}
-	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), Backend: s.Backend, Tokens: tokens}
+	out := &PrefixSnapshot{owner: s, epoch: s.cacheGeometryEpoch, Cache: s.Cache.Clone(), halLineage: s.halLineage.clone(0), Backend: s.Backend, Tokens: tokens}
 	if s.Backend == nil {
 		return out, nil
 	}
@@ -89,7 +90,7 @@ func (p *PrefixSnapshot) Clone() (*PrefixSnapshot, error) {
 	if p == nil || p.Cache == nil {
 		return nil, nil
 	}
-	out := &PrefixSnapshot{owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), Backend: p.Backend, Tokens: p.Tokens}
+	out := &PrefixSnapshot{owner: p.owner, epoch: p.epoch, Cache: p.Cache.Clone(), halLineage: p.halLineage.clone(0), Backend: p.Backend, Tokens: p.Tokens}
 	if p.Backend == nil {
 		return out, nil
 	}
@@ -129,11 +130,13 @@ func (p *PrefixSnapshot) Restore(s *Session) error {
 			s.halKV.Free()
 		}
 		s.closeQwen35HALState()
-		s.halKV, s.qwen35HAL = p.halKV, p.qwen35
+		s.halKV, s.halLineage, s.qwen35HAL = p.halKV, p.halLineage, p.qwen35
 		p.halKV, p.qwen35 = nil, nil
+		p.halLineage = tokenLineage{}
 	}
 	s.Cache = p.Cache
 	p.Cache = nil
+	p.halLineage = tokenLineage{}
 	return nil
 }
 
@@ -173,8 +176,9 @@ type Session struct {
 	// Backend is non-nil when this session is intentionally running through the
 	// internal/compute HAL instead of the legacy direct []float32 path. The legacy
 	// path stays the default until the full optimized prefill/batch path is adopted.
-	Backend compute.Backend
-	halKV   compute.KVStore
+	Backend    compute.Backend
+	halKV      compute.KVStore
+	halLineage tokenLineage
 	// halW memoizes weights staged onto Backend so a device session uploads each weight
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)
@@ -585,7 +589,7 @@ func (s *Session) tokenHidden(id, pos int) (out []float32) {
 		cos, sin := ropeRowForLayer(cfg, l, pos)
 		x = s.blockStep(l, pos, x, cos, sin, f32Kernel{m})
 	}
-	s.Cache.pos = append(s.Cache.pos, pos)
+	s.Cache.appendPosition(pos, id)
 	if tap != nil {
 		tap.writeMeta(cfg, H, pos)
 	}

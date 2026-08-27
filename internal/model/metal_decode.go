@@ -162,7 +162,7 @@ func (s *Session) metalDecodeLogitsQ8(id, pos int) []float32 {
 		s.Cache.K[l] = append(s.Cache.K[l], newKpost[l*w:(l+1)*w]...)
 		s.Cache.V[l] = append(s.Cache.V[l], newV[l*w:(l+1)*w]...)
 	}
-	s.Cache.pos = append(s.Cache.pos, pos)
+	s.Cache.appendPosition(pos, id)
 	logitScaleInPlace(logits, cfg) // Cohere/Gemma2; no-op for Llama/Qwen
 	return logits
 }

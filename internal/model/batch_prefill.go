@@ -158,7 +158,7 @@ func (bs *BatchSession) prefillEachRectF32(prompts [][]int, P int, wantLogits bo
 		}
 	}
 
-	bs.finishRectPrefillPositions(baseB, P)
+	bs.finishRectPrefillPositions(baseB, prompts, P)
 	if !wantLogits {
 		return nil
 	}
@@ -333,7 +333,7 @@ func (bs *BatchSession) prefillEachRectQ(prompts [][]int, P int, wantLogits bool
 		}
 	}
 
-	bs.finishRectPrefillPositions(baseB, P)
+	bs.finishRectPrefillPositions(baseB, prompts, P)
 	if !wantLogits {
 		return nil
 	}
@@ -370,10 +370,10 @@ func (bs *BatchSession) rectPrefillGeometry(P int) ([]int, []*KVCache, [][]float
 	return baseB, caches, cosN, sinN
 }
 
-func (bs *BatchSession) finishRectPrefillPositions(baseB []int, P int) {
+func (bs *BatchSession) finishRectPrefillPositions(baseB []int, prompts [][]int, P int) {
 	for b, s := range bs.Seqs {
 		for t := 0; t < P; t++ {
-			s.Cache.pos = append(s.Cache.pos, baseB[b]+t)
+			s.Cache.appendPosition(baseB[b]+t, prompts[b][t])
 		}
 	}
 }

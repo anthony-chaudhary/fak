@@ -14,7 +14,7 @@ import (
 
 const (
 	hostPrefixSnapshotMagic   = "FAKHPS"
-	hostPrefixSnapshotVersion = uint16(1)
+	hostPrefixSnapshotVersion = uint16(2)
 	hostPrefixSnapshotHeader  = len(hostPrefixSnapshotMagic) + 2 + sha256.Size
 )
 
@@ -43,6 +43,7 @@ func (h *HostPrefixSnapshot) MarshalBinary() ([]byte, error) {
 	payload.integer(h.tokens)
 	payload.cache(h.cache)
 	payload.kv(h.kv)
+	payload.lineage(h.halLineage)
 	payload.boolean(h.qwen35 != nil)
 	if h.qwen35 != nil {
 		payload.count(len(h.qwen35.layers))
@@ -107,6 +108,7 @@ func DecodeHostPrefixSnapshot(data []byte, backend compute.Backend, expected Con
 	tokens := d.integer()
 	cache := d.cache(cfg)
 	kv := d.kv()
+	halLineage := d.lineage()
 	hasQwen := d.boolean()
 	var qwen *hostQwen35State
 	if hasQwen {
@@ -131,7 +133,7 @@ func DecodeHostPrefixSnapshot(data []byte, backend compute.Backend, expected Con
 	if d.off != len(d.data) {
 		return nil, fmt.Errorf("model: decode host prefix snapshot: %d trailing bytes", len(d.data)-d.off)
 	}
-	out := &HostPrefixSnapshot{cache: cache, kv: kv, qwen35: qwen, backend: backend, tokens: tokens}
+	out := &HostPrefixSnapshot{cache: cache, kv: kv, halLineage: halLineage, qwen35: qwen, backend: backend, tokens: tokens}
 	if err := out.validate(); err != nil {
 		out.Close()
 		return nil, err
@@ -148,6 +150,12 @@ func (h *HostPrefixSnapshot) validate() error {
 	}
 	if len(h.kv.Pos) != h.tokens {
 		return fmt.Errorf("model: host prefix positions=%d, want tokens=%d", len(h.kv.Pos), h.tokens)
+	}
+	if h.cache.lineage.fault != "" || len(h.cache.lineage.ids) != len(h.cache.pos) {
+		return fmt.Errorf("model: host prefix cache lineage positions=%d, want %d", len(h.cache.lineage.ids), len(h.cache.pos))
+	}
+	if h.halLineage.fault != "" || len(h.halLineage.ids) != len(h.kv.Pos) {
+		return fmt.Errorf("model: host prefix HAL lineage positions=%d, want %d", len(h.halLineage.ids), len(h.kv.Pos))
 	}
 	layers := h.cache.cfg.NumLayers
 	if len(h.cache.K) != layers || len(h.cache.Kraw) != layers || len(h.cache.V) != layers {
@@ -238,6 +246,13 @@ func (e *snapshotEncoder) ints(v []int) {
 	}
 }
 
+func (e *snapshotEncoder) u32s(v []uint32) {
+	e.count(len(v))
+	for _, x := range v {
+		e.u32(x)
+	}
+}
+
 func (e *snapshotEncoder) f32(v []float32) {
 	e.count(len(v))
 	for _, x := range v {
@@ -268,6 +283,7 @@ func (e *snapshotEncoder) f64rows(v [][]float64) {
 
 func (e *snapshotEncoder) cache(c *KVCache) {
 	e.ints(c.pos)
+	e.lineage(c.lineage)
 	e.f32rows(c.K)
 	e.f32rows(c.Kraw)
 	e.f32rows(c.V)
@@ -292,6 +308,14 @@ func (e *snapshotEncoder) cache(c *KVCache) {
 		e.f32rows(c.msa.IndexK)
 		e.f32rows(c.msa.IndexKraw)
 	}
+}
+
+func (e *snapshotEncoder) lineage(l tokenLineage) {
+	if l.fault != "" && e.err == nil {
+		e.err = fmt.Errorf("model: cannot encode corrupt token lineage: %s", l.fault)
+		return
+	}
+	e.u32s(l.ids)
 }
 
 func (e *snapshotEncoder) kv(kv compute.KVHostSnapshot) {
@@ -393,6 +417,21 @@ func (d *snapshotDecoder) ints() []int {
 	return out
 }
 
+func (d *snapshotDecoder) u32s() []uint32 {
+	n := d.count()
+	if d.err != nil || n > (len(d.data)-d.off)/4 {
+		if d.err == nil {
+			d.err = errors.New("oversized uint32 vector")
+		}
+		return nil
+	}
+	out := make([]uint32, n)
+	for i := range out {
+		out[i] = d.u32()
+	}
+	return out
+}
+
 func (d *snapshotDecoder) f32() []float32 {
 	n := d.count()
 	if d.err != nil || n > (len(d.data)-d.off)/4 {
@@ -454,7 +493,7 @@ func (d *snapshotDecoder) f64rows() [][]float64 {
 }
 
 func (d *snapshotDecoder) cache(cfg Config) *KVCache {
-	c := &KVCache{cfg: cfg, pos: d.ints(), K: d.f32rows(), Kraw: d.f32rows(), V: d.f32rows()}
+	c := &KVCache{cfg: cfg, pos: d.ints(), lineage: d.lineage(), K: d.f32rows(), Kraw: d.f32rows(), V: d.f32rows()}
 	if d.boolean() {
 		n := d.count()
 		if d.err == nil && n != cfg.NumLayers {
@@ -474,6 +513,10 @@ func (d *snapshotDecoder) cache(cfg Config) *KVCache {
 		c.msa = &minimaxKVCache{IndexK: d.f32rows(), IndexKraw: d.f32rows()}
 	}
 	return c
+}
+
+func (d *snapshotDecoder) lineage() tokenLineage {
+	return tokenLineage{ids: d.u32s()}
 }
 
 func (d *snapshotDecoder) kv() compute.KVHostSnapshot {

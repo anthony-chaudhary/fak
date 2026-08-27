@@ -154,7 +154,7 @@ func (s *Session) prefillBatched(ids []int) []float32 {
 
 	// record the P new absolute positions, then return the LAST token's normed hidden.
 	for t := 0; t < P; t++ {
-		s.Cache.pos = append(s.Cache.pos, base+t)
+		s.Cache.appendPosition(base+t, ids[t])
 	}
 	last := X[(P-1)*H : P*H]
 	// finalNorm, not a hand-rolled normCfg: it is the ONE place the final-norm weight,

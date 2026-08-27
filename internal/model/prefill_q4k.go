@@ -223,7 +223,7 @@ func (s *Session) prefillBatchedQ4K(ids []int) []float32 {
 	}
 
 	for t := 0; t < P; t++ {
-		s.Cache.pos = append(s.Cache.pos, base+t)
+		s.Cache.appendPosition(base+t, ids[t])
 	}
 	if qprofOn {
 		total := time.Since(t0)

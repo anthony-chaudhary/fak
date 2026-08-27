@@ -157,7 +157,7 @@ func (s *Session) prefillQwen35HybridViaMM(ids []int, mm hybridGemmFn) []float32
 	}
 
 	for t := 0; t < P; t++ {
-		s.Cache.pos = append(s.Cache.pos, base+t)
+		s.Cache.appendPosition(base+t, ids[t])
 	}
 	out := rmsnormCfg(X[(P-1)*H:P*H], m.tensor("model.norm.weight"), eps, cfg)
 	if profile {

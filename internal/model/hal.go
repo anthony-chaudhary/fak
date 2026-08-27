@@ -541,6 +541,8 @@ const (
 // mode lets prompt ingestion skip discarded logits and greedy decode use a device argmax.
 func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tensor, int) {
 	s.ensureOpenBackendSession()
+	finishLineage := s.beginHALTokenLineageWrite([]int{id})
+	defer finishLineage()
 	be := s.Backend
 	m, cfg := s.M, s.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim

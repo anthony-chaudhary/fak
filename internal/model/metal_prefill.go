@@ -197,7 +197,7 @@ func (s *Session) prefillMetalResident(ids []int) []float32 {
 		s.Cache.V[l] = append(s.Cache.V[l], v[off:off+P*w]...)
 	}
 	for t := 0; t < P; t++ {
-		s.Cache.pos = append(s.Cache.pos, t) // base == 0
+		s.Cache.appendPosition(t, ids[t]) // base == 0
 	}
 	return rmsnorm(lastPre, m.tensor("model.norm.weight"), eps)
 }
@@ -334,7 +334,7 @@ func (s *Session) prefillBatchedMetal(ids []int) []float32 {
 	}
 
 	for t := 0; t < P; t++ {
-		s.Cache.pos = append(s.Cache.pos, base+t)
+		s.Cache.appendPosition(base+t, ids[t])
 	}
 	if metalProf {
 		total := time.Since(t0)

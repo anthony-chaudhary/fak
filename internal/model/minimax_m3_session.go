@@ -152,7 +152,7 @@ func (s *Session) tokenHiddenMiniMax(id, pos int) []float32 {
 		composeSublayer(cfg.BlockTopology, x, m.attentionNorms(layer), eps, cfg, attnBody)
 		composeSublayer(cfg.BlockTopology, x, m.mlpNorms(layer), eps, cfg, mlpBody)
 	}
-	s.Cache.pos = append(s.Cache.pos, pos)
+	s.Cache.appendPosition(pos, id)
 	return m.finalNorm(x)
 }
 

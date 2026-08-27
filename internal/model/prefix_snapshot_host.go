@@ -11,11 +11,12 @@ import (
 // process-owned host DRAM. It includes the host model cache, attention K/Kraw/V,
 // positions, and every Qwen3.5/3.6 convolution/recurrent tensor needed to resume.
 type HostPrefixSnapshot struct {
-	cache   *KVCache
-	kv      compute.KVHostSnapshot
-	qwen35  *hostQwen35State
-	backend compute.Backend
-	tokens  int
+	cache      *KVCache
+	kv         compute.KVHostSnapshot
+	halLineage tokenLineage
+	qwen35     *hostQwen35State
+	backend    compute.Backend
+	tokens     int
 }
 
 type hostQwen35State struct {
@@ -41,6 +42,7 @@ func (p *PrefixSnapshot) ResidencyBytes() (host, device int64) {
 		return 0, 0
 	}
 	host = p.Cache.residentBytes()
+	host += p.halLineage.metadataBytes()
 	deviceBacked := p.Backend != nil && p.Backend.Caps().DeviceMemory
 	if p.halKV != nil {
 		bytes := p.halKV.ResidentBytes()
@@ -93,10 +95,11 @@ func (p *PrefixSnapshot) CloneToHost() (out *HostPrefixSnapshot, err error) {
 		return nil, fmt.Errorf("model: stage prefix attention KV to host: %w", err)
 	}
 	out = &HostPrefixSnapshot{
-		cache:   p.Cache.Clone(),
-		kv:      hostKV,
-		backend: p.Backend,
-		tokens:  p.Tokens,
+		cache:      p.Cache.Clone(),
+		kv:         hostKV,
+		halLineage: p.halLineage.clone(0),
+		backend:    p.Backend,
+		tokens:     p.Tokens,
 	}
 	if p.qwen35 != nil {
 		out.qwen35 = &hostQwen35State{
@@ -157,10 +160,11 @@ func (h *HostPrefixSnapshot) Restore() (out *PrefixSnapshot, err error) {
 		return nil, fmt.Errorf("model: restore prefix attention KV from host: %w", err)
 	}
 	out = &PrefixSnapshot{
-		Cache:   h.cache.Clone(),
-		halKV:   kv,
-		Backend: h.backend,
-		Tokens:  h.tokens,
+		Cache:      h.cache.Clone(),
+		halKV:      kv,
+		halLineage: h.halLineage.clone(0),
+		Backend:    h.backend,
+		Tokens:     h.tokens,
 	}
 	if h.qwen35 != nil {
 		out.qwen35 = &qwen35HALState{
@@ -193,7 +197,7 @@ func (h *HostPrefixSnapshot) ResidentBytes() int64 {
 	if h == nil || h.cache == nil {
 		return 0
 	}
-	bytes := h.cache.residentBytes() + h.kv.ResidentBytes()
+	bytes := h.cache.residentBytes() + h.kv.ResidentBytes() + h.halLineage.metadataBytes()
 	if h.qwen35 != nil {
 		for i := range h.qwen35.layers {
 			bytes += int64(len(h.qwen35.layers[i].conv.data)+len(h.qwen35.layers[i].recurrent.data)) *
@@ -227,6 +231,15 @@ func (h *HostPrefixSnapshot) Tokens() int {
 	return h.tokens
 }
 
+// TokenLineageMetadataBytes reports the lineage payload retained by this host
+// image for a later verified restore.
+func (h *HostPrefixSnapshot) TokenLineageMetadataBytes() int64 {
+	if h == nil || h.cache == nil {
+		return 0
+	}
+	return h.cache.lineage.metadataBytes() + h.halLineage.metadataBytes()
+}
+
 // Close releases the host image to Go's allocator. It is idempotent.
 func (h *HostPrefixSnapshot) Close() {
 	if h == nil {
@@ -234,6 +247,7 @@ func (h *HostPrefixSnapshot) Close() {
 	}
 	h.cache = nil
 	h.kv = compute.KVHostSnapshot{}
+	h.halLineage = tokenLineage{}
 	h.qwen35 = nil
 	h.backend = nil
 	h.tokens = 0

@@ -13,6 +13,7 @@ func (p *PrefixSnapshot) ResidentBytes() int64 {
 	bytes := p.Cache.residentBytes()
 	if p.halKV != nil {
 		bytes += p.halKV.ResidentBytes()
+		bytes += p.halLineage.metadataBytes()
 	}
 	if p.qwen35 != nil {
 		for i := range p.qwen35.layers {
@@ -54,7 +55,16 @@ func (c *KVCache) residentBytes() int64 {
 			f32 += int64(len(c.msa.IndexK[i]) + len(c.msa.IndexKraw[i]))
 		}
 	}
-	return f32*int64(compute.F32.Bytes()) + f64*8 + int64(len(c.pos))*hostPositionBytes
+	return f32*int64(compute.F32.Bytes()) + f64*8 + int64(len(c.pos))*hostPositionBytes + c.lineage.metadataBytes()
+}
+
+// TokenLineageMetadataBytes reports the exact compact lineage payload included
+// in this prefix snapshot's resident-byte receipt.
+func (p *PrefixSnapshot) TokenLineageMetadataBytes() int64 {
+	if p == nil || p.Cache == nil {
+		return 0
+	}
+	return p.Cache.lineage.metadataBytes() + p.halLineage.metadataBytes()
 }
 
 // NewHostPrefixSnapshotForTest constructs an independently owned host snapshot for

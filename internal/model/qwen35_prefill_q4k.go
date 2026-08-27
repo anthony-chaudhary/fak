@@ -346,7 +346,7 @@ func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
 
 	t = s.phaseStart()
 	for t := 0; t < P; t++ {
-		s.Cache.pos = append(s.Cache.pos, base+t)
+		s.Cache.appendPosition(base+t, ids[t])
 	}
 	s.phaseEnd("cache_positions", t)
 	t = s.phaseStart()

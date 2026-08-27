@@ -228,7 +228,7 @@ func (s *Session) verifyForwardBatched(ids []int, pos []int, allow func(q, k int
 	}
 
 	for q := 0; q < P; q++ {
-		s.Cache.pos = append(s.Cache.pos, pos[q])
+		s.Cache.appendPosition(pos[q], ids[q])
 	}
 	out := make([][]float32, P)
 	for q := 0; q < P; q++ {

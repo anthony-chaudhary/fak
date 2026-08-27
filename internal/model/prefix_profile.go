@@ -19,6 +19,7 @@ type PrefixProfileEvent struct {
 	HostBytes     int64     `json:"host_bytes"`
 	DeviceBytes   int64     `json:"device_bytes"`
 	TransferBytes int64     `json:"transfer_bytes"`
+	MetadataBytes int64     `json:"metadata_bytes"`
 	Tokens        int       `json:"tokens"`
 	Backend       string    `json:"backend,omitempty"`
 }
@@ -42,6 +43,7 @@ func emitPrefixProfile(start time.Time, operation, component string, p *PrefixSn
 	e := PrefixProfileEvent{Schema: "fak.prefix-profile/1", At: time.Now().UTC(), Operation: operation, Component: component, DurationNS: time.Since(start).Nanoseconds()}
 	if p != nil {
 		e.HostBytes, e.DeviceBytes = p.ResidencyBytes()
+		e.MetadataBytes = p.TokenLineageMetadataBytes()
 		e.Tokens = p.Tokens
 		if p.Backend != nil {
 			e.Backend = p.Backend.Name()
@@ -50,6 +52,7 @@ func emitPrefixProfile(start time.Time, operation, component string, p *PrefixSn
 	if h != nil {
 		e.HostBytes = h.ResidentBytes()
 		e.TransferBytes = h.TransferBytes()
+		e.MetadataBytes = h.TokenLineageMetadataBytes()
 		e.Tokens = h.Tokens()
 		if h.backend != nil {
 			e.Backend = h.backend.Name()

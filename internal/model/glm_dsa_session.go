@@ -213,7 +213,7 @@ func (s *Session) decodeBandGLMDsa(id int, x []float32, lo, hi, pos int, isFirst
 		glmDsaDumpResidual(layer, pos, x)
 	}
 	if isLast {
-		s.Cache.pos = append(s.Cache.pos, pos)
+		s.Cache.appendPosition(pos, id)
 		return m.finalNorm(x), nil
 	}
 	return x, nil

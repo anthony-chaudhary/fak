@@ -548,7 +548,7 @@ func (s *Session) profToken(p *profiler, id, pos int, withHead bool) []float32 {
 		p.rec(opMLP, int64(3*I*H), int64(3*I*H*4), time.Since(t).Nanoseconds())
 	}
 
-	s.Cache.pos = append(s.Cache.pos, pos)
+	s.Cache.appendPosition(pos, id)
 	t := time.Now()
 	xf := rmsnorm(x, m.tensor("model.norm.weight"), eps)
 	p.rec(opNorm, int64(H), int64(H*4), time.Since(t).Nanoseconds())

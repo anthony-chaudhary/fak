@@ -629,6 +629,8 @@ func (s *Session) tryQwen35SequencePrefill(ids []int, needLogits bool) (compute.
 		return compute.Qwen35SequencePrefillResult{}, advertised, err
 	}
 	startPos := s.halKV.Len()
+	finishLineage := s.beginHALTokenLineageWrite(ids)
+	defer finishLineage()
 	result, err := seq.Qwen35SequencePrefill(s.qwen35SequencePrefillRequest(ids, needLogits))
 	if err != nil {
 		return result, true, &BackendForwardOperationError{Backend: s.Backend.Name(), Forward: ForwardQwen35GDN, Path: compute.Qwen35SequencePrefillPath, Layer: -1, Stage: "sequence prefill", Cause: err}

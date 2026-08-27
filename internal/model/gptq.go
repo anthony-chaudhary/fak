@@ -579,7 +579,7 @@ func (s *Session) tokenHiddenGPTQ(id, pos int) []float32 {
 		cos, sin := ropeRowForLayer(cfg, l, pos)
 		x = s.blockStep(l, pos, x, cos, sin, mat)
 	}
-	s.Cache.pos = append(s.Cache.pos, pos)
+	s.Cache.appendPosition(pos, id)
 	// finalNorm, not rmsnormCfg: nothing gates a GPTQ session on the norm kind (kv.go:686 keys
 	// only on s.GPTQ), so a GPTQ checkpoint of a LayerNorm family carries a learned
 	// model.norm.bias that rmsnormCfg's hard-coded nil would drop — while the blockStep loop

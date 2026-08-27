@@ -21,14 +21,19 @@ import (
 type kvBackend struct{ s *Session }
 
 // Len reports the session cache's live position count.
-func (b kvBackend) Len() int { return b.s.Cache.Len() }
+func (b kvBackend) Len() int {
+	if b.s.Backend != nil && b.s.halKV != nil {
+		return b.s.halKV.Len()
+	}
+	return b.s.Cache.Len()
+}
 
 // Prefill prefills a token span into the session cache and returns next-token logits.
 func (b kvBackend) Prefill(ids []int) []float32 { return b.s.Prefill(ids) }
 
 // Evict removes a [from,from+n) span via the proven re-RoPE / renumber primitive and
 // returns the number of positions removed.
-func (b kvBackend) Evict(from, n int) int { return b.s.Cache.Evict(from, n) }
+func (b kvBackend) Evict(from, n int) int { return b.s.evictKV(from, n) }
 
 // CanEvict reports the cache's span-eviction verdict: nil for a softmax-KV / GLM-DSA
 // cache (eviction supported), and a typed *RecurrentEvictUnsupportedError for a hybrid
