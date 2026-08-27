@@ -4,14 +4,7 @@ package metalgemm
 
 /*
 #include <stdint.h>
-int mg_qwen35_graph_attention_decode_batch(void *graph, void *q, void *k, void *v,
-    const float *qnorm, const float *knorm, const float *cosv, const float *sinv,
-    const float *prefix_k, const float *prefix_v, const int *prefix_offsets,
-    int batch, int nH, int nKV, int hd, int rotary, float scale, float qk_eps,
-    int gain1p, int qknorm, int qnorm_elems, int knorm_elems,
-    void **out, void **kraw, void **kpost);
-int mg_graph_live_owners(void);
-int mg_graph_live_buffers(void);
+int mg_qwen35_graph_attention_batch(void*,void*,void*,void*,const float*,const float*,const float*,const float*,const int*,const int*,const int*,const float*,const float*,int,int,int,int,int,int,float,float,int,int,int,int,void**,void**,void**,void**);
 */
 import "C"
 
@@ -21,285 +14,175 @@ import (
 	"unsafe"
 )
 
-const (
-	Qwen35FullAttentionDecodeBatchMin = 2
-	Qwen35FullAttentionDecodeBatchMax = 8
-	qwen35FullAttentionScratchTokens  = 4096
-	qwen35FullAttentionHidden         = 5120
-	qwen35FullAttentionNumHeads       = 24
-	qwen35FullAttentionNumKVHeads     = 4
-	qwen35FullAttentionHeadDim        = 256
-	qwen35FullAttentionRotaryDim      = 64
-)
+const Qwen35FullAttentionBatchMax = 8
 
-// Qwen35FullAttentionGeometry is the exact full-attention shape shared by all
-// independent decode lanes in one panel.
-type Qwen35FullAttentionGeometry struct {
-	Hidden, NumHeads, NumKVHeads int
-	HeadDim, RotaryDim           int
-}
-
-// Qwen35FullAttentionDecodeWeights are already-resident fak-native projection
-// owners. Q and K use Q8_0 because Qwen stores their reordered forms there; V
-// retains the resident Q4_K model payload.
-type Qwen35FullAttentionDecodeWeights struct {
+type Qwen35FullAttentionWeights struct {
 	Q, K *Q8Weight
 	V    *Q4KWeight
 }
-
-// Qwen35FullAttentionDecodeLane carries the metadata that must never cross a
-// session boundary. PrefixK is post-RoPE K. Cos and Sin are the rotary row for
-// Position, allowing the model layer to preserve its exact scaling policy.
-type Qwen35FullAttentionDecodeLane struct {
+type Qwen35FullAttentionLane struct {
 	Position         int
 	PrefixK, PrefixV []float32
-	Cos, Sin         []float32
+}
+type Qwen35FullAttentionBatchRequest struct {
+	Input                                    []float32
+	Weights                                  Qwen35FullAttentionWeights
+	Lanes                                    []Qwen35FullAttentionLane
+	QNorm, KNorm, Cos, Sin                   []float32
+	NumHeads, NumKVHeads, HeadDim, RotaryDim int
+	Scale, QKNormEpsilon                     float32
+	Gain1p, QKNorm                           bool
+	InjectPostSubmitFailureForTest           bool
+}
+type Qwen35FullAttentionBatchResult struct{ Output, KRaw, KPost, V [][]float32 }
+type Qwen35FullAttentionBatchReceipt struct {
+	Batch, CommandBuffers, Commits, CompletionWaits     int
+	ProjectionDispatches, AttentionDispatches           int
+	InputUploads, FinalReadbacks, IntermediateReadbacks int
+	AppendElements                                      []int
+	Committed, CompletedWait                            bool
 }
 
-// Qwen35FullAttentionDecodeBatchRequest describes B independent decode rows.
-// Input is packed [B, Hidden]; every lane owns a distinct logical KV prefix.
-type Qwen35FullAttentionDecodeBatchRequest struct {
-	Input                          []float32
-	Weights                        Qwen35FullAttentionDecodeWeights
-	Lanes                          []Qwen35FullAttentionDecodeLane
-	Geometry                       Qwen35FullAttentionGeometry
-	QNorm                          []float32
-	KNorm                          []float32
-	Scale                          float32
-	QKNormEps                      float32
-	NormGain1p, QKNorm             bool
-	InjectPostSubmitFailureForTest bool
-	afterGraphAllocationForTest    func()
-	afterGraphEncodeForTest        func()
-}
-
-// Qwen35FullAttentionDecodeRow returns the gated attention output and the
-// exact current-token values the caller appends to its lane-local KV owner.
-type Qwen35FullAttentionDecodeRow struct {
-	Output, KRaw, KPost, VAppend []float32
-}
-
-// Qwen35FullAttentionDecodeBatchReceipt binds the result to its one-fence
-// projection, attention, transfer, replay, and graph-owner lifecycle.
-type Qwen35FullAttentionDecodeBatchReceipt struct {
-	Rows                                                      int
-	CommandBuffers, Commits, CompletionWaits                  int
-	ProjectionDispatches, Quantizers, AttentionDispatches     int
-	InputUploads, ConstantUploads                             int
-	FinalReadbacks, IntermediateReadbacks, ReplayAttempts     int
-	GraphOwners, GraphOwnerReleases, Encoders                 int
-	PrefixTokens, Positions, KAppendElements, VAppendElements []int
-	Committed, CompletedWait                                  bool
-}
-
-// Qwen35FullAttentionDecodeBatchDeclinedError marks a request rejected before
-// the command buffer can be submitted. A GraphPostSubmitError is deliberately
-// distinct: callers must never replay an accepted lane panel.
-type Qwen35FullAttentionDecodeBatchDeclinedError struct{ Reason string }
-
-func (e *Qwen35FullAttentionDecodeBatchDeclinedError) Error() string {
-	return "metalgemm: Qwen full-attention decode batch declined: " + e.Reason
-}
-
-func qwen35FullAttentionBatchDecline(reason string) error {
-	return &Qwen35FullAttentionDecodeBatchDeclinedError{Reason: reason}
-}
-
-// RunQwen35FullAttentionDecodeBatch executes B=2..8 independent full-attention
-// decode rows in one caller-owned Metal graph. Q/K/V projection weights and the
-// submit/wait are shared once; lane offsets keep prefixes and appends isolated.
-// Once Committed is true, any error is terminal and no serial replay occurs.
-func RunQwen35FullAttentionDecodeBatch(req Qwen35FullAttentionDecodeBatchRequest) (out []Qwen35FullAttentionDecodeRow, receipt Qwen35FullAttentionDecodeBatchReceipt, accepted bool, err error) {
-	batch, qwidth, kvwidth, prefixK, prefixV, offsets, cosv, sinv, err := validateQwen35FullAttentionDecodeBatch(req)
+func RunQwen35FullAttentionDecodeBatch(req Qwen35FullAttentionBatchRequest) (result Qwen35FullAttentionBatchResult, receipt Qwen35FullAttentionBatchReceipt, accepted bool, err error) {
+	batch, hidden, kvWidth, totalKV, offsets, lengths, packedK, packedV, err := validateQwen35FullAttentionBatch(req)
 	if err != nil {
-		return nil, Qwen35FullAttentionDecodeBatchReceipt{}, false, err
+		return result, receipt, false, err
 	}
-	weights := []*Q8Weight{req.Weights.Q, req.Weights.K}
-	if !lockQ8Group(weights) {
-		return nil, Qwen35FullAttentionDecodeBatchReceipt{}, false, qwen35FullAttentionBatchDecline("Q/K resident handles are unavailable")
-	}
-	defer unlockQ8Group(weights)
-	q4kPinMu.Lock()
-	defer q4kPinMu.Unlock()
-	if req.Weights.Q.In != req.Geometry.Hidden || req.Weights.Q.Out != 2*qwidth ||
-		req.Weights.K.In != req.Geometry.Hidden || req.Weights.K.Out != kvwidth ||
-		req.Weights.V == nil || req.Weights.V.id < 0 || req.Weights.V.In != req.Geometry.Hidden || req.Weights.V.Out != kvwidth {
-		return nil, Qwen35FullAttentionDecodeBatchReceipt{}, false, qwen35FullAttentionBatchDecline("resident Q/K/V shapes do not match the requested geometry")
-	}
-
-	graph, err := BeginProjectionGraph(req.Input, nil, nil, batch, req.Geometry.Hidden)
+	g, err := BeginProjectionGraph(req.Input, nil, nil, batch, hidden)
 	if err != nil {
-		return nil, Qwen35FullAttentionDecodeBatchReceipt{}, false, err
+		return result, receipt, false, err
 	}
-	receipt.GraphOwners = 1
-	defer func() {
-		graph.Free()
-		receipt.GraphOwnerReleases = 1
-	}()
-	if req.afterGraphAllocationForTest != nil {
-		req.afterGraphAllocationForTest()
-	}
+	defer g.Free()
 	if req.InjectPostSubmitFailureForTest {
-		graph.InjectPostSubmitFailureForTest()
+		g.InjectPostSubmitFailureForTest()
 	}
-	input, err := graph.Input(req.Geometry.Hidden)
+	input, err := g.Input(hidden)
 	if err != nil {
-		return nil, receipt, false, err
+		return result, receipt, false, err
 	}
-	quantized, err := graph.QuantizeQ8(input)
+	qi, err := g.QuantizeQ8(input)
 	if err != nil {
-		return nil, receipt, false, err
+		return result, receipt, false, err
 	}
-	q, err := graph.EncodeQ8From(req.Weights.Q, quantized)
+	qgate, err := g.EncodeQ8From(req.Weights.Q, qi)
 	if err != nil {
-		return nil, receipt, false, err
+		return result, receipt, false, err
 	}
-	k, err := graph.EncodeQ8From(req.Weights.K, quantized)
+	k, err := g.EncodeQ8From(req.Weights.K, qi)
 	if err != nil {
-		return nil, receipt, false, err
+		return result, receipt, false, err
 	}
-	v, err := graph.EncodeQ4K(req.Weights.V)
+	v, err := g.EncodeQ4KFrom(req.Weights.V, input)
 	if err != nil {
-		return nil, receipt, false, err
+		return result, receipt, false, err
 	}
-	attention, err := graph.qwen35FullAttentionDecodeBatch(q, k, v, req, prefixK, prefixV, offsets, cosv, sinv)
+	attn, err := g.encodeQwen35FullAttentionBatch(qgate, k, v, req, offsets, lengths, packedK, packedV, totalKV)
 	if err != nil {
-		return nil, receipt, false, err
+		return result, receipt, false, err
 	}
-	if req.afterGraphEncodeForTest != nil {
-		req.afterGraphEncodeForTest()
+	outs, gr, finishErr := g.FinishRead(attn.Output, attn.KRaw, attn.KPost, attn.V)
+	accepted = gr.Committed
+	receipt = Qwen35FullAttentionBatchReceipt{Batch: batch, CommandBuffers: 1, Commits: decodeBoolInt(gr.Committed), CompletionWaits: decodeBoolInt(gr.CompletedWait), ProjectionDispatches: 3, AttentionDispatches: 4, InputUploads: 1, FinalReadbacks: gr.HostReadbacks, Committed: gr.Committed, CompletedWait: gr.CompletedWait, AppendElements: make([]int, batch)}
+	for i := range receipt.AppendElements {
+		receipt.AppendElements[i] = kvWidth
 	}
-	packed, graphReceipt, runErr := graph.FinishRead(attention.Output, attention.KRaw, attention.KPost, v)
-	accepted = graphReceipt.Committed
-	receipt = qwen35FullAttentionDecodeReceipt(req, graphReceipt, offsets, kvwidth)
-	if runErr != nil {
-		return nil, receipt, accepted, runErr
+	if finishErr != nil {
+		return result, receipt, accepted, finishErr
 	}
-	if len(packed) != 4 || len(packed[0]) != batch*qwidth || len(packed[1]) != batch*kvwidth ||
-		len(packed[2]) != batch*kvwidth || len(packed[3]) != batch*kvwidth ||
-		!receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 6 || receipt.FinalReadbacks != 1 {
-		return nil, receipt, true, fmt.Errorf("metalgemm: incomplete Qwen full-attention decode batch receipt: %+v", receipt)
+	if len(outs) != 4 {
+		return result, receipt, true, &GraphPostSubmitError{Reason: "incomplete packed attention results"}
 	}
-	out = make([]Qwen35FullAttentionDecodeRow, batch)
-	for row := range out {
-		out[row] = Qwen35FullAttentionDecodeRow{
-			Output:  packed[0][row*qwidth : (row+1)*qwidth],
-			KRaw:    packed[1][row*kvwidth : (row+1)*kvwidth],
-			KPost:   packed[2][row*kvwidth : (row+1)*kvwidth],
-			VAppend: packed[3][row*kvwidth : (row+1)*kvwidth],
-		}
-	}
-	return out, receipt, true, nil
+	result.Output = splitAttentionRows(outs[0], batch, hidden)
+	result.KRaw = splitAttentionRows(outs[1], batch, kvWidth)
+	result.KPost = splitAttentionRows(outs[2], batch, kvWidth)
+	result.V = splitAttentionRows(outs[3], batch, kvWidth)
+	return result, receipt, true, nil
 }
 
-func validateQwen35FullAttentionDecodeBatch(req Qwen35FullAttentionDecodeBatchRequest) (batch, qwidth, kvwidth int, prefixK, prefixV []float32, offsets []int32, cosv, sinv []float32, err error) {
+func validateQwen35FullAttentionBatch(req Qwen35FullAttentionBatchRequest) (batch, hidden, kvWidth, totalKV int, offsets, lengths []int, packedK, packedV []float32, err error) {
 	batch = len(req.Lanes)
-	g := req.Geometry
-	if batch < Qwen35FullAttentionDecodeBatchMin || batch > Qwen35FullAttentionDecodeBatchMax {
-		err = qwen35FullAttentionBatchDecline(fmt.Sprintf("batch=%d, want [%d,%d]", batch, Qwen35FullAttentionDecodeBatchMin, Qwen35FullAttentionDecodeBatchMax))
-		return
+	if batch < 2 || batch > Qwen35FullAttentionBatchMax {
+		return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: fmt.Sprintf("batch=%d outside [2,%d]", batch, Qwen35FullAttentionBatchMax)}
 	}
-	if g.Hidden != qwen35FullAttentionHidden || g.NumHeads != qwen35FullAttentionNumHeads ||
-		g.NumKVHeads != qwen35FullAttentionNumKVHeads || g.HeadDim != qwen35FullAttentionHeadDim ||
-		g.RotaryDim != qwen35FullAttentionRotaryDim {
-		err = qwen35FullAttentionBatchDecline("geometry is not the exact Qwen3.8 full-attention shape")
-		return
+	if req.NumHeads < 1 || req.NumKVHeads < 1 || req.NumHeads%req.NumKVHeads != 0 || req.HeadDim < 1 || req.HeadDim > 256 || req.RotaryDim < 2 || req.RotaryDim > req.HeadDim || req.RotaryDim%2 != 0 || req.Scale <= 0 || req.QKNormEpsilon <= 0 {
+		return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "unsupported attention geometry"}
 	}
-	qwidth, kvwidth = g.NumHeads*g.HeadDim, g.NumKVHeads*g.HeadDim
-	if len(req.Input) != batch*g.Hidden || req.Scale <= 0 || req.QKNormEps <= 0 || req.Weights.Q == nil || req.Weights.K == nil || req.Weights.V == nil {
-		err = qwen35FullAttentionBatchDecline("invalid packed input, constants, or resident weights")
-		return
+	hidden = req.NumHeads * req.HeadDim
+	kvWidth = req.NumKVHeads * req.HeadDim
+	if len(req.Input) != batch*hidden || req.Weights.Q == nil || req.Weights.K == nil || req.Weights.V == nil {
+		return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "missing or malformed panel/weights"}
 	}
-	if len(req.QNorm) != g.HeadDim && len(req.QNorm) != qwidth || len(req.KNorm) != g.HeadDim && len(req.KNorm) != kvwidth {
-		err = qwen35FullAttentionBatchDecline("invalid Q/K normalization shape")
-		return
+	if req.Weights.Q.In != hidden || req.Weights.Q.Out != 2*hidden || req.Weights.K.In != hidden || req.Weights.K.Out != kvWidth || req.Weights.V.In != hidden || req.Weights.V.Out != kvWidth {
+		return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "projection shape mismatch"}
 	}
-	halfRotary := g.RotaryDim / 2
-	offsets = make([]int32, batch+1)
-	totalPrefix := 0
-	for row, lane := range req.Lanes {
-		if len(lane.PrefixK) == 0 || len(lane.PrefixK)%kvwidth != 0 || len(lane.PrefixV) != len(lane.PrefixK) ||
-			len(lane.Cos) != halfRotary || len(lane.Sin) != halfRotary {
-			err = qwen35FullAttentionBatchDecline(fmt.Sprintf("invalid lane %d prefix or rotary row", row))
-			return
+	if len(req.QNorm) != req.HeadDim && len(req.QNorm) != hidden {
+		return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "Q norm shape"}
+	}
+	if len(req.KNorm) != req.HeadDim && len(req.KNorm) != kvWidth {
+		return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "K norm shape"}
+	}
+	offsets = make([]int, batch)
+	lengths = make([]int, batch)
+	for i, l := range req.Lanes {
+		if l.Position < 0 || l.Position >= 4096 || len(l.PrefixK) != l.Position*kvWidth || len(l.PrefixV) != len(l.PrefixK) {
+			return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: fmt.Sprintf("lane %d prefix/position mismatch", i)}
 		}
-		prefixTokens := len(lane.PrefixK) / kvwidth
-		if lane.Position < 0 || prefixTokens+1 > qwen35FullAttentionScratchTokens {
-			err = qwen35FullAttentionBatchDecline(fmt.Sprintf("invalid lane %d position=%d prefix=%d", row, lane.Position, prefixTokens))
-			return
+		offsets[i] = totalKV
+		lengths[i] = l.Position + 1
+		totalKV += lengths[i]
+		packedK = append(packedK, l.PrefixK...)
+		packedK = append(packedK, make([]float32, kvWidth)...)
+		packedV = append(packedV, l.PrefixV...)
+		packedV = append(packedV, make([]float32, kvWidth)...)
+	}
+	needRope := 0
+	for _, l := range req.Lanes {
+		if l.Position+1 > needRope {
+			needRope = l.Position + 1
 		}
-		totalPrefix += prefixTokens
-		offsets[row+1] = int32(totalPrefix)
-		prefixK = append(prefixK, lane.PrefixK...)
-		prefixV = append(prefixV, lane.PrefixV...)
-		cosv = append(cosv, lane.Cos...)
-		sinv = append(sinv, lane.Sin...)
+	}
+	needRope *= req.RotaryDim / 2
+	if len(req.Cos) < needRope || len(req.Sin) < needRope {
+		return 0, 0, 0, 0, nil, nil, nil, nil, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "rotary table too short"}
 	}
 	return
 }
 
-type qwen35FullAttentionDecodeBatchGraphResult struct {
-	Output, KRaw, KPost *GraphResult
-}
-
-func (g *ProjectionGraph) qwen35FullAttentionDecodeBatch(q, k, v *GraphResult, req Qwen35FullAttentionDecodeBatchRequest, prefixK, prefixV []float32, offsets []int32, cosv, sinv []float32) (qwen35FullAttentionDecodeBatchGraphResult, error) {
+func (g *ProjectionGraph) encodeQwen35FullAttentionBatch(qgate, k, v *GraphResult, req Qwen35FullAttentionBatchRequest, offsets, lengths []int, packedK, packedV []float32, totalKV int) (Qwen35GraphAttentionResult, error) {
 	batch := len(req.Lanes)
-	geom := req.Geometry
-	qwidth, kvwidth := geom.NumHeads*geom.HeadDim, geom.NumKVHeads*geom.HeadDim
-	for _, operand := range []struct {
-		result *GraphResult
-		width  int
-	}{{q, 2 * qwidth}, {k, kvwidth}, {v, kvwidth}} {
-		if operand.result == nil || operand.result.graph != g || operand.result.ptr == nil || operand.result.p != batch || operand.result.out != operand.width {
-			return qwen35FullAttentionDecodeBatchGraphResult{}, errors.New("metalgemm: invalid graph-owned Qwen attention batch operand")
+	hidden := req.NumHeads * req.HeadDim
+	kvWidth := req.NumKVHeads * req.HeadDim
+	for _, x := range []struct {
+		r *GraphResult
+		w int
+	}{{qgate, 2 * hidden}, {k, kvWidth}, {v, kvWidth}} {
+		if x.r == nil || x.r.graph != g || x.r.p != batch || x.r.out != x.w {
+			return Qwen35GraphAttentionResult{}, errors.New("metalgemm: invalid independent-lane projection")
 		}
 	}
-	prefixElems := int(offsets[len(offsets)-1]) * kvwidth
-	if len(prefixK) != prefixElems || len(prefixV) != prefixElems || len(offsets) != batch+1 {
-		return qwen35FullAttentionDecodeBatchGraphResult{}, errors.New("metalgemm: invalid packed Qwen attention lane metadata")
+	positions := make([]C.int, batch)
+	offs := make([]C.int, batch)
+	lens := make([]C.int, batch)
+	for i, l := range req.Lanes {
+		positions[i] = C.int(l.Position)
+		offs[i] = C.int(offsets[i])
+		lens[i] = C.int(lengths[i])
 	}
-	gain, qknorm := C.int(0), C.int(0)
-	if req.NormGain1p {
-		gain = 1
+	var op, kr, kp, vp unsafe.Pointer
+	ok := C.mg_qwen35_graph_attention_batch(g.ptr, qgate.ptr, k.ptr, v.ptr, (*C.float)(unsafe.Pointer(&req.QNorm[0])), (*C.float)(unsafe.Pointer(&req.KNorm[0])), (*C.float)(unsafe.Pointer(&req.Cos[0])), (*C.float)(unsafe.Pointer(&req.Sin[0])), &positions[0], &offs[0], &lens[0], (*C.float)(unsafe.Pointer(&packedK[0])), (*C.float)(unsafe.Pointer(&packedV[0])), C.int(totalKV), C.int(batch), C.int(req.NumHeads), C.int(req.NumKVHeads), C.int(req.HeadDim), C.int(req.RotaryDim), C.float(req.Scale), C.float(req.QKNormEpsilon), boolInt(req.Gain1p), boolInt(req.QKNorm), C.int(len(req.QNorm)), C.int(len(req.KNorm)), &op, &kr, &kp, &vp)
+	if ok == 0 {
+		return Qwen35GraphAttentionResult{}, errors.New("metalgemm: independent-lane full attention encode failed")
 	}
-	if req.QKNorm {
-		qknorm = 1
-	}
-	var outp, krawp, kpostp unsafe.Pointer
-	if C.mg_qwen35_graph_attention_decode_batch(g.ptr, q.ptr, k.ptr, v.ptr,
-		(*C.float)(unsafe.Pointer(&req.QNorm[0])), (*C.float)(unsafe.Pointer(&req.KNorm[0])),
-		(*C.float)(unsafe.Pointer(&cosv[0])), (*C.float)(unsafe.Pointer(&sinv[0])),
-		(*C.float)(unsafe.Pointer(&prefixK[0])), (*C.float)(unsafe.Pointer(&prefixV[0])),
-		(*C.int)(unsafe.Pointer(&offsets[0])), C.int(batch), C.int(geom.NumHeads), C.int(geom.NumKVHeads),
-		C.int(geom.HeadDim), C.int(geom.RotaryDim), C.float(req.Scale), C.float(req.QKNormEps), gain, qknorm,
-		C.int(len(req.QNorm)), C.int(len(req.KNorm)), &outp, &krawp, &kpostp) == 0 || outp == nil || krawp == nil || kpostp == nil {
-		return qwen35FullAttentionDecodeBatchGraphResult{}, errors.New("metalgemm: Qwen full-attention decode batch encode failed")
-	}
-	g.encoders += 2
-	return qwen35FullAttentionDecodeBatchGraphResult{
-		Output: &GraphResult{ptr: outp, out: qwidth, p: batch, graph: g},
-		KRaw:   &GraphResult{ptr: krawp, out: kvwidth, p: batch, graph: g},
-		KPost:  &GraphResult{ptr: kpostp, out: kvwidth, p: batch, graph: g},
-	}, nil
+	g.encoders += 4
+	return Qwen35GraphAttentionResult{Output: &GraphResult{ptr: op, out: hidden, p: batch, graph: g}, KRaw: &GraphResult{ptr: kr, out: kvWidth, p: batch, graph: g}, KPost: &GraphResult{ptr: kp, out: kvWidth, p: batch, graph: g}, V: &GraphResult{ptr: vp, out: kvWidth, p: batch, graph: g}}, nil
 }
-
-func qwen35FullAttentionDecodeReceipt(req Qwen35FullAttentionDecodeBatchRequest, graph GraphReceipt, offsets []int32, kvwidth int) Qwen35FullAttentionDecodeBatchReceipt {
-	batch := len(req.Lanes)
-	r := Qwen35FullAttentionDecodeBatchReceipt{
-		Rows: batch, CommandBuffers: 1, Commits: decodeBoolInt(graph.Committed), CompletionWaits: decodeBoolInt(graph.CompletedWait),
-		ProjectionDispatches: 3, Quantizers: 1, AttentionDispatches: 2,
-		InputUploads: 1, ConstantUploads: 7, FinalReadbacks: graph.HostReadbacks,
-		GraphOwners: 1, Encoders: graph.Encoders, Committed: graph.Committed, CompletedWait: graph.CompletedWait,
-		PrefixTokens: make([]int, batch), Positions: make([]int, batch), KAppendElements: make([]int, batch), VAppendElements: make([]int, batch),
+func splitAttentionRows(flat []float32, batch, width int) [][]float32 {
+	if len(flat) != batch*width {
+		return nil
 	}
-	for row, lane := range req.Lanes {
-		r.PrefixTokens[row] = int(offsets[row+1] - offsets[row])
-		r.Positions[row] = lane.Position
-		r.KAppendElements[row], r.VAppendElements[row] = kvwidth, kvwidth
+	out := make([][]float32, batch)
+	for i := range out {
+		out[i] = append([]float32(nil), flat[i*width:(i+1)*width]...)
 	}
-	return r
-}
-
-func qwen35FullAttentionDecodeBatchNativeLiveCounts() (owners, buffers int) {
-	return int(C.mg_graph_live_owners()), int(C.mg_graph_live_buffers())
+	return out
 }

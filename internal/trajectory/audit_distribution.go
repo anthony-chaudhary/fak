@@ -73,6 +73,40 @@ type auditToolResult struct {
 	combinedOutput bool
 }
 
+type auditClassifiedEvent struct {
+	category         string
+	tool             string
+	id               string
+	content          []byte
+	visible          bool
+	subtype          string
+	visibility       string
+	visibilityReason string
+}
+
+var (
+	auditClaudeRowSubtypes = map[string]struct{}{
+		"assistant": {}, "attachment": {}, "user": {},
+	}
+	auditClaudeBlockSubtypes = map[string]struct{}{
+		"reasoning": {}, "text": {}, "thinking": {}, "tool_result": {}, "tool_use": {},
+	}
+	auditCodexRowSubtypes = map[string]struct{}{
+		"event_msg": {}, "response_item": {}, "session_meta": {}, "turn_context": {},
+	}
+	auditCodexResponseItemSubtypes = map[string]struct{}{
+		"custom_tool_call": {}, "custom_tool_call_output": {}, "function_call": {},
+		"function_call_output": {}, "message": {}, "reasoning": {}, "web_search_call": {},
+	}
+	auditCodexMessageBlockSubtypes = map[string]struct{}{
+		"input_text": {}, "output_text": {},
+	}
+	auditCodexEventMessageSubtypes = map[string]struct{}{
+		"agent_message": {}, "item_completed": {}, "item_started": {},
+		"task_started": {}, "token_count": {}, "user_message": {},
+	}
+)
+
 func newAuditDistribution() auditDistribution {
 	return auditDistribution{
 		categories: map[string]int64{}, tools: map[string]*AuditDistributionRow{}, results: map[string]*AuditToolResultRow{},
@@ -92,22 +126,20 @@ func (d *auditDistribution) observe(source string, line []byte) {
 		payload = root["message"]
 	}
 	d.observeToolResult(source, typ, payload)
-	if source == AuditSourceClaude && d.observeClaudeDistribution(typ, payload) {
-		return
-	}
-	cat, tool, id, content, visible, sub := classifyDistribution(source, typ, payload, root)
-	if !visible {
-		k := source + "\x00" + sub
-		r := d.storage[k]
-		if r == nil {
-			r = &AuditStorageRow{Source: source, Subtype: sub}
-			d.storage[k] = r
+	for _, event := range classifyDistributionEvents(source, typ, payload, root) {
+		if !event.visible {
+			key := source + "\x00" + event.subtype
+			row := d.storage[key]
+			if row == nil {
+				row = &AuditStorageRow{Source: source, Subtype: event.subtype}
+				d.storage[key] = row
+			}
+			row.Bytes += int64(len(line))
+			row.Records++
+			continue
 		}
-		r.Bytes += int64(len(line))
-		r.Records++
-		return
+		d.observeVisible(event.category, event.tool, event.id, int64(len(event.content)))
 	}
-	d.observeVisible(cat, tool, id, int64(len(content)))
 }
 
 func (d *auditDistribution) observeVisible(cat, tool, id string, weight int64) {
@@ -139,43 +171,6 @@ func (d *auditDistribution) observeVisible(cat, tool, id string, weight int64) {
 			}
 		}
 	}
-}
-
-func (d *auditDistribution) observeClaudeDistribution(typ string, payload json.RawMessage) bool {
-	if typ != "assistant" && typ != "user" {
-		return false
-	}
-	var message map[string]json.RawMessage
-	if json.Unmarshal(payload, &message) != nil {
-		return false
-	}
-	var blocks []map[string]json.RawMessage
-	if json.Unmarshal(message["content"], &blocks) != nil {
-		return false
-	}
-	base := "assistant_message"
-	if typ == "user" {
-		base = "user_message"
-	}
-	for _, block := range blocks {
-		cat, tool, id := base, "", ""
-		var content []byte
-		switch rawString(block["type"]) {
-		case "tool_use":
-			cat, tool, id = "tool_call", rawString(block["name"]), rawString(block["id"])
-			content = joinRaw(block["input"])
-		case "tool_result":
-			cat, id = "tool_result", rawString(block["tool_use_id"])
-			content = joinRaw(block["content"])
-		case "thinking", "reasoning":
-			cat = "reasoning"
-			content = joinRaw(block["thinking"], block["text"], block["content"])
-		default:
-			content = joinRaw(block["text"], block["content"])
-		}
-		d.observeVisible(cat, tool, id, int64(len(content)))
-	}
-	return true
 }
 
 // observeToolResult deliberately uses only the harness-native call/result IDs:
@@ -506,92 +501,159 @@ func auditOutputIsTruncated(value any) bool {
 func rawBool(v json.RawMessage) bool { var b bool; _ = json.Unmarshal(v, &b); return b }
 
 func classifyDistribution(source, typ string, payload json.RawMessage, root map[string]json.RawMessage) (cat, tool, id string, content []byte, visible bool, sub string) {
+	events := classifyDistributionEvents(source, typ, payload, root)
+	if len(events) == 0 {
+		return "", "", "", nil, false, firstNonempty(typ, "unknown")
+	}
+	event := events[0]
+	return event.category, event.tool, event.id, event.content, event.visible, event.subtype
+}
+
+func classifyDistributionEvents(source, typ string, payload json.RawMessage, root map[string]json.RawMessage) []auditClassifiedEvent {
 	if source == "codex" {
 		if typ == "response_item" {
 			var p map[string]json.RawMessage
 			if json.Unmarshal(payload, &p) != nil {
-				return "visible_unknown", "", "", nil, true, "response_item/malformed"
+				return []auditClassifiedEvent{auditVisibleEvent("visible_unknown", "", "", nil, "response_item/malformed", "unresolved", "malformed_response_item")}
 			}
 			pt := rawString(p["type"])
-			sub = "response_item/" + pt
+			sub := "response_item/" + pt
+			if _, supported := auditCodexResponseItemSubtypes[pt]; !supported {
+				return []auditClassifiedEvent{auditVisibleEvent("visible_unknown", "", "", joinRaw(payload), sub, "unresolved", "unknown_response_item_subtype")}
+			}
 			switch pt {
 			case "function_call", "custom_tool_call", "web_search_call":
-				return "tool_call", firstNonempty(rawString(p["name"]), pt), firstNonempty(rawString(p["call_id"]), rawString(p["id"])), joinRaw(p["arguments"], p["input"]), true, sub
+				return []auditClassifiedEvent{auditVisibleEvent("tool_call", firstNonempty(rawString(p["name"]), pt), firstNonempty(rawString(p["call_id"]), rawString(p["id"])), joinRaw(p["arguments"], p["input"]), sub, "inferred_model_visible", "known_response_item_content")}
 			case "function_call_output", "custom_tool_call_output":
-				return "tool_result", "", firstNonempty(rawString(p["call_id"]), rawString(p["id"])), joinRaw(p["output"]), true, sub
+				return []auditClassifiedEvent{auditVisibleEvent("tool_result", "", firstNonempty(rawString(p["call_id"]), rawString(p["id"])), joinRaw(p["output"]), sub, "inferred_model_visible", "known_response_item_content")}
 			case "reasoning":
-				return "reasoning", "", "", joinRaw(p["summary"], p["content"]), true, sub
+				return []auditClassifiedEvent{auditVisibleEvent("reasoning", "", "", joinRaw(p["summary"], p["content"]), sub, "inferred_model_visible", "known_response_item_content")}
 			case "message":
 				role := rawString(p["role"])
 				c := "assistant_message"
 				if role == "user" {
 					c = "user_message"
 				}
-				return c, "", "", joinRaw(p["content"]), true, sub
+				return classifyCodexMessageContent(c, sub, p["content"])
 			}
-			return "visible_unknown", "", "", joinRaw(payload), true, sub
 		}
 		if typ == "event_msg" {
 			var p map[string]json.RawMessage
 			_ = json.Unmarshal(payload, &p)
 			pt := rawString(p["type"])
+			if _, supported := auditCodexEventMessageSubtypes[pt]; !supported {
+				return []auditClassifiedEvent{auditStorageEvent("event_msg/"+firstNonempty(pt, "unknown"), "unresolved", "unknown_event_message_subtype")}
+			}
 			if pt == "user_message" {
-				return "user_message", "", "", joinRaw(p["message"]), true, "event_msg/user_message"
+				return []auditClassifiedEvent{auditVisibleEvent("user_message", "", "", joinRaw(p["message"]), "event_msg/user_message", "inferred_model_visible", "known_event_message_content")}
 			}
 			if pt == "agent_message" {
-				return "assistant_message", "", "", joinRaw(p["message"]), true, "event_msg/agent_message"
+				return []auditClassifiedEvent{auditVisibleEvent("assistant_message", "", "", joinRaw(p["message"]), "event_msg/agent_message", "inferred_model_visible", "known_event_message_content")}
 			}
 			if pt == "item_completed" || pt == "item_started" {
 				var item map[string]json.RawMessage
 				_ = json.Unmarshal(p["item"], &item)
-				return "", "", "", nil, false, "event_msg/" + pt + "/" + firstNonempty(rawString(item["type"]), "unknown_item")
+				return []auditClassifiedEvent{auditStorageEvent("event_msg/"+pt+"/"+firstNonempty(rawString(item["type"]), "unknown_item"), "explicit_storage_only", "known_event_mirror")}
 			}
-			return "", "", "", nil, false, "event_msg/" + firstNonempty(pt, "unknown")
+			return []auditClassifiedEvent{auditStorageEvent("event_msg/"+pt, "explicit_storage_only", "known_event_envelope")}
 		}
-		return "", "", "", nil, false, firstNonempty(typ, "unknown")
+		if _, supported := auditCodexRowSubtypes[typ]; !supported {
+			return []auditClassifiedEvent{auditStorageEvent(firstNonempty(typ, "unknown"), "unresolved", "unknown_row_subtype")}
+		}
+		return []auditClassifiedEvent{auditStorageEvent(typ, "explicit_storage_only", "known_row_envelope")}
 	}
 	if typ == "user" || typ == "assistant" {
 		base := "assistant_message"
 		if typ == "user" {
 			base = "user_message"
 		}
-		c, t, i, b := classifyClaudeContent(base, payload)
-		return c, t, i, b, true, typ
+		return classifyClaudeContentEvents(base, typ, payload)
 	}
 	if typ == "attachment" {
 		var a map[string]json.RawMessage
 		_ = json.Unmarshal(root["attachment"], &a)
-		return "", "", "", nil, false, "attachment/" + firstNonempty(rawString(a["type"]), "unknown")
+		return []auditClassifiedEvent{auditStorageEvent("attachment/"+firstNonempty(rawString(a["type"]), "unknown"), "explicit_storage_only", "known_attachment_envelope")}
 	}
-	return "", "", "", nil, false, firstNonempty(typ, "unknown")
+	if _, supported := auditClaudeRowSubtypes[typ]; !supported {
+		return []auditClassifiedEvent{auditStorageEvent(firstNonempty(typ, "unknown"), "unresolved", "unknown_row_subtype")}
+	}
+	return []auditClassifiedEvent{auditStorageEvent(typ, "explicit_storage_only", "known_row_envelope")}
 }
 func classifyClaudeContent(base string, payload json.RawMessage) (string, string, string, []byte) {
+	events := classifyClaudeContentEvents(base, "", payload)
+	if len(events) == 0 {
+		return base, "", "", nil
+	}
+	event := events[0]
+	return event.category, event.tool, event.id, event.content
+}
+
+func classifyClaudeContentEvents(base, rowSubtype string, payload json.RawMessage) []auditClassifiedEvent {
 	var msg map[string]json.RawMessage
 	if json.Unmarshal(payload, &msg) != nil {
-		return "visible_unknown", "", "", nil
+		return []auditClassifiedEvent{auditVisibleEvent("visible_unknown", "", "", nil, firstNonempty(rowSubtype, "message")+"/malformed", "unresolved", "malformed_message")}
 	}
 	var blocks []map[string]json.RawMessage
 	if json.Unmarshal(msg["content"], &blocks) != nil {
-		return base, "", "", joinRaw(msg["content"])
+		return []auditClassifiedEvent{auditVisibleEvent(base, "", "", joinRaw(msg["content"]), firstNonempty(rowSubtype, "message")+"/scalar", "inferred_model_visible", "known_message_content")}
 	}
-	cat, tool, id := base, "", ""
-	var b []byte
+	if len(blocks) == 0 {
+		return []auditClassifiedEvent{auditVisibleEvent(base, "", "", nil, firstNonempty(rowSubtype, "message")+"/empty", "inferred_model_visible", "empty_message_content")}
+	}
+	events := make([]auditClassifiedEvent, 0, len(blocks))
 	for _, x := range blocks {
-		switch rawString(x["type"]) {
+		blockType := rawString(x["type"])
+		subtype := firstNonempty(rowSubtype, "message") + "/" + firstNonempty(blockType, "unknown")
+		if _, supported := auditClaudeBlockSubtypes[blockType]; !supported {
+			events = append(events, auditVisibleEvent("visible_unknown", "", "", joinRaw(json.RawMessage(mustJSON(x))), subtype, "unresolved", "unknown_content_block_subtype"))
+			continue
+		}
+		switch blockType {
 		case "tool_use":
-			cat, tool, id = "tool_call", rawString(x["name"]), rawString(x["id"])
-			b = append(b, joinRaw(x["input"])...)
+			events = append(events, auditVisibleEvent("tool_call", rawString(x["name"]), rawString(x["id"]), joinRaw(x["input"]), subtype, "inferred_model_visible", "known_content_block"))
 		case "tool_result":
-			cat, id = "tool_result", rawString(x["tool_use_id"])
-			b = append(b, joinRaw(x["content"])...)
+			events = append(events, auditVisibleEvent("tool_result", "", rawString(x["tool_use_id"]), joinRaw(x["content"]), subtype, "inferred_model_visible", "known_content_block"))
 		case "thinking", "reasoning":
-			cat = "reasoning"
-			b = append(b, joinRaw(x["thinking"], x["text"], x["content"])...)
+			events = append(events, auditVisibleEvent("reasoning", "", "", joinRaw(x["thinking"], x["text"], x["content"]), subtype, "inferred_model_visible", "known_content_block"))
 		default:
-			b = append(b, joinRaw(x["text"], x["content"])...)
+			events = append(events, auditVisibleEvent(base, "", "", joinRaw(x["text"], x["content"]), subtype, "inferred_model_visible", "known_content_block"))
 		}
 	}
-	return cat, tool, id, b
+	return events
+}
+
+func classifyCodexMessageContent(category, subtype string, content json.RawMessage) []auditClassifiedEvent {
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(content, &blocks) != nil {
+		return []auditClassifiedEvent{auditVisibleEvent(category, "", "", joinRaw(content), subtype+"/scalar", "inferred_model_visible", "known_message_content")}
+	}
+	if len(blocks) == 0 {
+		return []auditClassifiedEvent{auditVisibleEvent(category, "", "", nil, subtype+"/empty", "inferred_model_visible", "empty_message_content")}
+	}
+	events := make([]auditClassifiedEvent, 0, len(blocks))
+	for _, block := range blocks {
+		blockType := rawString(block["type"])
+		blockSubtype := subtype + "/" + firstNonempty(blockType, "unknown")
+		if _, supported := auditCodexMessageBlockSubtypes[blockType]; !supported {
+			events = append(events, auditVisibleEvent("visible_unknown", "", "", joinRaw(json.RawMessage(mustJSON(block))), blockSubtype, "unresolved", "unknown_message_block_subtype"))
+			continue
+		}
+		events = append(events, auditVisibleEvent(category, "", "", joinRaw(block["text"]), blockSubtype, "inferred_model_visible", "known_message_block"))
+	}
+	return events
+}
+
+func auditVisibleEvent(category, tool, id string, content []byte, subtype, visibility, reason string) auditClassifiedEvent {
+	return auditClassifiedEvent{category: category, tool: tool, id: id, content: content, visible: true, subtype: subtype, visibility: visibility, visibilityReason: reason}
+}
+
+func auditStorageEvent(subtype, visibility, reason string) auditClassifiedEvent {
+	return auditClassifiedEvent{subtype: subtype, visibility: visibility, visibilityReason: reason}
+}
+
+func mustJSON(value any) []byte {
+	b, _ := json.Marshal(value)
+	return b
 }
 func joinRaw(v ...json.RawMessage) []byte {
 	var out []byte

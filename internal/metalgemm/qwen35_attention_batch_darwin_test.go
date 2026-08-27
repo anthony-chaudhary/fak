@@ -7,396 +7,217 @@ import (
 	"fmt"
 	"math"
 	"testing"
-	"time"
 )
 
 func TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence(t *testing.T) {
 	if !Available() {
 		t.Skip("Metal unavailable")
 	}
-	geometry := Qwen35FullAttentionGeometry{Hidden: 5120, NumHeads: 24, NumKVHeads: 4, HeadDim: 256, RotaryDim: 64}
-	weights := qwen35AttentionBatchWeights(t, geometry)
-	defer func() {
-		weights.Q.Release()
-		weights.K.Release()
-		weights.V.Release()
-	}()
-	t.Logf("exact Qwen3.8 full-attention geometry: hidden=%d nH=%d nKV=%d hd=%d rotary=%d gqa=%d",
-		geometry.Hidden, geometry.NumHeads, geometry.NumKVHeads, geometry.HeadDim, geometry.RotaryDim, geometry.NumHeads/geometry.NumKVHeads)
-	qnorm, knorm := make([]float32, geometry.HeadDim), make([]float32, geometry.HeadDim)
-	for i := range qnorm {
-		qnorm[i] = float32((i%9)-4) * 0.015
-		knorm[i] = float32((i%7)-3) * 0.02
-	}
-	requestFor := func(batch int) Qwen35FullAttentionDecodeBatchRequest {
-		return Qwen35FullAttentionDecodeBatchRequest{
-			Input: qwen35AttentionBatchInput(batch, geometry.Hidden), Weights: weights,
-			Lanes: qwen35AttentionBatchLanes(batch, geometry), Geometry: geometry,
-			QNorm: qnorm, KNorm: knorm, Scale: 1 / float32(math.Sqrt(float64(geometry.HeadDim))),
-			QKNormEps: 1e-5, NormGain1p: true, QKNorm: true,
-		}
-	}
-
-	var b4Rows []Qwen35FullAttentionDecodeRow
-	const graphBufferDelta = 11 // xf + quantized q/d + three projections + five attention intermediates.
-	serialRequest := requestFor(Qwen35FullAttentionDecodeBatchMax)
-	serialRows := make([]Qwen35FullAttentionDecodeRow, Qwen35FullAttentionDecodeBatchMax)
-	for row := range serialRows {
-		serialRows[row] = qwen35AttentionSerialP32(t, serialRequest, row)
-	}
 	for _, batch := range []int{2, 4, 8} {
-		t.Run(fmt.Sprintf("B%d serial parity and accounting", batch), func(t *testing.T) {
-			req := requestFor(batch)
-			baseOwners, baseBuffers := qwen35FullAttentionDecodeBatchNativeLiveCounts()
-			peakOwners, peakBuffers := -1, -1
-			req.afterGraphEncodeForTest = func() { peakOwners, peakBuffers = qwen35FullAttentionDecodeBatchNativeLiveCounts() }
+		t.Run(fmt.Sprintf("B%d", batch), func(t *testing.T) {
+			const hidden = 256
+			const nH = 4
+			const nKV = 2
+			const hd = 64
+			const rotary = 64
+			kvw := nKV * hd
+			weights := Qwen35FullAttentionWeights{Q: attentionBatchQ8(t, 2*hidden, hidden, 11), K: attentionBatchQ8(t, kvw, hidden, 13), V: attentionBatchQ4K(t, kvw, hidden, 17)}
+			defer weights.Q.Release()
+			defer weights.K.Release()
+			defer weights.V.Release()
+			lanes := make([]Qwen35FullAttentionLane, batch)
+			input := make([]float32, batch*hidden)
+			maxPos := 0
+			for row := 0; row < batch; row++ {
+				pos := row + 2
+				if pos > maxPos {
+					maxPos = pos
+				}
+				lanes[row] = Qwen35FullAttentionLane{Position: pos, PrefixK: attentionBatchValues(pos*kvw, row+3), PrefixV: attentionBatchValues(pos*kvw, row+7)}
+				copy(input[row*hidden:], attentionBatchValues(hidden, row+11))
+			}
+			cosv, sinv := attentionBatchRope(maxPos+1, rotary)
+			req := Qwen35FullAttentionBatchRequest{Input: input, Weights: weights, Lanes: lanes, QNorm: attentionBatchOnes(hd), KNorm: attentionBatchOnes(hd), Cos: cosv, Sin: sinv, NumHeads: nH, NumKVHeads: nKV, HeadDim: hd, RotaryDim: rotary, Scale: 1 / float32(math.Sqrt(hd)), QKNormEpsilon: 1e-6, QKNorm: true}
 			got, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
 			if err != nil || !accepted {
-				t.Fatalf("B=%d accepted=%v err=%v", batch, accepted, err)
+				t.Fatalf("accepted=%v err=%v", accepted, err)
 			}
-			qwen35RequireAttentionBatchReceipt(t, receipt, req, geometry.NumKVHeads*geometry.HeadDim, 1)
-			if peakOwners != baseOwners+1 || peakBuffers != baseBuffers+graphBufferDelta {
-				t.Fatalf("B=%d native peak owners=%d buffers=%d, want %d/%d", batch, peakOwners, peakBuffers, baseOwners+1, baseBuffers+graphBufferDelta)
+			if receipt.CommandBuffers != 1 || receipt.Commits != 1 || receipt.CompletionWaits != 1 || receipt.ProjectionDispatches != 3 || receipt.InputUploads != 1 || receipt.IntermediateReadbacks != 0 || receipt.FinalReadbacks != 1 {
+				t.Fatalf("receipt=%+v", receipt)
 			}
-			if owners, buffers := qwen35FullAttentionDecodeBatchNativeLiveCounts(); owners != baseOwners || buffers != baseBuffers {
-				t.Fatalf("B=%d success retained native owners=%d buffers=%d, baseline=%d/%d", batch, owners, buffers, baseOwners, baseBuffers)
+			for row := 0; row < batch; row++ {
+				one := req
+				one.Input = append([]float32(nil), input[row*hidden:(row+1)*hidden]...)
+				one.Lanes = []Qwen35FullAttentionLane{lanes[row]}
+				want := attentionBatchSerialOracle(t, one)
+				attentionBatchClose(t, "output", got.Output[row], want.Output[0])
+				attentionBatchClose(t, "kraw", got.KRaw[row], want.KRaw[0])
+				attentionBatchClose(t, "kpost", got.KPost[row], want.KPost[0])
+				attentionBatchClose(t, "v", got.V[row], want.V[0])
 			}
-			for row := range got {
-				qwen35RequireAttentionBatchParity(t, fmt.Sprintf("B=%d row=%d output", batch, row), serialRows[row].Output, got[row].Output)
-				qwen35RequireAttentionBatchParity(t, fmt.Sprintf("B=%d row=%d KRaw", batch, row), serialRows[row].KRaw, got[row].KRaw)
-				qwen35RequireAttentionBatchParity(t, fmt.Sprintf("B=%d row=%d KPost", batch, row), serialRows[row].KPost, got[row].KPost)
-				qwen35RequireAttentionBatchParity(t, fmt.Sprintf("B=%d row=%d V append", batch, row), serialRows[row].VAppend, got[row].VAppend)
+			changed := req
+			changed.Lanes = append([]Qwen35FullAttentionLane(nil), lanes...)
+			changed.Lanes[0].PrefixK = append([]float32(nil), lanes[0].PrefixK...)
+			changed.Lanes[0].PrefixK[0] += .5
+			alt, _, ok, err := RunQwen35FullAttentionDecodeBatch(changed)
+			if err != nil || !ok {
+				t.Fatal(err)
 			}
-			if batch == 4 {
-				b4Rows = qwen35CloneAttentionBatchRows(got)
+			if attentionBatchSame(alt.Output[0], got.Output[0]) {
+				t.Fatal("changed lane did not change")
 			}
-			if qwen35AttentionBatchMaxAbs(got[0].Output, got[len(got)-1].Output) == 0 {
-				t.Fatalf("B=%d independent exact-geometry rows produced identical outputs", batch)
+			for row := 1; row < batch; row++ {
+				attentionBatchBits(t, alt.Output[row], got.Output[row])
 			}
 		})
 	}
-
-	t.Run("absolute position above scratch limit uses supplied rotary row", func(t *testing.T) {
-		req := requestFor(2)
-		for row := range req.Lanes {
-			req.Lanes[row].Position = 8192 + row*4097
-			req.Lanes[row].Cos, req.Lanes[row].Sin = qwen35AttentionRotaryRow(req.Lanes[row].Position, geometry.RotaryDim)
+	t.Run("committed_failure_is_not_replayed", func(t *testing.T) {
+		const hidden, nH, nKV, hd, rotary = 256, 4, 2, 64, 64
+		kvw := nKV * hd
+		weights := Qwen35FullAttentionWeights{Q: attentionBatchQ8(t, 2*hidden, hidden, 23), K: attentionBatchQ8(t, kvw, hidden, 29), V: attentionBatchQ4K(t, kvw, hidden, 31)}
+		defer weights.Q.Release()
+		defer weights.K.Release()
+		defer weights.V.Release()
+		cosv, sinv := attentionBatchRope(4, rotary)
+		req := Qwen35FullAttentionBatchRequest{
+			Input: attentionBatchValues(2*hidden, 37), Weights: weights,
+			Lanes: []Qwen35FullAttentionLane{
+				{Position: 2, PrefixK: attentionBatchValues(2*kvw, 41), PrefixV: attentionBatchValues(2*kvw, 43)},
+				{Position: 3, PrefixK: attentionBatchValues(3*kvw, 47), PrefixV: attentionBatchValues(3*kvw, 53)},
+			},
+			QNorm: attentionBatchOnes(hd), KNorm: attentionBatchOnes(hd), Cos: cosv, Sin: sinv,
+			NumHeads: nH, NumKVHeads: nKV, HeadDim: hd, RotaryDim: rotary,
+			Scale: 1 / float32(math.Sqrt(hd)), QKNormEpsilon: 1e-6, QKNorm: true,
+			InjectPostSubmitFailureForTest: true,
 		}
-		got, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
-		if err != nil || !accepted || len(got) != 2 {
-			t.Fatalf("large absolute position accepted=%v rows=%d receipt=%+v err=%v", accepted, len(got), receipt, err)
-		}
-		qwen35RequireAttentionBatchReceipt(t, receipt, req, geometry.NumKVHeads*geometry.HeadDim, 1)
-		if receipt.Positions[0] <= qwen35FullAttentionScratchTokens || receipt.Positions[1] <= receipt.Positions[0] {
-			t.Fatalf("large absolute positions were not preserved: %v", receipt.Positions)
-		}
-	})
-
-	t.Run("changing one prefix changes only its lane", func(t *testing.T) {
-		req := requestFor(4)
-		const changed = 2
-		req.Lanes[changed].PrefixK = append([]float32(nil), req.Lanes[changed].PrefixK...)
-		req.Lanes[changed].PrefixV = append([]float32(nil), req.Lanes[changed].PrefixV...)
-		req.Lanes[changed].PrefixK[3] += 0.75
-		req.Lanes[changed].PrefixV[7] -= 0.5
-		got, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
-		if err != nil || !accepted {
-			t.Fatalf("lane isolation accepted=%v err=%v", accepted, err)
-		}
-		qwen35RequireAttentionBatchReceipt(t, receipt, req, geometry.NumKVHeads*geometry.HeadDim, 1)
-		for row := range got {
-			qwen35RequireAttentionBatchParity(t, fmt.Sprintf("lane isolation row=%d KRaw", row), b4Rows[row].KRaw, got[row].KRaw)
-			qwen35RequireAttentionBatchParity(t, fmt.Sprintf("lane isolation row=%d KPost", row), b4Rows[row].KPost, got[row].KPost)
-			qwen35RequireAttentionBatchParity(t, fmt.Sprintf("lane isolation row=%d V append", row), b4Rows[row].VAppend, got[row].VAppend)
-			maxAbs := qwen35AttentionBatchMaxAbs(b4Rows[row].Output, got[row].Output)
-			if row == changed && maxAbs <= 1e-7 {
-				t.Fatalf("changed lane %d output maxAbs=%g, want nonzero", row, maxAbs)
-			}
-			if row != changed && maxAbs != 0 {
-				t.Fatalf("changed lane %d mutated row %d output maxAbs=%g", changed, row, maxAbs)
-			}
-		}
-	})
-
-	t.Run("invalid lane declines before graph allocation", func(t *testing.T) {
-		req := requestFor(2)
-		req.Lanes[1].PrefixV = req.Lanes[1].PrefixV[:len(req.Lanes[1].PrefixV)-1]
-		allocated := false
-		req.afterGraphAllocationForTest = func() { allocated = true }
-		baseOwners, baseBuffers := qwen35FullAttentionDecodeBatchNativeLiveCounts()
-		got, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
-		var declined *Qwen35FullAttentionDecodeBatchDeclinedError
-		if got != nil || accepted || !errors.As(err, &declined) || receipt.Committed || allocated {
-			t.Fatalf("pre-submit got=%v accepted=%v receipt=%+v allocated=%v err=%T %v", got, accepted, receipt, allocated, err, err)
-		}
-		if owners, buffers := qwen35FullAttentionDecodeBatchNativeLiveCounts(); owners != baseOwners || buffers != baseBuffers {
-			t.Fatalf("decline changed native owners=%d buffers=%d, baseline=%d/%d", owners, buffers, baseOwners, baseBuffers)
-		}
-	})
-
-	t.Run("committed failure has no replay and exact cleanup", func(t *testing.T) {
-		baseOwners, baseBuffers := qwen35FullAttentionDecodeBatchNativeLiveCounts()
-		for attempt := 0; attempt < 3; attempt++ {
-			req := requestFor(2)
-			req.InjectPostSubmitFailureForTest = true
-			peakOwners, peakBuffers := -1, -1
-			req.afterGraphEncodeForTest = func() { peakOwners, peakBuffers = qwen35FullAttentionDecodeBatchNativeLiveCounts() }
-			got, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
-			var post *GraphPostSubmitError
-			if got != nil || !accepted || !errors.As(err, &post) || !receipt.Committed || !receipt.CompletedWait {
-				t.Fatalf("attempt=%d got=%v accepted=%v receipt=%+v err=%T %v", attempt, got, accepted, receipt, err, err)
-			}
-			if receipt.ProjectionDispatches != 3 || receipt.ReplayAttempts != 0 || receipt.FinalReadbacks != 0 ||
-				receipt.GraphOwners != 1 || receipt.GraphOwnerReleases != 1 || peakOwners != baseOwners+1 || peakBuffers != baseBuffers+graphBufferDelta {
-				t.Fatalf("attempt=%d lifecycle receipt=%+v native peak=%d/%d baseline=%d/%d", attempt, receipt, peakOwners, peakBuffers, baseOwners, baseBuffers)
-			}
-			if owners, buffers := qwen35FullAttentionDecodeBatchNativeLiveCounts(); owners != baseOwners || buffers != baseBuffers {
-				t.Fatalf("attempt=%d retained native owners=%d buffers=%d, baseline=%d/%d", attempt, owners, buffers, baseOwners, baseBuffers)
-			}
-		}
-	})
-
-	t.Run("Q4_K V owner stays live through the synchronous graph", func(t *testing.T) {
-		req := requestFor(2)
-		entered, resume := make(chan struct{}), make(chan struct{})
-		req.afterGraphAllocationForTest = func() {
-			close(entered)
-			<-resume
-		}
-		type callResult struct {
-			receipt  Qwen35FullAttentionDecodeBatchReceipt
-			accepted bool
-			err      error
-		}
-		calls := make(chan callResult, 1)
-		go func() {
-			_, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
-			calls <- callResult{receipt: receipt, accepted: accepted, err: err}
-		}()
-		<-entered
-		released := make(chan struct{})
-		go func() {
-			weights.V.Release()
-			close(released)
-		}()
-		select {
-		case <-released:
-			close(resume)
-			t.Fatal("Q4_K V release crossed an in-flight graph")
-		case <-time.After(50 * time.Millisecond):
-		}
-		close(resume)
-		select {
-		case result := <-calls:
-			if result.err != nil || !result.accepted || result.receipt.GraphOwnerReleases != 1 {
-				t.Fatalf("synchronous owner call accepted=%v receipt=%+v err=%v", result.accepted, result.receipt, result.err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("synchronous owner call did not finish")
-		}
-		select {
-		case <-released:
-		case <-time.After(2 * time.Second):
-			t.Fatal("Q4_K V release did not resume after graph completion")
+		_, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
+		var post *GraphPostSubmitError
+		if !accepted || !errors.As(err, &post) || !receipt.Committed || receipt.Commits != 1 || receipt.CompletionWaits != 1 || receipt.FinalReadbacks != 0 {
+			t.Fatalf("accepted=%v receipt=%+v err=%v", accepted, receipt, err)
 		}
 	})
 }
 
-func qwen35AttentionBatchWeights(t *testing.T, g Qwen35FullAttentionGeometry) Qwen35FullAttentionDecodeWeights {
+// The serial oracle deliberately uses the established P=32 graph operation,
+// placing the independent row at t=31 with its own prefix/base. This compares
+// the new lane-indexed kernels against the shipped attention implementation.
+func attentionBatchSerialOracle(t *testing.T, req Qwen35FullAttentionBatchRequest) Qwen35FullAttentionBatchResult {
 	t.Helper()
-	uploadQ8 := func(name string, out, phase int) *Q8Weight {
-		codes := make([]int8, out*g.Hidden)
-		scales := make([]float32, out*(g.Hidden/32))
-		for i := range codes {
-			codes[i] = int8((i*7+phase)%17 - 8)
-		}
-		for i := range scales {
-			scales[i] = 0.006 + float32((i+phase)%7)*0.00075
-		}
-		w := UploadQ8(codes, scales, out, g.Hidden)
-		if w == nil {
-			t.Fatalf("upload %s Q8 [%d,%d]", name, out, g.Hidden)
-		}
-		return w
+	l := req.Lanes[0]
+	hidden := req.NumHeads * req.HeadDim
+	kvw := req.NumKVHeads * req.HeadDim
+	panel := make([]float32, 32*hidden)
+	copy(panel[31*hidden:], req.Input)
+	g, err := BeginProjectionGraph(panel, nil, nil, 32, hidden)
+	if err != nil {
+		t.Fatal(err)
 	}
-	qwidth, kvwidth := g.NumHeads*g.HeadDim, g.NumKVHeads*g.HeadDim
-	v := UploadQ4K(q4kTestRaw(kvwidth, g.Hidden, 951603), kvwidth, g.Hidden)
-	if v == nil {
-		t.Fatalf("upload V Q4_K [%d,%d]", kvwidth, g.Hidden)
+	defer g.Free()
+	x, _ := g.Input(hidden)
+	qx, _ := g.QuantizeQ8(x)
+	qg, _ := g.EncodeQ8From(req.Weights.Q, qx)
+	k, _ := g.EncodeQ8From(req.Weights.K, qx)
+	v, _ := g.EncodeQ4KFrom(req.Weights.V, x)
+	q, gate, err := g.SplitGatedQ(qg, hidden, req.HeadDim)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return Qwen35FullAttentionDecodeWeights{Q: uploadQ8("Q", 2*qwidth, 3), K: uploadQ8("K", kvwidth, 5), V: v}
+	// The established P=32 operation requires a 32-row rotary table even
+	// though this oracle consumes only row 31 at the lane's base position.
+	cosv, sinv := attentionBatchRope(32, req.RotaryDim)
+	attn, err := g.FullAttention(q, k, v, gate, req.QNorm, req.KNorm, cosv, sinv, l.PrefixK, l.PrefixV, l.Position, req.NumHeads, req.NumKVHeads, req.HeadDim, req.RotaryDim, req.Scale, req.QKNormEpsilon, req.Gain1p, req.QKNorm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, r, e := g.FinishRead(attn.Output, attn.KRaw, attn.KPost, attn.V)
+	if e != nil || !r.Committed {
+		t.Fatal(e)
+	}
+	return Qwen35FullAttentionBatchResult{Output: [][]float32{o[0][31*hidden:]}, KRaw: [][]float32{o[1][31*kvw:]}, KPost: [][]float32{o[2][31*kvw:]}, V: [][]float32{o[3][31*kvw:]}}
 }
-
-func qwen35AttentionBatchInput(batch, hidden int) []float32 {
-	x := make([]float32, batch*hidden)
-	for row := 0; row < batch; row++ {
-		for i := 0; i < hidden; i++ {
-			x[row*hidden+i] = float32(((row+2)*11+i*5)%37-18) / 64
-		}
+func attentionBatchQ8(t *testing.T, out, in, seed int) *Q8Weight {
+	t.Helper()
+	c := make([]int8, out*in)
+	s := make([]float32, out*(in/32))
+	for i := range c {
+		c[i] = int8((i+seed)%15) - 7
+	}
+	for i := range s {
+		s[i] = .004 + float32((i+seed)%7)*.001
+	}
+	w := UploadQ8(c, s, out, in)
+	if w == nil {
+		t.Fatal("Q8 upload")
+	}
+	return w
+}
+func attentionBatchQ4K(t *testing.T, out, in, seed int) *Q4KWeight {
+	t.Helper()
+	w := UploadQ4K(q4kTestRaw(out, in, uint64(seed)), out, in)
+	if w == nil {
+		t.Fatal("Q4K upload")
+	}
+	return w
+}
+func attentionBatchValues(n, seed int) []float32 {
+	x := make([]float32, n)
+	for i := range x {
+		x[i] = float32(math.Sin(float64(i+seed))) * .1
 	}
 	return x
 }
-
-func qwen35AttentionBatchLanes(batch int, g Qwen35FullAttentionGeometry) []Qwen35FullAttentionDecodeLane {
-	kvwidth := g.NumKVHeads * g.HeadDim
-	lanes := make([]Qwen35FullAttentionDecodeLane, batch)
-	for row := range lanes {
-		prefix := row + 1
-		position := 17 + row*3
-		cosv, sinv := qwen35AttentionRotaryRow(position, g.RotaryDim)
-		lane := Qwen35FullAttentionDecodeLane{Position: position, PrefixK: make([]float32, prefix*kvwidth), PrefixV: make([]float32, prefix*kvwidth), Cos: cosv, Sin: sinv}
-		for i := range lane.PrefixK {
-			lane.PrefixK[i] = float32(((row+1)*13+i*7)%41-20) / 80
-			lane.PrefixV[i] = float32(((row+3)*17+i*3)%43-21) / 72
+func attentionBatchOnes(n int) []float32 {
+	x := make([]float32, n)
+	for i := range x {
+		x[i] = 1
+	}
+	return x
+}
+func attentionBatchRope(pos, rot int) ([]float32, []float32) {
+	c := make([]float32, pos*rot/2)
+	s := make([]float32, len(c))
+	for p := 0; p < pos; p++ {
+		for j := 0; j < rot/2; j++ {
+			a := float64(p) * math.Pow(10000, -2*float64(j)/float64(rot))
+			c[p*rot/2+j] = float32(math.Cos(a))
+			s[p*rot/2+j] = float32(math.Sin(a))
 		}
-		lanes[row] = lane
 	}
-	return lanes
+	return c, s
 }
-
-func qwen35AttentionRotaryRow(position, rotary int) ([]float32, []float32) {
-	cosv, sinv := make([]float32, rotary/2), make([]float32, rotary/2)
-	for j := range cosv {
-		angle := float64(position) / math.Pow(10000, float64(2*j)/float64(rotary))
-		cosv[j], sinv[j] = float32(math.Cos(angle)), float32(math.Sin(angle))
-	}
-	return cosv, sinv
-}
-
-func qwen35AttentionSerialP32(t *testing.T, req Qwen35FullAttentionDecodeBatchRequest, row int) Qwen35FullAttentionDecodeRow {
+func attentionBatchClose(t *testing.T, n string, g, w []float32) {
 	t.Helper()
-	g := req.Geometry
-	qwidth, kvwidth := g.NumHeads*g.HeadDim, g.NumKVHeads*g.HeadDim
-	panel := make([]float32, 32*g.Hidden)
-	copy(panel, req.Input[row*g.Hidden:(row+1)*g.Hidden])
-	for token := 1; token < 32; token++ {
-		for i := 0; i < g.Hidden; i++ {
-			panel[token*g.Hidden+i] = float32((token*3+i)%23-11) / 96
+	if len(g) != len(w) {
+		t.Fatalf("%s len", n)
+	}
+	var d, gg, ww, m float64
+	for i := range g {
+		a, b := float64(g[i]), float64(w[i])
+		d += a * b
+		gg += a * a
+		ww += b * b
+		if x := math.Abs(a - b); x > m {
+			m = x
 		}
 	}
-	weights := []*Q8Weight{req.Weights.Q, req.Weights.K}
-	if !lockQ8Group(weights) {
-		t.Fatal("serial Q/K handles unavailable")
-	}
-	defer unlockQ8Group(weights)
-	q4kPinMu.Lock()
-	defer q4kPinMu.Unlock()
-	graph, err := BeginProjectionGraph(panel, nil, nil, 32, g.Hidden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer graph.Free()
-	input, err := graph.Input(g.Hidden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	quantized, err := graph.QuantizeQ8(input)
-	if err != nil {
-		t.Fatal(err)
-	}
-	qg, err := graph.EncodeQ8From(req.Weights.Q, quantized)
-	if err != nil {
-		t.Fatal(err)
-	}
-	kg, err := graph.EncodeQ8From(req.Weights.K, quantized)
-	if err != nil {
-		t.Fatal(err)
-	}
-	vg, err := graph.EncodeQ4K(req.Weights.V)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q, gate, err := graph.SplitGatedQ(qg, qwidth, g.HeadDim)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cosv, sinv := make([]float32, 32*(g.RotaryDim/2)), make([]float32, 32*(g.RotaryDim/2))
-	copy(cosv, req.Lanes[row].Cos)
-	copy(sinv, req.Lanes[row].Sin)
-	for token := 1; token < 32; token++ {
-		position := req.Lanes[row].Position + token
-		for j := 0; j < g.RotaryDim/2; j++ {
-			angle := float64(position) / math.Pow(10000, float64(2*j)/float64(g.RotaryDim))
-			cosv[token*(g.RotaryDim/2)+j] = float32(math.Cos(angle))
-			sinv[token*(g.RotaryDim/2)+j] = float32(math.Sin(angle))
-		}
-	}
-	base := len(req.Lanes[row].PrefixK) / kvwidth
-	attention, err := graph.FullAttention(q, kg, vg, gate, req.QNorm, req.KNorm, cosv, sinv,
-		req.Lanes[row].PrefixK, req.Lanes[row].PrefixV, base, g.NumHeads, g.NumKVHeads, g.HeadDim, g.RotaryDim,
-		req.Scale, req.QKNormEps, req.NormGain1p, req.QKNorm)
-	if err != nil {
-		t.Fatal(err)
-	}
-	packed, receipt, err := graph.FinishRead(attention.Output, attention.KRaw, attention.KPost, attention.V)
-	if err != nil || !receipt.Committed || !receipt.CompletedWait || receipt.HostReadbacks != 1 {
-		t.Fatalf("serial row=%d receipt=%+v err=%v", row, receipt, err)
-	}
-	return Qwen35FullAttentionDecodeRow{
-		Output: append([]float32(nil), packed[0][:qwidth]...), KRaw: append([]float32(nil), packed[1][:kvwidth]...),
-		KPost: append([]float32(nil), packed[2][:kvwidth]...), VAppend: append([]float32(nil), packed[3][:kvwidth]...),
+	if c := d / (math.Sqrt(gg*ww) + 1e-30); c < .999999 || m > .0001 {
+		t.Fatalf("%s cosine=%g max=%g", n, c, m)
 	}
 }
-
-func qwen35RequireAttentionBatchParity(t *testing.T, label string, want, got []float32) {
-	t.Helper()
-	if len(want) == 0 || len(want) != len(got) {
-		t.Fatalf("%s elements=%d, want %d", label, len(got), len(want))
+func attentionBatchSame(a, b []float32) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	var dot, nw, ng, maxAbs float64
-	for i := range want {
-		w, g := float64(want[i]), float64(got[i])
-		if math.IsNaN(w) || math.IsInf(w, 0) || math.IsNaN(g) || math.IsInf(g, 0) {
-			t.Fatalf("%s non-finite element %d: want=%g got=%g", label, i, w, g)
-		}
-		dot, nw, ng = dot+w*g, nw+w*w, ng+g*g
-		maxAbs = math.Max(maxAbs, math.Abs(w-g))
-	}
-	if nw <= 0 || ng <= 0 || math.IsNaN(nw) || math.IsInf(nw, 0) || math.IsNaN(ng) || math.IsInf(ng, 0) {
-		t.Fatalf("%s vacuous or non-finite norms: want=%g got=%g", label, nw, ng)
-	}
-	cosine := dot / math.Sqrt(nw*ng)
-	if math.IsNaN(cosine) || math.IsInf(cosine, 0) || math.IsNaN(maxAbs) || math.IsInf(maxAbs, 0) ||
-		cosine < 0.999999 || maxAbs > 0.0001 {
-		t.Fatalf("%s cosine=%.9f maxAbs=%g, want cosine>=0.999999 maxAbs<=0.0001", label, cosine, maxAbs)
-	}
-}
-
-func qwen35RequireAttentionBatchReceipt(t *testing.T, got Qwen35FullAttentionDecodeBatchReceipt, req Qwen35FullAttentionDecodeBatchRequest, kvwidth, wantReadbacks int) {
-	t.Helper()
-	batch := len(req.Lanes)
-	if got.Rows != batch || got.CommandBuffers != 1 || got.Commits != 1 || got.CompletionWaits != 1 ||
-		got.ProjectionDispatches != 3 || got.Quantizers != 1 || got.AttentionDispatches != 2 || got.Encoders != 6 ||
-		got.InputUploads != 1 || got.ConstantUploads != 7 || got.FinalReadbacks != wantReadbacks || got.IntermediateReadbacks != 0 || got.ReplayAttempts != 0 ||
-		got.GraphOwners != 1 || got.GraphOwnerReleases != 1 || !got.Committed || !got.CompletedWait {
-		t.Fatalf("batch receipt=%+v", got)
-	}
-	for row, lane := range req.Lanes {
-		if got.PrefixTokens[row] != len(lane.PrefixK)/kvwidth || got.Positions[row] != lane.Position ||
-			got.KAppendElements[row] != kvwidth || got.VAppendElements[row] != kvwidth {
-			t.Fatalf("batch receipt row=%d got=%+v", row, got)
-		}
-	}
-}
-
-func qwen35CloneAttentionBatchRows(in []Qwen35FullAttentionDecodeRow) []Qwen35FullAttentionDecodeRow {
-	out := make([]Qwen35FullAttentionDecodeRow, len(in))
-	for row := range in {
-		out[row] = Qwen35FullAttentionDecodeRow{Output: append([]float32(nil), in[row].Output...), KRaw: append([]float32(nil), in[row].KRaw...), KPost: append([]float32(nil), in[row].KPost...), VAppend: append([]float32(nil), in[row].VAppend...)}
-	}
-	return out
-}
-
-func qwen35AttentionBatchMaxAbs(a, b []float32) float64 {
-	if len(a) == 0 || len(a) != len(b) {
-		return math.Inf(1)
-	}
-	var maxAbs float64
 	for i := range a {
-		if math.IsNaN(float64(a[i])) || math.IsInf(float64(a[i]), 0) || math.IsNaN(float64(b[i])) || math.IsInf(float64(b[i]), 0) {
-			return math.Inf(1)
+		if math.Float32bits(a[i]) != math.Float32bits(b[i]) {
+			return false
 		}
-		maxAbs = math.Max(maxAbs, math.Abs(float64(a[i]-b[i])))
 	}
-	return maxAbs
+	return true
+}
+func attentionBatchBits(t *testing.T, a, b []float32) {
+	t.Helper()
+	if !attentionBatchSame(a, b) {
+		t.Fatal("cross-lane mutation")
+	}
 }

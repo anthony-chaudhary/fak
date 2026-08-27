@@ -1,0 +1,13 @@
+{"type":"user","sessionId":"claude-conformance","message":{"role":"user","content":[{"type":"text","text":"héllo 🌍"}]}}
+{"type":"assistant","sessionId":"claude-conformance","message":{"id":"a-mixed","model":"claude-fixture","usage":{"input_tokens":20,"output_tokens":5,"cache_read_input_tokens":3,"cache_creation_input_tokens":2},"content":[{"type":"text","text":"answer"},{"type":"thinking","thinking":"plan"},{"type":"reasoning","text":"why"},{"type":"tool_use","id":"call-mixed","name":"exec_command","input":{"cmd":"echo λ"}}]}}
+{"type":"user","sessionId":"claude-conformance","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-late","is_error":false,"content":"early ✓"}]}}
+{"type":"assistant","sessionId":"claude-conformance","message":{"id":"a-late","model":"claude-fixture","usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":1,"cache_creation_input_tokens":1},"content":[{"type":"tool_use","id":"call-late","name":"exec_command","input":{"cmd":"later"}}]}}
+{"type":"assistant","sessionId":"claude-conformance","message":{"id":"a-late","model":"claude-fixture","usage":{"input_tokens":10,"output_tokens":2,"cache_read_input_tokens":1,"cache_creation_input_tokens":1},"content":[]}}
+{"type":"user","sessionId":"claude-conformance","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-mixed","is_error":true,"content":"boom"}]}}
+{"type":"attachment","sessionId":"claude-conformance","attachment":{"type":"hook_completed","durationMs":12}}
+{"type":"attachment","sessionId":"claude-conformance","attachment":{"type":"deferred_tools_delta","addedNames":["mirror"]}}
+{"type":"assistant","sessionId":"claude-conformance","message":{"id":"a-empty","model":"claude-fixture","usage":{"input_tokens":0,"output_tokens":0},"content":[]}}
+{"type":"assistant","sessionId":"claude-conformance","message":{"content":[{"type":"future_block_v99","content":"future"}]}}
+{"type":"future_row_v99","sessionId":"claude-conformance","payload":{"text":"future row"}}
+{"type":"assistant","sessionId":"claude-conformance","message":"not-an-object"}
+{"type":"assistant","sessionId":"claude-conformance","message":

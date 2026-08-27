@@ -5,6 +5,7 @@ package model
 // identical to bs.Seqs[b].Step(ids[b]) run serially; the only difference is that the weight
 // stream is shared across all B users instead of re-streamed per user.
 func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
+	bs.lastStepSharedPanels = 0
 	if len(ids) != len(bs.Seqs) {
 		panic("model: StepBatch id count != batch size")
 	}
@@ -12,6 +13,9 @@ func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
 	// batched fast path does not cover) does no shared-weight batched projection work, so it
 	// honestly reports 0 rather than the previous call's stale count. stepBatchF32/Q set it.
 	bs.lastStepMACs = 0
+	if bs.qwen35HybridQ4KBatchOK(len(ids)) {
+		return bs.stepBatchQwen35HybridQ4K(ids)
+	}
 	if len(ids) == 1 || !batchDecodeFastPathOK(bs.M.Cfg, bs.Quant) {
 		if len(ids) == 1 {
 			return [][]float32{bs.Seqs[0].Step(ids[0])}
@@ -38,6 +42,14 @@ func (bs *BatchSession) StepBatch(ids []int) [][]float32 {
 // computed once per step; it does NOT include attention (per-user, cache-length-dependent),
 // so the projection count is the precise lever domain and yields the exact ratio #520 names.
 func (bs *BatchSession) LastStepMACs() int64 { return bs.lastStepMACs }
+
+// LastStepSharedPanels is an execution receipt, not admission evidence.
+func (bs *BatchSession) LastStepSharedPanels() int {
+	if bs == nil {
+		return 0
+	}
+	return bs.lastStepSharedPanels
+}
 
 // recordStepMACs stamps the B-proportional projection MAC count for a step of B active lanes.
 // Per layer the seven projections (q/k/v/o + gate/up/down) cost H·(2·nH·hd + 2·nKV·hd + 3·I)
@@ -94,6 +106,7 @@ func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
 	}
 	if len(idx) == 0 {
 		bs.lastStepMACs = 0 // no active lane decoded a token this step
+		bs.lastStepSharedPanels = 0
 		return make([][]float32, C)
 	}
 	// Compact: a transient BatchSession over ONLY the active lanes, sharing each active lane's
@@ -119,6 +132,7 @@ func (bs *BatchSession) StepBatchActive(ids []int, active []bool) [][]float32 {
 	bs.scratch = sub.scratch
 	bs.dbuf = sub.dbuf
 	bs.lastStepMACs = sub.lastStepMACs
+	bs.lastStepSharedPanels = sub.lastStepSharedPanels
 	out := make([][]float32, C)
 	for i, b := range idx {
 		out[b] = subLogits[i]
@@ -188,6 +202,7 @@ func (bs *BatchSession) generateBatchDecode(logits [][]float32, n int, pick func
 // hoisted to operate on a [B, *] panel: the projections/MLP/head become matMulBatch GEMMs
 // (weight read once, reused across all B), attention stays per-user over each user's cache.
 func (bs *BatchSession) stepBatchF32(ids []int) [][]float32 {
+	bs.lastStepSharedPanels = 1
 	m, cfg := bs.M, bs.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads
@@ -332,6 +347,7 @@ func (bs *BatchSession) qgemmBatchTensorInto(qt *q8Tensor, X []float32, B, width
 // qdot8 decode (the tile reduces in a different order) but clears the same Q8 gate the prefill
 // path does — argmax-exact + cosine vs f32 (TestBatchedDecodeQMatchesF32).
 func (bs *BatchSession) stepBatchQ(ids []int) [][]float32 {
+	bs.lastStepSharedPanels = 1
 	m, cfg := bs.M, bs.M.Cfg
 	H, hd := cfg.HiddenSize, cfg.HeadDim
 	nH, nKV := cfg.NumHeads, cfg.NumKVHeads

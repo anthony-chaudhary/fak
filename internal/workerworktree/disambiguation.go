@@ -3,6 +3,7 @@ package workerworktree
 import (
 	"archive/tar"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,23 +11,49 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/conceptcatalog"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
+const (
+	// DisambiguationTimeoutCode is the stable machine-readable diagnosis for a
+	// whole-tree witness that exceeded the single pre-CAS deadline.
+	DisambiguationTimeoutCode = "DISAMBIGUATION_TIMEOUT"
+
+	// One deadline covers all three whole-tree witnesses together. The work is
+	// intentionally bounded well below the 20+ minute stalls seen in #9579 while
+	// leaving ample room for the normal full-corpus scan on a busy workstation.
+	defaultDisambiguationTimeout = 2 * time.Minute
+)
+
+// DisambiguationDiagnostic identifies the exact witness and expensive subphase
+// that stopped a land. It is nested in the existing witness receipt so callers
+// gain typed detail without weakening or bypassing any invariant.
+type DisambiguationDiagnostic struct {
+	Code      string `json:"code"`
+	Witness   string `json:"witness"`
+	Subphase  string `json:"subphase"`
+	TimeoutMS int64  `json:"timeout_ms,omitempty"`
+}
+
 // DisambiguationWitness is one independently materialized view used by land.
 type DisambiguationWitness struct {
-	Tree           string             `json:"tree"`
-	Fresh          bool               `json:"fresh"`
-	SemanticValid  bool               `json:"semantic_valid"`
-	CriticalClean  bool               `json:"critical_clean"`
-	ClarityDebt    int                `json:"clarity_debt"`
-	Coverage       float64            `json:"coverage"`
-	CoverageDebt   int                `json:"coverage_debt"`
-	FamilyCoverage map[string]float64 `json:"family_coverage,omitempty"`
-	Detail         string             `json:"detail,omitempty"`
+	Tree           string                    `json:"tree"`
+	Fresh          bool                      `json:"fresh"`
+	SemanticValid  bool                      `json:"semantic_valid"`
+	CriticalClean  bool                      `json:"critical_clean"`
+	ClarityDebt    int                       `json:"clarity_debt"`
+	Coverage       float64                   `json:"coverage"`
+	CoverageDebt   int                       `json:"coverage_debt"`
+	FamilyCoverage map[string]float64        `json:"family_coverage,omitempty"`
+	Detail         string                    `json:"detail,omitempty"`
+	Diagnostic     *DisambiguationDiagnostic `json:"diagnostic,omitempty"`
 }
 type DisambiguationWitnesses struct {
 	Before    DisambiguationWitness `json:"before"`
@@ -48,13 +75,73 @@ func disambiguationRelevant(paths []string) bool {
 	return false
 }
 
-var readDisambiguation = readDisambiguationWitness
+type boundedReader func(context.Context, string, string, func(string)) DisambiguationWitness
+
+var (
+	readDisambiguation = boundedReader(readDisambiguationWitness)
+
+	disambiguationTimeout = defaultDisambiguationTimeout
+	newDeadline           = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+
+	// Injectable command seam for deterministic cancellation tests. Production
+	// always uses CommandContext so an expired land deadline terminates git archive
+	// instead of leaving the expensive witness process detached.
+	runDisambiguationArchive = func(ctx context.Context, repo, tree string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, "git", "archive", "--format=tar", tree)
+		cmd.Dir = repo
+		windowgate.ConfigureBackgroundCommand(cmd)
+		return cmd.Output()
+	}
+	runAnalyzer = func(ctx context.Context, root, generated string) ([]byte, error) {
+		python := "python3"
+		if runtime.GOOS == "windows" {
+			python = "python"
+		}
+		cmd := exec.CommandContext(ctx, python,
+			filepath.Join(root, "tools", "concept_disambiguation_scorecard.py"),
+			"--workspace", root,
+			"--json",
+			"--markdown-dir", generated,
+		)
+		cmd.Dir = root
+		windowgate.ConfigureBackgroundCommand(cmd)
+		return cmd.Output()
+	}
+)
 
 func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
-	before := readDisambiguation(root, "HEAD")
-	worktree := readDisambiguation(wtPath, "HEAD")
-	post := readDisambiguation(root, treeSHA)
-	all := &DisambiguationWitnesses{Before: before, Worktree: worktree, PostApply: post}
+	ctx, cancel := newDeadline(disambiguationTimeout)
+	defer cancel()
+	return verifyWithinDeadline(ctx, root, wtPath, treeSHA)
+}
+
+// verifyWithinDeadline keeps the entire three-witness sweep under
+// one deadline. landIsolated calls this only after write-tree populated a
+// throwaway GIT_INDEX_FILE and before commit-tree, recovery publication, or the
+// trunk CAS, so a timeout cannot move HEAD or touch the shared index by
+// construction.
+func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
+	all := &DisambiguationWitnesses{
+		Before:    DisambiguationWitness{Tree: "HEAD"},
+		Worktree:  DisambiguationWitness{Tree: "HEAD"},
+		PostApply: DisambiguationWitness{Tree: treeSHA},
+	}
+	var complete bool
+	all.Before, complete = readOneBounded(ctx, "before", root, "HEAD")
+	if !complete {
+		return all, false
+	}
+	all.Worktree, complete = readOneBounded(ctx, "worktree", wtPath, "HEAD")
+	if !complete {
+		return all, false
+	}
+	all.PostApply, complete = readOneBounded(ctx, "post_apply", root, treeSHA)
+	if !complete {
+		return all, false
+	}
+	before, post := all.Before, all.PostApply
 	// Freshness is a NON-REGRESSION check, mirroring the coverage terms beside it: a land must
 	// never turn a fresh HEAD stale, but it is not required to repair a peer's pre-existing
 	// staleness. Requiring absolute post.Fresh over-refused every isolated land whenever an
@@ -72,6 +159,58 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 	return all, ok
 }
 
+// readOneBounded bounds even a non-command subphase such as
+// the whole-corpus invariant scan. The worker owns its scratch directory until
+// it eventually returns; the land caller may stop waiting immediately at the
+// deadline without racing cleanup or touching trunk state.
+func readOneBounded(ctx context.Context, witness, repo, tree string) (DisambiguationWitness, bool) {
+	type result struct {
+		witness DisambiguationWitness
+	}
+	resultCh := make(chan result, 1)
+	subphase := "witness-start"
+	var subphaseMu sync.Mutex
+	setSubphase := func(next string) {
+		subphaseMu.Lock()
+		subphase = next
+		subphaseMu.Unlock()
+	}
+	currentSubphase := func() string {
+		subphaseMu.Lock()
+		defer subphaseMu.Unlock()
+		return subphase
+	}
+
+	go func() {
+		resultCh <- result{witness: readDisambiguation(ctx, repo, tree, setSubphase)}
+	}()
+
+	select {
+	case got := <-resultCh:
+		if err := ctx.Err(); err != nil {
+			return timeoutResult(tree, witness, currentSubphase(), err), false
+		}
+		return got.witness, true
+	case <-ctx.Done():
+		return timeoutResult(tree, witness, currentSubphase(), ctx.Err()), false
+	}
+}
+
+func timeoutResult(tree, witness, subphase string, err error) DisambiguationWitness {
+	timeoutMS := disambiguationTimeout.Milliseconds()
+	detail := fmt.Sprintf("%s: witness=%s subphase=%s timeout_ms=%d", DisambiguationTimeoutCode, witness, subphase, timeoutMS)
+	if err != nil {
+		detail += ": " + err.Error()
+	}
+	return DisambiguationWitness{
+		Tree:   tree,
+		Detail: detail,
+		Diagnostic: &DisambiguationDiagnostic{
+			Code: DisambiguationTimeoutCode, Witness: witness, Subphase: subphase, TimeoutMS: timeoutMS,
+		},
+	}
+}
+
 func coverageFamilyRegressed(before, after map[string]float64) bool {
 	for family, b := range before {
 		if a, ok := after[family]; ok && a+0.0001 < b {
@@ -81,18 +220,17 @@ func coverageFamilyRegressed(before, after map[string]float64) bool {
 	return false
 }
 
-func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
+func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubphase func(string)) DisambiguationWitness {
 	w := DisambiguationWitness{Tree: tree}
+	setSubphase("scratch-tree")
 	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
 	if err != nil {
 		w.Detail = err.Error()
 		return w
 	}
 	defer os.RemoveAll(tmp)
-	cmd := exec.Command("git", "archive", "--format=tar", tree)
-	cmd.Dir = repo
-	windowgate.ConfigureBackgroundCommand(cmd)
-	archive, err := cmd.Output()
+	setSubphase("git-archive")
+	archive, err := runDisambiguationArchive(ctx, repo, tree)
 	if err != nil {
 		w.Detail = err.Error()
 		return w
@@ -102,11 +240,13 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 	// "Cannot connect to C:", which reddened every disambiguation witness on
 	// Windows. This mirrors the in-process extraction in conceptcatalog.CheckGitTree.
 	out := filepath.Join(tmp, "tree")
-	if err = extractTar(archive, out); err != nil {
+	setSubphase("extract-archive")
+	if err = extractTarBounded(ctx, archive, out); err != nil {
 		w.Detail = fmt.Sprintf("extract candidate tree: %v", err)
 		return w
 	}
-	inv, err := conceptcatalog.CheckInvariant(out)
+	setSubphase("concept-invariant")
+	inv, err := checkInvariantBounded(ctx, out, setSubphase)
 	if err != nil {
 		w.Detail = err.Error()
 		return w
@@ -122,16 +262,122 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 	return w
 }
 
+// checkInvariantBounded is the context-aware equivalent of
+// conceptcatalog.CheckInvariant for the isolated land path. It deliberately
+// drives the scorecard once with both --json and --markdown-dir: the same
+// payload supplies the semantic/coverage verdict and the generated artifacts
+// used for freshness, while CommandContext makes the expensive Python process
+// terminate with the pre-CAS deadline.
+func checkInvariantBounded(ctx context.Context, root string, setSubphase func(string)) (conceptcatalog.InvariantResult, error) {
+	out, err := os.MkdirTemp("", "fak-concept-fresh-*")
+	if err != nil {
+		return conceptcatalog.InvariantResult{}, err
+	}
+	defer os.RemoveAll(out)
+	generated := filepath.Join(out, "generated")
+
+	setSubphase("scorecard-command")
+	payloadBytes, runErr := runAnalyzer(ctx, root, generated)
+	if err := ctx.Err(); err != nil {
+		return conceptcatalog.InvariantResult{}, err
+	}
+	if runErr != nil {
+		if _, ok := runErr.(*exec.ExitError); !ok {
+			return conceptcatalog.InvariantResult{}, runErr
+		}
+	}
+
+	setSubphase("generated-freshness")
+	fresh := conceptcatalog.FreshnessResult{Fresh: true, Regenerate: conceptcatalog.RegenerateCommand}
+	for _, artifact := range []struct {
+		tracked string
+		name    string
+	}{
+		{tracked: conceptcatalog.GeneratedReadme, name: "README.md"},
+		{tracked: conceptcatalog.GeneratedIndex, name: "INDEX.md"},
+	} {
+		expected, readErr := os.ReadFile(filepath.Join(generated, artifact.name))
+		if readErr != nil {
+			return conceptcatalog.InvariantResult{}, fmt.Errorf("read generated %s: %w", artifact.name, readErr)
+		}
+		actual, readErr := os.ReadFile(filepath.Join(root, filepath.FromSlash(artifact.tracked)))
+		if readErr != nil || !bytes.Equal(normalizeDisambiguationNewlines(actual), normalizeDisambiguationNewlines(expected)) {
+			fresh.Fresh = false
+			fresh.StalePaths = append(fresh.StalePaths, artifact.tracked)
+		}
+	}
+	sort.Strings(fresh.StalePaths)
+
+	inv := conceptcatalog.InvariantResult{
+		Freshness: fresh, SemanticValid: true, CriticalClean: true, FamilyCoverage: map[string]float64{},
+	}
+	setSubphase("catalog-validation")
+	cat, loadErr := conceptcatalog.Load(root)
+	if loadErr != nil {
+		inv.SemanticValid = false
+		inv.Detail = loadErr.Error()
+	} else if diagnostics := conceptcatalog.Validate(cat); len(diagnostics) > 0 {
+		inv.SemanticValid = false
+		encoded, _ := json.Marshal(diagnostics)
+		inv.Detail = string(encoded)
+	}
+
+	setSubphase("scorecard-decode")
+	var payload struct {
+		OK     bool   `json:"ok"`
+		Reason string `json:"reason"`
+		Corpus struct {
+			CoverageDebt int `json:"coverage_debt"`
+			ClarityDebt  int `json:"clarity_defects"`
+			Coverage     struct {
+				CoveragePct float64 `json:"coverage_pct"`
+				PerFamily   []struct {
+					Family     string `json:"family"`
+					Discovered int    `json:"discovered"`
+					Covered    int    `json:"covered"`
+				} `json:"per_family"`
+			} `json:"coverage"`
+		} `json:"corpus"`
+	}
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return inv, fmt.Errorf("decode scorecard: %w", err)
+	}
+	inv.ClarityDebt = payload.Corpus.ClarityDebt
+	inv.CriticalClean = inv.SemanticValid && inv.ClarityDebt == 0
+	inv.Coverage = payload.Corpus.Coverage.CoveragePct
+	inv.CoverageDebt = payload.Corpus.CoverageDebt
+	for _, family := range payload.Corpus.Coverage.PerFamily {
+		if family.Discovered > 0 {
+			inv.FamilyCoverage[family.Family] = 100 * float64(family.Covered) / float64(family.Discovered)
+		}
+	}
+	if !payload.OK && inv.Detail == "" {
+		inv.Detail = payload.Reason
+	}
+	return inv, nil
+}
+
+func normalizeDisambiguationNewlines(b []byte) []byte {
+	return bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
+}
+
 // extractTar unpacks a tar archive (as produced by `git archive --format=tar`)
 // into dst using the stdlib reader, so extraction is free of the external `tar`
 // binary and its platform quirks (notably GNU tar treating a Windows C:\ path as
 // a remote host). Path traversal outside dst is rejected.
 func extractTar(archive []byte, dst string) error {
+	return extractTarBounded(context.Background(), archive, dst)
+}
+
+func extractTarBounded(ctx context.Context, archive []byte, dst string) error {
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		return err
 	}
 	tr := tar.NewReader(bytes.NewReader(archive))
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		h, e := tr.Next()
 		if errors.Is(e, io.EOF) {
 			break
@@ -160,7 +406,7 @@ func extractTar(archive []byte, dst string) error {
 		if e != nil {
 			return e
 		}
-		_, copyErr := io.Copy(f, tr)
+		_, copyErr := copyBounded(ctx, f, tr)
 		closeErr := f.Close()
 		if copyErr != nil {
 			return copyErr
@@ -170,6 +416,33 @@ func extractTar(archive []byte, dst string) error {
 		}
 	}
 	return nil
+}
+
+func copyBounded(ctx context.Context, dst io.Writer, src io.Reader) (int64, error) {
+	buf := make([]byte, 64*1024)
+	var total int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return total, err
+		}
+		n, readErr := src.Read(buf)
+		if n > 0 {
+			written, writeErr := dst.Write(buf[:n])
+			total += int64(written)
+			if writeErr != nil {
+				return total, writeErr
+			}
+			if written != n {
+				return total, io.ErrShortWrite
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			return total, nil
+		}
+		if readErr != nil {
+			return total, readErr
+		}
+	}
 }
 
 func (w *DisambiguationWitnesses) compactDetail() string { b, _ := json.Marshal(w); return string(b) }
