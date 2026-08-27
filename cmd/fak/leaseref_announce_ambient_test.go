@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,6 +235,76 @@ func TestAmbientLeaserefAnnounceTwoNodesRealCommandsFoldEmpty(t *testing.T) {
 	}
 	if held := leaseref.FoldAnnouncements(bodies); len(held) != 0 {
 		t.Fatalf("two-node lifecycle did not fold empty: %+v", held)
+	}
+}
+
+func TestAmbientLeaserefAnnounceOutcomeLedger(t *testing.T) {
+	key := []byte("ledger-key-bytes-do-not-leak")
+	keyFile := filepath.Join(t.TempDir(), "announce.key")
+	if err := os.WriteFile(keyFile, key, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]string{
+		"FAK_LEASEREF_ANNOUNCE": "on", "FAK_LEASEREF_ANNOUNCE_REPO": "owner/repo",
+		"FAK_LEASEREF_ANNOUNCE_ISSUE": "9597", "FAK_LEASEREF_ANNOUNCE_KEY_FILE": keyFile,
+	} {
+		t.Setenv(name, value)
+	}
+
+	oldPost := ambientLeaserefAnnouncePost
+	t.Cleanup(func() { ambientLeaserefAnnouncePost = oldPost })
+	postCalls := 0
+	ambientLeaserefAnnouncePost = func(string, string, int, string) error {
+		postCalls++
+		if postCalls == 1 {
+			return nil
+		}
+		return errors.New("deterministic post failure")
+	}
+	rec := leaseref.Record{ID: "private-record-id", TreeGlobs: []string{"private/tree/**"}, Holder: "private-holder", SessionID: "private-session"}
+	var stderr bytes.Buffer
+	ambientLeaserefAnnounce(&stderr, t.TempDir(), "acquire", rec)
+	if err := os.Setenv("FAK_LEASEREF_ANNOUNCE", "offline"); err != nil {
+		t.Fatal(err)
+	}
+	ambientLeaserefAnnounce(&stderr, t.TempDir(), "renew", rec)
+	if err := os.Setenv("FAK_LEASEREF_ANNOUNCE", "on"); err != nil {
+		t.Fatal(err)
+	}
+	ambientLeaserefAnnounce(&stderr, t.TempDir(), "release", rec)
+
+	const marker = "ambient-announcement-outcomes"
+	var records []string
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.Contains(line, marker) {
+			records = append(records, line)
+		}
+	}
+	if len(records) != 3 {
+		t.Fatalf("stable records = %d, want 3; stderr=%q", len(records), stderr.String())
+	}
+	totals := [3]int{}
+	for _, line := range records {
+		var success, refusal, announceError int
+		prefix := "fak leaseref: " + marker
+		n, err := fmt.Sscanf(line, prefix+" success=%d refusal=%d error=%d", &success, &refusal, &announceError)
+		if err != nil || n != 3 || line != fmt.Sprintf(prefix+" success=%d refusal=%d error=%d", success, refusal, announceError) {
+			t.Fatalf("record does not have exact stable field order: %q", line)
+		}
+		if success+refusal+announceError != 1 || success < 0 || success > 1 || refusal < 0 || refusal > 1 || announceError < 0 || announceError > 1 {
+			t.Fatalf("record is not one-hot: %q", line)
+		}
+		totals[0] += success
+		totals[1] += refusal
+		totals[2] += announceError
+	}
+	if totals != [3]int{1, 1, 1} {
+		t.Fatalf("folded totals = %v, want [1 1 1]", totals)
+	}
+	for _, secret := range []string{string(key), rec.ID, rec.TreeGlobs[0], rec.Holder, rec.SessionID} {
+		if strings.Contains(stderr.String(), secret) {
+			t.Fatalf("stderr leaked private value %q: %q", secret, stderr.String())
+		}
 	}
 }
 
