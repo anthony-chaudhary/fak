@@ -183,6 +183,10 @@ type Session struct {
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)
 	halW map[string]compute.Tensor
+	// borrowedHALW marks halW keys whose handles belong to model-lifetime immutable
+	// device residency. It preserves the hot plain-map lookup while making Close's
+	// ownership decision O(1) per entry; unmarked entries remain session-owned.
+	borrowedHALW map[string]struct{}
 	// ExpertRingBytes bounds the DEVICE residency of ROUTED expert weights (`.mlp.experts.N.*`) at
 	// this many bytes, staging them through a pagedRing (expert_ring_hal.go, #5611) instead of the
 	// never-evicting halW memoizer above. It is what makes the ACTIVATED expert set a bounded object:

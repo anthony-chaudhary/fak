@@ -1,9 +1,175 @@
 package releasestatus
 
 import (
+	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestParseGoTestWorkUnitsDividesCapturedLog(t *testing.T) {
+	log, err := os.ReadFile("testdata/ci-fast-go-test-failed.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ParseGoTestWorkUnits(string(log))
+	if len(got) != 12 {
+		t.Fatalf("work units = %d, want 12: %+v", len(got), got)
+	}
+	wantPairs := [][2]string{
+		{"github.com/anthony-chaudhary/fak/cmd/fak", "TestRunAccountsStatusIncludesDiscoveredCodexHomes"},
+		{"github.com/anthony-chaudhary/fak/cmd/fak-dev", "TestOwnershipCommandUsesInventory"},
+		{"github.com/anthony-chaudhary/fak/cmd/harnesswebdemo", "TestCapturedSelfcheckReceipt"},
+		{"github.com/anthony-chaudhary/fak/cmd/verbsdoc", "TestCheckedInPageIsFresh"},
+		{"github.com/anthony-chaudhary/fak/internal/architest", "TestPrimitiveLeavesStayPrimitive"},
+		{"github.com/anthony-chaudhary/fak/internal/armbench", "TestCavemanPinnedInputsAndSemanticGate"},
+		{"github.com/anthony-chaudhary/fak/internal/boundarylint", "TestBoundaryPolicy"},
+		{"github.com/anthony-chaudhary/fak/internal/branchrole", "TestHardcodedRefAuditCurrentTreeClassified"},
+		{"github.com/anthony-chaudhary/fak/internal/capindex", "TestParseFrontmatterDecodesQuotedScalars"},
+		{"github.com/anthony-chaudhary/fak/internal/claimcheck", "TestCLAIMSLedgerIsClean"},
+		{"github.com/anthony-chaudhary/fak/internal/devcmd", "TestRunOwnershipJSON"},
+		{"github.com/anthony-chaudhary/fak/internal/pythongate", "TestNoNewPythonTools"},
+	}
+	want := make([]CIWorkUnit, 0, len(wantPairs))
+	for _, pair := range wantPairs {
+		want = append(want, CIWorkUnit{
+			Package: pair[0],
+			Tests:   []string{pair[1]},
+			Argv:    []string{"fak", "test", pair[0], "--", "-count=1", "-run", "^(?:" + pair[1] + ")$"},
+		})
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("captured run units mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestParseGoTestWorkUnitsEdgeCases(t *testing.T) {
+	validPackage := "github.com/anthony-chaudhary/fak/internal/edgecase"
+	tests := []struct {
+		name string
+		log  string
+		want []CIWorkUnit
+	}{
+		{name: "empty"},
+		{name: "malformed", log: "--- FAIL:\nFAIL\nnot a go test row\n"},
+		{
+			name: "hostile package path is not dispatchable",
+			log:  "--- FAIL: TestInjected (0.00s)\nFAIL ../../tmp/owned 0.01s\n",
+		},
+		{
+			name: "prefixed traversal is not dispatchable",
+			log:  "--- FAIL: TestInjected (0.00s)\nFAIL " + validPackage + "/../../tmp/owned 0.01s\n",
+		},
+		{
+			name: "regex metacharacters stay literal",
+			log:  "--- FAIL: TestQuoted/a+b|c.* (0.00s)\nFAIL " + validPackage + " 0.01s\n",
+			want: []CIWorkUnit{{
+				Package: validPackage,
+				Tests:   []string{"TestQuoted/a+b|c.*"},
+				Argv:    []string{"fak", "test", validPackage, "--", "-count=1", "-run", `^(?:TestQuoted/a\+b\|c\.\*)$`},
+			}},
+		},
+		{
+			name: "oversized unrelated line does not hide later failure",
+			log:  strings.Repeat("x", 70<<10) + "\n--- FAIL: TestAfterLargeLine (0.00s)\nFAIL " + validPackage + " 0.01s\n",
+			want: []CIWorkUnit{{
+				Package: validPackage,
+				Tests:   []string{"TestAfterLargeLine"},
+				Argv:    []string{"fak", "test", validPackage, "--", "-count=1", "-run", `^(?:TestAfterLargeLine)$`},
+			}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.want == nil {
+				tc.want = []CIWorkUnit{}
+			}
+			if got := ParseGoTestWorkUnits(tc.log); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("work units = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDiagnoseCIFailureAdversarialInputs(t *testing.T) {
+	tests := []struct {
+		name       string
+		steps      []string
+		log        string
+		conclusion string
+		wantStatus string
+		wantKind   string
+	}{
+		{name: "empty", wantStatus: "undifferentiated", wantKind: "unknown"},
+		{name: "unknown conclusion", conclusion: "hostile-value", wantStatus: "undifferentiated", wantKind: "unknown"},
+		{name: "billing words in test name stay code", steps: []string{"go test ./..."}, log: "--- FAIL: TestBillingPayment (0.00s)\nFAIL github.com/anthony-chaudhary/fak/internal/edgecase 0.01s\n", conclusion: "failure", wantStatus: "diagnosed", wantKind: "go_test_failure"},
+		{name: "duplicate hostile steps are stable", steps: []string{" mystery custom step ", "", "mystery custom step"}, conclusion: "failure", wantStatus: "diagnosed", wantKind: "unknown"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DiagnoseCIFailure("ci-fast.yml", CIRun{DatabaseID: 91, Conclusion: tc.conclusion}, tc.steps, tc.log)
+			if got.Status != tc.wantStatus || got.Kind != tc.wantKind {
+				t.Fatalf("diagnosis = %+v, want status=%q kind=%q", got, tc.wantStatus, tc.wantKind)
+			}
+			if tc.name == "duplicate hostile steps are stable" && !reflect.DeepEqual(got.FailedSteps, []string{"mystery custom step"}) {
+				t.Fatalf("failed steps = %#v", got.FailedSteps)
+			}
+		})
+	}
+}
+
+func TestClassifyCIFailedStepClosedFamilies(t *testing.T) {
+	cases := []struct {
+		step, kind, stage, action string
+		hasArgv                   bool
+	}{
+		{"Run actions/checkout@v4", "checkout", "bootstrap", "repair_checkout", false},
+		{"Run actions/setup-go@v5", "setup_toolchain", "bootstrap", "repair_toolchain", true},
+		{"cache Go build/test artifacts", "cache_artifact", "dependencies", "retry_ci", false},
+		{"verify-release-checksums self-test", "checksum", "supply_chain", "fix_checksum", true},
+		{"build", "build", "compile", "fix_build", true},
+		{"gofmt", "gofmt", "static_analysis", "fix_gofmt", true},
+		{"vet", "vet", "static_analysis", "fix_vet", true},
+		{"architest tier gate (uncached)", "architest", "architecture", "fix_architecture", true},
+		{"go test ./... (no -race)", "go_test", "test", "fix_ci", true},
+		{"go test -race ./...", "race", "dynamic_analysis", "fix_race", true},
+		{"claims lint", "claims", "claims", "fix_claims", true},
+		{"repository hygiene", "hygiene", "hygiene", "fix_hygiene", false},
+		{"secret leakage guard", "leakage_security", "security", "fix_security", false},
+		{"generated drift", "generated_drift", "generated", "regenerate", false},
+		{"DOS witness verification", "dos_witness", "witness", "repair_witness", false},
+		{"job timeout", "timed_out", "execution", "retry_ci", false},
+		{"Set up job", "startup_failure", "runner", "retry_ci", false},
+		{"mystery custom step", "unknown", "unknown", "inspect_ci", false},
+	}
+	for _, tc := range cases {
+		kind, stage, action, argv := ClassifyCIFailedStep(tc.step)
+		if kind != tc.kind || stage != tc.stage || action != tc.action || (len(argv) > 0) != tc.hasArgv {
+			t.Errorf("%q => %q/%q/%q argv=%v, want %q/%q/%q argv=%v", tc.step, kind, stage, action, argv, tc.kind, tc.stage, tc.action, tc.hasArgv)
+		}
+	}
+}
+
+func TestDiagnoseCIFailureTypesTerminalRunConclusions(t *testing.T) {
+	for _, conclusion := range []string{"timed_out", "startup_failure"} {
+		d := DiagnoseCIFailure("ci-fast.yml", CIRun{DatabaseID: 91, Conclusion: conclusion}, nil, "")
+		if d.Status != "diagnosed" || d.Kind != conclusion || d.Stage == "" || d.Action != "retry_ci" {
+			t.Errorf("%s diagnosis = %+v", conclusion, d)
+		}
+	}
+}
+
+func TestDiagnoseCIFailureBillingRequiresAccountAdmissionPhrase(t *testing.T) {
+	negative := "--- FAIL: TestBilling (0.00s)\n--- FAIL: TestPayment (0.00s)\nFAIL github.com/anthony-chaudhary/fak/internal/accounts 0.01s\n"
+	d := DiagnoseCIFailure("ci-fast.yml", CIRun{DatabaseID: 91, Conclusion: "failure"}, []string{"go test ./..."}, negative)
+	if d.Kind == "billing" || d.Action == "fix_ci_billing" {
+		t.Fatalf("test names misclassified as account billing: %+v", d)
+	}
+	positive := DiagnoseCIFailure("ci-fast.yml", CIRun{DatabaseID: 92, Conclusion: "failure"}, nil, "The job was not started because recent account payments have failed. Check Billing & plans.")
+	if positive.Kind != "billing" || positive.Action != "fix_ci_billing" || positive.Stage != "account_admission" {
+		t.Fatalf("account-admission phrase not classified: %+v", positive)
+	}
+}
 
 // TestFoldSchemaAndShape proves the fold emits the python SCHEMA id and the full
 // record shape (every sub-record the python emits has a value), so a consumer of

@@ -6,9 +6,19 @@ import (
 	"math"
 	"os"
 	"time"
+	"unsafe"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
+
+// mappedQ4KReaderAt carries the retained shard mapping beside the unchanged
+// ReaderAt fallback. span starts at shard offset zero and is capped to complete
+// pages because Metal's no-copy buffer contract requires a page-multiple view.
+type mappedQ4KReaderAt struct {
+	io.ReaderAt
+	span   []byte
+	offset int
+}
 
 // LoadModel loads a GGUF checkpoint through the default dequant-to-f32 path and returns a
 // regular in-kernel model.Model. GGUF tensor names are normalized to the canonical HF-Llama
@@ -95,6 +105,29 @@ func (s *WeightSource) tensorReader(info TensorInfo) (io.ReaderAt, int64, error)
 		return nil, 0, fmt.Errorf("gguf: tensor %s has no reader", info.Name)
 	}
 	return r, size, nil
+}
+
+// mappedQ4KReader returns the ordinary shard reader unless this tensor is fully
+// contained in a retained, page-aligned mmap prefix accepted by the Metal span
+// upload. A tensor in the shard's partial final page keeps the byte-identical
+// ReadAt path rather than exposing bytes outside the retained mapping.
+func (s *WeightSource) mappedQ4KReader(info TensorInfo, r io.ReaderAt, size int64, n int) io.ReaderAt {
+	data := s.data
+	if idx, ok := s.byName[info.Name]; ok && idx < len(s.dataFor) && s.dataFor[idx] != nil {
+		data = s.dataFor[idx]
+	}
+	page := os.Getpagesize()
+	if n <= 0 || len(data) == 0 || page <= 0 || info.FileOffset < 0 || info.FileOffset%32 != 0 ||
+		int64(len(data)) != size || uintptr(unsafe.Pointer(&data[0]))%uintptr(page) != 0 {
+		return r
+	}
+	spanLen := len(data) - len(data)%page
+	if spanLen == 0 || info.FileOffset > int64(spanLen) || int64(n) > int64(spanLen)-info.FileOffset {
+		return r
+	}
+	offset := int(info.FileOffset)
+	span := data[:spanLen:spanLen]
+	return &mappedQ4KReaderAt{ReaderAt: r, span: span, offset: offset}
 }
 
 // TensorBytes reads a named tensor's raw (still-quantized) payload bytes from the

@@ -1,0 +1,166 @@
+# Captured 2026-08-27 from `gh run view 33047582124 --log-failed`; reduced to parser-bearing failed-test and failed-package lines.
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9030293Z --- FAIL: TestRunAccountsStatusIncludesDiscoveredCodexHomes (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9047959Z --- FAIL: TestAgentProfileValueReadoutAcrossSourcesAndOff (0.01s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9048672Z     --- FAIL: TestAgentProfileValueReadoutAcrossSourcesAndOff/shipped_defaults (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9052487Z     --- FAIL: TestAgentProfileValueReadoutAcrossSourcesAndOff/explicit_independent_axes (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9056475Z     --- FAIL: TestAgentProfileValueReadoutAcrossSourcesAndOff/persisted_response (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9060294Z     --- FAIL: TestAgentProfileValueReadoutAcrossSourcesAndOff/explicit_off (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9063633Z --- FAIL: TestArmbenchCavemanFactorialSpine (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9066236Z --- FAIL: TestArmbenchCavemanNativeDryRunNeedsNoCredentials (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9106952Z --- FAIL: TestRunCommitPreviewReportsUpstreamWithoutFetch (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9114529Z --- FAIL: TestConceptPositionDryRunJSONShowsFilesCountsAndDoesNotWrite (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9149178Z --- FAIL: TestGuardAllFlagsAreGrouped (0.03s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9528484Z --- FAIL: TestLearningObservationGolden (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9530494Z --- FAIL: TestLearningObservationDuplicateAndConflict (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9568748Z --- FAIL: TestNativePerformanceRejectsInvalidArguments (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9572364Z --- FAIL: TestNativePerformanceAttachSystemBaseline (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9574823Z --- FAIL: TestNativePerformanceAttachRejectsTamperAndOverfill (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9579046Z --- FAIL: TestControlPaneSinceJSONWitness (0.01s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9580358Z     --- FAIL: TestControlPaneSinceJSONWitness/clean_tree_carries_all,_fold_equals_baseline (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9635400Z --- FAIL: TestServeWiringCheckPassesOnRealTree (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9694629Z --- FAIL: TestServeWiringDetectsDroppedField (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9743313Z --- FAIL: TestSessionRecoverPreviewNeedsNoFakDevExecutable (0.03s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9744788Z         --- FAIL: TestSessionRecoverPreviewNeedsNoFakDevExecutable (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9748913Z --- FAIL: TestSessionRecoverIsFirstClassAlias (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9751269Z --- FAIL: TestSessionRecoverPromptAndCWD (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9753691Z --- FAIL: TestSessionRecoverPollsUntilProductiveAndPreservesObservedCardinality (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9756728Z --- FAIL: TestSessionRecoverIdleShellIsNotFalseDone (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9759764Z --- FAIL: TestSessionRecoverFailsClosedOnDuplicateGuardedTrees (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9762994Z --- FAIL: TestSessionRecoverUsesJournalRecordedCWD (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9765845Z --- FAIL: TestSessionRecoverUsesCodexJournalOnlyWithExactStateRequest (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9768809Z --- FAIL: TestSessionRecoverUnifiedPreviewAndLiveWitness (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9771619Z --- FAIL: TestStopFailurePlanAndResetStale (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9774044Z --- FAIL: TestStudyClassifyCLIRoundTripAndDeterminism (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9776426Z --- FAIL: TestStudyClassifyCLICorruptionAndUsage (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9778759Z --- FAIL: TestStudyForgeCaptureCLIResumesWithinSourceCheckpoint (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9803122Z --- FAIL: TestOrchestrationLaunchConservesOneParentEnvelope (0.01s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9804740Z --- FAIL: TestRunWorkDeliveryInspectNamesMissingFinalMileReceipt (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:35.9806329Z FAIL	github.com/anthony-chaudhary/fak/cmd/fak	340.640s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:37.2474595Z --- FAIL: TestOwnershipCommandUsesInventory (0.11s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:37.2478501Z FAIL	github.com/anthony-chaudhary/fak/cmd/fak-dev	0.246s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:42.7519285Z --- FAIL: TestCapturedSelfcheckReceipt (0.03s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:07:42.7525221Z FAIL	github.com/anthony-chaudhary/fak/cmd/harnesswebdemo	0.032s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:08:07.2930867Z --- FAIL: TestCheckedInPageIsFresh (2.28s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:08:07.2931748Z FAIL	github.com/anthony-chaudhary/fak/cmd/verbsdoc	4.605s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:25.6020968Z --- FAIL: TestPrimitiveLeavesStayPrimitive (1.35s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:25.6028157Z --- FAIL: TestEveryAdjudicatorIsExecFree (1.09s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:25.6033716Z --- FAIL: TestDOSCLIProseUsesManWedgeAndKeepsMCPIdentifier (0.08s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:25.6037046Z --- FAIL: TestThirdPartyEffectsRegisterCoversTree (0.20s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:25.6293037Z --- FAIL: TestEffectRegisterMutationsAreCaught (0.21s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:25.6299686Z --- FAIL: TestEveryDeclaredReasonHasAnEmitter (0.27s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:25.6302936Z FAIL	github.com/anthony-chaudhary/fak/internal/architest	31.554s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:27.6284834Z --- FAIL: TestCavemanPinnedInputsAndSemanticGate (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:27.6287108Z --- FAIL: TestCavemanNativeMediumCanonicalArmAndRawOutput (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:27.6289240Z --- FAIL: TestCavemanNativeMediumProviderReceivesCanonicalFragment (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:27.6291139Z FAIL	github.com/anthony-chaudhary/fak/internal/armbench	0.140s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:48.0980832Z --- FAIL: TestBoundaryPolicy (3.37s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:48.0989918Z --- FAIL: TestTestSuitePolicy (2.65s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:10:48.1119976Z FAIL	github.com/anthony-chaudhary/fak/internal/boundarylint	6.028s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:27.4162509Z --- FAIL: TestHardcodedRefAuditCurrentTreeClassified (38.91s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:27.4172445Z FAIL	github.com/anthony-chaudhary/fak/internal/branchrole	38.990s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:36.5908522Z --- FAIL: TestParseFrontmatterDecodesQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:36.5913049Z --- FAIL: TestParseFrontmatterPreservesMalformedQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:36.5915005Z FAIL	github.com/anthony-chaudhary/fak/internal/capindex	0.159s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:38.8961525Z --- FAIL: TestCLAIMSLedgerIsClean (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:38.9050582Z --- FAIL: TestCLAIMSLedgerExposureIsTotal (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:38.9053203Z --- FAIL: TestCLAIMSLedgerBackfillCoversProseDisclosures (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:11:38.9055508Z FAIL	github.com/anthony-chaudhary/fak/internal/claimcheck	0.005s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:02.9766618Z --- FAIL: TestRunOwnershipJSON (0.06s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:02.9770315Z --- FAIL: TestIndexOwnershipCountsTheRuntimeClosure (0.86s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:02.9772894Z --- FAIL: TestRunOwnershipText (0.06s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:02.9775486Z FAIL	github.com/anthony-chaudhary/fak/internal/devcmd	22.468s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.2886846Z --- FAIL: TestRealRepoDogfood (0.05s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.2889142Z --- FAIL: TestCommandOwnershipIsTotalAndPinsProductBoundary (0.06s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.2891889Z --- FAIL: TestRuntimeGraphWitnessReportsCurrentDevLeaks (0.75s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.2894473Z --- FAIL: TestVerbTierCoverageIsTotal (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.2896288Z --- FAIL: TestVerbCatalogStyleCleanAtHead (0.06s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.2908588Z FAIL	github.com/anthony-chaudhary/fak/internal/devindex	6.600s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.6455620Z --- FAIL: TestRenderDocsMatchesTrackedExactSet (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:10.6503872Z FAIL	github.com/anthony-chaudhary/fak/internal/disambiguation	0.125s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:27.9619134Z --- FAIL: TestTreeEnumExhaustivenessNotGrowing (2.58s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:27.9668024Z FAIL	github.com/anthony-chaudhary/fak/internal/enumlint	10.101s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:38.3228560Z --- FAIL: TestNoNewNonSecretEnvReads (0.43s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:38.3346647Z --- FAIL: TestRatchetIsStillGating (7.34s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:16:38.3397906Z FAIL	github.com/anthony-chaudhary/fak/internal/envconfiglint	10.173s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2301742Z --- FAIL: TestNativeInferenceReceiptProductionPath (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2302809Z --- FAIL: TestNativeInferenceReceiptDefaultWireOmission (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2303859Z --- FAIL: TestNativeInferenceReceiptUnsupportedRequestsFailClosed (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2598263Z --- FAIL: TestRichDashboardDormantUntilFirstClickThenRedirects (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2599175Z --- FAIL: TestRichDashboardFailureAndDisabledRenders (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2599522Z     --- FAIL: TestRichDashboardFailureAndDisabledRenders/disabled (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2600359Z     --- FAIL: TestRichDashboardFailureAndDisabledRenders/unavailable (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2601192Z --- FAIL: TestRichDashboardRejectsUnsafeOverrideAndUnknownDestination (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:17:48.2986498Z FAIL	github.com/anthony-chaudhary/fak/internal/gateway	48.787s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:18:14.7470968Z --- FAIL: TestClosingDoctrineBindsAgentsMd (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:18:14.7474546Z --- FAIL: TestLeftoversDoctrineBindsAgentsMd (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:18:14.7476884Z FAIL	github.com/anthony-chaudhary/fak/internal/headlesslint	0.005s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0525825Z --- FAIL: TestEveryPreCommitGateRecordsACandidateDenominator (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0532905Z --- FAIL: TestDocCountClaimsMatchTheGateRegistry (0.04s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0536308Z --- FAIL: TestFailClosedLedgerCoversEveryDosReason (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0539076Z --- FAIL: TestFailClosedLedgerDeclaresRealEnforcement (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0541305Z --- FAIL: TestDemoCommand_LiveTreeClean (0.05s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0543790Z --- FAIL: TestGodfileGate_LiveTreeClean (0.45s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0553805Z --- FAIL: TestPythonToolGate_LiveTreeClean (0.01s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0630957Z --- FAIL: TestTierDeclared_LiveTreeClean (0.01s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0682493Z --- FAIL: TestGateScopeRowTableCoversEveryGateFile (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0686067Z --- FAIL: TestGateScopesClassifyEveryRegisteredGate (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:01.0687787Z FAIL	github.com/anthony-chaudhary/fak/internal/hooks	105.556s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:14.3307551Z --- FAIL: TestCommittedInventoryAndReportStayInSync (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:14.3309897Z FAIL	github.com/anthony-chaudhary/fak/internal/managedinventory	0.007s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:14.6862062Z --- FAIL: TestCanonicalManageFrontDoor (0.18s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:14.7386409Z FAIL	github.com/anthony-chaudhary/fak/internal/managedocs	0.187s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:16.1993764Z --- FAIL: TestRealRuntimeWitnessRegistryPasses (0.13s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:16.1995967Z FAIL	github.com/anthony-chaudhary/fak/internal/maturity	0.470s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:17.0686990Z --- FAIL: TestParseFrontmatterDecodesQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:17.0690411Z --- FAIL: TestParseFrontmatterPreservesMalformedQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:17.0693216Z FAIL	github.com/anthony-chaudhary/fak/internal/memoryindex	0.006s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:57.4834566Z --- FAIL: TestGateSystemBaselineLegacyAndStrictPolicy (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:57.4848041Z --- FAIL: TestAttachSystemBaselineUpgradesAndPreservesRepetitionOrder (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:57.4850010Z --- FAIL: TestValidateReceiptRejectsBindingHolesMismatchAndReuse (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:20:57.4851839Z FAIL	github.com/anthony-chaudhary/fak/internal/nativeperf	0.013s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:06.2709379Z --- FAIL: TestDogfoodRealRepo (0.85s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:06.2727774Z FAIL	github.com/anthony-chaudhary/fak/internal/orphanscan	0.852s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:13.1625281Z --- FAIL: TestNoNewPythonTools (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:13.1657905Z FAIL	github.com/anthony-chaudhary/fak/internal/pythongate	0.007s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:24.7379713Z --- FAIL: TestParseQuarantineCandidateDecodesQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:24.7382155Z --- FAIL: TestParseQuarantineCandidatePreservesMalformedQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:24.7384395Z FAIL	github.com/anthony-chaudhary/fak/internal/rsiloop	0.020s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:57.9649176Z --- FAIL: TestSkillDescriptionBudgetPassesAtHEAD (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:57.9662368Z --- FAIL: TestMeasuredDescriptionFloorSnapshot (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:57.9663425Z --- FAIL: TestCommittedSkillBudgetMatchesMeasuredFloor (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:21:57.9669054Z FAIL	github.com/anthony-chaudhary/fak/internal/skillfootprint	0.016s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:22:23.2038105Z --- FAIL: TestFeatureRosterResolvesToValidRungs (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:22:23.2040643Z --- FAIL: TestFeatureRosterAnchorsUniqueInLedger (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:22:23.2043040Z FAIL	github.com/anthony-chaudhary/fak/internal/supportmaturity	0.005s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:23:52.5438166Z --- FAIL: TestFrontmatterDecodesQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:23:52.5441040Z --- FAIL: TestFrontmatterPreservesMalformedQuotedScalars (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:23:52.5442666Z FAIL	github.com/anthony-chaudhary/fak/internal/toolcatalog	0.015s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:23:58.4072191Z --- FAIL: TestAssessQwenEmptyUsageWindowAndExclusions (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:23:58.4073171Z     --- FAIL: TestAssessQwenEmptyUsageWindowAndExclusions/completed_turn_is_empty (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:23:58.4080375Z FAIL	github.com/anthony-chaudhary/fak/internal/trajectory	0.055s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:03.0708998Z --- FAIL: TestIssue8672ConfidenceArtifact (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:03.0711907Z FAIL	github.com/anthony-chaudhary/fak/internal/ultracodebench	0.025s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:27.0508662Z --- FAIL: TestTrackedTreeHasNoPopups (8.69s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:27.0513142Z FAIL	github.com/anthony-chaudhary/fak/internal/windowgate	8.706s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:29.4125915Z --- FAIL: TestCapturedDeliverySpine (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:29.4204386Z FAIL	github.com/anthony-chaudhary/fak/internal/workdelivery	0.004s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1818383Z --- FAIL: TestLandRefusesUnwitnessedHardSelfCoreLockPath (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1821182Z --- FAIL: TestLandAllowsHardSelfWithConfirmedWitnessFlag (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1825658Z --- FAIL: TestLandAllowsHardSelfWithConfirmedWitnessTrailer (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1829650Z --- FAIL: TestLandRefusesHardSelfWhenWitnessRefuted (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1831843Z --- FAIL: TestLandOrdinaryLeafPathIsUnaffected (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1835975Z --- FAIL: TestLiveCoreLockRefusesUnwitnessedKernelLand (0.11s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1848843Z --- FAIL: TestLiveCoreLockOrdinaryLeafLandsWithoutWitness (0.10s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1862488Z --- FAIL: TestLandLandsDiffOntoTrunkByPathSignedOff (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1866873Z --- FAIL: TestLandBaseSHAIsTheDiffRefNotHead (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1870126Z --- FAIL: TestLandDerivesMsgFromWorktreeTipWhenNoFile (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1874072Z --- FAIL: TestLandReadbackVerifyPassesWhenTrunkCarriesPaths (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1878755Z --- FAIL: TestLandReadbackVerifyRefusesWhenPathSweptByRace (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1880903Z --- FAIL: TestLandReadbackForcedOffLeavesBaselineUnchanged (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1885042Z --- FAIL: TestLandReadbackFailsOpenOnGitError (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1888896Z --- FAIL: TestLandIsolatedForcedOffLeavesBaselineUnchanged (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1893080Z --- FAIL: TestLandIsolatedGateOnRoutesLandThroughIsolatedPath (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1896859Z --- FAIL: TestLandReportsDroppedOutOfLanePaths (0.00s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.1900679Z FAIL	github.com/anthony-chaudhary/fak/internal/workerworktree	1.895s
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.7794470Z --- FAIL: TestLiveDocFresh (0.01s)
+build · vet · test (no -race, fast release gate)	UNKNOWN STEP	2026-08-27T07:25:32.7796794Z FAIL	github.com/anthony-chaudhary/fak/internal/workflowaudit	0.043s

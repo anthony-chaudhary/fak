@@ -467,6 +467,8 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	phases := appendNativeProfilePhase(nil, "load-setup", loadDuration)
 
 	s := newSession()
+	finishProfile := onceFinishNativeProfile(s.Close)
+	defer finishProfile()
 	profiler := model.NewPhaseProfiler()
 	s.PhaseProfiler = profiler
 	prompt := lcgIDs(32, vocab)
@@ -520,7 +522,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	phases = appendNativeProfilePhase(phases, "verification", d)
 
 	t = time.Now()
-	s.Close()
+	finishProfile()
 	d = time.Since(t)
 	phases = appendNativeProfilePhase(phases, "teardown", d)
 
@@ -592,6 +594,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	}
 	b = append(b, '\n')
 	profileSum := sha256.Sum256(b)
+	q4kResidency := m.Q4KResidencyReceipt()
 	receipt := nativeProfileReceipt{
 		Schema:            nativeProfileReceiptSchema,
 		ProfileSHA256:     fmt.Sprintf("%x", profileSum),
@@ -605,6 +608,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 		Controls:          controls,
 		Execution:         executionReceipt,
 		Fallbacks:         fallbackReceipt,
+		Q4KResidency:      &q4kResidency,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {
@@ -941,7 +945,9 @@ func main() {
 		return s
 	}
 	if *f.nativeProfileOut != "" {
-		if err := runNativePerformanceProfile(f, m, loadNanos, vocab, nativeControls, newSession); err != nil {
+		if err := runWithTransferredWeightLifetime(f, func() error {
+			return runNativePerformanceProfile(f, m, loadNanos, vocab, nativeControls, newSession)
+		}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			f.exit(1)
 		}

@@ -1,0 +1,7 @@
+data: {"request_id":"req-sse","model":"glm-5.3-flash","choices":[{"delta":{"reasoning_content":"first "},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"reasoning_content":"second","content":"answer","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"lookup","arguments":"{\"city\":"}}]},"finish_reason":null}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"Paris\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":4,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":3}}}
+
+data: [DONE]

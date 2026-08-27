@@ -53,7 +53,7 @@ func TestNativePerformanceHumanOutputIsBackwardReadableAndShowsLevers(t *testing
 	}
 }
 
-func TestNativePerformanceNextIsDeterministicAndRunnable(t *testing.T) {
+func TestNativePerformanceNextIsDeterministicGraphProjection(t *testing.T) {
 	var first, second bytes.Buffer
 	if code := runNativePerformance(&first, &bytes.Buffer{}, []string{"--next"}); code != 0 {
 		t.Fatalf("first exit=%d", code)
@@ -64,10 +64,74 @@ func TestNativePerformanceNextIsDeterministicAndRunnable(t *testing.T) {
 	if first.String() != second.String() {
 		t.Fatal("--next changed across identical calls")
 	}
-	for _, want := range []string{"metal.command-buffer-amortization", "Owning issue: #8324", "Required witness:", "OFF/ON", "qwen38-27b-q4km-m3pro-p32-t64"} {
+	for _, want := range []string{"NEXT GRAPH-READY", "semantic graph projection only", "use --current work_packets", "metal.command-buffer-amortization", "Owning issue: #8324", "Required witness:", "OFF/ON", "qwen38-27b-q4km-m3pro-p32-t64"} {
 		if !strings.Contains(first.String(), want) {
 			t.Fatalf("--next missing %q:\n%s", want, first.String())
 		}
+	}
+}
+
+func TestNativePerformanceCurrentShowsAllReadyWork(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := runNativePerformance(&stdout, &stderr, []string{"--current"}); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	var snapshot nativeperf.CurrentSnapshot
+	if err := json.Unmarshal(stdout.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err := nativeperf.ValidateCurrentSnapshot(nativeperf.ActiveGraph(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	got := stdout.String()
+	for _, want := range []string{"measurement-control-loop", "active-native-lane-collision", "mac.m1-streamed-q4k-no-copy", "cuda.cache-weight-residency", "metal.command-buffer-amortization", "metal.paged-kv", "metal.chunked-prefill", "cuda.q8_1-activation-quant", "keep/reject"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("--current missing %q", want)
+		}
+	}
+}
+
+func TestNativePerformanceCurrentMarkdownIsDeterministic(t *testing.T) {
+	var first, second bytes.Buffer
+	if code := runNativePerformance(&first, &bytes.Buffer{}, []string{"--current-md"}); code != 0 {
+		t.Fatalf("first exit=%d", code)
+	}
+	if code := runNativePerformance(&second, &bytes.Buffer{}, []string{"--current-md"}); code != 0 {
+		t.Fatalf("second exit=%d", code)
+	}
+	if first.String() != second.String() {
+		t.Fatal("--current-md changed across identical calls")
+	}
+	for _, want := range []string{"Current native-performance constraints", "Divide-and-conquer execution", "Graph-dependency-ready arms and collisions", "OSS-to-performance walk"} {
+		if !strings.Contains(first.String(), want) {
+			t.Errorf("--current-md missing %q", want)
+		}
+	}
+}
+
+func TestNativePerformanceCurrentDocIsFresh(t *testing.T) {
+	snapshot, err := nativeperf.BuildCurrentSnapshot(nativeperf.ActiveGraph())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := nativeperf.RenderCurrentMarkdown(snapshot)
+	got, err := os.ReadFile(filepath.Join("..", "..", "docs", "benchmarks", "NATIVE-PERFORMANCE-CURRENT.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		at := 0
+		for at < len(got) && at < len(want) && got[at] == want[at] {
+			at++
+		}
+		gotEnd, wantEnd := at+120, at+120
+		if gotEnd > len(got) {
+			gotEnd = len(got)
+		}
+		if wantEnd > len(want) {
+			wantEnd = len(want)
+		}
+		t.Fatalf("docs/benchmarks/NATIVE-PERFORMANCE-CURRENT.md is stale at byte %d (got bytes=%d want=%d): got %q want %q; regenerate with fak native-performance --current-md", at, len(got), len(want), got[at:gotEnd], want[at:wantEnd])
 	}
 }
 
@@ -106,6 +170,8 @@ func TestNativePerformanceRejectsInvalidArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"extra"},
 		{"--json", "--next"},
+		{"--current", "--current-md"},
+		{"--current", "--json"},
 		{"--next", "--dot"},
 		{"--profile="},
 		{"--profile-next="},
@@ -120,7 +186,7 @@ func TestNativePerformanceRejectsInvalidArguments(t *testing.T) {
 		if code := runNativePerformance(&stdout, &stderr, args); code != 2 {
 			t.Fatalf("args=%v exit=%d, want 2", args, code)
 		}
-		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --dot | --baseline LEVER | --compare BASELINE --candidate CANDIDATE | --profile FILE | --profile-next FILE | --gate FILE | --attach-receipt RECEIPT --system-baseline ATTESTATION [--out FILE] | --capacity-plan | --capacity-receipt FILE]") {
+		if !strings.Contains(stderr.String(), "usage: fak native-performance [--json | --next | --current | --current-md | --dot") {
 			t.Fatalf("args=%v stderr=%q", args, stderr.String())
 		}
 	}

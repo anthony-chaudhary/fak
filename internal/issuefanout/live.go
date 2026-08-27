@@ -172,6 +172,16 @@ func LiveBody(c issuepolicy.Candidate) string {
 	list("Coordination", c.Coordination)
 	section("Trigger", c.Trigger)
 	section("Batch policy", c.BatchPolicy)
+	if c.RequiredModelTier != "" || c.OptimalModelTier != "" {
+		b.WriteString("## Model tier\n\n")
+		if c.RequiredModelTier != "" {
+			fmt.Fprintf(&b, "Required model tier: %s\n", strings.TrimSpace(c.RequiredModelTier))
+		}
+		if c.OptimalModelTier != "" {
+			fmt.Fprintf(&b, "Optimal model tier: %s\n", strings.TrimSpace(c.OptimalModelTier))
+		}
+		b.WriteString("\n")
+	}
 	if len(c.Paths) > 0 {
 		b.WriteString("## Likely files\n\n")
 		for _, p := range c.Paths {
@@ -207,11 +217,36 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 	if dedupeCap <= 0 {
 		dedupeCap = DefaultDedupeCap
 	}
+	if plan.Input.ParentIssue <= 0 || plan.Input.ParentBaseline <= 0 {
+		return LiveResult{}, refusef("issuefanout: live filing requires --parent-issue and --parent-baseline-points — set both flags to the parent issue number and its declared scope baseline")
+	}
+	// Validate the exact post-filing representation, not only the in-memory
+	// candidate. The body parser and live label set are the dispatch gate's real
+	// inputs. Preflighting the whole batch before the loop makes the write atomic
+	// with respect to contract validity: candidate N cannot fail after N-1 was
+	// already created.
+	strict := issuepolicy.Options{
+		Live:              true,
+		DedupeChecked:     true,
+		DedupeCap:         dedupeCap,
+		StrictModelTier:   true,
+		StrictScale:       true,
+		StrictWitness:     true,
+		StrictBornRouted:  true,
+		StrictProjectWork: true,
+	}
+	for _, c := range plan.Candidates {
+		r := issuepolicy.ReviewIssueDraft(liveIssueDraft(c), strict)
+		if !r.OK || r.Dispatchability != issuepolicy.Dispatchable {
+			detail := strings.Join(r.Reasons, ", ")
+			if len(r.MissingFields) > 0 {
+				detail += "; missing/invalid: " + strings.Join(r.MissingFields, ", ")
+			}
+			return LiveResult{}, refusef("issuefanout: live candidate %s fails the strict post-filing issue contract (%s) — fix the named metadata, then regenerate the full plan; no issues were filed", c.Key, detail)
+		}
+	}
 	res := LiveResult{Schema: LiveSchema, Input: plan.Input, DedupeCap: dedupeCap, Scanned: len(existing)}
 	for _, c := range plan.Candidates {
-		if plan.Input.ParentIssue <= 0 || plan.Input.ParentBaseline <= 0 {
-			return res, refusef("issuefanout: live filing requires --parent-issue and --parent-baseline-points — set both flags to the parent issue number and its declared scope baseline")
-		}
 		row := FileRow{Key: c.Key, Title: c.Title}
 		if n, seen := seenIn(existing, c.Key, legacyMarkerKey(plan.Input, c.Key), plan.Input.SpineRef); seen {
 			row.Action = "skipped"
@@ -219,16 +254,6 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 			row.MatchedSpine = plan.Input.SpineRef
 			row.Reason = fmt.Sprintf("marker key for spine %s already in issue #%d", plan.Input.SpineRef, n)
 			res.Skipped++
-			res.Rows = append(res.Rows, row)
-			continue
-		}
-		// Build already reviewed the plan offline; a live run re-reviews under the
-		// armed contract (agent-context + noise-control fields required) so a
-		// candidate the strict gate would refuse is reported, never filed.
-		if r := issuepolicy.ReviewCandidate(c, issuepolicy.Options{Live: true, DedupeChecked: true, DedupeCap: dedupeCap}); !r.OK || r.Dispatchability != issuepolicy.Dispatchable {
-			row.Action = "failed"
-			row.Reason = "issue contract (live-armed): " + strings.Join(r.Reasons, ", ")
-			res.Failed++
 			res.Rows = append(res.Rows, row)
 			continue
 		}
@@ -268,6 +293,14 @@ func FileLive(plan Plan, existing []Issue, opt LiveOptions) (LiveResult, error) 
 		existing = append(existing, Issue{Number: n, Body: body})
 	}
 	return res, nil
+}
+
+func liveIssueDraft(c issuepolicy.Candidate) issuepolicy.IssueDraft {
+	labels := make([]issuepolicy.IssueLabel, 0, len(LiveLabels(c)))
+	for _, label := range LiveLabels(c) {
+		labels = append(labels, issuepolicy.IssueLabel{Name: label})
+	}
+	return issuepolicy.IssueDraft{Title: c.Title, Body: LiveBody(c), Labels: labels}
 }
 
 // seenIn returns the first existing issue carrying either the qualified key or

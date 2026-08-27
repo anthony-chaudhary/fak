@@ -37,6 +37,7 @@ type auditParseState struct {
 	mutationAccountedFor  int64
 	hookDurations         []int64
 	claudeUsageByID       map[string]AuditTokens
+	codexPrimaryMetaSeen  bool
 	codexRawTotal         *auditCodexRawTokens
 	codexCompleted        AuditTokens
 	codexVersion          string
@@ -136,11 +137,8 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 		state.row.Models = append(state.row.Models, model)
 	}
 	sort.Strings(state.row.Models)
-	for _, count := range state.failureCounts {
-		if count > 1 {
-			state.row.RepeatedFailures += count - 1
-		}
-	}
+	state.row.failureCounts = cloneAuditFailureCounts(state.failureCounts)
+	state.row.RepeatedFailures = auditRepeatedFailureCount(state.failureCounts)
 	state.row.MutationChurnEvents = DetectQwenMutationChurn(state.mutationEvents)
 	for _, churn := range state.row.MutationChurnEvents {
 		state.row.MutationChurn += churn.Count - 1
@@ -267,6 +265,10 @@ func parseClaudeToolResults(content any, line int, state *auditParseState) {
 		isError, _ := block["is_error"].(bool)
 		id, _ := block["tool_use_id"].(string)
 		call := state.calls[id]
+		if auditExpectedWaitTimeout(call, block["content"]) {
+			state.row.ExpectedWaitTimeouts++
+			continue
+		}
 		if !isError {
 			if call.target == "" {
 				auditAppendMutationEvent(state, "", QwenMutationWitness)
@@ -294,6 +296,14 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 	payload, _ := record["payload"].(map[string]any)
 	switch recordType {
 	case "session_meta":
+		// Subagent rollouts embed their parent transcript history after the
+		// file-local metadata row. Only the first session_meta names this
+		// rollout; later rows are copied provenance and must not replace its
+		// identity or parser version.
+		if state.codexPrimaryMetaSeen {
+			return
+		}
+		state.codexPrimaryMetaSeen = true
 		if version, ok := payload["cli_version"].(string); ok {
 			state.codexVersion = strings.TrimSpace(version)
 		}
@@ -419,6 +429,10 @@ func parseCodexResponseItem(payload map[string]any, line int, rel string, state 
 	case "function_call_output", "custom_tool_call_output":
 		id, _ := payload["call_id"].(string)
 		call := state.calls[id]
+		if auditExpectedWaitTimeout(call, payload["output"]) {
+			state.row.ExpectedWaitTimeouts++
+			return
+		}
 		if !auditOutputIsError(payload["output"]) {
 			if call.target == "" {
 				auditAppendMutationEvent(state, "", QwenMutationWitness)
@@ -440,6 +454,129 @@ func auditRecordToolFailure(state *auditParseState, call auditToolCall, output a
 	state.toolErrorEvents = append(state.toolErrorEvents, QwenToolErrorEvent{Content: content, Index: line})
 	state.toolErrorAttributions = append(state.toolErrorAttributions, qwenToolErrorAttribution{failureKey: signature, mutationTarget: call.target})
 	state.failureCounts[signature]++
+}
+
+func auditRepeatedFailureCount(counts map[string]int) int {
+	var repeated int
+	for _, count := range counts {
+		if count > 1 {
+			repeated += count - 1
+		}
+	}
+	return repeated
+}
+
+// auditExpectedWaitTimeout recognizes only the bounded wait_agent polling
+// primitive and only when its result explicitly reports a timeout. A timeout
+// from any other tool, or any other wait_agent error, remains a failed action.
+func auditExpectedWaitTimeout(call auditToolCall, output any) bool {
+	return auditIsWaitAgentTool(call.name) && auditOutputIsTimeout(output) && !auditOutputHasTerminalFailure(output)
+}
+
+func auditIsWaitAgentTool(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "wait_agent" {
+		return true
+	}
+	for _, namespaceSeparator := range []string{".", "/", ":", "__"} {
+		if strings.HasSuffix(name, namespaceSeparator+"wait_agent") {
+			return true
+		}
+	}
+	return false
+}
+
+func auditOutputIsTimeout(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"timed_out", "timedOut"} {
+			if flag, _ := typed[key].(bool); flag {
+				return true
+			}
+		}
+		for _, key := range []string{"status", "outcome"} {
+			if status, ok := typed[key].(string); ok && auditTimeoutStatus(status) {
+				return true
+			}
+		}
+		for _, key := range []string{"output", "content", "result", "text", "error", "message"} {
+			if child, ok := typed[key]; ok && auditOutputIsTimeout(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if auditOutputIsTimeout(child) {
+				return true
+			}
+		}
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return false
+		}
+		var decoded any
+		decoder := json.NewDecoder(strings.NewReader(trimmed))
+		decoder.UseNumber()
+		if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && decoder.Decode(&decoded) == nil {
+			return auditOutputIsTimeout(decoded)
+		}
+		normalized := strings.ToLower(strings.Join(strings.Fields(trimmed), " "))
+		return auditTimeoutStatus(normalized)
+	}
+	return false
+}
+
+func auditOutputHasTerminalFailure(value any) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{"is_error", "isError"} {
+			if flag, _ := typed[key].(bool); flag {
+				return true
+			}
+		}
+		if status, _ := typed["status"].(string); status != "" {
+			switch strings.ToLower(strings.TrimSpace(status)) {
+			case "failed", "error", "cancelled", "canceled":
+				return true
+			}
+		}
+		if raw, ok := typed["error"]; ok && auditText(raw) != "" && auditText(raw) != "<nil>" {
+			return true
+		}
+		for _, key := range []string{"output", "content", "result"} {
+			if child, ok := typed[key]; ok && auditOutputHasTerminalFailure(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if auditOutputHasTerminalFailure(child) {
+				return true
+			}
+		}
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return false
+		}
+		var decoded any
+		decoder := json.NewDecoder(strings.NewReader(trimmed))
+		decoder.UseNumber()
+		if (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) && decoder.Decode(&decoded) == nil {
+			return auditOutputHasTerminalFailure(decoded)
+		}
+	}
+	return false
+}
+
+func auditTimeoutStatus(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "timeout", "timed_out", "timed-out", "timed out":
+		return true
+	default:
+		return false
+	}
 }
 
 func auditAppendMutationEvent(state *auditParseState, target string, kind QwenMutationKind) {
@@ -507,7 +644,7 @@ func auditOutputIsError(value any) bool {
 				return true
 			}
 		}
-		if status, _ := typed["status"].(string); status == "failed" || status == "error" {
+		if status, _ := typed["status"].(string); status == "failed" || status == "error" || auditTimeoutStatus(status) {
 			return true
 		}
 		for _, key := range []string{"output", "content", "result", "text"} {

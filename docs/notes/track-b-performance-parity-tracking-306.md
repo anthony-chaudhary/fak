@@ -9,6 +9,13 @@ description: "Umbrella tracker for epic #306 (Track B - Performance Parity). Rec
 > *"close prefill gap (1.76×), Vulkan optimization (100×), speculative decoding, continuous
 > batching, fused kernels, PagedAttention, INT4/INT2, dynamic batching."*
 >
+> **Historical snapshot, not current work state.** This page records the 2026-06-25
+> checkpoint. Live GitHub read-back on 2026-08-27 shows #306 and all eight children
+> (#289, #287, #284, #282, #279, #277, #275, #272) closed. Statements below that call
+> them open or next are preserved as history. Use
+> [`NATIVE-PERFORMANCE-CURRENT.md`](../benchmarks/NATIVE-PERFORMANCE-CURRENT.md) for the
+> current limiting constraints, ready waves, and next witnesses.
+>
 > **#306 is a pure roll-up: it closes only when all 8 children close.** This doc does not
 > claim the epic is done — it records the **honest on-disk state** of each child so an
 > operator (or the next agent) can see exactly what shipped, what is hardware-gated, and

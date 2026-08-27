@@ -543,7 +543,10 @@ def ci_failure_diagnosis(root: Path) -> dict:
         return {"status": "unavailable", "reason": raw.strip()[-300:] or "gh run list failed"}
     run_doc = first_ci_run(payload)
     scope = "head"
-    if not run_doc:
+    # A queued or in-progress head run is not decisive evidence against the
+    # completed failure that made the release base red. Keep the head run only
+    # as a fallback when main has no completed run to diagnose.
+    if not run_doc or not run_doc.get("conclusion"):
         payload, _trunk_code, trunk_raw = load_json([
             "gh", "run", "list",
             "--workflow", "ci.yml",
@@ -554,8 +557,10 @@ def ci_failure_diagnosis(root: Path) -> dict:
         ], root, timeout=30)
         if payload is None:
             return {"status": "unavailable", "reason": trunk_raw.strip()[-300:] or "gh trunk run list failed"}
-        run_doc = first_ci_run(payload)
-        scope = "latest_trunk"
+        trunk_run = first_ci_run(payload)
+        if trunk_run:
+            run_doc = trunk_run
+            scope = "latest_trunk"
     if not run_doc:
         return {"status": "none", "reason": "no ci.yml run found for HEAD or latest main"}
     if run_doc.get("conclusion") != "failure":

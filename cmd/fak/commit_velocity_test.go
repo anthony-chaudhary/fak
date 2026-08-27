@@ -4,12 +4,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/safecommit"
 )
+
+func withPassedCommitBuildCheck(t *testing.T) {
+	t.Helper()
+	old := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = old })
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckPassed, ""
+	}
+}
 
 // scoredVelocityResult builds a verified+pushed Result whose local and push boundaries both
 // landed under their default budgets, so ScoreCommitVelocity qualifies both legs (SCORED).
@@ -31,6 +41,7 @@ func scoredVelocityResult(o safecommit.Options) safecommit.Result {
 // both velocity legs as SCORED with their budget-relative score, distinct from the quality score
 // (#4241).
 func TestRunCommit_humanOutputShowsScoredVelocity(t *testing.T) {
+	withPassedCommitBuildCheck(t)
 	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
 		return scoredVelocityResult(o), nil
 	})
@@ -51,6 +62,7 @@ func TestRunCommit_humanOutputShowsScoredVelocity(t *testing.T) {
 // TestRunCommit_jsonCarriesVelocityObject: --json emits the nested velocity object with separate
 // local/push legs and a non-nil score on each qualified leg (#4241).
 func TestRunCommit_jsonCarriesVelocityObject(t *testing.T) {
+	withPassedCommitBuildCheck(t)
 	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
 		return scoredVelocityResult(o), nil
 	})

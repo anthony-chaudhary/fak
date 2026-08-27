@@ -100,6 +100,43 @@ func TestGuardCodexCLIUsageFailureClassification(t *testing.T) {
 	}
 }
 
+func TestGuardCodexInvalidJSONFailureClassification(t *testing.T) {
+	exit1, state1 := runToExit(t, 1)
+	observed := `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2","codex_error_info":"other"}}` + "\n"
+
+	if !guardIsCodexInvalidJSONFailure(exit1, state1.ProcessState, "codex", observed) {
+		t.Fatal("directly observed Codex invalid-JSON exit-1 envelope was not classified")
+	}
+	for name, stderr := range map[string]string{
+		"other without diagnostic": `{"type":"turn.failed","error":{"message":"request blocked","codex_error_info":"other"}}`,
+		"diagnostic without other": `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2"}}`,
+		"unstructured diagnostic":  "failed to parse function arguments: EOF while parsing an object at line 1 column 2",
+		"unrelated exit one":       "panic: index out of range",
+		"missing line":             `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line  column 2","codex_error_info":"other"}}`,
+		"zero line":                `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 0 column 2","codex_error_info":"other"}}`,
+		"missing column":           `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column ","codex_error_info":"other"}}`,
+		"zero column":              `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 0","codex_error_info":"other"}}`,
+		"trailing prose":           `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2 extra","codex_error_info":"other"}}`,
+		"signed coordinate":        `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line +1 column 2","codex_error_info":"other"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if guardIsCodexInvalidJSONFailure(exit1, state1.ProcessState, "codex", stderr) {
+				t.Fatalf("overgeneralized stderr %q as Codex invalid JSON", stderr)
+			}
+		})
+	}
+	if guardIsCodexInvalidJSONFailure(exit1, state1.ProcessState, "claude", observed) {
+		t.Fatal("Codex-shaped stderr from a non-Codex harness was classified")
+	}
+	exit2, state2 := runToExit(t, 2)
+	if guardIsCodexInvalidJSONFailure(exit2, state2.ProcessState, "codex", observed) {
+		t.Fatal("non-exit-1 Codex failure was classified as invalid JSON")
+	}
+	if _, code, ok := guardMaybeRestartOnCrash(exit1, state1.ProcessState, 0, 3); !ok || code != 1 {
+		t.Fatalf("unrelated exit 1 lost generic restart admission: code=%d ok=%v", code, ok)
+	}
+}
+
 func TestGuardChildStderrCapturePreservesAndBoundsStream(t *testing.T) {
 	payload := bytes.Repeat([]byte("x"), guardChildStderrCaptureLimit+257)
 	var original bytes.Buffer
@@ -112,6 +149,115 @@ func TestGuardChildStderrCapturePreservesAndBoundsStream(t *testing.T) {
 	}
 	if got := capture.String(); len(got) != guardChildStderrCaptureLimit || got != string(payload[:guardChildStderrCaptureLimit]) {
 		t.Fatalf("captured prefix length=%d, want bounded unchanged prefix length=%d", len(got), guardChildStderrCaptureLimit)
+	}
+}
+
+func TestGuardCodexExecJSONCommandShape(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		command []string
+		agent   string
+		want    bool
+	}{
+		{name: "exec json", command: []string{"codex", "exec", "--json"}, agent: "codex", want: true},
+		{name: "exec resume json", command: []string{"/opt/bin/codex", "exec", "resume", "session", "--json"}, agent: "codex.exe", want: true},
+		{name: "root short config", command: []string{"codex", "-c", "model=o3", "exec", "resume", "session", "--json"}, agent: "codex", want: true},
+		{name: "root long configs", command: []string{"codex", "--config=sandbox=read-only", "--enable", "feature", "--disable=other", "exec", "--json"}, agent: "codex", want: true},
+		{name: "interactive", command: []string{"codex"}, agent: "codex"},
+		{name: "interactive resume", command: []string{"codex", "resume", "--json"}, agent: "codex"},
+		{name: "exec without json", command: []string{"codex", "exec", "resume", "session"}, agent: "codex"},
+		{name: "review json", command: []string{"codex", "review", "--json"}, agent: "codex"},
+		{name: "json before exec", command: []string{"codex", "--json", "exec"}, agent: "codex"},
+		{name: "json prompt after delimiter", command: []string{"codex", "exec", "--", "--json"}, agent: "codex"},
+		{name: "root delimiter", command: []string{"codex", "--", "exec", "--json"}, agent: "codex"},
+		{name: "missing config value", command: []string{"codex", "--config", "exec", "--json"}, agent: "codex"},
+		{name: "non codex executable", command: []string{"claude", "exec", "--json"}, agent: "codex"},
+		{name: "non codex agent", command: []string{"codex", "exec", "--json"}, agent: "claude"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := guardIsCodexExecJSONCommand(tc.command, tc.agent); got != tc.want {
+				t.Fatalf("guardIsCodexExecJSONCommand(%v, %q)=%v, want %v", tc.command, tc.agent, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGuardChildStdoutCapturePreservesStreamAndRetainsTail(t *testing.T) {
+	prefix := bytes.Repeat([]byte("prior-jsonl\n"), guardChildStdoutCaptureLimit/6)
+	event := []byte(`{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 27 column 19","codex_error_info":"other"}}` + "\n")
+	var original bytes.Buffer
+	capture := newGuardChildStdoutCapture(&original)
+	for _, chunk := range [][]byte{prefix, event} {
+		if n, err := capture.Write(chunk); err != nil || n != len(chunk) {
+			t.Fatalf("capture.Write = %d, %v; want %d, nil", n, err, len(chunk))
+		}
+	}
+	want := append(append([]byte(nil), prefix...), event...)
+	if !bytes.Equal(original.Bytes(), want) {
+		t.Fatal("capture changed the original stdout stream")
+	}
+	gotTail := capture.String()
+	if len(gotTail) != guardChildStdoutCaptureLimit {
+		t.Fatalf("captured tail length=%d, want %d", len(gotTail), guardChildStdoutCaptureLimit)
+	}
+	if !strings.HasSuffix(gotTail, string(event)) {
+		t.Fatal("bounded tail lost terminal turn.failed event")
+	}
+	exit1, state1 := runToExit(t, 1)
+	if !guardIsCodexInvalidJSONFailure(exit1, state1.ProcessState, "codex", gotTail) {
+		t.Fatal("classifier did not recognize terminal event retained after more than 64 KiB of prior JSONL")
+	}
+}
+
+type guardShortWriter struct {
+	bytes.Buffer
+	limit int
+}
+
+func (w *guardShortWriter) Write(p []byte) (int, error) {
+	if len(p) > w.limit {
+		p = p[:w.limit]
+	}
+	n, _ := w.Buffer.Write(p)
+	return n, io.ErrShortWrite
+}
+
+func TestGuardChildStdoutCaptureRetainsOnlyAcceptedBytes(t *testing.T) {
+	dst := &guardShortWriter{limit: 4}
+	capture := newGuardChildStdoutCapture(dst)
+	if n, err := capture.Write([]byte("accepted-tail")); n != 4 || !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("capture.Write = %d, %v; want 4, io.ErrShortWrite", n, err)
+	}
+	if got := dst.String(); got != "acce" {
+		t.Fatalf("delegated stdout=%q, want accepted prefix", got)
+	}
+	if got := capture.String(); got != "acce" {
+		t.Fatalf("captured stdout=%q, want only bytes accepted by destination", got)
+	}
+}
+
+func TestGuardCaptureChildStdoutLeavesNonJSONWriterUntouched(t *testing.T) {
+	var stdout bytes.Buffer
+	for _, command := range [][]string{
+		{"codex"},
+		{"codex", "resume", "--json"},
+		{"codex", "exec"},
+		{"other", "exec", "--json"},
+	} {
+		child := exec.Command("unused")
+		child.Stdout = &stdout
+		if capture := guardCaptureChildStdout(child, command, guardAgentBaseName(command[0])); capture != nil {
+			t.Fatalf("unexpected capture for %v", command)
+		}
+		if child.Stdout != &stdout {
+			t.Fatalf("stdout writer changed for %v", command)
+		}
+	}
+	child := exec.Command("unused")
+	child.Stdout = &stdout
+	capture := guardCaptureChildStdout(child, []string{"codex", "-c", "model=o3", "exec", "resume", "session", "--json"}, "codex")
+	if capture == nil || child.Stdout != capture {
+		t.Fatal("Codex exec --json command did not install stdout capture")
 	}
 }
 
@@ -343,6 +489,192 @@ func TestGuardCodexCLIUsageFailureStopsBeforeRestart(t *testing.T) {
 	}
 }
 
+// TestGuardCodexInvalidJSONFailureStopsBeforeRestart is the supervision witness for #9481.
+// The child emits the sanitized turn.failed envelope observed on Codex exec resume and exits 1.
+// The launch count and audit rows prove the exact terminal class stops before generic restart,
+// while the classification table above keeps unrelated exit-1 failures restartable.
+func TestGuardCodexInvalidJSONFailureStopsBeforeRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		maxDuration string
+	}{
+		{name: "unsupervised"},
+		{name: "supervised", maxDuration: "30s"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runGuardCodexInvalidJSONFailureStopsBeforeRestart(t, tc.maxDuration)
+		})
+	}
+}
+
+func runGuardCodexInvalidJSONFailureStopsBeforeRestart(t *testing.T, maxDuration string) {
+	t.Helper()
+	dir := t.TempDir()
+	codexPath := guardNamedCodexTestBinary(t, dir)
+	statePath := filepath.Join(dir, "child-state")
+	auditPath := filepath.Join(dir, "audit.jsonl")
+
+	cmd := exec.Command(os.Args[0], "guard")
+	args := []string{
+		"--quiet", "--provider", "openai",
+		"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
+		"--audit", auditPath,
+	}
+	if maxDuration != "" {
+		args = append(args, "--max-duration", maxDuration)
+	}
+	args = append(args, "--", codexPath, "exec", "resume", "test-session", "--json", "--fak-guard-crash-witness-child")
+	guardArgs := strings.Join(args, " ")
+	cmd.Env = append(os.Environ(),
+		guardE2EHelperEnv+"="+guardArgs,
+		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
+		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
+		"FAK_GUARD_CRASH_WITNESS_MODE=codex-invalid-json",
+		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
+		guardCrashRestartLimitEnv+"=3",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("guard exit=%v, want preserved child exit 1\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	const failedEvent = `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2","codex_error_info":"other"}}` + "\n"
+	if got := stdout.String(); got != failedEvent {
+		t.Fatalf("stdout changed: got %q, want %q", got, failedEvent)
+	}
+	gotStderr := stderr.String()
+	for _, want := range []string{"codex progress sentinel", guardCodexInvalidJSONReason} {
+		if !strings.Contains(gotStderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, gotStderr)
+		}
+	}
+	if strings.Contains(gotStderr, "restarting the child") || strings.Contains(gotStderr, guardCrashRestartExhaustedReason) {
+		t.Fatalf("invalid-JSON failure entered crash restart:\n%s", gotStderr)
+	}
+	state, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(state)); got != "1" {
+		t.Fatalf("child launch count=%s, want exactly one launch", got)
+	}
+
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("failed to parse function arguments")) || bytes.Contains(data, []byte("codex_error_info")) || bytes.Contains(data, []byte(codexPath)) || bytes.Contains(data, []byte("codex progress sentinel")) {
+		t.Fatalf("audit leaked raw diagnostic or executable path:\n%s", data)
+	}
+	var invalidJSONWitnesses, restartHops int
+	scan := bufio.NewScanner(bytes.NewReader(data))
+	for scan.Scan() {
+		var row journal.Row
+		if err := json.Unmarshal(scan.Bytes(), &row); err != nil {
+			t.Fatalf("decode audit row %q: %v", scan.Text(), err)
+		}
+		if row.Kind == "CHILD_CRASH" && row.Reason == guardCodexInvalidJSONReason && row.ExitCode == 1 {
+			invalidJSONWitnesses++
+		}
+		if row.Kind == "RESTART_HOP" {
+			restartHops++
+		}
+	}
+	if err := scan.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if invalidJSONWitnesses != 1 || restartHops != 0 {
+		t.Fatalf("audit invalid-JSON witnesses=%d restart hops=%d, want 1/0\n%s", invalidJSONWitnesses, restartHops, data)
+	}
+}
+
+func TestGuardCodexUnrelatedExitOneRemainsRestartable(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		mode       string
+		wantStdout string
+	}{
+		{
+			name:       "unrelated other event",
+			mode:       "codex-unrelated-other",
+			wantStdout: `{"type":"turn.failed","error":{"message":"request blocked","codex_error_info":"other"}}` + "\n",
+		},
+		{name: "generic exit one", mode: "codex-generic-exit-one"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			codexPath := guardNamedCodexTestBinary(t, dir)
+			statePath := filepath.Join(dir, "child-state")
+			auditPath := filepath.Join(dir, "audit.jsonl")
+			cmd := exec.Command(os.Args[0], "guard")
+			guardArgs := strings.Join([]string{
+				"--quiet", "--provider", "openai",
+				"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
+				"--audit", auditPath,
+				"--", codexPath, "exec", "--json", "--fak-guard-crash-witness-child",
+			}, " ")
+			cmd.Env = append(os.Environ(),
+				guardE2EHelperEnv+"="+guardArgs,
+				"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
+				"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
+				"FAK_GUARD_CRASH_WITNESS_MODE="+tc.mode,
+				"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
+				guardCrashRestartLimitEnv+"=3",
+			)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("guard did not recover unrelated exit 1: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+			}
+			if got := stdout.String(); got != tc.wantStdout {
+				t.Fatalf("stdout=%q, want preserved %q", got, tc.wantStdout)
+			}
+			if got := strings.TrimSpace(string(mustReadFile(t, statePath))); got != "2" {
+				t.Fatalf("child launch count=%s, want one restart", got)
+			}
+			gotStderr := stderr.String()
+			if !strings.Contains(gotStderr, "restarting the child") || strings.Contains(gotStderr, guardCodexInvalidJSONReason) {
+				t.Fatalf("unrelated exit-1 supervision status:\n%s", gotStderr)
+			}
+			data := mustReadFile(t, auditPath)
+			var restartHops, invalidJSONWitnesses int
+			scan := bufio.NewScanner(bytes.NewReader(data))
+			for scan.Scan() {
+				var row journal.Row
+				if err := json.Unmarshal(scan.Bytes(), &row); err != nil {
+					t.Fatalf("decode audit row %q: %v", scan.Text(), err)
+				}
+				if row.Kind == "RESTART_HOP" {
+					restartHops++
+				}
+				if row.Kind == "CHILD_CRASH" && row.Reason == guardCodexInvalidJSONReason {
+					invalidJSONWitnesses++
+				}
+			}
+			if err := scan.Err(); err != nil {
+				t.Fatal(err)
+			}
+			if restartHops != 1 || invalidJSONWitnesses != 0 {
+				t.Fatalf("restart hops=%d invalid-JSON witnesses=%d, want 1/0\n%s", restartHops, invalidJSONWitnesses, data)
+			}
+		})
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func guardNamedCodexTestBinary(t *testing.T, dir string) string {
 	t.Helper()
 	source, err := os.Executable()
@@ -478,6 +810,25 @@ func runGuardCrashWitnessChild() {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Usage: codex exec [OPTIONS] [PROMPT]")
 		os.Exit(2)
+	}
+	if mode == "codex-invalid-json" {
+		fmt.Fprintln(os.Stderr, "codex progress sentinel")
+		fmt.Fprintln(os.Stdout, `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2","codex_error_info":"other"}}`)
+		os.Exit(1)
+	}
+	if mode == "codex-unrelated-other" {
+		if generation == 1 {
+			fmt.Fprintln(os.Stdout, `{"type":"turn.failed","error":{"message":"request blocked","codex_error_info":"other"}}`)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if mode == "codex-generic-exit-one" {
+		if generation == 1 {
+			fmt.Fprintln(os.Stderr, "generic exit-one sentinel")
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 
 	base := strings.TrimRight(os.Getenv("ANTHROPIC_BASE_URL"), "/")

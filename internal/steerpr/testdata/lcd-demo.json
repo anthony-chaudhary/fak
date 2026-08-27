@@ -1,0 +1,10 @@
+{
+  "schema": "fak.steerpr.demo.v1",
+  "commits": [
+    {"sha":"111111111111","subject":"docs(readme): add first demo page (#10) (fak docs)","files":["docs/one.md"],"verdict":"CLAIM_WITNESSED"},
+    {"sha":"222222222222","subject":"docs(readme): refine demo page (#10) (fak docs)","files":["docs/two.md"],"verdict":"CLAIM_WITNESSED"},
+    {"sha":"333333333333","subject":"feat(model): add pending model hook (#11) (fak model)","files":["internal/model/hook.go"],"verdict":"ABSTAIN"},
+    {"sha":"444444444444","subject":"fix(gateway): correct ready edge (#12) (fak gateway)","files":["internal/gateway/ready.go"],"verdict":"CLAIM_UNWITNESSED"},
+    {"sha":"555555555555","subject":"chore: refresh orphan fixture","files":["testdata/orphan.txt"],"verdict":"CLAIM_WITNESSED"}
+  ]
+}

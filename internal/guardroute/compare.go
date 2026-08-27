@@ -25,7 +25,14 @@ type routeCase struct {
 	want   string
 }
 
-var routeCases = []routeCase{{guardrsi.Fold{TotalRows: 5, BlankReasonOnDeny: 2}, guardrsi.Bucket{Bucket: "blank_reason_on_deny", Count: 2, Lever: "require reason"}, "OPEN_ISSUE"}, {guardrsi.Fold{TotalRows: 4, UnknownVerdict: 1}, guardrsi.Bucket{Bucket: "unknown_verdict", Count: 1, Lever: "closed set"}, "OPEN_ISSUE"}, {guardrsi.Fold{TotalRows: 10}, guardrsi.Bucket{Bucket: "reason:POLICY_BLOCK", Count: 3, Lever: "floor"}, "OPEN_FINDING"}, {guardrsi.Fold{TotalRows: 10}, guardrsi.Bucket{Bucket: "reason:POLICY_BLOCK", Count: 2}, "NOOP"}, {guardrsi.Fold{TotalRows: 0}, guardrsi.Bucket{Bucket: "none"}, "NOOP"}}
+var routeCases = []routeCase{
+	{guardrsi.Fold{TotalRows: 5, ChildCrash: 1}, guardrsi.Bucket{Bucket: "child_crash", Count: 1, Lever: "harden supervision"}, "OPEN_ISSUE"},
+	{guardrsi.Fold{TotalRows: 5, BlankReasonOnDeny: 2}, guardrsi.Bucket{Bucket: "blank_reason_on_deny", Count: 2, Lever: "require reason"}, "OPEN_ISSUE"},
+	{guardrsi.Fold{TotalRows: 4, UnknownVerdict: 1}, guardrsi.Bucket{Bucket: "unknown_verdict", Count: 1, Lever: "closed set"}, "OPEN_ISSUE"},
+	{guardrsi.Fold{TotalRows: 10}, guardrsi.Bucket{Bucket: "reason:POLICY_BLOCK", Count: 3, Lever: "floor"}, "OPEN_FINDING"},
+	{guardrsi.Fold{TotalRows: 10}, guardrsi.Bucket{Bucket: "reason:POLICY_BLOCK", Count: 2}, "NOOP"},
+	{guardrsi.Fold{TotalRows: 0}, guardrsi.Bucket{Bucket: "none"}, "NOOP"},
+}
 
 func runNativeComparison() ComparisonArm {
 	a := ComparisonArm{Name: "fak native guard-journal route", Kind: "native", Available: true, Cases: len(routeCases), Note: "typed fold and worst-bucket routing to finding, issue, or no-op"}

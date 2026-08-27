@@ -74,6 +74,31 @@ func TestAdvisoryIsNotAnUnknownVerdict(t *testing.T) {
 	}
 }
 
+func TestOperationalRowsAreClassifiedAndQualityNeutral(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"verdict": "ALLOW", "kind": "DECIDE", "tool": "Read"},
+		{"kind": "CONFIG_SWAP"},
+		{"kind": "RESTART_HOP"},
+		{"kind": "CAPABILITY_GRANT"},
+		{"kind": "NOVEL_CONTROL"},
+	})
+	fold := FoldRows([]string{p})
+	if fold.OperationalRows != 3 {
+		t.Fatalf("OperationalRows = %d, want 3", fold.OperationalRows)
+	}
+	for _, kind := range []string{"CONFIG_SWAP", "RESTART_HOP", "CAPABILITY_GRANT"} {
+		if got := fold.ByOperationalKind[kind]; got != 1 {
+			t.Errorf("ByOperationalKind[%s] = %d, want 1", kind, got)
+		}
+	}
+	if fold.UnknownVerdict != 1 || fold.ByVerdict["NOVEL_CONTROL"] != 1 {
+		t.Fatalf("fold = %+v, want only NOVEL_CONTROL classified as unknown", fold)
+	}
+	if got, want := VerdictQuality(fold), 50.0; got != want {
+		t.Fatalf("quality = %v, want %v; operational rows must not dilute the verdict denominator", got, want)
+	}
+}
+
 func TestUnexplainedBlockLowersQuality(t *testing.T) {
 	p := writeJournal(t, []map[string]any{
 		{"verdict": "ALLOW", "kind": "DECIDE"},

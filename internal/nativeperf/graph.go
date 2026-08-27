@@ -247,31 +247,14 @@ func issue(number int) IssueRef {
 // witness. A disabled conflicting baseline does not block selection: the arm's
 // experiment is expected to toggle it off.
 func NextLever(graph Graph) (*Lever, error) {
-	if err := Validate(graph); err != nil {
+	ready, err := ReadyLevers(graph)
+	if err != nil {
 		return nil, err
 	}
-	byID := make(map[string]Lever, len(graph.Levers))
-	for _, candidate := range graph.Levers {
-		byID[candidate.ID] = candidate
+	if len(ready) == 0 {
+		return nil, nil
 	}
-	for i := range graph.Levers {
-		candidate := &graph.Levers[i]
-		if candidate.Witnessed != nil || candidate.Enabled {
-			continue
-		}
-		ready := true
-		for _, dep := range candidate.DependencyIDs {
-			if !byID[dep].Enabled {
-				ready = false
-				break
-			}
-		}
-		if ready {
-			copy := *candidate
-			return &copy, nil
-		}
-	}
-	return nil, nil
+	return &ready[0], nil
 }
 
 // DOT renders deterministic Graphviz DOT. Envelope clusters prevent Metal and

@@ -117,6 +117,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			return
 		}
 		childStderr := guardCaptureChildStderr(child, agentName)
+		childStdout := guardCaptureChildStdout(child, command, agentName)
 		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
@@ -197,7 +198,8 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
-		if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, os.Stderr) {
+		if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, os.Stderr) ||
+			guardRefuseCodexInvalidJSON(runErr, child.ProcessState, agentName, guardTraceID, childStdout.String(), childStarted, auditJournal, os.Stderr) {
 			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
@@ -324,6 +326,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			return
 		}
 		childStderr := guardCaptureChildStderr(child, agentName)
+		childStdout := guardCaptureChildStdout(child, command, agentName)
 		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
@@ -415,7 +418,8 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
-			if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, restarter.stderr) {
+			if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, restarter.stderr) ||
+				guardRefuseCodexInvalidJSON(runErr, child.ProcessState, agentName, guardTraceID, childStdout.String(), childStarted, auditJournal, restarter.stderr) {
 				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}

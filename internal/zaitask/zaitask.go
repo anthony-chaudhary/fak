@@ -81,18 +81,32 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
+type PromptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens        int                 `json:"prompt_tokens"`
+	CompletionTokens    int                 `json:"completion_tokens"`
+	TotalTokens         int                 `json:"total_tokens"`
+	PromptTokensDetails PromptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	CachedTokens        int                 `json:"cached_tokens,omitempty"`
 }
 
 type Result struct {
-	Content   string `json:"content"`
-	Model     string `json:"model"`
-	RequestID string `json:"request_id"`
-	Usage     Usage  `json:"usage"`
-	LatencyMS int64  `json:"latency_ms"`
+	Content          string     `json:"content"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	FinishReason     string     `json:"finish_reason,omitempty"`
+	Model            string     `json:"model"`
+	RequestID        string     `json:"request_id"`
+	Usage            Usage      `json:"usage"`
+	LatencyMS        int64      `json:"latency_ms"`
+	Provider         string     `json:"provider,omitempty"`
+	Engine           string     `json:"engine,omitempty"`
+	FakNative        bool       `json:"fak_native"`
+	Streamed         bool       `json:"streamed,omitempty"`
+	Done             bool       `json:"done,omitempty"`
 }
 
 type apiRequest struct {
@@ -124,6 +138,9 @@ type apiResponse struct {
 }
 
 func (c Client) Run(ctx context.Context, prompt, model string, maxTokens int) (Result, error) {
+	if model == GLM53FlashModel {
+		return c.RunChat(ctx, Request{Model: model, Messages: []Message{{Role: "user", Content: prompt}}, MaxTokens: maxTokens})
+	}
 	if strings.TrimSpace(c.APIKey) == "" {
 		return Result{}, errors.New("ZAI API key is required; recovery: set Client.APIKey from a ZAI credential")
 	}

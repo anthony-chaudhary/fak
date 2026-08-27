@@ -79,6 +79,17 @@ func emitJSONOrRenderPrefixed(stdout, stderr io.Writer, errPrefix string, asJSON
 	return 0
 }
 
+// emitJSONOrPrintln is the compact form for command results whose human renderer
+// already returns a complete line. Keeping the branch here prevents otherwise
+// identical issue-routing verbs from each growing their own encode/error block.
+func emitJSONOrPrintln(stdout, stderr io.Writer, label string, asJSON bool, value any, human string) int {
+	if asJSON {
+		return encodeJSONOrFail(stdout, stderr, value, label)
+	}
+	fmt.Fprintln(stdout, human)
+	return 0
+}
+
 func emitReportGate(stdout io.Writer, asJSON bool, code int, message string, gated any) int {
 	if asJSON {
 		_ = writeIndentedJSONNoEscape(stdout, gated)

@@ -87,6 +87,65 @@ func TestBuildAreaFilterAndCap(t *testing.T) {
 	}
 }
 
+func TestBuildMapsEveryTaxonomyAreaToWorkClass(t *testing.T) {
+	plan, err := Build(spineInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"qa":            "class:infra",
+		"dogfood":       "class:dev",
+		"product":       "class:dev",
+		"observability": "class:infra",
+		"integration":   "class:infra",
+		"docs":          "class:frontdoor",
+		"release":       "class:frontdoor",
+	}
+	seen := map[string]bool{}
+	for _, c := range plan.Candidates {
+		if len(c.Labels) < 4 {
+			t.Fatalf("%s labels = %v, want area/class/priority routing", c.Key, c.Labels)
+		}
+		area := c.Labels[1]
+		seen[area] = true
+		if got := c.Labels[2]; got != want[area] {
+			t.Errorf("%s area %s class = %q, want %q", c.Key, area, got, want[area])
+		}
+	}
+	for area := range want {
+		if !seen[area] {
+			t.Errorf("taxonomy area %q had no generated candidate", area)
+		}
+	}
+}
+
+func TestBuildMapsPriorityToModelTiers(t *testing.T) {
+	plan, err := Build(spineInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][2]string{
+		"priority/P1": {"T1", "T0"},
+		"priority/P2": {"T2", "T1"},
+	}
+	seen := map[string]bool{}
+	for _, c := range plan.Candidates {
+		tiers, ok := want[c.Priority]
+		if !ok {
+			t.Fatalf("%s has unmapped priority %q", c.Key, c.Priority)
+		}
+		seen[c.Priority] = true
+		if c.RequiredModelTier != tiers[0] || c.OptimalModelTier != tiers[1] {
+			t.Errorf("%s priority %s tiers = %s/%s, want %s/%s", c.Key, c.Priority, c.RequiredModelTier, c.OptimalModelTier, tiers[0], tiers[1])
+		}
+	}
+	for priority := range want {
+		if !seen[priority] {
+			t.Errorf("priority mapping %q had no generated candidate", priority)
+		}
+	}
+}
+
 func TestBuildDerivesQAPackageFromDeclaredPaths(t *testing.T) {
 	in := spineInput()
 	in.Leaf = "cmd"

@@ -65,11 +65,18 @@ ownership — the honest dual of "status in background, operator surfaced":
 - **0 blocked issues** → a quiet green all-clear card (no page).
 - **≥1 with an UNOWNED issue** → an `operator` card: `<!here>` + a triage link (paged) —
   a blocker with no assignee needs a human to pick it up.
-- **≥1 but all assigned** → a muted background-`status` card (tracked, no page).
+- **≥1 but all assigned** → a muted background-`status` card stating that ownership is
+  recorded (no page; assignment alone does not prove progress).
 
 `fak blockers feed --issues <gh-json>` is a pure fold of a
 `gh issue list --json number,title,url,assignees,labels` payload, so it is unit-tested
-without `gh` or the network.
+without `gh` or the network. The input must be an explicit JSON array: `[]` from a
+successful zero-result query renders clear, while a missing, blank, `null`, or malformed
+payload fails closed. The scheduled workflow first runs `fak blockers source`, which
+writes the marker as `UNKNOWN`, resolves the exact configured label before and after the
+GitHub query, validates the returned array, then flips the marker to `OK`. Both render
+and post pass `--source-status blockers-source.json`; any acquisition failure therefore
+renders nothing and fails the workflow before posting.
 
 ## Configuration
 

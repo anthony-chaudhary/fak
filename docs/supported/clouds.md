@@ -63,10 +63,54 @@ Each cloud below serves tokens behind an OpenAI Chat Completions endpoint. You f
 | Groq | `--provider openai --base-url https://api.groq.com/openai/v1` | Yes | OpenAI Chat Completions. See the [matrix row](../integrations/compatibility-matrix.md). |
 | Fireworks AI | `--provider openai --base-url https://api.fireworks.ai/inference/v1` | Yes | OpenAI Chat Completions. See the [matrix row](../integrations/compatibility-matrix.md). |
 | DeepSeek (V4) | `--provider openai --base-url https://api.deepseek.com` (or `--provider anthropic --base-url https://api.deepseek.com/anthropic`) | Yes | Reasoning model: `thinking` is default-on and `reasoning_effort` takes only `high`/`max`. See the dedicated [DeepSeek V4 page](deepseek.md) for all three routes and the alias-retirement warning. |
+| Z.AI | `--provider openai --base-url https://api.z.ai/api/paas/v4` | Yes | OpenAI-compatible Chat Completions. The model-scoped `glm-5.3-flash` contract is stricter than generic compatibility; use the witnessed `cmd/zaitask` route below when fak must supply its mandatory reasoning fields. |
 
 Bedrock and Vertex are marked **Partial** because the repoint is templated and the auth is not a plain static key, exactly as the matrix caveats state. The other five expose a custom base URL outright.
 
 If your cloud is not in this table but exposes an OpenAI Chat Completions endpoint, fak fronts it the same way over `--provider openai`. The matrix surveys 47 targets and the rule holds across the field: if your tool or cloud can set a base URL, fak already fronts it.
+
+### Z.AI GLM-5.3-Flash: model-scoped hosted route
+
+`cmd/zaitask` has an exact hosted contract for `glm-5.3-flash`; it is not a
+generic model alias. Selecting that model resolves the direct general endpoint,
+sends `thinking.type=enabled`, and accepts `--reasoning-effort low|high|max`
+(`max` by default). `--stream` assembles both `delta.reasoning_content` and
+visible content through the terminal `[DONE]` event. The JSON receipt names
+`provider=z.ai`, `engine=zai-hosted`, and `fak_native=false` so a hosted result
+cannot be mistaken for the separate `glm5_next` native-runtime program.
+
+```bash
+ZAI_API_KEY=... go run ./cmd/zaitask \
+  --model glm-5.3-flash --reasoning-effort max --stream --json \
+  'Summarize the bounded change.'
+```
+
+The committed fixtures in `internal/zaitask/testdata/` cover mandatory reasoning,
+non-streaming and SSE reasoning/content, JSON-string tool arguments, cached-token
+usage, documented finish reasons, image URL/base64, uploaded-file, and file/video
+forms. Structured output, streamed tool arguments, and direct file/video URLs are
+explicit `CapabilityProbes`; callers cannot send those forms until their endpoint
+probe has accepted them. When `clear_thinking=false`, every historical assistant
+turn must include its complete ordered `reasoning_content`, otherwise the request
+fails before the network call.
+
+The token-spending live matrix is opt-in and emits a scrubbed provider/engine
+receipt rather than persisting credentials or media URLs:
+
+```bash
+FAK_ZAI_GLM53_LIVE=1 \
+ZAI_API_KEY=... \
+FAK_ZAI_GLM53_IMAGE_URL=... \
+FAK_ZAI_GLM53_FILE_ID=... \
+FAK_ZAI_GLM53_VIDEO_URL=... \
+go test ./internal/zaitask -run TestLiveGLM53FlashConformance -v
+```
+
+This contract follows the current official
+[GLM-5.3-Flash guide](https://docs.z.ai/guides/vlm/glm-5.3-flash) and
+[Chat Completion schema](https://docs.z.ai/api-reference/llm/chat-completion).
+Those provider capabilities are mutable observations, not fak performance or
+native-execution claims.
 
 ## How you point fak at a cloud
 

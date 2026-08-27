@@ -14,6 +14,8 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 )
 
+var measureHostMemoryRooflineForObserve = modelperfobs.MeasureHostMemoryRoofline
+
 func cmdModelObserve(args []string) {
 	if len(args) < 1 {
 		fmt.Fprintln(os.Stderr, modelObserveUsage())
@@ -138,6 +140,7 @@ func runModelObserveBandwidthCollect(args []string) error {
 	shape := fs.String("shape", "small", "request shape")
 	theoretical := fs.Float64("theoretical-gb-s", 0, "theoretical memory roofline in GB/s")
 	measured := fs.Float64("measured-gb-s", 0, "measured sustainable memory roofline in GB/s")
+	deviceRoofline := fs.Float64("device-roofline-gb-s", 0, "measured sustainable roofline for the profiled NVIDIA device")
 	latency := fs.Float64("latency-ms", 0, "request latency in milliseconds")
 	promptTokens := fs.Int64("prompt-tokens", 0, "request prompt tokens")
 	completionTokens := fs.Int64("completion-tokens", 0, "request completion tokens")
@@ -145,25 +148,27 @@ func runModelObserveBandwidthCollect(args []string) error {
 	physicalReadBytes := fs.Uint64("physical-read-bytes", 0, "software physical read bytes; not a DRAM counter")
 	physicalWriteBytes := fs.Uint64("physical-write-bytes", 0, "software physical write bytes; not a DRAM counter")
 	nvidiaDevice := fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0")
+	amdDevice := fs.String("amd-device", "", "AMD device index, BDF, or UUID; empty probes AMD device 0 after NVIDIA")
+	nvidiaNCUCSV := fs.String("nvidia-ncu-csv", "", "import Nsight Compute raw CSV instead of sampling the host")
+	profileDevice := fs.String("device", "", "profiled NVIDIA device name or UUID (required with --nvidia-ncu-csv)")
+	captureStart := fs.String("capture-start", "", "profile capture start time in RFC3339 (required with --nvidia-ncu-csv)")
+	captureEnd := fs.String("capture-end", "", "profile capture end time in RFC3339 (required with --nvidia-ncu-csv)")
 	measureRoofline := fs.Bool("measure-host-roofline", false, "benchmark and record sustainable host-memory bandwidth")
 	rooflineBytes := fs.Uint64("roofline-bytes", 64<<20, "host roofline benchmark working set")
 	rooflineTrials := fs.Int("roofline-trials", 5, "host roofline benchmark trial count")
 	rooflineDuration := fs.Duration("roofline-duration", 100*time.Millisecond, "target duration per host roofline trial")
 	rooflineThreads := fs.Int("roofline-threads", 0, "parallel host roofline workers (default: GOMAXPROCS)")
+	rooflineSweep := fs.Bool("roofline-sweep", false, "measure a geometric host roofline worker-count curve through --roofline-threads")
+	rooflineKneeThreshold := fs.Float64("roofline-knee-threshold", modelperfobs.DefaultRooflineKneeThreshold, "saturation knee fraction of the peak point median")
 	output := fs.String("output", "", "write collection JSON to this path")
 	pretty := fs.Bool("pretty", true, "indent JSON output")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice)}
-	if *measureRoofline {
-		threads := *rooflineThreads
-		if threads == 0 {
-			threads = runtime.GOMAXPROCS(0)
-		}
-		o.MeasureHostRoofline = &modelperfobs.RooflineBenchmarkOptions{WorkingSetBytes: *rooflineBytes, Trials: *rooflineTrials, TargetDuration: *rooflineDuration, Threads: threads}
-	}
+	o := modelperfobs.CollectionOptions{Count: *count, Interval: *interval, Phase: modelperfobs.RequestPhase(*phase), Shape: modelperfobs.RequestShape(*shape), NVIDIADevice: modelperfobs.NVIDIADeviceSelector(*nvidiaDevice), AMDDevice: modelperfobs.AMDDeviceSelector(*amdDevice)}
+	visited := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) {
+		visited[f.Name] = true
 		switch f.Name {
 		case "theoretical-gb-s":
 			o.TheoreticalGBS = theoretical
@@ -183,9 +188,110 @@ func runModelObserveBandwidthCollect(args []string) error {
 			o.PhysicalSoftwareWrite = physicalWriteBytes
 		}
 	})
-	collection, err := modelperfobs.CollectBandwidth(context.Background(), o)
-	if err != nil {
-		return err
+	if *nvidiaNCUCSV != "" {
+		for _, incompatible := range []string{"count", "interval", "measured-gb-s", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"} {
+			if visited[incompatible] {
+				return fmt.Errorf("--%s cannot be combined with --nvidia-ncu-csv", incompatible)
+			}
+		}
+	}
+	rooflineFlags := []string{"roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads", "roofline-sweep", "roofline-knee-threshold"}
+	if !*measureRoofline {
+		for _, name := range rooflineFlags {
+			if visited[name] {
+				return fmt.Errorf("--%s requires --measure-host-roofline", name)
+			}
+		}
+	}
+	if visited["roofline-knee-threshold"] && !*rooflineSweep {
+		return fmt.Errorf("--roofline-knee-threshold requires --roofline-sweep")
+	}
+	if *measureRoofline && visited["measured-gb-s"] {
+		return fmt.Errorf("--measured-gb-s cannot be combined with --measure-host-roofline")
+	}
+	var rooflineOptions *modelperfobs.RooflineBenchmarkOptions
+	if *measureRoofline {
+		threads := *rooflineThreads
+		if threads == 0 {
+			threads = runtime.GOMAXPROCS(0)
+		}
+		rooflineOptions = &modelperfobs.RooflineBenchmarkOptions{
+			WorkingSetBytes: *rooflineBytes,
+			Trials:          *rooflineTrials,
+			TargetDuration:  *rooflineDuration,
+			Threads:         threads,
+			Sweep:           *rooflineSweep,
+			KneeThreshold:   *rooflineKneeThreshold,
+		}
+	}
+	var collection modelperfobs.BandwidthCollection
+	var err error
+	if *nvidiaNCUCSV != "" {
+		started, err := time.Parse(time.RFC3339, *captureStart)
+		if err != nil {
+			return fmt.Errorf("--capture-start must be RFC3339: %w", err)
+		}
+		ended, err := time.Parse(time.RFC3339, *captureEnd)
+		if err != nil {
+			return fmt.Errorf("--capture-end must be RFC3339: %w", err)
+		}
+		in, err := os.Open(*nvidiaNCUCSV)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		profileOptions := modelperfobs.NVIDIAProfileOptions{
+			Phase:            o.Phase,
+			Shape:            o.Shape,
+			Device:           *profileDevice,
+			CaptureStartedAt: started,
+			CaptureEndedAt:   ended,
+			TheoreticalGBS:   o.TheoreticalGBS,
+		}
+		if visited["device-roofline-gb-s"] {
+			profileOptions.MeasuredDeviceGBS = deviceRoofline
+		}
+		collection, err = modelperfobs.ImportNVIDIAProfile(in, profileOptions)
+		if err != nil {
+			return err
+		}
+	} else {
+		for _, profileOnly := range []string{"device", "device-roofline-gb-s", "capture-start", "capture-end"} {
+			if visited[profileOnly] {
+				return fmt.Errorf("--%s requires --nvidia-ncu-csv", profileOnly)
+			}
+		}
+		runControl := context.Background()
+		cancel := context.CancelFunc(func() {})
+		var hostRoofline *modelperfobs.RooflineMeasurement
+		if rooflineOptions != nil {
+			rooflineBudget, budgetErr := modelperfobs.RooflineRuntimeBudget(*rooflineOptions)
+			if budgetErr != nil {
+				return budgetErr
+			}
+			totalBudget, budgetErr := modelObserveRooflineCollectBudget(o, rooflineBudget)
+			if budgetErr != nil {
+				return budgetErr
+			}
+			runControl, cancel = context.WithTimeout(runControl, totalBudget)
+			measuredRoofline, measureErr := measureHostMemoryRooflineForObserve(runControl, *rooflineOptions)
+			if measureErr != nil {
+				cancel()
+				return measureErr
+			}
+			measuredRoofline.CommandBudgetMS = totalBudget.Milliseconds()
+			hostRoofline = &measuredRoofline
+		}
+		defer cancel()
+		collection, err = modelperfobs.CollectBandwidth(runControl, o)
+		if err != nil {
+			return err
+		}
+		if hostRoofline != nil {
+			if err := modelperfobs.ApplyHostRooflineMeasurement(&collection, *hostRoofline); err != nil {
+				return err
+			}
+		}
 	}
 	w := io.Writer(os.Stdout)
 	var f *os.File
@@ -203,6 +309,31 @@ func runModelObserveBandwidthCollect(args []string) error {
 	}
 	return enc.Encode(collection)
 }
+
+const (
+	modelObserveRooflineCollectionSampleBudget = 5 * time.Second
+	maxModelObserveRooflineCLIRuntimeBudget    = 10 * time.Minute
+)
+
+func modelObserveRooflineCollectBudget(o modelperfobs.CollectionOptions, rooflineBudget time.Duration) (time.Duration, error) {
+	if err := modelperfobs.ValidateCollectionOptions(o); err != nil {
+		return 0, err
+	}
+	intervalBudget := time.Duration(o.Count-1) * o.Interval
+	sampleBudget := time.Duration(o.Count) * modelObserveRooflineCollectionSampleBudget
+	total := rooflineBudget
+	for _, part := range []time.Duration{intervalBudget, sampleBudget, modelObserveRooflineCollectionSampleBudget} {
+		if part < 0 || total > time.Duration(1<<63-1)-part {
+			return 0, fmt.Errorf("model-observe roofline collection runtime budget overflow")
+		}
+		total += part
+	}
+	if total > maxModelObserveRooflineCLIRuntimeBudget {
+		return 0, fmt.Errorf("model-observe roofline collection worst-case runtime budget %s exceeds maximum %s", total, maxModelObserveRooflineCLIRuntimeBudget)
+	}
+	return total, nil
+}
+
 func runModelObserveStateBench(args []string) error {
 	fs := flag.NewFlagSet("model-observe cache-state-bench", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -252,6 +383,8 @@ func modelObserveUsage() string {
 	return "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE]\n" +
 		"       fak model-observe report --input FILE [--format md|json]\n" +
 		"       fak model-observe bandwidth --input FILE [--output FILE --pretty=true]\n" +
+		"       fak model-observe bandwidth collect --measure-host-roofline [--roofline-sweep --roofline-threads N --roofline-knee-threshold 0.9]\n" +
+		"       fak model-observe bandwidth collect --nvidia-ncu-csv FILE --device DEVICE --capture-start RFC3339 --capture-end RFC3339 --phase PHASE --shape SHAPE [--device-roofline-gb-s N]\n" +
 		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
 		"       fak model-observe cache-state-bench --verify FILE"
 }

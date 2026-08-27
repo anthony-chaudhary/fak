@@ -34,15 +34,15 @@ const Schema = "fak.guard-route.v1"
 // DefaultReasonThreshold is the minimum count of a single denial reason before
 // that reason bucket is route-worthy. Below it, one or two denials of the same
 // reason are advisory noise, not a finding worth a queue row -- only a denial
-// reason that RECURS clears the bar. Honesty-holes (blank reason on a DENY, an
-// out-of-vocabulary verdict) route regardless of count: even one is a defect the
-// loop exists to close.
+// reason that RECURS clears the bar. Honesty-holes (a child crash, blank reason
+// on a DENY, or out-of-vocabulary verdict) route regardless of count: even one
+// is a defect the loop exists to close.
 const DefaultReasonThreshold = 3
 
 // Severity tokens, aligned with the findings_route.py ladder (P3<P2<P1<P0).
 const (
 	SevP2 = "P2" // an advisory recurring denial reason
-	SevP1 = "P1" // a real honesty-hole (unexplained block / unknown verdict)
+	SevP1 = "P1" // a real honesty-hole (child crash / unexplained block / unknown verdict)
 )
 
 // RouteDecision is the pure verdict over a session's fold + worst bucket: should
@@ -81,11 +81,39 @@ func Decide(fold guardrsi.Fold, bucket guardrsi.Bucket, threshold int) RouteDeci
 	d := RouteDecision{Schema: Schema}
 
 	if fold.TotalRows == 0 {
-		d.Reason = "empty journal -- no adjudicated row to review; nothing to route"
+		d.Reason = "empty journal -- no adjudicated row to review; recovery: run a guarded session to record at least one adjudicated row, then retry routing"
+		return d
+	}
+	if fold.TotalRows < 0 {
+		d.Reason = fmt.Sprintf("invalid journal -- total_rows=%d cannot be negative; recovery: rebuild the fold from verified journal rows, then retry routing", fold.TotalRows)
 		return d
 	}
 
+	// WorstBucket derives child_crash directly from Fold, so any disagreement here
+	// means the caller supplied stale or malformed evidence. Fail closed rather than
+	// fabricate a P1 issue from the bucket alone, or let a hostile bucket downgrade a
+	// real folded crash to an advisory denial.
+	if fold.ChildCrash < 0 || fold.ChildCrash > fold.TotalRows {
+		d.Reason = fmt.Sprintf("invalid child_crash fold -- child_crash=%d is outside [0,total_rows=%d]; recovery: rebuild the fold from verified journal rows, then retry routing", fold.ChildCrash, fold.TotalRows)
+		return d
+	}
+	if bucket.Bucket == "child_crash" || fold.ChildCrash > 0 {
+		if bucket.Bucket != "child_crash" || bucket.Count <= 0 || bucket.Count != fold.ChildCrash {
+			d.Reason = fmt.Sprintf("inconsistent child_crash evidence -- fold=%d bucket=%q count=%d; recovery: recompute the bucket with guardrsi.WorstBucket(fold), then retry routing", fold.ChildCrash, bucket.Bucket, bucket.Count)
+			return d
+		}
+	}
+
 	switch {
+	case bucket.Bucket == "child_crash":
+		d.Route = true
+		d.Severity = SevP1
+		d.FileIssue = true
+		d.CauseKey = "guard-journal:child_crash"
+		d.Pattern = "guard-child-crash"
+		d.Item = fmt.Sprintf("%d supervised child crash row(s) reached the journal -- harden the crash path so the guarded session survives", bucket.Count)
+		d.Reason = "honesty-hole: a supervised child crashed (" + bucket.Lever + ")"
+
 	case bucket.Bucket == "blank_reason_on_deny":
 		d.Route = true
 		d.Severity = SevP1

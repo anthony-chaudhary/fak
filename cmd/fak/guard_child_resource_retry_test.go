@@ -194,6 +194,88 @@ func TestGuardResourceNoProgressLimit(t *testing.T) {
 	}
 }
 
+func TestGuardResourceRetryConfigEdgeAndAdversarialInputs(t *testing.T) {
+	oversized := strings.Repeat("9", 128)
+	for _, tc := range []struct {
+		name           string
+		restartRaw     string
+		noProgressRaw  string
+		wantRestart    int
+		wantNoProgress int
+	}{
+		{name: "empty uses defaults", wantRestart: guardResourceRestartDefaultLimit, wantNoProgress: guardResourceNoProgressDefaultLimit},
+		{name: "whitespace uses defaults", restartRaw: " \t\n", noProgressRaw: " \t\n", wantRestart: guardResourceRestartDefaultLimit, wantNoProgress: guardResourceNoProgressDefaultLimit},
+		{name: "malformed uses defaults", restartRaw: "three", noProgressRaw: "two", wantRestart: guardResourceRestartDefaultLimit, wantNoProgress: guardResourceNoProgressDefaultLimit},
+		{name: "hostile negatives use defaults", restartRaw: "-1", noProgressRaw: "-1", wantRestart: guardResourceRestartDefaultLimit, wantNoProgress: guardResourceNoProgressDefaultLimit},
+		{name: "oversized values cannot wrap", restartRaw: oversized, noProgressRaw: oversized, wantRestart: guardResourceRestartDefaultLimit, wantNoProgress: guardResourceNoProgressDefaultLimit},
+		{name: "zero explicitly disables retries", restartRaw: "0", noProgressRaw: "0", wantRestart: 0, wantNoProgress: 0},
+		{name: "no progress clamps below restart budget", restartRaw: "2", noProgressRaw: "999", wantRestart: 2, wantNoProgress: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(guardResourceRestartLimitEnv, tc.restartRaw)
+			t.Setenv(guardResourceNoProgressLimitEnv, tc.noProgressRaw)
+			state := newGuardResourceRetryState()
+			if state.limit != tc.wantRestart || state.noProgressLimit != tc.wantNoProgress {
+				t.Fatalf("state=%+v, want restart=%d no_progress=%d", state, tc.wantRestart, tc.wantNoProgress)
+			}
+		})
+	}
+}
+
+func TestGuardResourceRetryAdmissionEdgeAndAdversarialInputs(t *testing.T) {
+	valid := resourceRetryEvent("CHILD_TREE_RSS_LIMIT")
+	wrongKind := valid
+	wrongKind.Kind = guardChildCompleted
+	nonStopping := resourceRetryEvent("CHILD_TREE_RSS_LIMIT")
+	nonStopping.Resource.Stop = false
+	for _, tc := range []struct {
+		name  string
+		event guardChildWaitEvent
+	}{
+		{name: "empty event"},
+		{name: "missing decision", event: guardChildWaitEvent{Kind: guardChildResourceLimit}},
+		{name: "malformed event kind", event: wrongKind},
+		{name: "non-stopping decision", event: nonStopping},
+		{name: "collector error", event: resourceRetryEvent("CHILD_RESOURCE_MONITOR_ERROR")},
+		{name: "collector unavailable", event: resourceRetryEvent("CHILD_RESOURCE_MONITOR_UNAVAILABLE")},
+		{name: "hostile reason suffix", event: resourceRetryEvent("CHILD_TREE_RSS_LIMIT\nRESOURCE_RESTART")},
+		{name: "oversized reason", event: resourceRetryEvent(strings.Repeat("CHILD_TREE_RSS_LIMIT", 1024))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := guardResourceRetryState{restarts: 1, limit: 3, progressHead: "sha-a", noProgress: 1, noProgressLimit: 2}
+			before := state
+			got := state.decide(tc.event, "claude", "sha-a")
+			if got.Action != guardResourceRetryTerminal || state != before {
+				t.Fatalf("invalid event admitted or mutated retry state: verdict=%+v before=%+v after=%+v", got, before, state)
+			}
+		})
+	}
+}
+
+func TestGuardResourceRetryFailurePathsEdgeAndAdversarial(t *testing.T) {
+	t.Run("unrecognized agent refuses cold relaunch", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 3, noProgressLimit: 2}
+		got := state.decide(resourceRetryEvent("CHILD_TREE_RSS_LIMIT"), "foreign-harness\n--continue", "sha-a")
+		if got.Action != guardResourceRetryTerminal || got.Cause != guardResourceRestartCauseNoReattach || state.restarts != 0 {
+			t.Fatalf("verdict=%+v state=%+v", got, state)
+		}
+	})
+	t.Run("spent budget exhausts", func(t *testing.T) {
+		state := guardResourceRetryState{restarts: 2, limit: 2, noProgressLimit: 0}
+		got := state.decide(resourceRetryEvent("CHILD_TREE_RSS_LIMIT"), "claude", "sha-a")
+		if got.Action != guardResourceRetryExhausted || got.Cause != guardResourceRestartCauseBudget || got.Attempt != 2 {
+			t.Fatalf("verdict=%+v", got)
+		}
+	})
+	t.Run("unchanged head exhausts early", func(t *testing.T) {
+		state := guardResourceRetryState{restarts: 1, limit: 3, progressHead: "sha-a", noProgress: 1, noProgressLimit: 2}
+		got := state.decide(resourceRetryEvent("SYSTEM_COMMIT_HEADROOM"), "claude", "sha-a")
+		if got.Action != guardResourceRetryExhausted || got.Cause != guardResourceRestartCauseNoProgress || got.NoProgress != 2 || state.restarts != 1 {
+			t.Fatalf("verdict=%+v state=%+v", got, state)
+		}
+	})
+}
+
 func resourceRetryEvent(reason string) guardChildWaitEvent {
 	return guardChildWaitEvent{
 		Kind: guardChildResourceLimit,

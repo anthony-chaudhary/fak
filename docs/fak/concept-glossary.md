@@ -2417,3 +2417,10 @@ The constructor for one restart-chain lineage hop whose source, destination, and
 The supervision helper that persists an already-constructed restart-chain hop to the audit journal and reports the same lineage status to the operator surface.
 
 **Distinct from:** It is the RESTART LINEAGE PERSISTENCE AND REPORTING step, not guardSameTraceRelaunchHop, which constructs the hop value, and not guardRestartRelaunchCommand, which builds the child command that the hop describes.
+
+
+### NativeEngine (model descriptor execution identity)
+
+The modeldescriptor field that pins an onboarding descriptor to fak-native execution before compatibility validation.
+
+**Distinct from:** This descriptor compatibility field is not the campaign ExecutionEngine evidence axis, a backend/device selector, or permission to fall back to an external runtime.

@@ -144,6 +144,7 @@ cross-checked against the live registry in code.
 | PRIOR_ART | warn | fail-open | advisory; prints the SOTA reference to cite |
 | MICROHARNESS_WITNESS | warn | fail-open | advisory; nudges bounded harness changes toward a staged test or typed receipt |
 | UNTIERED_LEAF | warn | fail-open | advisory by design (#3614); staged twin of TIER_DECLARED |
+| CART_BEFORE_HORSE | warn | fail-open | advisory by design (#2521); new leaves establish an applied spine before downstream proof/performance breadth |
 | GOFMT | warn | fail-open | advisory; commit-boundary twin of make ci gofmt-check |
 | DUPLICATION | warn | fail-open | advisory; in-process twin of fak dup guard --staged |
 | COMMENT_QUALITY | warn | fail-open | advisory; changed-lines-only comments should explain durable why |

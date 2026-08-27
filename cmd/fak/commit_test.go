@@ -609,6 +609,7 @@ func TestRunCommitDrainDryRunPlansRollup(t *testing.T) {
 }
 
 func TestRunCommitDrainExecutesRollupWithUnionPathsAndMarksDone(t *testing.T) {
+	withPassedCommitBuildCheck(t)
 	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
 	submitDrainIntent(t, queueDir, "intent-a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-a")
 	submitDrainIntent(t, queueDir, "intent-b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/b.go"}, "worker-b")
@@ -642,10 +643,52 @@ func TestRunCommitDrainExecutesRollupWithUnionPathsAndMarksDone(t *testing.T) {
 	if !res.Drained || res.Pathset == nil || !res.Pathset.OK {
 		t.Fatalf("result should be drained with pathset witness, got %+v", res)
 	}
+	if res.Commit == nil || !res.Commit.DeliveryVerified() || res.Commit.Evidence == nil || res.Commit.Evidence.ClosureBound.Outcome != safecommit.EvidencePassed {
+		t.Fatalf("green drain should carry closure-qualified delivery evidence, got %+v", res.Commit)
+	}
 	assertStrings(t, res.MarkedDone, []string{"intent-a", "intent-b"})
 	states := drainQueueStates(t, queueDir)
 	if states["intent-a"] != commitintent.StateDone || states["intent-b"] != commitintent.StateDone {
 		t.Fatalf("successful drain should mark intents done, states=%+v", states)
+	}
+}
+
+func TestRunCommitDrainSkippedValidationDoesNotMarkDone(t *testing.T) {
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	var checked []string
+	commitBuildCheckGate = func(_ io.Writer, _ string, paths []string) (safecommit.BuildCheckOutcome, string) {
+		checked = append([]string(nil), paths...)
+		return safecommit.BuildCheckSkippedInfra, "go toolchain unavailable"
+	}
+	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
+	submitDrainIntent(t, queueDir, "intent-a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-a")
+
+	withCommitFn(t, func(_ context.Context, o safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc123", Paths: o.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommitCommand(&out, &errb, []string{
+		"drain", "--json", "--queue-dir", queueDir,
+		"--base", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if code != 0 {
+		t.Fatalf("unchecked recording should return its commit result, got %d stderr=%q stdout=%q", code, errb.String(), out.String())
+	}
+	assertStrings(t, checked, []string{"internal/commitintent/a.go"})
+	var res commitDrainResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil {
+		t.Fatalf("drain --json emitted invalid JSON: %v\n%s", err, out.String())
+	}
+	if res.Drained || res.Commit == nil || res.Commit.Verified || res.Commit.DeliveryVerified() {
+		t.Fatalf("skipped validation advanced drain state: %+v", res)
+	}
+	if res.Commit.Evidence == nil || res.Commit.Evidence.Compiled.Outcome != safecommit.EvidenceSkipped || res.Commit.Evidence.ClosureBound.Outcome != safecommit.EvidencePassed {
+		t.Fatalf("skipped drain lost typed evidence: %+v", res.Commit)
+	}
+	states := drainQueueStates(t, queueDir)
+	if states["intent-a"] != commitintent.StatePending {
+		t.Fatalf("skipped validation should leave intent pending, states=%+v", states)
 	}
 }
 
@@ -710,6 +753,7 @@ func TestRunCommitDrainNoRollupKeepsOneIntentMode(t *testing.T) {
 }
 
 func TestRunCommitDrainPathsetMismatchDoesNotMarkDone(t *testing.T) {
+	withPassedCommitBuildCheck(t)
 	queueDir := filepath.Join(t.TempDir(), ".fak", "commit-intents")
 	submitDrainIntent(t, queueDir, "intent-a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", []string{"internal/commitintent/a.go"}, "worker-a")
 
@@ -1191,5 +1235,81 @@ func TestRunCommitJSONEmitsRecordingOnlyDeliveryReceipt(t *testing.T) {
 	// The prospective build gate may be green, but commit still records no verification receipt.
 	if result.Delivery.Receipt.Transition.Axis == "verification" {
 		t.Fatal("commit inferred verification")
+	}
+}
+
+func TestRunCommitJSONSkippedInfraDoesNotVerifyOrScoreVelocity(t *testing.T) {
+	oldBuild := commitBuildCheckGate
+	t.Cleanup(func() { commitBuildCheckGate = oldBuild })
+	commitBuildCheckGate = func(io.Writer, string, []string) (safecommit.BuildCheckOutcome, string) {
+		return safecommit.BuildCheckSkippedInfra, "go toolchain unavailable"
+	}
+	withCommitFn(t, func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
+		res := safecommit.Result{Committed: true, Verified: true, SHA: "abc123", Paths: opts.Paths}
+		velocity := safecommit.ScoreCommitVelocity(res, time.Millisecond, 0, safecommit.DefaultVelocityBudgets)
+		res.Velocity = &velocity
+		return res, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--json", "--path", "internal/safecommit/x.go", "-m", "fix(safecommit): witness skipped check (fak safecommit)"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	}
+	var result safecommit.Result
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Verified || result.DeliveryVerified() || result.Score != 55 {
+		t.Fatalf("skipped-infra inflated receipt: %s", out.String())
+	}
+	if result.Evidence == nil || result.Evidence.Compiled.Outcome != safecommit.EvidenceSkipped || result.Evidence.DiffWitnessed.Outcome != safecommit.EvidencePassed {
+		t.Fatalf("missing separated evidence: %s", out.String())
+	}
+	if result.Velocity == nil || result.Velocity.Local.Status != safecommit.VelocityUnscored {
+		t.Fatalf("unchecked commit retained velocity credit: %s", out.String())
+	}
+}
+
+func TestRunCommitJSONExplicitRecordOnlyStaysTruthful(t *testing.T) {
+	withCommitFn(t, func(_ context.Context, opts safecommit.Options) (safecommit.Result, error) {
+		return safecommit.Result{Committed: true, Verified: true, SHA: "abc123", Paths: opts.Paths}, nil
+	})
+	var out, errb bytes.Buffer
+	code := runCommit(&out, &errb, []string{"--json", "--no-build-check", "--path", "README.md", "-m", "docs: record wording (fak docs)"})
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errb.String())
+	}
+	var result safecommit.Result
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Verified || result.DeliveryVerified() || !result.RecordOnlyVerified() {
+		t.Fatalf("record-only class was promoted or rejected: %s", out.String())
+	}
+	if result.Score != 85 || result.Evidence == nil || result.Evidence.CompletionClass != safecommit.CompletionRecordOnly {
+		t.Fatalf("record-only receipt is not explicit: %s", out.String())
+	}
+}
+
+func TestCommitDrainMayMarkDoneUsesDeliveryContract(t *testing.T) {
+	legacy := safecommit.Result{Committed: true, Verified: true}
+	if !commitDrainMayMarkDone(legacy, true) {
+		t.Fatal("schema-less result lost the legacy drain contract")
+	}
+	recordOnly := safecommit.FinalizeEvidence(legacy, safecommit.EvidenceContract{CompletionClass: safecommit.CompletionRecordOnly})
+	if commitDrainMayMarkDone(recordOnly, true) {
+		t.Fatal("record-only receipt advanced issue/action state")
+	}
+	skipped := legacy
+	skipped.BuildCheck = &safecommit.BuildCheckResult{Outcome: safecommit.BuildCheckSkippedInfra, FailedOpen: true}
+	skipped = safecommit.FinalizeEvidence(skipped, safecommit.EvidenceContract{})
+	if commitDrainMayMarkDone(skipped, true) {
+		t.Fatal("skipped-infra receipt advanced issue/action state")
+	}
+	green := legacy
+	green.BuildCheck = &safecommit.BuildCheckResult{Outcome: safecommit.BuildCheckPassed, Compiled: true}
+	green = safecommit.FinalizeEvidence(green, safecommit.EvidenceContract{})
+	if !commitDrainMayMarkDone(green, true) || commitDrainMayMarkDone(green, false) {
+		t.Fatal("delivery/pathset closure gate is inconsistent")
 	}
 }

@@ -53,6 +53,14 @@ var refusalContract = []struct {
 		want:   []string{`unknown area "bogus"`, "known: " + strings.Join(AreaNames(), ", ")},
 	},
 	{
+		site: "candidate exceeds parent baseline",
+		mutate: func(in *Input) {
+			in.ParentIssue = 36
+			in.ParentBaseline = 2
+		},
+		want: []string{"exceeding the declared parent baseline", "raise --parent-baseline-points"},
+	},
+	{
 		site:   "area filter below the floor",
 		mutate: func(in *Input) { in.Areas = []string{"release"} },
 		want:   []string{"below the fan-out floor", "widen the area filter (or drop it)"},
@@ -101,6 +109,25 @@ var refusalContract = []struct {
 			return err
 		},
 		want: []string{"requires --parent-issue", "--parent-baseline-points"},
+	}, {
+		site: "strict post-filing issue contract",
+		drive: func(t *testing.T) error {
+			in := spineInput()
+			in.ParentIssue = 36
+			in.ParentBaseline = 100
+			in.CompletionStandard = "demo"
+			plan, err := Build(in)
+			if err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+			plan.Candidates[len(plan.Candidates)-1].OptimalModelTier = ""
+			_, err = FileLive(plan, nil, LiveOptions{Runner: func([]string) (string, string, bool) {
+				t.Fatal("strict preflight must refuse before the runner")
+				return "", "", false
+			}})
+			return err
+		},
+		want: []string{"fails the strict post-filing issue contract", "no issues were filed"},
 	}, {
 		site: "live filing without a runner",
 		drive: func(t *testing.T) error {

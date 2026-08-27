@@ -519,16 +519,42 @@ def go_tokens(text: str, *, normalize_idents: bool = True) -> list[tuple[str, in
 
 
 def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
-    """Return lexical Go function spans as (start, end, signature, body)."""
+    """Return lexical Go function spans as (start, end, signature, body).
+
+    Package-scope named function values are callable owners too: several command seams
+    assign an injectable implementation with ``var name = func(...)``. Recognizing that
+    narrow form keeps an ownerless function value from bypassing behavior confirmation
+    for an otherwise heterogeneous clone group.
+    """
     starts = re.finditer(
-        r"(?m)^\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*\s*\([^\n{}]*\)"
+        r"(?m)^(?:"
+        r"\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*(?:\s*\[[^\n]*\])?"
+        r"|var\s+[A-Za-z_]\w*\s*=\s*func"
+        r")\s*\([^\n{}]*\)"
         r"(?:\s*\([^\n{}]*\)|\s+[^\n{]+)?\s*\{", text)
     out: list[tuple[int, int, str, str]] = []
     for m in starts:
-        brace = text.find("{", m.start(), m.end())
+        # A generic constraint may itself contain an interface literal. The match ends
+        # at the function-body brace, so select that brace instead of the first one.
+        brace = m.end() - 1
         depth, quote, escaped, end = 0, "", False, -1
-        for i in range(brace, len(text)):
+        line_comment = block_comment = False
+        i = brace
+        while i < len(text):
             ch = text[i]
+            nxt = text[i + 1] if i + 1 < len(text) else ""
+            if line_comment:
+                if ch == "\n":
+                    line_comment = False
+                i += 1
+                continue
+            if block_comment:
+                if ch == "*" and nxt == "/":
+                    block_comment = False
+                    i += 2
+                else:
+                    i += 1
+                continue
             if quote:
                 if escaped:
                     escaped = False
@@ -536,16 +562,28 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
                     escaped = True
                 elif ch == quote:
                     quote = ""
+                i += 1
                 continue
-            if ch in {'"', "'", "`"}:
+            if ch == "/" and nxt == "/":
+                line_comment = True
+                i += 2
+            elif ch == "/" and nxt == "*":
+                block_comment = True
+                i += 2
+            elif ch in {'"', "'", "`"}:
                 quote = ch
+                i += 1
             elif ch == "{":
                 depth += 1
+                i += 1
             elif ch == "}":
                 depth -= 1
                 if depth == 0:
                     end = i + 1
                     break
+                i += 1
+            else:
+                i += 1
         if end > 0:
             out.append((m.start(), end, text[m.start():brace].strip(), text[brace + 1:end - 1]))
     return out

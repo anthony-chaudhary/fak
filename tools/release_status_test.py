@@ -398,6 +398,57 @@ class ReleaseStatusTest(unittest.TestCase):
         self.assertEqual(diagnosis["action"], "fix_ci_billing")
         self.assertEqual(diagnosis["jobs"][0]["steps"], 0)
 
+    def test_ci_failure_diagnosis_uses_decisive_red_when_head_is_queued(self) -> None:
+        rs = load()
+
+        def fake_git(root: Path, args: list[str], *, timeout: int = 120) -> tuple[int, str]:
+            self.assertEqual(args, ["rev-parse", "HEAD"])
+            return 0, "queued-head\n"
+
+        def fake_load_json(cmd: list[str], root: Path, *, timeout: int = 300) -> tuple[dict | None, int, str]:
+            if cmd[:3] == ["gh", "run", "list"] and "--commit" in cmd:
+                return {
+                    "value": [{
+                        "databaseId": "queued-run",
+                        "conclusion": "",
+                        "status": "queued",
+                        "headSha": "queued-head",
+                    }],
+                }, 0, "[]"
+            if cmd[:3] == ["gh", "run", "list"] and "--branch" in cmd:
+                return {
+                    "value": [{
+                        "databaseId": "failed-run",
+                        "conclusion": "failure",
+                        "status": "completed",
+                        "headSha": "failed-ancestor",
+                    }],
+                }, 0, "[]"
+            if cmd == ["gh", "run", "view", "failed-run", "--json", "jobs"]:
+                return {
+                    "jobs": [{
+                        "databaseId": "failed-job",
+                        "name": "build · vet · test",
+                        "conclusion": "failure",
+                        "status": "completed",
+                        "steps": [{"name": "go test ./...", "conclusion": "failure"}],
+                    }],
+                }, 0, "{}"
+            if cmd[:2] == ["gh", "api"]:
+                return {"value": []}, 0, "[]"
+            raise AssertionError(cmd)
+
+        rs.git = fake_git
+        rs.load_json = fake_load_json
+        rs.github_repo_slug = lambda root: "owner/repo"
+
+        diagnosis = rs.ci_failure_diagnosis(Path("repo"))
+
+        self.assertEqual(diagnosis["status"], "diagnosed")
+        self.assertEqual(diagnosis["scope"], "latest_trunk")
+        self.assertEqual(diagnosis["run"]["databaseId"], "failed-run")
+        self.assertEqual(diagnosis["failed_steps"], ["go test ./..."])
+
     def test_failed_step_names_picks_real_failures_only(self) -> None:
         rs = load()
         job = {"steps": [

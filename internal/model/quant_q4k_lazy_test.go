@@ -3,9 +3,29 @@ package model
 import (
 	"bytes"
 	"errors"
+	"io"
+	"os"
+	"strings"
 	"sync"
 	"testing"
 )
+
+type issue9073ReaderAt struct {
+	data  []byte
+	reads int
+}
+
+func (r *issue9073ReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	r.reads++
+	if off < 0 || off >= int64(len(r.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[off:])
+	if n != len(p) {
+		return n, io.EOF
+	}
+	return n, nil
+}
 
 func TestLazyQ4KMaterializesExactRangeWithoutResidentCopy(t *testing.T) {
 	cfg := Config{HiddenSize: 256}
@@ -35,6 +55,32 @@ func TestLazyQ4KMaterializesExactRangeWithoutResidentCopy(t *testing.T) {
 	}
 }
 
+func TestIssue9073InvalidMappedViewFallsBackToByteIdenticalReadAt(t *testing.T) {
+	payload := make([]byte, q4kBlockBytes)
+	for i := range payload {
+		payload[i] = byte(i*23 + 9)
+	}
+	prefix := []byte("reader-prefix")
+	reader := &issue9073ReaderAt{data: append(append([]byte(nil), prefix...), payload...)}
+	qt := &q4kTensor{out: 1, in: qkK, nblk: 1, lazy: &LazyQ4KRange{
+		Reader: reader, Offset: int64(len(prefix)), Bytes: len(payload),
+		MappedSpan: makePageAlignedResidentBytes(os.Getpagesize()), MappedOffset: os.Getpagesize() - 32,
+	}}
+	if _, _, ok := qt.mappedRaw(); ok {
+		t.Fatal("out-of-bounds mapped view was selected")
+	}
+	got, err := qt.materializeRaw()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("ReadAt fallback changed Q4_K payload bytes")
+	}
+	if reader.reads != 1 {
+		t.Fatalf("fallback ReadAt calls=%d, want 1", reader.reads)
+	}
+}
+
 type closeWitness struct{ closes int }
 
 func (c *closeWitness) Close() error { c.closes++; return nil }
@@ -56,6 +102,28 @@ func TestCloseWeightsOwnsLazyCheckpointLifetime(t *testing.T) {
 		t.Fatalf("checkpoint close count after double close = %d, want 1", w.closes)
 	}
 }
+
+func TestIssue9073CloseWeightsReleasesBorrowingQ4KBeforeCheckpoint(t *testing.T) {
+	old := releaseModelQ4KHandles
+	defer func() { releaseModelQ4KHandles = old }()
+	events := make([]string, 0, 2)
+	releaseModelQ4KHandles = func(*Model) { events = append(events, "release") }
+	m := &Model{}
+	m.SetWeightCloser(closeFunc(func() error {
+		events = append(events, "unmap")
+		return nil
+	}))
+	if err := m.CloseWeights(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(events, ","), "release,unmap"; got != want {
+		t.Fatalf("teardown order = %q, want %q", got, want)
+	}
+}
+
+type closeFunc func() error
+
+func (f closeFunc) Close() error { return f() }
 
 type failingReaderAt struct{}
 

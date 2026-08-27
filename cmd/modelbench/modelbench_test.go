@@ -67,6 +67,13 @@ func TestStreamQ4KValidation(t *testing.T) {
 	if err := validateFlagCombinations(valid); err != nil {
 		t.Fatalf("valid streamed Q4_K load rejected: %v", err)
 	}
+	*valid.nativeProfileOut = "profile.json"
+	*valid.metal = true
+	*valid.decodePrompt = 32
+	*valid.decodeSteps = 64
+	if err := validateFlagCombinations(valid); err != nil {
+		t.Fatalf("valid streamed native-performance profile rejected: %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -76,7 +83,23 @@ func TestStreamQ4KValidation(t *testing.T) {
 		{name: "missing q4k", edit: func(f *benchFlags) { *f.q4k = false }, want: "requires exact -gguf and -q4k"},
 		{name: "missing gguf", edit: func(f *benchFlags) { *f.gguf = "" }, want: "requires exact -gguf and -q4k"},
 		{name: "lean remains incompatible", edit: func(f *benchFlags) { *f.lean = true }, want: "omit -lean"},
-		{name: "native profile envelope unchanged", edit: func(f *benchFlags) { *f.nativeProfileOut = "profile.json" }, want: "not yet admitted"},
+		{name: "native profile still requires metal", edit: func(f *benchFlags) {
+			*f.nativeProfileOut = "profile.json"
+			*f.decodePrompt = 32
+			*f.decodeSteps = 64
+		}, want: "requires -gguf, -q4k, -metal"},
+		{name: "native profile still requires P32", edit: func(f *benchFlags) {
+			*f.nativeProfileOut = "profile.json"
+			*f.metal = true
+			*f.decodePrompt = 31
+			*f.decodeSteps = 64
+		}, want: "-decode-prompt=32"},
+		{name: "native profile still requires T64", edit: func(f *benchFlags) {
+			*f.nativeProfileOut = "profile.json"
+			*f.metal = true
+			*f.decodePrompt = 32
+			*f.decodeSteps = 63
+		}, want: "-decode-steps=64"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -270,6 +293,107 @@ func TestTransferredWeightCloserRunsExactlyOnce(t *testing.T) {
 			t.Fatalf("exit code = %d, want 1 after close failure", gotCode)
 		}
 	})
+}
+
+func TestStreamedNativeProfileRetainsAndClosesWeightsExactlyOnce(t *testing.T) {
+	tests := []struct {
+		name    string
+		runErr  error
+		wantErr string
+	}{
+		{name: "success"},
+		{name: "profile error", runErr: fmt.Errorf("capture failed"), wantErr: "capture failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := testCompleteBenchFlags()
+			*f.streamQ4K = true
+			f.processExit = func(int) {}
+			calls := 0
+			m := &model.Model{}
+			m.SetWeightCloser(testCloser(func() error {
+				calls++
+				return nil
+			}))
+			if !bindLoadedModelWeights(f, m) {
+				t.Fatal("streamed native profile did not bind model weight ownership")
+			}
+			err := runWithTransferredWeightLifetime(f, func() error {
+				if calls != 0 {
+					t.Fatal("checkpoint closed before native profile completed")
+				}
+				return tt.runErr
+			})
+			if tt.wantErr == "" && err != nil {
+				t.Fatalf("native profile returned error: %v", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Fatalf("native profile error = %v, want substring %q", err, tt.wantErr)
+			}
+			f.exit(1)
+			_ = f.closeTransferredWeights()
+			if calls != 1 {
+				t.Fatalf("weight closer calls = %d, want exactly 1", calls)
+			}
+		})
+	}
+}
+
+func TestNativeProfileFailureFinishesExecutionBeforeTransferredWeights(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*f.streamQ4K = true
+	var events []string
+	f.bindWeightCloser(func() error {
+		events = append(events, "weights")
+		return nil
+	})
+
+	err := runWithTransferredWeightLifetime(f, func() (err error) {
+		finishProfile := onceFinishNativeProfile(func() { events = append(events, "session") })
+		defer finishProfile()
+		return fmt.Errorf("injected profile failure")
+	})
+	if err == nil || !strings.Contains(err.Error(), "injected profile failure") {
+		t.Fatalf("profile error = %v", err)
+	}
+	if !reflect.DeepEqual(events, []string{"session", "weights"}) {
+		t.Fatalf("failure cleanup order = %v, want [session weights]", events)
+	}
+}
+
+func TestNativeProfileFinishDoesNotRepeat(t *testing.T) {
+	calls := 0
+	finishProfile := onceFinishNativeProfile(func() { calls++ })
+	finishProfile()
+	finishProfile()
+	if calls != 1 {
+		t.Fatalf("session closer calls = %d, want exactly 1", calls)
+	}
+}
+
+func TestResidentNativeProfileDoesNotBindWeightCloser(t *testing.T) {
+	f := testCompleteBenchFlags()
+	*f.gguf = "fixture.gguf"
+	*f.q4k = true
+	*f.metal = true
+	*f.decodePrompt = 32
+	*f.decodeSteps = 64
+	*f.nativeProfileOut = "profile.json"
+	if err := validateFlagCombinations(f); err != nil {
+		t.Fatalf("historical non-stream native profile rejected: %v", err)
+	}
+	m := &model.Model{}
+	calls := 0
+	m.SetWeightCloser(testCloser(func() error { calls++; return nil }))
+	if bindLoadedModelWeights(f, m) {
+		t.Fatal("resident native profile unexpectedly transferred streamed weight ownership")
+	}
+	if err := runWithTransferredWeightLifetime(f, func() error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 0 {
+		t.Fatalf("resident native profile closer calls = %d, want 0", calls)
+	}
 }
 
 func TestParsePositiveInts(t *testing.T) {
@@ -506,13 +630,14 @@ func TestAllFinite(t *testing.T) {
 }
 
 func testNativeProfileControls() map[string]string {
-	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+6)
+	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+7)
 	for key, value := range nativeProfileRequiredEnvironment {
 		controls[key] = value
 	}
 	for _, key := range nativeProfileDeniedEnvironment {
 		controls[key] = nativeProfileUnset
 	}
+	controls[nativeControlGGUFMMap] = "1"
 	controls[nativeControlFlagBudget] = "0"
 	controls[nativeControlLogicalCPUs] = strconv.Itoa(runtime.NumCPU())
 	controls[nativeControlGOMAXPROCS] = strconv.Itoa(runtime.GOMAXPROCS(0))
@@ -529,6 +654,8 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 		required[key] = value
 		declarations = append(declarations, key+"="+value)
 	}
+	required[nativeControlGGUFMMap] = "0"
+	declarations = append(declarations, nativeControlGGUFMMap+"=0")
 	lookup := func(key string) (string, bool) { value, ok := required[key]; return value, ok }
 	if _, err := nativeProfileControlEnvironment(lookup, declarations, 0); err != nil {
 		t.Fatalf("documented control envelope rejected: %v", err)
@@ -547,6 +674,7 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 		{name: "q8 gemm group", key: "FAK_Q8_GEMM_GROUP", value: "1"},
 		{name: "workers", key: "FAK_WORKERS", value: "4"},
 		{name: "budget env", key: "FAK_BUDGET", value: "0.5"},
+		{name: "mmap untyped", key: nativeControlGGUFMMap, value: "true"},
 		{name: "budget flag", budget: 0.5},
 		{name: "unknown fak control", declaration: "FAK_FUTURE_Q4K_SWITCH=1"},
 	}
@@ -574,6 +702,7 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 
 func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, nativeProfileReceipt) {
 	t.Helper()
+	t.Setenv("FAK_GGUF_MMAP", "1")
 	executionSession := metalgemm.NewExecutionSession()
 	executionSession.Record(metalgemm.ExecutionSnapshot{Events: []metalgemm.ExecutionEvent{{
 		Operation: metalgemm.ExecutionQ4KGEMM, CommandBufferID: 1, Committed: true,
@@ -615,6 +744,7 @@ func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, n
 	if err != nil {
 		t.Fatal(err)
 	}
+	q4kResidency := (&model.Model{}).Q4KResidencyReceipt()
 	receipt := nativeProfileReceipt{
 		Schema:        nativeProfileReceiptSchema,
 		ProfileSHA256: fmt.Sprintf("%x", profileSHA),
@@ -624,12 +754,13 @@ func testNativeProfileReceipt(t *testing.T) ([]byte, nativeperf.ProfileBundle, n
 			Model:              "unsloth/Qwen3.8-27B-GGUF", ModelRevision: "f1bfb127c64f7072bdd2cad55f258b9c8b2910fe",
 		},
 		ModelConfig: config, ModelConfigSHA256: configSHA,
-		Host:      nativeHostIdentity{GOOS: "darwin", GOARCH: "arm64", CPU: "Apple M3 Pro", MetalDevice: "Apple M3 Pro", GPUCores: 18, MemoryBytes: 36 << 30, MetalWorkingSetBytes: 1},
-		Source:    nativeSourceIdentity{Revision: strings.Repeat("a", 40)},
-		Binary:    nativeFileIdentity{Bytes: 123, SHA256: strings.Repeat("b", 64)},
-		Controls:  testNativeProfileControls(),
-		Execution: execution,
-		Fallbacks: model.MetalFallbackReceipt{Schema: "fak-metal-fallback-receipt/v1", Events: fallbackEvents, EventsSHA256: fallbackSHA},
+		Host:         nativeHostIdentity{GOOS: "darwin", GOARCH: "arm64", CPU: "Apple M3 Pro", MetalDevice: "Apple M3 Pro", GPUCores: 18, MemoryBytes: 36 << 30, MetalWorkingSetBytes: 1},
+		Source:       nativeSourceIdentity{Revision: strings.Repeat("a", 40)},
+		Binary:       nativeFileIdentity{Bytes: 123, SHA256: strings.Repeat("b", 64)},
+		Controls:     testNativeProfileControls(),
+		Execution:    execution,
+		Fallbacks:    model.MetalFallbackReceipt{Schema: "fak-metal-fallback-receipt/v1", Events: fallbackEvents, EventsSHA256: fallbackSHA},
+		Q4KResidency: &q4kResidency,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {
@@ -663,6 +794,14 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 	if err := validateNativeProfileReceipt(profileBytes, profile, receipt); err != nil {
 		t.Fatalf("valid receipt rejected: %v", err)
 	}
+	// The nested receipt is an additive, versioned extension. A companion produced by the older
+	// v1 writer omits it and retains its original binding shape, so readback stays compatible.
+	legacy := receipt
+	legacy.Q4KResidency = nil
+	legacy.BindingSHA256, _ = nativeReceiptBinding(legacy)
+	if err := validateNativeProfileReceipt(profileBytes, profile, legacy); err != nil {
+		t.Fatalf("legacy v1 receipt rejected: %v", err)
+	}
 
 	tests := []struct {
 		name string
@@ -677,6 +816,9 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 		{name: "fallback aggregate", edit: func(r *nativeProfileReceipt) { r.Fallbacks.PromisedCPUFallbacks++ }},
 		{name: "forced q8 upload", edit: func(r *nativeProfileReceipt) { r.Controls["FAK_METAL_Q8_UPLOAD"] = "1" }},
 		{name: "worker budget", edit: func(r *nativeProfileReceipt) { r.Controls[nativeControlWorkers] = "0" }},
+		{name: "residency count", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.MappedSuccess.Tensors++ }},
+		{name: "residency control", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.FAKGGUFMMap = "0" }},
+		{name: "residency digest", edit: func(r *nativeProfileReceipt) { r.Q4KResidency.IntegritySHA256 = strings.Repeat("d", 64) }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -684,6 +826,8 @@ func TestNativeProfileReceiptBindsAllEvidence(t *testing.T) {
 			copy.ModelConfig = mapsClone(receipt.ModelConfig)
 			copy.Controls = mapsStringClone(receipt.Controls)
 			copy.Execution.Events = append([]metalgemm.ExecutionEvent(nil), receipt.Execution.Events...)
+			q4kResidencyCopy := *receipt.Q4KResidency
+			copy.Q4KResidency = &q4kResidencyCopy
 			test.edit(&copy)
 			if err := validateNativeProfileReceipt(profileBytes, profile, copy); err == nil {
 				t.Fatal("tampered receipt was accepted")

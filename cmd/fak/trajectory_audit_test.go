@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -81,8 +83,38 @@ func TestRunTrajectoryAuditUnsupportedShapeWritesArtifactAndFails(t *testing.T) 
 	}
 }
 
+func TestRunTrajectoryAuditIssue9418SharedCodexSessionIDsStayDistinct(t *testing.T) {
+	temp := t.TempDir()
+	jsonlPath := filepath.Join(temp, "audit.jsonl")
+	missingClaude := filepath.Join(temp, "missing-claude")
+	codexRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "issue-9418", "codex-shared-session", "sessions")
+	var stdout, stderr bytes.Buffer
+	rc := runTrajectory(&stdout, &stderr, []string{
+		"audit", "--since", "0", "--claude-root", missingClaude, "--codex-root", codexRoot, "--jsonl", jsonlPath,
+	})
+	if rc != 0 {
+		t.Fatalf("rc=%d, want 0; stderr=%s", rc, stderr.String())
+	}
+	artifact, err := os.ReadFile(jsonlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(artifact, []byte(`"kind":"refusal"`)) {
+		t.Fatalf("unexpected refusal for distinct primary rollout ids:\n%s", artifact)
+	}
+	for _, want := range []string{`"session_id":"root-rollout"`, `"session_id":"child-rollout"`, `"raw_fragments":2`, `"canonical_transcripts":2`, `"refused_records":0`} {
+		if !bytes.Contains(artifact, []byte(want)) {
+			t.Fatalf("artifact missing %q:\n%s", want, artifact)
+		}
+	}
+	if !strings.Contains(stderr.String(), "sessions=2 exact_usage=2 refused=0") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunTrajectoryAuditRefusalMatrix(t *testing.T) {
 	fixtureRoot := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "issue-8493", "refusals")
+	issue9418Root := filepath.Join("..", "..", "internal", "trajectory", "testdata", "audit", "issue-9418")
 	missing := filepath.Join(t.TempDir(), "missing")
 	tests := []struct {
 		name       string
@@ -91,6 +123,8 @@ func TestRunTrajectoryAuditRefusalMatrix(t *testing.T) {
 		code       string
 	}{
 		{"Claude duplicate mismatch", filepath.Join(fixtureRoot, "claude-duplicate", "projects"), missing, "claude_duplicate_usage_mismatch"},
+		{"Claude live duplicate mismatch", filepath.Join(issue9418Root, "claude-duplicate", "projects"), missing, "claude_duplicate_usage_mismatch"},
+		{"Codex canonical fragment mismatch", missing, filepath.Join(issue9418Root, "codex-ambiguous", "sessions"), "codex_fragment_usage_mismatch"},
 		{"Codex cumulative decrease", missing, filepath.Join(fixtureRoot, "codex-decreasing", "sessions"), "codex_total_usage_decreased"},
 		{"malformed JSON", filepath.Join(fixtureRoot, "malformed", "claude", "projects"), missing, "malformed_json"},
 	}
@@ -134,10 +168,12 @@ func TestRunTrajectoryAuditRefusalMatrix(t *testing.T) {
 
 func assertTrajectoryAuditRefusal(t *testing.T, claudeRoot, codexRoot, code string) {
 	t.Helper()
-	jsonlPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	temp := t.TempDir()
+	jsonlPath := filepath.Join(temp, "audit.jsonl")
+	markdownPath := filepath.Join(temp, "audit.md")
 	var stdout, stderr bytes.Buffer
 	rc := runTrajectory(&stdout, &stderr, []string{
-		"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--jsonl", jsonlPath,
+		"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--jsonl", jsonlPath, "--md", markdownPath,
 	})
 	if rc != 1 {
 		t.Fatalf("rc=%d, want 1; stderr=%s", rc, stderr.String())
@@ -153,6 +189,38 @@ func assertTrajectoryAuditRefusal(t *testing.T, claudeRoot, codexRoot, code stri
 	}
 	if !strings.Contains(stderr.String(), "TRAJECTORY_SCHEMA_REFUSED") {
 		t.Fatalf("missing refusal status; stderr=%s", stderr.String())
+	}
+
+	var summaryRefused, denominatorRefused, refusalRows int
+	for _, line := range bytes.Split(bytes.TrimSpace(artifact), []byte{'\n'}) {
+		var row struct {
+			Kind           string `json:"kind"`
+			RefusedRecords int    `json:"refused_records"`
+		}
+		if err := json.Unmarshal(line, &row); err != nil {
+			t.Fatalf("decode audit row: %v\n%s", err, line)
+		}
+		switch row.Kind {
+		case "summary":
+			summaryRefused = row.RefusedRecords
+		case "source_denominator":
+			denominatorRefused += row.RefusedRecords
+		case "refusal":
+			refusalRows++
+		}
+	}
+	if summaryRefused != refusalRows || denominatorRefused != refusalRows || refusalRows != 1 {
+		t.Fatalf("refusal totals = summary:%d denominators:%d rows:%d, want 1/1/1; artifact=%s", summaryRefused, denominatorRefused, refusalRows, artifact)
+	}
+	if !strings.Contains(stderr.String(), "refused="+strconv.Itoa(refusalRows)) {
+		t.Fatalf("stderr refusal total disagrees with artifact: %s", stderr.String())
+	}
+	markdown, err := os.ReadFile(markdownPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(markdown, []byte("Broad efficiency conclusions: **blocked** (refusals: "+strconv.Itoa(refusalRows)+").")) {
+		t.Fatalf("markdown refusal total disagrees with artifact:\n%s", markdown)
 	}
 }
 

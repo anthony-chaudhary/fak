@@ -27,7 +27,6 @@ package main
 // steer-overlay floor that globs every cmd/fak/steer_*.go.
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"strings"
@@ -55,41 +54,17 @@ var steerCommentPost = ghSteerCommentPost
 func runSteerComment(stdout, stderr io.Writer, argv []string) int {
 	// The unit name may come before the flags or after them; accept both.
 	unitArg, argv := splitSteerUnitArg(argv)
-	fs := flag.NewFlagSet("fak steer comment", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	note := fs.String("m", "", "the operator's note about this unit (required)")
-	by := fs.String("by", "", "who is annotating (default: git config user.name; the row must be attributable)")
-	base := fs.String("base", "", "range base ref (default: origin/<release_branch>)")
-	head := fs.String("head", "", "range head ref (default: <release_source> tip)")
-	if !parseFlags(fs, argv) {
-		return 2
-	}
+	commentFlags := newSteerActorCommand("fak steer comment", stderr, argv, unitArg, "is annotating")
+	note := commentFlags.String("m", "", "the operator's note about this unit (required)")
+	base := commentFlags.String("base", "", "range base ref (default: origin/<release_branch>)")
+	head := commentFlags.String("head", "", "range head ref (default: <release_source> tip)")
 	const usage = `usage: fak steer comment <unit> -m "<note>" [--by WHO] [--base REF] [--head REF]`
-	var ok bool
-	if unitArg, ok = finishSteerUnitArg(fs, unitArg, usage, stderr); !ok {
-		return 2
+	unit, root, who, code := commentFlags.resolveUnit(usage, base, head,
+		"fak steer comment: unit %q binds no issue (#N), so there is no honest place to post this note — only a subject-bound `Resolves` is closure-grade (a mention is not a binding). `fak steer redirect` can still re-aim it\n")
+	if code != 0 {
+		return code
 	}
 
-	root := steerRoot()
-	unit, view, err := resolveSteerUnit(root, *base, *head, unitArg)
-	if err != nil {
-		fmt.Fprintf(stderr, "fak steer comment: %v\n", err)
-		return 1
-	}
-	if unit == nil {
-		fmt.Fprintf(stderr, "fak steer comment: no forming unit %q in %s — see `fak steer prs` for the units forming now\n",
-			unitArg, releaseStatusString(view["range"]))
-		return 1
-	}
-	if len(unit.Resolves) == 0 {
-		// No closure-grade binding: there is no honest place to post. Say so
-		// rather than guessing an issue — a unit's Mentions are NOT a binding,
-		// and an annotation on an unrelated ticket is worse than no annotation.
-		fmt.Fprintf(stderr, "fak steer comment: unit %q binds no issue (#N), so there is no honest place to post this note — only a subject-bound `Resolves` is closure-grade (a mention is not a binding). `fak steer redirect` can still re-aim it\n", unitArg)
-		return 1
-	}
-
-	who := steerActor(root, *by)
 	// The unit's closure-grade binding: the annotation lands on the intent's own
 	// ticket, anchored to the exact member SHA set the operator was reading.
 	rec, err := steerpr.NewComment(unit.Leaf, who, *note, steerpr.UnitSHAs(*unit), unit.Band, unit.Resolves[0], time.Now())

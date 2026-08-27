@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -107,8 +109,13 @@ func TestModelObserveBandwidthCollectSpine(t *testing.T) {
 }
 
 func TestModelObserveBandwidthMeasuresHostRoofline(t *testing.T) {
+	old := measureHostMemoryRooflineForObserve
+	measureHostMemoryRooflineForObserve = func(_ context.Context, o modelperfobs.RooflineBenchmarkOptions) (modelperfobs.RooflineMeasurement, error) {
+		return deterministicRooflineMeasurement(o), nil
+	}
+	t.Cleanup(func() { measureHostMemoryRooflineForObserve = old })
 	output := filepath.Join(t.TempDir(), "collection.json")
-	args := []string{"collect", "--count", "1", "--interval", "10ms", "--phase", "other", "--shape", "small", "--theoretical-gb-s", "999", "--measure-host-roofline", "--roofline-bytes", "1048576", "--roofline-trials", "3", "--roofline-duration", "10ms", "--roofline-threads", "1", "--output", output, "--pretty=false"}
+	args := []string{"collect", "--count", "1", "--interval", "10ms", "--phase", "other", "--shape", "small", "--nvidia-device", "__fak_no_device__", "--theoretical-gb-s", "999", "--measure-host-roofline", "--roofline-bytes", "1048576", "--roofline-trials", "3", "--roofline-duration", "10ms", "--roofline-threads", "1", "--output", output, "--pretty=false"}
 	if err := runModelObserveBandwidth(args); err != nil {
 		t.Fatal(err)
 	}
@@ -117,9 +124,262 @@ func TestModelObserveBandwidthMeasuresHostRoofline(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(got)
-	for _, want := range []string{`"schema":"fak-host-memory-roofline/1"`, `"scope":"host-memory"`, `"method":"parallel-copy"`, `"traffic_accounting":"read-plus-write-2-bytes-per-copied-byte"`, `"dram_isolation":"not-proven"`, `"interpretation":"sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth"`, `"aggregation":"median"`, `"selected_source":"measured-sustainable"`} {
+	for _, want := range []string{`"schema":"fak-host-memory-roofline/1"`, `"scope":"host-memory"`, `"method":"parallel-copy"`, `"traffic_accounting":"read-plus-write-2-bytes-per-copied-byte"`, `"overhead_accounting":"first-touch-and-calibration-reported-separately-from-measured-trials"`, `"target_duration_ms":10`, `"total_duration_ms":25`, `"warmup_duration_ms":1`, `"warmup_bytes_touched":3145728`, `"duration_ms":5`, `"calibration_duration_ms":40`, `"calibration_traffic_bytes":8388608`, `"runtime_budget_ms":100`, `"command_budget_ms":`, `"dram_isolation":"not-proven"`, `"interpretation":"sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth"`, `"aggregation":"median"`, `"applied_host_observation_count":1`, `"selected_source":"measured-sustainable"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("collection missing %s: %s", want, text)
 		}
+	}
+}
+
+func deterministicRooflineMeasurement(o modelperfobs.RooflineBenchmarkOptions) modelperfobs.RooflineMeasurement {
+	return modelperfobs.RooflineMeasurement{
+		Schema:                 modelperfobs.RooflineMeasurementSchema,
+		Scope:                  "host-memory",
+		MachineClass:           "test/test",
+		Method:                 "parallel-copy",
+		Aggregation:            "median",
+		TrafficAccounting:      "read-plus-write-2-bytes-per-copied-byte",
+		OverheadAccounting:     "first-touch-and-calibration-reported-separately-from-measured-trials",
+		DRAMIsolation:          "not-proven",
+		Interpretation:         "sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth",
+		WorkingSetBytes:        o.WorkingSetBytes,
+		PeakBufferBytes:        o.WorkingSetBytes * 2,
+		TargetDurationMS:       o.TargetDuration.Milliseconds(),
+		RuntimeBudgetMS:        100,
+		TotalDurationMS:        25,
+		WarmupDurationMS:       1,
+		WarmupBytesTouched:     o.WorkingSetBytes * 3,
+		Threads:                o.Threads,
+		MeasuredSustainableGBS: 60,
+		Trials:                 deterministicRooflineTrials(o, 60),
+	}
+}
+
+func TestModelObserveBandwidthMeasuresHostRooflineSweep(t *testing.T) {
+	old := measureHostMemoryRooflineForObserve
+	measureHostMemoryRooflineForObserve = func(_ context.Context, o modelperfobs.RooflineBenchmarkOptions) (modelperfobs.RooflineMeasurement, error) {
+		return deterministicRooflineSweepMeasurement(o), nil
+	}
+	t.Cleanup(func() { measureHostMemoryRooflineForObserve = old })
+	output := filepath.Join(t.TempDir(), "collection.json")
+	args := []string{"collect", "--count", "1", "--interval", "10ms", "--phase", "other", "--shape", "small", "--nvidia-device", "__fak_no_device__", "--measure-host-roofline", "--roofline-sweep", "--roofline-knee-threshold", "0.01", "--roofline-bytes", "1048576", "--roofline-trials", "3", "--roofline-duration", "10ms", "--roofline-threads", "3", "--output", output, "--pretty=false"}
+	if err := runModelObserveBandwidth(args); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var collection modelperfobs.BandwidthCollection
+	if err := json.Unmarshal(data, &collection); err != nil {
+		t.Fatal(err)
+	}
+	got := collection.RooflineMeasurement
+	if got == nil {
+		t.Fatalf("missing roofline measurement: %s", data)
+	}
+	if got.Schema != modelperfobs.RooflineSweepMeasurementSchema || got.RequestedPointCount != 3 || got.PointCount != 3 || got.OmittedPointCount != 0 || got.KneeThreshold != 0.01 || got.AppliedHostObservationCount != 1 {
+		t.Fatalf("sweep summary=%+v", got)
+	}
+	wantWorkers := []int{1, 2, 3}
+	rawPeakIndex := 0
+	kneeIndex := -1
+	for i, point := range got.Points {
+		if point.WorkerCount != wantWorkers[i] || point.MedianGBS <= 0 || point.EfficiencyVersusSustainablePeak <= 0 || len(point.Trials) != 3 || point.WarmupDurationMS <= 0 || point.WarmupBytesTouched == 0 {
+			t.Fatalf("point[%d]=%+v", i, point)
+		}
+		if i == 0 {
+			if point.MarginalGainGBS != nil || point.MarginalGainFraction != nil {
+				t.Fatalf("first point fabricated marginal gain: %+v", point)
+			}
+		} else if point.MarginalGainGBS == nil || point.MarginalGainFraction == nil {
+			t.Fatalf("point[%d] missing marginal gain: %+v", i, point)
+		}
+		if point.MedianGBS > got.Points[rawPeakIndex].MedianGBS {
+			rawPeakIndex = i
+		}
+		if point.WorkerCount == got.SaturationKneeWorkerCount {
+			kneeIndex = i
+		}
+	}
+	if kneeIndex < 0 || got.RawObservedPeakWorkerCount != got.Points[rawPeakIndex].WorkerCount || got.RawObservedPeakMedianGBS != got.Points[rawPeakIndex].MedianGBS || got.MeasuredSustainableGBS <= 0 || got.MeasuredSustainableGBS > got.RawObservedPeakMedianGBS || len(got.PlateauWorkerCounts) != 2 {
+		t.Fatalf("inconsistent sweep summary=%+v", got)
+	}
+	for i := kneeIndex; i < len(got.Points); i++ {
+		if got.Points[i].MedianGBS < got.KneeThreshold*got.MeasuredSustainableGBS {
+			t.Fatalf("point after knee fell below stable threshold: summary=%+v", got)
+		}
+	}
+	text := string(data)
+	for _, want := range []string{
+		`"schema":"fak-host-memory-roofline-sweep/1"`,
+		`"traffic_accounting":"read-plus-write-2-bytes-per-copied-byte"`,
+		`"overhead_accounting":"first-touch-and-calibration-reported-separately-from-measured-trials"`,
+		`"dram_isolation":"not-proven"`,
+		`"interpretation":"sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth"`,
+		`"raw_observed_peak_worker_count":`,
+		`"raw_observed_peak_median_gb_s":`,
+		`"plateau_worker_counts":`,
+		`"saturation_knee_worker_count":`,
+		`"efficiency_versus_sustainable_peak":`,
+		`"marginal_gain_gb_s":`,
+		`"calibration_duration_ms":`,
+		`"runtime_budget_ms":`,
+		`"command_budget_ms":`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("sweep collection missing %s: %s", want, text)
+		}
+	}
+}
+
+func deterministicRooflineSweepMeasurement(o modelperfobs.RooflineBenchmarkOptions) modelperfobs.RooflineMeasurement {
+	workers := []int{1, 2, 3}
+	medians := []float64{10, 20, 30}
+	points := make([]modelperfobs.RooflineSweepPoint, len(workers))
+	for i, workers := range workers {
+		points[i] = modelperfobs.RooflineSweepPoint{
+			WorkerCount:                     workers,
+			MedianGBS:                       medians[i],
+			EfficiencyVersusSustainablePeak: medians[i] / 20,
+			WarmupDurationMS:                1,
+			WarmupBytesTouched:              o.WorkingSetBytes * 3,
+			Trials:                          deterministicRooflineTrials(o, medians[i]),
+		}
+		if i > 0 {
+			gain := medians[i] - medians[i-1]
+			fraction := gain / medians[i-1]
+			points[i].MarginalGainGBS = &gain
+			points[i].MarginalGainFraction = &fraction
+		}
+	}
+	return modelperfobs.RooflineMeasurement{
+		Schema:                     modelperfobs.RooflineSweepMeasurementSchema,
+		Scope:                      "host-memory",
+		MachineClass:               "test/test",
+		Method:                     "parallel-copy",
+		Aggregation:                "median",
+		TrafficAccounting:          "read-plus-write-2-bytes-per-copied-byte",
+		OverheadAccounting:         "first-touch-and-calibration-reported-separately-from-measured-trials",
+		DRAMIsolation:              "not-proven",
+		Interpretation:             "sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth",
+		WorkingSetBytes:            o.WorkingSetBytes,
+		PeakBufferBytes:            o.WorkingSetBytes * 2,
+		TargetDurationMS:           o.TargetDuration.Milliseconds(),
+		RuntimeBudgetMS:            100,
+		TotalDurationMS:            50,
+		Threads:                    o.Threads,
+		MeasuredSustainableGBS:     20,
+		RequestedPointCount:        len(points),
+		PointCount:                 len(points),
+		KneeThreshold:              o.KneeThreshold,
+		StabilityRule:              "deterministic-test-fixture",
+		RawObservedPeakWorkerCount: workers[len(workers)-1],
+		RawObservedPeakMedianGBS:   medians[len(medians)-1],
+		PlateauWorkerCounts:        []int{2, 3},
+		SaturationKneeWorkerCount:  workers[0],
+		Points:                     points,
+	}
+}
+
+func deterministicRooflineTrials(o modelperfobs.RooflineBenchmarkOptions, gbs float64) []modelperfobs.RooflineTrial {
+	trials := make([]modelperfobs.RooflineTrial, o.Trials)
+	for trial := range trials {
+		trials[trial] = modelperfobs.RooflineTrial{
+			Index:                   trial + 1,
+			Iterations:              2,
+			DurationMS:              5,
+			TrafficBytes:            o.WorkingSetBytes * 4,
+			GBS:                     gbs,
+			CalibrationRounds:       modelperfobs.MaxRooflineCalibrationRounds,
+			CalibrationDurationMS:   40,
+			CalibrationTrafficBytes: o.WorkingSetBytes * 8,
+		}
+	}
+	return trials
+}
+
+func TestModelObserveBandwidthValidatesHostRooflineSweepFlags(t *testing.T) {
+	base := []string{"collect", "--count", "1", "--interval", "10ms", "--phase", "other", "--shape", "small"}
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "sweep-requires-measurement", args: []string{"--roofline-sweep"}, want: "--roofline-sweep requires --measure-host-roofline"},
+		{name: "threads-require-measurement", args: []string{"--roofline-threads", "2"}, want: "--roofline-threads requires --measure-host-roofline"},
+		{name: "threshold-requires-sweep", args: []string{"--measure-host-roofline", "--roofline-knee-threshold", "0.8"}, want: "--roofline-knee-threshold requires --roofline-sweep"},
+		{name: "threshold-bounded", args: []string{"--measure-host-roofline", "--roofline-sweep", "--roofline-knee-threshold", "0", "--roofline-bytes", "1048576", "--roofline-trials", "3", "--roofline-duration", "10ms", "--roofline-threads", "3"}, want: "roofline knee threshold"},
+		{name: "sweep-needs-three-points", args: []string{"--measure-host-roofline", "--roofline-sweep", "--roofline-bytes", "1048576", "--roofline-trials", "3", "--roofline-duration", "10ms", "--roofline-threads", "2"}, want: "at least 3 worker-count points"},
+		{name: "operator-measured-conflicts", args: []string{"--measure-host-roofline", "--measured-gb-s", "80"}, want: "--measured-gb-s cannot be combined with --measure-host-roofline"},
+		{name: "total-runtime-bounded", args: []string{"--count", "120", "--interval", "1m", "--measure-host-roofline", "--roofline-bytes", "1048576", "--roofline-trials", "3", "--roofline-duration", "10ms", "--roofline-threads", "1"}, want: "collection worst-case runtime budget"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append(append([]string(nil), base...), tt.args...)
+			if err := runModelObserveBandwidth(args); err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestModelObserveBandwidthImportsNVIDIAProfile(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "collection.json")
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "nvidia-hbm-ncu.csv")
+	args := []string{
+		"collect",
+		"--nvidia-ncu-csv", fixture,
+		"--device", "NVIDIA H100 80GB HBM3 (0)",
+		"--capture-start", "2026-08-27T10:00:00Z",
+		"--capture-end", "2026-08-27T10:01:00Z",
+		"--phase", "decode",
+		"--shape", "large",
+		"--theoretical-gb-s", "3350",
+		"--device-roofline-gb-s", "1250",
+		"--output", output,
+		"--pretty=false",
+	}
+	if err := runModelObserveBandwidth(args); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(got)
+	for _, want := range []string{
+		`"engine":"fak-native"`,
+		`"collector":"nvidia-nsight-compute"`,
+		`"dram_counters":true`,
+		`"read_gb_s":750`,
+		`"write_gb_s":250`,
+		`"total_gb_s":1000`,
+		`"utilization":0.8`,
+		`"selected_source":"measured-sustainable"`,
+		`"schema":"fak-nvidia-ncu-bandwidth-profile/1"`,
+		`"engine_evidence":"operator-asserted-not-proven-by-csv"`,
+		`"launch_count":2`,
+		`"cumulative_duration_ns":2000000`,
+		`"capture_ended_at":"2026-08-27T10:01:00Z"`,
+		`"device_roofline_evidence":"operator-supplied-matched-device-measurement"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("NVIDIA profile collection missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestModelObserveBandwidthRejectsCrossModeFlags(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "nvidia-hbm-ncu.csv")
+	base := []string{"collect", "--nvidia-ncu-csv", fixture, "--device", "NVIDIA H100", "--capture-start", "2026-08-27T10:00:00Z", "--capture-end", "2026-08-27T10:01:00Z", "--phase", "decode", "--shape", "large"}
+	for _, incompatible := range [][]string{{"--count", "2"}, {"--measured-gb-s", "80"}, {"--nvidia-device", "0"}, {"--logical-bytes", "10"}, {"--roofline-sweep"}} {
+		args := append(append([]string(nil), base...), incompatible...)
+		if err := runModelObserveBandwidth(args); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+			t.Fatalf("args=%v error=%v", incompatible, err)
+		}
+	}
+	if err := runModelObserveBandwidth([]string{"collect", "--device", "NVIDIA H100", "--count", "1", "--interval", "10ms", "--phase", "other", "--shape", "small"}); err == nil || !strings.Contains(err.Error(), "requires --nvidia-ncu-csv") {
+		t.Fatalf("profile-only flag error=%v", err)
 	}
 }

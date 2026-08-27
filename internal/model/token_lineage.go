@@ -125,9 +125,15 @@ func (s *Session) beginHALTokenLineageWrite(tokenIDs []int) func() {
 	if s == nil || s.halKV == nil {
 		return func() {}
 	}
-	before := s.halKV.Len()
+	// Capture the admitted store, not the mutable Session field. A fail-closed backend
+	// operation calls Session.Close before panic unwinds through this completion hook;
+	// Close clears s.halKV, but the hook must finish against the store that began the
+	// write so its bookkeeping cannot replace the original backend failure with a nil
+	// dereference. Device-store Free keeps Len safe and clears its resident positions.
+	halKV := s.halKV
+	before := halKV.Len()
 	return func() {
-		after := s.halKV.Len()
+		after := halKV.Len()
 		if after < before {
 			if s.halLineage.fault == "" {
 				s.halLineage.fault = fmt.Sprintf("HAL write reduced resident length from %d to %d", before, after)

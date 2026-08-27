@@ -42,7 +42,7 @@ const maxFeedLines = 12
 //
 //	0 issues                 -> SeverityClear    (all-clear heartbeat, no page)
 //	>=1, at least one UNOWNED -> SeverityOperator (someone must pick these up — paged)
-//	>=1, all OWNED            -> SeverityStatus   (tracked, in progress — recorded, no page)
+//	>=1, all OWNED            -> SeverityStatus   (ownership recorded, no page)
 //
 // label is the issue label the backlog was filtered by (e.g. "blocked"), used in the
 // prose and to build the "triage" link. repoURL is the repo's base URL (e.g.
@@ -86,8 +86,8 @@ func FoldIssues(issues []Issue, label, repoURL string) Blocker {
 		b.ActionURL = backlogURL(repoURL, label)
 	} else {
 		b.Severity = SeverityStatus
-		b.Title = fmt.Sprintf("%d blocker(s) in progress", len(ordered))
-		b.Detail = fmt.Sprintf("%d open `%s` issue(s), all assigned — tracked, no action needed.", len(ordered), label)
+		b.Title = fmt.Sprintf("%d blocker(s) have owners", len(ordered))
+		b.Detail = fmt.Sprintf("%d open `%s` issue(s); every issue has at least one assignee — ownership recorded.", len(ordered), label)
 	}
 
 	shown := ordered

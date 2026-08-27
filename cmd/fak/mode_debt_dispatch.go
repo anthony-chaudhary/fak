@@ -134,13 +134,8 @@ func runModeDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "fak mode-debt-dispatch: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, dogfoodissues.Render(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "fak mode-debt-dispatch", *asJSON, result, dogfoodissues.Render(result)); code != 0 {
+		return code
 	}
 	return exit
 }
