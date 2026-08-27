@@ -105,6 +105,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		os.Exit(runConceptCLI(os.Stdout, os.Stderr, args))
 	case "config":
 		cmdConfig(args)
+	case "coordinate":
+		cmdCoordinate(args)
 	case "rename-concept":
 		cmdRenameConcept(args)
 	case "session":

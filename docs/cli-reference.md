@@ -458,6 +458,16 @@ fak orchestration status --json
 
 Human output leads with the run verdict and running/completed/exited counts. `--json` emits `fak.codex_orchestration_status.v1` with the same per-worker PID, process, log freshness, last-event, and turn-count evidence. The command observes workers; it does not stop, replace, or mutate them.
 
+## `fak coordinate`: governed agentic compute
+
+`fak coordinate` turns one harness task into a content-free whole-path plan and receipt. It joins harness-neutral task intent with managed context/cache actions, **fak-native** compute placement, serve admission/backpressure, required effects, and accepted outcomes. This is governed agentic compute: unlike a raw model-serving receipt, it proves the task-level controls and outcome evidence needed for acceptance. Raw-model-only input is therefore reported as insufficient and cannot yield an accepted receipt.
+
+```bash
+fak coordinate --demo        # deterministic built-in two-worker receipt
+fak coordinate --json < in.json
+```
+
+Equivalent Claude, Codex, and fak-native inputs normalize to the same plan identity. The JSON schema is `fak.coordinate/1`; input and output carry identifiers and control metadata, not prompts, responses, or other task content. Unknown or malformed fields fail closed. Setting `coordination` to `false` delegates explicitly to existing harness behavior instead of claiming a coordinated result.
 ## `fak agent` response profiles
 
 `fak agent --output-style <selection>` opts the owned agent loop into a named response shape. The default is `full` (no shaping). Run `fak agent profiles` or `fak agent profiles --json` to list shipped, reserved, and not-yet selections. The recommended concise compatibility setting is `caveman:medium`; it canonicalizes to the fak-authored `caveman:native:medium`. See [Response profiles](response-profiles.md) for intensity guidance, native-versus-original provenance, preservation rules, and the current harness boundary.

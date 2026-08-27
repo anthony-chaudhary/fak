@@ -238,6 +238,11 @@ const usageCoreText = `usage:
                 It fixes the canonical profile to ultracode: leases, independent
                 effect readback, and reconciliation remain mandatory. Planning and
                 --selfcheck are offline; --launch starts resolved harness workers.
+  fak coordinate --demo | --json
+                (GOVERNED AGENTIC COMPUTE: compose harness-neutral task intent,
+                 managed context/cache, fak-native placement, admission/backpressure,
+                 required effects, and accepted outcomes into one content-free receipt;
+                 raw model evidence alone is explicitly insufficient)
   fak agent     [--native] [--task STR] [--provider openai|anthropic|gemini|xai]
                 [--base-url URL --model M --api-key-env VAR | --offline]
                 [--max-turns N] [--out agent-report.json] [--policy FILE]
