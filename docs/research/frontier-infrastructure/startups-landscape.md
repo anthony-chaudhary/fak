@@ -31,6 +31,14 @@ material claims belong in [`index.json`](index.json) with a dated source.
 - partnerships, licensing, acquisitions, cancellations, export controls, and supply dependencies;
 - source class and confidence; rumor origin, independent corroboration, expiry, and outcome.
 
+## Realized startup/provider failures (#9363)
+
+| Entity | Outcome | Boundary |
+|---|---|---|
+| Untether AI | Existing bankruptcy record: nearly $25M assets, >$128M unsecured liabilities, $103.6M deficiency | Insolvency is not a measured amount of removed live accelerator capacity. |
+| Builder.ai | Insolvency proceedings after a cash crunch | Company continuity does not quantify GPU fleet, customer workload loss, or final liquidation. |
+| Equinix Metal | Bare-metal service wind-down and $233M impairment disclosed for 2024 | Product/service withdrawal is not closure of Equinix colocation sites. |
+
 ## Failure modes in startup coverage
 
 1. Treating funding or valuation as technical/product evidence.

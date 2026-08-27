@@ -4,6 +4,17 @@
 AI infrastructure availability or design assumptions. It separates completed events,
 announced/future products, reported negotiations, and unconfirmed rumors.
 
+## Failure and cancellation chronology (#9363)
+
+| Date | Event | Lifecycle interpretation |
+|---|---|---|
+| 2024 | Equinix stopped commercially offering Metal and wound down supporting operations. | Service-line withdrawal and impairment, not physical portfolio shutdown. |
+| 2025-05-20 | Builder.ai entered insolvency proceedings. | Counterparty failure; workload and hardware consequences remain unquantified. |
+| 2025-07-24 | Intel discontinued Germany/Poland and slowed Ohio. | Two planned expansions canceled; one build delayed to demand. |
+| 2025-09-22 | Google withdrew the Franklin Township, Indianapolis rezoning proposal. | Pre-construction site withdrawal, not lost live MW. |
+| 2025-10-14 | Untether AI entered bankruptcy, retained from the existing corpus record. | Accelerator-startup insolvency, not a chip-capacity decrement. |
+| 2025 full year | Heatmap found 25 opposition-linked U.S. cancellations, 21 in the second half. | Bounded heterogeneous cohort, not homogeneous MW. |
+
 ## 2026 chronology
 
 | Date | Entity/event | Type and state | Infrastructure expectation | Evidence caveat |

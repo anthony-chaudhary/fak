@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9362,
+  "latest_slice_issue": 9363,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 213,
+    "entry_count": 218,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -112,6 +112,7 @@
       "Azure OpenAI / BurstGPT",
       "Baichuan 2",
       "Baidu",
+      "Builder.ai",
       "BurstGPT v1.1",
       "ByteDance Seed",
       "CacheRoute",
@@ -125,6 +126,7 @@
       "DeepSeek",
       "DistServe",
       "Eaton",
+      "Equinix Metal",
       "European Commission / EuroHPC",
       "European Union / AI Office",
       "FineServe",
@@ -136,6 +138,7 @@
       "Google / utility partners",
       "Google Cloud",
       "Google DeepMind",
+      "Google Franklin Township data-center proposal",
       "Google internal developer tools",
       "Graphcore / SoftBank",
       "Groq",
@@ -147,6 +150,7 @@
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
       "IndiaAI Mission",
+      "Intel manufacturing expansion",
       "International Energy Agency",
       "Johnson Controls",
       "Kakao",
@@ -237,6 +241,7 @@
       "U.S. Bureau of Industry and Security / UAE",
       "U.S. datacenter sector",
       "Ultra Ethernet Consortium",
+      "United States data-center cancellation cohort",
       "Untether AI",
       "Untether AI / AMD",
       "VAST Data",
@@ -8318,6 +8323,175 @@
       ],
       "fak_implications": [
         "Recommendation training planners should account for sequence-length imbalance and duplicate feature communication separately from request traffic."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "builder-ai-insolvency-2025",
+      "category": "market_signal",
+      "entity": "Builder.ai",
+      "topic": [
+        "insolvency",
+        "ai_startup",
+        "counterparty_risk"
+      ],
+      "published_at": "2025-05-20",
+      "event_at": "2025-05-20",
+      "source_title": "Builder.ai enters insolvency proceedings",
+      "source_url": "https://www.ft.com/content/9fdb4e63-a047-48ef-b3e2-3c454ad0c9f4",
+      "source_kind": "news_report",
+      "evidence_class": "insolvency_report",
+      "confidence": "high",
+      "claim": "Builder.ai entered insolvency proceedings after a cash crunch, showing that large fundraising and AI-product adoption claims do not guarantee operating continuity.",
+      "quantified": {},
+      "assumptions": [
+        "The record concerns company continuity, not a frontier-model training cluster or public cloud region."
+      ],
+      "contradictions_or_limits": [
+        "Insolvency does not itself quantify customer workload loss, GPU capacity, debt recovery, or final liquidation outcome.",
+        "Company and creditor allegations require separate adjudication from the insolvency lifecycle fact."
+      ],
+      "fak_implications": [
+        "Startup/provider ledgers should type insolvency separately from acquisition, shutdown, service migration, and technical failure."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "equinix-metal-winddown-2024",
+      "category": "hyperscaler",
+      "entity": "Equinix Metal",
+      "topic": [
+        "service_winddown",
+        "bare_metal_cloud",
+        "asset_impairment"
+      ],
+      "published_at": "2025-02-21",
+      "event_at": "2024-12-31",
+      "source_title": "Equinix 2024 Form 10-K",
+      "source_url": "https://www.sec.gov/Archives/edgar/data/1101239/000162828025005126/eqix-20241231.htm",
+      "source_kind": "regulatory_filing",
+      "evidence_class": "official_financial_disclosure",
+      "confidence": "high",
+      "claim": "Equinix disclosed that it would no longer commercially offer Metal and would wind down supporting operations; its 2024 Form 10-K recorded $233M of impairment charges related to the Metal wind-down and projected cash flows, a service-line retreat distinct from shutting Equinix colocation data centers.",
+      "quantified": {
+        "metal_winddown_impairment_usd": 233000000
+      },
+      "assumptions": [
+        "The wind-down applies to the Metal service and associated assets, not the company’s entire data-center footprint."
+      ],
+      "contradictions_or_limits": [
+        "An accounting impairment is not equivalent to removed IT MW, and the filing does not provide a workload or customer migration distribution.",
+        "Wind-down timing and residual support require date-specific follow-up."
+      ],
+      "fak_implications": [
+        "Cloud capacity maps should distinguish service/product withdrawal from physical site closure and retain migration deadlines."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "intel-germany-poland-cancel-ohio-slow-2025",
+      "category": "supply_chain",
+      "entity": "Intel manufacturing expansion",
+      "topic": [
+        "fab_cancellation",
+        "construction_delay",
+        "semiconductor_capacity"
+      ],
+      "published_at": "2025-07-24",
+      "event_at": "2025-07-24",
+      "source_title": "Intel Reports Second-Quarter 2025 Financial Results",
+      "source_url": "https://www.intc.com/news-events/press-releases/detail/1745/intel-reports-second-quarter-2025-financial-results",
+      "source_kind": "official_earnings",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Intel said it would not move forward with planned projects in Germany and Poland and would slow Ohio construction to match market demand, reducing previously announced manufacturing expansion without proving loss of already-live wafer capacity.",
+      "quantified": {
+        "cancelled_projects": 2,
+        "slowed_projects": 1
+      },
+      "assumptions": [
+        "Germany and Poland are discontinued planned projects; Ohio is slowed, not cancelled."
+      ],
+      "contradictions_or_limits": [
+        "The disclosure does not provide a single comparable wafer-start, accelerator-output, or AI-specific capacity decrement.",
+        "Planned investment and subsidies are not equivalent to qualified shipped output."
+      ],
+      "fak_implications": [
+        "Supply forecasts must carry project state transitions and exclude cancelled or delayed capacity from near-term usable supply."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "google-franklin-township-withdrawal-2025",
+      "category": "datacenter_physical",
+      "entity": "Google Franklin Township data-center proposal",
+      "topic": [
+        "project_withdrawal",
+        "site_pipeline",
+        "permitting"
+      ],
+      "published_at": "2025-09-22",
+      "event_at": "2025-09-22",
+      "source_title": "Google backs down from proposed data center after months of community pushback",
+      "source_url": "https://www.wfyi.org/wfyi-news/2025-09-22/indianapolis-council-google-data-center-vote-withdrawl",
+      "source_kind": "local_public_media",
+      "evidence_class": "named_project_withdrawal",
+      "confidence": "medium",
+      "claim": "Google withdrew its rezoning proposal for a data-center campus on hundreds of acres in Franklin Township, Indianapolis, before construction, removing one named pipeline project rather than closing an operating site.",
+      "quantified": {},
+      "assumptions": [
+        "Withdrawal date is tied to the local land-use/permitting process reported by the source."
+      ],
+      "contradictions_or_limits": [
+        "A withdrawn proposal is not lost live MW, installed accelerators, or a company-wide capex reversal.",
+        "The source does not establish whether demand or capital shifted to another site."
+      ],
+      "fak_implications": [
+        "Site ledgers should retain withdrawn and relocated proposals so announced capacity is not double-counted as built supply."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "us-datacenter-cancellation-cohort-2025",
+      "category": "datacenter_physical",
+      "entity": "United States data-center cancellation cohort",
+      "topic": [
+        "project_cancellation",
+        "pipeline_attrition",
+        "public_records"
+      ],
+      "published_at": "2026-01-12",
+      "event_at": "2025-12-31",
+      "source_title": "Local Pushback, Canceled Data Centers Surged in 2025",
+      "source_url": "https://heatmap.news/politics/data-center-cancellations-2025",
+      "source_kind": "investigative_report",
+      "evidence_class": "public_record_review",
+      "confidence": "medium",
+      "claim": "Heatmap’s review found 25 U.S. data-center projects canceled following local opposition in 2025, 21 in the second half, providing a bounded opposition-linked attrition cohort rather than a direct estimate of lost live capacity.",
+      "quantified": {
+        "cancelled_projects": 25,
+        "second_half_cancelled_projects": 21,
+        "cohort_year": 2025
+      },
+      "assumptions": [
+        "The reported count is a discovered lower bound from public records and reporting, not a complete census."
+      ],
+      "contradictions_or_limits": [
+        "Projects differ in size, stage, tenant, cause, and whether capacity was relocated; counts cannot be summed as homogeneous MW.",
+        "Cancellation of a proposal or expansion is not shutdown of operating IT load."
+      ],
+      "fak_implications": [
+        "Capacity models need stage-weighted cancellation hazards and should not assign equal MW or probability to every announced project."
       ],
       "rumor": {
         "is_rumor": false

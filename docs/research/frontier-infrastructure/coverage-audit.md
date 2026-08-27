@@ -63,6 +63,15 @@ production-scale asynchronous RL, stateful recommendation caching, and 200M one-
 training sequences. iFLYTEK hardware and neutral Ascend operating receipts remain
 missing. Corpus totals are **213 entries**, **208 unique URLs**, and **176 entity labels**.
 
+## Issue #9363 delta
+
+Issue #9363 deduplicates the existing Untether AI bankruptcy and adds five realized negative outcomes to counter announcement/build survivorship
+bias: Untether AI bankruptcy, Builder.ai insolvency, Equinix Metal wind-down, Intel fab
+project cancellation/delay, Google Franklin Township withdrawal, and a lower-bound 2025
+U.S. cancellation cohort. Totals are **218 entries**, **213 unique URLs**, and **181 entity
+labels**. More shutdowns, bankruptcies, power denials, and commissioned-capacity failures
+remain open.
+
 ## Status vocabulary
 
 | Status | Meaning |

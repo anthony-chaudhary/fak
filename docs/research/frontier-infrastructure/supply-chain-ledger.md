@@ -5,6 +5,14 @@ multi-stage industrial system. A GPU purchase or gigawatt announcement becomes u
 only after every binding input is delivered, integrated, commissioned, healthy, scheduled,
 and matched to a real workload.
 
+## Capacity attrition and cancellation (#9363)
+
+Intel’s July 2025 disclosure types Germany and Poland as discontinued planned projects
+and Ohio as slowed construction, not cancellation. The 25-project opposition-linked cohort
+and named Google withdrawal further show why investment, permitting, construction,
+commissioning, and live output require separate survival states. None alone measures lost
+qualified wafers, shipped accelerators, or operating IT MW.
+
 ## Capacity lifecycle
 
 | State | Minimum evidence |

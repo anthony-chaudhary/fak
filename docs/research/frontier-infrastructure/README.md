@@ -34,6 +34,15 @@ contains **213 entries**, **208 unique source URLs**, and **176 entity labels**.
 teams, applications, developers, API growth, agents, sequences, users, requests, and
 tokens remain separate denominators; internal/vendor maxima are not universal.
 
+## Latest slice: realized failures and cancellations (#9363)
+
+This slice reconciles the existing Untether AI bankruptcy record and adds Builder.ai insolvency, a bare-metal cloud wind-down,
+semiconductor-project cancellation and delay, one named data-center withdrawal, and a
+25-project lower-bound U.S. cancellation cohort. The corpus now contains **218 entries**,
+**213 unique source URLs**, and **181 entity labels**. Bankruptcy, insolvency, wind-down,
+impairment, withdrawal, cancellation, delay, operating shutdown, and lost live MW remain
+distinct states.
+
 ## Result first
 
 The initial evidence already rejects several convenient defaults:
