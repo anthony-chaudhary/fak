@@ -53,6 +53,7 @@ type CollectionOptions struct {
 	PhysicalSoftwareRead   *uint64
 	PhysicalSoftwareWrite  *uint64
 	NVIDIADevice           NVIDIADeviceSelector
+	AMDDevice              AMDDeviceSelector
 	MeasureHostRoofline    *RooflineBenchmarkOptions
 }
 type BandwidthCollection struct {
@@ -79,6 +80,9 @@ func ValidateCollectionOptions(o CollectionOptions) error {
 	}
 	if o.Interval < MinSampleInterval || o.Interval > MaxSampleInterval {
 		return fmt.Errorf("sample interval must be %s..%s", MinSampleInterval, MaxSampleInterval)
+	}
+	if o.NVIDIADevice != "" && o.AMDDevice != "" {
+		return fmt.Errorf("nvidia and AMD device selectors are mutually exclusive")
 	}
 	return validateSample(BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "host"}})
 }
@@ -110,7 +114,7 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		if err != nil {
 			return BandwidthCollection{}, err
 		}
-		device, err := collectNVIDIADeviceSnapshot(ctx, o.NVIDIADevice)
+		device, err := collectDeviceSnapshot(ctx, o)
 		if err != nil {
 			return BandwidthCollection{}, err
 		}
@@ -120,12 +124,16 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		av.ProcessIO = av.ProcessIO || snap.availability.ProcessIO
 		av.MemoryPressure = av.MemoryPressure || snap.availability.MemoryPressure
 		av.DeviceCounters = av.DeviceCounters || device.available
-		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Device: device.device, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
+		av.DRAMCounters = av.DRAMCounters || device.dramCounters
+		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Live: device.live, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Device: device.device, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
 		if device.available {
 			collector = snap.collector + "+" + device.collector
 			s.Capacity = device.capacity
 			s.Provenance.Device = device.provenanceDevice
 			s.Provenance.Collector = collector
+			if device.provenanceSource != "" {
+				s.Provenance.Source = device.provenanceSource
+			}
 		}
 		if !device.available && snap.host.PhysicalTotalBytes != nil && snap.host.PhysicalAvailableBytes != nil && *snap.host.PhysicalTotalBytes >= *snap.host.PhysicalAvailableBytes {
 			u := *snap.host.PhysicalTotalBytes - *snap.host.PhysicalAvailableBytes
@@ -142,6 +150,20 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		return BandwidthCollection{}, err
 	}
 	return BandwidthCollection{Schema: BandwidthCollectionSchema, Engine: "fak-native", MachineClass: runtime.GOOS + "/" + runtime.GOARCH, Collector: collector, IntervalMS: o.Interval.Milliseconds(), Availability: av, Capture: cap, Report: report, RooflineMeasurement: measured}, nil
+}
+
+func collectDeviceSnapshot(ctx context.Context, o CollectionOptions) (deviceSnapshot, error) {
+	if o.AMDDevice != "" {
+		return collectAMDDeviceSnapshot(ctx, o.AMDDevice)
+	}
+	if o.NVIDIADevice != "" {
+		return collectNVIDIADeviceSnapshot(ctx, o.NVIDIADevice)
+	}
+	s, err := collectNVIDIADeviceSnapshot(ctx, "")
+	if err != nil || s.available {
+		return s, err
+	}
+	return collectAMDDeviceSnapshot(ctx, "")
 }
 func cloneI64(v *int64) *int64 {
 	if v == nil {

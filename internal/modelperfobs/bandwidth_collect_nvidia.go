@@ -15,9 +15,12 @@ type NVIDIADeviceSelector string
 type deviceSnapshot struct {
 	device           DeviceSignals
 	capacity         CapacitySignals
+	live             LiveBandwidth
 	provenanceDevice string
+	provenanceSource string
 	collector        string
 	available        bool
+	dramCounters     bool
 }
 
 var runNvidiaSMI = func(ctx context.Context, args ...string) ([]byte, error) {

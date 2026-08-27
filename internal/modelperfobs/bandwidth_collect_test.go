@@ -22,6 +22,12 @@ func TestCollectionBounds(t *testing.T) {
 	if err := ValidateCollectionOptions(base); err == nil {
 		t.Fatal("expected interval bound")
 	}
+	base.Interval = 10 * time.Millisecond
+	base.NVIDIADevice = "0"
+	base.AMDDevice = "0"
+	if err := ValidateCollectionOptions(base); err == nil {
+		t.Fatal("expected mutually exclusive device selectors")
+	}
 }
 func TestCollectBandwidthPreservesUnavailableDRAM(t *testing.T) {
 	r, err := CollectBandwidth(context.Background(), CollectionOptions{Count: 1, Interval: 10 * time.Millisecond, Phase: PhaseDecode, Shape: ShapeSmall, TheoreticalGBS: fp(100)})
