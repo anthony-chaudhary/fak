@@ -97,7 +97,7 @@ func guardResourceContainmentReason(reason string) bool {
 // claim that another generation will remain contained.
 func (s *guardResourceRetryState) decide(event guardChildWaitEvent, agentName, currentHead string) guardResourceRetryVerdict {
 	verdict := guardResourceRetryVerdict{Action: guardResourceRetryTerminal, Limit: s.limit}
-	if event.Resource == nil {
+	if event.Kind != guardChildResourceLimit || event.Resource == nil || !event.Resource.Stop {
 		return verdict
 	}
 	verdict.ResourceType = strings.TrimSpace(event.Resource.Reason)
