@@ -64,10 +64,13 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 	legacyResume := false
 	if req.Resume != nil {
 		corpus = cloneCorpus(*req.Resume)
+		preMetricResume := corpus.Receipt.NonAtomicDelta != nil &&
+			corpus.Receipt.NonAtomicDelta.EvidenceMode == NonAtomicDeltaEvidenceModeLegacyCountOnly &&
+			corpus.Receipt.NonAtomicDelta.Policy.Metric == ""
 		if issues, ok := sourceByName(corpus.Receipt.Sources, "issues"); ok {
 			legacyResume = isLegacyMixedPullCheckpoint(corpus.Receipt, issues)
 		}
-		if err := validateResume(corpus, full, req.Cutoff, c.BaseURL, expectedEndpoints, legacyResume); err != nil {
+		if err := validateResume(corpus, full, req.Cutoff, c.BaseURL, expectedEndpoints, legacyResume || preMetricResume); err != nil {
 			return Corpus{}, err
 		}
 		if err := validateResumeRevisionEvidence(corpus); err != nil {
@@ -79,6 +82,9 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		corpus.Receipt.Status = StatusPartial
 		for i := range corpus.Receipt.Sources {
 			backfillCrawlWindow(&corpus.Receipt.Sources[i])
+		}
+		if preMetricResume && !upgradeLegacyPreMetricCountOnlyEvidence(&corpus) {
+			return Corpus{}, errors.New("invalid resume: legacy pre-metric count-only evidence was not migrated")
 		}
 		if legacyResume {
 			upgraded, err := upgradeLegacyMixedPullEvidence(&corpus)

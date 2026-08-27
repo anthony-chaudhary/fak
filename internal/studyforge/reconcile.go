@@ -224,6 +224,22 @@ func absNonNegativeDifference(a, b int) int {
 	return b - a
 }
 
+// upgradeLegacyPreMetricCountOnlyEvidence finishes the one-way migration of
+// the short-lived count-only checkpoint shape that predates a typed policy
+// metric. Resume validation must prove that exact shape before this is called.
+func upgradeLegacyPreMetricCountOnlyEvidence(corpus *Corpus) bool {
+	delta := corpus.Receipt.NonAtomicDelta
+	if delta == nil || delta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly || delta.Policy.Metric != "" {
+		return false
+	}
+	observed := absNonNegativeDifference(delta.MixedCount, delta.DedicatedCount)
+	delta.Policy.Metric = NonAtomicDeltaPolicyMetricEndpointCardinalityDelta
+	delta.ObservedEndpointCardinalityDelta = intPointer(observed)
+	delta.Accepted = observed <= delta.Policy.MaxTotal
+	delta.Verdict = map[bool]string{true: NonAtomicDeltaVerdictAccepted, false: NonAtomicDeltaVerdictRejected}[delta.Accepted]
+	return true
+}
+
 // upgradeLegacyMixedPullEvidence performs the one-way pre-#9314 migration.
 // The old issues receipt retained an exact classified count but no identities.
 // Once the pulls census is terminal, this records that asymmetry explicitly;
