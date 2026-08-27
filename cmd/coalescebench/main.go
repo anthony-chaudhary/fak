@@ -40,13 +40,16 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"math"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 	"github.com/anthony-chaudhary/fak/internal/deepseekv4moe"
 	"github.com/anthony-chaudhary/fak/internal/intlist"
 )
@@ -58,20 +61,20 @@ const (
 
 // benchConfig is the full deterministic input set: same config → identical output.
 type benchConfig struct {
-	Seed         int64
-	Steps        int     // decode steps replayed per batch point
-	Layers       int     // L — MoE layers
-	Experts      int     // N — experts per layer
-	TopK         int     // K — experts per token
-	Skew         float64 // Zipf exponent s over per-layer expert popularity; 0 = uniform
-	ExpertMiB    float64 // e — bytes per routed (layer,expert) group, in MiB
-	NonRoutedGiB float64 // NR — non-routed active bytes per token, in GiB
-	BWSSDGiB     float64 // BW_ssd — SSD/host read bandwidth, GiB/s
-	BWRAMGiB     float64 // BW_ram — resident-memory bandwidth, GiB/s
-	ActiveGFLOP  float64 // active GFLOP per token
-	GFLOPS       float64 // device GFLOP/s
-	CacheGiB     float64 // resident expert-cache budget (the RAM tier over SSD), GiB
-	Batches      []int
+	Seed         int64   `json:"seed"`
+	Steps        int     `json:"steps"`            // decode steps replayed per batch point
+	Layers       int     `json:"layers"`           // L — MoE layers
+	Experts      int     `json:"experts"`          // N — experts per layer
+	TopK         int     `json:"top_k"`            // K — experts per token
+	Skew         float64 `json:"router_zipf_skew"` // Zipf exponent s over per-layer expert popularity; 0 = uniform
+	ExpertMiB    float64 `json:"expert_mib"`       // e — bytes per routed (layer,expert) group, in MiB
+	NonRoutedGiB float64 `json:"non_routed_gib"`   // NR — non-routed active bytes per token, in GiB
+	BWSSDGiB     float64 `json:"bw_ssd_gib_s"`     // BW_ssd — SSD/host read bandwidth, GiB/s
+	BWRAMGiB     float64 `json:"bw_ram_gib_s"`     // BW_ram — resident-memory bandwidth, GiB/s
+	ActiveGFLOP  float64 `json:"active_gflop"`     // active GFLOP per token
+	GFLOPS       float64 `json:"device_gflop_s"`   // device GFLOP/s
+	CacheGiB     float64 `json:"cache_gib"`        // resident expert-cache budget (the RAM tier over SSD), GiB
+	Batches      []int   `json:"batches"`
 }
 
 func (c benchConfig) validate() error {
@@ -237,18 +240,153 @@ func synthRoutes(cfg benchConfig, agents int) ([]deepseekv4moe.BatchStep, unionS
 
 // row is one PROJECTED point of the net-tok/s(B) curve.
 type row struct {
-	B              int
-	UMean          float64 // U(B): mean distinct experts per (layer, decode-step)
-	C              float64 // C(B) = B·K / U(B) — within-step coalescing ratio
-	PageInsPerStep float64 // simulated SSD page-in groups (trace.Misses — §2's M) per decode step, all layers
-	TraceRatio     float64 // simulator CoalesceRatio: NaiveStreamed/DistinctStreamed
-	PeakResident   int
-	SSDTerm        float64 // seconds per agent-token, §2 as written
-	RAMTerm        float64
-	FLOPTerm       float64
-	T              float64 // max of the three terms
-	NetToks        float64 // B / T
-	Binding        string  // which roofline binds: SSD | RAM | FLOP
+	B              int     `json:"batch"`
+	UMean          float64 `json:"mean_distinct_experts"`  // U(B): mean distinct experts per (layer, decode-step)
+	C              float64 `json:"coalescing_ratio"`       // C(B) = B·K / U(B) — within-step coalescing ratio
+	PageInsPerStep float64 `json:"page_ins_per_step"`      // simulated SSD page-in groups (trace.Misses — §2's M) per decode step, all layers
+	TraceRatio     float64 `json:"trace_coalescing_ratio"` // simulator CoalesceRatio: NaiveStreamed/DistinctStreamed
+	PeakResident   int     `json:"peak_resident_groups"`
+	SSDTerm        float64 `json:"ssd_term_seconds"` // seconds per agent-token, §2 as written
+	RAMTerm        float64 `json:"ram_term_seconds"`
+	FLOPTerm       float64 `json:"flop_term_seconds"`
+	T              float64 `json:"projected_agent_seconds"` // max of the three terms
+	NetToks        float64 `json:"projected_net_tokens_s"`  // B / T
+	Binding        string  `json:"binding_roofline"`        // which roofline binds: SSD | RAM | FLOP
+}
+
+// benchRun is the computed portion of one report. Keeping it separate from the
+// Markdown renderer lets the optional JSON artifact describe the exact same rows
+// without parsing or recomputing the operator-facing output.
+type benchRun struct {
+	Capacity int
+	Rows     []row
+	Base     row
+}
+
+const coalesceArtifactSchema = "fak-coalescebench/1"
+
+// coalesceArtifactReport is the additive machine-readable companion to the
+// historical Markdown stdout. ProjectedMarkdown is retained byte-for-byte so
+// adding the shared benchcli envelope cannot silently rewrite a headline or
+// baseline while the typed points make the same calculation indexable.
+type coalesceArtifactReport struct {
+	Schema  string                 `json:"schema"`
+	Label   string                 `json:"label"`
+	Model   string                 `json:"model"`
+	Config  benchConfig            `json:"config"`
+	Results coalesceArtifactResult `json:"results"`
+}
+
+type coalesceArtifactResult struct {
+	Points                   []row   `json:"points"`
+	RegimeTransitionBatch    *int    `json:"regime_transition_batch"`
+	UncoalescedSharedSSDTokS float64 `json:"uncoalesced_shared_ssd_tokens_s"`
+	UncoalescedBaseline      string  `json:"uncoalesced_baseline"`
+	SingleAgentBaseline      string  `json:"single_agent_baseline"`
+	ProjectedMarkdown        string  `json:"projected_markdown"`
+}
+
+func artifactReport(cfg benchConfig, run benchRun, markdown string) coalesceArtifactReport {
+	var transition *int
+	if star, ok := regimeTransition(run.Rows); ok {
+		b := star.B
+		transition = &b
+	}
+	return coalesceArtifactReport{
+		Schema: coalesceArtifactSchema,
+		Label:  "PROJECTED",
+		Model:  "synthetic GLM-5.2-shaped router",
+		Config: cfg,
+		Results: coalesceArtifactResult{
+			Points:                   run.Rows,
+			RegimeTransitionBatch:    transition,
+			UncoalescedSharedSSDTokS: uncoalescedFloor(cfg),
+			UncoalescedBaseline:      "B independent un-coalesced streams, each granted full SSD bandwidth (optimistic B-box baseline)",
+			SingleAgentBaseline:      "aggregate net tokens/s divided by the B=1 projected point; not single-user latency",
+			ProjectedMarkdown:        markdown,
+		},
+	}
+}
+
+// analyticalEvidence declares exactly what coalescebench's deterministic
+// router replay plus roofline can prove. In particular, its projected tok/s
+// fields remain bottleneck hypotheses and can never be promoted to achieved or
+// competitive throughput by a downstream artifact consumer.
+func analyticalEvidence(cfg benchConfig, wall time.Duration, reportBytes int64) (benchcli.SimulationEvidence, error) {
+	configJSON, err := json.Marshal(cfg)
+	if err != nil {
+		return benchcli.SimulationEvidence{}, fmt.Errorf("marshal evidence config: %w", err)
+	}
+	configDigest := benchcli.SHA256Digest(configJSON)
+	engineRevision := benchcli.Stamp().GitCommit
+	if strings.TrimSpace(engineRevision) == "" || strings.EqualFold(strings.TrimSpace(engineRevision), "unknown") {
+		return benchcli.SimulationEvidence{}, fmt.Errorf("engine revision unresolved: %q", engineRevision)
+	}
+	workloadDigest := benchcli.SHA256Digest(append([]byte(engineRevision+"\n"), configJSON...))
+	seed := cfg.Seed
+	return benchcli.SimulationEvidence{
+		Schema:       benchcli.SimulationEvidenceSchema,
+		EvidenceType: benchcli.EvidenceAnalyticalBound,
+		ClaimCeiling: benchcli.ClaimBottleneckOnly,
+		Engine: benchcli.SimulationEngine{
+			Name:         "coalescebench synthetic-router roofline",
+			Revision:     engineRevision,
+			ConfigDigest: configDigest,
+		},
+		Workload: benchcli.WorkloadProvenance{
+			Name:   "synthetic GLM-5.2-shaped MoE routes",
+			Source: "cmd/coalescebench splitmix64 weighted-without-replacement generator",
+			Digest: workloadDigest,
+		},
+		ValidityEnvelope: benchcli.ValidityEnvelope{
+			Description: "deterministic mechanism counts and roofline bottleneck bounds for the declared synthetic router, cache capacity, model shape, and placeholder rates",
+			Dimensions: map[string]string{
+				"batches":             fmt.Sprint(cfg.Batches),
+				"cache":               fmt.Sprintf("%.6g GiB LRU over %.6g MiB expert groups", cfg.CacheGiB, cfg.ExpertMiB),
+				"model_shape":         fmt.Sprintf("layers=%d experts=%d top_k=%d", cfg.Layers, cfg.Experts, cfg.TopK),
+				"router_distribution": fmt.Sprintf("synthetic Zipf exponent %.6g", cfg.Skew),
+				"seed":                fmt.Sprint(cfg.Seed),
+				"steps":               fmt.Sprint(cfg.Steps),
+			},
+		},
+		ExcludedEffects: []string{
+			"real-model routing distribution and the pending #5251 trace",
+			"served model I/O, dequantization, kernel execution, scheduling, and contention",
+			"achieved latency, throughput, energy, cost, and tail behavior",
+			"fak-vs-llama.cpp or native-faster competitive claims",
+			"cross-seed uncertainty and statistical confidence; this is one frozen fixed-seed fixture",
+			"host CPU time is not sampled by this portable in-process runner (recorded as 0 ms)",
+		},
+		Replay: benchcli.ReplaySpec{
+			Seed:               &seed,
+			Stream:             "one frozen fixture; splitmix64 substreams keyed by (seed,batch) are sweep inputs, not independent replications",
+			Repetitions:        1,
+			IndependentStreams: 1,
+			Stochastic:         false,
+			Uncertainty:        "not estimated; the fixed seed establishes replay only",
+		},
+		Cost: benchcli.SimulationCost{
+			HostWallTimeMS: float64(wall) / float64(time.Millisecond),
+			HostCPUTimeMS:  0,
+			Bytes:          reportBytes,
+		},
+	}, nil
+}
+
+func writeArtifact(path string, cfg benchConfig, run benchRun, markdown string, wall time.Duration) error {
+	report := artifactReport(cfg, run, markdown)
+	reportJSON, err := json.Marshal(report)
+	if err != nil {
+		return fmt.Errorf("marshal report for cost accounting: %w", err)
+	}
+	evidence, err := analyticalEvidence(cfg, wall, int64(len(reportJSON)))
+	if err != nil {
+		return err
+	}
+	if err := benchcli.WriteReportWithEvidence(path, report, evidence); err != nil {
+		return fmt.Errorf("write artifact: %w", err)
+	}
+	return nil
 }
 
 // computeRow applies the §2 roofline exactly as written to one batch point.
@@ -320,16 +458,16 @@ func benchPoint(cfg benchConfig, capacity, b int) (row, error) {
 	return r, nil
 }
 
-// runBench produces the full deterministic report for a config. diag receives per-point
-// progress lines (os.Stderr in main, io.Discard in tests); the returned string is the
-// entire stdout artifact — same cfg → identical string.
-func runBench(cfg benchConfig, diag io.Writer) (string, error) {
+// runSweep computes the deterministic points shared by the Markdown and JSON
+// renderers. diag receives per-point progress lines (os.Stderr in main,
+// io.Discard in tests).
+func runSweep(cfg benchConfig, diag io.Writer) (benchRun, error) {
 	if err := cfg.validate(); err != nil {
-		return "", err
+		return benchRun{}, err
 	}
 	capacity, err := cfg.capacityGroups()
 	if err != nil {
-		return "", err
+		return benchRun{}, err
 	}
 
 	rows := make([]row, 0, len(cfg.Batches))
@@ -338,7 +476,7 @@ func runBench(cfg benchConfig, diag io.Writer) (string, error) {
 	for _, b := range cfg.Batches {
 		r, err := benchPoint(cfg, capacity, b)
 		if err != nil {
-			return "", err
+			return benchRun{}, err
 		}
 		rows = append(rows, r)
 		if b == 1 {
@@ -352,11 +490,20 @@ func runBench(cfg benchConfig, diag io.Writer) (string, error) {
 		// B=1 is not in the sweep (it is, at the defaults).
 		base, err = benchPoint(cfg, capacity, 1)
 		if err != nil {
-			return "", err
+			return benchRun{}, err
 		}
 	}
+	return benchRun{Capacity: capacity, Rows: rows, Base: base}, nil
+}
 
-	return render(cfg, capacity, rows, base), nil
+// runBench produces the full deterministic stdout report for a config. The
+// returned string remains the legacy artifact: same cfg -> identical bytes.
+func runBench(cfg benchConfig, diag io.Writer) (string, error) {
+	run, err := runSweep(cfg, diag)
+	if err != nil {
+		return "", err
+	}
+	return render(cfg, run.Capacity, run.Rows, run.Base), nil
 }
 
 func render(cfg benchConfig, capacity int, rows []row, base row) string {
@@ -405,6 +552,7 @@ func main() {
 	gflops := flag.Float64("gflops", 1000.0, "device GFLOP/s for FLOP_term. PLACEHOLDER (host-GEMM ~1 TFLOP/s class)")
 	cacheGiB := flag.Float64("cache-gib", 128.0, "resident expert-cache budget (RAM tier over SSD), GiB. PLACEHOLDER — the epic's premise is host RAM smaller than the 414.5 GiB routed band")
 	batchesArg := flag.String("batches", "1,4,16,64,128", "comma-separated batch sizes (agent counts) to sweep")
+	artifactOut := flag.String("artifact-out", "", "optional shared benchcli JSON artifact path; stdout remains the historical PROJECTED Markdown")
 	flag.Parse()
 
 	cfg := benchConfig{
@@ -413,10 +561,19 @@ func main() {
 		BWSSDGiB: *bwSSD, BWRAMGiB: *bwRAM, ActiveGFLOP: *activeGFLOP, GFLOPS: *gflops,
 		CacheGiB: *cacheGiB, Batches: intlist.Parse(*batchesArg),
 	}
-	out, err := runBench(cfg, os.Stderr)
+	started := time.Now()
+	run, err := runSweep(cfg, os.Stderr)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "coalescebench:", err)
 		os.Exit(1)
+	}
+	simulationWall := time.Since(started)
+	out := render(cfg, run.Capacity, run.Rows, run.Base)
+	if path := strings.TrimSpace(*artifactOut); path != "" {
+		if err := writeArtifact(path, cfg, run, out, simulationWall); err != nil {
+			fmt.Fprintln(os.Stderr, "coalescebench:", err)
+			os.Exit(1)
+		}
 	}
 	fmt.Print(out)
 }

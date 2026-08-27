@@ -7668,6 +7668,36 @@
           "category": "incidental",
           "reason": "Windows Job Object accounting field name from the OS API, not a fak gateway engine concept",
           "token": "kernel_100ns"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark evidence producer identity record; not the gateway execution-engine concept.",
+          "token": "SimulationEngine"
+        },
+        {
+          "category": "incidental",
+          "reason": "Captured trace provenance field; not runtime gateway engine selection.",
+          "token": "KernelSelection"
+        },
+        {
+          "category": "incidental",
+          "reason": "Frozen-trace invalidation trigger; not runtime gateway or engine routing.",
+          "token": "TraceInvalidationKernelChoice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized frozen-trace invalidation token; not runtime gateway or engine routing.",
+          "token": "kernel_choice"
+        },
+        {
+          "category": "incidental",
+          "reason": "Simulation evidence producer revision identity; not the gateway engine abstraction.",
+          "token": "EngineRevision"
+        },
+        {
+          "category": "incidental",
+          "reason": "Simulation evidence configuration digest; not gateway engine configuration.",
+          "token": "EngineConfigDigest"
         }
       ],
       "id": "gateway-engine",
@@ -7678,11 +7708,13 @@
         "BaselineEngineCalls",
         "DeniedEngineCalls",
         "EngineBash",
+        "EngineConfigDigest",
         "EngineEdit",
         "EngineGlob",
         "EngineGrep",
         "EngineRead",
         "EngineReductionPct",
+        "EngineRevision",
         "EngineWrite",
         "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE",
         "FAK_INKERNEL_RADIX_HOST_L2_BYTES",
@@ -7691,6 +7723,7 @@
         "KERNEL_TRANSFORM_REQUIRES_CLIENT_PREVIEW",
         "KernelID",
         "KernelRevision",
+        "KernelSelection",
         "KernelTurns",
         "NativeDecodeTraceEngine",
         "NativeDecodeTraceSupported",
@@ -7699,8 +7732,10 @@
         "PrivateAgentBEngineCalls",
         "RegisterEngines",
         "SessionAffinityGateway",
+        "SimulationEngine",
         "ThisPeriodTotalKernelTime",
         "TotalKernelTime",
+        "TraceInvalidationKernelChoice",
         "WithAffinity",
         "bashEngine",
         "cacheEmitter",
@@ -7748,6 +7783,7 @@
         "kernelSession",
         "kernelValue",
         "kernel_100ns",
+        "kernel_choice",
         "kernels",
         "kernelwiki",
         "microCacheKernel32",
@@ -10848,6 +10884,16 @@
           "category": "incidental",
           "reason": "Go JSON field for one existing portfolio coverage debt row, not a support-maturity concept.",
           "token": "CoverageDebtUnit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Simulation evidence claim-ceiling symbol; not a support-maturity state or promotion concept.",
+          "token": "ClaimCorrectnessOnly"
+        },
+        {
+          "category": "incidental",
+          "reason": "Serialized simulation claim ceiling; not a support-maturity state or promotion concept.",
+          "token": "correctness_only"
         }
       ],
       "exclude": [
@@ -10862,6 +10908,7 @@
         "CancellationSupported",
         "CaseSupported",
         "CaseUnsupported",
+        "ClaimCorrectnessOnly",
         "ClaudeKeychainSupported",
         "CodeUnsupportedCombination",
         "ConfidenceUnsupported",
@@ -10993,6 +11040,7 @@
         "compareParity",
         "correctnessTasks",
         "correctness_noninferiority_margin",
+        "correctness_only",
         "correctnessclass",
         "correctnessdependson",
         "coverageBlock",
