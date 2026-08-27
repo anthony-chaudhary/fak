@@ -1,5 +1,13 @@
 # Frontier infrastructure coverage audit
 
+## Issue #9381 delta
+
+- Revised four existing primary-trace records rather than duplicating them: BurstGPT/Azure OpenAI, Chutes Year-in-Serving, ServeGen, and Alibaba Cloud Model Studio KV-cache.
+- Named each random/rank variable, observation window, granularity, method class, directly reported parameter/test, and denominator/stationarity limitation.
+- Kept entry, category, and entity counts unchanged; `coverage.entities` remains exactly sorted.
+- Retained only released traces, primary papers, and official analysis/generator code as substantiation.
+- Preserved the bounded conclusion: ServeGen v3 directly supports tier-specific Gamma/Weibull/Exponential IAT fits, category-specific Pareto/lognormal-mixture input fits, an Exponential output fit, and 24h/12h aggregate seasonality; it does not support a universal law or unreported parameters. Later BurstGPT v1.1 synthetic Zipf material, qualitative heavy-tail language, and empirical CDFs were not upgraded into production fits.
+
 **Snapshot:** 2026-08-27
 **Issue:** [#9306](https://github.com/anthony-chaudhary/fak/issues/9306)  
 **Authority:** [`index.json`](index.json)

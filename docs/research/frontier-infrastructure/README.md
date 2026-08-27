@@ -1,5 +1,9 @@
 # Frontier infrastructure and workload expectations index
 
+## Latest slice: production distribution evidence (#9381)
+
+Four existing records now carry variable- and denominator-specific audits for BurstGPT/Azure OpenAI, Chutes Year-in-Serving, ServeGen, and Alibaba Cloud Model Studio KV-cache. The audit distinguishes empirical distributions, explicit fitted models, statistical fit/tests, and synthetic generator assumptions. No entries or entities were added. ServeGen v3 supplies bounded, variable-specific fitted families, but public evidence still does not support one universal Zipf, lognormal, Pareto, Poisson, Hawkes, or MMPP workload law.
+
 **Status:** initial end-to-end spine, incomplete by design. **As of:** 2026-08-27. **Tracker:** #9269.
 
 This index records what frontier labs, hyperscalers, AI clouds, datacenter operators,

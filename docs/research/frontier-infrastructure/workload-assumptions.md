@@ -70,6 +70,28 @@ turn-count, or model-demand claim still requires an explicit fitted population a
 
 ## Distribution assumptions
 
+### Production distribution evidence audited for #9381
+
+The public production traces support **bounded empirical distributions, not one universal
+family**. Keep the random variable, denominator, product, window, and aggregation level in
+every benchmark record. In particular, heavy tail is not a power law; a power law is not
+Zipf unless the variable is rank-frequency and the fit is supported; an empirical CDF is
+not a fitted family; and a synthetic generator is not production evidence.
+
+| Primary trace | Exact variable / rank variable | Population, window, granularity | Evidence method | Reported family / parameter | Stationarity and denominator limit |
+|---|---|---|---|---|---|
+| BurstGPT / Azure OpenAI v1 (2024-01-31) | Aggregate request arrivals; interarrival time derivable from released timestamps; per-request input and output token counts | Azure OpenAI GPT services, 121 days; separate research API, 36 days; request-level traces and aggregate time-series/histogram views | Released trace plus qualitative plots/empirical distributions | None; no fit statistic in v1 | Aggregate arrivals are not per-user/client arrivals; the two products/windows are separate; later v1.1 synthetic Zipf sampling is outside this record and is not a production fit |
+| Chutes Year-in-Serving | Per-model request-count rank/share; selected-model interarrival time; per-request input/output length | Chutes.ai, 212B requests and 46T tokens across 60K models, calendar 2025; product aggregate or selected-model figures | Rank/share summaries and empirical distributions | None; no fit statistic | Model request share is not token, spend, prefix, or user share; rankings turn over during the year; selected models are not the whole product |
+| ServeGen / Alibaba Cloud Model Studio v3 | Per-request input/output length; one-minute interarrival time; aggregate request rate | 300+ APIs, 2024-11-25 through 2024-12-01; one-minute IAT samples and five-minute rate buckets | KS tests for Exponential/Gamma/Weibull IAT candidates; fitted length curves; linear trend plus 24h/12h Fourier seasonality | Best IAT family by tier: Gamma (M-large), Weibull (M-mid), Exponential (M-small); category inputs: Pareto/lognormal mixture; outputs: Exponential. No mixture parameters or length-fit statistic published | Fits are variable- and tier/category-specific; KS p-values vary and may be insignificant. One aggregate week does not prove stationarity, per-client laws, or a universal family |
+| Alibaba Cloud Model Studio KV-cache trace | Request input/output length; shared-prefix length/ratio; prefix-tree height/width; session request count; cacheable-prefix reuse frequency/lifetime | 58 workloads, 2024-06-07 through 2024-07-25; request-, workload-, prefix-, session-, and block-level denominators vary by figure | Empirical CDFs and workload summaries | None; no rank exponent or fit statistic | Prefix frequency is not model popularity or user/token share; 49 days and cross-workload heterogeneity do not prove stationarity |
+
+No retained primary trace supports a universal Zipf, lognormal, Pareto, Poisson, Hawkes, or
+MMPP law. ServeGen does support bounded, source-specific Gamma/Weibull/Exponential IAT fits
+and Pareto/lognormal-mixture and Exponential token-length fits; retain them only with their
+exact variable and tier/category. Other named families remain labeled sensitivity or synthetic
+scenarios unless a benchmark cites a source-specific fit or computes one reproducibly from an
+official released trace.
+
 | Dimension | Convenient but weak default | Evidence-backed expectation | Benchmark requirement |
 |---|---|---|---|
 | Request arrivals | Stationary Poisson | Bursty, time-varying, client-composed, and shifted by releases/availability | Include stationary baseline **and** regime-switching/burst scenarios; label synthetic generators. |

@@ -110,6 +110,21 @@ decoding settings. It reported average skewness **3.10**, mean coefficient of va
 P90/P50 **4.62**, and P99/P50 **10.77**. Its fitted log-t result is experimental rather
 than a production arrival trace, but it falsifies deterministic per-prompt output length.
 
+## Audited distribution parameters (#9381)
+
+| Source | Production variables retained | Directly reported family/test/parameter | Benchmark treatment |
+|---|---|---|---|
+| BurstGPT / Azure OpenAI v1 | Request timestamps, aggregate arrivals, input tokens/request, output tokens/request | No family parameter or goodness-of-fit test in arXiv v1 (2024-01-31) | Replay each released 121-day and 36-day population separately; exclude later v1.1 synthetic Zipf material from this record |
+| Chutes Year-in-Serving | Model request-count rank/share, selected-model interarrivals, input/output tokens per request | No Zipf exponent or fitted family/test | Preserve rank/share, lengths, and interarrivals as different axes; segment time because model rankings and load evolve |
+| ServeGen v3 | One-minute interarrival time by workload tier; category input/output lengths; five-minute aggregate request rate | IAT candidates Exponential/Gamma/Weibull are KS-tested; best families are Gamma (M-large), Weibull (M-mid), and Exponential (M-small). Category inputs use a Pareto/lognormal mixture and outputs Exponential. Trend model periods are 24h and 12h. No token-mixture parameters or token-fit statistic published | Preserve variable and tier/category labels; replay the week or label generated traffic synthetic; do not turn the bounded fits into a universal law |
+| Alibaba KV-cache trace | Prefix-sharing ratio/length, tree geometry, session size, prefix reuse frequency/lifetime, request lengths | No Zipf/Pareto/lognormal parameter or fit/test | Use empirical per-workload distributions and keep request/workload/prefix/session/block denominators explicit |
+
+ServeGen v3 retains named fitted families and KS test evidence, but it publishes no reusable
+shape/scale values for its IAT families and no weights or Pareto/lognormal parameters for its
+input-length mixture. Its 24-hour and 12-hour values are aggregate seasonality periods, not
+family parameters. No source in this audit reports a defensible universal Zipf exponent,
+Pareto tail index, lognormal parameters, Poisson rate, Hawkes kernel, or MMPP transition matrix.
+
 ## Distribution-selection rules
 
 1. **Poisson:** use only as a stationary control or after demonstrating inter-arrival fit for

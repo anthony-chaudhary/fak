@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
   "updated_at": "2026-08-27",
-  "issue": 9269,
+  "issue": 9381,
   "root_issue": 9269,
-  "latest_slice_issue": 9379,
+  "latest_slice_issue": 9381,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -910,39 +910,11 @@
       "source_kind": "peer_reviewed_paper",
       "evidence_class": "production_measurement",
       "confidence": "high",
-      "claim": "ServeGen characterized production text, multimodal, and reasoning workloads and showed that each requires separate generation: text has one-day temporal structure and client heterogeneity, multimodal input sizes cluster by modality, and reasoning output lengths correlate with configured reasoning budgets.",
-      "quantified": {
-        "workload_classes": 3,
-        "text_generation_observation_window_days": 1,
-        "text_top_clients_request_share": 0.9,
-        "text_cross_client_cv_variation_multiple_min": 2,
-        "multimodal_prompt_image_90th_percentile": 5,
-        "multimodal_images_over_prompt_fraction": 0.2,
-        "multimodal_client_max_request_rate_multiple": 5,
-        "reasoning_model_max_request_rate_rps": 2.17,
-        "reasoning_client_max_request_rate_rps": 0.047,
-        "reasoning_output_budget_correlation_coefficient": 0.7,
-        "reasoning_minimum_output_budget_ratio": 1.05,
-        "reasoning_output_length_heavy_tail_min_tokens": 4000,
-        "reasoning_max_output_tokens": 40000,
-        "reasoning_multi_turn_request_fraction_approx": 0.1
-      },
-      "assumptions": [
-        "Text, multimodal, and reasoning workloads need different temporal and size models.",
-        "Client heterogeneity can exceed aggregate temporal variation and should be represented explicitly.",
-        "Reasoning output distributions are conditional on configured reasoning budgets rather than independent draws.",
-        "Figure-read maxima, percentiles, correlations, and ratios are approximate visual extractions from the released plot assets, not population confidence intervals."
-      ],
-      "contradictions_or_limits": [
-        "ServeGen is a production study but provider identity, exact population denominators, and universal user distribution are not disclosed.",
-        "The study does not establish a universal Zipf law, tenant concentration parameter, geography mix, retry rate, speculative acceptance rate, or service failure distribution.",
-        "The released trace is provider-specific and reports no population confidence intervals; plot-read values should parameterize envelopes, not universal laws."
-      ],
-      "fak_implications": [
-        "Use workload-class-specific generators and preserve client identity when benchmarking routing, batching, and cache behavior.",
-        "Condition reasoning output lengths on budget and test the observed long tail instead of assuming a fixed completion length.",
-        "Do not infer user popularity or arrival families from aggregate request curves alone."
-      ],
+      "claim": "ServeGen characterizes one week of Alibaba Cloud Model Studio production traffic and reports source-specific distribution fits rather than one universal workload family: one-minute interarrival-time samples are tested against Exponential, Gamma, and Weibull families; category input lengths are fitted with a Pareto/lognormal mixture and category output lengths with an Exponential distribution. It separately reconstructs aggregate five-minute request-rate series with a linear trend and 24-hour and 12-hour Fourier terms.",
+      "quantified": "The trace covers 300+ APIs from 2024-11-25 through 2024-12-01. Arrival fitting uses one-minute IAT samples; Figure 2 reports KS statistics and p-values for Exponential, Gamma, and Weibull candidates and names the best family by workload tier (Gamma for M-large, Weibull for M-mid, Exponential for M-small). Figure 10 reports the input-length Pareto/lognormal-mixture fit and output-length Exponential fit qualitatively; the paper does not publish the mixture weights, Pareto/lognormal parameters, or an input/output goodness-of-fit statistic. The reconstruction model uses aggregate five-minute rate buckets with linear trend plus 24h and 12h Fourier periods.",
+      "assumptions": "Treat each reported family as bounded to its stated random variable, workload tier/category, one-week production population, and paper version v3. Do not transfer the arrival-family fits to per-client traffic or the token-length fits across categories. Use the official generator only with source-derived or explicitly supplied parameters; its Weibull option is not by itself production evidence.",
+      "contradictions_or_limits": "The paper explicitly rejects neither every alternative family nor a universal family: it tests only Exponential, Gamma, and Weibull for one-minute IAT samples, while its token-length fits use different families. KS p-values vary across minutes and may be insignificant; no stationarity proof, per-client fit, mixture parameter table, or token-length goodness-of-fit statistic is reported. The 24h/12h components model aggregate seasonality, not interarrival or token-length distributions.",
+      "fak_implications": "Preserve the source-specific fitted families and KS evidence as separate benchmark cases, with workload tier/category and variable labels. Replay the observed week for fidelity; when generating traffic, label fitted-IAT, fitted-token-length, and trend/seasonality components separately and do not collapse them into a universal Poisson, Pareto, lognormal, or Weibull law.",
       "rumor": {
         "is_rumor": false
       }
@@ -1046,56 +1018,11 @@
       "source_kind": "preprint",
       "evidence_class": "production_measurement",
       "confidence": "medium_high",
-      "claim": "A one-year Chutes trace captured 6.12B requests from 314,970 users across 9,174 models and found evolving model popularity, heterogeneous user cadence, strong token-level prefix reuse, and persistent load imbalance.",
-      "quantified": {
-        "trace_days": 365,
-        "requests": 6120000000,
-        "users": 314970,
-        "models": 9174,
-        "public_models": 3922,
-        "private_models": 5252,
-        "input_tokens_million": 35795761,
-        "output_tokens_million": 2522394,
-        "models_with_one_user_fraction": 0.75,
-        "models_with_under_100_requests_fraction": 0.67,
-        "users_targeting_one_or_two_models_fraction_min": 0.7,
-        "users_with_daily_periodicity_fraction": 0.22,
-        "user_median_iat_range_seconds": [
-          0.02,
-          105700
-        ],
-        "same_user_model_iat_within_0_1_seconds_fraction_approx": 0.5,
-        "same_user_model_iat_within_10_seconds_fraction_approx": 0.8,
-        "prefix_reuse_distance_within_90_seconds_fraction": 0.5,
-        "prefix_reuse_distance_within_24_hours_fraction": 0.95,
-        "cache_request_hit_ratio_percent_approx": 5,
-        "cache_token_hit_ratio_percent_max": 80,
-        "cache_token_hit_ratio_percent_min": 20,
-        "periodic_models_cacheable_prefix_fraction": 0.85,
-        "periodic_models_token_hit_ratio_percent": 78,
-        "load_balance_max_to_mean_ratio_min": 5.5,
-        "load_balance_max_to_mean_ratio_max": 8.8,
-        "load_balance_max_to_min_ratio": 4.8
-      },
-      "assumptions": [
-        "Model popularity, user tenure, request cadence, and cache locality drift materially over months.",
-        "Request-share concentration and token-share concentration are different distributions.",
-        "Exact prompt repetition can be rare even when token-level prefix reuse is high.",
-        "User-level inter-arrival times and periodicity are heterogeneous enough to require multiple workload classes.",
-        "Figure-read values are approximate visual extractions from the paper assets, not reported confidence intervals; retain their displayed precision only for bounded benchmark envelopes."
-      ],
-      "contradictions_or_limits": [
-        "This is one decentralized marketplace; its user and model mix is not a direct distribution for hyperscaler APIs or consumer chat products.",
-        "The paper reports empirical shares and intervals, not a universal fitted Zipf exponent or one stationary arrival process.",
-        "Cache ratios depend on tokenization, routing, model, trace period, and prefix definition; request hit ratio must not be substituted for token hit ratio.",
-        "The trace does not expose geography, retries, speculative acceptance, service failure causes, or quality-constrained useful goodput.",
-        "The trace reports no population confidence intervals; several concentration, cache, and imbalance values are approximate reads from plotted empirical distributions rather than fitted-family parameters."
-      ],
-      "fak_implications": [
-        "Benchmark popularity and cache policies under monthly drift, model churn, heterogeneous users, and separate request/token concentrations.",
-        "Use tiered prefix TTLs that cover sub-second automation, 90-second locality, and daily/weekly periodic reuse.",
-        "Treat routing imbalance and cache locality jointly; balancing request counts alone can leave 3–4x load skew."
-      ],
+      "claim": "Chutes.ai reports one year of production serving telemetry spanning 2025-01-01 through 2025-12-31: 212B requests and 46T tokens across 60K models. Distribution evidence is descriptive: request traffic is highly concentrated among the leading models, hot-model rankings change materially over time, and input/output token lengths and interarrival times are shown as empirical distributions for selected models and use cases. No Zipf/Pareto/lognormal/Poisson/Hawkes/MMPP fit or goodness-of-fit test is reported.",
+      "quantified": "212B requests; 46T tokens; 60K models; calendar-year 2025. Paper figures use product-wide or selected-model empirical distributions at the figure-specific granularity; model popularity is request-count rank/share, while token-length plots count tokens per request. No family parameter is reported.",
+      "assumptions": "The population is requests served by Chutes.ai during calendar 2025. Model-rank and selected-model distributions use different denominators. The year contains workload growth and model turnover, so pooled distributions are not stationary estimates.",
+      "contradictions_or_limits": "Heavy concentration is not a power-law or Zipf proof. Request popularity is not token, spend, prefix, or user share. Selected-model interarrival and length plots cannot be generalized to every model or client, and the year-long aggregate does not imply stationarity.",
+      "fak_implications": "Replay both concentration and churn: model request-share rank, selected-model interarrival, and per-request input/output lengths should be separate axes. Do not collapse them into one Zipf exponent or one stationary arrival process.",
       "rumor": {
         "is_rumor": false
       }
@@ -1796,23 +1723,11 @@
       "source_kind": "research_paper",
       "evidence_class": "production_measurement",
       "confidence": "high",
-      "claim": "Two Aliyun production workloads show skewed, category-dependent KV reuse. Contrary to assuming multi-turn chat dominates reuse, single-turn requests account for 97% of reuses in one trace; reuse probability within request categories is modeled well by exponential distributions.",
-      "quantified": {
-        "single_turn_share_of_reuses_pct_in_one_trace": 97,
-        "production_workloads": 2
-      },
-      "assumptions": [
-        "Prefix reuse depends on request category and workload; single-turn repeated prefixes can dominate.",
-        "Global reuse distributions are less predictable than category-conditioned distributions."
-      ],
-      "contradictions_or_limits": [
-        "The 97% result is trace-specific and must not be projected to every cloud or application.",
-        "The paper does not establish a universal Zipf exponent or one cache TTL across workloads."
-      ],
-      "fak_implications": [
-        "Classify request category before cache admission and routing.",
-        "Include single-turn shared-prefix reuse in addition to conversational multi-turn reuse."
-      ],
+      "claim": "A production trace from Alibaba Cloud Model Studio covers 58 LLM serving workloads across 49 days (June 7-July 25, 2024) and reports empirical KV-prefix sharing/reuse behavior. The retained distribution variables are request-level input/output lengths, shared-prefix length and ratio, prefix-tree height/width, session request count, and cacheable-prefix reuse frequency/lifetime. Results are empirical CDFs and workload summaries; the paper reports no Zipf/Pareto/lognormal fit or goodness-of-fit test.",
+      "quantified": "58 workloads; 49 days from 2024-06-07 through 2024-07-25. Example reported shares include 17.7% of requests sharing no prefix and 16.2% sharing only a system prompt; more than 60% of workloads have over 20% shareable tokens and more than 1,000 cacheable KV blocks. No rank exponent or family parameter is reported.",
+      "assumptions": "Workload and figure denominators vary: requests, workloads, prefixes, sessions, or cache blocks. Prefix frequency is defined by exact/structured prefix reuse in the authors' analysis, not semantic prompt similarity or per-user demand.",
+      "contradictions_or_limits": "Prefix reuse frequency is not model popularity, user share, token-spend share, or a Zipf law. Empirical CDFs do not establish fitted families. The 49-day window and strong cross-workload heterogeneity do not establish stationarity or universality.",
+      "fak_implications": "Replay cacheability using measured prefix/session variables and per-workload heterogeneity. Keep prefix popularity distinct from model popularity and require explicit trace-derived ranks before testing Zipf-shaped cache scenarios.",
       "rumor": {
         "is_rumor": false
       }
@@ -7996,53 +7911,15 @@
       "published_at": "2026-08-25",
       "event_at": "2026-08-25",
       "source_title": "BurstGPT: A Real-World Workload Dataset to Optimize LLM Serving Systems",
-      "source_url": "https://arxiv.org/abs/2401.17644",
+      "source_url": "https://arxiv.org/abs/2401.17644v1",
       "source_kind": "research_paper",
       "evidence_class": "production_measurement",
       "confidence": "high",
-      "claim": "BurstGPT reports 10.31M requests across 213 days and four Azure OpenAI-powered services, with daily and weekly periodicity, long-tailed token lengths, separated GPT-4 failure classes, and case-study bursts spanning high-rate seconds to lower-rate minutes.",
-      "quantified": {
-        "requests": 10310000,
-        "trace_days": 213,
-        "services": 4,
-        "gpt4_requests": 8690000,
-        "gpt35_requests": 950000,
-        "chatgpt_requests": 300000,
-        "gpt4o_requests": 160000,
-        "gpt4_instance_failure_fraction_approx": 0.068,
-        "gpt4_trigger_or_context_exceed_failure_fraction_approx": 0.034,
-        "gpt4_content_policy_failure_fraction_approx": 0.005,
-        "day4_users_approx": 3000,
-        "dominant_period_days": 1,
-        "case_study_bursts": [
-          {
-            "requests_per_second": 400,
-            "duration_seconds": 10
-          },
-          {
-            "requests_per_second": 100,
-            "duration_seconds": 60
-          },
-          {
-            "requests_per_second": 15,
-            "duration_seconds": 600
-          }
-        ]
-      },
-      "assumptions": [
-        "Replay should preserve service identity, daily and weekly periodicity, long-tailed token geometry, and multiple burst durations rather than fitting one stationary aggregate process.",
-        "Failure classes should remain separate because instance, trigger/context, and content-policy outcomes imply different recovery and capacity costs."
-      ],
-      "contradictions_or_limits": [
-        "The dataset contains four Azure OpenAI-powered traces, not all Azure OpenAI traffic.",
-        "The approximately 3,000 users are reported for day 4 and are not a total-user count.",
-        "The 400 requests/s for 10 s, 100 requests/s for 60 s, and 15 requests/s for 600 s bursts are case studies, not population quantiles.",
-        "GPT-4 instance, trigger/context-exceed, and content-policy failure fractions are separated and must not be merged into one interchangeable failure rate."
-      ],
-      "fak_implications": [
-        "Add source-bounded daily and weekly seasonality plus multi-duration burst scenarios to workload replay.",
-        "Condition token work, failure handling, and capacity receipts on service and failure class rather than requests alone."
-      ],
+      "claim": "The original BurstGPT v1 paper and released Azure OpenAI traces expose production request timestamps/aggregate arrivals and per-request input/output token counts for two separate products. They characterize burstiness and empirical token/request patterns but do not fit a named Zipf, power-law, Pareto, lognormal, Poisson, Hawkes, or MMPP family to the production trace.",
+      "quantified": "Azure OpenAI GPT services are represented by a 121-day trace, and a separate research API by a 36-day trace. The released request-level fields permit empirical interarrival derivation within each trace and preserve input/output token counts. No production family parameter, goodness-of-fit statistic, or rejection test is reported in arXiv v1 (2024-01-31).",
+      "assumptions": "Keep the 121-day and 36-day populations separate, preserve request-level granularity, and derive interarrivals only from the released timestamps while recording any filtering or aggregation. Treat this record as the original v1/2024 trace and paper, not later BurstGPT v1.1 analysis or generator material.",
+      "contradictions_or_limits": "Aggregate arrivals are not per-user/client arrivals, token histograms are not fitted distribution families, and either finite window is insufficient to prove stationarity. Later BurstGPT versions/material add synthetic Zipf request-length sampling; that is generator configuration, not a production fit, and is outside this v1 record. No untested family is rejected by the absence of a reported fit.",
+      "fak_implications": "Replay the two official traces separately and report burst metrics plus empirical input/output-token distributions. Any Zipf, Poisson, Hawkes, MMPP, Pareto, or lognormal scenario must be labeled synthetic or independently fitted; do not attribute later v1.1 generator assumptions to the original Azure production trace.",
       "rumor": {
         "is_rumor": false,
         "status": "not_applicable"
