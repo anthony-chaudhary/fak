@@ -383,3 +383,118 @@ func TestModelObserveBandwidthRejectsCrossModeFlags(t *testing.T) {
 		t.Fatalf("profile-only flag error=%v", err)
 	}
 }
+
+func TestModelObserveBandwidthImportsHostControllerCounters(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "collection.json")
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "host-controller-direct.json")
+	args := []string{
+		"collect",
+		"--host-counter-import", fixture,
+		"--host-counter-provider", "fixture-imc",
+		"--host-counter-scope", "system",
+		"--phase", "decode",
+		"--shape", "small",
+		"--measured-gb-s", "4",
+		"--output", output,
+		"--pretty=false",
+	}
+	if err := runModelObserveBandwidth(args); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`"collector":"fixture-imc"`,
+		`"dram_counters":true`,
+		`"source":"host-controller-direct-bytes"`,
+		`"device":"host-memory"`,
+		`"read_gb_s":1.5`,
+		`"write_gb_s":0.5`,
+		`"total_gb_s":2`,
+		`"selected_source":"measured-sustainable"`,
+		`"host_controller_artifact":{"schema":"fak-host-controller-counters/1"`,
+		`"scope":{"kind":"system"}`,
+		`"byte_provenance":"direct-bytes"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("host controller collection missing %s: %s", want, text)
+		}
+	}
+	for _, forbidden := range []string{`"process_read_bytes":0`, `"process_write_bytes":0`, `"physical_read_bytes":0`, `"physical_write_bytes":0`} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("unavailable process I/O serialized as DRAM evidence: %s", text)
+		}
+	}
+}
+
+func TestModelObserveBandwidthImportsPerfHostCounters(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "collection.json")
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "host-controller-perf.csv")
+	args := []string{
+		"collect",
+		"--host-counter-import", fixture,
+		"--host-counter-format", "perf-csv",
+		"--host-counter-provider", "linux-perf",
+		"--host-counter-scope", "controller",
+		"--host-counter-scope-id", "imc0",
+		"--host-counter-bytes-per-event", "64",
+		"--capture-start", "2026-08-27T10:00:00Z",
+		"--capture-end", "2026-08-27T10:00:00.1Z",
+		"--phase", "decode",
+		"--shape", "small",
+		"--output", output,
+		"--pretty=false",
+	}
+	if err := runModelObserveBandwidth(args); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{`"import_format":"perf-csv"`, `"bytes_per_event":64`, `"running_ratio":1`, `"byte_provenance":"converted-events"`, `"total_gb_s":0.96`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("perf host collection missing %s: %s", want, text)
+		}
+	}
+}
+
+func TestModelObserveBandwidthValidatesHostCounterImportFlags(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "host-controller-direct.json")
+	base := []string{"collect", "--host-counter-import", fixture, "--host-counter-provider", "fixture-imc", "--host-counter-scope", "system", "--phase", "other", "--shape", "small"}
+	for _, incompatible := range [][]string{
+		{"--count", "2"},
+		{"--interval", "10ms"},
+		{"--nvidia-device", "0"},
+		{"--amd-device", "0"},
+		{"--nvidia-ncu-csv", "profile.csv"},
+		{"--logical-bytes", "10"},
+		{"--physical-read-bytes", "10"},
+		{"--measure-host-roofline"},
+		{"--roofline-sweep"},
+	} {
+		args := append(append([]string(nil), base...), incompatible...)
+		if err := runModelObserveBandwidth(args); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+			t.Fatalf("args=%v error=%v", incompatible, err)
+		}
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{args: []string{"collect", "--host-counter-import", fixture, "--host-counter-scope", "system", "--phase", "other", "--shape", "small"}, want: "--host-counter-provider is required"},
+		{args: []string{"collect", "--host-counter-import", fixture, "--host-counter-provider", "fixture-imc", "--phase", "other", "--shape", "small"}, want: "--host-counter-scope is required"},
+		{args: []string{"collect", "--host-counter-provider", "fixture-imc", "--phase", "other", "--shape", "small"}, want: "requires --host-counter-import"},
+		{args: []string{"collect", "--host-counter-import", fixture, "--host-counter-provider", "fixture-imc", "--host-counter-scope", "system", "--host-counter-scope-id", "0", "--phase", "other", "--shape", "small"}, want: "system host counter scope must not have an id"},
+		{args: []string{"collect", "--host-counter-import", fixture, "--host-counter-provider", "fixture-imc", "--host-counter-scope", "controller", "--host-counter-scope-id", "imc0", "--measured-gb-s", "10", "--phase", "other", "--shape", "small"}, want: "require system-aggregate"},
+		{args: []string{"collect", "--host-counter-import", fixture, "--host-counter-provider", "fixture-imc", "--host-counter-scope", "controller", "--host-counter-scope-id", "imc0", "--theoretical-gb-s", "10", "--phase", "other", "--shape", "small"}, want: "require system-aggregate"},
+	} {
+		if err := runModelObserveBandwidth(tt.args); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("args=%v error=%v want=%q", tt.args, err, tt.want)
+		}
+	}
+}

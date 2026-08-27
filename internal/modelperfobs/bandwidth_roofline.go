@@ -779,22 +779,37 @@ func ApplyHostRooflineMeasurement(collection *BandwidthCollection, measurement R
 	if measurement.Scope != "host-memory" || measurement.MeasuredSustainableGBS <= 0 || math.IsNaN(measurement.MeasuredSustainableGBS) || math.IsInf(measurement.MeasuredSustainableGBS, 0) {
 		return fmt.Errorf("invalid host roofline measurement")
 	}
-	applied := 0
-	for i := range collection.Capture.Samples {
-		sample := &collection.Capture.Samples[i]
-		if sample.Provenance.Source == "live-host" && sample.Provenance.Device == "host-memory" {
-			sample.Rooflines.MeasuredSustainableGBS = cloneFloat(&measurement.MeasuredSustainableGBS)
-			applied++
-		} else {
-			sample.Rooflines.MeasuredSustainableGBS = nil
+	artifact := collection.HostControllerArtifact
+	if artifact != nil && artifact.Scope.Kind != "system" {
+		return fmt.Errorf("host memory roofline requires system-aggregate host counter scope, got %s", artifact.Scope.Kind)
+	}
+	capture := collection.Capture
+	capture.Samples = append([]BandwidthSample(nil), collection.Capture.Samples...)
+	matching := make([]int, 0, len(capture.Samples))
+	for i := range capture.Samples {
+		sample := capture.Samples[i]
+		isLiveHost := sample.Provenance.Source == "live-host" && sample.Provenance.Device == "host-memory"
+		isImportedHostController := artifact != nil &&
+			(sample.Provenance.Source == "host-controller-direct-bytes" || sample.Provenance.Source == "host-controller-converted-events") &&
+			sample.Provenance.Device == "host-memory" &&
+			sample.Provenance.Collector == artifact.Provider && sample.Provenance.SampledAt == artifact.CaptureEndedAt
+		if isLiveHost || isImportedHostController {
+			matching = append(matching, i)
 		}
 	}
-	measurement.AppliedHostObservationCount = applied
-	collection.RooflineMeasurement = &measurement
-	report, err := AnalyzeBandwidth(collection.Capture)
+	if artifact != nil && len(matching) != 1 {
+		return fmt.Errorf("system host controller artifact matches %d imported samples, want exactly one", len(matching))
+	}
+	for _, i := range matching {
+		capture.Samples[i].Rooflines.MeasuredSustainableGBS = cloneFloat(&measurement.MeasuredSustainableGBS)
+	}
+	measurement.AppliedHostObservationCount = len(matching)
+	report, err := AnalyzeBandwidth(capture)
 	if err != nil {
 		return err
 	}
+	collection.Capture = capture
+	collection.RooflineMeasurement = &measurement
 	collection.Report = report
 	return nil
 }

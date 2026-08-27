@@ -1,0 +1,2 @@
+1000000,,uncore_imc_0/cas_count_read/,100000000,100.00
+500000,,uncore_imc_0/cas_count_write/,100000000,100.00

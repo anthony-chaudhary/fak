@@ -14,8 +14,12 @@ var MinSampleInterval = 10 * time.Millisecond
 var MaxSampleInterval = time.Minute
 
 type HostSignals struct {
-	PhysicalTotalBytes          *uint64  `json:"physical_total_bytes,omitempty"`
-	PhysicalAvailableBytes      *uint64  `json:"physical_available_bytes,omitempty"`
+	PhysicalTotalBytes     *uint64 `json:"physical_total_bytes,omitempty"`
+	PhysicalAvailableBytes *uint64 `json:"physical_available_bytes,omitempty"`
+	// PhysicalAvailableSemantics labels a collector-specific approximation.
+	// Labeled availability remains Host evidence and is not generic Capacity.
+	PhysicalAvailableSemantics  string   `json:"physical_available_semantics,omitempty"`
+	PhysicalFreeBytes           *uint64  `json:"physical_free_bytes,omitempty"`
 	ProcessResidentBytes        *uint64  `json:"process_resident_bytes,omitempty"`
 	ProcessReadBytes            *uint64  `json:"process_read_bytes,omitempty"`
 	ProcessWriteBytes           *uint64  `json:"process_write_bytes,omitempty"`
@@ -55,7 +59,15 @@ type HostSignals struct {
 	MemorySwapInPagesPerSecond                 *float64 `json:"memory_swap_in_pages_per_second,omitempty"`
 	MemorySwapOutPagesTotal                    *uint64  `json:"memory_swap_out_pages_total,omitempty"`
 	MemorySwapOutPagesPerSecond                *float64 `json:"memory_swap_out_pages_per_second,omitempty"`
-	ProcessIOScope                             string   `json:"process_io_scope,omitempty"`
+	// Darwin vm_stat resident-byte states are pressure/occupancy evidence.
+	// Page-in/out counters and rates are paging activity, never memory bandwidth.
+	MemoryWiredResidentBytes      *uint64  `json:"memory_wired_resident_bytes,omitempty"`
+	MemoryCompressedResidentBytes *uint64  `json:"memory_compressed_resident_bytes,omitempty"`
+	MemoryPageInPagesTotal        *uint64  `json:"memory_page_in_pages_total,omitempty"`
+	MemoryPageInPagesPerSecond    *float64 `json:"memory_page_in_pages_per_second,omitempty"`
+	MemoryPageOutPagesTotal       *uint64  `json:"memory_page_out_pages_total,omitempty"`
+	MemoryPageOutPagesPerSecond   *float64 `json:"memory_page_out_pages_per_second,omitempty"`
+	ProcessIOScope                string   `json:"process_io_scope,omitempty"`
 }
 type CollectorAvailability struct {
 	PhysicalMemory bool `json:"physical_memory"`
@@ -79,18 +91,21 @@ type CollectionOptions struct {
 	PhysicalSoftwareRead   *uint64
 	PhysicalSoftwareWrite  *uint64
 	NVIDIADevice           NVIDIADeviceSelector
+	AMDDevice              AMDDeviceSelector
 	MeasureHostRoofline    *RooflineBenchmarkOptions
 }
 type BandwidthCollection struct {
-	Schema              string                `json:"schema"`
-	Engine              string                `json:"engine"`
-	MachineClass        string                `json:"machine_class"`
-	Collector           string                `json:"collector"`
-	IntervalMS          int64                 `json:"interval_ms"`
-	Availability        CollectorAvailability `json:"availability"`
-	Capture             BandwidthCapture      `json:"capture"`
-	Report              BandwidthReport       `json:"report"`
-	RooflineMeasurement *RooflineMeasurement  `json:"roofline_measurement,omitempty"`
+	Schema                 string                  `json:"schema"`
+	Engine                 string                  `json:"engine"`
+	MachineClass           string                  `json:"machine_class,omitempty"`
+	Collector              string                  `json:"collector"`
+	IntervalMS             int64                   `json:"interval_ms"`
+	Availability           CollectorAvailability   `json:"availability"`
+	Capture                BandwidthCapture        `json:"capture"`
+	Report                 BandwidthReport         `json:"report"`
+	RooflineMeasurement    *RooflineMeasurement    `json:"roofline_measurement,omitempty"`
+	ProfileReceipt         *NVIDIAProfileReceipt   `json:"profile_receipt,omitempty"`
+	HostControllerArtifact *HostControllerArtifact `json:"host_controller_artifact,omitempty"`
 }
 type hostSnapshot struct {
 	at           time.Time
@@ -105,6 +120,9 @@ func ValidateCollectionOptions(o CollectionOptions) error {
 	}
 	if o.Interval < MinSampleInterval || o.Interval > MaxSampleInterval {
 		return fmt.Errorf("sample interval must be %s..%s", MinSampleInterval, MaxSampleInterval)
+	}
+	if o.NVIDIADevice != "" && o.AMDDevice != "" {
+		return fmt.Errorf("nvidia and AMD device selectors are mutually exclusive")
 	}
 	return validateSample(BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "host"}})
 }
@@ -136,7 +154,7 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		if err != nil {
 			return BandwidthCollection{}, err
 		}
-		device, err := collectNVIDIADeviceSnapshot(ctx, o.NVIDIADevice)
+		device, err := collectDeviceSnapshot(ctx, o)
 		if err != nil {
 			return BandwidthCollection{}, err
 		}
@@ -146,17 +164,19 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		av.ProcessIO = av.ProcessIO || snap.availability.ProcessIO
 		av.MemoryPressure = av.MemoryPressure || snap.availability.MemoryPressure
 		av.DeviceCounters = av.DeviceCounters || device.available
-		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Device: device.device, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
+		av.DRAMCounters = av.DRAMCounters || device.dramCounters
+		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Live: device.live, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Device: device.device, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
 		if device.available {
 			collector = snap.collector + "+" + device.collector
 			s.Capacity = device.capacity
 			s.Provenance.Device = device.provenanceDevice
 			s.Provenance.Collector = collector
+			if device.provenanceSource != "" {
+				s.Provenance.Source = device.provenanceSource
+			}
 		}
-		if !device.available && snap.host.PhysicalTotalBytes != nil && snap.host.PhysicalAvailableBytes != nil && *snap.host.PhysicalTotalBytes >= *snap.host.PhysicalAvailableBytes {
-			u := *snap.host.PhysicalTotalBytes - *snap.host.PhysicalAvailableBytes
-			s.Capacity.TotalBytes = cloneU64(snap.host.PhysicalTotalBytes)
-			s.Capacity.UsedBytes = &u
+		if !device.available {
+			s.Capacity = capacityFromExactHostAvailability(snap.host)
 		}
 		if len(cap.Samples) > 0 {
 			deriveHostPressureRates(&cap.Samples[len(cap.Samples)-1], &s)
@@ -168,6 +188,29 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		return BandwidthCollection{}, err
 	}
 	return BandwidthCollection{Schema: BandwidthCollectionSchema, Engine: "fak-native", MachineClass: runtime.GOOS + "/" + runtime.GOARCH, Collector: collector, IntervalMS: o.Interval.Milliseconds(), Availability: av, Capture: cap, Report: report, RooflineMeasurement: measured}, nil
+}
+
+func capacityFromExactHostAvailability(host HostSignals) CapacitySignals {
+	if host.PhysicalAvailableSemantics != "" || host.PhysicalTotalBytes == nil ||
+		host.PhysicalAvailableBytes == nil || *host.PhysicalTotalBytes < *host.PhysicalAvailableBytes {
+		return CapacitySignals{}
+	}
+	used := *host.PhysicalTotalBytes - *host.PhysicalAvailableBytes
+	return CapacitySignals{TotalBytes: cloneU64(host.PhysicalTotalBytes), UsedBytes: &used}
+}
+
+func collectDeviceSnapshot(ctx context.Context, o CollectionOptions) (deviceSnapshot, error) {
+	if o.AMDDevice != "" {
+		return collectAMDDeviceSnapshot(ctx, o.AMDDevice)
+	}
+	if o.NVIDIADevice != "" {
+		return collectNVIDIADeviceSnapshot(ctx, o.NVIDIADevice)
+	}
+	s, err := collectNVIDIADeviceSnapshot(ctx, "")
+	if err != nil || s.available {
+		return s, err
+	}
+	return collectAMDDeviceSnapshot(ctx, "")
 }
 func cloneI64(v *int64) *int64 {
 	if v == nil {
@@ -202,6 +245,8 @@ func deriveHostPressureRates(previous, current *BandwidthSample) {
 	current.Host.MemoryReclaimDirectReclaimedPagesPerSecond = counterRate(previous.Host.MemoryReclaimDirectReclaimedPagesTotal, current.Host.MemoryReclaimDirectReclaimedPagesTotal, seconds)
 	current.Host.MemorySwapInPagesPerSecond = counterRate(previous.Host.MemorySwapInPagesTotal, current.Host.MemorySwapInPagesTotal, seconds)
 	current.Host.MemorySwapOutPagesPerSecond = counterRate(previous.Host.MemorySwapOutPagesTotal, current.Host.MemorySwapOutPagesTotal, seconds)
+	current.Host.MemoryPageInPagesPerSecond = counterRate(previous.Host.MemoryPageInPagesTotal, current.Host.MemoryPageInPagesTotal, seconds)
+	current.Host.MemoryPageOutPagesPerSecond = counterRate(previous.Host.MemoryPageOutPagesTotal, current.Host.MemoryPageOutPagesTotal, seconds)
 }
 
 func counterRate(previous, current *uint64, seconds float64) *float64 {

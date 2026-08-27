@@ -1,0 +1,14 @@
+{
+    "counter-value": "3000000000.000000",
+    "unit": "bytes",
+    "event": "uncore_imc_0/dram_read_bytes/",
+    "event-runtime": 2000000000,
+    "pcnt-running": 100.00
+}
+{
+    "counter-value": "1000000000.000000",
+    "unit": "bytes",
+    "event": "uncore_imc_0/dram_write_bytes/",
+    "event-runtime": 2000000000,
+    "pcnt-running": 100.00
+}
