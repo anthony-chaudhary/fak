@@ -230,6 +230,15 @@ func dequantBlocks(out []float32, raw []byte, qk, blockBytes int, body func([]fl
 	wg.Wait()
 }
 
+// dequantScalarBlocks owns the shared scalar-decoder block iteration and indexing.
+// body receives exactly one decoded output block and its corresponding packed bytes,
+// keeping format-specific kernels local without duplicating stride arithmetic.
+func dequantScalarBlocks(out []float32, raw []byte, qk, blockBytes int, body func([]float32, []byte)) {
+	for block := 0; block < len(out)/qk; block++ {
+		body(out[block*qk:(block+1)*qk], raw[block*blockBytes:(block+1)*blockBytes])
+	}
+}
+
 // dequantKQuantBody returns the per-chunk dequant body the K-quant and IQ3_XXS load
 // paths hand to dequantBlocks. It runs the SIMD arch unpack when the CPU provides it
 // (arch returns true after vectorizing the chunk) and falls back to the scalar unpack
@@ -605,17 +614,15 @@ func dequantIQ3XXS(out []float32, raw []byte) {
 }
 
 func dequantIQ3XXSScalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qkK; block++ {
-		base := block * blockIQ3XXSBytes
-		d := f16At(raw, base)
-		qs := raw[base+2 : base+2+qkK/4]                 // 64 grid-index bytes
-		sas := raw[base+2+qkK/4 : base+blockIQ3XXSBytes] // 32 scale/sign bytes (8 u32)
-		yi := block * qkK
+	dequantScalarBlocks(out, raw, qkK, blockIQ3XXSBytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
+		qs := raw[2 : 2+qkK/4]                 // 64 grid-index bytes
+		sas := raw[2+qkK/4 : blockIQ3XXSBytes] // 32 scale/sign bytes (8 u32)
 		for ib32 := 0; ib32 < qkK/32; ib32++ {
 			aux32 := binary.LittleEndian.Uint32(sas[4*ib32:])
 			db := d * (0.5 + float32(aux32>>28)) * 0.5
 			gi := ib32 * 8 // 8 grid-index bytes per sub-block
-			off := yi + ib32*32
+			off := ib32 * 32
 			for l := 0; l < 4; l++ {
 				signs := ksignsIQ2XS[(aux32>>(7*uint(l)))&127]
 				g1 := iq3xxsGrid[qs[gi+2*l+0]]
@@ -634,7 +641,7 @@ func dequantIQ3XXSScalar(out []float32, raw []byte) {
 				}
 			}
 		}
-	}
+	})
 }
 
 // dequantQ4_1 expands the legacy GGML Q4_1 32-element block: a little-endian f16
@@ -646,19 +653,17 @@ func dequantQ4_1(out []float32, raw []byte) {
 }
 
 func dequantQ4_1Scalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qk4; block++ {
-		base := block * blockQ4_1Bytes
-		d := f16At(raw, base)
-		m := f16At(raw, base+2)
-		qs := raw[base+4 : base+blockQ4_1Bytes]
-		yi := block * qk4
+	dequantScalarBlocks(out, raw, qk4, blockQ4_1Bytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
+		m := f16At(raw, 2)
+		qs := raw[4:blockQ4_1Bytes]
 		for j := 0; j < qk4/2; j++ {
 			x0 := int(qs[j] & 0x0f)
 			x1 := int(qs[j] >> 4)
-			out[yi+j] = float32(x0)*d + m
-			out[yi+j+qk4/2] = float32(x1)*d + m
+			out[j] = float32(x0)*d + m
+			out[j+qk4/2] = float32(x1)*d + m
 		}
-	}
+	})
 }
 
 func dequantQ5_0(out []float32, raw []byte) {
@@ -666,21 +671,19 @@ func dequantQ5_0(out []float32, raw []byte) {
 }
 
 func dequantQ5_0Scalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qk5; block++ {
-		base := block * blockQ5_0Bytes
-		d := f16At(raw, base)
-		qh := binary.LittleEndian.Uint32(raw[base+2:])
-		qs := raw[base+6 : base+blockQ5_0Bytes]
-		yi := block * qk5
+	dequantScalarBlocks(out, raw, qk5, blockQ5_0Bytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
+		qh := binary.LittleEndian.Uint32(raw[2:])
+		qs := raw[6:blockQ5_0Bytes]
 		for j := 0; j < qk5/2; j++ {
 			xh0 := byte(((qh >> uint(j)) << 4) & 0x10)
 			xh1 := byte((qh >> uint(j+12)) & 0x10)
 			x0 := int((qs[j]&0x0f)|xh0) - 16
 			x1 := int((qs[j]>>4)|xh1) - 16
-			out[yi+j] = float32(x0) * d
-			out[yi+j+qk5/2] = float32(x1) * d
+			out[j] = float32(x0) * d
+			out[j+qk5/2] = float32(x1) * d
 		}
-	}
+	})
 }
 
 func dequantQ5_1(out []float32, raw []byte) {
@@ -688,22 +691,20 @@ func dequantQ5_1(out []float32, raw []byte) {
 }
 
 func dequantQ5_1Scalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qk5; block++ {
-		base := block * blockQ5_1Bytes
-		d := f16At(raw, base)
-		m := f16At(raw, base+2)
-		qh := binary.LittleEndian.Uint32(raw[base+4:])
-		qs := raw[base+8 : base+blockQ5_1Bytes]
-		yi := block * qk5
+	dequantScalarBlocks(out, raw, qk5, blockQ5_1Bytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
+		m := f16At(raw, 2)
+		qh := binary.LittleEndian.Uint32(raw[4:])
+		qs := raw[8:blockQ5_1Bytes]
 		for j := 0; j < qk5/2; j++ {
 			xh0 := byte(((qh >> uint(j)) << 4) & 0x10)
 			xh1 := byte((qh >> uint(j+12)) & 0x10)
 			x0 := int((qs[j] & 0x0f) | xh0)
 			x1 := int((qs[j] >> 4) | xh1)
-			out[yi+j] = float32(x0)*d + m
-			out[yi+j+qk5/2] = float32(x1)*d + m
+			out[j] = float32(x0)*d + m
+			out[j+qk5/2] = float32(x1)*d + m
 		}
-	}
+	})
 }
 
 func dequantQ2K(out []float32, raw []byte) {
@@ -711,14 +712,12 @@ func dequantQ2K(out []float32, raw []byte) {
 }
 
 func dequantQ2KScalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qkK; block++ {
-		base := block * blockQ2KBytes
-		scales := raw[base : base+qkK/16]
-		q := raw[base+qkK/16 : base+qkK/16+qkK/4]
-		dm := base + qkK/16 + qkK/4
+	dequantScalarBlocks(out, raw, qkK, blockQ2KBytes, func(out []float32, raw []byte) {
+		scales := raw[:qkK/16]
+		q := raw[qkK/16 : qkK/16+qkK/4]
+		dm := qkK/16 + qkK/4
 		d := f16At(raw, dm)
 		min := f16At(raw, dm+2)
-		yi := block * qkK
 		qi := 0
 		is := 0
 		for n := 0; n < qkK; n += 128 {
@@ -728,20 +727,20 @@ func dequantQ2KScalar(out []float32, raw []byte) {
 				is++
 				dl, ml := d*float32(sc&0x0f), min*float32(sc>>4)
 				for l := 0; l < 16; l++ {
-					out[yi+n+j*32+l] = dl*float32((q[qi+l]>>shift)&3) - ml
+					out[n+j*32+l] = dl*float32((q[qi+l]>>shift)&3) - ml
 				}
 
 				sc = scales[is]
 				is++
 				dl, ml = d*float32(sc&0x0f), min*float32(sc>>4)
 				for l := 0; l < 16; l++ {
-					out[yi+n+j*32+16+l] = dl*float32((q[qi+16+l]>>shift)&3) - ml
+					out[n+j*32+16+l] = dl*float32((q[qi+16+l]>>shift)&3) - ml
 				}
 				shift += 2
 			}
 			qi += 32
 		}
-	}
+	})
 }
 
 func dequantQ3K(out []float32, raw []byte) {
@@ -749,13 +748,11 @@ func dequantQ3K(out []float32, raw []byte) {
 }
 
 func dequantQ3KScalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qkK; block++ {
-		base := block * blockQ3KBytes
-		hmask := raw[base : base+qkK/8]
-		q := raw[base+qkK/8 : base+qkK/8+qkK/4]
-		scales := unpackQ3KScales(raw[base+qkK/8+qkK/4 : base+qkK/8+qkK/4+kScaleSize])
-		d := f16At(raw, base+blockQ3KBytes-2)
-		yi := block * qkK
+	dequantScalarBlocks(out, raw, qkK, blockQ3KBytes, func(out []float32, raw []byte) {
+		hmask := raw[:qkK/8]
+		q := raw[qkK/8 : qkK/8+qkK/4]
+		scales := unpackQ3KScales(raw[qkK/8+qkK/4 : qkK/8+qkK/4+kScaleSize])
+		d := f16At(raw, blockQ3KBytes-2)
 		qi := 0
 		is := 0
 		mask := byte(1)
@@ -769,7 +766,7 @@ func dequantQ3KScalar(out []float32, raw []byte) {
 					if hmask[l]&mask == 0 {
 						code -= 4
 					}
-					out[yi+n+j*32+l] = dl * float32(code)
+					out[n+j*32+l] = dl * float32(code)
 				}
 
 				dl = d * float32(scales[is]-32)
@@ -779,14 +776,14 @@ func dequantQ3KScalar(out []float32, raw []byte) {
 					if hmask[16+l]&mask == 0 {
 						code -= 4
 					}
-					out[yi+n+j*32+16+l] = dl * float32(code)
+					out[n+j*32+16+l] = dl * float32(code)
 				}
 				shift += 2
 				mask <<= 1
 			}
 			qi += 32
 		}
-	}
+	})
 }
 
 func unpackQ3KScales(raw []byte) [16]int8 {
@@ -818,27 +815,25 @@ func dequantQ4K(out []float32, raw []byte) {
 }
 
 func dequantQ4KScalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qkK; block++ {
-		base := block * blockQ4KBytes
-		d := f16At(raw, base)
-		min := f16At(raw, base+2)
-		scales := raw[base+4 : base+4+kScaleSize]
-		q := raw[base+4+kScaleSize : base+blockQ4KBytes]
+	dequantScalarBlocks(out, raw, qkK, blockQ4KBytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
+		min := f16At(raw, 2)
+		scales := raw[4 : 4+kScaleSize]
+		q := raw[4+kScaleSize : blockQ4KBytes]
 		qi := 0
 		is := 0
-		yi := block * qkK
 		for j := 0; j < qkK; j += 64 {
 			d1, m1, d2, m2 := scaleMinPairK4(d, min, is, scales)
 			for l := 0; l < 32; l++ {
-				out[yi+j+l] = d1*float32(q[qi+l]&0x0f) - m1
+				out[j+l] = d1*float32(q[qi+l]&0x0f) - m1
 			}
 			for l := 0; l < 32; l++ {
-				out[yi+j+32+l] = d2*float32(q[qi+l]>>4) - m2
+				out[j+32+l] = d2*float32(q[qi+l]>>4) - m2
 			}
 			qi += 32
 			is += 2
 		}
-	}
+	})
 }
 
 // scaleMinPairK4 decodes the two 6-bit (scale,min) sub-block fields at indices is and is+1
@@ -858,17 +853,15 @@ func dequantQ5K(out []float32, raw []byte) {
 }
 
 func dequantQ5KScalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qkK; block++ {
-		base := block * blockQ5KBytes
-		d := f16At(raw, base)
-		min := f16At(raw, base+2)
-		scales := raw[base+4 : base+4+kScaleSize]
-		qh := raw[base+4+kScaleSize : base+4+kScaleSize+qkK/8]
-		ql := raw[base+4+kScaleSize+qkK/8 : base+blockQ5KBytes]
+	dequantScalarBlocks(out, raw, qkK, blockQ5KBytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
+		min := f16At(raw, 2)
+		scales := raw[4 : 4+kScaleSize]
+		qh := raw[4+kScaleSize : 4+kScaleSize+qkK/8]
+		ql := raw[4+kScaleSize+qkK/8 : blockQ5KBytes]
 		qi := 0
 		is := 0
 		u1, u2 := byte(1), byte(2)
-		yi := block * qkK
 		for j := 0; j < qkK; j += 64 {
 			d1, m1, d2, m2 := scaleMinPairK4(d, min, is, scales)
 			for l := 0; l < 32; l++ {
@@ -876,21 +869,21 @@ func dequantQ5KScalar(out []float32, raw []byte) {
 				if qh[l]&u1 != 0 {
 					hi = 16
 				}
-				out[yi+j+l] = d1*float32((ql[qi+l]&0x0f)+hi) - m1
+				out[j+l] = d1*float32((ql[qi+l]&0x0f)+hi) - m1
 			}
 			for l := 0; l < 32; l++ {
 				hi := byte(0)
 				if qh[l]&u2 != 0 {
 					hi = 16
 				}
-				out[yi+j+32+l] = d2*float32((ql[qi+l]>>4)+hi) - m2
+				out[j+32+l] = d2*float32((ql[qi+l]>>4)+hi) - m2
 			}
 			qi += 32
 			is += 2
 			u1 <<= 2
 			u2 <<= 2
 		}
-	}
+	})
 }
 
 func dequantQ6K(out []float32, raw []byte) {
@@ -902,23 +895,20 @@ func dequantQ8_0(out []float32, raw []byte) {
 }
 
 func dequantQ8_0Scalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qk8_0; block++ {
-		base := block * blockQ8_0Bytes
-		d := f16At(raw, base)
+	dequantScalarBlocks(out, raw, qk8_0, blockQ8_0Bytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
 		for j := 0; j < qk8_0; j++ {
-			out[block*qk8_0+j] = float32(int8(raw[base+2+j])) * d
+			out[j] = float32(int8(raw[2+j])) * d
 		}
-	}
+	})
 }
 
 func dequantQ6KScalar(out []float32, raw []byte) {
-	for block := 0; block < len(out)/qkK; block++ {
-		base := block * blockQ6KBytes
-		ql := raw[base : base+qkK/2]
-		qh := raw[base+qkK/2 : base+qkK/2+qkK/4]
-		scales := raw[base+qkK/2+qkK/4 : base+qkK/2+qkK/4+qkK/16]
-		d := f16At(raw, base+blockQ6KBytes-2)
-		yi := block * qkK
+	dequantScalarBlocks(out, raw, qkK, blockQ6KBytes, func(out []float32, raw []byte) {
+		ql := raw[:qkK/2]
+		qh := raw[qkK/2 : qkK/2+qkK/4]
+		scales := raw[qkK/2+qkK/4 : qkK/2+qkK/4+qkK/16]
+		d := f16At(raw, blockQ6KBytes-2)
 		qlOff, qhOff, scOff := 0, 0, 0
 		for n := 0; n < qkK; n += 128 {
 			for l := 0; l < 32; l++ {
@@ -927,16 +917,16 @@ func dequantQ6KScalar(out []float32, raw []byte) {
 				q2 := int8((ql[qlOff+l+32]&0x0f)|(((qh[qhOff+l]>>2)&3)<<4)) - 32
 				q3 := int8((ql[qlOff+l+0]>>4)|(((qh[qhOff+l]>>4)&3)<<4)) - 32
 				q4 := int8((ql[qlOff+l+32]>>4)|(((qh[qhOff+l]>>6)&3)<<4)) - 32
-				out[yi+n+l+0] = d * float32(int8(scales[scOff+is+0])) * float32(q1)
-				out[yi+n+l+32] = d * float32(int8(scales[scOff+is+2])) * float32(q2)
-				out[yi+n+l+64] = d * float32(int8(scales[scOff+is+4])) * float32(q3)
-				out[yi+n+l+96] = d * float32(int8(scales[scOff+is+6])) * float32(q4)
+				out[n+l+0] = d * float32(int8(scales[scOff+is+0])) * float32(q1)
+				out[n+l+32] = d * float32(int8(scales[scOff+is+2])) * float32(q2)
+				out[n+l+64] = d * float32(int8(scales[scOff+is+4])) * float32(q3)
+				out[n+l+96] = d * float32(int8(scales[scOff+is+6])) * float32(q4)
 			}
 			qlOff += 64
 			qhOff += 32
 			scOff += 8
 		}
-	}
+	})
 }
 
 // f16At decodes the little-endian IEEE-754 half stored at raw[off:off+2] into a float32.
@@ -1093,13 +1083,12 @@ func dequantIQ3S(out []float32, raw []byte) {
 		signsOffset  = qhOffset + 8
 		scalesOffset = signsOffset + 32
 	)
-	for block, off := 0, 0; off < len(raw); block, off = block+1, off+blockIQ3SBytes {
-		d := f16At(raw, off)
-		qs := raw[off+qsOffset : off+qhOffset]
-		qh := raw[off+qhOffset : off+signsOffset]
-		signs := raw[off+signsOffset : off+scalesOffset]
-		scales := raw[off+scalesOffset : off+blockIQ3SBytes]
-		base := block * qkIQ3S
+	dequantScalarBlocks(out, raw, qkIQ3S, blockIQ3SBytes, func(out []float32, raw []byte) {
+		d := f16At(raw, 0)
+		qs := raw[qsOffset:qhOffset]
+		qh := raw[qhOffset:signsOffset]
+		signs := raw[signsOffset:scalesOffset]
+		scales := raw[scalesOffset:blockIQ3SBytes]
 		for pair := 0; pair < 4; pair++ {
 			scaleByte := scales[pair]
 			for half := 0; half < 2; half++ {
@@ -1112,7 +1101,7 @@ func dequantIQ3S(out []float32, raw []byte) {
 				qBase := ib32 * 8
 				high := qh[ib32]
 				signBase := ib32 * 4
-				outBase := base + ib32*32
+				outBase := ib32 * 32
 				for group := 0; group < 4; group++ {
 					idx1 := uint16(qs[qBase+2*group]) | (uint16(high)<<uint(8-2*group))&0x100
 					idx2 := uint16(qs[qBase+2*group+1]) | (uint16(high)<<uint(7-2*group))&0x100
@@ -1133,5 +1122,5 @@ func dequantIQ3S(out []float32, raw []byte) {
 				}
 			}
 		}
-	}
+	})
 }

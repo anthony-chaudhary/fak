@@ -3,12 +3,34 @@ package conceptusage
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
+
+func TestResultFindingsProjectsOneFailureChannel(t *testing.T) {
+	tests := []struct {
+		name        string
+		result      KPIResult
+		wantDefects []string
+		wantSoft    []string
+	}{
+		{name: "passed", result: KPIResult{Key: "passed", Passed: true}},
+		{name: "hard", result: KPIResult{Key: "hard", Hard: true, Detail: "failed"}, wantDefects: []string{"hard: failed"}},
+		{name: "soft", result: KPIResult{Key: "soft", Detail: "missed"}, wantSoft: []string{"soft: missed"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defects, soft := resultFindings(tt.result)
+			if !reflect.DeepEqual(defects, tt.wantDefects) || !reflect.DeepEqual(soft, tt.wantSoft) {
+				t.Fatalf("resultFindings() = (%v, %v), want (%v, %v)", defects, soft, tt.wantDefects, tt.wantSoft)
+			}
+		})
+	}
+}
 
 // writeJournal drops a .dos/<name> file under root with the given JSONL lines.
 func writeJournal(t *testing.T, root, name string, lines ...string) {
