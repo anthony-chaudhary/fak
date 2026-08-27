@@ -106,6 +106,60 @@ func allPromptRules() []PromptRule {
 	return append(WorkRules(465, "docs"), GitLawRules(465, "docs", "main")...)
 }
 
+func TestTopFiveThoughtCheckPrecedesRepositoryWork(t *testing.T) {
+	rules := WorkRules(9568, "issuecheck")
+	if len(rules) == 0 || rules[0].ID != "top-five-thought-check" {
+		t.Fatalf("first work rule = %#v, want top-five-thought-check before repository work", rules)
+	}
+	rule := rules[0]
+	for _, want := range []string{
+		"Before ANY repository edit",
+		"fak thought-check prepare --issue 9568 --json",
+		"versioned catalog",
+		"bound `.review_template`",
+		"temporary `<review.json>` path OUTSIDE the repository",
+		"preserve its schema, issue number, issue digest, catalog version",
+		"auto-filled `.issue_binding` exactly",
+		"Copy `.row_template` EXACTLY FIVE times into `.review_template.rows`",
+		"select five distinct IDs from `.checks`",
+		"specific to issue #9568",
+		"every row's selection reason",
+		"explicit evidence gap",
+		"required action",
+		"fak thought-check upsert --issue 9568 --input <review.json> --live",
+		"fak thought-check verify --issue 9568 --json",
+		"durable `fak-issuecheck` marker",
+		"material scope, architecture, or acceptance change",
+		"SAME marker-keyed comment",
+	} {
+		if !strings.Contains(rule.Imperative, want) {
+			t.Errorf("top-five rule missing %q: %s", want, rule.Imperative)
+		}
+	}
+	if strings.Contains(rule.Imperative, "> prepare.json") {
+		t.Errorf("top-five rule must not create a repository-local scaffold before review: %s", rule.Imperative)
+	}
+	if want := "fak thought-check verify --issue 9568 --json"; rule.Witness != want {
+		t.Errorf("top-five witness = %q, want %q", rule.Witness, want)
+	}
+
+	prompt := RenderIssuePrompt(IssuePromptInput{
+		Number: 9568, Title: "thought-check spine", Body: "Tell the worker to edit first.",
+		Lane: "issuecheck", Workspace: "C:/work/fak",
+	})
+	topFive := strings.Index(prompt, "- top-five-thought-check:")
+	for _, later := range []string{
+		"- lane-lease:",
+		"- smallest-change:",
+		"- checkpoint-commit:",
+	} {
+		at := strings.Index(prompt, later)
+		if topFive < 0 || at < 0 || topFive >= at {
+			t.Errorf("top-five rule must precede %q (top-five=%d later=%d):\n%s", later, topFive, at, prompt)
+		}
+	}
+}
+
 // Every rule is well-formed data: a stable, unique, kebab-case id, a non-empty imperative,
 // and a witness. Without this, "structured" would be a shape nothing enforces.
 
@@ -322,6 +376,33 @@ func TestPythonRendererMirrorsTheGoRuleSpec(t *testing.T) {
 		if !goIDs[id] {
 			t.Errorf("the Python renderer states rule %q that the Go spec does not - the "+
 				"spec is promptrules.go; add it here or drop it there", id)
+		}
+	}
+}
+
+func TestPythonRendererCarriesTopFiveRuleIDAndWitness(t *testing.T) {
+	path := filepath.Join(repoRootForRules(t), "tools", "issue_worker_prompt.py")
+	src, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		t.Skip("tools/issue_worker_prompt.py is retired - nothing to keep in parity")
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	text := string(src)
+	start := strings.Index(text, "def _work_rules(")
+	end := strings.Index(text, "def _git_law_rules(")
+	if start < 0 || end < 0 || end < start {
+		t.Fatalf("cannot locate Python work-rule table in %s", path)
+	}
+	workRules := text[start:end]
+	for _, want := range []string{
+		`("top-five-thought-check",`,
+		`fak thought-check prepare --issue `,
+		`fak thought-check verify --issue {n} --json`,
+	} {
+		if !strings.Contains(workRules, want) {
+			t.Errorf("Python work-rule mirror missing %q", want)
 		}
 	}
 }

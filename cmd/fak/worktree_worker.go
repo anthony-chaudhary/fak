@@ -58,6 +58,8 @@ fak worktree <subcommand>
            [--require-remote-recovery]
                    Apply the worktree's diff-since-base onto the trunk as one
                    signed-off commit. Prints {ok, applied, committed, ...}.
+                   Managed issue lands re-verify the Top-5 comment. Roll back with
+                   FAK_THOUGHT_CHECK_MODE=observe|off (default: enforce).
                    A diff touching a hard-self core-locked path is REFUSED with
                    CORE_SELF_MODIFY unless the witness claim (flag, or a
                    Core-lock-maintenance-witness: trailer in the commit message)
@@ -236,6 +238,12 @@ func worktreeWorkerLand(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak worktree worker land: unknown --verify %q (want off|go-build)\n", *verify)
 		os.Exit(2)
 	}
+	// workerworktree's isolated-index path commits with git commit-tree, which runs
+	// no git hooks. Compose the same managed-issue thought-check admission into its
+	// pre-apply VerifyHook so an inventory land cannot bypass the pre-commit gate.
+	// A genuinely unbound operator land (no managed env and no prepared/issue-bound
+	// message) retains the caller-selected hook byte-for-byte.
+	hook = composeWorktreeThoughtCheckVerify(strings.TrimSpace(*worktree), strings.TrimSpace(*msgFile), hook)
 
 	opts := []workerworktree.LandOption{
 		workerworktree.WithCoreLockWitness(*coreLockWitness),

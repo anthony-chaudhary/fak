@@ -605,6 +605,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdBalance(args)
 	case "token-defaults-scorecard":
 		cmdTokenDefaultsScorecard(args)
+	case "thought-check":
+		cmdThoughtCheck(args)
 	case "skill-effectiveness-scorecard":
 		cmdSkillEffectivenessScorecard(args)
 	case "mcp-filter-proof":

@@ -654,6 +654,13 @@ const usageScorecardText = `  fak cluster   selftest | coordinator --listen ADDR
                  gh and --fetch-existing verifies against the tracker -- both leave an
                  issues-sync.json receipt beside the report, which dogfood-score's chain
                  axis and the improve-loops super loop read)
+  fak thought-check catalog --json
+  fak thought-check prepare --issue N [--repo owner/name] --json
+  fak thought-check upsert --issue N --input review.json [--repo owner/name] [--live]
+  fak thought-check verify --issue N [--repo owner/name] --json
+                (versioned Top-5 issue-review catalog and trusted GitHub comment edge.
+                 Upsert is dry-run by default; --live creates or updates the one
+                 production-marker comment and verifies the exact readback.)
   fak dev idea-scout [--candidates FILE] [--live] [--json]
                 (research-to-issue feeder: score arXiv/GitHub/HN/Reddit candidates,
                  deduplicate them against the tracker, and render issue plans. Dry-run by

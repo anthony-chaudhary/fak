@@ -32,6 +32,7 @@
 package workerworktree
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -216,14 +217,21 @@ func defaultGit(root string, args []string) (int, string) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = root
 	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
 	if err != nil {
+		out := stdout.String() + stderr.String()
 		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode(), string(out)
+			return ee.ExitCode(), out
 		}
-		return 127, string(out)
+		return 127, out
 	}
-	return 0, string(out)
+	// Successful git commands may still emit advisory warnings on stderr (for
+	// example core.autocrlf conversion notices). Machine-readable callers consume
+	// stdout as names, SHAs, or patches, so mixing those warnings into success data
+	// can corrupt a patch and invent paths. Preserve stderr only on failure.
+	return 0, stdout.String()
 }
 
 // BoundedGitRunner binds every git subprocess to one caller-owned deadline. The
@@ -239,17 +247,20 @@ func BoundedGitRunner(ctx context.Context) GitRunner {
 		cmd.Dir = root
 		cmd.WaitDelay = 100 * time.Millisecond
 		windowgate.ConfigureBackgroundCommand(cmd)
-		out, err := cmd.CombinedOutput()
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
 		if ctx.Err() != nil {
 			return ReapTimeoutExitCode, ctx.Err().Error()
 		}
 		if err != nil {
+			out := stdout.String() + stderr.String()
 			if ee, ok := err.(*exec.ExitError); ok {
-				return ee.ExitCode(), string(out)
+				return ee.ExitCode(), out
 			}
-			return 127, string(out)
+			return 127, out
 		}
-		return 0, string(out)
+		return 0, stdout.String()
 	}
 }
 
@@ -276,14 +287,17 @@ func defaultGitEnv(root string, env map[string]string, args []string) (int, stri
 	}
 	cmd.Env = base
 	windowgate.ConfigureBackgroundCommand(cmd)
-	out, err := cmd.CombinedOutput()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
 	if err != nil {
+		out := stdout.String() + stderr.String()
 		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode(), string(out)
+			return ee.ExitCode(), out
 		}
-		return 127, string(out)
+		return 127, out
 	}
-	return 0, string(out)
+	return 0, stdout.String()
 }
 
 func runEnv(genv GitEnvRunner, root string, env map[string]string, args []string) (int, string) {
