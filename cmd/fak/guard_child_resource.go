@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,6 +81,10 @@ type guardResourceReceipt struct {
 	Action             string  `json:"action"`
 	DescendantsSurvive bool    `json:"descendants_survive"`
 	Detail             string  `json:"detail,omitempty"`
+	BuildCommit        string  `json:"build_commit,omitempty"`
+	BuildModule        string  `json:"build_module,omitempty"`
+	BuildDirty         bool    `json:"build_dirty,omitempty"`
+	ActivationID       string  `json:"activation_id,omitempty"`
 }
 
 func guardResourcePolicyFromEnv() guardResourcePolicy {
@@ -317,8 +323,24 @@ func guardWriteResourceReceipt(event guardChildWaitEvent, traceID, agent string,
 	}
 }
 
+var (
+	guardResourceBuildIdentity = buildIdentityFromRuntime
+	guardResourceActivationID  = newGuardResourceActivationID()
+)
+
+func newGuardResourceActivationID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("pid-%d-%d", os.Getpid(), time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b[:])
+}
 func newGuardResourceReceipt(traceID, agent string, rootPID int, d guardResourceDecision) guardResourceReceipt {
-	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: "reap_tree", DescendantsSurvive: false, Detail: scrubGuardResourceDetail(d.Detail)}
+	identity := guardResourceBuildIdentity()
+	receipt := guardResourceReceipt{Schema: "fak.guard.child-resource.v1", At: time.Now().UTC().Format(time.RFC3339Nano), TraceID: traceID, Agent: agent, RootPID: rootPID, OffenderPID: d.Offender.PID, OffenderPPID: d.Offender.PPID, OffenderName: d.Offender.Name, MemoryMetric: string(d.Metric), TreeMemoryBytes: d.TreeBytes, SystemMemoryBytes: d.SystemBytes, SystemMemoryLimit: d.SystemLimit, ThresholdBytes: d.ThresholdBytes, HeadroomBytes: d.HeadroomBytes, Reason: d.Reason, Action: "reap_tree", DescendantsSurvive: false, Detail: scrubGuardResourceDetail(d.Detail), BuildCommit: identity.Commit, BuildModule: identity.ModuleVersion, BuildDirty: identity.Dirty, ActivationID: guardResourceActivationID}
+	if receipt.BuildModule == "" {
+		receipt.BuildModule = "cmd/fak"
+	}
 	if d.Metric == procguard.MemoryMetricRSS {
 		receipt.TreeRSSBytes = uint64Pointer(d.TreeBytes)
 	} else {

@@ -328,3 +328,46 @@ func TestGuardResourceErrorPathsEdgeAndAdversarial(t *testing.T) {
 		}
 	})
 }
+
+func TestGuardResourceMonitorFailureReceiptBindsRunningActivation(t *testing.T) {
+	oldIdentity := guardResourceBuildIdentity
+	oldActivation := guardResourceActivationID
+	guardResourceBuildIdentity = func() binaryIdentity {
+		return binaryIdentity{Commit: "0123456789abcdef", ModuleVersion: "v1.2.3", Dirty: true, Stamped: true}
+	}
+	guardResourceActivationID = "activation-42"
+	t.Cleanup(func() {
+		guardResourceBuildIdentity = oldIdentity
+		guardResourceActivationID = oldActivation
+	})
+
+	event := guardResourceMonitorFailure(42, procguard.MemorySnapshot{
+		Metric:  procguard.MemoryMetricRSS,
+		RootPID: 42,
+		Processes: []procguard.MemoryProcess{{
+			PID:  42,
+			Name: "codex",
+		}},
+	}, "CHILD_RESOURCE_MONITOR_ERROR", `collector=C:\private\ps.exe host=db1.corp token=hunter2`)
+	if event.Resource == nil {
+		t.Fatal("monitor failure has no resource decision")
+	}
+	receipt := newGuardResourceReceipt("trace", "codex", 42, *event.Resource)
+	data, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.BuildCommit != "0123456789abcdef" || receipt.BuildModule != "v1.2.3" || !receipt.BuildDirty || receipt.ActivationID != "activation-42" {
+		t.Fatalf("activation identity missing: %+v", receipt)
+	}
+	for _, leaked := range []string{`C:\private`, "db1.corp", "hunter2"} {
+		if strings.Contains(string(data), leaked) {
+			t.Fatalf("receipt identity leaked %q: %s", leaked, data)
+		}
+	}
+	for _, forbiddenKey := range []string{"hostname", "executable", "executable_path"} {
+		if strings.Contains(string(data), `"`+forbiddenKey+`"`) {
+			t.Fatalf("receipt persisted forbidden key %q: %s", forbiddenKey, data)
+		}
+	}
+}
