@@ -40,6 +40,12 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 	store := leaseref.NewInDir(*dir)
+	// Capture the public-safe projection inputs before deletion. Get failures are ignored
+	// here because release remains authoritative and announcement is only advisory.
+	announceRec := leaseref.Record{ID: *id, Holder: *holder, Generation: *gen}
+	if current, ok, getErr := store.Get(context.Background(), *id); getErr == nil && ok {
+		announceRec = current
+	}
 	if *force {
 		// The unconditional single-ref delete — idempotent on an absent record. This is
 		// the operator's manual reap for a record whose holder identity is lost; the
@@ -48,11 +54,15 @@ func runLeaserefRelease(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak leaseref release: %v\n", err)
 			return 1
 		}
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec)
 		return emitLeaserefJSON(stdout, stderr, leaseref.FenceVerdict{
 			OK:     true,
 			Detail: "lease " + *id + " force-released (holder check skipped)",
 		}, "release")
 	}
 	v, err := store.ReleaseFenced(context.Background(), *id, *holder, *gen, time.Now())
+	if err == nil && v.OK {
+		ambientLeaserefAnnounce(stderr, *dir, leaseref.AnnounceRelease, announceRec)
+	}
 	return emitLeaserefResult(stdout, stderr, v, err, "fak leaseref release", "release", func(v leaseref.FenceVerdict) bool { return v.OK })
 }
