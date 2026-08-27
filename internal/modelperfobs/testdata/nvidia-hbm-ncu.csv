@@ -1,0 +1,9 @@
+==PROF== Connected to process 4242 (/opt/fak/bin/fak)
+==PROF== Profiling "fak_decode" - 1: 0%....50%....100% - 3 passes
+"ID","Process ID","Process Name","Host Name","Kernel Name","Kernel Time","Context","Stream","Device","Section Name","Metric Name","Metric Unit","Metric Value"
+"2","4242","fak","lab-gpu","fak_decode","2026-Aug-27 10:00:00","1","7","0","Command line profiler metrics","dram__bytes_write.sum","byte","300000000"
+"1","4242","fak","lab-gpu","fak_decode","2026-Aug-27 10:00:00","1","7","0","Command line profiler metrics","gpu__time_duration.sum","nsecond","800000"
+"2","4242","fak","lab-gpu","fak_decode","2026-Aug-27 10:00:00","1","7","0","Command line profiler metrics","dram__bytes_read.sum","byte","900000000"
+"1","4242","fak","lab-gpu","fak_decode","2026-Aug-27 10:00:00","1","7","0","Command line profiler metrics","dram__bytes_read.sum","byte","600000000"
+"2","4242","fak","lab-gpu","fak_decode","2026-Aug-27 10:00:00","1","7","0","Command line profiler metrics","gpu__time_duration.sum","nsecond","1200000"
+"1","4242","fak","lab-gpu","fak_decode","2026-Aug-27 10:00:00","1","7","0","Command line profiler metrics","dram__bytes_write.sum","byte","200000000"

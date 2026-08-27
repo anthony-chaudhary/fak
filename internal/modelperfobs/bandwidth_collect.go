@@ -66,6 +66,7 @@ type BandwidthCollection struct {
 	Capture             BandwidthCapture      `json:"capture"`
 	Report              BandwidthReport       `json:"report"`
 	RooflineMeasurement *RooflineMeasurement  `json:"roofline_measurement,omitempty"`
+	ProfileReceipt      *NVIDIAProfileReceipt `json:"profile_receipt,omitempty"`
 }
 type hostSnapshot struct {
 	at           time.Time

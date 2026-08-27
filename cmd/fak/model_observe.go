@@ -138,6 +138,7 @@ func runModelObserveBandwidthCollect(args []string) error {
 	shape := fs.String("shape", "small", "request shape")
 	theoretical := fs.Float64("theoretical-gb-s", 0, "theoretical memory roofline in GB/s")
 	measured := fs.Float64("measured-gb-s", 0, "measured sustainable memory roofline in GB/s")
+	deviceRoofline := fs.Float64("device-roofline-gb-s", 0, "measured sustainable roofline for the profiled NVIDIA device")
 	latency := fs.Float64("latency-ms", 0, "request latency in milliseconds")
 	promptTokens := fs.Int64("prompt-tokens", 0, "request prompt tokens")
 	completionTokens := fs.Int64("completion-tokens", 0, "request completion tokens")
@@ -146,6 +147,10 @@ func runModelObserveBandwidthCollect(args []string) error {
 	physicalWriteBytes := fs.Uint64("physical-write-bytes", 0, "software physical write bytes; not a DRAM counter")
 	nvidiaDevice := fs.String("nvidia-device", "", "NVIDIA device index or UUID; empty still probes device 0")
 	amdDevice := fs.String("amd-device", "", "AMD device index, BDF, or UUID; empty probes AMD device 0 after NVIDIA")
+	nvidiaNCUCSV := fs.String("nvidia-ncu-csv", "", "import Nsight Compute raw CSV instead of sampling the host")
+	profileDevice := fs.String("device", "", "profiled NVIDIA device name or UUID (required with --nvidia-ncu-csv)")
+	captureStart := fs.String("capture-start", "", "profile capture start time in RFC3339 (required with --nvidia-ncu-csv)")
+	captureEnd := fs.String("capture-end", "", "profile capture end time in RFC3339 (required with --nvidia-ncu-csv)")
 	measureRoofline := fs.Bool("measure-host-roofline", false, "benchmark and record sustainable host-memory bandwidth")
 	rooflineBytes := fs.Uint64("roofline-bytes", 64<<20, "host roofline benchmark working set")
 	rooflineTrials := fs.Int("roofline-trials", 5, "host roofline benchmark trial count")
@@ -164,7 +169,9 @@ func runModelObserveBandwidthCollect(args []string) error {
 		}
 		o.MeasureHostRoofline = &modelperfobs.RooflineBenchmarkOptions{WorkingSetBytes: *rooflineBytes, Trials: *rooflineTrials, TargetDuration: *rooflineDuration, Threads: threads}
 	}
+	visited := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) {
+		visited[f.Name] = true
 		switch f.Name {
 		case "theoretical-gb-s":
 			o.TheoreticalGBS = theoretical
@@ -184,9 +191,52 @@ func runModelObserveBandwidthCollect(args []string) error {
 			o.PhysicalSoftwareWrite = physicalWriteBytes
 		}
 	})
-	collection, err := modelperfobs.CollectBandwidth(context.Background(), o)
-	if err != nil {
-		return err
+	var collection modelperfobs.BandwidthCollection
+	var err error
+	if *nvidiaNCUCSV != "" {
+		for _, incompatible := range []string{"count", "interval", "measured-gb-s", "latency-ms", "prompt-tokens", "completion-tokens", "logical-bytes", "physical-read-bytes", "physical-write-bytes", "nvidia-device", "measure-host-roofline", "roofline-bytes", "roofline-trials", "roofline-duration", "roofline-threads"} {
+			if visited[incompatible] {
+				return fmt.Errorf("--%s cannot be combined with --nvidia-ncu-csv", incompatible)
+			}
+		}
+		started, err := time.Parse(time.RFC3339, *captureStart)
+		if err != nil {
+			return fmt.Errorf("--capture-start must be RFC3339: %w", err)
+		}
+		ended, err := time.Parse(time.RFC3339, *captureEnd)
+		if err != nil {
+			return fmt.Errorf("--capture-end must be RFC3339: %w", err)
+		}
+		in, err := os.Open(*nvidiaNCUCSV)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		profileOptions := modelperfobs.NVIDIAProfileOptions{
+			Phase:            o.Phase,
+			Shape:            o.Shape,
+			Device:           *profileDevice,
+			CaptureStartedAt: started,
+			CaptureEndedAt:   ended,
+			TheoreticalGBS:   o.TheoreticalGBS,
+		}
+		if visited["device-roofline-gb-s"] {
+			profileOptions.MeasuredDeviceGBS = deviceRoofline
+		}
+		collection, err = modelperfobs.ImportNVIDIAProfile(in, profileOptions)
+		if err != nil {
+			return err
+		}
+	} else {
+		for _, profileOnly := range []string{"device", "device-roofline-gb-s", "capture-start", "capture-end"} {
+			if visited[profileOnly] {
+				return fmt.Errorf("--%s requires --nvidia-ncu-csv", profileOnly)
+			}
+		}
+		collection, err = modelperfobs.CollectBandwidth(context.Background(), o)
+		if err != nil {
+			return err
+		}
 	}
 	w := io.Writer(os.Stdout)
 	var f *os.File
@@ -253,6 +303,7 @@ func modelObserveUsage() string {
 	return "usage: fak model-observe proxy --backend URL [--listen ADDR --ledger FILE]\n" +
 		"       fak model-observe report --input FILE [--format md|json]\n" +
 		"       fak model-observe bandwidth --input FILE [--output FILE --pretty=true]\n" +
+		"       fak model-observe bandwidth collect --nvidia-ncu-csv FILE --device DEVICE --capture-start RFC3339 --capture-end RFC3339 --phase PHASE --shape SHAPE [--device-roofline-gb-s N]\n" +
 		"       fak model-observe cache-state-bench [--output FILE --pretty=true]\n" +
 		"       fak model-observe cache-state-bench --verify FILE"
 }
