@@ -77,6 +77,18 @@ URLs**, and **200 entity labels**. Task counts, generated instances, websites, t
 tags, observations, actions, turns, users, sessions, and production arrivals remain separate
 denominators; benchmark success is not a production workload distribution.
 
+## Latest slice: speculative-decoding production observability (#9371)
+
+Three pinned official-repository records add bounded vLLM, SGLang, and NVIDIA
+TensorRT-LLM speculative-decoding telemetry/control surfaces. The corpus now contains
+**244 entries**, **239 unique source URLs**, and **207 entity labels**. Available
+instrumentation is not evidence that it is enabled, collected, retained, or representative:
+request accepted-draft-length histograms remain distinct from fleet aggregate counters; accepted,
+drafted, emitted/output tokens, and iterations remain distinct denominators; adaptive-controller
+inputs remain distinct from published outcomes; and benchmark acceptance or speedup remains
+distinct from production prevalence or goodput. No verified retry/fallback/client-side production
+distribution was found in this bounded primary-source slice.
+
 ## Latest slice: public conversation populations (#9370)
 
 Four direct population records add LMSYS-Chat-1M, WildChat, Chatbot Arena preferences, and

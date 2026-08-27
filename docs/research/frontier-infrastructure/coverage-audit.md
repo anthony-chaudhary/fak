@@ -1,6 +1,6 @@
 # Frontier infrastructure coverage audit
 
-**Snapshot:** 2026-08-26  
+**Snapshot:** 2026-08-27
 **Issue:** [#9306](https://github.com/anthony-chaudhary/fak/issues/9306)  
 **Authority:** [`index.json`](index.json)
 
@@ -108,6 +108,17 @@ language, country, timestamp, preference-vote, tree, and annotation boundaries. 
 **241 entries**, **236 unique URLs**, and **204 entity labels**. Provider-wide tenant/user
 denominators, billing/API segmentation, stable identities, verified geography, and production
 session/arrival distributions remain missing.
+
+## Issue #9371 delta
+
+Issue #9371 adds three current, pinned official-repository records for vLLM, SGLang, and
+NVIDIA TensorRT-LLM. Totals are **244 entries**, **239 unique URLs**, and **207 entity
+labels**; `serving_system` rises from 37 to **40**, and `official_repository` rises from 1
+to **4**. The slice verifies available accepted-length histograms, separate drafted/accepted/
+emitted-or-output/iteration accounting, benchmark report fields, and adaptive-controller inputs
+and parameter outputs. It does **not** establish enabled or collected production telemetry, a
+representative request distribution, fleet aggregate acceptance/goodput, production prevalence,
+or a controller outcome. Retry/fallback/client-side production distributions remain **missing**.
 
 ## Status vocabulary
 

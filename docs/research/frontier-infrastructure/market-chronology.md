@@ -151,6 +151,23 @@ Expiry means **remove from active architectural assumptions**, not delete histor
 later check must mark each claim `confirmed`, `partially_confirmed`, `refuted`, or
 `expired_unresolved`, with exact claim fragments and sources.
 
+## Speculative-decoding observability update — 2026-08-27
+
+- **vLLM:** the pinned V1 implementation records drafted, accepted, and emitted token totals,
+  speculative iterations, draft acceptance rate, a per-request consecutive accepted-draft-length
+  histogram, and acceptance by draft position. These are available instrumentation surfaces; the
+  source does not show that any production operator enabled, scraped, retained, or published them.
+- **SGLang:** the pinned metrics collector exposes accepted-length histogram and cumulative
+  accepted-token/forward-iteration seams, while the adaptive implementation consumes runtime
+  outcome statistics and chooses later speculative parameters. Controller input and selected
+  parameters are not a published controller outcome or causal production speedup.
+- **NVIDIA TensorRT-LLM:** the pinned benchmark report schema separates total draft tokens, total
+  accepted draft tokens, acceptance rate/length/probability, request count, and output-token total.
+  It is benchmark instrumentation, not a production request distribution or fleet aggregate rate.
+- **Bounded absence:** this slice found no primary-source retry/fallback/client-side production
+  distribution. It therefore makes no retry or fallback telemetry claim. Benchmark acceptance or
+  speedup likewise does not establish production prevalence or goodput.
+
 ## Rumor resolution update — 2026-08-27
 
 - **NVIDIA memory-price direction corroborated, magnitude still open.** NVIDIA's August 26 fiscal-Q2-2027 materials/call corroborate extreme memory-cost pressure and planned product price increases. They do not confirm the reported >15% magnitude, customer notices, named Grace Blackwell/Vera Rubin configurations, or shipment scope. Status remains `partially_corroborated_open`; expiry remains 2026-11-30.

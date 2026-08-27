@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-27T00:00:00-07:00",
+  "updated_at": "2026-08-27",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9370,
+  "latest_slice_issue": 9371,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 241,
+    "entry_count": 244,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -202,6 +202,7 @@
       "NVIDIA Dynamo",
       "NVIDIA Dynamo Planner",
       "NVIDIA Nemotron",
+      "NVIDIA TensorRT-LLM",
       "Nebius Group",
       "OSWorld",
       "OctoAI / NVIDIA",
@@ -222,6 +223,7 @@
       "Parrot serving study",
       "Robust KV cache management study",
       "SDAIA / IBM",
+      "SGLang",
       "SK Telecom",
       "SK hynix",
       "SMetric agent scheduling study",
@@ -275,6 +277,7 @@
       "iFLYTEK Spark / Open Platform",
       "llm-d / Google",
       "tau-bench",
+      "vLLM",
       "vLLM / PagedAttention",
       "xAI",
       "xAI Grok 3"
@@ -288,7 +291,8 @@
       "Full startup census across inference engines, neoclouds, model routers, KV-cache systems, power, cooling, networking, and modular datacenters, including failures and acquisitions.",
       "China and export-control coverage, sovereign AI programs, standards, regulatory changes, and regional supply chains.",
       "A systematic rumor chronology with original source, independent corroboration graph, later confirmation/refutation, and expiry.",
-      "Automated link checking, schema validation as a committed Go leaf, and scheduled refresh; the manual contradiction matrix exists but project-level reconciliation remains incomplete."
+      "Automated link checking, schema validation as a committed Go leaf, and scheduled refresh; the manual contradiction matrix exists but project-level reconciliation remains incomplete.",
+      "Representative production retry, server/client fallback, and client-side speculative-decoding outcome distributions remain unavailable in the reviewed primary sources."
     ]
   },
   "entries": [
@@ -9369,6 +9373,155 @@
       "rumor": {
         "is_rumor": false
       }
+    },
+    {
+      "id": "vllm-spec-decode-metrics-2026",
+      "category": "serving_system",
+      "entity": "vLLM",
+      "topic": [
+        "speculative_decoding",
+        "production_observability",
+        "accepted_draft_length",
+        "token_accounting"
+      ],
+      "published_at": "2026-06-14",
+      "event_at": "2026-06-14",
+      "source_title": "vLLM speculative-decoding metrics implementation",
+      "source_url": "https://github.com/vllm-project/vllm/blob/4ef4492e9b7a5a7ba295da783d456d45db5eb9d6/vllm/v1/spec_decode/metrics.py",
+      "source_kind": "official_repository",
+      "evidence_class": "instrumentation_surface",
+      "confidence": "high",
+      "claim": "vLLM V1 records speculative-decoding statistics from each engine-step update: drafted-token count, accepted-token count, emitted-token count, draft acceptance rate, a request-level histogram of consecutive accepted draft lengths, and acceptance counts by draft position. The histogram is updated once per request that has speculative tokens in that step; the implementation also keeps drafted, accepted, emitted, and iteration totals as separate counters.",
+      "quantified": {
+        "request_histogram_bucket_semantics": "number of consecutive accepted draft tokens in one request update",
+        "aggregate_counters": [
+          "num_draft_tokens",
+          "num_accepted_tokens",
+          "num_emitted_tokens",
+          "num_spec_decode_iterations"
+        ],
+        "position_index_origin": 0
+      },
+      "assumptions": [
+        "The pinned repository implementation is evidence that instrumentation is available in that source revision, not that an operator enabled export or retained observations.",
+        "A request-level accepted-length histogram and fleet aggregate counters have different denominators and must not be merged.",
+        "Accepted draft tokens, drafted tokens, emitted tokens, and speculative iterations are distinct quantities."
+      ],
+      "contradictions_or_limits": [
+        "The source publishes no representative production distribution, deployment prevalence, tenant mix, or fleet goodput outcome.",
+        "The code surface does not establish that metrics are enabled, scraped, stored, or representative in any production fleet.",
+        "No directly verified retry, client-side fallback, or failure-recovery distribution is exposed by this source.",
+        "Availability of these counters does not convert benchmark speedup into production prevalence or production goodput."
+      ],
+      "fak_implications": [
+        "Preserve request histogram samples separately from monotonic fleet counters and attach engine/config/version labels before aggregation.",
+        "Compute acceptance diagnostics only from denominator-compatible fields; do not substitute emitted tokens for accepted drafts or iterations for requests.",
+        "Treat missing collection state and retry/fallback observations as explicit unknowns."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "sglang-spec-decode-metrics-adaptive-2026",
+      "category": "serving_system",
+      "entity": "SGLang",
+      "topic": [
+        "speculative_decoding",
+        "production_observability",
+        "accepted_draft_length",
+        "adaptive_speculation"
+      ],
+      "published_at": "2026-08-26",
+      "event_at": "2026-08-26",
+      "source_title": "SGLang speculative-decoding metrics and adaptive parameter implementation",
+      "source_url": "https://github.com/sgl-project/sglang/blob/5b7fc61306138582e0fb3536047fcdbd12aedd57/python/sglang/srt/speculative/adaptive_spec_params.py",
+      "source_kind": "official_repository",
+      "evidence_class": "instrumentation_and_control_surface",
+      "confidence": "high",
+      "claim": "SGLang exposes a speculative accepted-length histogram and separate cumulative accepted-token and forward-iteration totals in its metrics collector, while its adaptive speculative-parameter implementation accepts runtime outcome statistics such as accepted lengths and batch context to choose subsequent draft parameters. This verifies an available telemetry/control seam, not a published production outcome.",
+      "quantified": {
+        "accepted_length_histogram": "sglang:spec_accept_length",
+        "cumulative_inputs": [
+          "spec_num_total_accepted_tokens",
+          "spec_num_total_forward_ct"
+        ],
+        "adaptive_output_examples": [
+          "speculative_num_steps",
+          "speculative_eagle_topk"
+        ]
+      },
+      "assumptions": [
+        "The histogram, cumulative totals, and adaptive controller operate at different aggregation boundaries and remain separately typed.",
+        "Controller inputs and selected parameters are implementation surfaces, not evidence of controller benefit in a production workload.",
+        "The pinned repository revision is a current primary-source snapshot; operators can configure or disable the relevant features."
+      ],
+      "contradictions_or_limits": [
+        "The source does not publish a representative request-level production distribution, fleet deployment rate, or production goodput delta.",
+        "Instrumentation available does not mean enabled, collected, exported, retained, or representative.",
+        "Adaptive controller input and parameter output do not establish a published controller outcome, stability envelope, or causal speedup.",
+        "No directly verified retry, client-side fallback, or fallback-frequency telemetry was found in this bounded source review."
+      ],
+      "fak_implications": [
+        "Record adaptive-controller inputs, chosen parameters, and later request outcomes as separate events so a controller can be evaluated rather than presumed effective.",
+        "Keep accepted-length histograms distinct from cumulative accepted-token and iteration counters.",
+        "Require an explicit collection/enabled-state witness before treating the surface as observed workload evidence."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
+    },
+    {
+      "id": "tensorrt-llm-speculative-benchmark-reporting-2026",
+      "category": "serving_system",
+      "entity": "NVIDIA TensorRT-LLM",
+      "topic": [
+        "speculative_decoding",
+        "benchmark_reporting",
+        "acceptance_rate",
+        "token_accounting"
+      ],
+      "published_at": "2026-08-19",
+      "event_at": "2026-08-19",
+      "source_title": "TensorRT-LLM benchmark reporting dataclasses",
+      "source_url": "https://github.com/NVIDIA/TensorRT-LLM/blob/e6caf6f09bfaf383776a9f88bb58b45940331e43/tensorrt_llm/bench/dataclasses/reporting.py",
+      "source_kind": "official_repository",
+      "evidence_class": "benchmark_instrumentation_surface",
+      "confidence": "high",
+      "claim": "TensorRT-LLM benchmark reporting defines speculative-decoding fields for total draft tokens, total accepted draft tokens, acceptance rate, acceptance length, and acceptance probability alongside request and output-token totals. This is a benchmark/report schema surface and preserves drafted, accepted, and output-token quantities as separate fields.",
+      "quantified": {
+        "speculative_fields": [
+          "total_draft_tokens",
+          "total_accepted_draft_tokens",
+          "acceptance_rate",
+          "acceptance_length",
+          "acceptance_probability"
+        ],
+        "non_speculative_denominators": [
+          "num_requests",
+          "total_output_tokens"
+        ]
+      },
+      "assumptions": [
+        "Fields in the benchmark report schema are available instrumentation, not proof that a production service exports them.",
+        "Drafted, accepted, and output tokens are different accounting quantities; acceptance length and acceptance probability are derived statistics, not token counters."
+      ],
+      "contradictions_or_limits": [
+        "The source is benchmark reporting, not a representative production workload distribution or fleet aggregate telemetry publication.",
+        "No production prevalence, enabled-state, scrape/retention state, tenant mix, fallback frequency, retry distribution, or client-side outcome distribution is published here.",
+        "Benchmark speedup or acceptance summaries cannot be promoted to production prevalence or goodput without production workload and accounting evidence."
+      ],
+      "fak_implications": [
+        "Tag benchmark-only speculative fields so they cannot be silently joined with production request telemetry.",
+        "Require request/fleet denominators and output-token accounting before comparing acceptance across engines.",
+        "Retain the unresolved production retry/fallback/client-side distribution gap."
+      ],
+      "rumor": {
+        "is_rumor": false
+      },
+      "checked_at": "2026-08-27"
     }
   ]
 }
