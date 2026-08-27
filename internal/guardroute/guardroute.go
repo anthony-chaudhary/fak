@@ -81,11 +81,11 @@ func Decide(fold guardrsi.Fold, bucket guardrsi.Bucket, threshold int) RouteDeci
 	d := RouteDecision{Schema: Schema}
 
 	if fold.TotalRows == 0 {
-		d.Reason = "empty journal -- no adjudicated row to review; nothing to route"
+		d.Reason = "empty journal -- no adjudicated row to review; recovery: run a guarded session to record at least one adjudicated row, then retry routing"
 		return d
 	}
 	if fold.TotalRows < 0 {
-		d.Reason = fmt.Sprintf("invalid journal -- total_rows=%d cannot be negative; nothing to route", fold.TotalRows)
+		d.Reason = fmt.Sprintf("invalid journal -- total_rows=%d cannot be negative; recovery: rebuild the fold from verified journal rows, then retry routing", fold.TotalRows)
 		return d
 	}
 
@@ -94,12 +94,12 @@ func Decide(fold guardrsi.Fold, bucket guardrsi.Bucket, threshold int) RouteDeci
 	// fabricate a P1 issue from the bucket alone, or let a hostile bucket downgrade a
 	// real folded crash to an advisory denial.
 	if fold.ChildCrash < 0 || fold.ChildCrash > fold.TotalRows {
-		d.Reason = fmt.Sprintf("invalid child_crash fold -- child_crash=%d is outside [0,total_rows=%d]; nothing to route", fold.ChildCrash, fold.TotalRows)
+		d.Reason = fmt.Sprintf("invalid child_crash fold -- child_crash=%d is outside [0,total_rows=%d]; recovery: rebuild the fold from verified journal rows, then retry routing", fold.ChildCrash, fold.TotalRows)
 		return d
 	}
 	if bucket.Bucket == "child_crash" || fold.ChildCrash > 0 {
 		if bucket.Bucket != "child_crash" || bucket.Count <= 0 || bucket.Count != fold.ChildCrash {
-			d.Reason = fmt.Sprintf("inconsistent child_crash evidence -- fold=%d bucket=%q count=%d; nothing to route", fold.ChildCrash, bucket.Bucket, bucket.Count)
+			d.Reason = fmt.Sprintf("inconsistent child_crash evidence -- fold=%d bucket=%q count=%d; recovery: recompute the bucket with guardrsi.WorstBucket(fold), then retry routing", fold.ChildCrash, bucket.Bucket, bucket.Count)
 			return d
 		}
 	}
