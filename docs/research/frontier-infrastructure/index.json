@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9365,
+  "latest_slice_issue": 9366,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 227,
+    "entry_count": 232,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -128,6 +128,7 @@
       "DeepSeek",
       "DistServe",
       "Dominion Energy Virginia GS-5",
+      "EAGLE",
       "Eaton",
       "Equinix Metal",
       "European Commission / EuroHPC",
@@ -166,7 +167,9 @@
       "LiquidStack / Trane Technologies",
       "MBZUAI / G42 Institute of Foundation Models",
       "MBZUAI / Inception / Cerebras / Petuum",
+      "MagicDec",
       "Marvell / Celestial AI",
+      "Medusa",
       "Meituan DORA",
       "Meituan LongCat-Flash",
       "Meituan MTGenRec",
@@ -233,6 +236,8 @@
       "Siemens Energy / Start Campus",
       "Singapore IMDA",
       "SkyWalker cross-region study",
+      "SpecInfer",
+      "Speculative decoding",
       "StepFun",
       "TIE scheduling study",
       "TSMC",
@@ -8830,6 +8835,189 @@
       ],
       "fak_implications": [
         "Domestic-fab capacity models should begin credit at qualified high-volume output, then separately track product mix, good dies, packaging, and system shipment."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "speculative-decoding-foundation-2022",
+      "category": "serving_system",
+      "entity": "Speculative decoding",
+      "topic": [
+        "speculative_decoding",
+        "lossless_sampling",
+        "draft_verification"
+      ],
+      "published_at": "2022-11-30",
+      "event_at": "2022-11-30",
+      "source_title": "Fast Inference from Transformers via Speculative Decoding",
+      "source_url": "https://arxiv.org/abs/2211.17192",
+      "source_kind": "research_paper",
+      "evidence_class": "controlled_benchmark",
+      "confidence": "high",
+      "claim": "The foundational speculative-decoding method uses a faster approximation model to draft several tokens and a target model to verify them in parallel with a rejection-sampling correction that preserves the target output distribution; T5-XXL experiments reported roughly 2x-3x acceleration over standard T5X decoding.",
+      "quantified": {
+        "speedup_min": 2.0,
+        "speedup_max": 3.0
+      },
+      "assumptions": [
+        "Speedup depends on draft cost, draft-target agreement, verification cost, hardware, model pair, sequence geometry, and load."
+      ],
+      "contradictions_or_limits": [
+        "The T5-XXL/T5X benchmark is not a production acceptance distribution or universal LLM-serving multiplier.",
+        "Rejected drafts still consume draft and verification work; the paper does not supply provider retry/failure denominators."
+      ],
+      "fak_implications": [
+        "Decode accounting should track drafted, verified, accepted, rejected, fallback, and emitted tokens separately."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "specinfer-tree-speculation-2023",
+      "category": "serving_system",
+      "entity": "SpecInfer",
+      "topic": [
+        "speculative_decoding",
+        "token_tree",
+        "distributed_inference"
+      ],
+      "published_at": "2023-05-16",
+      "event_at": "2023-05-16",
+      "source_title": "SpecInfer: Accelerating Large Language Model Serving with Tree-based Speculative Inference and Verification",
+      "source_url": "https://arxiv.org/abs/2305.09781",
+      "source_kind": "research_paper",
+      "evidence_class": "controlled_benchmark",
+      "confidence": "high",
+      "claim": "SpecInfer drafts and verifies token trees to use spare parallel resources; it reported 1.5x-2.8x gains for distributed inference and 2.6x-3.5x for offloading inference, with tree speculation 1.2x-1.5x faster than sequence-based speculation in its evaluated envelopes.",
+      "quantified": {
+        "distributed_speedup_min": 1.5,
+        "distributed_speedup_max": 2.8,
+        "offloading_speedup_min": 2.6,
+        "offloading_speedup_max": 3.5,
+        "tree_vs_sequence_speedup_min": 1.2,
+        "tree_vs_sequence_speedup_max": 1.5
+      },
+      "assumptions": [
+        "Tree width and depth trade extra candidate work for higher probability of accepting useful continuations."
+      ],
+      "contradictions_or_limits": [
+        "Distributed and offloading results use different bottlenecks and are not interchangeable or stackable.",
+        "The paper does not establish production prevalence, request-level acceptance histograms, or retry distributions."
+      ],
+      "fak_implications": [
+        "Schedulers should cost candidate-tree nodes and verifier work, not count only emitted tokens or nominal draft length."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "medusa-multiple-heads-2024",
+      "category": "serving_system",
+      "entity": "Medusa",
+      "topic": [
+        "parallel_decoding",
+        "multiple_heads",
+        "tree_verification"
+      ],
+      "published_at": "2024-01-19",
+      "event_at": "2024-01-19",
+      "source_title": "Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads",
+      "source_url": "https://arxiv.org/abs/2401.10774",
+      "source_kind": "research_paper",
+      "evidence_class": "controlled_benchmark",
+      "confidence": "high",
+      "claim": "Medusa adds multiple decoding heads to one backbone and verifies a candidate tree without maintaining a separate draft model; Medusa-1 reported over 2.2x speedup with the backbone frozen, while jointly trained Medusa-2 reported 2.3x-3.6x.",
+      "quantified": {
+        "medusa1_speedup_min": 2.2,
+        "medusa2_speedup_min": 2.3,
+        "medusa2_speedup_max": 3.6
+      },
+      "assumptions": [
+        "Head accuracy, candidate tree, acceptance rule, backbone model, task, and hardware determine realized gains."
+      ],
+      "contradictions_or_limits": [
+        "Medusa-1 and Medusa-2 use different training and quality-preservation contracts and must not be conflated.",
+        "Benchmark maxima are not request-population acceptance distributions or evidence of deployment share."
+      ],
+      "fak_implications": [
+        "Serving manifests should record whether speculation uses a separate drafter, attached heads, joint training, or relaxed acceptance."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "eagle-feature-speculation-2024",
+      "category": "serving_system",
+      "entity": "EAGLE",
+      "topic": [
+        "speculative_decoding",
+        "feature_prediction",
+        "acceptance_length"
+      ],
+      "published_at": "2024-01-26",
+      "event_at": "2024-01-26",
+      "source_title": "EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty",
+      "source_url": "https://arxiv.org/abs/2401.15077",
+      "source_kind": "research_paper",
+      "evidence_class": "controlled_benchmark",
+      "confidence": "high",
+      "claim": "EAGLE predicts second-to-top-layer features plus an advanced token sequence while preserving the target distribution; across its LLaMA/Vicuna evaluations it reported roughly 1.5x-2.8x wall-clock speedup, with acceptance length varying materially by task, model, temperature, and draft position.",
+      "quantified": {
+        "wall_clock_speedup_min": 1.5,
+        "wall_clock_speedup_max": 2.8
+      },
+      "assumptions": [
+        "Acceptance length is tokens emitted per draft-verification cycle, including method-specific verification semantics."
+      ],
+      "contradictions_or_limits": [
+        "The speedup range spans named paper evaluations and is not a request-population acceptance distribution or universal multiplier.",
+        "Acceptance varies by task, model, temperature, token position, batch/load, hardware, and implementation."
+      ],
+      "fak_implications": [
+        "Acceptance should be stored as a conditional position/task/model distribution, not one global scalar."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "magicdec-long-context-batching-2024",
+      "category": "serving_system",
+      "entity": "MagicDec",
+      "topic": [
+        "speculative_decoding",
+        "long_context",
+        "batching"
+      ],
+      "published_at": "2024-08-20",
+      "event_at": "2024-08-20",
+      "source_title": "MagicDec: Breaking the Latency-Throughput Tradeoff for Long Context Generation with Speculative Decoding",
+      "source_url": "https://arxiv.org/abs/2408.11049",
+      "source_kind": "research_paper",
+      "evidence_class": "controlled_benchmark",
+      "confidence": "high",
+      "claim": "MagicDec uses sparse-KV draft models for long-context serving and shows that speculative decoding can help at batches 32-256 when KV work changes the bottleneck; it reported up to 2x for LLaMA-2-7B-32K and 1.84x for LLaMA-3.1-8B on eight A100 GPUs.",
+      "quantified": {
+        "batch_size_min": 32,
+        "batch_size_max": 256,
+        "a100_gpus": 8,
+        "llama2_7b_32k_speedup_max": 2.0,
+        "llama31_8b_speedup_max": 1.84
+      },
+      "assumptions": [
+        "Large-batch benefits arise in moderate/long-sequence regimes where KV-cache costs and draft strategy alter the memory/compute balance."
+      ],
+      "contradictions_or_limits": [
+        "This does not mean speculative decoding improves every large batch; short contexts, low agreement, or expensive drafting can erase gains.",
+        "Controlled benchmarks do not provide production acceptance, retry, load, or request-mix distributions."
+      ],
+      "fak_implications": [
+        "Batching policy should condition speculative admission on context length, effective batch, draft cost, KV footprint, and measured acceptance."
       ],
       "rumor": {
         "is_rumor": false

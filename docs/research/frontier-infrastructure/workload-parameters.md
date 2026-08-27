@@ -15,6 +15,16 @@ popularity, fixed token lengths.” The source-level claims and limitations rema
 | MTServe | Unique user/item state; request- and prefix-level caches; up to 4.93x throughput and 4.19x lower latency | Stateful recommendation locality is not ordinary shared-prefix reuse and does not prove Zipf. |
 | MTGenRec | 200M real user sequences over one week; 128 A100s | Sequences are training examples, not unique users, sessions, requests, or live QPS. |
 
+## Speculative decoding and acceptance parameters (#9366)
+
+| Mechanism | Bounded result | Planning boundary |
+|---|---|---|
+| Foundational speculative decoding | T5-XXL roughly 2x-3x with output distribution preserved | Drafter/target agreement and verification cost determine waste. |
+| SpecInfer | 1.5x-2.8x distributed; 2.6x-3.5x offloading; tree 1.2x-1.5x vs sequence | Different bottlenecks; ranges are not stackable. |
+| Medusa | >2.2x frozen-backbone Medusa-1; 2.3x-3.6x jointly trained Medusa-2 | Different training and quality contracts. |
+| EAGLE | Roughly 1.5x-2.8x wall-clock speedup across named LLaMA/Vicuna evaluations | Acceptance is conditional on task, model, temperature, draft position, and load. |
+| MagicDec | Batch 32-256, eight A100s; up to 2x/1.84x for named long-context models | Large batches help only in the measured KV-dominated regime. |
+
 ## Trace populations
 
 | Trace | Population and window | Scale | Directly observed fields | Boundary |

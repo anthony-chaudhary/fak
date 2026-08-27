@@ -13,6 +13,14 @@ whose reuse geometry differs from exact prompt or token-prefix reuse; MTGenRec a
 one-week sequence-training population, not a serving arrival law. None supports a
 universal Zipf, lognormal, Pareto, Poisson, Hawkes, or MMPP model.
 
+## Speculation, failures, and retries (#9366)
+
+Speculative acceptance is not one global probability. It varies by draft/target pair, task,
+temperature, token position, context length, batch/load, tree geometry, and implementation.
+Provider failure reasons are not client retry counts, and rejected draft tokens are compute
+work even when they never become output. The current papers provide bounded mechanism
+benchmarks, not a production acceptance or retry distribution; that gap remains explicit.
+
 ## Distribution assumptions
 
 | Dimension | Convenient but weak default | Evidence-backed expectation | Benchmark requirement |

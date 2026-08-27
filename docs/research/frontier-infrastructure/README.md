@@ -61,6 +61,14 @@ contains **227 entries**, **222 unique source URLs**, and **190 entity labels**.
 qualification, volume production, shipped components, assembled systems, deployed clusters,
 and useful goodput remain separate lifecycle states.
 
+## Latest slice: speculative acceptance envelopes (#9366)
+
+Five dedicated records add foundational draft/verify sampling, SpecInfer token trees, Medusa
+decoding heads, EAGLE feature speculation, and MagicDec long-context batching. The corpus
+now contains **232 entries**, **227 unique source URLs**, and **195 entity labels**. Drafted,
+verified, accepted, rejected, fallback, and emitted tokens remain separate work; benchmark
+speedups are task/model/hardware/load envelopes, not stackable production multipliers.
+
 ## Result first
 
 The initial evidence already rejects several convenient defaults:

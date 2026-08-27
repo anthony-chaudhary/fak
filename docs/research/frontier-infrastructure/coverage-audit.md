@@ -87,6 +87,13 @@ packaging, and leading-edge wafers. Totals are **227 entries**, **222 unique URL
 entity labels**. Exact shipped units, yields, allocations, good-package output, assembled
 systems, optics/cabling joins, and deployed capacity remain incomplete.
 
+## Issue #9366 delta
+
+Issue #9366 adds five dedicated speculative-decoding mechanisms and bounded acceptance or
+speedup examples. Totals are **232 entries**, **227 unique URLs**, and **195 entity labels**.
+Production request-level acceptance histograms, draft/rejection waste, fallback rates, client
+retry counts, and load-conditioned distributions remain missing.
+
 ## Status vocabulary
 
 | Status | Meaning |
