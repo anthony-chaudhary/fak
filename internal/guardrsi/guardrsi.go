@@ -40,10 +40,19 @@ var KnownVerdicts = map[string]bool{
 	"WITNESS": true, "DEFER": true, "INDETERMINATE": true, "ADVISORY": true,
 }
 
+// KnownOperationalKinds are guard-authored control and lifecycle rows, not tool
+// decisions. The fold reports them explicitly but excludes them from verdict quality;
+// adding an operational row must not make an unrelated verdict defect look better.
+var KnownOperationalKinds = map[string]bool{
+	"CONFIG_SWAP": true, "RESTART_HOP": true, "CAPABILITY_GRANT": true,
+}
+
 type Fold struct {
 	TotalRows         int            `json:"total_rows"`
 	ByVerdict         map[string]int `json:"by_verdict"`
 	ByReason          map[string]int `json:"by_reason"`
+	OperationalRows   int            `json:"operational_rows"`
+	ByOperationalKind map[string]int `json:"by_operational_kind"`
 	UnknownVerdict    int            `json:"unknown_verdict"`
 	BlankReasonOnDeny int            `json:"blank_reason_on_deny"`
 	WitnesslessBlock  int            `json:"witnessless_block"`
@@ -161,7 +170,7 @@ func DiagnoseAuditGap(root string) string {
 }
 
 func FoldRows(paths []string) Fold {
-	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}, ByCrashClass: map[string]int{}, ByRateLimitClass: map[string]int{}}
+	fold := Fold{ByVerdict: map[string]int{}, ByReason: map[string]int{}, ByOperationalKind: map[string]int{}, ByCrashClass: map[string]int{}, ByRateLimitClass: map[string]int{}}
 	for _, path := range paths {
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -176,12 +185,19 @@ func FoldRows(paths []string) Fold {
 			if err := json.Unmarshal([]byte(line), &row); err != nil {
 				continue
 			}
+			kind := strings.ToUpper(strings.TrimSpace(scorecard.StringValue(row["kind"])))
+			if KnownOperationalKinds[kind] {
+				fold.TotalRows++
+				fold.OperationalRows++
+				fold.ByOperationalKind[kind]++
+				continue
+			}
 			// A CHILD_CRASH row is not a kernel decision — the wrapped child died
 			// abnormally. It carries no verdict, so it never enters the verdict/reason
 			// accounting below (that would misread its crash-class Reason as a denial
 			// reason and its non-verdict Kind as an unknown verdict). It counts on its
 			// own worst-honesty-hole axis, keyed by the closed crash class.
-			if strings.EqualFold(strings.TrimSpace(scorecard.StringValue(row["kind"])), "CHILD_CRASH") {
+			if kind == "CHILD_CRASH" {
 				fold.TotalRows++
 				if class, ok := childRateLimitExitClass(row); ok {
 					fold.RateLimitExit++
@@ -248,13 +264,14 @@ func childRateLimitExitClass(row map[string]any) (string, bool) {
 }
 
 func VerdictQuality(f Fold) float64 {
-	if f.TotalRows <= 0 {
+	verdictRows := f.TotalRows - f.OperationalRows
+	if verdictRows <= 0 {
 		return 0
 	}
 	// A CHILD_CRASH takes a FULL per-row penalty (weight 1.0, alongside blank-reason
 	// and unknown-verdict): a session the guard failed to keep alive is the worst
 	// honesty hole, so a crash moves the metric as hard as an unexplained block.
-	penalty := (float64(f.BlankReasonOnDeny+f.UnknownVerdict+f.ChildCrash) + 0.5*float64(f.WitnesslessBlock)) / float64(f.TotalRows)
+	penalty := (float64(f.BlankReasonOnDeny+f.UnknownVerdict+f.ChildCrash) + 0.5*float64(f.WitnesslessBlock)) / float64(verdictRows)
 	return mathx.Round3(math.Max(0, 1-penalty) * 100)
 }
 
