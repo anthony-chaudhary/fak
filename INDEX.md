@@ -277,6 +277,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Apple unified-memory counter provenance (2026-08-27)](docs/notes/APPLE-UNIFIED-MEMORY-COUNTER-PROVENANCE-2026-08-27.md) — generic normalized package/system import contract for direct byte rates or monotonic byte deltas, plus historical powermetrics `DCS RD`/`DCS WR` field evidence and its removal boundary; the fixtures are synthetic and no live capture is claimed.
+
 - [Zero-day model-onboarding study (2026-08-27)](docs/notes/CONCEPT-STUDY-ZERO-DAY-MODEL-ONBOARDING-2026-08-27.md) -- issue #9421 provenance for the pinned vLLM/SGLang source anchors, durable study `study_a4310abb38820a69d2b77ffaa1ada12058d1cde24169bf651806ef1c9baa8d01`, and the refusal-safe release-to-descriptor compiler now documented in the [new-model playbook](docs/new-model-playbook.md).
 - [Simulation in performance benchmarking: deterministic feedback, calibrated estimates, and claim ceilings](docs/notes/CONCEPT-SIMULATION-BENCHMARK-EVIDENCE-2026-08-27.md) — field-borrow pass for [#9424](https://github.com/anthony-chaudhary/fak/issues/9424): a multi-fidelity ladder from exact counts through calibrated estimates, with machine-readable claim ceilings that keep simulated evidence out of measured and competitive headlines.
 - [GLM-5.3-Flash hosted and fak-native support study](docs/notes/CONCEPT-STUDY-GLM53-FLASH-2026-08-27.md) -- pinned API, artifact, architecture, upstream-runtime, fak-gap, license, and phased epic evidence for #9433/#9434-#9435/#9438-#9442.

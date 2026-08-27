@@ -1,0 +1,46 @@
+{
+  "schema": "fak-apple-memory-counter-import/1",
+  "provider": "fixture-apple-counter-export",
+  "provider_version": "1.0",
+  "scope": {
+    "kind": "package"
+  },
+  "capture": {
+    "status": "ok",
+    "started_at": "2026-08-27T18:00:00Z",
+    "ended_at": "2026-08-27T18:00:00.5Z",
+    "interval_ns": 500000000,
+    "metadata": {
+      "os_version": "fixture-macos",
+      "hardware_model": "fixture-apple-silicon",
+      "capture_method": "synthetic-contract-fixture"
+    }
+  },
+  "counters": [
+    {
+      "direction": "read",
+      "semantic": "memory-read-bytes",
+      "field": "memory_read_bytes_per_second",
+      "unit": "bytes_per_second",
+      "scope": {
+        "kind": "package"
+      },
+      "rate_bytes_per_second": 85000000000
+    },
+    {
+      "direction": "write",
+      "semantic": "memory-write-bytes",
+      "field": "memory_write_bytes_per_second",
+      "unit": "bytes_per_second",
+      "scope": {
+        "kind": "package"
+      },
+      "rate_bytes_per_second": 17500000000
+    }
+  ],
+  "raw_provider_fields": {
+    "memory_read_bytes_per_second": 85000000000,
+    "memory_write_bytes_per_second": 17500000000,
+    "provider_scope": "package"
+  }
+}

@@ -498,3 +498,156 @@ func TestModelObserveBandwidthValidatesHostCounterImportFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestModelObserveBandwidthImportsAppleMemoryCounters(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "collection.json")
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "apple-memory-direct-rate.json")
+	args := []string{
+		"collect",
+		"--apple-memory-import", fixture,
+		"--apple-memory-provider", "fixture-apple-counter-export",
+		"--apple-memory-provider-version", "1.0",
+		"--apple-memory-scope", "package",
+		"--apple-memory-format", "generic-json",
+		"--apple-memory-interval", "500ms",
+		"--capture-start", "2026-08-27T18:00:00Z",
+		"--capture-end", "2026-08-27T18:00:00.5Z",
+		"--phase", "decode",
+		"--shape", "small",
+		"--measured-gb-s", "120",
+		"--output", output,
+		"--pretty=false",
+	}
+	if err := runModelObserveBandwidth(args); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	for _, want := range []string{
+		`"collector":"fixture-apple-counter-export"`,
+		`"dram_counters":true`,
+		`"source":"apple-memory-direct-byte-rates"`,
+		`"device":"apple-unified-memory"`,
+		`"scope":{"kind":"package"}`,
+		`"read_gb_s":85`,
+		`"write_gb_s":17.5`,
+		`"total_gb_s":102.5`,
+		`"selected_source":"measured-sustainable"`,
+		`"apple_memory_artifact":{"schema":"fak-apple-unified-memory-counters/1"`,
+		`"provider_version":"1.0"`,
+		`"interval_ns":500000000`,
+		`"capture_status":"ok"`,
+		`"raw_provider_fields":{"memory_read_bytes_per_second":85000000000`,
+		`"phase_attribution":"request phase is temporal attribution only; package/system traffic is not process or model traffic"`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("Apple memory collection missing %s: %s", want, text)
+		}
+	}
+	for _, forbidden := range []string{
+		`"process_read_bytes":0`, `"process_write_bytes":0`,
+		`"physical_read_bytes":0`, `"physical_write_bytes":0`, `"read_bytes":0`, `"write_bytes":0`,
+	} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("unavailable/process data serialized as Apple memory evidence: %s", text)
+		}
+	}
+}
+
+func TestModelObserveBandwidthValidatesAppleMemoryImportFlags(t *testing.T) {
+	fixture := filepath.Join("..", "..", "internal", "modelperfobs", "testdata", "apple-memory-direct-rate.json")
+	base := []string{
+		"collect",
+		"--apple-memory-import", fixture,
+		"--apple-memory-provider", "fixture-apple-counter-export",
+		"--apple-memory-provider-version", "1.0",
+		"--apple-memory-scope", "package",
+		"--phase", "other",
+		"--shape", "small",
+	}
+	for _, incompatible := range [][]string{
+		{"--count", "2"},
+		{"--interval", "10ms"},
+		{"--nvidia-device", "0"},
+		{"--amd-device", "0"},
+		{"--nvidia-ncu-csv", "profile.csv"},
+		{"--host-counter-import", "host.json"},
+		{"--logical-bytes", "10"},
+		{"--physical-read-bytes", "10"},
+		{"--measure-host-roofline"},
+		{"--roofline-sweep"},
+	} {
+		args := append(append([]string(nil), base...), incompatible...)
+		if err := runModelObserveBandwidth(args); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+			t.Fatalf("args=%v error=%v", incompatible, err)
+		}
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{
+			args: []string{"collect", "--apple-memory-import", fixture, "--apple-memory-provider-version", "1.0", "--apple-memory-scope", "package", "--phase", "other", "--shape", "small"},
+			want: "--apple-memory-provider is required",
+		},
+		{
+			args: []string{"collect", "--apple-memory-import", fixture, "--apple-memory-provider", "fixture-apple-counter-export", "--apple-memory-scope", "package", "--phase", "other", "--shape", "small"},
+			want: "--apple-memory-provider-version is required",
+		},
+		{
+			args: []string{"collect", "--apple-memory-import", fixture, "--apple-memory-provider", "fixture-apple-counter-export", "--apple-memory-provider-version", "1.0", "--phase", "other", "--shape", "small"},
+			want: "--apple-memory-scope is required",
+		},
+		{
+			args: []string{"collect", "--apple-memory-provider", "fixture-apple-counter-export", "--phase", "other", "--shape", "small"},
+			want: "requires --apple-memory-import",
+		},
+		{
+			args: append(append([]string(nil), base...), "--apple-memory-scope-id", "0"),
+			want: "flag provided but not defined: -apple-memory-scope-id",
+		},
+		{
+			args: append(append([]string(nil), base...), "--apple-memory-interval", "0s"),
+			want: "--apple-memory-interval must be positive",
+		},
+		{
+			args: []string{
+				"collect", "--apple-memory-import", fixture,
+				"--apple-memory-provider", "fixture-apple-counter-export",
+				"--apple-memory-provider-version", "1.0",
+				"--apple-memory-scope", "device",
+				"--phase", "other", "--shape", "small",
+			},
+			want: "Apple memory scope must be system or package",
+		},
+		{
+			args: []string{
+				"collect", "--apple-memory-import", fixture,
+				"--apple-memory-provider", "fixture-apple-counter-export",
+				"--apple-memory-provider-version", "1.0",
+				"--apple-memory-scope", "process",
+				"--phase", "other", "--shape", "small",
+			},
+			want: "Apple memory scope must be system or package",
+		},
+	} {
+		if err := runModelObserveBandwidth(tt.args); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("args=%v error=%v want=%q", tt.args, err, tt.want)
+		}
+	}
+}
+
+func TestModelObserveUsageAdvertisesOnlyHostAppleMemoryScopes(t *testing.T) {
+	usage := modelObserveUsage()
+	if !strings.Contains(usage, "--apple-memory-scope system|package") {
+		t.Fatalf("Apple import usage missing package/system scope: %s", usage)
+	}
+	for _, forbidden := range []string{"system|package|process|device", "--apple-memory-scope-id"} {
+		if strings.Contains(usage, forbidden) {
+			t.Fatalf("Apple import usage advertises unsupported scope %q: %s", forbidden, usage)
+		}
+	}
+}
