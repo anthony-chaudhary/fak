@@ -1,0 +1,196 @@
+{
+  "schema": "fak-trajectory-schema-baseline/1",
+  "events": [
+    {
+      "source": "claude",
+      "event_type": "assistant",
+      "builds": [
+        {"provider": "anthropic", "provider_build": "messages-v1", "harness": "claude", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.message", "types": ["object"]},
+        {"path": "$.message.content", "types": ["array"]},
+        {"path": "$.message.id", "types": ["string"]},
+        {"path": "$.message.model", "types": ["string"]},
+        {"path": "$.message.usage", "types": ["object"]},
+        {"path": "$.message.usage.cache_creation_input_tokens", "types": ["number"]},
+        {"path": "$.message.usage.cache_read_input_tokens", "types": ["number"]},
+        {"path": "$.message.usage.input_tokens", "types": ["number"]},
+        {"path": "$.message.usage.output_tokens", "types": ["number"]},
+        {"path": "$.provider", "types": ["string"]},
+        {"path": "$.provider_version", "types": ["string"]},
+        {"path": "$.sessionId", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]},
+        {"path": "$.version", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "claude",
+      "event_type": "attachment",
+      "builds": [
+        {"provider": "anthropic", "provider_build": "messages-v1", "harness": "claude", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.attachment", "types": ["object"]},
+        {"path": "$.attachment.durationMs", "types": ["number"]},
+        {"path": "$.attachment.hookEvent", "types": ["string"]},
+        {"path": "$.attachment.type", "types": ["string"]},
+        {"path": "$.provider", "types": ["string"]},
+        {"path": "$.provider_version", "types": ["string"]},
+        {"path": "$.sessionId", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]},
+        {"path": "$.version", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "claude",
+      "event_type": "user",
+      "builds": [
+        {"provider": "anthropic", "provider_build": "messages-v1", "harness": "claude", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.message", "types": ["object"]},
+        {"path": "$.message.content", "types": ["array", "string"]},
+        {"path": "$.provider", "types": ["string"]},
+        {"path": "$.provider_version", "types": ["string"]},
+        {"path": "$.sessionId", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]},
+        {"path": "$.version", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "codex",
+      "event_type": "event_msg:token_count",
+      "builds": [
+        {"provider": "openai", "provider_build": "responses-v1", "harness": "codex", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.payload", "types": ["object"]},
+        {"path": "$.payload.info", "types": ["object"]},
+        {"path": "$.payload.info.last_token_usage", "types": ["object"]},
+        {"path": "$.payload.info.last_token_usage.cache_write_input_tokens", "types": ["number"]},
+        {"path": "$.payload.info.last_token_usage.cached_input_tokens", "types": ["number"]},
+        {"path": "$.payload.info.last_token_usage.input_tokens", "types": ["number"]},
+        {"path": "$.payload.info.last_token_usage.output_tokens", "types": ["number"]},
+        {"path": "$.payload.info.last_token_usage.reasoning_output_tokens", "types": ["number"]},
+        {"path": "$.payload.info.last_token_usage.total_tokens", "types": ["number"]},
+        {"path": "$.payload.info.total_token_usage", "types": ["object"]},
+        {"path": "$.payload.info.total_token_usage.cache_write_input_tokens", "types": ["number"]},
+        {"path": "$.payload.info.total_token_usage.cached_input_tokens", "types": ["number"]},
+        {"path": "$.payload.info.total_token_usage.input_tokens", "types": ["number"]},
+        {"path": "$.payload.info.total_token_usage.output_tokens", "types": ["number"]},
+        {"path": "$.payload.info.total_token_usage.reasoning_output_tokens", "types": ["number"]},
+        {"path": "$.payload.info.total_token_usage.total_tokens", "types": ["number"]},
+        {"path": "$.payload.type", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "codex",
+      "event_type": "response_item:custom_tool_call",
+      "builds": [
+        {"provider": "openai", "provider_build": "responses-v1", "harness": "codex", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.payload", "types": ["object"]},
+        {"path": "$.payload.call_id", "types": ["string"]},
+        {"path": "$.payload.input", "types": ["string"]},
+        {"path": "$.payload.name", "types": ["string"]},
+        {"path": "$.payload.status", "types": ["string"]},
+        {"path": "$.payload.type", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "codex",
+      "event_type": "response_item:custom_tool_call_output",
+      "builds": [
+        {"provider": "openai", "provider_build": "responses-v1", "harness": "codex", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.payload", "types": ["object"]},
+        {"path": "$.payload.call_id", "types": ["string"]},
+        {"path": "$.payload.output", "types": ["array"]},
+        {"path": "$.payload.type", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "codex",
+      "event_type": "response_item:function_call",
+      "builds": [
+        {"provider": "openai", "provider_build": "responses-v1", "harness": "codex", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.payload", "types": ["object"]},
+        {"path": "$.payload.arguments", "types": ["string"]},
+        {"path": "$.payload.call_id", "types": ["string"]},
+        {"path": "$.payload.name", "types": ["string"]},
+        {"path": "$.payload.type", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "codex",
+      "event_type": "response_item:function_call_output",
+      "builds": [
+        {"provider": "openai", "provider_build": "responses-v1", "harness": "codex", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.payload", "types": ["object"]},
+        {"path": "$.payload.call_id", "types": ["string"]},
+        {"path": "$.payload.output", "types": ["string"]},
+        {"path": "$.payload.type", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "codex",
+      "event_type": "session_meta",
+      "builds": [
+        {"provider": "openai", "provider_build": "responses-v1", "harness": "codex", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.payload", "types": ["object"]},
+        {"path": "$.payload.cli_version", "types": ["string"]},
+        {"path": "$.payload.id", "types": ["string"]},
+        {"path": "$.payload.model_provider", "types": ["string"]},
+        {"path": "$.payload.provider_version", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    },
+    {
+      "source": "codex",
+      "event_type": "turn_context",
+      "builds": [
+        {"provider": "openai", "provider_build": "responses-v1", "harness": "codex", "harness_build": "1.0.0-fixture"}
+      ],
+      "fields": [
+        {"path": "$", "types": ["object"]},
+        {"path": "$.payload", "types": ["object"]},
+        {"path": "$.payload.model", "types": ["string"]},
+        {"path": "$.payload.turn_id", "types": ["string"]},
+        {"path": "$.timestamp", "types": ["string"]},
+        {"path": "$.type", "types": ["string"]}
+      ]
+    }
+  ]
+}

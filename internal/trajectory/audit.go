@@ -38,10 +38,11 @@ type AuditSource struct {
 
 // AuditOptions selects the transcript roots and comparison window.
 type AuditOptions struct {
-	Sources  []AuditSource
-	Since    time.Duration
-	Now      time.Time
-	Baseline *AuditSummaryRow
+	Sources        []AuditSource
+	Since          time.Duration
+	Now            time.Time
+	Baseline       *AuditSummaryRow
+	SchemaBaseline *AuditSchemaBaseline
 	// UserContains keeps only transcripts whose user-authored prompts contain this case-insensitive literal. Tool output, system text, and injected context never select a transcript; there is no raw-byte fallback.
 	UserContains string
 }
@@ -102,6 +103,7 @@ type AuditTranscriptRow struct {
 	TranscriptID         string                 `json:"session_id"`
 	SourcePath           string                 `json:"source_path"`
 	Models               []string               `json:"models"`
+	BuildIdentities      []AuditBuildIdentity   `json:"build_identities"`
 	Tokens               AuditTokens            `json:"tokens"`
 	ToolCalls            int                    `json:"tool_calls"`
 	ToolErrors           int                    `json:"tool_errors"`
@@ -118,6 +120,7 @@ type AuditTranscriptRow struct {
 	SourcePaths          []string               `json:"source_paths,omitempty"`
 	usageByID            map[string]AuditTokens
 	failureCounts        map[string]int
+	schemaShapes         map[string]auditShapeSet
 }
 
 // AuditBottleneckRow ranks sessions by exact accounted tokens. DominantBucket
@@ -222,6 +225,8 @@ type AuditRefusalRow struct {
 type AuditConclusionStatus struct {
 	BroadEfficiencySupported bool `json:"broad_efficiency_supported"`
 	RefusalCount             int  `json:"refusal_count"`
+	SchemaDriftCount         int  `json:"schema_drift_count"`
+	BreakingSchemaDrift      int  `json:"breaking_schema_drift"`
 }
 
 type AuditResult struct {
@@ -231,6 +236,8 @@ type AuditResult struct {
 	Transcripts       []AuditTranscriptRow
 	Bottlenecks       []AuditBottleneckRow
 	Baseline          []AuditDeltaRow
+	EventSchemas      []AuditEventSchemaRow `json:"event_schemas,omitempty"`
+	SchemaDrift       []AuditSchemaDriftRow `json:"schema_drift,omitempty"`
 	Refusals          []AuditRefusalRow     `json:"refusals,omitempty"`
 	ToolErrorFamilies []QwenToolErrorFamily `json:"tool_error_families,omitempty"`
 }
@@ -311,14 +318,35 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 	result.Summary.RefusedRecords = len(result.Refusals)
 	result.Summary.RawFragments = len(result.Transcripts)
 	result.Summary.CanonicalTranscripts = len(canonical)
-	result.ConclusionStatus = AuditConclusionStatus{
-		BroadEfficiencySupported: len(result.Refusals) == 0,
-		RefusalCount:             len(result.Refusals),
-	}
 	result.Bottlenecks = rankAuditBottlenecks(canonical)
 	result.ToolErrorFamilies = rankQwenToolErrorFamilies(allToolErrorEvents)
 	if opts.Baseline != nil {
 		result.Baseline = auditBaselineDeltas(result.Summary, *opts.Baseline)
+	}
+	currentSchema := auditCurrentSchemaEvents(result.Transcripts)
+	for _, event := range currentSchema {
+		result.EventSchemas = append(result.EventSchemas, AuditEventSchemaRow{Schema: AuditSchema, Kind: "event_schema", AuditSchemaEvent: event})
+	}
+	schemaBaseline := opts.SchemaBaseline
+	if schemaBaseline == nil {
+		loaded, err := DefaultAuditSchemaBaseline()
+		if err != nil {
+			return AuditResult{}, err
+		}
+		schemaBaseline = &loaded
+	}
+	result.SchemaDrift = compareAuditSchema(currentSchema, auditSchemaBaselineForPresentSources(*schemaBaseline, result.Denominators))
+	breakingSchemaDrift := 0
+	for _, row := range result.SchemaDrift {
+		if row.Compatibility == "breaking" {
+			breakingSchemaDrift++
+		}
+	}
+	result.ConclusionStatus = AuditConclusionStatus{
+		BroadEfficiencySupported: len(result.Refusals) == 0,
+		RefusalCount:             len(result.Refusals),
+		SchemaDriftCount:         len(result.SchemaDrift),
+		BreakingSchemaDrift:      breakingSchemaDrift,
 	}
 	return result, nil
 }
@@ -800,6 +828,12 @@ func WriteAuditJSONL(w io.Writer, result AuditResult) error {
 		rows = append(rows, row)
 	}
 	for _, row := range result.Baseline {
+		rows = append(rows, row)
+	}
+	for _, row := range result.EventSchemas {
+		rows = append(rows, row)
+	}
+	for _, row := range result.SchemaDrift {
 		rows = append(rows, row)
 	}
 	for _, row := range result.Refusals {
