@@ -1,0 +1,55 @@
+=== first_run ===
+Set up local features
+Download 6.0 GB. 20.0 GB available. Tasks: draft, summarize.
+Mode: Automatic
+Action: Download
+=== partial_readiness ===
+Some local features are ready
+Ready: summarize. Still downloading: draft.
+Mode: Prefer local
+Action: Continue in background
+=== no_space ===
+More storage is needed
+The download needs 6.0 GB; 2.0 GB is available.
+Mode: Local only
+Action: Manage storage
+=== no_network ===
+Waiting for a connection
+Downloaded features remain available. Connect to finish setup.
+Mode: Automatic
+Action: Retry
+=== pressure ===
+Local work is paused to keep this app responsive
+It will resume when memory pressure falls.
+Mode: Automatic
+Action: Use cloud or wait
+=== battery ===
+Using less power
+Local tasks may take longer while on battery.
+Mode: Prefer local
+Action: Continue or pause
+=== thermal ===
+Cooling down
+Local work will resume when this Mac cools.
+Mode: Automatic
+Action: Wait
+=== helper_restart ===
+Restarting local features
+Your work is safe. The helper is reconnecting.
+Mode: Automatic
+Action: Retry now
+=== handoff_ask ===
+Continue using cloud compute?
+Send the document text to your selected provider. Local processing cannot finish this task.
+Mode: Automatic
+Action: Allow once or keep local
+=== handoff_denied ===
+Cloud handoff was not allowed
+Nothing was sent. Retry locally or cancel.
+Mode: Local only
+Action: Retry locally
+=== corrupt_update_rollback ===
+Update repaired
+The new local asset failed verification. The previous working version was restored.
+Mode: Automatic
+Action: Retry update or keep current
