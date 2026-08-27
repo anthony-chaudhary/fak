@@ -222,3 +222,29 @@ reference design
 Reference designs answer **what must fit together**. Product releases answer **what a
 vendor offers**. Backlog answers **what customers have ordered under the supplier's
 definition**. None alone answers how much AI capacity is operating.
+
+## Grid and electrical manufacturing additions
+
+| Evidence date | Supplier / footprint | Observed state | Quantified evidence | Missing delivery join |
+|---|---|---|---|---|
+| 2025-02-12 | Eaton, Jonesville SC | New three-phase transformer factory announced; production expected 2027 | $340M investment; third U.S. three-phase transformer factory | Factory completion, annual unit/MVA output, allocation, shipment, substation install, energization. |
+| 2025-09-04 | Hitachi Energy, U.S. | Multi-site manufacturing investment announced | $1B U.S. program; $457M new large-power-transformer factory in South Boston VA | Construction/output date, MVA throughput, yield, orders, allocation, site commissioning. |
+| 2026-02-03 | Siemens Energy, U.S. | Brownfield expansion and new factory program announced | $1B across transformers/service, gas turbines, and grid components | Product split, factory start, output, lead-time reduction, shipment, commissioning. |
+| 2025-05-14 | GE Vernova T&D India | New manufacturing/testing capacity planned in Chennai and Noida | ~$16M; Electrification backlog reported >3× YoY | Product-specific throughput, domestic/export allocation, shipped/installed equipment, live grid capacity. |
+
+### Electrical delivery chain
+
+```text
+investment / factory announcement
+  -> factory construction / line qualification
+  -> annual product-specific output
+  -> customer order / backlog
+  -> testing / shipment
+  -> site/substation installation
+  -> utility acceptance / energization
+  -> continuous deliverable facility power
+  -> live critical IT load
+```
+
+Transformer MVA, switchgear ratings, HVDC/FACTS equipment, generation MW, facility MW,
+and critical IT MW remain distinct physical units.

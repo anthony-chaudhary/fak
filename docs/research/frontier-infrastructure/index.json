@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
-  "updated_at": "2026-08-26T20:14:00-07:00",
+  "updated_at": "2026-08-26T20:32:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9325,
+  "latest_slice_issue": 9330,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 166,
+    "entry_count": 170,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -114,11 +114,13 @@
       "CoreWeave / Nebius / Cerebras",
       "Data Center Watch",
       "DeepSeek",
+      "Eaton",
       "European Commission / EuroHPC",
       "European Union / AI Office",
       "FineServe",
       "Fireworks AI",
       "GE Vernova / Crusoe",
+      "GE Vernova T&D India",
       "GitHub Copilot coding agent",
       "Google",
       "Google / utility partners",
@@ -127,6 +129,7 @@
       "Google internal developer tools",
       "Groq",
       "HeteroScale production study",
+      "Hitachi Energy",
       "Huawei Cloud Pangu",
       "IBM Cloud / Together AI",
       "IETF Internet-Draft authors",
@@ -182,6 +185,7 @@
       "Sea AI Lab",
       "SemiAnalysis",
       "ServeGen production study",
+      "Siemens Energy",
       "Siemens Energy / Start Campus",
       "Singapore IMDA",
       "SkyWalker cross-region study",
@@ -6265,6 +6269,159 @@
       "fak_implications": [
         "Track supplier backlog definition, product/site allocation, ship/install/commission dates, and live capacity.",
         "Do not allocate total company backlog to AI datacenters without disclosed segment/project detail."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "eaton-sc-transformer-factory-2025",
+      "category": "supply_chain",
+      "entity": "Eaton",
+      "topic": [
+        "transformers",
+        "manufacturing_expansion",
+        "factory",
+        "production_start",
+        "data_center_demand"
+      ],
+      "published_at": "2025-02-12",
+      "event_at": "2025-02-12",
+      "source_title": "Eaton invests in new South Carolina transformer manufacturing site to support U.S. electrical infrastructure",
+      "source_url": "https://www.eaton.com/us/en-us/company/news-insights/news-releases/2025/eaton-invests-in-new-south-carolina-transformer-manufacturing.html",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Eaton announced a $340M investment in a new Jonesville, South Carolina factory for three-phase transformers serving utility, industrial, commercial, and datacenter demand, with production and hiring expected to begin in 2027.",
+      "quantified": {
+        "investment_usd": 340000000,
+        "expected_production_start_year": 2027,
+        "us_three_phase_transformer_factories_after_opening": 3
+      },
+      "assumptions": [
+        "Transformer shortages and factory lead times can gate electrical delivery after datacenter demand is contracted."
+      ],
+      "contradictions_or_limits": [
+        "Factory investment and planned production start are not current transformer output, orders shipped, substations commissioned, or live IT MW.",
+        "The source does not disclose annual unit/MVA capacity, yields, customer allocation, or datacenter share."
+      ],
+      "fak_implications": [
+        "Track factory construction, production start, output, allocation, shipment, site installation, and energization separately.",
+        "Do not map investment dollars directly to transformer count or datacenter MW."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "hitachi-virginia-transformer-factory-2025",
+      "category": "supply_chain",
+      "entity": "Hitachi Energy",
+      "topic": [
+        "transformers",
+        "manufacturing_expansion",
+        "factory",
+        "grid_equipment",
+        "data_center_demand"
+      ],
+      "published_at": "2025-09-04",
+      "event_at": "2025-09-04",
+      "source_title": "Hitachi announces historic $1 billion USD manufacturing investment to power America’s energy future through production of critical grid infrastructure",
+      "source_url": "https://www.hitachienergy.com/news-and-events/press-releases/2025/09/hitachi-announces-historic-1-billion-usd-manufacturing-investment-to-power-america-s-energy-future-through-production-of-critical-grid-infrastructure",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Hitachi Energy announced $1B of U.S. manufacturing investment, including $457M for a new large-power-transformer factory in South Boston, Virginia, aimed at transformer and high-voltage-equipment demand including AI datacenters.",
+      "quantified": {
+        "us_manufacturing_investment_usd": 1000000000,
+        "virginia_large_power_transformer_factory_usd": 457000000
+      },
+      "assumptions": [
+        "Large power transformers and high-voltage equipment form a separate supply chain from rack-level power and accelerators."
+      ],
+      "contradictions_or_limits": [
+        "Announced factory investment is not completed construction, qualified output, shipment, project allocation, or commissioned grid capacity.",
+        "The release does not provide annual MVA/unit output, lead-time reduction, yield, or datacenter allocation."
+      ],
+      "fak_implications": [
+        "Track large-power-transformer factory/output separately from dry-type and distribution transformer capacity.",
+        "Require project-level ship/install/energize evidence before admitting grid-ready site capacity."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "siemens-us-grid-manufacturing-2026",
+      "category": "supply_chain",
+      "entity": "Siemens Energy",
+      "topic": [
+        "transformers",
+        "switchgear",
+        "grid_components",
+        "manufacturing_expansion",
+        "services"
+      ],
+      "published_at": "2026-02-03",
+      "event_at": "2026-02-03",
+      "source_title": "Siemens Energy is investing $1 billion and creating highly skilled manufacturing jobs in the United States",
+      "source_url": "https://www.siemens-energy.com/global/en/home/press-releases/siemens-energy-is-investing--1-billion-and-creating-highly-skill.html",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Siemens Energy announced $1B of U.S. manufacturing expansion across transformer production/service, large gas turbines, and a new Mississippi grid-component factory.",
+      "quantified": {
+        "us_manufacturing_investment_usd": 1000000000
+      },
+      "assumptions": [
+        "Grid equipment and service capacity need brownfield and greenfield expansion to reduce project backlogs and maintenance bottlenecks."
+      ],
+      "contradictions_or_limits": [
+        "Portfolio-wide investment does not reveal transformer/switchgear output, delivery dates, datacenter allocation, or commissioned capacity.",
+        "Manufacturing expansion and standardized designs may shorten lead time but do not prove a specific project schedule."
+      ],
+      "fak_implications": [
+        "Track manufacturing product split, service/refurbishment capacity, factory start, output, shipment, and project commissioning.",
+        "Keep vendor speed-to-power claims as scenarios until site-level evidence exists."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "gevernova-india-grid-expansion-2025",
+      "category": "supply_chain",
+      "entity": "GE Vernova T&D India",
+      "topic": [
+        "transformers",
+        "switchgear",
+        "hvdc",
+        "facts",
+        "manufacturing_expansion",
+        "backlog"
+      ],
+      "published_at": "2025-05-14",
+      "event_at": "2025-05-14",
+      "source_title": "GE Vernova to invest USD $16 million to expand manufacturing footprint in India to meet rising demand for advanced grid infrastructure",
+      "source_url": "https://www.gevernova.com/news/press-releases/ge-vernova-invest-usd-16-million-expand-manufacturing-footprint-india-meet-rising",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "GE Vernova announced about $16M to add manufacturing/testing capacity in Chennai and Noida for HVDC, FACTS, transformers, switchgear, and related grid equipment; it said Electrification equipment backlog had more than tripled over the prior year.",
+      "quantified": {
+        "investment_usd_approx": 16000000,
+        "reported_electrification_backlog_growth_multiple_gt": 3
+      },
+      "assumptions": [
+        "Regional manufacturing and test capacity can feed both domestic and export grid projects, making electrical supply chains globally coupled."
+      ],
+      "contradictions_or_limits": [
+        "Backlog growth and investment do not disclose product mix, factory throughput, export allocation, shipment, or commissioning.",
+        "HVDC/FACTS and transformer/switchgear capacity cannot be summed as interchangeable units."
+      ],
+      "fak_implications": [
+        "Track product-specific factory/testing capacity and regional export allocation.",
+        "Do not convert supplier backlog growth into datacenter MW or interconnection completion."
       ],
       "rumor": {
         "is_rumor": false
