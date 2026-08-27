@@ -286,6 +286,8 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		}
 		return result.Transcripts[i].SourcePath < result.Transcripts[j].SourcePath
 	})
+	canonical, canonicalRefusals := canonicalAuditTranscripts(result.Transcripts)
+	result.Refusals = append(result.Refusals, canonicalRefusals...)
 	sort.Slice(result.Refusals, func(i, j int) bool {
 		a, b := result.Refusals[i], result.Refusals[j]
 		if a.Source != b.Source {
@@ -299,22 +301,32 @@ func RunAudit(opts AuditOptions) (AuditResult, error) {
 		}
 		return a.Code < b.Code
 	})
-
+	addAuditCanonicalRefusalDenominators(result.Denominators, canonicalRefusals)
+	result.Summary = summarizeAudit(result.Denominators, canonical, allHookDurations)
+	result.Summary.RefusedRecords = len(result.Refusals)
+	result.Summary.RawFragments = len(result.Transcripts)
+	result.Summary.CanonicalTranscripts = len(canonical)
 	result.ConclusionStatus = AuditConclusionStatus{
 		BroadEfficiencySupported: len(result.Refusals) == 0,
 		RefusalCount:             len(result.Refusals),
 	}
-	canonical, canonicalRefusals := canonicalAuditTranscripts(result.Transcripts)
-	result.Refusals = append(result.Refusals, canonicalRefusals...)
-	result.Summary = summarizeAudit(result.Denominators, canonical, allHookDurations)
-	result.Summary.RawFragments = len(result.Transcripts)
-	result.Summary.CanonicalTranscripts = len(canonical)
 	result.Bottlenecks = rankAuditBottlenecks(canonical)
 	result.ToolErrorFamilies = rankQwenToolErrorFamilies(allToolErrorEvents)
 	if opts.Baseline != nil {
 		result.Baseline = auditBaselineDeltas(result.Summary, *opts.Baseline)
 	}
 	return result, nil
+}
+
+func addAuditCanonicalRefusalDenominators(denominators []AuditDenominatorRow, refusals []AuditRefusalRow) {
+	for _, refusal := range refusals {
+		for i := range denominators {
+			if denominators[i].Source == refusal.Source {
+				denominators[i].RefusedRecords++
+				break
+			}
+		}
+	}
 }
 
 func auditSource(source AuditSource, opts AuditOptions) (AuditDenominatorRow, []AuditTranscriptRow, []AuditRefusalRow, []int64, []QwenToolErrorEvent, error) {

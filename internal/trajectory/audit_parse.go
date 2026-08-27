@@ -37,6 +37,7 @@ type auditParseState struct {
 	mutationAccountedFor  int64
 	hookDurations         []int64
 	claudeUsageByID       map[string]AuditTokens
+	codexPrimaryMetaSeen  bool
 	codexRawTotal         *auditCodexRawTokens
 	codexCompleted        AuditTokens
 	codexVersion          string
@@ -294,6 +295,14 @@ func parseCodexAuditRecord(record map[string]any, line int, rel string, state *a
 	payload, _ := record["payload"].(map[string]any)
 	switch recordType {
 	case "session_meta":
+		// Subagent rollouts embed their parent transcript history after the
+		// file-local metadata row. Only the first session_meta names this
+		// rollout; later rows are copied provenance and must not replace its
+		// identity or parser version.
+		if state.codexPrimaryMetaSeen {
+			return
+		}
+		state.codexPrimaryMetaSeen = true
 		if version, ok := payload["cli_version"].(string); ok {
 			state.codexVersion = strings.TrimSpace(version)
 		}

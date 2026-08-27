@@ -135,6 +135,109 @@ func TestRunAuditPinnedCrossHarnessParity(t *testing.T) {
 	}
 }
 
+func TestAuditIssue9418PreservesPrimaryCodexFragmentIdentity(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-9418", "codex-shared-session", "sessions")
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceCodex, Root: root, RootLabel: "codex/sessions"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 0 {
+		t.Fatalf("refusals = %+v, want none for distinct primary rollout ids", result.Refusals)
+	}
+	if result.Summary.Transcripts != 2 || result.Summary.RawFragments != 2 || result.Summary.CanonicalTranscripts != 2 || result.Summary.DuplicateFragments != 0 {
+		t.Fatalf("summary fragment counts = %+v, want two distinct exact rollouts", result.Summary)
+	}
+	wantTokens := AuditTokens{InputTokens: 62, OutputTokens: 18, CacheCreateTokens: 8, CacheReadTokens: 100}
+	if result.Summary.Tokens != wantTokens {
+		t.Fatalf("tokens = %+v, want each rollout counted once as %+v", result.Summary.Tokens, wantTokens)
+	}
+	ids := map[string]bool{}
+	for _, row := range result.Transcripts {
+		ids[row.TranscriptID] = true
+	}
+	if !ids["root-rollout"] || !ids["child-rollout"] {
+		t.Fatalf("transcript ids = %#v, want file-local root and child ids", ids)
+	}
+	denominator := result.Denominators[0]
+	if denominator.UsageRecordsSeen != 2 || denominator.UsageRecordsExact != 2 || denominator.UsageRecordsApplied != 2 || denominator.RefusedRecords != 0 {
+		t.Fatalf("denominator = %+v, want two exact applied rollouts and no refusal", denominator)
+	}
+}
+
+func TestAuditIssue9418ClaudeDuplicateMismatchRemainsTyped(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-9418", "claude-duplicate", "projects")
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceClaude, Root: root, RootLabel: "claude/projects"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 1 || result.Refusals[0].Code != "claude_duplicate_usage_mismatch" {
+		t.Fatalf("refusals = %+v, want one typed Claude duplicate mismatch", result.Refusals)
+	}
+	if result.Summary.RefusedRecords != 1 || result.Denominators[0].RefusedRecords != 1 {
+		t.Fatalf("refusal totals = summary:%d denominator:%d, want 1/1", result.Summary.RefusedRecords, result.Denominators[0].RefusedRecords)
+	}
+	if result.ConclusionStatus.BroadEfficiencySupported || result.ConclusionStatus.RefusalCount != 1 {
+		t.Fatalf("conclusion = %+v, want blocked by one refusal", result.ConclusionStatus)
+	}
+}
+
+func TestAuditIssue9418CanonicalRefusalTotalsAgreeEverywhere(t *testing.T) {
+	root := filepath.Join("testdata", "audit", "issue-9418", "codex-ambiguous", "sessions")
+	result, err := RunAudit(AuditOptions{Sources: []AuditSource{{Name: AuditSourceCodex, Root: root, RootLabel: "codex/sessions"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Refusals) != 1 || result.Refusals[0].Code != "codex_fragment_usage_mismatch" {
+		t.Fatalf("refusals = %+v, want one canonical fragment refusal", result.Refusals)
+	}
+	if result.Summary.RefusedRecords != 1 || result.Denominators[0].RefusedRecords != 1 {
+		t.Fatalf("refusal totals = summary:%d denominator:%d, want 1/1", result.Summary.RefusedRecords, result.Denominators[0].RefusedRecords)
+	}
+	if result.ConclusionStatus.BroadEfficiencySupported || result.ConclusionStatus.RefusalCount != 1 {
+		t.Fatalf("conclusion = %+v, want blocked by one refusal", result.ConclusionStatus)
+	}
+
+	var jsonl bytes.Buffer
+	if err := WriteAuditJSONL(&jsonl, result); err != nil {
+		t.Fatal(err)
+	}
+	var summaryRefused, denominatorRefused, refusalRows int
+	scanner := bufio.NewScanner(bytes.NewReader(jsonl.Bytes()))
+	for scanner.Scan() {
+		var row struct {
+			Kind           string `json:"kind"`
+			RefusedRecords int    `json:"refused_records"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			t.Fatal(err)
+		}
+		switch row.Kind {
+		case "summary":
+			summaryRefused = row.RefusedRecords
+		case "source_denominator":
+			denominatorRefused += row.RefusedRecords
+		case "refusal":
+			refusalRows++
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if summaryRefused != 1 || denominatorRefused != 1 || refusalRows != 1 {
+		t.Fatalf("JSONL refusal totals = summary:%d denominators:%d rows:%d, want 1/1/1", summaryRefused, denominatorRefused, refusalRows)
+	}
+
+	var markdown bytes.Buffer
+	if err := WriteAuditMarkdown(&markdown, result); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Broad efficiency conclusions: **blocked** (refusals: 1).", "`codex_fragment_usage_mismatch`"} {
+		if !strings.Contains(markdown.String(), want) {
+			t.Fatalf("markdown missing %q:\n%s", want, markdown.String())
+		}
+	}
+}
+
 func TestAuditExcludesPinnedClaudePytestFixture(t *testing.T) {
 	baseline := runPinnedAudit(t, nil)
 	result, err := RunAudit(AuditOptions{Sources: []AuditSource{
