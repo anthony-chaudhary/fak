@@ -12,8 +12,8 @@ func Read(path string) (Corpus, error) {
 	return readCorpus(path, validateCheckpoint)
 }
 
-// ReadResume loads either a current checkpoint or the one exact legacy shape
-// that Capture can upgrade on resume. It does not mutate or rewrite the file.
+// ReadResume loads either a current checkpoint or a narrowly recognized
+// historical shape that Capture can upgrade. It does not mutate the file.
 func ReadResume(path string) (Corpus, error) {
 	return readCorpus(path, validateResumeCheckpoint)
 }

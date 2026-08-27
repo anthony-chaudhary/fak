@@ -17,9 +17,9 @@ func Validate(c Corpus) error { return validateCorpus(c, true) }
 // fact already claimed by the checkpoint. Resume must never build on a weak partial file.
 func validateCheckpoint(c Corpus) error { return validateCorpus(c, false, false) }
 
-// validateResumeCheckpoint recognizes exactly the pre-#9314 mixed-issues
-// representation. The exception is private to resume loading; ordinary reads,
-// writes, and validation continue to require the explicit identity marker.
+// validateResumeCheckpoint recognizes only the historical shapes with a
+// one-way Capture migration. The exception is private to resume loading;
+// ordinary reads, writes, and validation remain strict.
 func validateResumeCheckpoint(c Corpus) error { return validateCorpus(c, false, true) }
 
 func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) error {
@@ -223,7 +223,7 @@ func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) e
 	if issuesSource != nil && pullsSource != nil && issuesSource.Status == StatusComplete && pullsSource.Status == StatusComplete {
 		legacy := allowLegacy && isLegacyMixedPullCheckpoint(r, *issuesSource)
 		if !legacy {
-			if err := validateNonAtomicDelta(r, *issuesSource, *pullsSource, recordsForSource(c.Records, "pulls"), requireComplete); err != nil {
+			if err := validateNonAtomicDelta(r, *issuesSource, *pullsSource, recordsForSource(c.Records, "pulls"), requireComplete, allowLegacy); err != nil {
 				es = append(es, err)
 			}
 		}
@@ -265,7 +265,7 @@ func validateCorpus(c Corpus, requireComplete bool, allowLegacyResume ...bool) e
 	return errors.Join(es...)
 }
 
-func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords []Record, requireComplete bool) error {
+func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords []Record, requireComplete bool, allowLegacyResume ...bool) error {
 	if r.NonAtomicDelta == nil {
 		return errors.New("completed issues and pulls sources require non_atomic_delta evidence")
 	}
@@ -298,6 +298,9 @@ func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords 
 		}
 		return validateExactNonAtomicDelta(r, issues, pullRecords, delta, requireComplete, legacyExactShape)
 	case NonAtomicDeltaEvidenceModeLegacyCountOnly:
+		if len(allowLegacyResume) == 1 && allowLegacyResume[0] && delta.Policy.Metric == "" {
+			return validateLegacyPreMetricCountOnlyNonAtomicDelta(r, issues, pullRecords, delta)
+		}
 		if err := validateNonAtomicDeltaPolicy(delta.Policy, NonAtomicDeltaPolicyMetricEndpointCardinalityDelta, false); err != nil {
 			return err
 		}
@@ -402,41 +405,15 @@ func validateExactNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []
 }
 
 func validateLegacyCountOnlyNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []Record, delta NonAtomicDeltaEvidence, requireComplete bool) error {
-	if delta.IdentitySetsAvailable == nil || *delta.IdentitySetsAvailable || delta.IdentityBasis != identityBasisLegacyCountOnly || delta.EvidenceReason != legacyCountOnlyReason ||
-		delta.MixedEvidence != CrossEndpointEvidenceExactCountOnly ||
-		delta.DedicatedEvidence != CrossEndpointEvidenceExactIdentities ||
-		delta.RelationEvidence != CrossEndpointEvidenceUnavailable {
-		return errors.New("legacy count-only non_atomic_delta has contradictory provenance")
-	}
-	if issues.ClassifiedPullIdentities != nil || issues.ClassifiedPullChecksum != "" {
-		return errors.New("legacy count-only non_atomic_delta contradicts unavailable mixed identities")
-	}
-	if delta.Overlap != nil || delta.OnlyInMixed != nil || delta.OnlyInDedicated != nil || delta.OverlapCount != nil || delta.OnlyInMixedCount != nil || delta.OnlyInDedicatedCount != nil {
-		return errors.New("legacy count-only non_atomic_delta must keep relation identity sets and counts unavailable")
-	}
-	dedicated := pullRecordIdentities(pullRecords)
-	if err := validateIdentityList("legacy count-only dedicated pulls", dedicated); err != nil {
+	lower, err := validateLegacyCountOnlyNonAtomicDeltaEvidence(issues, pullRecords, delta)
+	if err != nil {
 		return err
 	}
-	if delta.MixedCount != issues.ClassifiedPullCount || delta.DedicatedCount != len(dedicated) {
-		return errors.New("legacy count-only non_atomic_delta counts contradict endpoint evidence")
-	}
-	if delta.MixedCount < 0 || delta.DedicatedCount < 0 {
-		return errors.New("legacy count-only non_atomic_delta endpoint counts must be non-negative")
-	}
-	lower := absNonNegativeDifference(delta.MixedCount, delta.DedicatedCount)
 	if delta.ObservedEndpointCardinalityDelta == nil {
 		return errors.New("legacy count-only non_atomic_delta observed endpoint-cardinality delta is missing")
 	}
 	if *delta.ObservedEndpointCardinalityDelta != lower {
 		return errors.New("legacy count-only non_atomic_delta observed endpoint-cardinality delta contradicts counts")
-	}
-	if delta.MixedCount > int(^uint(0)>>1)-delta.DedicatedCount {
-		return errors.New("legacy count-only non_atomic_delta possible symmetric-difference upper bound overflows")
-	}
-	upper := delta.MixedCount + delta.DedicatedCount
-	if delta.SymmetricDifferenceLowerBound != lower || delta.SymmetricDifferenceUpperBound != upper {
-		return errors.New("legacy count-only non_atomic_delta symmetric-difference bounds contradict counts")
 	}
 	wantVerdict := NonAtomicDeltaVerdictRejected
 	if lower <= delta.Policy.MaxTotal {
@@ -449,6 +426,76 @@ func validateLegacyCountOnlyNonAtomicDelta(r Receipt, issues SourceReceipt, pull
 		return fmt.Errorf("legacy count-only non_atomic_delta is rejected: endpoint_cardinality_delta=%d limit=%d", lower, delta.Policy.MaxTotal)
 	}
 	return nil
+}
+
+// validateLegacyPreMetricCountOnlyNonAtomicDelta admits only the checkpoint
+// shape written between the count-only migration and its typed metric. It is
+// called exclusively by resume validation; ordinary reads remain strict.
+func validateLegacyPreMetricCountOnlyNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []Record, delta NonAtomicDeltaEvidence) error {
+	if r.Status != StatusPartial {
+		return errors.New("legacy pre-metric count-only non_atomic_delta requires a partial receipt")
+	}
+	if delta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly || delta.Policy.Metric != "" {
+		return errors.New("legacy pre-metric count-only non_atomic_delta has a non-legacy metric")
+	}
+	lower, err := validateLegacyCountOnlyNonAtomicDeltaEvidence(issues, pullRecords, delta)
+	if err != nil {
+		return err
+	}
+	if delta.Policy.Type != NonAtomicDeltaPolicyType ||
+		delta.Policy.MaxOnlyInMixed != DefaultNonAtomicDeltaLimit ||
+		delta.Policy.MaxOnlyInDedicated != DefaultNonAtomicDeltaLimit ||
+		delta.Policy.MaxTotal != DefaultNonAtomicDeltaLimit {
+		return errors.New("legacy pre-metric count-only non_atomic_delta policy does not match the historical bound")
+	}
+	if delta.ObservedEndpointCardinalityDelta != nil {
+		return errors.New("legacy pre-metric count-only non_atomic_delta already has an observed endpoint-cardinality delta")
+	}
+	if delta.Verdict != NonAtomicDeltaVerdictCompatibleUnproven || delta.Accepted {
+		return errors.New("legacy pre-metric count-only non_atomic_delta verdict is contradictory")
+	}
+	minimumOnlyMixed := max(delta.MixedCount-delta.DedicatedCount, 0)
+	minimumOnlyDedicated := max(delta.DedicatedCount-delta.MixedCount, 0)
+	upper := delta.MixedCount + delta.DedicatedCount
+	if lower > delta.Policy.MaxTotal || minimumOnlyMixed > delta.Policy.MaxOnlyInMixed || minimumOnlyDedicated > delta.Policy.MaxOnlyInDedicated ||
+		(upper <= delta.Policy.MaxTotal && delta.MixedCount <= delta.Policy.MaxOnlyInMixed && delta.DedicatedCount <= delta.Policy.MaxOnlyInDedicated) {
+		return errors.New("legacy pre-metric count-only non_atomic_delta compatible_unproven verdict contradicts its historical policy")
+	}
+	return nil
+}
+
+func validateLegacyCountOnlyNonAtomicDeltaEvidence(issues SourceReceipt, pullRecords []Record, delta NonAtomicDeltaEvidence) (int, error) {
+	if delta.IdentitySetsAvailable == nil || *delta.IdentitySetsAvailable || delta.IdentityBasis != identityBasisLegacyCountOnly || delta.EvidenceReason != legacyCountOnlyReason ||
+		delta.MixedEvidence != CrossEndpointEvidenceExactCountOnly ||
+		delta.DedicatedEvidence != CrossEndpointEvidenceExactIdentities ||
+		delta.RelationEvidence != CrossEndpointEvidenceUnavailable {
+		return 0, errors.New("legacy count-only non_atomic_delta has contradictory provenance")
+	}
+	if issues.ClassifiedPullIdentities != nil || issues.ClassifiedPullChecksum != "" {
+		return 0, errors.New("legacy count-only non_atomic_delta contradicts unavailable mixed identities")
+	}
+	if delta.Overlap != nil || delta.OnlyInMixed != nil || delta.OnlyInDedicated != nil || delta.OverlapCount != nil || delta.OnlyInMixedCount != nil || delta.OnlyInDedicatedCount != nil {
+		return 0, errors.New("legacy count-only non_atomic_delta must keep relation identity sets and counts unavailable")
+	}
+	dedicated := pullRecordIdentities(pullRecords)
+	if err := validateIdentityList("legacy count-only dedicated pulls", dedicated); err != nil {
+		return 0, err
+	}
+	if delta.MixedCount != issues.ClassifiedPullCount || delta.DedicatedCount != len(dedicated) {
+		return 0, errors.New("legacy count-only non_atomic_delta counts contradict endpoint evidence")
+	}
+	if delta.MixedCount < 0 || delta.DedicatedCount < 0 {
+		return 0, errors.New("legacy count-only non_atomic_delta endpoint counts must be non-negative")
+	}
+	lower := absNonNegativeDifference(delta.MixedCount, delta.DedicatedCount)
+	if delta.MixedCount > int(^uint(0)>>1)-delta.DedicatedCount {
+		return 0, errors.New("legacy count-only non_atomic_delta possible symmetric-difference upper bound overflows")
+	}
+	upper := delta.MixedCount + delta.DedicatedCount
+	if delta.SymmetricDifferenceLowerBound != lower || delta.SymmetricDifferenceUpperBound != upper {
+		return 0, errors.New("legacy count-only non_atomic_delta symmetric-difference bounds contradict counts")
+	}
+	return lower, nil
 }
 
 func validateNonAtomicDeltaPolicy(policy NonAtomicDeltaPolicy, metric NonAtomicDeltaPolicyMetric, allowLegacyMissingMetric bool) error {
