@@ -279,6 +279,41 @@ def test_duplication_behavior_gate_keeps_equivalent_renamed_functions():
     assert len(cs.kpi_duplication(files)["defects"]) >= 1
 
 
+def _generic_semantic_ratio(name: str, zero_result: int) -> str:
+    return f"""func {name}[T interface{{ ~float64 }}](a, b T) T {{
+    if b == 0 {{
+        return {zero_result}
+    }}
+    result := a / b
+    if result < 0 {{
+        result = -result
+    }}
+    if result > 100 {{
+        result = 100
+    }}
+    return result
+}}
+"""
+
+
+def test_duplication_behavior_gate_splits_divergent_generic_owners():
+    files = {
+        "a.go": "package x\n" + _generic_semantic_ratio("ratio", 1),
+        "b.go": "package x\n" + _generic_semantic_ratio("rate", 0),
+    }
+    k = cs.kpi_duplication(files)
+    assert k["defects"] == [], k["defects"]
+    assert any("behavior-divergent" in row for row in k["soft"]), k["soft"]
+
+
+def test_duplication_behavior_gate_keeps_equivalent_generic_owners():
+    files = {
+        "a.go": "package x\n" + _generic_semantic_ratio("ratio", 0),
+        "b.go": "package x\n" + _generic_semantic_ratio("rate", 0),
+    }
+    assert len(cs.kpi_duplication(files)["defects"]) >= 1
+
+
 def test_duplication_behavior_gate_ignores_quote_markers_in_comments():
     # Comments are not Go string/rune literals. An apostrophe or backtick in one must
     # not strand the lightweight owner scanner in quote state and thereby let a

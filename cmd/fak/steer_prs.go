@@ -245,6 +245,8 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 	check := fs.Bool("check", false, "exit 1 if any forming unit is RESIDUAL (reports; never blocks a merge)")
 	maxFiles := fs.Int("max-files", 20, "file paths listed per unit before folding to a count")
 	cohort := fs.String("cohort", "", "issue-cohort plan `file` (fak-dev issue cohort --json): fold commits bound to a planned wave into one unit per wave")
+	demo := fs.String("demo", "", "deterministic commit-log fixture file (no git or network)")
+	selfcheck := fs.Bool("selfcheck", false, "assert the demo fixture's expected worst-first fold")
 	if !parseFlags(fs, argv) {
 		return 2
 	}
@@ -255,6 +257,34 @@ func runSteerPRs(stdout, stderr io.Writer, argv []string) int {
 	if *maxFiles < 0 {
 		fmt.Fprintln(stderr, "fak steer prs: --max-files must be >= 0")
 		return 2
+	}
+
+	if *selfcheck && strings.TrimSpace(*demo) == "" {
+		fmt.Fprintln(stderr, "fak steer prs: --selfcheck requires --demo")
+		return 2
+	}
+	if strings.TrimSpace(*demo) != "" {
+		view, err := buildSteerPRsDemoView(*demo)
+		if err != nil {
+			fmt.Fprintf(stderr, "fak steer prs: demo: %v\n", err)
+			return 1
+		}
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, view); err != nil {
+				fmt.Fprintf(stderr, "fak steer prs: encode json: %v\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprintln(stdout, writeSteerPRs(view, *maxFiles))
+		}
+		if *selfcheck {
+			if err := checkSteerPRsDemo(view); err != nil {
+				fmt.Fprintf(stderr, "fak steer prs: selfcheck FAILED: %v\n", err)
+				return 1
+			}
+			fmt.Fprintln(stderr, "fak steer prs: selfcheck OK")
+		}
+		return 0
 	}
 
 	// The wave bindings are read ONCE, here, and handed to the fold as data: an
@@ -412,6 +442,73 @@ func ghSteerRedirectFollowUp(r steerpr.Redirect) (string, error) {
 // worst-attention-first operator view. It reuses the release-plan range
 // resolution (branchrole + prPlanResolve) and git seam so the continuous view
 // and the promotion plan always fold the SAME range through the SAME parser.
+type steerPRsDemoFixture struct {
+	Schema  string               `json:"schema"`
+	Commits []steerPRsDemoCommit `json:"commits"`
+}
+
+type steerPRsDemoCommit struct {
+	SHA     string          `json:"sha"`
+	Subject string          `json:"subject"`
+	Body    string          `json:"body,omitempty"`
+	Files   []string        `json:"files,omitempty"`
+	Verdict steerpr.Verdict `json:"verdict"`
+}
+
+func buildSteerPRsDemoView(path string) (map[string]any, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var fixture steerPRsDemoFixture
+	if err := json.Unmarshal(b, &fixture); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if fixture.Schema != "fak.steerpr.demo.v1" {
+		return nil, fmt.Errorf("schema = %q, want fak.steerpr.demo.v1", fixture.Schema)
+	}
+	commits := make([]steerpr.Commit, 0, len(fixture.Commits))
+	for _, row := range fixture.Commits {
+		raw := row.SHA + "\x1f" + row.Subject + "\x1f" + row.Body + "\x1f" + strings.Join(row.Files, "\n") + "\x1e"
+		parsed := steerpr.ParseLog(raw)
+		if len(parsed) != 1 {
+			return nil, fmt.Errorf("commit %q did not parse", row.SHA)
+		}
+		parsed[0].Verdict = row.Verdict
+		commits = append(commits, parsed[0])
+	}
+	units, unstamped := steerpr.FoldUnits(commits)
+	steerpr.SortWorstFirst(units)
+	return map[string]any{
+		"schema": "fak.steerpr.v1", "base": "fixture-base", "base_sha": "fixture-base",
+		"head": "fixture-head", "head_sha": "fixture-head", "range": "fixture",
+		"development_branch": "fixture-dev", "release_branch": "fixture-release", "release_source": "fixture-dev",
+		"commit_count": len(commits), "unit_count": len(units), "unstamped_count": len(unstamped),
+		"residual_count": steerpr.Residual(units), "forming_count": 0, "unknown_expected_count": 0,
+		"wave_unit_count": 0, "units": units, "unstamped": unstamped,
+		"acks": map[string]steerpr.Ack{}, "pauses": map[string]steerpr.Pause{},
+	}, nil
+}
+
+func checkSteerPRsDemo(view map[string]any) error {
+	units, _ := view["units"].([]steerpr.Unit)
+	unstamped, _ := view["unstamped"].([]steerpr.Commit)
+	if len(units) != 3 || len(unstamped) != 1 {
+		return fmt.Errorf("fold = %d unit(s), %d orphan(s); want 3, 1", len(units), len(unstamped))
+	}
+	wantBands := []steerpr.Band{steerpr.BandResidual, steerpr.BandUnverifiable, steerpr.BandCleared}
+	wantLeaves := []string{"gateway", "model", "docs"}
+	wantMembers := []int{1, 1, 2}
+	for i := range wantBands {
+		if units[i].Band != wantBands[i] || units[i].Leaf != wantLeaves[i] || len(units[i].Commits) != wantMembers[i] {
+			return fmt.Errorf("unit[%d] = %s/%s/%d; want %s/%s/%d", i, units[i].Band, units[i].Leaf, len(units[i].Commits), wantBands[i], wantLeaves[i], wantMembers[i])
+		}
+	}
+	if unstamped[0].Leaf != "" {
+		return fmt.Errorf("orphan unexpectedly stamped %q", unstamped[0].Leaf)
+	}
+	return nil
+}
 func buildSteerPRsView(root, base, head string) (map[string]any, error) {
 	return buildSteerPRsViewWaves(root, base, head, nil)
 }

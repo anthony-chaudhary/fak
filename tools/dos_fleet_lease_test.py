@@ -142,6 +142,39 @@ class SnapshotTest(unittest.TestCase):
         self.assertEqual(r["host_id"], "A")
 
 
+class KernelAcquireContractTest(unittest.TestCase):
+    def test_current_kernel_call_omits_removed_mode_flag(self):
+        seen = {}
+
+        def fake_run(cmd, cwd):
+            seen["cmd"] = cmd
+            if "--mode" in cmd:
+                return {"stdout": "", "stderr": "unrecognized arguments: --mode", "returncode": 2}
+            return {"stdout": '{"outcome":"acquire","lane":"tools"}', "stderr": "", "returncode": 0}
+
+        with mock.patch.object(fl, "run_text", side_effect=fake_run):
+            result = fl.kernel_acquire(
+                Path("C:/work/fleet"), lane="tools", owner="worker",
+                kind="keyword", mode="exclusive",
+            )
+
+        self.assertNotIn("--mode", seen["cmd"])
+        self.assertEqual(result["outcome"], "acquire")
+        self.assertEqual(result["_returncode"], 0)
+
+    def test_kernel_usage_error_preserves_stderr(self):
+        with mock.patch.object(fl, "run_text", return_value={
+            "stdout": "", "stderr": "unrecognized arguments: --future-flag", "returncode": 2,
+        }):
+            result = fl.kernel_acquire(
+                Path("C:/work/fleet"), lane="tools", owner="worker",
+                kind="keyword", mode="exclusive",
+            )
+
+        self.assertEqual(result["_returncode"], 2)
+        self.assertEqual(result["_stderr"], "unrecognized arguments: --future-flag")
+
+
 class LocalDirStoreCASTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -280,6 +313,22 @@ class VerbWiringTest(unittest.TestCase):
         # Kernel returned a DIFFERENT lane than requested -> denied for the request.
         self.assertEqual(code, fl.EXIT_DENIED)
         self.assertEqual(payload["reason"], fl.REASON_HELD_REMOTE)
+
+    def test_kernel_usage_error_is_contract_error_not_contention(self):
+        def fake_live(ws):
+            return []
+
+        def fake_acquire(ws, **kw):
+            return {"_returncode": 2, "_stderr": "unrecognized arguments: --future-flag"}
+
+        payload, code = fl.do_acquire(
+            self.ws, self.store, lane="tools", owner="A", kind="keyword", mode="exclusive",
+            run_id="", scope="local", host="A", now=T0, live=fake_live, acquire=fake_acquire)
+
+        self.assertEqual(code, fl.EXIT_USAGE)
+        self.assertEqual(payload["error"], fl.KERNEL_CONTRACT_ERROR)
+        self.assertNotEqual(payload.get("reason"), fl.REASON_HELD_REMOTE)
+        self.assertIn("unrecognized arguments: --future-flag", payload["detail"])
 
 
 @unittest.skipUnless(shutil.which("git"), "git required for GitRefStore transport tests")

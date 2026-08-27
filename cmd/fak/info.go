@@ -91,6 +91,13 @@ type guardInfoVars struct {
 		MeanTTFTSeconds       float64 `json:"mean_ttft_seconds"`
 		InflightMaxAgeSeconds float64 `json:"inflight_max_age_seconds"`
 	} `json:"inference"`
+	// TokenDestination is a recorded, payload-free trajectory-audit summary supplied by
+	// the polled gateway snapshot. It is deliberately optional: today's gateway may not
+	// have a live recorder attached, and omission must render as UNAVAILABLE rather than
+	// an invented all-zero category mix. The info-local wrapper carries freshness and
+	// window provenance; the distribution rows and compact rendering remain trajectory's
+	// exported contract.
+	TokenDestination *infoTokenDestinationSnapshot `json:"token_destination,omitempty"`
 	// Sessions mirrors the gateway's /debug/vars sessions block: one row per live
 	// session — the main agent and any SUB-AGENTS it spawned (a row with a parent
 	// trace) — with the remaining budget axes and live wall-clock the agents
@@ -420,6 +427,8 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	runKey := fs.String("run-key", "", "optional run key for history export; persisted only as a SHA-256 identity")
 	style := fs.String("style", envOrDefault("FAK_INFO_STYLE", "visual"), "watch-loop rendering on a TTY: visual (default — task-manager gauges + trend sparklines in stacked sub-panes) or line (a single compact status line); off a TTY both append one line per tick")
 	maxIdle := fs.Duration("max-idle", 0, "issue #2340: in watch mode, self-exit (with a closing line) after the gateway has been unreachable for about this long WITHOUT ever answering — a self-terminating backstop so an auto-spawned pane (e.g. from `fak guard --split`) whose gateway never comes up cannot poll a dead URL forever and leak a terminal pane. 0 (default) polls indefinitely, the manual-run behavior. Ignored with --once/--json. Rounds up to a whole --interval tick.")
+	tokenDestinationSnapshot := fs.String("token-destination-snapshot", envOrDefault("FAK_INFO_TOKEN_DESTINATION_SNAPSHOT", ""), "recorded fak-trajectory-audit/1 JSONL summary refreshed by a live recorder; renders its model-visible UTF-8-byte category mix and top tool without rescanning transcripts in the TUI")
+	tokenDestinationMaxAge := fs.Duration("token-destination-max-age", time.Minute, "maximum age of --token-destination-snapshot before the TUI labels the retained mix STALE (must be positive when a snapshot path is set)")
 	prefixTranscript := fs.String("prefix-transcript", "", "issue #1602: score the managed-context prefix-stability of a recorded Claude Code / GLM transcript (JSONL) turn-by-turn, offline, and exit — no gateway needed")
 	fromFixture := fs.String("from-fixture", "", "render the overlay OFFLINE from a recorded /debug/vars JSON snapshot (the shape `fak info --json` emits) instead of polling a live gateway — no gateway needed. The deterministic capture path (the twin of `fak console guard --journal`): pairs with --tab and --frame to draw a single static frame for docs/media. See visuals/info-overlay-capture.md.")
 	fleetSelfcheck := fs.Bool("fleet-selfcheck", false, "render the deterministic read-only Fleet workspace proof and exit")
@@ -437,6 +446,10 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 	}
 	if *workDoneWindow < 0 || (*workDoneWindow > 0 && !*workDoneJSON) || (*workDoneJSON && *asJSON) || (*workDoneHistory != "" && *workloadKey == "") {
 		fmt.Fprintln(stderr, "fak info: --work-done-window requires --work-done-json; --json and --work-done-json are mutually exclusive; --work-done-history requires --workload-key")
+		return 2
+	}
+	if strings.TrimSpace(*tokenDestinationSnapshot) != "" && *tokenDestinationMaxAge <= 0 {
+		fmt.Fprintln(stderr, "fak info: --token-destination-max-age must be positive when --token-destination-snapshot is set")
 		return 2
 	}
 	if *workCoverage {
@@ -526,6 +539,10 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 		key:  strings.TrimSpace(os.Getenv(strings.TrimSpace(*keyEnv))),
 		hc:   &http.Client{Timeout: 10 * time.Second},
 	}
+	tokenDestinationSource := &infoTokenDestinationSource{
+		Path:   strings.TrimSpace(*tokenDestinationSnapshot),
+		MaxAge: *tokenDestinationMaxAge,
+	}
 
 	// --startup is a one-shot read, not a watch: fetch the recorded report, print it
 	// verbatim, done. A gateway that answers but recorded no report (fak serve, an older
@@ -551,6 +568,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 		if !ok {
 			return 1
 		}
+		tokenDestinationSource.decorate(&v)
 		id := guardInfoCurrentRuntimeIdentity(v)
 		v.RuntimeIdentity = &id
 		return encodeJSONOrFail(stdout, stderr, v, "fak info")
@@ -580,7 +598,7 @@ func runInfo(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 	c.workHistoryPath, c.workloadKey, c.runKey = *workDoneHistory, *workloadKey, *runKey
-	return runGuardInfoOverlay(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style, *color, *maxIdle)
+	return runInfoOverlayWithDestination(stdout, stderr, c, *interval, *once, infoTTY, infoWidth, infoHeight, *style, *color, tokenDestinationSource, *maxIdle)
 }
 
 // prefixTranscriptTurnResult is one line of `fak info --prefix-transcript` output: the
@@ -746,6 +764,10 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 	if len(maxIdleOpt) > 0 {
 		maxIdle = maxIdleOpt[0]
 	}
+	return runInfoOverlayWithDestination(stdout, stderr, c, interval, once, tty, width, height, style, colorMode, nil, maxIdle)
+}
+
+func runInfoOverlayWithDestination(stdout, stderr io.Writer, c *claudeMacDebugClient, interval time.Duration, once, tty bool, width, height int, style string, colorMode string, tokenDestinationSource *infoTokenDestinationSource, maxIdle time.Duration) int {
 	idleLimit := 0
 	if maxIdle > 0 && interval > 0 {
 		idleLimit = int((maxIdle + interval - 1) / interval) // ceil(maxIdle/interval), so a sub-interval budget still bites
@@ -982,6 +1004,7 @@ func runGuardInfoOverlay(stdout, stderr io.Writer, c *claudeMacDebugClient, inte
 		v.FleetWorkspace = collectInfoFleetWorkspace("", fleetPaneRunner, time.Now().UTC())
 		v.WorkDone = ptrGuardInfoWorkDone(guardInfoWorkDoneFromVars(v))
 		c.decorateWorkHistory(&v)
+		tokenDestinationSource.decorate(&v)
 		if viewState.copyMode {
 			lastSample, haveSample = v, true // keep the sample fresh but stay frozen for copy/select
 		} else {

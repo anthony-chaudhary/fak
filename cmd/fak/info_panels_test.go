@@ -241,14 +241,17 @@ func TestGuardInfoTrendsSavedCalls(t *testing.T) {
 		t.Errorf("turns-saved row must stay in the calls currency:\n%s", full)
 	}
 
-	// Silent without any avoided calls: the pre-existing three-row trends layout.
+	// Silent without any avoided calls: the saved row stays absent. #9450 deliberately
+	// adds one honesty row for an unavailable token-destination recorder, so the base
+	// layout is now the three pre-existing rows plus that explicit state.
 	bareCtx := guardInfoPanelCtx{v: provenVisualVars(), tr: tr, width: 120, sparkW: 12, gaugeW: 10}
 	bare := guardInfoTrendsPanelRows(bareCtx, guardPanelFull)
-	if strings.Contains(strings.Join(bare, "\n"), "calls avoided") {
-		t.Errorf("trends panel must omit the saved row when nothing was avoided:\n%s", strings.Join(bare, "\n"))
+	bareRows := strings.Join(bare, "\n")
+	if strings.Contains(bareRows, "calls avoided") {
+		t.Errorf("trends panel must omit the saved row when nothing was avoided:\n%s", bareRows)
 	}
-	if len(bare) != 3 {
-		t.Errorf("silent trends panel must keep its three rows, got %d", len(bare))
+	if !strings.Contains(bareRows, "tokens→ unavailable") || len(bare) != 4 {
+		t.Errorf("base trends panel must keep three economy rows plus unavailable destination state, got %d:\n%s", len(bare), bareRows)
 	}
 
 	proxy := bareCtx
