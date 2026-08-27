@@ -29,9 +29,10 @@ post is:
 |---|---|---|---|
 | `status` | :hourglass_flowing_sand: | no | an ongoing, tracked impediment — recorded, scrolls by. "GPU-gated, waiting on GPU server hours", "peer merge in flight". |
 | `operator` | :rotating_light: | **yes** — `<!here>` or a named owner | a blocker that needs a **human** to act, with a "do this next". "FAK_SCOREBOARD_TOKEN missing", "CPU server host unreachable — needs a manual restart". |
-| `clear` | :white_check_mark: | no | an all-clear heartbeat — the daily cadence's "no open blockers" card. |
+| `clear` | :white_check_mark: | no | an all-clear heartbeat — only after a successful query returns no open blockers. |
+| `unknown` | :warning: | no | the blocker source could not be evaluated; the feeder records the diagnostic and fails without posting or claiming all-clear. |
 
-Only `operator` is surfaced; `status` and `clear` are the background tiers. An operator
+Only `operator` is surfaced; `status`, `clear`, and `unknown` are the background tiers. An operator
 blocker carries the broadcast mention in **both** the notification fallback and the lead
 block, which is what makes Slack actually page — see `internal/blockerpost/render.go`.
 
@@ -59,13 +60,16 @@ will show but won't notify.
 ## The daily heartbeat (`fak blockers feed`)
 
 `blockers-feed.yml` runs daily and folds the open GitHub backlog filtered to the blocker
-label (`FAK_BLOCKERS_LABEL`, default `blocked`) into one card. The surfacing follows
+label (`FAK_BLOCKERS_LABEL`, default `operator-agentic-blocked`) into one card. The surfacing follows
 ownership — the honest dual of "status in background, operator surfaced":
 
-- **0 blocked issues** → a quiet green all-clear card (no page).
+- **Successful query, 0 blocked issues** → a quiet green all-clear card (no page).
+- **Missing configured label or failed/invalid query** → an `unknown` diagnostic and
+  failed workflow; no all-clear and no Slack post.
 - **≥1 with an UNOWNED issue** → an `operator` card: `<!here>` + a triage link (paged) —
   a blocker with no assignee needs a human to pick it up.
-- **≥1 but all assigned** → a muted background-`status` card (tracked, no page).
+- **≥1 but all assigned** → a muted background-`status` card (ownership recorded, no
+  inference that work is active or that no action is needed).
 
 `fak blockers feed --issues <gh-json>` is a pure fold of a
 `gh issue list --json number,title,url,assignees,labels` payload, so it is unit-tested
@@ -80,7 +84,7 @@ configures every workspace):
 |---|---|---|
 | `FAK_BLOCKERS_TOKEN` | falls back to `FAK_SCOREBOARD_TOKEN` | the bot token (never the lab `SLACK_BOT_TOKEN`). |
 | `FAK_BLOCKERS_CHANNEL` | `C0BGQ411TCJ` (CI/CD reporting sink) | target channel; falls back to the family sink, then `FAK_CICD_REPORT_CHANNEL`; never inherits `FAK_SCOREBOARD_CHANNEL`. |
-| `FAK_BLOCKERS_LABEL` | `blocked` | the feeder's issue-label filter (repo variable). |
+| `FAK_BLOCKERS_LABEL` | `operator-agentic-blocked` | the feeder's issue-label filter (repo variable). |
 
 **Operator one-time step:** add the repo secret `FAK_SCOREBOARD_TOKEN` (the
 scoreboard-workspace bot token) under *Settings → Secrets and variables → Actions*.

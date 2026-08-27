@@ -16,6 +16,8 @@ func (b Blocker) glyph() string {
 		return ":rotating_light:"
 	case SeverityClear:
 		return ":white_check_mark:"
+	case SeverityUnknown:
+		return ":warning:"
 	default: // SeverityStatus and the zero value
 		return ":hourglass_flowing_sand:"
 	}
@@ -48,6 +50,8 @@ func (b Blocker) headline() string {
 		return "BLOCKER — needs operator · " + title
 	case SeverityClear:
 		return title + " — all clear"
+	case SeverityUnknown:
+		return title + " — UNKNOWN"
 	default:
 		return title + " — ongoing"
 	}

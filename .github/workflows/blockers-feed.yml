@@ -6,11 +6,12 @@ name: blockers-feed
 # its heartbeat.
 #
 # The CI-derivable blocker source is the open GitHub backlog filtered to the blocker
-# label (FAK_BLOCKERS_LABEL, default `blocked`). `fak blockers feed` folds that list,
+# label (FAK_BLOCKERS_LABEL, default `operator-agentic-blocked`). `fak blockers feed` folds that list,
 # and the surfacing follows ownership — the honest dual of "lightweight status ones in
 # background, human-operator ones surfaced":
 #
-#   * 0 blocked issues            -> a quiet green all-clear card (no page).
+#   * successful query, 0 issues  -> a quiet green all-clear card (no page).
+#   * missing label/query failure -> UNKNOWN + failed run; never an all-clear/post.
 #   * >=1 with an UNOWNED issue    -> an OPERATOR card: <!here> + a triage link (paged) —
 #                                     a blocker with no assignee needs a human to pick up.
 #   * >=1 but all assigned         -> a muted background-status card (tracked, no page).
@@ -62,7 +63,7 @@ jobs:
       GOTOOLCHAIN: auto
       FAK_SCOREBOARD_TOKEN: ${{ secrets.FAK_SCOREBOARD_TOKEN }}
       FAK_BLOCKERS_CHANNEL: ${{ vars.FAK_BLOCKERS_CHANNEL || vars.FAK_CICD_REPORT_CHANNEL || 'C0BGQ411TCJ' }}
-      FAK_BLOCKERS_LABEL: ${{ vars.FAK_BLOCKERS_LABEL || 'blocked' }}
+      FAK_BLOCKERS_LABEL: ${{ vars.FAK_BLOCKERS_LABEL || 'operator-agentic-blocked' }}
       FAK_SCOREBOARD_SOURCE: ci
     steps:
       - uses: actions/checkout@v4
@@ -72,25 +73,56 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # List the open blocker-labelled issues — the standing-blocker signal. `gh` ships
-      # on the runner and authenticates with the built-in GITHUB_TOKEN. A label that does
-      # not exist (or any gh hiccup) must NOT fail the heartbeat: fall back to an empty
-      # array, which folds to the honest "no standing blockers" all-clear card.
-      - name: list blocked issues
+      # Validate the configured label, then list its open issues. A successful [] is the
+      # ONLY input that may fold to all-clear. A missing label, gh/API failure, empty or
+      # malformed payload renders an UNKNOWN diagnostic, fails the job, and prevents the
+      # normal render/post steps from running.
+      - name: validate blocker source and list issues
         id: issues
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          render_unknown() {
+            reason="$1"
+            printf '[]\n' > issues.json
+            echo "count=unknown" >> "$GITHUB_OUTPUT"
+            echo "source_status=unknown" >> "$GITHUB_OUTPUT"
+            go run ./cmd/fak blockers feed \
+              --source-status unknown \
+              --source-error "$reason" \
+              --label "$FAK_BLOCKERS_LABEL" \
+              --repo-url "${{ github.server_url }}/${{ github.repository }}" \
+              --channel "$FAK_BLOCKERS_CHANNEL" \
+              --source ci \
+              --dry-run > blockers-card.txt || true
+            {
+              echo "## blockers-feed — UNKNOWN"
+              echo '```'
+              cat blockers-card.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=blockers-feed source unavailable::$reason"
+          }
+
           set +e
+          gh label list --limit 1000 --json name > labels.json
+          label_rc=$?
+          if [ $label_rc -ne 0 ] || [ ! -s labels.json ] || ! jq -e --arg label "$FAK_BLOCKERS_LABEL" 'any(.[]; .name == $label)' labels.json >/dev/null; then
+            set -e
+            render_unknown "configured label '$FAK_BLOCKERS_LABEL' does not exist or could not be read (rc=$label_rc)"
+            exit 1
+          fi
+
           gh issue list --state open --label "$FAK_BLOCKERS_LABEL" --limit 200 \
             --json number,title,url,assignees,labels > issues.json
           rc=$?
           set -e
-          if [ $rc -ne 0 ] || [ ! -s issues.json ]; then
-            echo "gh issue list returned no usable payload (rc=$rc); treating as no standing blockers"
-            echo "[]" > issues.json
+          if [ $rc -ne 0 ] || [ ! -s issues.json ] || ! jq -e 'type == "array"' issues.json >/dev/null; then
+            render_unknown "gh issue list returned no usable array payload (rc=$rc)"
+            exit 1
           fi
-          echo "count=$(jq 'length' issues.json 2>/dev/null || echo 0)" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq 'length' issues.json)" >> "$GITHUB_OUTPUT"
+          echo "source_status=ok" >> "$GITHUB_OUTPUT"
 
       # Always render the card to the step summary (and as the artifact) so the run is
       # auditable even when nothing posts (missing secret / manual dry-run / fork).

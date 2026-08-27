@@ -18,8 +18,10 @@
 //	          "CPU host unreachable — needs a manual restart".
 //	clear     an all-clear heartbeat (no open blockers) — a quiet green card so the
 //	          daily cadence shows the pipe is alive without paging anyone.
+//	unknown   the blocker source could not be evaluated — a quiet warning card that
+//	          must never be interpreted as an all-clear or posted as a normal feed.
 //
-// Only `operator` is surfaced. {status, clear} are the background tiers. That two-tier
+// Only `operator` is surfaced. {status, clear, unknown} are the background tiers. That two-tier
 // (background vs surfaced) split is the whole reason this channel is distinct from the
 // status feeders — see Blocker.Text / Blocker.Blocks for the mechanics (the mention
 // rides in BOTH the notification fallback and the lead section, which is what makes
@@ -75,6 +77,10 @@ const (
 	SeverityOperator Severity = "operator"
 	// SeverityClear is an all-clear heartbeat: a quiet green card, no mention.
 	SeverityClear Severity = "clear"
+	// SeverityUnknown means the blocker source was unavailable or invalid. It is
+	// visibly non-green and quiet; callers should fail the producing run rather
+	// than post it as a normal feed result.
+	SeverityUnknown Severity = "unknown"
 )
 
 // ParseSeverity maps a flag string to a Severity, defaulting to SeverityStatus for the
@@ -98,7 +104,7 @@ func ParseSeverity(s string) (Severity, bool) {
 // the open blocker backlog — so the renderer (Text/Blocks) has a single input shape,
 // the same pattern as benchpost.Post and dojopost.Post.
 type Blocker struct {
-	Severity  Severity // status | operator | clear (default status)
+	Severity  Severity // status | operator | clear | unknown (default status)
 	Title     string   // short headline, e.g. "CPU host unreachable"
 	Detail    string   // one-line what is blocked / why
 	Lines     []string // optional body, one per sub-item (the feeder's per-issue rows)

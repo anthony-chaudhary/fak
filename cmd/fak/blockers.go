@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/blockerpost"
 )
@@ -83,12 +84,33 @@ func runBlockersFeed(stdout, stderr io.Writer, argv []string) int {
 	fs.SetOutput(stderr)
 	issuesPath := fs.String("issues", "", "fold a `gh issue list --json number,title,url,assignees,labels` payload from this file (- for stdin)")
 	label := fs.String("label", "blocked", "the issue label the backlog was filtered by (for prose + the triage link)")
+	sourceStatus := fs.String("source-status", "ok", "issue-query status: ok | unknown; unknown renders a non-green diagnostic, refuses to post, and exits 1")
+	sourceError := fs.String("source-error", "", "source-status=unknown: concise acquisition failure shown in the diagnostic")
 	repoURL := fs.String("repo-url", "", "repo base URL for the operator triage link, e.g. https://github.com/owner/repo")
 	source := fs.String("source", "", "who is posting: ci | agent | <hostname> (default: $FAK_SCOREBOARD_SOURCE or hostname)")
 	channel := fs.String("channel", "", "override target channel id (default: $FAK_BLOCKERS_CHANNEL / .env.slack.local / #blockers)")
 	token := fs.String("token", "", "override bot token (default: $FAK_BLOCKERS_TOKEN, then the scoreboard token)")
 	dryRun := fs.Bool("dry-run", false, "render the card and print it; do not post to Slack")
 	if !parseFlags(fs, argv) {
+		return 2
+	}
+
+	switch strings.ToLower(strings.TrimSpace(*sourceStatus)) {
+	case "ok":
+		// Continue to the successful-query fold below. An empty JSON array is a
+		// valid clear result only on this path.
+	case "unknown":
+		b := blockerpost.FoldIssuesUnavailable(*label, *sourceError)
+		b.Source = resolveBlockerSource(*source)
+		// UNKNOWN is a diagnostic, never a normal outbound feed result. Force the
+		// dry-run renderer even if the caller forgot --dry-run, then fail the run.
+		if code := emitBlocker(stdout, stderr, b, *channel, *token, true); code != 0 {
+			return code
+		}
+		fmt.Fprintln(stderr, "fak blockers feed: blocker source is UNKNOWN; refusing to post or report all-clear")
+		return 1
+	default:
+		fmt.Fprintf(stderr, "fak blockers feed: unknown --source-status %q (want: ok | unknown)\n", *sourceStatus)
 		return 2
 	}
 
