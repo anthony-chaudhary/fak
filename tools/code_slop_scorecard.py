@@ -528,10 +528,10 @@ def _function_spans(text: str) -> list[tuple[int, int, str, str]]:
     """
     starts = re.finditer(
         r"(?m)^(?:"
-        r"\s*func\s+(?:\([^\n{}]*\)\s*)?[A-Za-z_]\w*(?:\s*\[[^\n]*\])?"
+        r"\s*func\s+(?:\((?:[^\n{}]|\{\})*\)\s*)?[A-Za-z_]\w*(?:\s*\[[^\n]*\])?"
         r"|var\s+[A-Za-z_]\w*\s*=\s*func"
-        r")\s*\([^\n{}]*\)"
-        r"(?:\s*\([^\n{}]*\)|\s+[^\n{]+)?\s*\{", text)
+        r")\s*\((?:[^\n{}]|\{\})*\)"
+        r"(?:\s*\((?:[^\n{}]|\{\})*\)|\s+[^\n{]+)?\s*\{", text)
     out: list[tuple[int, int, str, str]] = []
     for m in starts:
         # A generic constraint may itself contain an interface literal. The match ends
