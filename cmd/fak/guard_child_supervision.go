@@ -116,6 +116,7 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		childStderr := guardCaptureChildStderr(child, agentName)
 		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
@@ -194,6 +195,10 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			// the process keeps the exit-0 semantics the `break` already had.
 			appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
 			finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+			return
+		}
+		if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, os.Stderr) {
+			finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
 		if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {
@@ -318,6 +323,7 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		childStderr := guardCaptureChildStderr(child, agentName)
 		maybeStartGuardChildHarnessTerminalRestorePulseForPlan(spawnMeta.LaunchPlan)
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
@@ -407,6 +413,10 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				// witness before the report, which closes the journal.
 				appendGuardChildExitWitness(auditJournal, agentName, guardTraceID, nil, child.ProcessState, childStarted)
 				finishGuardChildAndReport(nil, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+				return
+			}
+			if guardRefuseCodexCLIUsage(runErr, child.ProcessState, agentName, guardTraceID, childStderr.String(), childStarted, auditJournal, restarter.stderr) {
+				finishGuardChildAndReport(runErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 				return
 			}
 			if next, ok := guardMaybeRecoverAuthCrash(runErr, command, credPath, agentName, quiet, os.Stderr); ok {

@@ -23,7 +23,7 @@ func TestMeasureHostMemoryRooflineAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != RooflineMeasurementSchema || got.Scope != "host-memory" || got.MeasuredSustainableGBS <= 0 || len(got.Trials) != 3 {
+	if got.Schema != RooflineMeasurementSchema || got.Scope != "host-memory" || got.MeasuredSustainableGBS <= 0 || got.DRAMIsolation != "not-proven" || len(got.Caveats) != 3 || len(got.Trials) != 3 {
 		t.Fatalf("%+v", got)
 	}
 	for _, trial := range got.Trials {

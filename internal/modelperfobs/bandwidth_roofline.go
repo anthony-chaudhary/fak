@@ -40,6 +40,9 @@ type RooflineMeasurement struct {
 	Method                 string          `json:"method"`
 	Aggregation            string          `json:"aggregation"`
 	TrafficAccounting      string          `json:"traffic_accounting"`
+	DRAMIsolation          string          `json:"dram_isolation"`
+	Interpretation         string          `json:"interpretation"`
+	Caveats                []string        `json:"caveats"`
 	WorkingSetBytes        uint64          `json:"working_set_bytes"`
 	TargetDurationMS       int64           `json:"target_duration_ms"`
 	Threads                int             `json:"threads"`
@@ -142,5 +145,5 @@ func MeasureHostMemoryRoofline(ctx context.Context, o RooflineBenchmarkOptions) 
 	}
 	sort.Float64s(values)
 	median := values[len(values)/2]
-	return RooflineMeasurement{Schema: RooflineMeasurementSchema, Scope: "host-memory", MachineClass: runtime.GOOS + "/" + runtime.GOARCH, Method: "parallel-copy", Aggregation: "median", TrafficAccounting: "read-plus-write-2-bytes-per-copied-byte", WorkingSetBytes: o.WorkingSetBytes, TargetDurationMS: o.TargetDuration.Milliseconds(), Threads: o.Threads, MeasuredSustainableGBS: median, Trials: trials}, nil
+	return RooflineMeasurement{Schema: RooflineMeasurementSchema, Scope: "host-memory", MachineClass: runtime.GOOS + "/" + runtime.GOARCH, Method: "parallel-copy", Aggregation: "median", TrafficAccounting: "read-plus-write-2-bytes-per-copied-byte", DRAMIsolation: "not-proven", Interpretation: "sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth", Caveats: []string{"cache-residency-not-measured", "numa-placement-os-managed", "copy-kernel-and-scheduler-dependent"}, WorkingSetBytes: o.WorkingSetBytes, TargetDurationMS: o.TargetDuration.Milliseconds(), Threads: o.Threads, MeasuredSustainableGBS: median, Trials: trials}, nil
 }

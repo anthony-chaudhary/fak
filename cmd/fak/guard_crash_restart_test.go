@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -61,6 +64,76 @@ func TestGuardMaybeRestartOnCrash(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestGuardCodexCLIUsageFailureClassification(t *testing.T) {
+	exit2, state2 := runToExit(t, 2)
+	exit17, state17 := runToExit(t, 17)
+	observed := "error: unexpected argument '--full-auto' found\n\nUsage: codex exec [OPTIONS] [PROMPT]\n"
+
+	if !guardIsCodexCLIUsageFailure(exit2, state2.ProcessState, "codex", observed) {
+		t.Fatal("directly observed Codex exit-2 usage envelope was not classified")
+	}
+	for name, stderr := range map[string]string{
+		"unrelated exit 2":     "panic: index out of range\n",
+		"diagnostic only":      "error: unexpected argument '--full-auto' found\n",
+		"usage only":           "Usage: codex exec [OPTIONS] [PROMPT]\n",
+		"different usage root": "error: unexpected argument '--full-auto' found\nUsage: codex [OPTIONS]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if guardIsCodexCLIUsageFailure(exit2, state2.ProcessState, "codex", stderr) {
+				t.Fatalf("overgeneralized stderr %q as Codex CLI usage", stderr)
+			}
+		})
+	}
+	if guardIsCodexCLIUsageFailure(exit2, state2.ProcessState, "claude", observed) {
+		t.Fatal("Codex-shaped stderr from a non-Codex harness was classified")
+	}
+	if guardIsCodexCLIUsageFailure(exit17, state17.ProcessState, "codex", observed) {
+		t.Fatal("non-exit-2 Codex failure was classified as CLI usage")
+	}
+	if _, code, ok := guardMaybeRestartOnCrash(exit2, state2.ProcessState, 0, 3); !ok || code != 2 {
+		t.Fatalf("unrelated exit 2 lost generic restart admission: code=%d ok=%v", code, ok)
+	}
+	if _, code, ok := guardMaybeRestartOnCrash(exit17, state17.ProcessState, 0, 3); !ok || code != 17 {
+		t.Fatalf("transient crash lost generic restart admission: code=%d ok=%v", code, ok)
+	}
+}
+
+func TestGuardChildStderrCapturePreservesAndBoundsStream(t *testing.T) {
+	payload := bytes.Repeat([]byte("x"), guardChildStderrCaptureLimit+257)
+	var original bytes.Buffer
+	capture := newGuardChildStderrCapture(&original)
+	if n, err := capture.Write(payload); err != nil || n != len(payload) {
+		t.Fatalf("capture.Write = %d, %v; want %d, nil", n, err, len(payload))
+	}
+	if !bytes.Equal(original.Bytes(), payload) {
+		t.Fatal("capture changed the original stderr stream")
+	}
+	if got := capture.String(); len(got) != guardChildStderrCaptureLimit || got != string(payload[:guardChildStderrCaptureLimit]) {
+		t.Fatalf("captured prefix length=%d, want bounded unchanged prefix length=%d", len(got), guardChildStderrCaptureLimit)
+	}
+}
+
+func TestGuardRefuseCodexCLIUsageWritesOneTypedWitness(t *testing.T) {
+	exit2, state2 := runToExit(t, 2)
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	j, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = j.Close() }()
+	var stderr bytes.Buffer
+	if !guardRefuseCodexCLIUsage(exit2, state2.ProcessState, "codex", "trace-usage", "error: unexpected argument '--full-auto' found\nUsage: codex exec [OPTIONS] [PROMPT]\n", time.Now(), j, &stderr) {
+		t.Fatal("recognized usage failure was not refused")
+	}
+	rows := j.Recent(4)
+	if len(rows) != 1 || rows[0].Kind != "CHILD_CRASH" || rows[0].Reason != guardCodexCLIUsageReason || rows[0].ExitCode != 2 {
+		t.Fatalf("typed usage witness = %+v", rows)
+	}
+	if got := stderr.String(); !strings.Contains(got, guardCodexCLIUsageReason) || strings.Contains(got, guardCrashRestartExhaustedReason) {
+		t.Fatalf("typed final status = %q", got)
+	}
 }
 
 // TestGuardCrashRestartLimit pins default-on child isolation and the explicit env override.
@@ -189,6 +262,120 @@ func TestGuardReportCrashRestartSaysParentStaysUp(t *testing.T) {
 	}
 }
 
+// TestGuardCodexCLIUsageFailureStopsBeforeRestart is the supervision witness for #9346. The
+// copied test binary is deliberately named codex so the real launch-plan classifier recognizes
+// it, then its child mode emits the captured field envelope and exits 2. The launch counter and
+// audit journal prove that classification happened before generic crash-restart admission.
+func TestGuardCodexCLIUsageFailureStopsBeforeRestart(t *testing.T) {
+	dir := t.TempDir()
+	codexPath := guardNamedCodexTestBinary(t, dir)
+	statePath := filepath.Join(dir, "child-state")
+	auditPath := filepath.Join(dir, "audit.jsonl")
+
+	cmd := exec.Command(os.Args[0], "guard")
+	guardArgs := strings.Join([]string{
+		"--quiet", "--provider", "openai",
+		"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
+		"--audit", auditPath,
+		"--", codexPath, "--fak-guard-crash-witness-child",
+	}, " ")
+	cmd.Env = append(os.Environ(),
+		guardE2EHelperEnv+"="+guardArgs,
+		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
+		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
+		"FAK_GUARD_CRASH_WITNESS_MODE=codex-usage",
+		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
+		guardCrashRestartLimitEnv+"=3",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+		t.Fatalf("guard exit=%v, want preserved child exit 2\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	gotStderr := stderr.String()
+	for _, want := range []string{
+		"error: unexpected argument '--full-auto' found",
+		"Usage: codex exec [OPTIONS] [PROMPT]",
+		guardCodexCLIUsageReason,
+	} {
+		if !strings.Contains(gotStderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, gotStderr)
+		}
+	}
+	if strings.Contains(gotStderr, "restarting the child") || strings.Contains(gotStderr, guardCrashRestartExhaustedReason) {
+		t.Fatalf("usage failure entered crash restart:\n%s", gotStderr)
+	}
+	state, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(state)); got != "1" {
+		t.Fatalf("child launch count=%s, want exactly one launch", got)
+	}
+
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usageWitnesses, restartHops int
+	scan := bufio.NewScanner(bytes.NewReader(data))
+	for scan.Scan() {
+		var row journal.Row
+		if err := json.Unmarshal(scan.Bytes(), &row); err != nil {
+			t.Fatalf("decode audit row %q: %v", scan.Text(), err)
+		}
+		if row.Kind == "CHILD_CRASH" && row.Reason == guardCodexCLIUsageReason && row.ExitCode == 2 {
+			usageWitnesses++
+		}
+		if row.Kind == "RESTART_HOP" {
+			restartHops++
+		}
+	}
+	if err := scan.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if usageWitnesses != 1 || restartHops != 0 {
+		t.Fatalf("audit usage witnesses=%d restart hops=%d, want 1/0\n%s", usageWitnesses, restartHops, data)
+	}
+}
+
+func guardNamedCodexTestBinary(t *testing.T, dir string) string {
+	t.Helper()
+	source, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "codex"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	destination := filepath.Join(dir, name)
+	if err := os.Link(source, destination); err == nil {
+		return destination
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return destination
+}
+
 // TestGuardParentSurvivesHarnessCrash is the behavior witness for #4686. It starts the REAL
 // fak guard command as a parent process and gives it this test binary as a child harness. The
 // first child invocation exits non-zero; the restarted invocation probes the guard-owned
@@ -275,6 +462,7 @@ type guardCrashWitnessObservation struct {
 func runGuardCrashWitnessChild() {
 	statePath := os.Getenv("FAK_GUARD_CRASH_WITNESS_STATE")
 	observedPath := os.Getenv("FAK_GUARD_CRASH_WITNESS_OBSERVED")
+	mode := os.Getenv("FAK_GUARD_CRASH_WITNESS_MODE")
 	generation := 1
 	if data, err := os.ReadFile(statePath); err == nil {
 		if prior, convErr := strconv.Atoi(strings.TrimSpace(string(data))); convErr == nil {
@@ -284,6 +472,12 @@ func runGuardCrashWitnessChild() {
 	if err := os.WriteFile(statePath, []byte(strconv.Itoa(generation)), 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(91)
+	}
+	if mode == "codex-usage" {
+		fmt.Fprintln(os.Stderr, "error: unexpected argument '--full-auto' found")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Usage: codex exec [OPTIONS] [PROMPT]")
+		os.Exit(2)
 	}
 
 	base := strings.TrimRight(os.Getenv("ANTHROPIC_BASE_URL"), "/")
