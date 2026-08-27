@@ -257,13 +257,8 @@ func runTaskHandoff(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "fak task handoff: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, renderTaskHandoff(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "fak task handoff", *asJSON, result, renderTaskHandoff(result)); code != 0 {
+		return code
 	}
 
 	if !review.OK {

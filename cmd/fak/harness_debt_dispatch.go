@@ -293,13 +293,8 @@ func runHarnessDebtDispatch(stdout, stderr io.Writer, argv []string) int {
 		}
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "harness-debt-dispatch: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, hddRender(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "harness-debt-dispatch", *asJSON, result, hddRender(result)); code != 0 {
+		return code
 	}
 	return exit
 }

@@ -108,13 +108,8 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 			Refused:         true,
 			Error:           "stale_report",
 		}
-		if *asJSON {
-			if err := writeIndentedJSON(stdout, result); err != nil {
-				fmt.Fprintf(stderr, "dogfood-issues: encode json: %v\n", err)
-				return 1
-			}
-		} else {
-			fmt.Fprintln(stdout, dogfoodissues.Render(result))
+		if code := emitJSONOrPrintln(stdout, stderr, "dogfood-issues", *asJSON, result, dogfoodissues.Render(result)); code != 0 {
+			return code
 		}
 		fmt.Fprintf(stderr, "dogfood-issues: %s\n", dogfoodissues.StaleReportMessage(freshness))
 		return 2
@@ -185,13 +180,8 @@ func runDogfoodIssues(stdout, stderr io.Writer, argv []string) int {
 		result.Receipt = receiptPath
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "dogfood-issues: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, dogfoodissues.Render(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "dogfood-issues", *asJSON, result, dogfoodissues.Render(result)); code != 0 {
+		return code
 	}
 
 	if *live {

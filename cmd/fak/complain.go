@@ -160,13 +160,8 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 		result.Synced = []dogfoodissues.SyncRow{guardcomplaint.Sync(row, *repo, useLabels, nil)}
 	}
 
-	if *asJSON {
-		if err := writeIndentedJSON(stdout, result); err != nil {
-			fmt.Fprintf(stderr, "fak complain: encode json: %v\n", err)
-			return 1
-		}
-	} else {
-		fmt.Fprintln(stdout, guardcomplaint.Render(result))
+	if code := emitJSONOrPrintln(stdout, stderr, "fak complain", *asJSON, result, guardcomplaint.Render(result)); code != 0 {
+		return code
 	}
 
 	if liveMode {
