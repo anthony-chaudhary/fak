@@ -117,7 +117,7 @@ func TestModelObserveBandwidthMeasuresHostRoofline(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(got)
-	for _, want := range []string{`"schema":"fak-host-memory-roofline/1"`, `"scope":"host-memory"`, `"method":"parallel-copy"`, `"traffic_accounting":"read-plus-write-2-bytes-per-copied-byte"`, `"aggregation":"median"`, `"selected_source":"measured-sustainable"`} {
+	for _, want := range []string{`"schema":"fak-host-memory-roofline/1"`, `"scope":"host-memory"`, `"method":"parallel-copy"`, `"traffic_accounting":"read-plus-write-2-bytes-per-copied-byte"`, `"dram_isolation":"not-proven"`, `"interpretation":"sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth"`, `"aggregation":"median"`, `"selected_source":"measured-sustainable"`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("collection missing %s: %s", want, text)
 		}
