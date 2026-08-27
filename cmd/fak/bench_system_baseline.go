@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/systembaseline"
@@ -16,11 +17,12 @@ import (
 )
 
 const (
-	minimumSystemBaselineInterval = 10 * time.Millisecond
-	maximumSystemBaselineInterval = 10 * time.Second
-	minimumSystemBaselineDuration = 10 * time.Millisecond
-	maximumSystemBaselineDuration = 60 * time.Second
-	maximumSystemBaselineTimeout  = 24 * time.Hour
+	minimumSystemBaselineInterval  = 10 * time.Millisecond
+	maximumSystemBaselineInterval  = 10 * time.Second
+	minimumSystemBaselineDuration  = 10 * time.Millisecond
+	maximumSystemBaselineDuration  = 60 * time.Second
+	maximumSystemBaselineTimeout   = 24 * time.Hour
+	windowsSystemBaselineWaitDelay = 250 * time.Millisecond
 )
 
 func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
@@ -32,9 +34,9 @@ func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
 type systemBaselineCommandAttributor interface {
 	Configure(*exec.Cmd) bool
 	Active() bool
-	Started(int)
+	Started(int) error
 	LaunchFailed(error)
-	Finish() systembaseline.CgroupV2
+	FinishAttribution() systembaseline.CommandAttribution
 }
 
 func runBenchSystemBaselineWithAttributor(stdout, stderr io.Writer, argv []string, newAttributor func() systemBaselineCommandAttributor) int {
@@ -74,15 +76,22 @@ func runBenchSystemBaselineWithAttributor(stdout, stderr io.Writer, argv []strin
 
 	cadencePolicy := systembaseline.CadencePolicy{Minimum: *interval, Maximum: 10 * *interval, MaximumDutyPercent: *maxSamplerDuty}
 	baselineSamples := captureSystemBaselineWindow(*baselineDuration, cadencePolicy)
-	ctx := context.Background()
-	cancel := func() {}
-	if *timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, *timeout)
-	}
-	defer cancel()
+	// Arm the command timeout only after Windows has atomically placed and
+	// resumed a suspended child. Starting it before Job Object setup lets a
+	// short command timeout kill the process while the launch transaction is
+	// still acquiring/read-checking handles, turning correct placement into a
+	// nondeterministic OpenThread/NtResumeProcess failure.
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(context.Canceled)
 	newCommand := func() *exec.Cmd {
 		cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 		windowgate.ConfigureBackgroundCommand(cmd)
+		// A job member can outlive the root while retaining os/exec's copied
+		// stdout/stderr pipe handles. Bound that wait so job finalization can reap
+		// the descendant instead of deadlocking behind cmd.Wait.
+		if runtime.GOOS == "windows" {
+			cmd.WaitDelay = windowsSystemBaselineWaitDelay
+		}
 		cmd.Stdout, cmd.Stderr = stderr, stderr
 		return cmd
 	}
@@ -97,14 +106,26 @@ func runBenchSystemBaselineWithAttributor(stdout, stderr io.Writer, argv []strin
 		}
 		if err != nil {
 			attributor.LaunchFailed(err)
-			_ = attributor.Finish()
+			_ = attributor.FinishAttribution()
 			fmt.Fprintf(stderr, "fak bench system-baseline: start child: %v\n", err)
 			return 1
 		}
 	}
 	rootPID := cmd.Process.Pid
 	if configured && attributor.Active() {
-		attributor.Started(rootPID)
+		if err := attributor.Started(rootPID); err != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			attributor.LaunchFailed(err)
+			_ = attributor.FinishAttribution()
+			fmt.Fprintf(stderr, "fak bench system-baseline: finalize child launch: %v\n", err)
+			return 1
+		}
+	}
+	var timeoutTimer *time.Timer
+	if *timeout > 0 {
+		timeoutTimer = time.AfterFunc(*timeout, func() { cancel(context.DeadlineExceeded) })
+		defer timeoutTimer.Stop()
 	}
 	sampler := newAdaptiveSystemBaselineSampler(cadencePolicy)
 	samples := []systembaseline.Snapshot{sampler.capture()}
@@ -126,12 +147,17 @@ waitLoop:
 	}
 	samples = append(samples, sampler.capture())
 	exitCode := 0
-	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	timedOut := errors.Is(context.Cause(ctx), context.DeadlineExceeded)
 	if timedOut {
 		exitCode = 124
 	} else if waitErr != nil {
 		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
+		if errors.Is(waitErr, exec.ErrWaitDelay) && cmd.ProcessState != nil {
+			exitCode = cmd.ProcessState.ExitCode()
+			if exitCode < 0 {
+				exitCode = 1
+			}
+		} else if errors.As(waitErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
@@ -145,8 +171,8 @@ waitLoop:
 	policy.MaximumCensusIntervalNS = int64(cadencePolicy.Maximum)
 	policy.RequireProcessMemory = *requireMemory
 	policy.IncludeTopConsumers = *topConsumers
-	cgroup := attributor.Finish()
-	report := systembaseline.BuildWithCgroupV2(baselineSamples, samples, rootPID, *interval, policy, exitCode, timedOut, &cgroup)
+	attribution := attributor.FinishAttribution()
+	report := systembaseline.BuildWithCommandAttribution(baselineSamples, samples, rootPID, *interval, policy, exitCode, timedOut, &attribution)
 	raw, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "fak bench system-baseline: encode: %v\n", err)

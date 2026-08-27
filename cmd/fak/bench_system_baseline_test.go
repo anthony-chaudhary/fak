@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,21 +15,81 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/systembaseline"
 )
 
+const (
+	systemBaselineHelperModeEnv   = "GO_WANT_SYSTEM_BASELINE_HELPER"
+	systemBaselineHelperMarkerEnv = "GO_WANT_SYSTEM_BASELINE_MARKER"
+	systemBaselineChurnChildren   = 12
+)
+
 func TestSystemBaselineHelper(t *testing.T) {
-	mode := os.Getenv("GO_WANT_SYSTEM_BASELINE_HELPER")
+	mode := os.Getenv(systemBaselineHelperModeEnv)
 	if mode == "" {
 		return
 	}
-	if mode == "timeout" {
+	switch mode {
+	case "timeout":
 		time.Sleep(5 * time.Second)
 		return
-	}
-	if mode == "success" {
+	case "success":
 		time.Sleep(80 * time.Millisecond)
+		return
+	case "windows_cleanup_grandchild":
+		time.Sleep(30 * time.Second)
+		return
+	case "windows_cleanup_success", "windows_cleanup_failure", "windows_cleanup_timeout":
+		child := exec.Command(os.Args[0], "-test.run=^TestSystemBaselineHelper$")
+		child.Env = systemBaselineHelperEnv("windows_cleanup_grandchild")
+		if err := child.Start(); err != nil {
+			os.Exit(101)
+		}
+		marker := os.Getenv(systemBaselineHelperMarkerEnv)
+		if marker == "" || os.WriteFile(marker, []byte(strconv.Itoa(child.Process.Pid)), 0o600) != nil {
+			_ = child.Process.Kill()
+			os.Exit(102)
+		}
+		if mode == "windows_cleanup_timeout" {
+			time.Sleep(30 * time.Second)
+			return
+		}
+		// Keep the root alive briefly so the parent test can retain a handle to
+		// the exact grandchild process object before this root exits.
+		time.Sleep(150 * time.Millisecond)
+		if mode == "windows_cleanup_failure" {
+			os.Exit(7)
+		}
+		return
+	case "windows_churn_root":
+		for range systemBaselineChurnChildren {
+			child := exec.Command(os.Args[0], "-test.run=^TestSystemBaselineHelper$")
+			child.Env = systemBaselineHelperEnv("windows_churn_child")
+			if err := child.Run(); err != nil {
+				os.Exit(103)
+			}
+		}
+		return
+	case "windows_churn_child":
+		grandchild := exec.Command(os.Args[0], "-test.run=^TestSystemBaselineHelper$")
+		grandchild.Env = systemBaselineHelperEnv("windows_churn_grandchild")
+		if err := grandchild.Run(); err != nil {
+			os.Exit(104)
+		}
+		return
+	case "windows_churn_grandchild":
 		return
 	}
 	time.Sleep(80 * time.Millisecond)
 	os.Exit(7)
+}
+
+func systemBaselineHelperEnv(mode string) []string {
+	prefix := systemBaselineHelperModeEnv + "="
+	env := make([]string, 0, len(os.Environ())+1)
+	for _, item := range os.Environ() {
+		if !strings.HasPrefix(item, prefix) {
+			env = append(env, item)
+		}
+	}
+	return append(env, prefix+mode)
 }
 
 type failingSystemBaselineWriter struct{}
@@ -44,16 +105,19 @@ type recordingSystemBaselineAttributor struct {
 
 func (*recordingSystemBaselineAttributor) Configure(*exec.Cmd) bool { return true }
 func (*recordingSystemBaselineAttributor) Active() bool             { return true }
-func (a *recordingSystemBaselineAttributor) Started(pid int)        { a.startedPID = pid }
-func (*recordingSystemBaselineAttributor) LaunchFailed(error)       {}
-func (a *recordingSystemBaselineAttributor) Finish() systembaseline.CgroupV2 {
+func (a *recordingSystemBaselineAttributor) Started(pid int) error {
+	a.startedPID = pid
+	return nil
+}
+func (*recordingSystemBaselineAttributor) LaunchFailed(error) {}
+func (a *recordingSystemBaselineAttributor) FinishAttribution() systembaseline.CommandAttribution {
 	a.finishCalls++
 	reason := "injected cgroup counter fallback"
 	metric := func(unit string) systembaseline.Metric {
 		return systembaseline.Metric{Unit: unit, Reason: reason}
 	}
 	axis := systembaseline.PressureAxis{Some: metric("microseconds"), Full: metric("microseconds")}
-	return systembaseline.CgroupV2{
+	cgroup := systembaseline.CgroupV2{
 		State:  systembaseline.CgroupStateUnavailable,
 		Reason: reason,
 		Membership: systembaseline.CgroupMembership{
@@ -73,6 +137,7 @@ func (a *recordingSystemBaselineAttributor) Finish() systembaseline.CgroupV2 {
 		Pressure: systembaseline.CgroupPressure{CPU: axis, Memory: axis, IO: axis},
 		Cleanup:  systembaseline.CgroupCleanup{Attempted: true, Empty: true, Removed: true},
 	}
+	return systembaseline.CommandAttribution{CgroupV2: &cgroup}
 }
 
 func TestBenchSystemBaselineFinalizesCgroupForEveryCommandOutcome(t *testing.T) {
@@ -113,6 +178,146 @@ func TestBenchSystemBaselineFinalizesCgroupForEveryCommandOutcome(t *testing.T) 
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestBenchSystemBaselineWindowsJobObjectCleansEveryTerminalPath(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows Job Object integration witness")
+	}
+	tests := []struct {
+		name, mode string
+		timeout    string
+		wantExit   int
+	}{
+		{name: "success", mode: "windows_cleanup_success", wantExit: 0},
+		{name: "failure", mode: "windows_cleanup_failure", wantExit: 7},
+		{name: "timeout", mode: "windows_cleanup_timeout", timeout: "2s", wantExit: 124},
+	}
+	type runResult struct {
+		code           int
+		stdout, stderr string
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			marker := t.TempDir() + string(os.PathSeparator) + "grandchild.pid"
+			t.Setenv(systemBaselineHelperModeEnv, test.mode)
+			t.Setenv(systemBaselineHelperMarkerEnv, marker)
+			args := []string{"--interval", "10ms", "--baseline-duration", "20ms", "--max-sampler-duty-percent", "100"}
+			if test.timeout != "" {
+				args = append(args, "--timeout", test.timeout)
+			}
+			args = append(args, "--", os.Args[0], "-test.run=^TestSystemBaselineHelper$")
+			done := make(chan runResult, 1)
+			go func() {
+				var stdout, stderr bytes.Buffer
+				code := runBenchSystemBaseline(&stdout, &stderr, args)
+				done <- runResult{code: code, stdout: stdout.String(), stderr: stderr.String()}
+			}()
+
+			var grandchild *os.Process
+			deadline := time.Now().Add(10 * time.Second)
+			for grandchild == nil && time.Now().Before(deadline) {
+				raw, err := os.ReadFile(marker)
+				if err == nil && len(strings.TrimSpace(string(raw))) > 0 {
+					pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+					if parseErr != nil {
+						t.Fatalf("parse grandchild PID %q: %v", raw, parseErr)
+					}
+					grandchild, err = os.FindProcess(pid)
+					if err != nil {
+						t.Fatalf("retain grandchild process %d: %v", pid, err)
+					}
+					break
+				}
+				select {
+				case result := <-done:
+					t.Fatalf("bench exited before grandchild could be retained: code=%d stderr=%s", result.code, result.stderr)
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
+			if grandchild == nil {
+				t.Fatal("timed out waiting for grandchild PID marker")
+			}
+			grandchildDone := make(chan error, 1)
+			go func() {
+				_, err := grandchild.Wait()
+				grandchildDone <- err
+			}()
+
+			var result runResult
+			select {
+			case result = <-done:
+			case <-time.After(15 * time.Second):
+				_ = grandchild.Kill()
+				t.Fatal("bench did not finish after the root terminal path")
+			}
+			if result.code != test.wantExit {
+				t.Fatalf("exit=%d want=%d stderr=%s", result.code, test.wantExit, result.stderr)
+			}
+			select {
+			case err := <-grandchildDone:
+				if err != nil {
+					t.Fatalf("wait retained grandchild: %v", err)
+				}
+			case <-time.After(5 * time.Second):
+				_ = grandchild.Kill()
+				t.Fatal("grandchild survived Job Object cleanup")
+			}
+
+			var report systembaseline.Report
+			if err := json.Unmarshal([]byte(result.stdout), &report); err != nil {
+				t.Fatalf("decode: %v\nstdout=%s\nstderr=%s", err, result.stdout, result.stderr)
+			}
+			job := report.WindowsJobObject
+			if report.Coverage.DescendantAttribution != "job_object" || job == nil || job.State != systembaseline.WindowsJobStateMeasured {
+				t.Fatalf("coverage=%q job=%+v", report.Coverage.DescendantAttribution, job)
+			}
+			if !job.Membership.AtomicPlacement || job.Membership.RootStartID == 0 || !job.Cleanup.Attempted || !job.Cleanup.KilledRemaining || !job.Cleanup.Empty || !job.Cleanup.Closed {
+				t.Fatalf("membership=%+v cleanup=%+v", job.Membership, job.Cleanup)
+			}
+			if err := report.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestBenchSystemBaselineWindowsJobObjectAttributesRapidChurn(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows Job Object integration witness")
+	}
+	t.Setenv(systemBaselineHelperModeEnv, "windows_churn_root")
+	var stdout, stderr bytes.Buffer
+	code := runBenchSystemBaseline(&stdout, &stderr, []string{
+		"--interval", "10ms",
+		"--baseline-duration", "20ms",
+		"--max-sampler-duty-percent", "100",
+		"--", os.Args[0], "-test.run=^TestSystemBaselineHelper$",
+	})
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	var report systembaseline.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	job := report.WindowsJobObject
+	// The job can also contain Windows console infrastructure. The load-bearing
+	// bound is that none of the known root/child/grandchild processes disappeared
+	// between Toolhelp samples.
+	wantProcesses := uint64(1 + 2*systemBaselineChurnChildren)
+	if report.Coverage.DescendantAttribution != "job_object" || job == nil || job.State != systembaseline.WindowsJobStateMeasured {
+		t.Fatalf("coverage=%q job=%+v", report.Coverage.DescendantAttribution, job)
+	}
+	if got := job.Processes.Values["total_processes"]; got < wantProcesses {
+		t.Fatalf("job lifetime process count=%d want at least %d (100%% root/child/grandchild attribution)", got, wantProcesses)
+	}
+	if job.Membership.RootStartID == 0 || !job.CPU.Available || !job.Memory.PeakJobCommitBytes.Available || !job.Cleanup.Empty || !job.Cleanup.Closed {
+		t.Fatalf("job receipt=%+v", job)
+	}
+	if err := report.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }
 

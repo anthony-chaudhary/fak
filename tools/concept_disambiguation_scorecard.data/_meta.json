@@ -7639,6 +7639,11 @@
           "category": "incidental",
           "reason": "Legacy environment selector removed while rebasing the coordinator onto current native GDN execution; not a gateway or engine concept.",
           "token": "FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE"
+        },
+        {
+          "category": "incidental",
+          "reason": "Windows Job Object accounting field name from the OS API, not a fak gateway engine concept",
+          "token": "kernel_100ns"
         }
       ],
       "id": "gateway-engine",
@@ -7718,6 +7723,7 @@
         "kernel32",
         "kernelSession",
         "kernelValue",
+        "kernel_100ns",
         "kernels",
         "kernelwiki",
         "microCacheKernel32",
@@ -8698,6 +8704,11 @@
           "category": "incidental",
           "reason": "local scorecard defect list, not a policy capability",
           "token": "policyDefects"
+        },
+        {
+          "category": "incidental",
+          "reason": "Internal report-policy helper name, not a capability or authorization concept",
+          "token": "applyWindowsJobPolicy"
         }
       ],
       "exclude": [
@@ -8783,6 +8794,7 @@
         "adjudication",
         "adjudicationPrompt",
         "adjudicators",
+        "applyWindowsJobPolicy",
         "bundled_capability",
         "byCapability",
         "capabilities",

@@ -89,14 +89,27 @@ func cloneCounters(in map[string]uint64) map[string]uint64 {
 type commandAttributorPlatform interface {
 	configure(*exec.Cmd) bool
 	active() bool
-	started(int)
+	started(int) error
 	launchFailed(error)
 	finish() CgroupV2
 }
 
+// CommandAttribution is the OS-neutral result of command-bound attribution.
+// Exactly one platform receipt is normally present. The pointers keep an
+// unavailable platform from adding a misleading receipt to the report.
+type CommandAttribution struct {
+	CgroupV2         *CgroupV2         `json:"cgroup_v2,omitempty"`
+	WindowsJobObject *WindowsJobObject `json:"windows_job_object,omitempty"`
+}
+
+type commandAttributionFinisher interface {
+	finishAttribution() CommandAttribution
+}
+
 // CommandAttributor owns the optional OS boundary used by the command wrapper.
-// Call Configure before Start, Started after a successful Start, and Finish
-// exactly once after Wait.
+// Call Configure before Start, Started after a successful Start, and
+// FinishAttribution exactly once after Wait. Finish remains the Linux-specific
+// compatibility surface.
 type CommandAttributor struct {
 	platform commandAttributorPlatform
 }
@@ -113,10 +126,11 @@ func (a *CommandAttributor) Active() bool {
 	return a != nil && a.platform != nil && a.platform.active()
 }
 
-func (a *CommandAttributor) Started(pid int) {
+func (a *CommandAttributor) Started(pid int) error {
 	if a != nil && a.platform != nil {
-		a.platform.started(pid)
+		return a.platform.started(pid)
 	}
+	return nil
 }
 
 func (a *CommandAttributor) LaunchFailed(err error) {
@@ -130,6 +144,20 @@ func (a *CommandAttributor) Finish() CgroupV2 {
 		return unavailableCgroup("command attribution adapter unavailable")
 	}
 	return a.platform.finish()
+}
+
+// FinishAttribution finalizes the active platform boundary. It is idempotent;
+// callers should prefer it over Finish when constructing a cross-platform
+// report.
+func (a *CommandAttributor) FinishAttribution() CommandAttribution {
+	if a == nil || a.platform == nil {
+		return CommandAttribution{}
+	}
+	if finisher, ok := a.platform.(commandAttributionFinisher); ok {
+		return finisher.finishAttribution()
+	}
+	cgroup := a.platform.finish()
+	return CommandAttribution{CgroupV2: &cgroup}
 }
 
 func unavailableCgroup(reason string) CgroupV2 {

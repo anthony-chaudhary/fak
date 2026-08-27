@@ -116,23 +116,24 @@ type SamplerOverhead struct {
 }
 
 type Report struct {
-	Schema          string          `json:"schema"`
-	Verdict         string          `json:"verdict"`
-	Baseline        Window          `json:"baseline_window"`
-	BaselineHost    HostTotals      `json:"baseline_host_totals"`
-	BaselineSampler SamplerOverhead `json:"baseline_sampler"`
-	Window          Window          `json:"command_window"`
-	CommandSampler  SamplerOverhead `json:"command_sampler"`
-	Coverage        Coverage        `json:"coverage"`
-	Host            HostTotals      `json:"host_totals"`
-	Attribution     Attribution     `json:"attribution"`
-	CgroupV2        *CgroupV2       `json:"cgroup_v2,omitempty"`
-	TopNonSUT       []Consumer      `json:"top_non_sut_consumers"`
-	Policy          Policy          `json:"policy"`
-	Findings        []Finding       `json:"findings"`
-	CommandExitCode int             `json:"command_exit_code"`
-	TimedOut        bool            `json:"timed_out"`
-	Digest          string          `json:"digest"`
+	Schema           string            `json:"schema"`
+	Verdict          string            `json:"verdict"`
+	Baseline         Window            `json:"baseline_window"`
+	BaselineHost     HostTotals        `json:"baseline_host_totals"`
+	BaselineSampler  SamplerOverhead   `json:"baseline_sampler"`
+	Window           Window            `json:"command_window"`
+	CommandSampler   SamplerOverhead   `json:"command_sampler"`
+	Coverage         Coverage          `json:"coverage"`
+	Host             HostTotals        `json:"host_totals"`
+	Attribution      Attribution       `json:"attribution"`
+	CgroupV2         *CgroupV2         `json:"cgroup_v2,omitempty"`
+	WindowsJobObject *WindowsJobObject `json:"windows_job_object,omitempty"`
+	TopNonSUT        []Consumer        `json:"top_non_sut_consumers"`
+	Policy           Policy            `json:"policy"`
+	Findings         []Finding         `json:"findings"`
+	CommandExitCode  int               `json:"command_exit_code"`
+	TimedOut         bool              `json:"timed_out"`
+	Digest           string            `json:"digest"`
 }
 
 // HostSample contains cumulative CPU nanoseconds across all logical CPUs and
@@ -180,17 +181,31 @@ func Capture() Snapshot {
 }
 
 func Build(baselineSamples, samples []Snapshot, rootPID int, interval time.Duration, policy Policy, exitCode int, timedOut bool) Report {
-	return BuildWithCgroupV2(baselineSamples, samples, rootPID, interval, policy, exitCode, timedOut, nil)
+	return BuildWithCommandAttribution(baselineSamples, samples, rootPID, interval, policy, exitCode, timedOut, nil)
 }
 
 // BuildWithCgroupV2 builds the ordinary host/process report and, when a
 // verified delegated cgroup is supplied, replaces sampled SUT CPU and memory
 // with the cgroup's cumulative whole-descendant counters.
 func BuildWithCgroupV2(baselineSamples, samples []Snapshot, rootPID int, interval time.Duration, policy Policy, exitCode int, timedOut bool, cgroup *CgroupV2) Report {
-	r := Report{Schema: Schema, Verdict: VerdictClean, Policy: normalizePolicy(policy), CommandExitCode: exitCode, TimedOut: timedOut, TopNonSUT: []Consumer{}, Findings: []Finding{}}
+	var attribution *CommandAttribution
 	if cgroup != nil {
-		copy := cgroup.clone()
+		attribution = &CommandAttribution{CgroupV2: cgroup}
+	}
+	return BuildWithCommandAttribution(baselineSamples, samples, rootPID, interval, policy, exitCode, timedOut, attribution)
+}
+
+// BuildWithCommandAttribution builds the ordinary host/process report and
+// overlays whichever exact command boundary the platform verified.
+func BuildWithCommandAttribution(baselineSamples, samples []Snapshot, rootPID int, interval time.Duration, policy Policy, exitCode int, timedOut bool, attribution *CommandAttribution) Report {
+	r := Report{Schema: Schema, Verdict: VerdictClean, Policy: normalizePolicy(policy), CommandExitCode: exitCode, TimedOut: timedOut, TopNonSUT: []Consumer{}, Findings: []Finding{}}
+	if attribution != nil && attribution.CgroupV2 != nil {
+		copy := attribution.CgroupV2.clone()
 		r.CgroupV2 = &copy
+	}
+	if attribution != nil && attribution.WindowsJobObject != nil {
+		copy := attribution.WindowsJobObject.clone()
+		r.WindowsJobObject = &copy
 	}
 	if len(baselineSamples) > 0 {
 		baselineSamples = append([]Snapshot(nil), baselineSamples...)
@@ -244,6 +259,7 @@ func BuildWithCgroupV2(baselineSamples, samples []Snapshot, rootPID int, interva
 	}
 	r.foldProcesses(samples, rootPID)
 	r.foldCgroupV2(samples)
+	r.foldWindowsJobObject(samples)
 	r.applyPolicy()
 	r.Seal()
 	return r
@@ -678,6 +694,7 @@ func (r *Report) applyPolicy() {
 		r.Verdict = VerdictInvalid
 	}
 	r.applyCgroupPolicy()
+	r.applyWindowsJobPolicy()
 }
 
 func available(v float64, unit, source string) Metric {
@@ -773,6 +790,9 @@ func (r Report) policyVerdict() string {
 			}
 		}
 	}
+	if r.WindowsJobObject != nil && r.WindowsJobObject.Cleanup.Attempted && (!r.WindowsJobObject.Cleanup.Empty || !r.WindowsJobObject.Cleanup.Closed) {
+		return VerdictInvalid
+	}
 	return VerdictClean
 }
 
@@ -807,6 +827,17 @@ func (r Report) Validate() error {
 		if r.Coverage.DescendantAttribution == "exact_cgroup_v2" && r.CgroupV2.State != CgroupStateMeasured {
 			return errors.New("systembaseline: exact_cgroup_v2 coverage requires measured cgroup evidence")
 		}
+	}
+	if r.WindowsJobObject != nil {
+		if err := r.WindowsJobObject.validate(); err != nil {
+			return err
+		}
+		if r.Coverage.DescendantAttribution == "job_object" && r.WindowsJobObject.State != WindowsJobStateMeasured {
+			return errors.New("systembaseline: job_object coverage requires measured Windows Job Object evidence")
+		}
+	}
+	if r.Coverage.DescendantAttribution == "job_object" && r.WindowsJobObject == nil {
+		return errors.New("systembaseline: job_object coverage requires a Windows Job Object receipt")
 	}
 	if want := r.policyVerdict(); r.Verdict != want {
 		return fmt.Errorf("systembaseline: verdict %q contradicts policy evidence; want %q; rebuild the report or use the policy-derived verdict", r.Verdict, want)

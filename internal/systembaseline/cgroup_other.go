@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !windows
 
 package systembaseline
 
@@ -14,6 +14,6 @@ func newCommandAttributorPlatform() commandAttributorPlatform {
 
 func (u *unavailableCommandAttributor) configure(*exec.Cmd) bool { return false }
 func (u *unavailableCommandAttributor) active() bool             { return false }
-func (u *unavailableCommandAttributor) started(int)              {}
+func (u *unavailableCommandAttributor) started(int) error        { return nil }
 func (u *unavailableCommandAttributor) launchFailed(error)       {}
 func (u *unavailableCommandAttributor) finish() CgroupV2         { return u.result.clone() }

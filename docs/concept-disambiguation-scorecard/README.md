@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **111** (clarity 0 + coverage 111) |
-| **Crystal-clear concepts (and climbing)** | **797** crystal of 2509 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2635 / 2746** (96.0% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 202 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **74** of 3474 indexed names |
+| **Disambiguation-debt (drive to 0)** | **137** (clarity 0 + coverage 137) |
+| **Crystal-clear concepts (and climbing)** | **798** crystal of 2510 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2636 / 2773** (95.1% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 203 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **74** of 3476 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 97.4/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 96.8/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2509 concepts - score 97.4/100 (grade A) - disambiguation-debt 111
+concept-disambiguation chart - 2510 concepts - score 96.8/100 (grade A) - disambiguation-debt 137
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #############............... 797
+  * crystal       #############............... 798
   o defined       ############################ 1712
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -50,7 +50,7 @@ clarity mix by family (each cell = one concept):
   guard-gate       *********************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (430 concept(s); 189 crystal)
   layout           *****ooooooooo     (14 concept(s); 5 crystal)
   loop             ****************************************oooooooooooooooooooooooooooooooooooooo (78 concept(s); 40 crystal)
-  plan             *****************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (305 concept(s); 65 crystal)
+  plan             ******************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (306 concept(s); 66 crystal)
   policy-capability *************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (166 concept(s); 61 crystal)
   pool             ******oooooooooooooooooooooooooooooo (36 concept(s); 6 crystal)
   render-materialize ****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (181 concept(s); 28 crystal)
@@ -62,37 +62,37 @@ clarity mix by family (each cell = one concept):
   witness-proof    *********************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (149 concept(s); 69 crystal)
 
 coverage by family (positioned / discovered):
-  plan             ##########################.. 364/393
-  policy-capability ##########################.. 186/201
+  plan             #########################... 365/403
+  policy-capability #########################... 186/206
+  cache            ###########################. 284/297
   session-runtime  ###########################. 255/268
-  cache            ###########################. 284/295
-  context-ctx      ###########################. 228/235
+  context-ctx      ###########################. 228/236
+  guard-gate       ############################ 489/496
   render-materialize ###########################. 198/205
   witness-proof    ###########################. 156/162
+  loop             ##########################.. 88/93
   support-maturity ##########################.. 56/61
   attention        ###########################. 81/85
-  guard-gate       ############################ 489/493
-  gateway-engine   ############################ 184/187
-  loop             ###########################. 88/91
-  score-debt       ###########################. 87/90
+  gateway-engine   ###########################. 184/188
+  score-debt       ###########################. 87/91
+  decision         ###########################. 58/60
   layout           #########################... 15/17
   pool             ###########################. 38/40
   cross-cluster    ............................ 0/0
-  decision         ############################ 58/58
   dev-tier         ............................ 0/0
   evict            ############################ 54/54
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [###############################.] 96.0%  (2635/2746 confusable tokens positioned)
+namespace coverage  [##############################..] 95.1%  (2636/2773 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 202
+  mutual       ############################ 203
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 202/202
+  pairs separated   [################################] 203/203
 
-name index: 3474 lookup name(s) -> 2509 concept(s), 74 ambiguous
+name index: 3476 lookup name(s) -> 2510 concept(s), 74 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 202 |
-| **Separated from each other (drive to all)** | **202 / 202** (202 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 203 |
+| **Separated from each other (drive to all)** | **203 / 203** (203 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1708 / 4538 |
+| Boundaries drawn (mutual / total) | 1710 / 4541 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3474 over 2509 concepts |
+| Lookup names indexed | 3476 over 2510 concepts |
 | Lookup names landing on several concepts | 74 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2509 |
+| Concepts carrying a contrast set | 2510 |
 
 ## The concepts (best verdict first)
 
@@ -654,6 +654,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | plan | **plan implementation surface for runplanaudit** - `RunPlanAudit` is the plan symbol declared or used at `cmd/fak-dev/main.go:48` as `return devcmd.RunPlanAudit(stdout, stderr, argv[1:])`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | plan | **plan implementation surface for runwipland** - `runWipLand` is the plan symbol declared or used at `cmd/fak/wip.go:61` as `return runWipLand(stdout, stderr, argv[1:])`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | plan | **plan implementation surface for unplanned** - `unplanned` is the plan symbol declared or used at `internal/plancfi/plancfi.go:9` as `// produces a call OUTSIDE the approved plan — an unplanned gadget — and plancfi`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | doc-term | plan | **NonCandidate** - The study-classification disposition for a source record that is release metadata or otherwise outside the actionable mechanism queue. |
 | * | crystal | symbol | plan | **Plan (planner)** - Planner's chosen resident view: selected set, elided set, and accounting |
 | * | crystal | symbol | plan | **Plan (memq)** - Static pre-execution Explain output: pipeline steps, effects, and mutations |
 | * | crystal | symbol | plan | **Candidate** - Scored span the planner may keep resident with cost, benefit, and density metrics |
@@ -1089,7 +1090,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | o | defined | symbol | cache | **no_cache / explicit_cache (vCache provider policy actions)** - DecisionNoCache and DecisionExplicitCache are vcachegov provider-cache policy decisions: no_cache refuses warming secret prefixes, while explicit_cache requires a regulated explicit-cache path instead of ambient warming. |
 | o | defined | symbol | cache | **provider-cache transport capability fields** - ExplicitCacheTransport and HeartbeatTransport are ProviderTransportWitness booleans proving that the host has a provider-cache transport surface for regulated explicit-cache entries or harmless heartbeat refreshes before a vCache action row can move from gated to ready. |
 | o | defined | symbol | cache | **CacheCapability (wire-neutral engine cache contract)** - engine.CacheCapability is the wire-neutral value contract for what an upstream inference engine can expose about its cache: an opaque Engine label plus a Verdict (closed CacheVerdict class), a Provenance plane, an Evidence anchor, and a ColdPathCorrect bit. The gateway consumes it through the CacheCapabilityProducer seam so core never imports an engine-specific adapter package (cache-frontier item 32, epic #1490); gateway.ReportEngineCacheCapability is the reporter that fail-closes an unset verdict to CacheUnknown rather than reading a fabricated positive. |
-| o | defined | symbol | cache | **engine.CacheVerdict (engine cache-capability vocabulary)** - engine.CacheVerdict is the CLOSED vocabulary of wire-neutral engine cache-capability labels — unknown, passive-observe, active-warm, exact-evict, prefix-clone, paged-kv — the only classes a CacheCapability report may use. CacheUnknown is the zero value ('capability not established'), never inferred as a positive; CachePassiveObserve marks an engine that exposes cache symptoms (usage counters) but no control surface to act on. A new engine cannot smuggle in a purpose-built class. |
+| o | defined | symbol | cache | **engine.CacheVerdict (engine cache-capability vocabulary)** - engine.CacheVerdict is the CLOSED vocabulary of wire-neutral engine cache-capability labels — unknown, passive-observe, active-warm, exact-evict, prefix-clone, paged-kv — the only classes a CacheCapability report may use. CacheUnknown is the zero value ('capability not established'), never inferred as a positive; CachePassiveObserve marks an engine that exposes cache symptoms (usage counters) but no control surface to act on. A new engine cannot smuggle in a bespoke class. |
 | o | defined | symbol | cache | **ablate.CacheEffect (per-feature ablation attribution card)** - ablate.CacheEffect is the per-feature attribution card the ablation report carries: for one cache feature it records the Owner (fak vs external) and the Plane (kernel_tool_cache | local_kv | provider_prompt_cache | context_compression | context_view) so a reader can tell 'fak's own KV/tool-cache effect' apart from 'a provider/external component was merely observed'. The report's CacheEffects slice holds one card per witnessed feature. |
 | o | defined | concept | cache | **cache attribution (owner/plane per-mechanism line)** - Cache attribution is the owner/plane labeling that tags every reuse saving with WHO authored it (Owner: fak vs provider/external) and WHICH plane produced it (kernel_tool_cache, local_kv, provider_prompt_cache, provider_prompt_cache_control, context_compression, context_view). It surfaces as the guard-info cache-attribution line (guardInfoCacheAttributionText) and the cachevalue-status plane rows, so a provider's observed cache_read is never read as fak's own witnessed reuse (epic #1490 honest per-mechanism attribution). |
 | o | defined | subsystem | cache | **uncached_trim (compaction shed of uncached spans)** - uncached_trim (ablate.FeatureUncachedTrim, env FAK_ABLATE_UNCACHED_TRIM) is the compaction mechanism that sheds history spans NOT protected by a provider cache_control breakpoint — it trims only uncached tokens so the cached prefix the provider is keyed on survives intact. The ablation harness toggles it to measure its isolated savings (the UncachedTrimResults / UncachedTrimShed accounting). |
@@ -2781,43 +2782,42 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2830/4538 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2509 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2831/4541 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2510 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 202 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 203 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3474 lookup name(s) resolves - 74 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3476 lookup name(s) resolves - 74 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| plan | 364 | 393 | 29 |
-| policy-capability | 186 | 201 | 15 |
+| plan | 365 | 403 | 38 |
+| policy-capability | 186 | 206 | 20 |
+| cache | 284 | 297 | 13 |
 | session-runtime | 255 | 268 | 13 |
-| cache | 284 | 295 | 11 |
-| context-ctx | 228 | 235 | 7 |
+| context-ctx | 228 | 236 | 8 |
+| guard-gate | 489 | 496 | 7 |
 | render-materialize | 198 | 205 | 7 |
 | witness-proof | 156 | 162 | 6 |
+| loop | 88 | 93 | 5 |
 | support-maturity | 56 | 61 | 5 |
 | attention | 81 | 85 | 4 |
-| guard-gate | 489 | 493 | 4 |
-| gateway-engine | 184 | 187 | 3 |
-| loop | 88 | 91 | 3 |
-| score-debt | 87 | 90 | 3 |
+| gateway-engine | 184 | 188 | 4 |
+| score-debt | 87 | 91 | 4 |
+| decision | 58 | 60 | 2 |
 | layout | 15 | 17 | 2 |
 | pool | 38 | 40 | 2 |
 | cross-cluster | 0 | 0 | 0 |
-| decision | 58 | 58 | 0 |
 | dev-tier | 0 | 0 | 0 |
 | evict | 54 | 54 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-
 

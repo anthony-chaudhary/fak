@@ -159,9 +159,9 @@ func (l *linuxCommandAttributor) configure(cmd *exec.Cmd) bool {
 	return true
 }
 
-func (l *linuxCommandAttributor) started(pid int) {
+func (l *linuxCommandAttributor) started(pid int) error {
 	if !l.active() || !l.configured {
-		return
+		return nil
 	}
 	l.result.Membership.AtomicPlacement = true
 	l.result.Membership.RootPID = pid
@@ -171,6 +171,7 @@ func (l *linuxCommandAttributor) started(pid int) {
 		l.result.Membership.AfterStart = unavailable("processes", err.Error())
 	}
 	_ = l.closeDir()
+	return nil
 }
 
 func (l *linuxCommandAttributor) launchFailed(startErr error) {
