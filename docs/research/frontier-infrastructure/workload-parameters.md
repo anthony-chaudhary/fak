@@ -142,6 +142,42 @@ input-length mixture. Its 24-hour and 12-hour values are aggregate seasonality p
 family parameters. No source in this audit reports a defensible universal Zipf exponent,
 Pareto tail index, lognormal parameters, Poisson rate, Hawkes kernel, or MMPP transition matrix.
 
+## OpScale autoscaling parameters (#9387)
+
+This table binds each number to its experiment mode. OpScale is a prototype on a
+common nano-vLLM backend; the production-derived traces are replay inputs, not a
+measured production deployment.
+
+| Mode | Workload/model | Hardware/topology | Control/SLO | Exact result or overhead |
+|---|---|---|---|---|
+| Dynamic trace replay, dense | Qwen2-7B; total replay population 929K requests and 1.5B prompt tokens for the model; one-hour window displayed | 40 A100-80GB GPUs across five Azure VMs; 8 GPUs/VM; NVLink intra-VM, InfiniBand inter-VM | OpScale 1 s; model-level baselines 20 s; P99 TTFT <1.0 s | Average GPUs: OpScale 7.1, DynamoLLM 11.2, AIBrix 14.3, Production Stack 13.0. SLO attainment: 98.4% versus 88-95%. |
+| Dynamic trace replay, MoE | Qwen2-57B-A14B; total replay population 929K requests and 1.5B prompt tokens for the model; one-hour window displayed | Same 40-A100 cluster | OpScale 1 s; baselines 20 s; P99 TTFT <2.0 s | Average GPUs: 10.8, 17.3, 23.1, 18.0 in the same system order. SLO attainment: 98.1% versus 84.2-97%. Approximate high-load peak: OpScale ~25 GPUs; AIBrix/DynamoLLM frequently ~30-35. |
+| Qwen2-7B on-demand scale-up | One operator, 50% of operators, all operators, or one full model replica | A100 prototype cluster; no pre-reserved full-model warm standby | Scale event latency | Average/P90/P99 seconds: model 10.68/11.04/11.55; one op 0.03/0.05/0.10; 50% ops 0.18/0.26/0.42; all ops 0.33/0.38/0.45. |
+| Minimum-capacity SLO sweep | Qwen2-7B at 80/120/160/200/240 QPS; Qwen2-57B-A14B at 25/50/75/100/125 QPS; 1K/4K/8K sequence lengths | A100 cluster; total GPUs and cluster power counted | Capacity raised until violation threshold is met; example dense gate P99 TTFT <1 s | Versus model-level provisioning: average GPU reduction at 1K is 20.1% dense and 35.7% MoE; reported longer-length reductions are 36.3% at 4K and 22.1% at 8K; high-load cluster power is 14-28% lower. Example per-GPU average is 282 W versus 245 W. |
+| Fixed-budget input-throughput sweep | Arrival load increased until the SLO limit; dense and MoE across cluster size and length points | Static clusters up to 40 GPUs | Maximum sustainable **input tokens/s** at SLO limit | Versus the model-level static deployment on the same GPU budget: dense input TPS +3-38%; MoE up to +44% at 40 GPUs. This is not an explicit goodput metric. |
+| Granularity/topology sensitivity | Monolith, Attn-FFN, and full operator-level placement | A100 cluster and separate 24-GB200 same-domain NVLink/NVL cluster | Static comparison; the figure does not disclose model, sequence length, trace/arrival law, or SLO | On A100, OpScale reports up to 33% lower GPU demand and 1.7x maximum **request throughput (RPS)** versus Attn-FFN. At the readable 40-QPS point, moving from A100 to GB200 reduces GPU count by 52% for OpScale and 38% for the monolith. |
+| Offline analytical oracle | Qwen2-7B and Qwen2-57B-A14B; 10-100 QPS; 128-65,536-token sequences; trace-derived length input | Profile-driven device model | Per-operator M/M/R, Poisson arrivals, exponential service, Erlang-C wait; exhaustive SLO-compliant search | Online greedy plan is within 8% resource cost of the brute-force oracle. This law belongs to the analytical model, not the trace arrival process. |
+| Control/profile/model overhead | Qwen2-7B and Qwen2-57B-A14B | CPU planner; one GB200 node for 57B profiling | 1 s control interval | Qwen2-7B plan 2.6 ms median/3.2 ms P99 (2.5 ms provisioning, 0.1 ms placement); MoE plan 4.4 ms; dispatch/execution overhead 0.3%, about 1.5 ms of a 500 ms prefill; 57B offline profile under one hour. |
+| Model accuracy and movement | Held-out/runtime validation across evaluated scenarios and bursty replays | Operator colocation and inter-GPU transfer | Relative error / movement cost | Operator sensitivity 7% average/15% P90; SM contention 5%/9.4%; queue latency 0.8%/1.9%. Transfer is below 5% of compute for most operators and ~20% for SiLU Mul. Resharding is 11x replica-scaling overhead, P99 1.15 s. |
+
+The trace replay retains production-derived temporal arrivals and request lengths;
+it is not generated from the analytical Poisson law. The paper names baseline
+signals—AIBrix GPU utilization and Production Stack pending prompt tokens—but
+publishes no observed values for either signal. It reports the direction of
+autoscaling reactions (scale bottleneck operators, reclaim non-critical ones, and
+activate a new GPU only when existing placements are not SLO-feasible), not a
+machine-readable scaling-action series.
+
+Required unknowns for any reproduction are: achieved active batch and batch-size
+distribution; queue depth, pending-token count, and queue wait; exact achieved
+GPU/SM utilization; logical operator-replica totals, placement map, and migration
+count; configured per-model tensor/pipeline-parallel degrees; numeric TBT target;
+output tokens; failures, retries, cancellations, and recovery; accepted-output
+goodput; and currency or GPU-hour cost. The paper's `B=1-256`,
+`L=1-65,536`, and `SM=1-100%` ranges describe a typical profiling space, not
+the configured or achieved runtime state. arXiv v1 exposes no linked OpScale
+code, trace, configuration, or result-data repository.
+
 ## Distribution-selection rules
 
 1. **Poisson:** use only as a stationary control or after demonstrating inter-arrival fit for

@@ -1,5 +1,45 @@
 # Frontier infrastructure and workload expectations index
 
+## Latest slice: operator-level autoscaling envelope (#9387)
+
+The existing OpScale row now separates four evidence modes from arXiv v1: an
+offline analytical opportunity model, production-trace replay on a research
+prototype, SLO-constrained static/provisioning sweeps, and profiling/model-
+accuracy microbenchmarks. The prototype uses a common nano-vLLM data plane for
+OpScale and the ported baselines, evaluates Qwen2-7B and Qwen2-57B-A14B, and
+reports 929K replayed requests plus 1.5B prompt tokens per model. Most prototype
+experiments use five Azure VMs with 40 A100-80GB GPUs total, NVLink within each
+eight-GPU VM, and InfiniBand across VMs; a separate sensitivity study uses 24
+GB200 GPUs in one NVLink/NVL domain.
+
+In the displayed one-hour dynamic windows, OpScale runs a one-second control
+interval while the model-level baselines scale every 20 seconds. It reports
+average allocations/SLO attainment of **7.1 GPUs / 98.4%** for Qwen2-7B under a
+one-second P99 TTFT target, versus 11.2/14.3/13.0 GPUs for
+DynamoLLM/AIBrix/Production Stack, and **10.8 GPUs / 98.1%** for
+Qwen2-57B-A14B under a two-second P99 TTFT target, versus 17.3/23.1/18.0
+GPUs. On-demand Qwen2-7B scale-up is 10.68 seconds average at model level,
+versus 0.03/0.18/0.33 seconds for one operator, 50% of operators, or all
+operators; the corresponding P99s are 11.55 seconds versus 0.10/0.42/0.45
+seconds.
+
+The larger maxima remain experiment-bound and use the model-level configuration
+as their comparison denominator: 20.1% and 35.7% average GPU reductions at 1K
+sequence length for the dense and MoE models, 36.3% at 4K and 22.1% at 8K in
+the disclosed SLO-constrained sweeps, 14-28% cluster-power reduction at high
+load, 3-38% higher dense-model input TPS on the same GPU budget, and up to 44%
+higher MoE input TPS at 40 GPUs. No achieved active-batch value, numeric queue
+depth or wait, exact cluster GPU-utilization value, realized operator-replica
+count/placement series, configured per-model tensor/pipeline parallelism,
+numeric TBT target, failures/retries, explicit goodput metric, or
+currency/GPU-hour cost is disclosed. The separate granularity/topology figure
+reports request throughput in RPS, but does not state its model, sequence
+length, arrival/trace input, or SLO. arXiv v1 and its TeX source link no OpScale
+code, trace, configuration, or result-data repository; linked nano-vLLM and
+other repositories are dependencies or baselines, not an OpScale artifact.
+Counts remain **272 entries**, **265 unique source URLs**, and **224 entity
+labels**.
+
 ## Latest slice: Google AI Hypercomputer control plane and TPU topology (#9384)
 
 Five official Google Cloud records now separate supported topology, configured maxima,

@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
   "updated_at": "2026-08-27",
-  "issue": 9384,
+  "issue": 9387,
   "root_issue": 9269,
-  "latest_slice_issue": 9384,
+  "latest_slice_issue": 9387,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -5451,28 +5451,219 @@
         "autoscaling",
         "scaling_unit",
         "prefill_decode",
-        "goodput",
+        "operator_placement",
+        "trace_replay",
+        "queue_model",
+        "gpu_power",
         "slo"
       ],
       "published_at": "2026-08-13",
       "event_at": "2026-08-13",
-      "source_title": "Operator-level Provisioning and Autoscaling for LLM Serving",
+      "source_title": "OpScale: Operator-level Provisioning and Autoscaling for LLM Serving",
       "source_url": "https://arxiv.org/html/2608.13499v1",
       "source_kind": "preprint",
       "evidence_class": "benchmark_measurement",
       "confidence": "medium_high",
-      "claim": "This study asks whether the scaling unit should be a monolithic model replica or finer-grained inference operators, arguing that phase/operator demand and SLOs can diverge enough to make monolithic scaling inefficient.",
-      "quantified": {},
+      "claim": "OpScale is a roughly 17K-line nano-vLLM prototype that scales and places individual operator replicas. In production-trace replay on a 40-A100 cluster, it reports average allocations of 7.1 GPUs for Qwen2-7B and 10.8 GPUs for Qwen2-57B-A14B with 98.4% and 98.1% SLO attainment, respectively; separate comparisons against model-level provisioning report up to 36.3% fewer GPUs, 28% lower cluster power, or 44% higher input-token throughput within the paper's disclosed model, hardware, trace, sequence-length, and TTFT envelopes.",
+      "quantified": {
+        "prototype_implementation_python_lines_approx": 17000,
+        "common_inference_backend": "nano-vLLM with the same model implementation, kernels, continuous-batching scheduler, KV-cache manager, and tensor-parallel backend for OpScale and ported baselines",
+        "prototype_evaluation_models": [
+          "Qwen2-7B dense",
+          "Qwen2-57B-A14B MoE"
+        ],
+        "characterization_model_families": [
+          "Qwen2-7B",
+          "Qwen2-57B-A14B",
+          "Llama3-8B",
+          "Mixtral-8x7B",
+          "Qwen2.5-VL-32B"
+        ],
+        "a100_cluster_gpus": 40,
+        "a100_cluster_azure_vms": 5,
+        "a100_gpus_per_vm": 8,
+        "a100_memory_gb_per_gpu": 80,
+        "a100_topology": "NVLink within each 8-GPU VM; high-speed InfiniBand across VMs",
+        "gb200_sensitivity_cluster_gpus": 24,
+        "gb200_topology": "same NVLink/NVL domain",
+        "trace_replay_requests_per_model": 929000,
+        "trace_replay_prompt_tokens_per_model": 1500000000,
+        "displayed_dynamic_trace_window_seconds": 3600,
+        "trace_replay_arrivals_and_lengths": "temporal request-arrival patterns and sequence lengths from the production LLM serving traces used by DynamoLLM; not generated from the analytical Poisson law",
+        "opscale_control_interval_seconds": 1,
+        "model_level_baseline_control_interval_seconds": 20,
+        "dense_dynamic_p99_ttft_slo_seconds": 1.0,
+        "moe_dynamic_p99_ttft_slo_seconds": 2.0,
+        "dense_dynamic_average_gpu_count": 7.1,
+        "dense_dynamic_baseline_average_gpu_counts": {
+          "DynamoLLM": 11.2,
+          "AIBrix_utilization_mode": 14.3,
+          "Production_Stack_pending_prompt_tokens": 13.0
+        },
+        "dense_dynamic_slo_attainment_pct": 98.4,
+        "dense_dynamic_baseline_slo_attainment_pct_range": [
+          88,
+          95
+        ],
+        "moe_dynamic_average_gpu_count": 10.8,
+        "moe_dynamic_baseline_average_gpu_counts": {
+          "DynamoLLM": 17.3,
+          "AIBrix_utilization_mode": 23.1,
+          "Production_Stack_pending_prompt_tokens": 18.0
+        },
+        "moe_dynamic_slo_attainment_pct": 98.1,
+        "moe_dynamic_baseline_slo_attainment_pct_range": [
+          84.2,
+          97
+        ],
+        "moe_dynamic_peak_gpu_count_approx": 25,
+        "moe_dynamic_baseline_peak_gpu_count_frequent_range_approx": [
+          30,
+          35
+        ],
+        "dense_power_reduction_vs_best_power_aware_baseline_pct": {
+          "P50": 20,
+          "P90": 16
+        },
+        "qwen2_7b_scale_up_latency_seconds": {
+          "model_level": {
+            "P99": 11.55,
+            "P90": 11.04,
+            "average": 10.68
+          },
+          "opscale_one_operator": {
+            "P99": 0.1,
+            "P90": 0.05,
+            "average": 0.03
+          },
+          "opscale_50_pct_operators": {
+            "P99": 0.42,
+            "P90": 0.26,
+            "average": 0.18
+          },
+          "opscale_all_operators": {
+            "P99": 0.45,
+            "P90": 0.38,
+            "average": 0.33
+          }
+        },
+        "cost_sweep_dense_qps": [
+          80,
+          120,
+          160,
+          200,
+          240
+        ],
+        "cost_sweep_moe_qps": [
+          25,
+          50,
+          75,
+          100,
+          125
+        ],
+        "cost_sweep_sequence_lengths_tokens": [
+          1000,
+          4000,
+          8000
+        ],
+        "example_average_per_gpu_power_watts": {
+          "OpScale": 282,
+          "model_level": 245
+        },
+        "analytical_oracle_models": [
+          "Qwen2-7B",
+          "Qwen2-57B-A14B"
+        ],
+        "analytical_oracle_qps_range": [
+          10,
+          100
+        ],
+        "analytical_oracle_sequence_length_tokens_range": [
+          128,
+          65536
+        ],
+        "analytical_queue_assumption": "per-operator M/M/R queue with Poisson arrivals and exponential service times; Erlang-C waiting time",
+        "online_greedy_resource_cost_within_pct_of_bruteforce_oracle": 8,
+        "qwen2_7b_plan_time_ms": {
+          "median": 2.6,
+          "P99": 3.2,
+          "provisioning": 2.5,
+          "placement": 0.1
+        },
+        "qwen2_57b_a14b_plan_time_ms": 4.4,
+        "execution_plane_overhead_pct": 0.3,
+        "execution_plane_overhead_ms_per_500ms_prefill_approx": 1.5,
+        "offline_57b_profile_time": "under one hour on one GB200 node",
+        "model_prediction_relative_error_pct": {
+          "operator_sensitivity_average": 7,
+          "operator_sensitivity_P90": 15,
+          "sm_contention_average": 5,
+          "sm_contention_P90": 9.4,
+          "queue_latency_average": 0.8,
+          "queue_latency_P90": 1.9
+        },
+        "operator_transfer_overhead_vs_compute_pct": "below 5% for most operators and approximately 20% for SiLU Mul in the characterization",
+        "op_level_resharding_overhead": "11x replica-scaling overhead; P99 1.15 seconds",
+        "typical_profile_grid_not_achieved_runtime": {
+          "batch_size_range": [
+            1,
+            256
+          ],
+          "sequence_length_tokens_range": [
+            1,
+            65536
+          ],
+          "sm_allocation_pct_range": [
+            1,
+            100
+          ]
+        },
+        "configured_model_parallelism": "not disclosed per model; provisioning inherits tensor parallelism for intra-server and pipeline parallelism for cross-server deployment",
+        "slo_constrained_gpu_reduction_pct_average_at_1k_vs_model_level": {
+          "Qwen2_7B": 20.1,
+          "Qwen2_57B_A14B": 35.7
+        },
+        "slo_constrained_gpu_reduction_pct_at_4k_vs_model_level": 36.3,
+        "slo_constrained_gpu_reduction_pct_at_8k_vs_model_level": 22.1,
+        "high_load_cluster_power_reduction_pct_range_vs_model_level": [
+          14,
+          28
+        ],
+        "fixed_budget_dense_input_tps_improvement_pct_range_vs_model_level": [
+          3,
+          38
+        ],
+        "fixed_budget_moe_input_tps_improvement_pct_up_to_at_40_gpus_vs_model_level": 44,
+        "gb200_vs_a100_gpu_count_reduction_pct_at_40_qps": {
+          "OpScale": 52,
+          "monolith": 38
+        },
+        "a100_gpu_demand_reduction_vs_attn_ffn_pct_up_to": 33,
+        "a100_max_request_throughput_gain_vs_attn_ffn_x": 1.7
+      },
       "assumptions": [
-        "The correct autoscaling unit depends on model partition, phase demand, traffic composition, SLO, and provisioning overhead."
+        "The paper's prototype results assume one model owns a dedicated GPU set; multi-model, multi-tenant fairness and cross-model interference are future work.",
+        "The dynamic prototype replays production-derived arrivals and sequence lengths, while the separate offline opportunity analysis uses a per-operator M/M/R approximation with Poisson arrivals and exponential service times.",
+        "Operator replicas are split into monolithic base instances plus elastic components, placed by interference-aware best fit with intra-device, then intra-server NVLink/NVL, then cross-server InfiniBand locality; weighted shortest-queue dispatch selects among replicas.",
+        "Warm standby capacity is counted as provisioned even while idle; headline savings therefore compare on-demand scale-out without a pre-reserved full-model replica."
       ],
       "contradictions_or_limits": [
-        "Preprint evaluation is not neutral multi-provider production evidence.",
-        "Finer scaling adds orchestration, transfer, fragmentation, and model-state management overhead."
+        "This is a research prototype and trace replay, not a measured production deployment or evidence that operator-level autoscaling is prevalent at providers.",
+        "The arXiv v1 landing page and TeX source link no OpScale code, configuration, trace, or result-data repository; nano-vLLM, kvcached, Dynamo, and Production Stack are referenced dependencies or baselines, not an OpScale artifact.",
+        "No achieved active-batch or batch-size distribution is disclosed. The B=1-256 range is a typical offline profiling space, not the configured maximum or achieved active batch in the reported runs.",
+        "No numeric queue depth, pending-prompt-token count, queue-wait distribution, or per-operator waiting-time distribution is reported; queue buildup is described qualitatively and the queue-driven baseline signal is named without its observed values.",
+        "No exact achieved cluster GPU-utilization percentage or distribution is reported. The paper says per-GPU utilization is higher and uses GPU utilization as an AIBrix signal, but does not publish a readable fleet utilization value for the autoscaling runs.",
+        "No realized per-operator replica-count series, total operator-replica count, replica placement map, per-model tensor/pipeline-parallel degrees, SM-allocation distribution, or migration count is disclosed; average and approximate peak GPU counts are not substitutes.",
+        "No explicit goodput metric is reported. Static results are maximum sustainable input tokens per second at an SLO limit, and dynamic results report SLO attainment separately.",
+        "Numeric TBT SLOs, output-token totals or distributions, request-rate time series values, failures, retries, cancellations, cold-start failures, recovery time, and workload cost in currency or GPU-hours are not disclosed.",
+        "The granularity/topology comparison against Attn-FFN reports up to 33% lower GPU demand and 1.7x maximum request throughput on A100; separately, at the readable 40-QPS point, A100-to-GB200 GPU-count reductions are 52% for OpScale and 38% for the monolith. The figure does not disclose its model, sequence length, trace or arrival law, or SLO.",
+        "The 36.3% GPU, 28% power, and 44% input-TPS maxima come from different sequence-length, load, baseline, hardware, or fixed-budget experiments and must not be combined as one universal gain."
       ],
       "fak_implications": [
-        "Benchmark monolithic, phase-level, and operator-level scaling under the same trace and SLO.",
-        "Admit finer-grained scaling only after control/transfer overhead and recovery are net-positive."
+        "Benchmark monolithic, phase-level, and operator-level scaling on the same replay with model, hardware, topology, control interval, QPS/length envelope, TTFT/TBT target, and warm-capacity accounting fixed.",
+        "Record achieved active batch, queue depth and wait, per-operator replica counts and placement, GPU/SM utilization, scaling actions, migrations, failures/retries, and SLO-satisfied accepted output in addition to average GPU count and input TPS.",
+        "Charge operator scale-out, placement, dispatch, cross-device transfer, profile/model error, and resharding overhead; prefer horizontal operator replication over resharding unless the measured envelope reverses the paper's 11x overhead result.",
+        "Treat the paper as a WATCH/benchmark envelope for finer-grained autoscaling, not as evidence of provider production prevalence or a default fak-native serving architecture."
       ],
       "rumor": {
         "is_rumor": false

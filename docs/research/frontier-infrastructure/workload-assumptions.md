@@ -234,6 +234,63 @@ Public sources still do not adequately reveal:
 Until these are measured, benchmark sweeps must expose the assumption ranges rather than
 present one guessed distribution as “the frontier workload.”
 
+## Operator-level autoscaling envelope (#9387)
+
+OpScale supports a bounded operator-level benchmark fixture, not a production-default
+assumption. Keep these evidence modes separate:
+
+| Evidence mode | Exact disclosed envelope | Safe benchmark use |
+|---|---|---|
+| Offline analytical opportunity model | Qwen2-7B and Qwen2-57B-A14B; 10-100 QPS; 128-64K sequence lengths; production-trace-derived length input; each operator approximated as M/M/R with Poisson arrivals, exponential service, and Erlang-C waiting time; exhaustive SLO-compliant search | Sensitivity/oracle only. Do not label the Poisson queue law as the production replay's arrival distribution. |
+| Dynamic prototype trace replay | 929K requests and 1.5B prompt tokens per model; Qwen2-7B and Qwen2-57B-A14B; a displayed one-hour window; 40 A100-80GB GPUs in five Azure VMs; NVLink within each eight-GPU VM and InfiniBand between VMs | Replay evidence, not a production deployment. Preserve the source trace, model, prompt-token denominator, hardware topology, and one-hour displayed-window boundary. |
+| Static/minimum-capacity prototype sweeps | Dense QPS points 80/120/160/200/240; MoE 25/50/75/100/125; 1K/4K/8K sequence lengths; fixed clusters up to 40 GPUs; capacity increased until the latency-SLO violation threshold is met | Compare total GPUs and total power against model-level provisioning, or maximum sustainable **input** TPS against the model-level static deployment on the same GPU budget, only under the matching model, length, hardware, and TTFT threshold. |
+| Hardware/granularity sensitivity | A100 and 24-GB200 same-domain NVLink/NVL clusters; monolithic, Attn-FFN, and operator-level placement | A100 reports up to 33% lower GPU demand and 1.7x maximum **request throughput (RPS)** versus Attn-FFN. At the readable 40-QPS point, A100-to-GB200 GPU-count reduction is 52% for OpScale and 38% for the monolith. The figure omits model, length, trace/arrival law, and SLO, so treat it as incompletely specified topology sensitivity. |
+| Profiling/control microbenchmarks | Typical profile space B=1-256, L=1-65,536, SM=1-100%; 57B profile under one hour on one GB200 node; Qwen2-7B plan 2.6 ms median/3.2 ms P99; Qwen2-57B-A14B plan 4.4 ms | The batch range is an offline profiling grid, not configured or achieved active batch. Charge profiling, plan error, placement, dispatch, transfer, and actuation separately. |
+
+The dynamic controller uses a one-second interval; model-level baselines use 20 seconds.
+For Qwen2-7B, the paper reports a one-second P99 TTFT SLO, 7.1 average GPUs, and
+98.4% SLO attainment, versus 11.2/14.3/13.0 GPUs for
+DynamoLLM/AIBrix/Production Stack and 88-95% baseline attainment. For
+Qwen2-57B-A14B, the corresponding two-second P99 TTFT envelope reports 10.8
+average GPUs and 98.1% attainment, versus 17.3/23.1/18.0 GPUs and 84.2-97%.
+The MoE figure/prose gives an approximate OpScale high-load peak near 25 GPUs
+and says AIBrix/DynamoLLM frequently exceed roughly 30-35; retain the
+approximation label.
+
+Qwen2-7B on-demand scale-up latency is:
+
+| Scaling action | Average | P90 | P99 |
+|---|---:|---:|---:|
+| Full model replica | 10.68 s | 11.04 s | 11.55 s |
+| One operator | 0.03 s | 0.05 s | 0.10 s |
+| 50% of operators | 0.18 s | 0.26 s | 0.42 s |
+| All operators | 0.33 s | 0.38 s | 0.45 s |
+
+Warm standby is counted as provisioned capacity even while idle, so these scale-up
+comparisons are on-demand rather than pre-warmed. Horizontal operator replication is
+the favored actuation in this prototype: dynamic operator resharding reports **11x**
+higher overhead than replica scaling and **1.15 s P99**.
+
+Use the following mechanism assumptions only as explicit experimental choices:
+
+- retain a monolithic base-instance floor, then add elastic operator replicas;
+- choose `(batch, replicas, tensor-parallel shards)` from traffic and the SLO model;
+- place elastic replicas by interference-aware best fit, opening a new GPU only when
+  no existing SLO-feasible placement exists;
+- break placement ties by same device, then intra-server NVLink/NVL, then
+  cross-server InfiniBand locality; and
+- dispatch through capacity-weighted shortest operator queues.
+
+The paper does **not** disclose achieved active batch, queue depth, pending prompt
+tokens, numeric queue wait, achieved GPU-utilization percentage, realized
+operator-replica totals or placement series, SM-allocation distribution, migration
+count, configured per-model tensor/pipeline-parallel degrees, numeric TBT target,
+failure/retry/cancellation behavior, output-token total, explicit goodput, or
+currency/GPU-hour cost. Store each as `unknown`; do not derive them from the
+profiling grid, average GPU count, qualitative plot lines, or configured baseline
+signals. No OpScale code/data repository is linked in arXiv v1; referenced nano-vLLM
+and other repositories are dependencies or baselines.
+
 ## Foundational serving mechanism matrix
 
 | Mechanism | Helps when | Costs / break-even variables | Bounded evidence |
@@ -254,7 +311,7 @@ SLO, topology, and accounting boundary.
 |---|---|---|---|
 | Monolithic autoscaling | Simple model replicas remain the common baseline. | Stable model/workload mix; low control complexity; fast replica start. | Phase imbalance, long model load, heterogeneous hardware, or SLOs that require separate prefill/decode capacity. |
 | Phase-specific autoscaling | NVIDIA Dynamo Planner scales prefill/decode replicas; HeteroScale reports production coordination at tens-of-thousands-GPU scale. | Prefill and decode demand diverge and topology/forecast signals are accurate. | Forecast error, cold-start and model-load time, network bottlenecks, failure recovery, and pool fragmentation. |
-| Operator-level scaling | 2026 operator-level study questions model replica as the scaling unit. | Fine-grained operators have separable bottlenecks and low state/transfer overhead. | Orchestration, model-state duplication, transfer, recovery, and debugging cost exceed saved capacity. |
+| Operator-level scaling | OpScale trace replay reports 7.1/10.8 average GPUs with 98.4%/98.1% SLO attainment for Qwen2-7B/Qwen2-57B-A14B on 40 A100s; versus model-level provisioning, separate sweeps report 20.1-36.3% GPU reduction, 14-28% lower cluster power, and up to 44% higher input TPS on the same GPU budget in specific envelopes. | Fine-grained operators have separable bottlenecks; one-second control and 0.03-0.33 s average on-demand operator actuation beat a 10.68 s full-model scale-out; topology permits safe colocation. | Research prototype/trace replay only; active batch, queue wait/depth, exact achieved utilization, configured TP/PP, realized operator counts/placement, failures/retries, and goodput are undisclosed; resharding is 11x slower than replica scaling at P99 1.15 s. |
 | Aggregated prefill/decode | TaiChi reports an advantage under tight TTFT and relaxed TPOT regimes. | Interference is tolerable; first-token latency dominates; transfer overhead would be high. | Decode jitter, long outputs, strict TPOT, and queue interference. |
 | Disaggregated prefill/decode | Dynamo/llm-d/TaiChi/TokenScale expose separate pools and KV transfer. | Strict decode SLO, phase-specific hardware, reusable prefill, or scaling asymmetry beats transfer/control cost. | Short prompts/outputs, weak fabric, small batches, KV transfer, extra failure domains, and underfilled pools. |
 | Hybrid aggregation/disaggregation | TaiChi reports up to 77% benchmark goodput gain under balanced SLOs. | Traffic mixes contain both TTFT- and TPOT-sensitive requests and the scheduler can shift latency safely. | Maximum result is not universal; baseline, SLO mix, hardware, and scheduler overhead must match. |

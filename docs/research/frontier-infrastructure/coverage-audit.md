@@ -1,5 +1,52 @@
 # Frontier infrastructure coverage audit
 
+## Issue #9387 delta
+
+- Deepened the existing `operator-autoscaling-unit-2026` record without adding a
+  duplicate entry, URL, or entity. Totals remain **272 entries**, **265 unique
+  source URLs**, **224 entity labels**, and **3 explicit rumors**.
+- Separated evidence modes: the 10-100 QPS, 128-64K-sequence M/M/R analysis is
+  an offline analytical oracle; the 929K-request/1.5B-prompt-token-per-model
+  evaluation is production-trace replay on a research prototype; the
+  fixed-capacity TPS and minimum-capacity curves are SLO-constrained benchmark
+  sweeps; and plan latency/model error are prototype microbenchmarks.
+- Bound the dynamic replay to Qwen2-7B and Qwen2-57B-A14B on the common
+  nano-vLLM data plane. The main cluster is 40 A100-80GB GPUs across five Azure
+  VMs, with NVLink inside each eight-GPU VM and InfiniBand between VMs; the
+  hardware/granularity sensitivity cluster is 24 GB200 GPUs in one NVLink/NVL
+  domain.
+- Added the one-second OpScale versus 20-second model-level control intervals,
+  one-hour displayed windows, P99 TTFT targets of one second for Qwen2-7B and
+  two seconds for Qwen2-57B-A14B, average GPU counts of 7.1 and 10.8, SLO
+  attainment of 98.4% and 98.1%, the baseline GPU counts, and the full
+  Qwen2-7B scale-up latency table.
+- Bound result deltas and denominators to their envelopes: versus model-level
+  provisioning, 20.1%/35.7% average GPU reductions at 1K sequence length for
+  dense/MoE, 36.3% at 4K and 22.1% at 8K, and 14-28% lower cluster power at
+  high load; versus the model-level static deployment on the same GPU budget,
+  3-38% higher dense input TPS and up to 44% higher MoE input TPS at 40 GPUs.
+  These maxima are not one stackable result.
+- Recorded the placement/control mechanism without inventing realized counts:
+  monolithic base instances plus elastic operator replicas; interference-aware
+  best fit; locality preference from same device to NVLink/NVL to InfiniBand;
+  weighted shortest-queue dispatch; and new-GPU activation only when no
+  existing placement remains SLO-feasible.
+- Preserved exact absence. The paper reports no achieved active batch, numeric
+  queue depth or pending-token count, queue-wait distribution, exact cluster
+  GPU-utilization value, operator-replica count/placement time series,
+  configured per-model tensor/pipeline parallelism, SM-allocation distribution,
+  numeric TBT SLO, failures/retries, explicit goodput, or currency/GPU-hour
+  cost. The B=1-256 range is only a typical profiling space.
+- Correctly typed the separate granularity/topology figure: the reported 1.7x is
+  maximum request throughput in RPS, not input TPS. Its A100 result reports up
+  to 33% lower GPU demand versus Attn-FFN; at 40 QPS, moving from A100 to
+  GB200 reduces GPU count by 52% for OpScale and 38% for the monolith. The
+  figure does not disclose model, sequence length, trace/arrival law, or SLO.
+- No official OpScale code/data artifact is linked from the arXiv v1 landing
+  page or TeX source. nano-vLLM, kvcached, Dynamo, and Production Stack are
+  referenced dependencies/baselines, not an OpScale repository. The paper is
+  benchmark evidence, not provider production-prevalence evidence.
+
 ## Issue #9384 delta
 
 - Added five non-duplicate official Google Cloud records: Cluster Director network
@@ -324,12 +371,16 @@ batch opportunities depend on arrival, lengths, SLOs, hardware, and tenant polic
 **Present but incomplete:** phase/operator autoscaling, token-work signals, hybrid
 aggregated/disaggregated scheduling, production-scale heterogeneous coordination, and
 Google DWS Flex-start versus reservation-bound admission now have explicit evidence
-envelopes.
+envelopes. OpScale adds exact prototype control intervals, scale-up latency, average GPU
+counts, TTFT-bound SLO attainment, topology, and SLO-constrained power/input-TPS results,
+but not the production-relevant queue/batch/utilization/operator-count fields below.
 
 **Missing or shallow:** comparable production distributions for batch size, queue wait,
 SLO class, cancellation, priority, fairness, admission, and cross-tenant interference;
 policy prevalence by lab/cloud; DWS admission probability and wait distributions;
-scheduler behavior during failures and regional bursts.
+scheduler behavior during failures and regional bursts. OpScale specifically leaves
+achieved active batch, numeric queue depth/wait, achieved GPU utilization, realized
+operator-replica placement/counts, and failure/retry reactions undisclosed.
 
 **Proof needed for complete:** production traces or operator measurements with batch and
 queue fields, stratified by model, tenant, hardware, region, and SLO.
