@@ -42,16 +42,18 @@ type CollectionOptions struct {
 	PhysicalSoftwareRead   *uint64
 	PhysicalSoftwareWrite  *uint64
 	NVIDIADevice           NVIDIADeviceSelector
+	MeasureHostRoofline    *RooflineBenchmarkOptions
 }
 type BandwidthCollection struct {
-	Schema       string                `json:"schema"`
-	Engine       string                `json:"engine"`
-	MachineClass string                `json:"machine_class"`
-	Collector    string                `json:"collector"`
-	IntervalMS   int64                 `json:"interval_ms"`
-	Availability CollectorAvailability `json:"availability"`
-	Capture      BandwidthCapture      `json:"capture"`
-	Report       BandwidthReport       `json:"report"`
+	Schema              string                `json:"schema"`
+	Engine              string                `json:"engine"`
+	MachineClass        string                `json:"machine_class"`
+	Collector           string                `json:"collector"`
+	IntervalMS          int64                 `json:"interval_ms"`
+	Availability        CollectorAvailability `json:"availability"`
+	Capture             BandwidthCapture      `json:"capture"`
+	Report              BandwidthReport       `json:"report"`
+	RooflineMeasurement *RooflineMeasurement  `json:"roofline_measurement,omitempty"`
 }
 type hostSnapshot struct {
 	at           time.Time
@@ -72,6 +74,15 @@ func ValidateCollectionOptions(o CollectionOptions) error {
 func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollection, error) {
 	if err := ValidateCollectionOptions(o); err != nil {
 		return BandwidthCollection{}, err
+	}
+	var measured *RooflineMeasurement
+	if o.MeasureHostRoofline != nil {
+		r, err := MeasureHostMemoryRoofline(ctx, *o.MeasureHostRoofline)
+		if err != nil {
+			return BandwidthCollection{}, err
+		}
+		measured = &r
+		o.MeasuredSustainableGBS = &measured.MeasuredSustainableGBS
 	}
 	cap := BandwidthCapture{Schema: BandwidthSchema, Engine: "fak-native", Trigger: TriggerConfig{SymptomWindow: 2, ResourceWindow: 2, LatencyThresholdMS: 1e100, ResourceUtilization: 1}, Samples: make([]BandwidthSample, 0, o.Count)}
 	var av CollectorAvailability
@@ -115,7 +126,7 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 	if err != nil {
 		return BandwidthCollection{}, err
 	}
-	return BandwidthCollection{Schema: BandwidthCollectionSchema, Engine: "fak-native", MachineClass: runtime.GOOS + "/" + runtime.GOARCH, Collector: collector, IntervalMS: o.Interval.Milliseconds(), Availability: av, Capture: cap, Report: report}, nil
+	return BandwidthCollection{Schema: BandwidthCollectionSchema, Engine: "fak-native", MachineClass: runtime.GOOS + "/" + runtime.GOARCH, Collector: collector, IntervalMS: o.Interval.Milliseconds(), Availability: av, Capture: cap, Report: report, RooflineMeasurement: measured}, nil
 }
 func cloneI64(v *int64) *int64 {
 	if v == nil {
