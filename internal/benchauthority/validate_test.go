@@ -1,10 +1,13 @@
 package benchauthority
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 // validMeasured returns a fully-admissible MEASURED claim; tests mutate one field
@@ -180,4 +183,148 @@ func TestValidateArtifacts(t *testing.T) {
 	if !hasProblem(errs, "not found") {
 		t.Fatalf("expected a not-found problem for the missing artifact, got %v", errs)
 	}
+}
+
+// TestValidateArtifacts_SimulationPromotionBoundary is the benchmark-authority
+// lint witness for #9424. The same validator-clean structural-count artifact may
+// support a theoretical noncompetitive row, but it cannot be relabelled as a
+// measured/verified result or an outward competitive comparison.
+func TestValidateArtifacts_SimulationPromotionBoundary(t *testing.T) {
+	root := t.TempDir()
+	seed := int64(9424)
+	ev := benchcli.SimulationEvidence{
+		Schema:       benchcli.SimulationEvidenceSchema,
+		EvidenceType: benchcli.EvidenceStructuralCount,
+		ClaimCeiling: benchcli.ClaimCorrectnessOnly,
+		Engine: benchcli.SimulationEngine{
+			Name:         "authority-lint-fixture",
+			Revision:     "r1",
+			ConfigDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		Workload: benchcli.WorkloadProvenance{
+			Name:   "fixed-mechanism-count",
+			Source: "internal/benchauthority/validate_test.go",
+			Digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		},
+		ValidityEnvelope: benchcli.ValidityEnvelope{
+			Description: "one fixed mechanism-count fixture",
+			Dimensions:  map[string]string{"shape": "fixture-v1"},
+		},
+		ExcludedEffects: []string{"elapsed time", "throughput", "competitor runtime"},
+		Replay: benchcli.ReplaySpec{
+			Seed:               &seed,
+			Stream:             "fixed",
+			Repetitions:        1,
+			IndependentStreams: 1,
+		},
+		Cost: benchcli.SimulationCost{HostWallTimeMS: 1, HostCPUTimeMS: 1, Bytes: 256},
+	}
+	path := writeBenchmarkArtifactFixture(t, root, "simulated.json", benchcli.BenchmarkArtifact{
+		RunID:              "authority-lint-simulated",
+		SimulationEvidence: &ev,
+	})
+
+	theoretical := validMeasured()
+	theoretical.ID = "simulated-bound"
+	theoretical.Status = Theoretical
+	theoretical.Artifact = path
+	if errs := ValidateArtifacts(root, []Claim{theoretical}); len(errs) != 0 {
+		t.Fatalf("validator-clean noncompetitive theoretical evidence should be admissible, got %v", errs)
+	}
+
+	measured := theoretical
+	measured.ID = "simulated-measured"
+	measured.Status = Measured
+	if errs := ValidateArtifacts(root, []Claim{measured}); !hasProblem(errs, "MEASURED row cannot use non-hardware") {
+		t.Fatalf("simulated artifact populated a MEASURED row; got %v", errs)
+	}
+
+	verified := theoretical
+	verified.ID = "simulated-verified"
+	verified.Status = Verified
+	if errs := ValidateArtifacts(root, []Claim{verified}); !hasProblem(errs, "VERIFIED row cannot use non-hardware") {
+		t.Fatalf("simulated artifact populated a VERIFIED row; got %v", errs)
+	}
+
+	competitive := theoretical
+	competitive.ID = "simulated-competitive"
+	competitive.Competitive = true
+	if errs := ValidateArtifacts(root, []Claim{competitive}); !hasProblem(errs, "competitive row cannot use non-hardware") {
+		t.Fatalf("simulated artifact populated a competitive row; got %v", errs)
+	}
+}
+
+// TestValidateArtifacts_InvalidSimulationEvidenceFailsClosed proves an invalid
+// claim-ceiling promotion is rejected by the shared benchcli validator before
+// authority classification, and malformed envelopes cannot evade that validator
+// by failing DecodeArtifact.
+func TestValidateArtifacts_InvalidSimulationEvidenceFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	seed := int64(1)
+	invalid := benchcli.SimulationEvidence{
+		Schema:       benchcli.SimulationEvidenceSchema,
+		EvidenceType: benchcli.EvidenceStructuralCount,
+		ClaimCeiling: benchcli.ClaimMeasuredAbsolute,
+		Engine: benchcli.SimulationEngine{
+			Name:         "invalid-promotion",
+			Revision:     "r1",
+			ConfigDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		Workload: benchcli.WorkloadProvenance{
+			Name: "fixture", Source: "validate_test.go",
+			Digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		},
+		ValidityEnvelope: benchcli.ValidityEnvelope{
+			Description: "fixture", Dimensions: map[string]string{"shape": "one"},
+		},
+		ExcludedEffects: []string{"elapsed time"},
+		Replay: benchcli.ReplaySpec{
+			Seed: &seed, Stream: "fixed", Repetitions: 1, IndependentStreams: 1,
+		},
+	}
+	invalidPath := writeBenchmarkArtifactFixture(t, root, "invalid.json", benchcli.BenchmarkArtifact{
+		RunID: "invalid-simulation-promotion", SimulationEvidence: &invalid,
+	})
+	c := validMeasured()
+	c.Status = Theoretical
+	c.Artifact = invalidPath
+	if errs := ValidateArtifacts(root, []Claim{c}); !hasProblem(errs, "malformed benchmark_artifact envelope") {
+		t.Fatalf("invalid evidence did not fail closed, got %v", errs)
+	}
+
+	malformedPath := filepath.ToSlash("artifacts/malformed.json")
+	full := filepath.Join(root, filepath.FromSlash(malformedPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The valid lineage sibling is load-bearing: DecodeArtifact must not fall
+	// through from a malformed modern envelope to this legacy compatibility path.
+	malformed := []byte(`{"benchmark_artifact":{"run_id":"malformed-simulation","simulation_evidence":"not-an-object"},"lineage":{"lineage_schema":"fak-bench-lineage/1","app_version":"test","utc":"2026-08-27T00:00:00Z","git_commit":"abc123","go_version":"go1.test","node":"fixture"}}`)
+	if err := os.WriteFile(full, malformed, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.Artifact = malformedPath
+	if errs := ValidateArtifacts(root, []Claim{c}); !hasProblem(errs, "malformed benchmark_artifact envelope") {
+		t.Fatalf("malformed evidence evaded the lint, got %v", errs)
+	}
+}
+
+func writeBenchmarkArtifactFixture(t *testing.T, root, name string, art benchcli.BenchmarkArtifact) string {
+	t.Helper()
+	if art.Schema == "" {
+		art.Schema = benchcli.BenchmarkArtifactSchema
+	}
+	rel := filepath.ToSlash(filepath.Join("artifacts", name))
+	full := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]any{"benchmark_artifact": art})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return rel
 }

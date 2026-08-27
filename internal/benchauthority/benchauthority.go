@@ -32,9 +32,10 @@
 //     the record the commit-audit perf-claim rung is designed to point at. The
 //     disk-and-catalog cross-checks are layered by capability-holding callers:
 //     ValidateArtifacts(root) does the on-disk half (each Artifact path must exist,
-//     catching the dropped-prefix drift the old doc admitted to); the "a named Bench is
-//     a registered benchcatalog surface" half stays with a caller that imports that
-//     leaf, since this leaf imports nothing internal by design.
+//     catching the dropped-prefix drift the old doc admitted to) and delegates typed
+//     benchmark-envelope validation to benchcli before enforcing authority promotion;
+//     the "a named Bench is a registered benchcatalog surface" half stays with a
+//     caller that imports that registry leaf.
 //
 // Adding or updating a number means editing one Claim literal and running
 // `go run ./cmd/authorityledger -write` — the same additive-leaf discipline the
@@ -110,6 +111,12 @@ type Claim struct {
 	// Baseline is what the number compares against — never omit; a ratio without a
 	// baseline is meaningless.
 	Baseline string
+	// Competitive marks an outward-facing product/runtime comparison: a win,
+	// parity result, or honest loss against another implementation. Simulation may
+	// rank candidates inside one calibrated envelope, but it can never populate one
+	// of these rows; ValidateArtifacts enforces that boundary from the artifact's
+	// typed simulation-evidence block rather than trusting headline prose.
+	Competitive bool
 	// Commit is the provenance SHA, or "artifact" when the SHA is not a public
 	// reproduce handle (the reproduce handle is then Artifact + Reproduce).
 	Commit string

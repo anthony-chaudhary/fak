@@ -1,6 +1,7 @@
 package benchauthority
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -8,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 // Validate checks the registered claim ledger for the structural invariants a
@@ -121,10 +124,14 @@ func (c Claim) measurementProblems() []error {
 }
 
 // ValidateArtifacts is the on-disk half of Validate: every claim's non-empty Artifact
-// path must resolve to an existing file under root. It is kept separate from
-// Validate() because it needs a filesystem capability (a repo root) the pure ledger
-// check does not — and it catches exactly the dropped-directory-prefix drift the old
-// hand-typed doc admitted to.
+// path must resolve to an existing file under root. Benchmark artifacts also pass the
+// shared benchcli evidence validator, then the authority-specific promotion boundary:
+// non-hardware evidence can support a theoretical noncompetitive row, but cannot be
+// promoted into a MEASURED/VERIFIED or competitive row.
+//
+// It is kept separate from Validate() because it needs a filesystem capability (a
+// repo root) the pure ledger check does not — and it catches exactly the
+// dropped-directory-prefix drift the old hand-typed doc admitted to.
 func ValidateArtifacts(root string, claims []Claim) []error {
 	var errs []error
 	for i, c := range claims {
@@ -135,6 +142,37 @@ func ValidateArtifacts(root string, claims []Claim) []error {
 		full := filepath.Join(root, filepath.FromSlash(p))
 		if _, err := os.Stat(full); err != nil {
 			errs = append(errs, fmt.Errorf("claim %d %q: Artifact %q not found under %q: %v", i, c.ID, p, root, err))
+			continue
+		}
+		raw, err := os.ReadFile(full)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("claim %d %q: Artifact %q cannot be read: %v", i, c.ID, p, err))
+			continue
+		}
+		art, ok := benchcli.DecodeArtifact(raw)
+		if !ok {
+			// Legacy evidence may be a log, markdown dossier, or pre-envelope JSON.
+			// Preserve it. A document that claims to carry the shared envelope,
+			// however, must decode; otherwise malformed simulation metadata could
+			// evade the promotion check by making DecodeArtifact return false.
+			if bytes.Contains(raw, []byte(`"benchmark_artifact"`)) {
+				errs = append(errs, fmt.Errorf("claim %d %q: Artifact %q has a malformed benchmark_artifact envelope", i, c.ID, p))
+			}
+			continue
+		}
+		if err := benchcli.ValidateBenchmarkArtifact(art); err != nil {
+			errs = append(errs, fmt.Errorf("claim %d %q: Artifact %q has invalid simulation evidence: %v", i, c.ID, p, err))
+			continue
+		}
+		ev := art.SimulationEvidence
+		if ev == nil || ev.EvidenceType == benchcli.EvidenceHardwareMeasurement {
+			continue
+		}
+		if c.Status == Measured || c.Status == Verified {
+			errs = append(errs, fmt.Errorf("claim %d %q: %s row cannot use non-hardware %q evidence", i, c.ID, c.Status, ev.EvidenceType))
+		}
+		if c.Competitive {
+			errs = append(errs, fmt.Errorf("claim %d %q: competitive row cannot use non-hardware %q evidence", i, c.ID, ev.EvidenceType))
 		}
 	}
 	return errs
