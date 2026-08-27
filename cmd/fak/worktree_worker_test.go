@@ -632,3 +632,39 @@ func TestLandVerifyFlagParsesGoBuild(t *testing.T) {
 	// here we only assert the CLI's go-build hook is a valid VerifyHook value.
 	var _ workerworktree.VerifyHook = worktreeWorkerGoBuildVerify
 }
+
+func TestWorkerLandProgressRendersJSONLinesOffFinalReceiptChannel(t *testing.T) {
+	var stderr bytes.Buffer
+	sink := worktreeWorkerProgressSink(&stderr)
+	sink(workerworktree.LandProgressEvent{
+		Schema: workerworktree.LandProgressSchema, Phase: "admission", State: "started",
+	})
+	sink(workerworktree.LandProgressEvent{
+		Schema: workerworktree.LandProgressSchema, Phase: "admission", State: "completed", Outcome: "ok", PhaseElapsedMS: 7,
+	})
+	lines := strings.Split(strings.TrimSpace(stderr.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("progress lines=%q, want two bounded JSON objects", stderr.String())
+	}
+	for i, line := range lines {
+		var got workerworktree.LandProgressEvent
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("decode line %d %q: %v", i, line, err)
+		}
+		if got.Schema != workerworktree.LandProgressSchema || got.Phase != "admission" {
+			t.Fatalf("line %d=%+v", i, got)
+		}
+	}
+	if strings.Contains(stderr.String(), "/peer/dirty/path") {
+		t.Fatalf("progress must not render paths: %q", stderr.String())
+	}
+
+	res := workerworktree.Result{OK: true, Applied: true, Committed: true, LandCost: &workerworktree.LandCostReceipt{
+		Schema: workerworktree.LandCostSchema, Outcome: "ok", WallMS: 7, AccountedPhaseMS: 7,
+	}}
+	got := mustKeys(t, res, "ok", "applied", "committed", "land_cost")
+	cost, ok := got["land_cost"].(map[string]any)
+	if !ok || cost["schema"] != workerworktree.LandCostSchema || cost["wall_ms"] != float64(7) {
+		t.Fatalf("terminal cost receipt=%v", got["land_cost"])
+	}
+}

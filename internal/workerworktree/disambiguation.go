@@ -27,6 +27,8 @@ type DisambiguationWitness struct {
 	CoverageDebt   int                `json:"coverage_debt"`
 	FamilyCoverage map[string]float64 `json:"family_coverage,omitempty"`
 	Detail         string             `json:"detail,omitempty"`
+	ScannedFiles   int                `json:"scanned_files,omitempty"`
+	ScannedBytes   int64              `json:"scanned_bytes,omitempty"`
 }
 type DisambiguationWitnesses struct {
 	Before    DisambiguationWitness `json:"before"`
@@ -51,9 +53,21 @@ func disambiguationRelevant(paths []string) bool {
 var readDisambiguation = readDisambiguationWitness
 
 func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
+	return verifyAppliedDisambiguationProgress(root, wtPath, treeSHA, nil, 0)
+}
+
+func verifyAppliedDisambiguationProgress(root, wtPath, treeSHA string, recorder *landRecorder, attempt int) (*DisambiguationWitnesses, bool) {
+	beforePhase := recorder.begin("whole_tree_analysis_before", attempt)
 	before := readDisambiguation(root, "HEAD")
+	recorder.addWholeTreeScan(before.ScannedFiles, before.ScannedBytes)
+	beforePhase.complete("ok")
+	worktreePhase := recorder.begin("whole_tree_analysis_worktree", attempt)
 	worktree := readDisambiguation(wtPath, "HEAD")
+	recorder.addWholeTreeScan(worktree.ScannedFiles, worktree.ScannedBytes)
+	worktreePhase.complete("ok")
+	postPhase := recorder.begin("whole_tree_analysis_post_apply", attempt)
 	post := readDisambiguation(root, treeSHA)
+	recorder.addWholeTreeScan(post.ScannedFiles, post.ScannedBytes)
 	all := &DisambiguationWitnesses{Before: before, Worktree: worktree, PostApply: post}
 	// Freshness is a NON-REGRESSION check, mirroring the coverage terms beside it: a land must
 	// never turn a fresh HEAD stale, but it is not required to repair a peer's pre-existing
@@ -68,6 +82,11 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 	ok := freshNonRegress && post.SemanticValid && clarityNonRegress && post.Coverage+0.0001 >= before.Coverage && post.CoverageDebt <= before.CoverageDebt && !coverageFamilyRegressed(before.FamilyCoverage, post.FamilyCoverage)
 	if !ok && post.Detail == "" {
 		all.PostApply.Detail = fmt.Sprintf("clarity debt %d -> %d; coverage %.2f -> %.2f; coverage debt %d -> %d", before.ClarityDebt, post.ClarityDebt, before.Coverage, post.Coverage, before.CoverageDebt, post.CoverageDebt)
+	}
+	if ok {
+		postPhase.complete("ok")
+	} else {
+		postPhase.complete("failed")
 	}
 	return all, ok
 }
@@ -102,10 +121,12 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 	// "Cannot connect to C:", which reddened every disambiguation witness on
 	// Windows. This mirrors the in-process extraction in conceptcatalog.CheckGitTree.
 	out := filepath.Join(tmp, "tree")
-	if err = extractTar(archive, out); err != nil {
+	files, bytesRead, err := extractTarMeasured(archive, out)
+	if err != nil {
 		w.Detail = fmt.Sprintf("extract candidate tree: %v", err)
 		return w
 	}
+	w.ScannedFiles, w.ScannedBytes = files, bytesRead
 	inv, err := conceptcatalog.CheckInvariant(out)
 	if err != nil {
 		w.Detail = err.Error()
@@ -127,8 +148,13 @@ func readDisambiguationWitness(repo, tree string) DisambiguationWitness {
 // binary and its platform quirks (notably GNU tar treating a Windows C:\ path as
 // a remote host). Path traversal outside dst is rejected.
 func extractTar(archive []byte, dst string) error {
+	_, _, err := extractTarMeasured(archive, dst)
+	return err
+}
+
+func extractTarMeasured(archive []byte, dst string) (files int, bytesRead int64, err error) {
 	if err := os.MkdirAll(dst, 0755); err != nil {
-		return err
+		return 0, 0, err
 	}
 	tr := tar.NewReader(bytes.NewReader(archive))
 	for {
@@ -137,16 +163,16 @@ func extractTar(archive []byte, dst string) error {
 			break
 		}
 		if e != nil {
-			return e
+			return files, bytesRead, e
 		}
 		clean := filepath.Clean(filepath.FromSlash(h.Name))
 		if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("unsafe archive path %q", h.Name)
+			return files, bytesRead, fmt.Errorf("unsafe archive path %q", h.Name)
 		}
 		target := filepath.Join(dst, clean)
 		if h.FileInfo().IsDir() {
 			if e := os.MkdirAll(target, 0755); e != nil {
-				return e
+				return files, bytesRead, e
 			}
 			continue
 		}
@@ -154,22 +180,24 @@ func extractTar(archive []byte, dst string) error {
 			continue
 		}
 		if e := os.MkdirAll(filepath.Dir(target), 0755); e != nil {
-			return e
+			return files, bytesRead, e
 		}
 		f, e := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, h.FileInfo().Mode())
 		if e != nil {
-			return e
+			return files, bytesRead, e
 		}
 		_, copyErr := io.Copy(f, tr)
 		closeErr := f.Close()
 		if copyErr != nil {
-			return copyErr
+			return files, bytesRead, copyErr
 		}
 		if closeErr != nil {
-			return closeErr
+			return files, bytesRead, closeErr
 		}
+		files++
+		bytesRead += h.Size
 	}
-	return nil
+	return files, bytesRead, nil
 }
 
 func (w *DisambiguationWitnesses) compactDetail() string { b, _ := json.Marshal(w); return string(b) }
