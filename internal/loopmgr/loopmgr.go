@@ -25,6 +25,83 @@ const (
 	SchemaStatus = "fak.loop-status.v1"
 )
 
+// DutyCycle declares a recurring local-time on-window. Weekdays uses ISO
+// weekday numbers (1=Monday..7=Sunday); an empty set means every day.
+type DutyCycle struct {
+	Location  string `json:"location,omitempty"`
+	Weekdays  []int  `json:"weekdays,omitempty"`
+	OnMinute  int    `json:"on_minute"`
+	OffMinute int    `json:"off_minute"`
+}
+
+func (d DutyCycle) location() (*time.Location, error) {
+	if d.Location == "" {
+		return time.UTC, nil
+	}
+	return time.LoadLocation(d.Location)
+}
+func (d DutyCycle) Validate() error {
+	if d.OnMinute < 0 || d.OnMinute >= 1440 || d.OffMinute <= d.OnMinute || d.OffMinute > 1440 {
+		return fmt.Errorf("duty window = %d..%d minutes, want 0 <= on < off <= 1440", d.OnMinute, d.OffMinute)
+	}
+	for _, day := range d.Weekdays {
+		if day < 1 || day > 7 {
+			return fmt.Errorf("duty weekday = %d, want 1..7", day)
+		}
+	}
+	_, err := d.location()
+	return err
+}
+func (d DutyCycle) enabledDay(day time.Weekday) bool {
+	if len(d.Weekdays) == 0 {
+		return true
+	}
+	iso := int(day)
+	if iso == 0 {
+		iso = 7
+	}
+	for _, want := range d.Weekdays {
+		if want == iso {
+			return true
+		}
+	}
+	return false
+}
+func (d DutyCycle) Active(t time.Time) bool {
+	if d.Validate() != nil {
+		return false
+	}
+	loc, _ := d.location()
+	local := t.In(loc)
+	m := local.Hour()*60 + local.Minute()
+	return d.enabledDay(local.Weekday()) && m >= d.OnMinute && m < d.OffMinute
+}
+func (d DutyCycle) NextOn(t time.Time) (time.Time, error) {
+	if err := d.Validate(); err != nil {
+		return time.Time{}, err
+	}
+	loc, _ := d.location()
+	local := t.In(loc)
+	for i := 0; i < 8; i++ {
+		day := local.AddDate(0, 0, i)
+		if !d.enabledDay(day.Weekday()) {
+			continue
+		}
+		start := time.Date(day.Year(), day.Month(), day.Day(), d.OnMinute/60, d.OnMinute%60, 0, 0, loc)
+		end := time.Date(day.Year(), day.Month(), day.Day(), d.OffMinute/60, d.OffMinute%60, 0, 0, loc)
+		if !local.After(end) && local.Before(start) {
+			return start.UTC(), nil
+		}
+		if i == 0 && d.Active(t) {
+			return t.UTC(), nil
+		}
+		if i > 0 {
+			return start.UTC(), nil
+		}
+	}
+	return time.Time{}, errors.New("duty cycle has no on-window in the next week")
+}
+
 type EventKind string
 
 const (

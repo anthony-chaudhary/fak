@@ -69,8 +69,10 @@ type Job struct {
 
 	// CreatedUnixNano / UpdatedUnixNano are registry bookkeeping, stamped by the
 	// mutating helpers so a reload can show when a job last changed.
-	CreatedUnixNano int64 `json:"created_unix_nano,omitempty"`
-	UpdatedUnixNano int64 `json:"updated_unix_nano,omitempty"`
+	CreatedUnixNano int64      `json:"created_unix_nano,omitempty"`
+	UpdatedUnixNano int64      `json:"updated_unix_nano,omitempty"`
+	WakeAtUnixNano  int64      `json:"wake_at_unix_nano,omitempty"`
+	Duty            *DutyCycle `json:"duty_cycle,omitempty"`
 }
 
 // JobID is the job's identity, sourced from its schedule.
@@ -94,6 +96,11 @@ func (r Registry) Validate() error {
 		}
 		if err := job.Schedule.Validate(); err != nil {
 			return fmt.Errorf("loop registry job %q: %w", key, err)
+		}
+		if job.Duty != nil {
+			if err := job.Duty.Validate(); err != nil {
+				return fmt.Errorf("loop registry job %q: %w", key, err)
+			}
 		}
 		if !ValidJobState(job.State) {
 			return fmt.Errorf("loop registry job %q: state = %q, want armed|stopped|disabled (never defaulted)", key, job.State)
@@ -185,6 +192,11 @@ func SaveRegistry(path string, r Registry) error {
 func (r *Registry) Put(job Job, at time.Time) error {
 	if err := job.Schedule.Validate(); err != nil {
 		return err
+	}
+	if job.Duty != nil {
+		if err := job.Duty.Validate(); err != nil {
+			return err
+		}
 	}
 	if !ValidJobState(job.State) {
 		return fmt.Errorf("job %q: state = %q, want armed|stopped|disabled (never defaulted)", job.JobID(), job.State)
