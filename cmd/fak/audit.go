@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +8,7 @@ import (
 	"os"
 
 	"github.com/anthony-chaudhary/fak/internal/journal"
+	"github.com/anthony-chaudhary/fak/internal/jsonlledger"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 	"github.com/anthony-chaudhary/fak/internal/usagelog"
 )
@@ -149,22 +148,13 @@ func auditVerifySchema(path string) string {
 		return ""
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		var probe struct {
-			Schema string `json:"schema"`
-		}
-		if err := json.Unmarshal(line, &probe); err != nil {
-			return ""
-		}
-		return probe.Schema
+	probe, found, err := jsonlledger.First[struct {
+		Schema string `json:"schema"`
+	}](f)
+	if err != nil || !found {
+		return ""
 	}
-	return ""
+	return probe.Schema
 }
 
 // cmdAuditExport re-emits a journal as JSONL on stdout. It opens the file-backed
