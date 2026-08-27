@@ -4,6 +4,37 @@
 accepted, rejected, or parameterized in fak benchmarks. It is not a substitute for the
 per-source provenance in [`index.json`](index.json).
 
+## Provider-scale population denominators (#9379)
+
+Official first-party disclosures now bound several unlike populations: 950 million Gemini
+app MAU; more than 2.4 million Antigravity WAU; more than 9 million monthly model
+developers; approximately 22 billion model-API tokens per minute; almost 1 billion Meta AI
+MAU; 1 billion
+people using ChatGPT weekly; more than 30 million paid Microsoft 365 Copilot seats; 50
+million GitHub Copilot users; 100,000 Microsoft Foundry customers; nearly 40 million
+registered Agent 365 agents; more than 50 billion Purview-audited Copilot interactions to
+date; and more than 100,000
+customers running Claude on Amazon Bedrock. Google also reports customer cohorts above
+explicit annual token thresholds, which establish high-volume enterprise populations but not
+total traffic. These quantities are reach, entitlement, customer, or threshold-cohort
+denominators, not directly comparable traffic measurements.
+
+Preserve the denominator and product boundary in every benchmark or capacity claim:
+
+- registered users, WAU, MAU, and DAU are distinct; a DAU growth multiple is not a DAU count;
+- consumer users and subscribers are distinct from paid enterprise seats, organizations,
+  business customers, API developers, and API customers;
+- Gemini app, Meta AI, ChatGPT, Microsoft 365 Copilot, and Anthropic business customers do not
+  represent provider-wide or model-specific traffic;
+- requests or queries are distinct from sessions, messages, and tokens; and
+- a population count supplies no concurrency, request rate, interarrival law, geography,
+  session length, tenant concentration, market share, or Zipf parameter.
+
+Therefore fak may use these disclosures to test population-scale metadata and denominator
+hygiene, but must not synthesize arrivals, concurrency, cache popularity, or capacity from
+them. Any such workload shape still requires a direct production trace or an explicitly
+synthetic sensitivity sweep.
+
 ## Denominator and locality additions (#9362)
 
 The new Chinese-platform evidence reinforces typed denominators: developer teams,

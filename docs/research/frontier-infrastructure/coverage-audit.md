@@ -4,6 +4,21 @@
 **Issue:** [#9306](https://github.com/anthony-chaudhary/fak/issues/9306)  
 **Authority:** [`index.json`](index.json)
 
+## Issue #9379 delta
+
+Issue #9379 adds three official first-party records and refreshes two existing records without
+duplicating their IDs. Google reports Gemini app and Antigravity active-user populations, a monthly developer
+population, aggregate model-API token throughput, and Cloud token-threshold customer cohorts; Meta reports almost 1 billion Meta AI monthly actives; Microsoft
+reports separate Microsoft 365 Copilot seat, GitHub Copilot user, Foundry customer, Agent
+365 registered-agent, and cumulative Purview-audited-interaction populations; OpenAI reports 1 billion people using ChatGPT weekly; Anthropic reports more
+than 100,000 customers running Claude on Amazon Bedrock. The slice improves provider-scale
+population coverage, but it does not fill
+the production-distribution gap: none of these counts supplies requests, queries, sessions,
+messages, tokens, concurrency, interarrival laws, geography, tenant concentration, market
+share, or Zipf evidence. No extra frontier provider was added because no additional robust
+official disclosure located in this pass supplied a comparably useful, clearly scoped
+denominator.
+
 ## Verdict
 
 The corpus has a strong initial spine but is **incomplete**. It covers the major
@@ -26,7 +41,7 @@ classification, forecast inclusion, completed study, approval, construction, ene
 live load remain separate states. The New York GEIS/report processes, final Batch Zero outputs,
 Fall 2027 statewide transmission plan, and end-2026 forecast including Batch loads remain future
 work. The Texas-governor directive/~474 GW claim remains explicit coverage debt because no
-direct governor source was supplied. **Exact indexed totals: 258 entries, 253 unique URLs, and
+direct governor source was supplied. **Exact indexed totals: 261 entries, 254 unique URLs, and
 220 entity labels.**
 
 Issue #9325 adds an opened Modine/Airedale cooling factory, a >$4B 2027-2029
@@ -153,20 +168,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **258** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **248** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **215** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 62; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 24; `policy_regulation` 14; `serving_system` 40; `standard` 3; `supply_chain` 31; `workload_model` 8; `workload_trace` 21. |
-| Evidence classes used | **48** | Machine-derived counts now include `official_statement` 95, `vendor_claim` 31, `benchmark_measurement` 22, `reported_observation` 15, `production_measurement` 13, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 58 entries across 40 other bounded lifecycle/benchmark/specification labels. |
-| Confidence labels | **16** | Exact labels include `high` 170, `medium_high` 58, `medium` 11, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **258/258 published; 258/258 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Entries | **261** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **254** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **220** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 65; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 24; `policy_regulation` 14; `serving_system` 40; `standard` 3; `supply_chain` 31; `workload_model` 13; `workload_trace` 21. |
+| Evidence classes used | **48** | Machine-derived counts now include `official_statement` 99, `vendor_claim` 31, `benchmark_measurement` 22, `reported_observation` 15, `production_measurement` 12, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 63 entries across 40 other bounded lifecycle/benchmark/specification labels. |
+| Confidence labels | **16** | Exact labels include `high` 179, `medium_high` 57, `medium` 11, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **261/261 published; 261/261 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 258 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 261 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |

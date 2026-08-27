@@ -25,6 +25,18 @@ views are:
 
 Empty or missing slices are coverage debt, not evidence that a category has no activity.
 
+## Latest slice: provider-scale demand denominators (#9379)
+
+This slice adds official first-party scale disclosures for Google Gemini, Meta AI, and
+Microsoft 365 Copilot, and refreshes the existing OpenAI and Anthropic user-scale records.
+The five records deliberately preserve unlike denominators: Gemini app monthly active users,
+Antigravity weekly active users, monthly model developers, model-API token throughput, Google
+Cloud token-threshold customer cohorts, Meta AI
+monthly actives, weekly ChatGPT people, paid Microsoft 365 Copilot seats, GitHub
+Copilot users, Microsoft Foundry customers, Agent 365 registered agents, Purview-audited
+Copilot interactions, and Claude-on-Amazon-Bedrock customers. They are not interchangeable and do not establish requests, queries, sessions,
+messages, tokens, concurrency, interarrival laws, geography, market share, or Zipf behavior.
+
 ## Latest slice: New York and ERCOT large-load controls (#9373)
 
 Four bounded official-source records now cover the PUCT-granted ERCOT Batch Zero deadline
@@ -37,7 +49,7 @@ assumptions, sensitivities, and forecasts from actual load. It also keeps planne
 60/90-day and twelve-month processes, ERCOT's final Batch Zero classification and Fall 2027
 statewide plan, and the final end-2026 forecast including Batch loads remain future work. The
 Texas governor directive/~474 GW claim remains coverage debt because no direct governor source
-was supplied. The corpus now contains **258 entries**, **253 unique URLs**, and **220 entity
+was supplied. The corpus now contains **261 entries**, **254 unique URLs**, and **220 entity
 labels**.
 
 ## Latest slice: Chinese platform envelopes (#9362)
@@ -217,8 +229,8 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **207 dated entries**, **202 unique source URLs**, and
-**170 distinct entity labels** across **13 categories** spanning frontier labs,
+The current spine contains **261 dated entries**, **254 unique source URLs**, and
+**220 distinct entity labels** across **13 categories** spanning frontier labs,
 hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
 and **2 explicit rumors**. FineServe, ServeGen, the one-year Chutes trace, OpenRouter geography, and

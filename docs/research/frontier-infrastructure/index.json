@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9376,
+  "latest_slice_issue": 9379,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 258,
+    "entry_count": 261,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -486,32 +486,34 @@
       }
     },
     {
-      "id": "openai-user-scale-2025",
+      "id": "openai-chatgpt-weekly-people-2026",
       "category": "frontier_lab",
       "entity": "OpenAI",
       "topic": [
         "userbase",
         "demand"
       ],
-      "published_at": "2025-09-22",
-      "event_at": "2025-09-22",
-      "source_title": "OpenAI and NVIDIA announce strategic partnership to deploy 10 gigawatts of NVIDIA systems",
-      "source_url": "https://openai.com/index/openai-nvidia-systems-partnership/",
+      "published_at": "2026-08-06",
+      "event_at": "2026-08-06",
+      "source_title": "Improving GPT-5.6 Sol in ChatGPT—and expanding access to GPT-5.6 Luna for free users",
+      "source_url": "https://openai.com/index/improving-gpt-5-6-sol-in-chatgpt/",
       "source_kind": "official_release",
       "evidence_class": "official_statement",
-      "confidence": "medium_high",
-      "claim": "OpenAI reported more than 700 million weekly active users while announcing the infrastructure partnership.",
+      "confidence": "high",
+      "claim": "OpenAI reported that 1 billion people turn to ChatGPT every week.",
       "quantified": {
-        "weekly_active_users_gt": 700000000
+        "chatgpt_weekly_people": 1000000000
       },
       "assumptions": [
-        "Consumer and enterprise traffic can justify hyperscale inference fleets."
+        "The weekly population establishes ChatGPT product reach, not provider-wide model or API traffic."
       ],
       "contradictions_or_limits": [
-        "Weekly-active-user totals reveal neither tenant concentration nor request/token distributions."
+        "The wording identifies people using ChatGPT each week; it is not a registered-user, monthly-active-user, daily-active-user, subscriber, paid-seat, organization, developer, request, session, message, token, or concurrency count.",
+        "The disclosure does not provide request rate, interarrival law, tenant concentration, geography, model routing, or per-person usage intensity."
       ],
       "fak_implications": [
-        "Do not substitute registered or active users for demand-shape measurements."
+        "Keep the ChatGPT weekly-people denominator separate from subscribers, business customers, API developers, Codex users, and API traffic.",
+        "Treat population scale as a reach constraint only; do not derive traffic shape or capacity from it."
       ],
       "rumor": {
         "is_rumor": false
@@ -3161,7 +3163,7 @@
       }
     },
     {
-      "id": "anthropic-2026-user-scale",
+      "id": "anthropic-amazon-bedrock-customer-scale-2026",
       "category": "frontier_lab",
       "entity": "Anthropic",
       "topic": [
@@ -3169,26 +3171,27 @@
         "enterprise",
         "demand"
       ],
-      "published_at": "2026-06-18",
-      "event_at": "2026-06-18",
-      "source_title": "Anthropic’s Economic Index: New measures of AI usage across the economy",
-      "source_url": "https://www.anthropic.com/research/anthropic-economic-index-june-2026",
-      "source_kind": "official_research",
-      "evidence_class": "production_measurement",
+      "published_at": "2026-04-20",
+      "event_at": "2026-04-20",
+      "source_title": "Anthropic and Amazon expand collaboration for up to 5 gigawatts of new compute",
+      "source_url": "https://www.anthropic.com/news/anthropic-amazon-compute",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
       "confidence": "high",
-      "claim": "Anthropic said millions of people use Claude daily and 80% of the Fortune 500 use it, while reporting economic-use patterns from Claude interactions.",
+      "claim": "Anthropic reported that more than 100,000 customers run Claude on Amazon Bedrock.",
       "quantified": {
-        "fortune_500_usage_pct": 80,
-        "daily_users": "millions"
+        "amazon_bedrock_customers_running_claude_gt": 100000
       },
       "assumptions": [
-        "Enterprise and consumer channels coexist and likely have different request, privacy, latency, and workload distributions."
+        "The count establishes a Claude-on-Amazon-Bedrock customer denominator rather than Anthropic-wide users, seats, organizations, or direct API customers."
       ],
       "contradictions_or_limits": [
-        "Company-reported adoption does not reveal active seats, token share, tenant concentration, or infrastructure allocation."
+        "The source does not define whether a customer is an AWS account, organization, contract, or another unit, and one customer may contain many users, applications, workspaces, or API keys.",
+        "The count excludes or does not separately identify direct Anthropic API, Claude.ai, Google Vertex AI, or Microsoft Foundry populations and is not requests, sessions, messages, tokens, concurrency, or model-specific traffic."
       ],
       "fak_implications": [
-        "Keep channel and tenant class in traces; do not infer traffic from logo/adoption counts."
+        "Represent the Amazon Bedrock customer population separately from direct Anthropic and other cloud-channel populations.",
+        "Do not translate customer count into users, request load, traffic share, or workload shape."
       ],
       "rumor": {
         "is_rumor": false
@@ -10232,6 +10235,132 @@
         "Do not use either timeout as a workload-duration distribution."
       ],
       "rumor": false
+    },
+    {
+      "id": "google-gemini-app-user-scale-2026",
+      "category": "frontier_lab",
+      "entity": "Google",
+      "topic": [
+        "userbase",
+        "developer",
+        "enterprise",
+        "traffic",
+        "demand"
+      ],
+      "published_at": "2026-07-22",
+      "event_at": "2026-07-22",
+      "source_title": "Alphabet 2026 Q2 earnings call",
+      "source_url": "https://abc.xyz/investor/events/event-details/2026/2026-Q2-Earnings-Call-2026-GgTAq7Is0z/default.aspx",
+      "source_kind": "official_transcript",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Alphabet reported 950 million Gemini app monthly active users, more than 2.4 million Antigravity weekly active users, more than 9 million monthly developers across its model APIs and key developer products, approximately 22 billion model-API tokens processed per minute, and two Google Cloud paid-token customer cohorts.",
+      "quantified": {
+        "gemini_app_monthly_active_users": 950000000,
+        "gemini_app_daily_active_users_yoy_multiple": 3,
+        "antigravity_weekly_active_users_gt": 2400000,
+        "model_api_and_key_developer_product_monthly_developers_gt": 9000000,
+        "model_api_tokens_per_minute_approx": 22000000000,
+        "google_cloud_customers_tokens_prior_year_gt_1t_approx": 500,
+        "google_cloud_enterprises_tokens_prior_12_months_gt_100b": 2000
+      },
+      "assumptions": [
+        "Each quantity has its own product, time-window, and unit boundary: Gemini app MAU, Antigravity WAU, monthly developers across model APIs and key developer products, model-API tokens per minute, and Google Cloud customer/enterprise token-threshold cohorts."
+      ],
+      "contradictions_or_limits": [
+        "The daily-active disclosure is a growth multiple without a daily-active population count.",
+        "Gemini app MAU excludes or does not separately identify AI Studio, Gemini API, Workspace, Search AI features, or model-specific traffic; Antigravity WAU and the monthly developer population are separate product scopes.",
+        "Model-API tokens per minute are aggregate throughput, not requests, queries, sessions, messages, users, concurrency, geography, per-model allocation, or an interarrival distribution.",
+        "The Cloud token cohorts count customers or enterprises crossing thresholds, not total customers, total tokens, tokens per minute, requests, sessions, messages, concurrent users, or a traffic distribution."
+      ],
+      "fak_implications": [
+        "Keep Gemini app MAU, Antigravity WAU, monthly developers, model-API token throughput, and Google Cloud threshold cohorts as separate typed denominators.",
+        "Use the token-per-minute disclosure only as an aggregate provider model-API throughput point; do not derive request rate, concurrency, geography, model mix, or traffic shape.",
+        "Threshold cohorts can bound the existence of very large enterprise token consumers, but do not identify their exact traffic, concentration, geography, or arrival process."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "meta-ai-user-scale-2025",
+      "category": "frontier_lab",
+      "entity": "Meta",
+      "topic": [
+        "userbase",
+        "consumer",
+        "demand"
+      ],
+      "published_at": "2025-04-30",
+      "event_at": "2025-04-30",
+      "source_title": "Meta Reports First Quarter 2025 Results",
+      "source_url": "https://investor.atmeta.com/investor-news/press-release-details/2025/Meta-Reports-First-Quarter-2025-Results/default.aspx",
+      "source_kind": "official_release",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Meta reported that Meta AI had almost 1 billion monthly actives.",
+      "quantified": {
+        "meta_ai_monthly_actives_approx": 1000000000
+      },
+      "assumptions": [
+        "The disclosure establishes an approximate monthly-actives population for Meta AI across the product scope Meta used in the release; it does not define the counted person or account unit."
+      ],
+      "contradictions_or_limits": [
+        "\"Almost 1 billion\" is approximate and does not state the exact count, whether the unit is people or accounts, or the inclusion rules across Meta applications and surfaces.",
+        "Meta AI monthly actives are not Meta Family daily active people, registered accounts, requests, sessions, messages, tokens, model-specific Llama traffic, or concurrency."
+      ],
+      "fak_implications": [
+        "Preserve the approximate qualifier and Meta AI product scope.",
+        "Do not infer per-user usage, geography, request rate, concurrency, or Llama model share from the monthly-active population."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "microsoft-365-copilot-seat-scale-2026",
+      "category": "frontier_lab",
+      "entity": "Microsoft",
+      "topic": [
+        "paid_seats",
+        "userbase",
+        "developer",
+        "enterprise",
+        "traffic",
+        "demand"
+      ],
+      "published_at": "2026-07-29",
+      "event_at": "2026-07-29",
+      "source_title": "Microsoft fiscal year 2026 fourth quarter earnings conference call",
+      "source_url": "https://www.microsoft.com/en-us/investor/events/fy-2026/earnings-fy-2026-q4",
+      "source_kind": "official_transcript",
+      "evidence_class": "official_statement",
+      "confidence": "high",
+      "claim": "Microsoft reported more than 30 million paid Microsoft 365 Copilot seats, 50 million GitHub Copilot users, 100,000 Microsoft Foundry customers, nearly 40 million agents registered in Agent 365 across tens of thousands of companies, and more than 50 billion Copilot interactions audited by Purview to date.",
+      "quantified": {
+        "microsoft_365_copilot_paid_seats_gt": 30000000,
+        "microsoft_365_copilot_net_seat_adds_qoq_multiple_gt": 2,
+        "github_copilot_users": 50000000,
+        "microsoft_foundry_customers": 100000,
+        "agent_365_registered_agents_approx": 40000000,
+        "agent_365_company_count": "tens_of_thousands",
+        "purview_copilot_interactions_audited_to_date_gt": 50000000000
+      },
+      "assumptions": [
+        "The quantities describe separate products and denominator types: paid Microsoft 365 Copilot entitlements, GitHub Copilot users, Microsoft Foundry customers, registered Agent 365 agents and companies, and cumulative Copilot interactions audited by Purview."
+      ],
+      "contradictions_or_limits": [
+        "Paid seats are not necessarily active people; GitHub Copilot users are not identified as paid seats or active users; Foundry customers are not defined as organizations, developers, or active tenants; registered agents are not active or concurrent agents.",
+        "Purview-audited Copilot interactions are a cumulative governance/audit scope, not all Copilot interactions, a time-normalized request rate, sessions, messages, tokens, unique users, or model-specific traffic.",
+        "None is provider-wide Copilot usage, and the source does not disclose request interarrival, seat utilization, tenant concentration, geography, or model routing for these populations."
+      ],
+      "fak_implications": [
+        "Model each Microsoft product population and audited-interaction quantity separately, preserving seat, user, customer, registered-agent, company, and cumulative-interaction semantics.",
+        "Do not treat population growth, registered agents, or cumulative audited interactions as evidence of current request rate, concurrency, or workload distribution."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
     }
   ]
 }
