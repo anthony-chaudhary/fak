@@ -65,7 +65,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | Reused docs/research/inventory/ai-dynamo-dynamo-corpus.jsonl: cursor-exhausted legacy GraphQL issues/PRs/discussions plus releases/tags at 22:01:04Z, but it is stale against the shared cutoff pin and is not a fak-studyforge terminal receipt. |
+| forge_history | `complete` | `study-forge:sha256:9e49e551c3966f612159a773265363d753396d795ece243fdb59165a88676be2; file-sha256:6547f197b42a31ba78579d32f66de440f128d23e8a9ce417bdd72b0392577bd9; records:13979; bytes:45421438` | Complete validated study-forge corpus at the shared cutoff and pinned revision 6fa28c2f84e0ceab4c4cf60f147f63dff77b7f17; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:0579a280eb576396695dac7b0e0b4a43c1bf953e7cbedec1e3513bf7e786f53b` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `partial` | — | Reused docs/research/inventory/ai-dynamo-dynamo.json at stale pin f494601e; 5,401 files were exhaustive there, not at the cutoff pin. |
 
@@ -90,7 +90,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | Legacy paginated issue/PR/release/discussion read-back exists at the stale pin; no terminal fak-studyforge receipt is present. |
+| forge_history | `complete` | `study-forge:sha256:90ad57df79a5c82656c41aaeb644c807117f6c0cff1227053f3806ab6ea1bb4e; file-sha256:31b45236b77a1e279f909762075437b80629acfd1446e01f2d44ba8bbcd127a1; records:5203; bytes:17238820` | Complete validated study-forge corpus at the shared cutoff and pinned revision e4b7fa4b7c3ba5e17286d9c59f2bcf2ca07e0a6d; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:901583878dc508e37e7bc6877575e3bcea1e732ba38baab4961e6310491d4a47` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `partial` | — | Reused docs/research/inventory/flashinfer-ai-flashinfer.json at stale pin fb28d724; exact cutoff tree remains uncaptured. |
 
@@ -115,7 +115,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | docs/research/inventory/ggml-org-llama-cpp.json covers 2,226 open issue/PR items at 22:20Z; it explicitly does not prove complete closed history or all six study-forge classes. |
+| forge_history | `complete` | `study-forge:sha256:f2b36ab2c7d52df411d588df4c18ba136702de4edca778728247cc99c82afca3; file-sha256:f865ff875d3f4af44d954f5bae5ea4e746b5649d48b17202e6ff43fc7f8fef8e; records:34633; bytes:114986090` | Complete validated study-forge corpus at the shared cutoff and pinned revision 925e1179947ea0c0ebfb0032df18af3a729822be; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:bb7561b67dae0ce068cb1afd368457a03ca5ea9ab7b34fda9e801ae7fcc28638` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `complete` | `docs/research/inventory/ggml-org-llama-cpp.json#upstream.tree.truncated=false` | Exact cutoff revision recursive tree: 3,871 entries, 3,498 blobs, 373 trees, not truncated. |
 
@@ -140,7 +140,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | Legacy GitHub aggregate and pagination receipts exist at the stale pin, but no terminal fak-studyforge receipt is present. |
+| forge_history | `complete` | `study-forge:sha256:89d9fbfa7ed92f44f5d6a303ddf99cc004f15c0ce66b3115cfa94f3fca72064e; file-sha256:e1c78998333edc530101554d13ec90c8c40758a2dbe6b7971490ffd2fec83bab; records:2470; bytes:5259930` | Complete validated study-forge corpus at the shared cutoff and pinned revision bc20f73bd344b5a0faad5afca93831088aeee957; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:57c031e130d149f50ee163d60355ecbbd06ba15de421f960f58d76a11f5fa184` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `partial` | — | Reused docs/research/inventory/llm-d-llm-d.json at stale pin 3243fcf1; the exact cutoff tree is not captured. |
 
@@ -165,7 +165,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `missing` | — | No terminal study-forge corpus or source-class receipt exists at the shared cutoff. |
+| forge_history | `complete` | `study-forge:sha256:b80845eff4b726afc73a8aa3c7c64274bbef235a8f1964b6156a17bbf4634ef2; file-sha256:2fd1d9a546567b402df6db0a1c6a953ac1c89f2008bca1fb7d56357c399daaf1; records:18376; bytes:87650376` | Complete validated study-forge corpus at the shared cutoff and pinned revision c2f5f31912bf2257bfc42f79fa6621766cd4f9e4; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:d45dd09104d1edd45b1737d57248bb9793e11f70f206a6eba4c3fa5b743985b6` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No machine-readable runtime tree inventory exists for c2f5f319; docs/notes/CONCEPT-STUDY-TENSORRT-LLM-2026-07-18.md is stale source guidance only. |
 
@@ -190,7 +190,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `missing` | — | No terminal study-forge corpus at the shared cutoff; mechanism slices remain partial. |
+| forge_history | `complete` | `study-forge:sha256:f1636085e8c9bfbb3a0c20fb4f684d329f76b8b17f54627001b22970ecaf0c7a; file-sha256:2103ccac2d04cc23e6a0bd405bd5ac5f6e1d6005efa81c83dc28490fe7d00056; records:36658; bytes:164718108` | Complete validated study-forge corpus at the shared cutoff and pinned revision 7f27bf470824f452a34e866d22ab5e332a23e26f; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:114d9a9af75479da6cb8ca5bb4df91d4bc0ff3559d1225ac7dbf0d5309e7813f` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No standard inventory for full sgl-project/sglang at 7f27bf47; existing mini-sglang map is a different repository and cannot satisfy this member. |
 
@@ -215,7 +215,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `missing` | — | No study-forge capture was attempted; forge classes remain missing. |
+| forge_history | `complete` | `study-forge:sha256:76e106727641b361c9aa00b129fc7f8b7f0a02c652001b24a946a7e8697dc989; file-sha256:e1f191632e40c167aa9012f1142c8c12561fe7eaddbb249a5e8100eb86a05d63; records:290; bytes:1153460` | Complete validated study-forge corpus at the shared cutoff and pinned revision b00e884c4e8eb542544d3eba623e74ca01252c92; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:5478d62c626fab3bfcb978ff3d46827a85270113f221a4f7ee3e3b06a57ea76c` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No pinned runtime tree slice is retained in git or allocated scratch for this run. |
 
@@ -240,7 +240,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `missing` | — | No study-forge capture was attempted; forge classes remain missing. |
+| forge_history | `complete` | `study-forge:sha256:498dfd478eb302fc630665c0b23e66ff728e3caad168851e84a0c3f6d9800c25; file-sha256:f43e945d1fcb0a9131bf9aed741cd0ba5a1fb65160f16a351c5c94898f4ead62; records:2690; bytes:8549752` | Complete validated study-forge corpus at the shared cutoff and pinned revision 7540088967a00a00d9e954688543914ec84ec832; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:8bf963bedc1b4fd3d55c0b32a840b25f50c23f1d0e01426dd5a2d85cb955caa3` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No pinned runtime tree inventory is present. |
 
@@ -265,7 +265,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | _scratch/study-adjacency-9275/vllm-project-production-stack-forge.json: 1,089 normalized records at the exact cutoff revision; discussions failed HTTP 410 and non-atomic PR delta 1,486 exceeded the 1,000 policy. |
+| forge_history | `complete` | `study-forge:sha256:80a468dc2d1da9db5a752de66e69fce311274f533b8782739ba095b422e2b00c; file-sha256:57702b0369e5a9a68dfb407dd71af425aa11f0143cbe83eb93462f8d67da67a2; records:1088; bytes:4109839` | Complete validated study-forge corpus at the shared cutoff and pinned revision 58a0935955d5b29f615c784a3533ff2433075bdd; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:1e45cba00cf8e04e5a30ef31858375d287db6b2ab866d40bbcd3a84a81ef8083` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No standard pinned runtime tree inventory was produced in this run. |
 
@@ -290,7 +290,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | _scratch/study-adjacency-9275/vllm-project-router-forge.json: 232 normalized records; issues/pulls/releases/labels/milestones terminal and PR reconciliation accepted, but Discussions is disabled (HTTP 410), so the overall receipt is partial. |
+| forge_history | `complete` | `study-forge:sha256:1973cac7a70d66f60cb0f778f05561eb184b0e39f3e61dd03241c361a902a97c; file-sha256:bbc3cf9f2dba1e006a3eb35e825f9b0c728141c9970589689ac34bedba4c3543; records:232; bytes:736345` | Complete validated study-forge corpus at the shared cutoff and pinned revision 1d10e71fb7bb4c0adc9f2c16ec77bf5dd4aa1586; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:6000415ff90e6b649bd860b38b96980ff79252009cdcb221ac68bce0f66a201f` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No standard pinned runtime tree inventory was produced in this run. |
 
@@ -315,7 +315,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `missing` | — | No study-forge capture was attempted; forge classes remain missing. |
+| forge_history | `complete` | `study-forge:sha256:0955662d24595bed793fecd2b8ba64616b5961980ec16fdb00585a95af99792a; file-sha256:4b141321dabc1f2b2495f791a46804d699756aa87da3c0f66e24ddee394c7c33; records:3112; bytes:11625722` | Complete validated study-forge corpus at the shared cutoff and pinned revision 2aaf0a647e491e8dde22a4ce6888975e358c9008; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:80e031c77a6249d52c331027c34ca49a155ba7ed588533a1481da8dc721a2b38` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No pinned runtime tree inventory is present. |
 
@@ -340,7 +340,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | _scratch/study-adjacency-9275/vllm-project-speculators-forge.json: 1,078 normalized records; all six source crawls terminal, but non-atomic PR reconciliation rejected the corpus. |
+| forge_history | `complete` | `study-forge:sha256:37d3929622cbda83b513febdd5bf601f6a4ca58c4e06c38a961ad99bb62d7b11; file-sha256:dd6210c8045fa95e2fdc298c765670b68e435555415497157c05633042cfa92e; records:1078; bytes:3839241` | Complete validated study-forge corpus at the shared cutoff and pinned revision 51f8e02f077c9336f9e4cc66155e22127f354c5d; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:ae7848b63e4245d5d6ed8c8915a0e19bd91dda17a42132cf2ed07dc08b461d3b` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `partial` | — | Reused docs/research/inventory/vllm-project-speculators.json at stale pin 0faffeb3; exact cutoff tree is not inventoried. |
 
@@ -365,7 +365,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `missing` | — | No study-forge capture was attempted; forge classes remain missing. |
+| forge_history | `complete` | `study-forge:sha256:e2c5eb1f769d6729dc4eee0899a52d8df116702ada123ff3a93a99ea4bbedfa0; file-sha256:7349113f2ff31fe8c0522a573d90eeb94e87e72b1692b32e6ed4e47a1531fd5a; records:140; bytes:392667` | Complete validated study-forge corpus at the shared cutoff and pinned revision fb973ad784f38b98b054e136bec3414b7cd8494d; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:e78d016fc2451101764ecba28ee58f733a05fa7915773a6fcd93a44d606e068c` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No pinned runtime tree inventory is present. |
 
@@ -390,7 +390,7 @@
 
 | Class | Status | Terminal receipt | Notes |
 |---|---|---|---|
-| forge_history | `partial` | — | _scratch/study-adjacency-9275/vllm-project-vllm-metal-forge.json: 1,114 normalized records; discussions failed HTTP 410 and exact PR reconciliation exceeded policy (1,060 > 1,000), so the receipt remains partial. |
+| forge_history | `complete` | `study-forge:sha256:2da0ed39efa76b19305d4f7039debb7245e6eb27101326e193f0dc7fcf17422d; file-sha256:c4e674cc13c122438aa5f862aa96de63b4586edaa693a525683da8994ede5902; records:1114; bytes:2288792` | Complete validated study-forge corpus at the shared cutoff and pinned revision db4d7c57c7d72f731f7010fd3b60fc25fc489229; full corpus retained in allocated scratch. |
 | repository_metadata | `complete` | `github-graphql:defaultBranchRef.history(first:1,until=2026-08-26T22:35:00Z); response-sha256:99d629405d298eb28c0707403bca1bd692debf08a5c682a644c86712871ee3fd` | Authoritative GitHub GraphQL returned the canonical identity, default branch, cutoff revision, and commit timestamp. The normalized one-line response digest is retained here; raw responses remain allocated scratch. |
 | runtime_tree | `missing` | — | No standard pinned runtime tree inventory was produced in this run. |
 
