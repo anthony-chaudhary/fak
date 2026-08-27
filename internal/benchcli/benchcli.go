@@ -12,11 +12,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -102,22 +104,23 @@ type Lineage struct {
 // that a generic emitter cannot infer are never omitted; they fail-soft to
 // "unknown" (or CLAIM_UNWITNESSED for DOS verification) so absence is visible.
 type BenchmarkArtifact struct {
-	Schema         string            `json:"schema"`
-	RunID          string            `json:"run_id"`
-	Timestamp      string            `json:"timestamp"`
-	FAKCommit      string            `json:"fak_commit"`
-	FAKVersion     string            `json:"fak_version"`
-	HarnessVersion string            `json:"harness_version"`
-	Harness        HarnessInfo       `json:"harness"`
-	Machine        MachineInfo       `json:"machine"`
-	Model          ModelSnapshot     `json:"model"`
-	Dependencies   map[string]string `json:"dependency_versions"`
-	Build          BuildInfo         `json:"build"`
-	Config         ConfigSnapshot    `json:"config"`
-	Results        ResultSnapshot    `json:"results"`
-	Invalidated    Invalidation      `json:"invalidated"`
-	Witness        WitnessInfo       `json:"witness"`
-	Lineage        LineageRefs       `json:"lineage"`
+	Schema             string              `json:"schema"`
+	RunID              string              `json:"run_id"`
+	Timestamp          string              `json:"timestamp"`
+	FAKCommit          string              `json:"fak_commit"`
+	FAKVersion         string              `json:"fak_version"`
+	HarnessVersion     string              `json:"harness_version"`
+	Harness            HarnessInfo         `json:"harness"`
+	Machine            MachineInfo         `json:"machine"`
+	Model              ModelSnapshot       `json:"model"`
+	Dependencies       map[string]string   `json:"dependency_versions"`
+	Build              BuildInfo           `json:"build"`
+	Config             ConfigSnapshot      `json:"config"`
+	Results            ResultSnapshot      `json:"results"`
+	Invalidated        Invalidation        `json:"invalidated"`
+	Witness            WitnessInfo         `json:"witness"`
+	Lineage            LineageRefs         `json:"lineage"`
+	SimulationEvidence *SimulationEvidence `json:"simulation_evidence,omitempty"`
 }
 
 type HarnessInfo struct {
@@ -156,9 +159,10 @@ type ConfigSnapshot struct {
 }
 
 type ResultSnapshot struct {
-	Metrics  map[string]any    `json:"metrics"`
-	Units    map[string]string `json:"units"`
-	Baseline map[string]any    `json:"baseline"`
+	Metrics       map[string]any    `json:"metrics"`
+	Units         map[string]string `json:"units"`
+	Baseline      map[string]any    `json:"baseline"`
+	ClaimLanguage []string          `json:"claim_language,omitempty"`
 }
 
 type Invalidation struct {
@@ -183,15 +187,16 @@ type LineageRefs struct {
 // small: enough to answer "which run produced this published number, under what
 // code/model/config identity, and is it still valid?"
 type IndexedArtifact struct {
-	Path           string        `json:"path"`
-	RunID          string        `json:"run_id"`
-	Timestamp      string        `json:"timestamp"`
-	FAKCommit      string        `json:"fak_commit"`
-	HarnessVersion string        `json:"harness_version"`
-	Model          ModelSnapshot `json:"model"`
-	ConfigHash     string        `json:"config_hash"`
-	Invalidated    Invalidation  `json:"invalidated"`
-	Witness        WitnessInfo   `json:"witness"`
+	Path               string              `json:"path"`
+	RunID              string              `json:"run_id"`
+	Timestamp          string              `json:"timestamp"`
+	FAKCommit          string              `json:"fak_commit"`
+	HarnessVersion     string              `json:"harness_version"`
+	Model              ModelSnapshot       `json:"model"`
+	ConfigHash         string              `json:"config_hash"`
+	Invalidated        Invalidation        `json:"invalidated"`
+	Witness            WitnessInfo         `json:"witness"`
+	SimulationEvidence *SimulationEvidence `json:"simulation_evidence,omitempty"`
 }
 
 type ArtifactIndex struct {
@@ -227,16 +232,41 @@ func stampCommit() string {
 	if v := strings.TrimSpace(os.Getenv("FAK_BENCH_COMMIT")); v != "" {
 		return v
 	}
+	if commit := stampGitCommit(); commit != "" {
+		return commit
+	}
+	if commit := stampBuildVCSCommit(); commit != "" {
+		return commit
+	}
+	return lineageUnknown
+}
+
+var readBuildInfo = debug.ReadBuildInfo
+
+var stampGitCommit = func() string {
 	cmd := exec.Command("git", "rev-parse", "HEAD")
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		return lineageUnknown
+		return ""
 	}
 	if c := strings.TrimSpace(string(out)); c != "" {
 		return c
 	}
-	return lineageUnknown
+	return ""
+}
+
+func stampBuildVCSCommit() string {
+	info, ok := readBuildInfo()
+	if !ok || info == nil {
+		return ""
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "vcs.revision" {
+			return strings.TrimSpace(setting.Value)
+		}
+	}
+	return ""
 }
 
 func stampNode() string {
@@ -390,6 +420,24 @@ func firstNonSpaceIsBrace(b []byte) bool {
 // returned unchanged. This and WriteReport are the wiring points the lineage gate
 // (tools/check_bench_lineage.py) requires every cmd/*bench* result emitter to use.
 func MarshalReport(report any) ([]byte, error) {
+	return marshalReport(report, nil)
+}
+
+// MarshalReportWithEvidence is MarshalReport plus the typed evidence contract.
+// It validates before emitting so a malformed or over-promoted simulated result
+// can never be serialized as a benchmark artifact. The schema default is the
+// sole convenience: all evidence and provenance fields remain fail-closed.
+func MarshalReportWithEvidence(report any, evidence SimulationEvidence) ([]byte, error) {
+	if evidence.Schema == "" {
+		evidence.Schema = SimulationEvidenceSchema
+	}
+	if err := ValidateSimulationEvidence(evidence); err != nil {
+		return nil, fmt.Errorf("simulation evidence: %w", err)
+	}
+	return marshalReport(report, &evidence)
+}
+
+func marshalReport(report any, evidence *SimulationEvidence) ([]byte, error) {
 	var b []byte
 	switch r := report.(type) {
 	case []byte:
@@ -404,8 +452,28 @@ func MarshalReport(report any) ([]byte, error) {
 		b = m
 	}
 	lin := Stamp()
-	b = ArtifactFromJSON(lin, b).Into(b)
-	return lin.Into(b), nil
+	art := ArtifactFromJSON(lin, b)
+	art.SimulationEvidence = evidence
+	if evidence != nil {
+		if err := ValidateBenchmarkArtifact(art); err != nil {
+			return nil, fmt.Errorf("benchmark artifact evidence: %w", err)
+		}
+	}
+	b = art.Into(b)
+	b = lin.Into(b)
+	if evidence != nil {
+		decoded, ok := DecodeArtifact(b)
+		if !ok || decoded.SimulationEvidence == nil || !sameSimulationEvidence(*decoded.SimulationEvidence, *evidence) {
+			return nil, errors.New("benchmark report shape cannot embed the exact simulation evidence block")
+		}
+	}
+	return b, nil
+}
+
+func sameSimulationEvidence(left, right SimulationEvidence) bool {
+	lb, lerr := json.Marshal(left)
+	rb, rerr := json.Marshal(right)
+	return lerr == nil && rerr == nil && bytes.Equal(lb, rb)
 }
 
 // WriteReport marshals report (stamping lineage, see MarshalReport) and writes it
@@ -413,12 +481,28 @@ func MarshalReport(report any) ([]byte, error) {
 // emitters that always write to a file; emitters that also print to stdout use
 // MarshalReport and branch on the bytes themselves.
 func WriteReport(path string, report any) error {
+	return writeReport(path, report, nil)
+}
+
+// WriteReportWithEvidence is the single-call file form of
+// MarshalReportWithEvidence.
+func WriteReportWithEvidence(path string, report any, evidence SimulationEvidence) error {
+	return writeReport(path, report, &evidence)
+}
+
+func writeReport(path string, report any, evidence *SimulationEvidence) error {
 	prev := os.Getenv("FAK_BENCH_ARTIFACT")
 	if prev == "" {
 		_ = os.Setenv("FAK_BENCH_ARTIFACT", filepath.ToSlash(path))
 		defer os.Unsetenv("FAK_BENCH_ARTIFACT")
 	}
-	b, err := MarshalReport(report)
+	var b []byte
+	var err error
+	if evidence == nil {
+		b, err = MarshalReport(report)
+	} else {
+		b, err = MarshalReportWithEvidence(report, *evidence)
+	}
 	if err != nil {
 		return err
 	}
@@ -494,15 +578,16 @@ func BuildLineageIndex(root string) (ArtifactIndex, error) {
 			rel = path
 		}
 		out.Artifacts = append(out.Artifacts, IndexedArtifact{
-			Path:           filepath.ToSlash(rel),
-			RunID:          art.RunID,
-			Timestamp:      art.Timestamp,
-			FAKCommit:      art.FAKCommit,
-			HarnessVersion: art.HarnessVersion,
-			Model:          art.Model,
-			ConfigHash:     art.Config.Hash,
-			Invalidated:    art.Invalidated,
-			Witness:        art.Witness,
+			Path:               filepath.ToSlash(rel),
+			RunID:              art.RunID,
+			Timestamp:          art.Timestamp,
+			FAKCommit:          art.FAKCommit,
+			HarnessVersion:     art.HarnessVersion,
+			Model:              art.Model,
+			ConfigHash:         art.Config.Hash,
+			Invalidated:        art.Invalidated,
+			Witness:            art.Witness,
+			SimulationEvidence: art.SimulationEvidence,
 		})
 		return nil
 	})
@@ -518,11 +603,18 @@ func DecodeArtifact(raw []byte) (BenchmarkArtifact, bool) {
 		return BenchmarkArtifact{}, false
 	}
 	if v, ok := root["benchmark_artifact"]; ok {
-		b, _ := json.Marshal(v)
-		var art BenchmarkArtifact
-		if json.Unmarshal(b, &art) == nil && art.RunID != "" {
-			return art, true
+		b, err := json.Marshal(v)
+		if err != nil {
+			return BenchmarkArtifact{}, false
 		}
+		var art BenchmarkArtifact
+		if json.Unmarshal(b, &art) != nil || art.Schema != BenchmarkArtifactSchema || art.RunID == "" {
+			return BenchmarkArtifact{}, false
+		}
+		if err := ValidateBenchmarkArtifact(art); err != nil {
+			return BenchmarkArtifact{}, false
+		}
+		return art, true
 	}
 	if v, ok := root["lineage"]; ok {
 		b, _ := json.Marshal(v)
@@ -630,6 +722,7 @@ func extractConfig(root map[string]any) ConfigSnapshot {
 func extractResults(root map[string]any) ResultSnapshot {
 	metrics := map[string]any{}
 	units := map[string]string{}
+	var claims []string
 	for _, section := range []string{"results", "kpis", "net"} {
 		if m := mapField(root, section); len(m) > 0 {
 			flattenScalars(metrics, section, m)
@@ -645,8 +738,13 @@ func extractResults(root map[string]any) ResultSnapshot {
 			units[k] = u
 		}
 	}
+	for _, key := range []string{"label", "headline", "claim", "evidence_status"} {
+		if value := strings.TrimSpace(stringField(root, key)); value != "" {
+			claims = append(claims, value)
+		}
+	}
 	base := firstMap(root, "baseline", "spawned_hook_baseline")
-	return ResultSnapshot{Metrics: metrics, Units: units, Baseline: base}
+	return ResultSnapshot{Metrics: metrics, Units: units, Baseline: base, ClaimLanguage: claims}
 }
 
 func envInvalidation() Invalidation {

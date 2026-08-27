@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -67,6 +68,7 @@ const (
 	guardCrashNoProgressLimitEnv     = "FLEET_CLAUDE_GUARD_CRASH_NO_PROGRESS_LIMIT"
 	guardCrashNoProgressLimitDefault = 2
 	guardCodexCLIUsageReason         = "CODEX_CLI_USAGE"
+	guardCodexInvalidJSONReason      = "CODEX_INVALID_JSON"
 	guardChildStderrCaptureLimit     = 64 << 10
 )
 
@@ -148,6 +150,41 @@ func guardIsCodexCLIUsageFailure(runErr error, childState *os.ProcessState, agen
 	return parseDiagnostic && usage
 }
 
+// guardIsCodexInvalidJSONFailure recognizes the exact Codex exec-resume terminal envelope
+// observed in #9481: exit 1 plus a turn.failed JSON event classified as "other" whose message
+// is the stable function-argument JSON parser diagnostic. Requiring all four fields keeps an
+// unrelated exit 1, a generic "other" error, and unstructured prose on the bounded restart path.
+func guardIsCodexInvalidJSONFailure(runErr error, childState *os.ProcessState, agentName, capturedStderr string) bool {
+	if guardAgentBaseName(agentName) != "codex" {
+		return false
+	}
+	_, code, isCrash := guardClassifyChildCrash(runErr, childState)
+	if !isCrash || code != 1 {
+		return false
+	}
+	type turnFailedEvent struct {
+		Type  string `json:"type"`
+		Error struct {
+			Message        string `json:"message"`
+			CodexErrorInfo string `json:"codex_error_info"`
+		} `json:"error"`
+	}
+	for _, raw := range strings.Split(capturedStderr, "\n") {
+		var event turnFailedEvent
+		if json.Unmarshal([]byte(strings.TrimSpace(raw)), &event) != nil {
+			continue
+		}
+		if event.Type != "turn.failed" || event.Error.CodexErrorInfo != "other" {
+			continue
+		}
+		const diagnostic = "failed to parse function arguments: EOF while parsing an object at line "
+		if strings.HasPrefix(event.Error.Message, diagnostic) && strings.Contains(event.Error.Message[len(diagnostic):], " column ") {
+			return true
+		}
+	}
+	return false
+}
+
 // guardRefuseCodexCLIUsage records one durable, typed terminal witness. The caller then enters
 // the ordinary final-report funnel with the original *exec.ExitError, preserving exit 2 and the
 // stderr that the capture already streamed while creating no restart hop or replacement child.
@@ -158,6 +195,20 @@ func guardRefuseCodexCLIUsage(runErr error, childState *os.ProcessState, agentNa
 	appendGuardChildExitWitnessWithReason(auditJournal, agentName, traceID, runErr, childState, started, guardCodexCLIUsageReason)
 	if stderr != nil {
 		fmt.Fprintf(stderr, "fak guard: %s: Codex rejected the command-line usage; correct the command with `codex exec --help` before relaunching\n", guardCodexCLIUsageReason)
+	}
+	return true
+}
+
+// guardRefuseCodexInvalidJSON records only the typed terminal reason; the captured Codex event
+// remains on the original child stream and never enters the audit journal. The caller preserves
+// the original exit-1 error while stopping before generic crash-restart admission.
+func guardRefuseCodexInvalidJSON(runErr error, childState *os.ProcessState, agentName, traceID string, capturedStderr string, started time.Time, auditJournal *journal.Journal, stderr io.Writer) bool {
+	if !guardIsCodexInvalidJSONFailure(runErr, childState, agentName, capturedStderr) {
+		return false
+	}
+	appendGuardChildExitWitnessWithReason(auditJournal, guardAgentBaseName(agentName), traceID, runErr, childState, started, guardCodexInvalidJSONReason)
+	if stderr != nil {
+		fmt.Fprintf(stderr, "fak guard: %s: Codex ended the turn on invalid function-call JSON; correct the failed turn before resuming\n", guardCodexInvalidJSONReason)
 	}
 	return true
 }

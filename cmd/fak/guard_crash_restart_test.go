@@ -100,6 +100,37 @@ func TestGuardCodexCLIUsageFailureClassification(t *testing.T) {
 	}
 }
 
+func TestGuardCodexInvalidJSONFailureClassification(t *testing.T) {
+	exit1, state1 := runToExit(t, 1)
+	observed := `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2","codex_error_info":"other"}}` + "\n"
+
+	if !guardIsCodexInvalidJSONFailure(exit1, state1.ProcessState, "codex", observed) {
+		t.Fatal("directly observed Codex invalid-JSON exit-1 envelope was not classified")
+	}
+	for name, stderr := range map[string]string{
+		"other without diagnostic": `{"type":"turn.failed","error":{"message":"request blocked","codex_error_info":"other"}}`,
+		"diagnostic without other": `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2"}}`,
+		"unstructured diagnostic":  "failed to parse function arguments: EOF while parsing an object at line 1 column 2",
+		"unrelated exit one":       "panic: index out of range",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if guardIsCodexInvalidJSONFailure(exit1, state1.ProcessState, "codex", stderr) {
+				t.Fatalf("overgeneralized stderr %q as Codex invalid JSON", stderr)
+			}
+		})
+	}
+	if guardIsCodexInvalidJSONFailure(exit1, state1.ProcessState, "claude", observed) {
+		t.Fatal("Codex-shaped stderr from a non-Codex harness was classified")
+	}
+	exit2, state2 := runToExit(t, 2)
+	if guardIsCodexInvalidJSONFailure(exit2, state2.ProcessState, "codex", observed) {
+		t.Fatal("non-exit-1 Codex failure was classified as invalid JSON")
+	}
+	if _, code, ok := guardMaybeRestartOnCrash(exit1, state1.ProcessState, 0, 3); !ok || code != 1 {
+		t.Fatalf("unrelated exit 1 lost generic restart admission: code=%d ok=%v", code, ok)
+	}
+}
+
 func TestGuardChildStderrCapturePreservesAndBoundsStream(t *testing.T) {
 	payload := bytes.Repeat([]byte("x"), guardChildStderrCaptureLimit+257)
 	var original bytes.Buffer
@@ -343,6 +374,90 @@ func TestGuardCodexCLIUsageFailureStopsBeforeRestart(t *testing.T) {
 	}
 }
 
+// TestGuardCodexInvalidJSONFailureStopsBeforeRestart is the supervision witness for #9481.
+// The child emits the sanitized turn.failed envelope observed on Codex exec resume and exits 1.
+// The launch count and audit rows prove the exact terminal class stops before generic restart,
+// while the classification table above keeps unrelated exit-1 failures restartable.
+func TestGuardCodexInvalidJSONFailureStopsBeforeRestart(t *testing.T) {
+	dir := t.TempDir()
+	codexPath := guardNamedCodexTestBinary(t, dir)
+	statePath := filepath.Join(dir, "child-state")
+	auditPath := filepath.Join(dir, "audit.jsonl")
+
+	cmd := exec.Command(os.Args[0], "guard")
+	guardArgs := strings.Join([]string{
+		"--quiet", "--provider", "openai",
+		"--api-key-env", "FAK_GUARD_CRASH_WITNESS_KEY",
+		"--audit", auditPath,
+		"--", codexPath, "--fak-guard-crash-witness-child",
+	}, " ")
+	cmd.Env = append(os.Environ(),
+		guardE2EHelperEnv+"="+guardArgs,
+		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
+		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
+		"FAK_GUARD_CRASH_WITNESS_MODE=codex-invalid-json",
+		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
+		guardCrashRestartLimitEnv+"=3",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("guard exit=%v, want preserved child exit 1\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	gotStderr := stderr.String()
+	for _, want := range []string{
+		"failed to parse function arguments: EOF while parsing an object at line 1 column 2",
+		`"codex_error_info":"other"`,
+		guardCodexInvalidJSONReason,
+	} {
+		if !strings.Contains(gotStderr, want) {
+			t.Fatalf("stderr missing %q:\n%s", want, gotStderr)
+		}
+	}
+	if strings.Contains(gotStderr, "restarting the child") || strings.Contains(gotStderr, guardCrashRestartExhaustedReason) {
+		t.Fatalf("invalid-JSON failure entered crash restart:\n%s", gotStderr)
+	}
+	state, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(state)); got != "1" {
+		t.Fatalf("child launch count=%s, want exactly one launch", got)
+	}
+
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("failed to parse function arguments")) || bytes.Contains(data, []byte("codex_error_info")) || bytes.Contains(data, []byte(codexPath)) {
+		t.Fatalf("audit leaked raw diagnostic or executable path:\n%s", data)
+	}
+	var invalidJSONWitnesses, restartHops int
+	scan := bufio.NewScanner(bytes.NewReader(data))
+	for scan.Scan() {
+		var row journal.Row
+		if err := json.Unmarshal(scan.Bytes(), &row); err != nil {
+			t.Fatalf("decode audit row %q: %v", scan.Text(), err)
+		}
+		if row.Kind == "CHILD_CRASH" && row.Reason == guardCodexInvalidJSONReason && row.ExitCode == 1 {
+			invalidJSONWitnesses++
+		}
+		if row.Kind == "RESTART_HOP" {
+			restartHops++
+		}
+	}
+	if err := scan.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if invalidJSONWitnesses != 1 || restartHops != 0 {
+		t.Fatalf("audit invalid-JSON witnesses=%d restart hops=%d, want 1/0\n%s", invalidJSONWitnesses, restartHops, data)
+	}
+}
+
 func guardNamedCodexTestBinary(t *testing.T, dir string) string {
 	t.Helper()
 	source, err := os.Executable()
@@ -478,6 +593,10 @@ func runGuardCrashWitnessChild() {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "Usage: codex exec [OPTIONS] [PROMPT]")
 		os.Exit(2)
+	}
+	if mode == "codex-invalid-json" {
+		fmt.Fprintln(os.Stderr, `{"type":"turn.failed","error":{"message":"failed to parse function arguments: EOF while parsing an object at line 1 column 2","codex_error_info":"other"}}`)
+		os.Exit(1)
 	}
 
 	base := strings.TrimRight(os.Getenv("ANTHROPIC_BASE_URL"), "/")

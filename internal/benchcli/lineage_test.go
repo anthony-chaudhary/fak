@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 )
@@ -110,6 +111,27 @@ func TestStampFieldsAndOverrides(t *testing.T) {
 	}
 	if strings.TrimSpace(lin.AppVersion) == "" {
 		t.Errorf("app_version is blank; appversion.Current() must always resolve")
+	}
+}
+
+func TestStampCommitFallsBackToGoBuildVCSRevision(t *testing.T) {
+	oldGit := stampGitCommit
+	oldBuildInfo := readBuildInfo
+	stampGitCommit = func() string { return "" }
+	readBuildInfo = func() (*debug.BuildInfo, bool) {
+		return &debug.BuildInfo{Settings: []debug.BuildSetting{
+			{Key: "vcs", Value: "git"},
+			{Key: "vcs.revision", Value: "build-vcs-deadbeef"},
+		}}, true
+	}
+	t.Cleanup(func() {
+		stampGitCommit = oldGit
+		readBuildInfo = oldBuildInfo
+	})
+	t.Setenv("FAK_BENCH_COMMIT", "")
+
+	if got := stampCommit(); got != "build-vcs-deadbeef" {
+		t.Fatalf("stampCommit fallback = %q, want Go build vcs.revision", got)
 	}
 }
 

@@ -592,6 +592,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	}
 	b = append(b, '\n')
 	profileSum := sha256.Sum256(b)
+	q4kResidency := m.Q4KResidencyReceipt()
 	receipt := nativeProfileReceipt{
 		Schema:            nativeProfileReceiptSchema,
 		ProfileSHA256:     fmt.Sprintf("%x", profileSum),
@@ -605,6 +606,7 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 		Controls:          controls,
 		Execution:         executionReceipt,
 		Fallbacks:         fallbackReceipt,
+		Q4KResidency:      &q4kResidency,
 	}
 	receipt.BindingSHA256, err = nativeReceiptBinding(receipt)
 	if err != nil {

@@ -194,6 +194,9 @@ type Model struct {
 	// paths never read it.
 	q4kw    map[string]*q4kTensor
 	q4khead *q4kTensor // pinned when lm_head is held raw in q4kw; headName() can't see q4kw
+	// q4kResidency owns the once-only streamed upload evidence for this model. Keeping the state
+	// on the model gives it the same lifetime without a global pointer-key retention map.
+	q4kResidency *q4kResidencyState
 
 	// numaInterleaveLabel caches the verdict of the last ApplyDecodeNUMAInterleave call
 	// (#4974) so a later NUMAInterleaveLabel() — e.g. a decode-witness RESULT line — can

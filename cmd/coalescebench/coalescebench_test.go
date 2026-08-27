@@ -5,10 +5,16 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 // smallCfg is a tiny, fast config that still exercises every code path (multiple layers,
@@ -49,6 +55,123 @@ func TestRunBenchDeterministic(t *testing.T) {
 		if !strings.Contains(first, want) {
 			t.Fatalf("output missing %q:\n%s", want, first)
 		}
+	}
+}
+
+// TestArtifactEmitsAnalyticalSimulationEvidence captures the actual shared
+// benchcli JSON emitter. The nested block is the mechanical fence that keeps
+// this deterministic PROJECTED roofline from being read as achieved hardware
+// throughput, while projected_markdown proves the old headline artifact is
+// carried byte-for-byte beside it.
+func TestArtifactEmitsAnalyticalSimulationEvidence(t *testing.T) {
+	cfg := smallCfg()
+	run, err := runSweep(cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("runSweep: %v", err)
+	}
+	markdown := render(cfg, run.Capacity, run.Rows, run.Base)
+
+	// Freeze the generic benchcli envelope so this proof only observes the
+	// coalescebench evidence contract, not the host clock/checkout/node.
+	t.Setenv("FAK_BENCH_UTC", "2026-08-27T00:00:00Z")
+	t.Setenv("FAK_BENCH_COMMIT", "0123456789abcdef")
+	t.Setenv("FAK_BENCH_NODE", "coalescebench-test")
+	t.Setenv("FAK_BENCH_RUN_ID", "coalescebench-evidence-test")
+	path := filepath.Join(t.TempDir(), "coalescebench.json")
+	if err := writeArtifact(path, cfg, run, markdown, 12*time.Millisecond); err != nil {
+		t.Fatalf("writeArtifact: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	if !strings.Contains(string(raw), `"simulation_evidence": {`) {
+		t.Fatalf("emitted artifact has no simulation_evidence block:\n%s", raw)
+	}
+
+	art, ok := benchcli.DecodeArtifact(raw)
+	if !ok {
+		t.Fatalf("benchcli.DecodeArtifact rejected emitted artifact:\n%s", raw)
+	}
+	if art.SimulationEvidence == nil {
+		t.Fatalf("decoded artifact lost simulation_evidence:\n%s", raw)
+	}
+	ev := art.SimulationEvidence
+	if ev.EvidenceType != benchcli.EvidenceAnalyticalBound || ev.ClaimCeiling != benchcli.ClaimBottleneckOnly {
+		t.Fatalf("evidence promotion fence = %q/%q, want %q/%q",
+			ev.EvidenceType, ev.ClaimCeiling, benchcli.EvidenceAnalyticalBound, benchcli.ClaimBottleneckOnly)
+	}
+	configJSON, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal expected config: %v", err)
+	}
+	const wantRevision = "0123456789abcdef"
+	wantConfig := benchcli.SHA256Digest(configJSON)
+	wantWorkload := benchcli.SHA256Digest(append([]byte(wantRevision+"\n"), configJSON...))
+	if ev.Engine.Revision != wantRevision || ev.Engine.ConfigDigest != wantConfig || ev.Workload.Digest != wantWorkload {
+		t.Fatalf("evidence identity = revision %q config %q workload %q, want revision %q config %q workload %q",
+			ev.Engine.Revision, ev.Engine.ConfigDigest, ev.Workload.Digest, wantRevision, wantConfig, wantWorkload)
+	}
+	if ev.Replay.Seed == nil || *ev.Replay.Seed != cfg.Seed || ev.Replay.Repetitions != 1 ||
+		ev.Replay.IndependentStreams != 1 || ev.Replay.Stochastic {
+		t.Fatalf("replay identity = %+v, want one deterministic fixed-seed fixture with seed=%d", ev.Replay, cfg.Seed)
+	}
+	if ev.ValidityEnvelope.Dimensions["seed"] != "7" {
+		t.Fatalf("validity seed = %q, want 7", ev.ValidityEnvelope.Dimensions["seed"])
+	}
+	hasCrossSeedFence := false
+	for _, excluded := range ev.ExcludedEffects {
+		if strings.Contains(excluded, "cross-seed uncertainty") {
+			hasCrossSeedFence = true
+			break
+		}
+	}
+	if !hasCrossSeedFence {
+		t.Fatalf("excluded effects do not fence cross-seed uncertainty: %v", ev.ExcludedEffects)
+	}
+	if ev.Cost.HostWallTimeMS != 12 || ev.Cost.HostCPUTimeMS != 0 || ev.Cost.Bytes <= 0 {
+		t.Fatalf("simulator cost = %+v, want wall=12ms cpu=0-unsampled bytes>0", ev.Cost)
+	}
+	if err := benchcli.ValidateBenchmarkArtifact(art); err != nil {
+		t.Fatalf("emitted evidence does not validate: %v", err)
+	}
+
+	var report struct {
+		Label   string                 `json:"label"`
+		Results coalesceArtifactResult `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("decode coalesce report: %v", err)
+	}
+	if report.Label != "PROJECTED" || report.Results.ProjectedMarkdown != markdown {
+		t.Fatalf("artifact changed legacy headline semantics: label=%q markdown_equal=%v",
+			report.Label, report.Results.ProjectedMarkdown == markdown)
+	}
+	for _, fence := range []string{"NOT a served measurement", "PROJECTED", "un-coalesced shared-SSD floor", "×vs-1agent"} {
+		if !strings.Contains(report.Results.ProjectedMarkdown, fence) {
+			t.Fatalf("artifact projected_markdown lost %q:\n%s", fence, report.Results.ProjectedMarkdown)
+		}
+	}
+}
+
+// TestArtifactRejectsUnknownEngineRevision proves the analytical receipt cannot
+// escape a Git checkout (or another stamped build-identity source) by silently
+// substituting the generic lineage placeholder for the simulator code identity.
+func TestArtifactRejectsUnknownEngineRevision(t *testing.T) {
+	cfg := smallCfg()
+	run, err := runSweep(cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("runSweep: %v", err)
+	}
+	markdown := render(cfg, run.Capacity, run.Rows, run.Base)
+	t.Setenv("FAK_BENCH_COMMIT", "unknown")
+	path := filepath.Join(t.TempDir(), "must-not-exist.json")
+	err = writeArtifact(path, cfg, run, markdown, time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "engine revision unresolved") {
+		t.Fatalf("writeArtifact error = %v, want unresolved engine revision refusal", err)
+	}
+	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+		t.Fatalf("writeArtifact created %s despite unresolved revision (stat error %v)", path, statErr)
 	}
 }
 

@@ -30,6 +30,8 @@ var nativeProfileRequiredEnvironment = map[string]string{
 	"FAK_Q4K":              "1",
 }
 
+const nativeControlGGUFMMap = "FAK_GGUF_MMAP"
+
 // nativeProfileDeniedEnvironment is the complete set of process controls read by the Qwen3.8
 // resident-Q4_K forward, its attention/KV helpers, and its worker scheduler. The profile contract
 // pins their default behavior by requiring them to be absent. FAK_Q4K_FREE_CPU and
@@ -88,7 +90,7 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 	if budget != 0 {
 		return nil, fmt.Errorf("native performance profile unavailable: -budget must be 0, got %g", budget)
 	}
-	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+6)
+	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+7)
 	for key, want := range nativeProfileRequiredEnvironment {
 		got, ok := lookup(key)
 		if !ok || got != want {
@@ -96,6 +98,11 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 		}
 		controls[key] = got
 	}
+	mmapControl, ok := lookup(nativeControlGGUFMMap)
+	if !ok || (mmapControl != "0" && mmapControl != "1") {
+		return nil, fmt.Errorf("native performance profile unavailable: %s must equal typed 0 or 1", nativeControlGGUFMMap)
+	}
+	controls[nativeControlGGUFMMap] = mmapControl
 	for _, key := range nativeProfileDeniedEnvironment {
 		if got, ok := lookup(key); ok {
 			return nil, fmt.Errorf("native performance profile unavailable: %s override is not allowed (got %q)", key, got)
@@ -110,6 +117,9 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 			continue
 		}
 		if _, ok := nativeProfileRequiredEnvironment[key]; ok {
+			continue
+		}
+		if key == nativeControlGGUFMMap {
 			continue
 		}
 		return nil, fmt.Errorf("native performance profile unavailable: unrecognized %s override is not allowed", key)
@@ -127,7 +137,7 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 }
 
 func validateNativeProfileControls(controls map[string]string) error {
-	wantLen := len(nativeProfileRequiredEnvironment) + len(nativeProfileDeniedEnvironment) + 6
+	wantLen := len(nativeProfileRequiredEnvironment) + len(nativeProfileDeniedEnvironment) + 7
 	if len(controls) != wantLen {
 		return fmt.Errorf("native performance control receipt has %d fields, want %d", len(controls), wantLen)
 	}
@@ -135,6 +145,9 @@ func validateNativeProfileControls(controls map[string]string) error {
 		if controls[key] != want {
 			return fmt.Errorf("required control %s was not captured as %s", key, want)
 		}
+	}
+	if controls[nativeControlGGUFMMap] != "0" && controls[nativeControlGGUFMMap] != "1" {
+		return fmt.Errorf("required control %s was not captured as typed 0 or 1", nativeControlGGUFMMap)
 	}
 	for _, key := range nativeProfileDeniedEnvironment {
 		if controls[key] != nativeProfileUnset {
@@ -195,6 +208,7 @@ type nativeProfileReceipt struct {
 	Controls          map[string]string          `json:"controls"`
 	Execution         metalgemm.ExecutionReceipt `json:"execution"`
 	Fallbacks         model.MetalFallbackReceipt `json:"fallbacks"`
+	Q4KResidency      *model.Q4KResidencyReceipt `json:"q4k_residency,omitempty"`
 }
 
 func sha256JSON(v any) (string, error) {
@@ -395,6 +409,14 @@ func validateNativeProfileReceipt(profileBytes []byte, profile nativeperf.Profil
 	}
 	if err := model.ValidateMetalFallbackReceipt(receipt.Fallbacks); err != nil {
 		return err
+	}
+	if receipt.Q4KResidency != nil {
+		if err := model.ValidateQ4KResidencyReceipt(*receipt.Q4KResidency); err != nil {
+			return err
+		}
+		if receipt.Q4KResidency.FAKGGUFMMap != receipt.Controls[nativeControlGGUFMMap] {
+			return fmt.Errorf("Q4_K residency control does not match native profile controls")
+		}
 	}
 	if receipt.Fallbacks.PromisedCPUFallbacks != profile.Execution.FallbackCount {
 		return fmt.Errorf("raw fallback total does not match v1 execution identity")
