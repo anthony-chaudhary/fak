@@ -348,6 +348,7 @@ var verbManifest = []Verb{
 	{Name: "steering", Synopsis: "the steerability Slack surface for #steering-guard (status/report/alert/pin)", Lane: "cmd"},
 	{Name: "stopfailure", Synopsis: "operator surface for .dos/stop-failures breaker markers (plan/reset-stale/clear-reviewed)", Lane: "cmd"},
 	{Name: "study-forge", Synopsis: "capture and validate deterministic paginated GitHub forge corpora", Lane: "cmd"},
+	{Name: "study-adjacency", Synopsis: "validate and render the bounded related-system runtime study manifest", Lane: "cmd"},
 	{Name: "study-classify", Synopsis: "classify a validated forge corpus into deterministic dispositions and evidence-backed mechanism clusters", Lane: "cmd", Doc: "docs/cli-reference.md"},
 	{Name: "study-inventory", Synopsis: "render a deterministic local checkout map for exhaustive study-repo passes", Lane: "cmd"},
 	{Name: "study-monitor", Synopsis: "report recurring research sources that are due for another study pass", Lane: "cmd"},

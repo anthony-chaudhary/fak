@@ -687,6 +687,9 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 	case "study-classify":
 		// Deterministic dispositions and mechanism clusters over a forge corpus.
 		os.Exit(runStudyClassify(os.Stdout, os.Stderr, args))
+	case "study-adjacency":
+		// Bounded cross-runtime adjacency manifest validation and rendering.
+		os.Exit(runStudyAdjacency(os.Stdout, os.Stderr, args))
 	case "customization-index":
 		os.Exit(runCustomizationIndex(os.Stdout, os.Stderr, args))
 	case "idea-scout":

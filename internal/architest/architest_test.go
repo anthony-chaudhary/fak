@@ -721,6 +721,7 @@ var tier = map[string]int{
 	"qwen4exp":                   1, // stdlib-only deterministic native four-layer correctness oracle (#9123).
 	"qwensemanticstop":           2, // deterministic experiment receipt gate; live exact-model cancellation remains hardware-witnessed (#8646).
 	"studyclass":                 2,
+	"studyadjacency":             2,
 	// new-leaf:tier - `fak new-leaf <name> --tier <tier>` inserts the
 	// declaration for a generated leaf immediately ABOVE this line. Keep the marker last.
 }

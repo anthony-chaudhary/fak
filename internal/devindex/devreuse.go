@@ -274,6 +274,7 @@ var maintainerDevCommands = []string{
 	"steering",
 	"stopfailure",
 	"study-forge",
+	"study-adjacency",
 	"study-classify",
 	"study-inventory",
 	"study-monitor",
