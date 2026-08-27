@@ -1,24 +1,5 @@
 # Frontier infrastructure and workload expectations index
 
-## Latest slice: Google AI Hypercomputer control plane and TPU topology (#9384)
-
-Five official Google Cloud records now separate supported topology, configured maxima,
-admission semantics, and achieved active work. Cluster Director documents a
-host→single-rack sub-block→block→cluster GPU network hierarchy, with one hop inside a
-sub-block, at most two hops inside a block, and support for clusters at the
-“thousands of GPUs” scale. Current GKE Multislice supports homogeneous multi-host TPU
-slices and atomic slice-node-pool scaling, while the maintenance-only Cloud TPU API
-separately documents a **256-slice queued-resource ceiling**; that legacy ceiling is not
-silently transferred to GKE. Dynamic Workload Scheduler distinguishes best-effort
-Flex-start admission from approved reservation-bound capacity. Finally, Google's
-November 2023 XPK/GKE report is retained as an achieved **50,944-chip TPU v5e**
-training workload across **199 pods**, not as a schedulable fleet or supported maximum.
-
-The current corpus contains **272 entries**, **265 unique source URLs**, **224 entity
-labels**, and **3 explicit rumors**. None of the five sources supplies a production
-queue-wait distribution, utilization, provider-wide active scale, failure/retry
-distribution, power, or total workload cost.
-
 ## Latest slice: NVIDIA / Hugging Face acquisition-report lifecycle (#9383)
 
 One open rumor record now preserves the August 2026 report lifecycle without promoting it
@@ -264,7 +245,7 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **272 dated entries**, **265 unique source URLs**, and
+The current spine contains **267 dated entries**, **260 unique source URLs**, and
 **224 distinct entity labels** across **13 categories** spanning frontier labs,
 hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,

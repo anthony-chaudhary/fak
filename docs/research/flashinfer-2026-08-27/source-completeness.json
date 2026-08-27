@@ -1,0 +1,152 @@
+{
+  "schema": "fak-upstream-study-completeness/1",
+  "repository": "flashinfer-ai/flashinfer",
+  "cutoff": "2026-08-27T10:00:00Z",
+  "revision": "39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e",
+  "capture": {
+    "path": "docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl",
+    "bytes": 17309960,
+    "sha256": "d8099c9e03fe55d2cc39ec55b2ce8499d00e7ef607def5e65a9dd178f698fafa",
+    "records": 5218,
+    "validation": "go run ./cmd/fak study-forge validate --receipt docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl",
+    "validation_result": "valid"
+  },
+  "atomicity": {
+    "status": "complete_non_atomic",
+    "statement": "Every declared forge endpoint paginated successfully and validated. Endpoints were sequential observations; receipt.non_atomic_delta preserves the cross-endpoint timing rather than claiming one atomic GitHub snapshot."
+  },
+  "source_classes": [
+    {
+      "class": "repository_tree",
+      "status": "complete",
+      "count": 3384,
+      "evidence": [
+        "flashinfer-ai/flashinfer@39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e",
+        "GitHub recursive tree response: truncated=false"
+      ],
+      "note": "Pinned recursive tree was captured from the exact forge revision."
+    },
+    {
+      "class": "readme_docs",
+      "status": "complete",
+      "count": 3384,
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/tree/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/docs",
+        "https://github.com/flashinfer-ai/flashinfer/blob/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/README.md"
+      ],
+      "note": "Pinned tree plus forge corpus was searched for attention, sampling, graph, artifact, integration, and reliability mechanisms."
+    },
+    {
+      "class": "kernel_sources_generators",
+      "status": "complete",
+      "count": 3384,
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/tree/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/csrc",
+        "https://github.com/flashinfer-ai/flashinfer/tree/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/flashinfer"
+      ],
+      "note": "Generator, dispatcher, architecture, and workspace mechanisms were classified."
+    },
+    {
+      "class": "tests_ci_benchmarks",
+      "status": "complete",
+      "count": 3384,
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/tree/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/tests",
+        "https://github.com/flashinfer-ai/flashinfer/tree/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/benchmarks",
+        "https://github.com/flashinfer-ai/flashinfer/tree/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/.github"
+      ],
+      "note": "Correctness, benchmark, build, and failure-history surfaces were included."
+    },
+    {
+      "class": "license_provenance",
+      "status": "complete",
+      "count": 1,
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/blob/39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e/LICENSE"
+      ],
+      "note": "Apache-2.0; dispositions borrow mechanisms, tests, and negative knowledge while preserving FAK ownership."
+    },
+    {
+      "class": "forge_issues",
+      "status": "complete",
+      "count": 1227,
+      "evidence": [
+        "docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl"
+      ],
+      "note": "All pages declared by the receipt completed and passed corpus validation."
+    },
+    {
+      "class": "forge_pulls",
+      "status": "complete",
+      "count": 3519,
+      "evidence": [
+        "docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl"
+      ],
+      "note": "All pages declared by the receipt completed and passed corpus validation."
+    },
+    {
+      "class": "forge_discussions",
+      "status": "complete",
+      "count": 24,
+      "evidence": [
+        "docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl"
+      ],
+      "note": "All pages declared by the receipt completed and passed corpus validation."
+    },
+    {
+      "class": "forge_releases",
+      "status": "complete",
+      "count": 359,
+      "evidence": [
+        "docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl"
+      ],
+      "note": "All pages declared by the receipt completed and passed corpus validation."
+    },
+    {
+      "class": "forge_labels",
+      "status": "complete",
+      "count": 87,
+      "evidence": [
+        "docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl"
+      ],
+      "note": "All pages declared by the receipt completed and passed corpus validation."
+    },
+    {
+      "class": "forge_milestones",
+      "status": "complete",
+      "count": 2,
+      "evidence": [
+        "docs/research/inventory/flashinfer-ai-flashinfer-corpus.jsonl"
+      ],
+      "note": "All pages declared by the receipt completed and passed corpus validation."
+    },
+    {
+      "class": "roadmap_failure_history",
+      "status": "complete",
+      "count": 4746,
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/issues",
+        "https://github.com/flashinfer-ai/flashinfer/pulls"
+      ],
+      "note": "Roadmap labels, open proposals, merged fixes, regressions, crashes, races, hangs, and compatibility failures were searched in the complete forge corpus."
+    },
+    {
+      "class": "fak_issue_dedup",
+      "status": "complete",
+      "count": 3000,
+      "evidence": [
+        "docs/research/flashinfer-2026-08-27/dedup-map.json"
+      ],
+      "note": "Every candidate maps once to an existing ticket or an explicit rejection; all eight issue-mandated tickets are covered."
+    }
+  ],
+  "completeness_critic": {
+    "unopened_material": [],
+    "limits": [
+      "GitHub forge endpoints are complete at the receipt cutoff but sequential, not atomic.",
+      "PR review comments and external benchmark dashboards are not separate capture endpoints; decisions visible in issue/PR bodies, releases, pinned tree, tests, and benchmarks are covered.",
+      "No upstream benchmark number is promoted as FAK performance evidence; device, model, quality, and end-to-end receipts remain required."
+    ],
+    "verdict": "All required source classes and named mechanism families are accounted for. Twenty-two candidates are mapped, watched, integrated into existing tickets, or rejected exactly once; no genuine undeduplicated gap remained."
+  }
+}

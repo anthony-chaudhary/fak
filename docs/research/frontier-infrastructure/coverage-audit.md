@@ -1,32 +1,5 @@
 # Frontier infrastructure coverage audit
 
-## Issue #9384 delta
-
-- Added five non-duplicate official Google Cloud records: Cluster Director network
-  topology, current GKE TPU Multislice, the maintenance-only Cloud TPU API Multislice
-  ceiling, current Compute Engine/DWS provisioning semantics, and the November 2023
-  XPK/GKE TPU v5e training run.
-- Preserved the physical/control hierarchy: host → rack/sub-block → block → cluster
-  for Cluster Director; and job → Multislice → slice → VM/host → chip, with ICI
-  inside TPU slices and DCN between slices.
-- Typed quantities by lifecycle: “thousands of GPUs” is a supported Cluster Director
-  scale class; 256 slices is a configured maximum for the legacy Cloud TPU queued-
-  resource API; Flex-start is best-effort admission; approved reservation-bound
-  capacity has very high assurance; and 50,944 TPU v5e chips across 199 pods is an
-  achieved provider-reported workload.
-- Kept current and legacy control planes separate. The current GKE page does not
-  disclose a maximum slices-per-JobSet value, so the legacy 256-slice ceiling is not
-  transferred to GKE or treated as a prevalent topology.
-- Totals rise to **272 entries**, **265 unique source URLs**, **224 entity labels**, and
-  **3 explicit rumors**. `ai_cloud` rises to **11**, `accelerator_platform` to **4**,
-  `official_documentation` to **9**, `official_engineering_release` to **11**,
-  `vendor_specification` to **10**, and `official_statement` to **100**.
-- None of the five sources discloses a production queue-wait distribution, utilization,
-  provider-wide active/schedulable scale, failure/retry distribution, power, or total
-  workload cost. Regional and preview/GA status remain source-specific: the XPK release
-  announces Multislice Training GA, while the living configuration pages do not label
-  every listed topology, machine family, or region with one universal stage.
-
 ## Issue #9383 delta
 
 - Added one `market_signal` rumor record for the NVIDIA / Hugging Face August 2026
@@ -90,8 +63,8 @@ classification, forecast inclusion, completed study, approval, construction, ene
 live load remain separate states. The New York GEIS/report processes, final Batch Zero outputs,
 Fall 2027 statewide transmission plan, and end-2026 forecast including Batch loads remain future
 work. The Texas-governor directive/~474 GW claim remains explicit coverage debt because no
-direct governor source was supplied. The current exact indexed totals after issue #9384
-are **272 entries, 265 unique URLs, and 224 entity labels**.
+direct governor source was supplied. **Exact indexed totals: 267 entries, 260 unique URLs, and
+224 entity labels.**
 
 Issue #9325 adds an opened Modine/Airedale cooling factory, a >$4B 2027-2029
 capacity reservation with $165M upfront funding, and a shipping Schneider prefabricated
@@ -217,21 +190,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **272** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **265** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Entries | **267** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **260** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
 | Distinct entity labels | **224** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **13** | `accelerator_platform` 4; `ai_cloud` 11; `datacenter_physical` 22; `frontier_lab` 65; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 25; `policy_regulation` 14; `serving_system` 45; `standard` 3; `supply_chain` 31; `workload_model` 13; `workload_trace` 21. |
-| Source kinds used | **54** | Machine-derived leaders are `official_release` 55, `research_paper` 28, `preprint` 18, `credible_reporting` 16, `official_earnings` 16, `official_model_release` 15, `official_repository` 14, `official_product_release` 12, `official_engineering_release` 11, `technical_report` 11, and `official_documentation` 9; 67 entries use 43 other bounded source-kind labels. |
-| Evidence classes used | **48** | Machine-derived counts now include `official_statement` 100, `vendor_claim` 31, `benchmark_measurement` 27, `reported_observation` 15, `production_measurement` 12, `vendor_specification` 10, `production_observation` 8, `synthetic_experiment` 6, and 63 entries across 40 other bounded lifecycle/benchmark/specification labels. |
-| Confidence labels | **16** | Exact labels include `high` 189, `medium_high` 57, `medium` 11, `low` 3, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **272/272 published; 272/272 event** | Presence is complete. Date precision is source-bounded: the XPK run exposes only November 2023 for the event, while its publication date is exact. |
+| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 65; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 25; `policy_regulation` 14; `serving_system` 45; `standard` 3; `supply_chain` 31; `workload_model` 13; `workload_trace` 21. |
+| Evidence classes used | **48** | Machine-derived counts now include `official_statement` 99, `vendor_claim` 31, `benchmark_measurement` 27, `reported_observation` 15, `production_measurement` 12, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 64 entries across 40 other bounded lifecycle/benchmark/specification labels. |
+| Confidence labels | **16** | Exact labels include `high` 184, `medium_high` 57, `medium` 11, `low` 3, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
+| Date fields | **267/267 published; 267/267 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **3** | All are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 272 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 267 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -321,15 +293,11 @@ shipment evidence rather than only vendor roadmaps.
 batching assumptions, queueing, and several workload traces. The corpus recognizes that
 batch opportunities depend on arrival, lengths, SLOs, hardware, and tenant policy.
 
-**Present but incomplete:** phase/operator autoscaling, token-work signals, hybrid
-aggregated/disaggregated scheduling, production-scale heterogeneous coordination, and
-Google DWS Flex-start versus reservation-bound admission now have explicit evidence
-envelopes.
+**Present but incomplete:** phase/operator autoscaling, token-work signals, hybrid aggregated/disaggregated scheduling, and production-scale heterogeneous coordination now have explicit evidence envelopes.
 
 **Missing or shallow:** comparable production distributions for batch size, queue wait,
 SLO class, cancellation, priority, fairness, admission, and cross-tenant interference;
-policy prevalence by lab/cloud; DWS admission probability and wait distributions;
-scheduler behavior during failures and regional bursts.
+policy prevalence by lab/cloud; scheduler behavior during failures and regional bursts.
 
 **Proof needed for complete:** production traces or operator measurements with batch and
 queue fields, stratified by model, tenant, hardware, region, and SLO.
@@ -365,18 +333,14 @@ cache policy, plus end-to-end hit/goodput measurements under realistic churn.
 ### 8. Autoscaling, placement, resilience, and fairness — **Partial**
 
 **Present:** cluster-scale reliability research, routing/scheduling papers, and system
-releases expose topology-aware placement and failure/retry costs. Cluster Director now
-adds a host/rack-sub-block/block/cluster GPU hierarchy, current GKE Multislice adds
-atomic homogeneous multi-host slice scheduling, and the Copilot trace reports **9% of
-turns with tool failure** and retry loops reaching **4× compute** in the captured
-population.
+releases expose topology-aware placement and failure/retry costs. The Copilot trace
+reports **9% of turns with tool failure** and retry loops reaching **4× compute** in the
+captured population.
 
 **Missing or shallow:** production cold-start and scale-up times, capacity headroom,
 regional failover, heterogeneous accelerator placement, maintenance/health attrition,
 preemption, tenant fairness, quota enforcement, noisy-neighbor distributions, and
-installed-to-schedulable-to-goodput conversion. Google’s current pages also leave the
-maximum GKE slices per JobSet, exhaustive region/stage matrix, and production
-queue/utilization/failure/cost envelopes undisclosed.
+installed-to-schedulable-to-goodput conversion.
 
 **Present but incomplete:** workflow-DAG, agentic-OS, and tool-result-cache research now bounds request-level assumptions; Copilot/TraceLab supply production session, idle, tool, and retry evidence.
 

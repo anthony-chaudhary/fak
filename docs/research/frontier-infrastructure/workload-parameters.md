@@ -5,23 +5,6 @@ parameters instead of collapsing every serving workload into “Poisson arrivals
 popularity, fixed token lengths.” The source-level claims and limitations remain in
 [`index.json`](index.json).
 
-## Google Hypercomputer topology and admission parameters (#9384)
-
-| Source / control plane | Exact quantity or rule | Quantity type | Unknown or forbidden inference |
-|---|---|---|---|
-| Cluster Director networking | 1 rack/sub-block; maximum 1 GPU-network hop within a sub-block; maximum 2 within a block; cluster scale stated as thousands of GPUs | Supported topology/reachability envelope | No numeric cluster maximum, configured deployment, prevalence, active scale, latency, utilization, queue, power, or cost |
-| GKE TPU Multislice | Minimum 2 slices; Standard ≥1.27.4-gke.900; Autopilot ≥1.29.2-gke.1521000; JAX ≥2.1; VM may contain 1, 4, or 8 TPU chips; multi-host slices only; same type/size/topology; atomic 0→topology-derived node-pool maximum | Current supported/configured envelope | No disclosed maximum slices per JobSet, universal hosts/slice, regional capacity, queue wait, active scale, failure rate, or prevalence |
-| Legacy Cloud TPU API Multislice | Maximum 256 slices/queued resource; v4+; one node = one slice; v4 has 4 chips/host and 50 Gbps maximum host network bandwidth; gang scheduling all-or-none; >4,096 v4 chips supported in one run | Maintenance-only API request ceiling and architecture | Not a GKE maximum, prevalent topology, allocation receipt, pod count, achieved workload, or availability guarantee |
-| DWS Flex-start | Standalone wait ≤2 hours; MIG waits until capacity or cancellation; run duration 10 minutes–7 days; best-effort capacity; dense placement best-effort | Configured wait/run ceilings and admission semantics | Not observed wait, admission probability, SLA, utilization, or achieved scale |
-| DWS reservation-bound/calendar | Workloads up to 90 days; very high capacity assurance after approval; exclusive access during reservation; TPU7x access allowlisted | Approved reservation semantics | Approval is not job success; reserved is not created, running, or useful-goodput-producing |
-| XPK/GKE TPU v5e run | 50,944 active training chips; 199 pods; 256 chips/pod; 10 peak exa-FLOPs at 16-bit or 20 peak exa-OPs at 8-bit; 16B/32B/64B/128B models | Provider-reported achieved workload and peak capability | No host or slice count, achieved FLOPs, MFU, queue wait, utilization, failures/retries, power, cost, or generally schedulable 50,944-chip fleet |
-
-Parameterize `control_plane`, `provisioning_model`, `capacity_state`,
-`topology_level`, `slice_shape`, `slices_requested`, `hosts_per_slice`,
-`chips_per_host`, `pods`, `admission_wait`, and `run_duration` independently.
-When a source leaves a field blank, write `not disclosed`; never back-calculate
-slices from pods or transfer the legacy 256-slice limit to current GKE.
-
 ## Chinese platform and recommendation envelopes (#9362)
 
 | Source | Typed population / envelope | Bounded implication |

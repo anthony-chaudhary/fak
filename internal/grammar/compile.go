@@ -41,7 +41,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/guideddecode"
 )
@@ -129,12 +128,6 @@ type CallMask struct {
 	eos       int
 	canonical []byte
 	digest    string
-
-	// decoded caches immutable tokenizer pieces once per compiled mask. Native
-	// sampling revisits the whole vocabulary every token; repeatedly crossing
-	// the tokenizer interface there dominated the measured tool-schema mask.
-	decodedOnce sync.Once
-	decoded     [][]byte
 }
 
 // Compile lowers specs into a *CallMask over dec's vocabulary. Order of specs
@@ -189,9 +182,8 @@ func (m *CallMask) MaskLogits(history []int, logits []float32) {
 		return
 	}
 	var prefix []byte
-	m.cacheDecoded(len(logits))
 	for _, id := range history {
-		prefix = append(prefix, m.tokenBytes(id)...)
+		prefix = append(prefix, m.dec.TokenBytes(id)...)
 	}
 	allowed, complete := m.allowedNext(prefix)
 	neg := float32(math.Inf(-1))
@@ -213,27 +205,10 @@ func (m *CallMask) MaskLogits(history []int, logits []float32) {
 			logits[id] = neg // EOS is admissible ONLY at a complete envelope
 			continue
 		}
-		if !m.admits(prefix, allowed, m.tokenBytes(id)) {
+		if !m.admits(prefix, allowed, m.dec.TokenBytes(id)) {
 			logits[id] = neg
 		}
 	}
-}
-
-func (m *CallMask) cacheDecoded(vocabSize int) {
-	m.decodedOnce.Do(func() {
-		m.decoded = make([][]byte, vocabSize)
-		for id := range m.decoded {
-			b := m.dec.TokenBytes(id)
-			m.decoded[id] = append([]byte(nil), b...)
-		}
-	})
-}
-
-func (m *CallMask) tokenBytes(id int) []byte {
-	if id >= 0 && id < len(m.decoded) {
-		return m.decoded[id]
-	}
-	return m.dec.TokenBytes(id)
 }
 
 // admits replays a candidate token's decoded bytes one at a time from the

@@ -1,0 +1,190 @@
+{
+  "schema": "fak-upstream-dedup-map/1",
+  "repository": "flashinfer-ai/flashinfer",
+  "cutoff": "2026-08-27T10:00:00Z",
+  "search_receipt": {
+    "method": "complete local issue export plus targeted title searches",
+    "exported_issue_count": 3000,
+    "queries": [
+      "attention",
+      "sampling",
+      "speculative",
+      "CUDA graph",
+      "workspace",
+      "JIT",
+      "Blackwell",
+      "ROCm",
+      "MLA",
+      "GDN",
+      "kernel"
+    ],
+    "captured_at": "2026-08-27"
+  },
+  "required_named_ticket_coverage": [
+    6042,
+    8607,
+    8608,
+    8609,
+    3254,
+    9137,
+    9139,
+    9238
+  ],
+  "entries": [
+    {
+      "candidate": "C01",
+      "disposition": "INTEGRATE",
+      "matched_issue": 3254,
+      "outcome": "deduplicated",
+      "reason": "Extend the existing data-selected attention backend and KV-layout discriminator; do not add a parallel backend registry."
+    },
+    {
+      "candidate": "C02",
+      "disposition": "INTEGRATE",
+      "matched_issue": 1479,
+      "outcome": "deduplicated",
+      "reason": "Borrow the no-host-readback capture invariant into the existing capture-once decode graph work."
+    },
+    {
+      "candidate": "C03",
+      "disposition": "WATCH",
+      "matched_issue": 3254,
+      "outcome": "deduplicated",
+      "reason": "Retain merge-support and empty-state semantics as tests when cascade enters the existing attention backend."
+    },
+    {
+      "candidate": "C04",
+      "disposition": "INTEGRATE",
+      "matched_issue": 3088,
+      "outcome": "deduplicated",
+      "reason": "Reuse the true-sparse attention seam and require actual sparse work reduction, not dense masking."
+    },
+    {
+      "candidate": "C05",
+      "disposition": "INTEGRATE",
+      "matched_issue": 8607,
+      "outcome": "deduplicated",
+      "reason": "The open reusable plan/run contract is the canonical spine; preserve stable addresses and caller ownership."
+    },
+    {
+      "candidate": "C06",
+      "disposition": "INTEGRATE",
+      "matched_issue": 4202,
+      "outcome": "deduplicated",
+      "reason": "Fold stream isolation and request-local RNG into the existing lossless stochastic speculative-sampling ticket."
+    },
+    {
+      "candidate": "C07",
+      "disposition": "INTEGRATE",
+      "matched_issue": 8657,
+      "outcome": "deduplicated",
+      "reason": "Use the pinned three-arm native speculative campaign; upstream is a contract/reference only."
+    },
+    {
+      "candidate": "C08",
+      "disposition": "INTEGRATE",
+      "matched_issue": 1479,
+      "outcome": "deduplicated",
+      "reason": "Strengthen the existing capture-once/replay-many spine with shared-workspace address stability and no readback."
+    },
+    {
+      "candidate": "C09",
+      "disposition": "INTEGRATE",
+      "matched_issue": 4184,
+      "outcome": "deduplicated",
+      "reason": "Extend honest SASS/PTX/JIT coverage receipts; never compile or select an artifact silently."
+    },
+    {
+      "candidate": "C10",
+      "disposition": "WATCH",
+      "matched_issue": 9139,
+      "outcome": "deduplicated",
+      "reason": "Borrow shape/arch gate structure while keeping generated kernels and tuning artifacts FAK-owned."
+    },
+    {
+      "candidate": "C11",
+      "disposition": "INTEGRATE",
+      "matched_issue": 4180,
+      "outcome": "deduplicated",
+      "reason": "The first-class Blackwell epic owns build, run, and decode coverage; candidate evidence informs its shape matrix."
+    },
+    {
+      "candidate": "C12",
+      "disposition": "INTEGRATE",
+      "matched_issue": 4184,
+      "outcome": "deduplicated",
+      "reason": "Report native artifact coverage and refuse unsupported shapes rather than fall through to another engine."
+    },
+    {
+      "candidate": "C13",
+      "disposition": "REJECT",
+      "matched_issue": 6042,
+      "outcome": "rejected_dependency_boundary",
+      "reason": "Borrow request/shape contracts only; importing a serving runtime would surrender FAK scheduling and kernel ownership."
+    },
+    {
+      "candidate": "C14",
+      "disposition": "INTEGRATE",
+      "matched_issue": 9139,
+      "outcome": "deduplicated",
+      "reason": "Feed replayable shape profiles to offline tuning and retain padded-scale correctness as a hard gate."
+    },
+    {
+      "candidate": "C15",
+      "disposition": "INTEGRATE",
+      "matched_issue": 969,
+      "outcome": "deduplicated",
+      "reason": "Add failure-shaped oracles to the existing graph/native test seams before borrowing optimizations."
+    },
+    {
+      "candidate": "C16",
+      "disposition": "INTEGRATE",
+      "matched_issue": 4356,
+      "outcome": "deduplicated",
+      "reason": "Build on the shipped compressed-latent MLA seam; preserve LSE convention and sparse-shape hang tests."
+    },
+    {
+      "candidate": "C17",
+      "disposition": "INTEGRATE",
+      "matched_issue": 9209,
+      "outcome": "deduplicated",
+      "reason": "Use exact CUDA-kernel work for QSA/GDN and retain architecture/TP/accuracy gates."
+    },
+    {
+      "candidate": "C18",
+      "disposition": "INTEGRATE",
+      "matched_issue": 8609,
+      "outcome": "deduplicated",
+      "reason": "Use the shipped bounded device-event trace contract; upstream benchmark labels are not FAK performance claims."
+    },
+    {
+      "candidate": "C19",
+      "disposition": "INTEGRATE",
+      "matched_issue": 8608,
+      "outcome": "deduplicated",
+      "reason": "Use the shipped replayable workload-profile tuner and preserve frozen shape/hardware receipts."
+    },
+    {
+      "candidate": "C20",
+      "disposition": "INTEGRATE",
+      "matched_issue": 8607,
+      "outcome": "deduplicated",
+      "reason": "Caller-owned workspace and stable addresses remain the single contract."
+    },
+    {
+      "candidate": "C21",
+      "disposition": "WATCH",
+      "matched_issue": 4184,
+      "outcome": "deduplicated",
+      "reason": "Track compatibility failures as negative knowledge; FAK artifacts remain versioned and independently witnessed."
+    },
+    {
+      "candidate": "C22",
+      "disposition": "INTEGRATE",
+      "matched_issue": 9137,
+      "outcome": "deduplicated",
+      "reason": "Apply specialization to the existing persistent decode hot-set ticket with matched quality and memory accounting."
+    }
+  ],
+  "new_issue_numbers": []
+}

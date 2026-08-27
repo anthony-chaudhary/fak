@@ -1,0 +1,396 @@
+{
+  "schema": "fak-upstream-candidate-ledger/1",
+  "repository": "flashinfer-ai/flashinfer",
+  "revision": "39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e",
+  "cutoff": "2026-08-27T10:00:00Z",
+  "license": "Apache-2.0",
+  "candidates": [
+    {
+      "id": "C01",
+      "mechanism": "Paged attention metadata and equal-stride specialization",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4664",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4736"
+      ],
+      "fak_seam": "native attention layout/dispatch",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 3254,
+      "decision": "Extend the existing data-selected attention backend and KV-layout discriminator; do not add a parallel backend registry."
+    },
+    {
+      "id": "C02",
+      "mechanism": "Ragged attention with graph-safe host-readback avoidance",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4703",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4696"
+      ],
+      "fak_seam": "native ragged attention / graph capture",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 1479,
+      "decision": "Borrow the no-host-readback capture invariant into the existing capture-once decode graph work."
+    },
+    {
+      "id": "C03",
+      "mechanism": "Cascade state merges including empty-state semantics",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4427",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4054"
+      ],
+      "fak_seam": "hierarchical KV/attention state composition",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "WATCH",
+      "dedup_issue": 3254,
+      "decision": "Retain merge-support and empty-state semantics as tests when cascade enters the existing attention backend."
+    },
+    {
+      "id": "C04",
+      "mechanism": "Paged block-sparse and variable-sparse attention",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4474",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4593",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4241"
+      ],
+      "fak_seam": "native sparse attention",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 3088,
+      "decision": "Reuse the true-sparse attention seam and require actual sparse work reduction, not dense masking."
+    },
+    {
+      "id": "C05",
+      "mechanism": "Decode/prefill plan-run split with caller-owned workspace",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4721",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4603",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4666"
+      ],
+      "fak_seam": "compute plan/run/workspace contract",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 8607,
+      "decision": "The open reusable plan/run contract is the canonical spine; preserve stable addresses and caller ownership."
+    },
+    {
+      "id": "C06",
+      "mechanism": "Sampling kernels with per-request RNG and stream-isolated reductions",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/2345",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4692",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4763"
+      ],
+      "fak_seam": "native constrained and stochastic sampling",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 4202,
+      "decision": "Fold stream isolation and request-local RNG into the existing lossless stochastic speculative-sampling ticket."
+    },
+    {
+      "id": "C07",
+      "mechanism": "Speculative decode kernels and empty-query handling",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4518",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4461"
+      ],
+      "fak_seam": "native speculative decode",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 8657,
+      "decision": "Use the pinned three-arm native speculative campaign; upstream is a contract/reference only."
+    },
+    {
+      "id": "C08",
+      "mechanism": "CUDA graph stable-buffer and capture-safe lifecycle",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4771",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4553",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4703"
+      ],
+      "fak_seam": "native CUDA graph replay",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 1479,
+      "decision": "Strengthen the existing capture-once/replay-many spine with shared-workspace address stability and no readback."
+    },
+    {
+      "id": "C09",
+      "mechanism": "JIT/AOT/prebuilt artifact selection and cache lifecycle",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4757",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4760",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4763"
+      ],
+      "fak_seam": "native kernel artifact provenance",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 4184,
+      "decision": "Extend honest SASS/PTX/JIT coverage receipts; never compile or select an artifact silently."
+    },
+    {
+      "id": "C10",
+      "mechanism": "Kernel generation with CuTe DSL and architecture gates",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4612",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4753",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4649"
+      ],
+      "fak_seam": "native kernel authoring and dispatch",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "WATCH",
+      "dedup_issue": 9139,
+      "decision": "Borrow shape/arch gate structure while keeping generated kernels and tuning artifacts FAK-owned."
+    },
+    {
+      "id": "C11",
+      "mechanism": "Blackwell SM100/SM103/SM120 specializations",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4593",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4518",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4765"
+      ],
+      "fak_seam": "native Blackwell backend",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 4180,
+      "decision": "The first-class Blackwell epic owns build, run, and decode coverage; candidate evidence informs its shape matrix."
+    },
+    {
+      "id": "C12",
+      "mechanism": "Cross-architecture portability and explicit unsupported envelopes",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/issues/3713",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4649"
+      ],
+      "fak_seam": "native architecture capability gates",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 4184,
+      "decision": "Report native artifact coverage and refuse unsupported shapes rather than fall through to another engine."
+    },
+    {
+      "id": "C13",
+      "mechanism": "vLLM/SGLang serving adapters and integration contracts",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4709",
+        "https://github.com/flashinfer-ai/flashinfer/pull/3813",
+        "https://github.com/flashinfer-ai/flashinfer/issues/4006"
+      ],
+      "fak_seam": "gateway/integration boundary",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "REJECT",
+      "dedup_issue": 6042,
+      "decision": "Borrow request/shape contracts only; importing a serving runtime would surrender FAK scheduling and kernel ownership."
+    },
+    {
+      "id": "C14",
+      "mechanism": "Matched kernel benchmark corpus and padded-scale correctness",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4744",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4656"
+      ],
+      "fak_seam": "native benchmark authority",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 9139,
+      "decision": "Feed replayable shape profiles to offline tuning and retain padded-scale correctness as a hard gate."
+    },
+    {
+      "id": "C15",
+      "mechanism": "Failure-history corpus: illegal access, races, graph UAF, hangs",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/3011",
+        "https://github.com/flashinfer-ai/flashinfer/pull/2981",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4553",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4732"
+      ],
+      "fak_seam": "native reliability regression suite",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 969,
+      "decision": "Add failure-shaped oracles to the existing graph/native test seams before borrowing optimizations."
+    },
+    {
+      "id": "C16",
+      "mechanism": "MLA sparse kernels and uniform LSE-base semantics",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4650",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4751",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4732"
+      ],
+      "fak_seam": "native MLA attention",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 4356,
+      "decision": "Build on the shipped compressed-latent MLA seam; preserve LSE convention and sparse-shape hang tests."
+    },
+    {
+      "id": "C17",
+      "mechanism": "GatedDeltaNet recurrent decode and TP shape validation",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/issues/3713",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4698",
+        "https://github.com/flashinfer-ai/flashinfer/pull/3156"
+      ],
+      "fak_seam": "Qwen3.8 recurrent native kernels",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 9209,
+      "decision": "Use exact CUDA-kernel work for QSA/GDN and retain architecture/TP/accuracy gates."
+    },
+    {
+      "id": "C18",
+      "mechanism": "Bounded device-event tracing and replay evidence",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4656",
+        "https://github.com/flashinfer-ai/flashinfer/issues/4474"
+      ],
+      "fak_seam": "native benchmark observability",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 8609,
+      "decision": "Use the shipped bounded device-event trace contract; upstream benchmark labels are not FAK performance claims."
+    },
+    {
+      "id": "C19",
+      "mechanism": "Offline workload-profile kernel tuning",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4736",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4751"
+      ],
+      "fak_seam": "native offline autotuning",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 8608,
+      "decision": "Use the shipped replayable workload-profile tuner and preserve frozen shape/hardware receipts."
+    },
+    {
+      "id": "C20",
+      "mechanism": "Workspace sharing without resize or per-call allocation",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4721",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4603",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4553"
+      ],
+      "fak_seam": "native memory/workspace ownership",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 8607,
+      "decision": "Caller-owned workspace and stable addresses remain the single contract."
+    },
+    {
+      "id": "C21",
+      "mechanism": "Release cadence and prebuilt compatibility matrix",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/releases/tag/v0.6.9rc1",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4763"
+      ],
+      "fak_seam": "artifact compatibility and rollback",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "WATCH",
+      "dedup_issue": 4184,
+      "decision": "Track compatibility failures as negative knowledge; FAK artifacts remain versioned and independently witnessed."
+    },
+    {
+      "id": "C22",
+      "mechanism": "PrimTS decode backend and persistent hot-path specialization",
+      "source_state": "implemented upstream",
+      "evidence": [
+        "https://github.com/flashinfer-ai/flashinfer/pull/4771",
+        "https://github.com/flashinfer-ai/flashinfer/pull/4736"
+      ],
+      "fak_seam": "native persistent decode",
+      "ownership_boundary": "FAK retains the engine, kernels, memory, scheduler, cache, adaptation, and operations; FlashInfer is evidence and prior art, never an automatic runtime fallback.",
+      "hardware_model_envelope": "Native CUDA kernels; shape and architecture gates must be explicit.",
+      "quality_constraint": "Bitwise/numeric oracle plus matched end-to-end quality before any performance claim.",
+      "lifecycle_cost": "FAK owns implementation, dispatch gates, workspace lifetime, tests, receipts, and rollback.",
+      "disposition": "INTEGRATE",
+      "dedup_issue": 9137,
+      "decision": "Apply specialization to the existing persistent decode hot-set ticket with matched quality and memory accounting."
+    }
+  ]
+}
