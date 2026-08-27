@@ -11,10 +11,11 @@ const AuditDistributionUnit = "utf8_content_bytes"
 const AuditStorageUnit = "utf8_serialized_bytes"
 
 type AuditDistributionRow struct {
-	Name  string  `json:"name"`
-	Bytes int64   `json:"bytes"`
-	Share float64 `json:"share"`
-	Calls int     `json:"calls,omitempty"`
+	Name        string   `json:"name"`
+	Bytes       int64    `json:"bytes"`
+	Share       float64  `json:"share"`
+	Calls       int      `json:"calls,omitempty"`
+	ExemplarIDs []string `json:"exemplar_ids,omitempty"`
 }
 type AuditToolResultRow struct {
 	Name           string `json:"name"`
@@ -38,11 +39,12 @@ type AuditToolResultRow struct {
 	ChannelUnknown int    `json:"channel_unknown,omitempty"`
 }
 type AuditStorageRow struct {
-	Source  string  `json:"source"`
-	Subtype string  `json:"subtype"`
-	Bytes   int64   `json:"bytes"`
-	Share   float64 `json:"share"`
-	Records int     `json:"records"`
+	Source      string   `json:"source"`
+	Subtype     string   `json:"subtype"`
+	Bytes       int64    `json:"bytes"`
+	Share       float64  `json:"share"`
+	Records     int      `json:"records"`
+	ExemplarIDs []string `json:"exemplar_ids,omitempty"`
 }
 type auditDistribution struct {
 	categories     map[string]int64
@@ -53,6 +55,7 @@ type auditDistribution struct {
 	resultCalls    map[string]auditResultCall
 	pendingResults map[string][]auditToolResult
 	storage        map[string]*AuditStorageRow
+	exemplars      *auditUnknownExemplarReservoir
 }
 
 type auditResultCall struct {
@@ -112,6 +115,7 @@ func newAuditDistribution() auditDistribution {
 		categories: map[string]int64{}, tools: map[string]*AuditDistributionRow{}, results: map[string]*AuditToolResultRow{},
 		callTools: map[string]string{}, pending: map[string]int64{}, resultCalls: map[string]auditResultCall{},
 		pendingResults: map[string][]auditToolResult{}, storage: map[string]*AuditStorageRow{},
+		exemplars: newDefaultAuditUnknownExemplarReservoir(),
 	}
 }
 
@@ -126,12 +130,25 @@ func (d *auditDistribution) observe(source string, line []byte) {
 		payload = root["message"]
 	}
 	d.observeToolResult(source, typ, payload)
+	persistedSource := auditUnknownSourceLabel(source)
 	for _, event := range classifyDistributionEvents(source, typ, payload, root) {
+		subtype := event.subtype
+		if event.visibility == "unresolved" {
+			// Unknown discriminator values are payload even when they resemble
+			// harmless identifiers. Persist only a known structural prefix plus
+			// an opaque stable hash of the classifier's ephemeral raw subtype.
+			subtype = auditOpaqueUnknownSubtype(source, typ, event.subtype)
+			visibility, aggregate, observedBytes := "visible_unknown", event.category, int64(len(event.content))
+			if !event.visible {
+				visibility, aggregate, observedBytes = "storage_unknown", subtype, int64(len(line))
+			}
+			d.exemplars.observe(persistedSource, subtype, visibility, aggregate, line, observedBytes)
+		}
 		if !event.visible {
-			key := source + "\x00" + event.subtype
+			key := persistedSource + "\x00" + subtype
 			row := d.storage[key]
 			if row == nil {
-				row = &AuditStorageRow{Source: source, Subtype: event.subtype}
+				row = &AuditStorageRow{Source: persistedSource, Subtype: subtype}
 				d.storage[key] = row
 			}
 			row.Bytes += int64(len(line))
@@ -139,6 +156,15 @@ func (d *auditDistribution) observe(source string, line []byte) {
 			continue
 		}
 		d.observeVisible(event.category, event.tool, event.id, int64(len(event.content)))
+	}
+}
+
+func auditUnknownSourceLabel(source string) string {
+	switch source {
+	case AuditSourceClaude, AuditSourceCodex:
+		return source
+	default:
+		return "source/" + auditUnknownDiscriminatorSuffix([]string{"source\x00" + source})
 	}
 }
 
@@ -171,6 +197,69 @@ func (d *auditDistribution) observeVisible(cat, tool, id string, weight int64) {
 			}
 		}
 	}
+}
+
+func (d *auditDistribution) distributionRows() []AuditDistributionRow {
+	rows := distributionRows(d.categories)
+	exemplars := d.exemplars.snapshot().Exemplars
+	for i := range rows {
+		name := rows[i].Name
+		rows[i].ExemplarIDs = auditExemplarIDs(exemplars, func(exemplar AuditUnknownExemplar) bool {
+			return exemplar.Visibility == "visible_unknown" && exemplar.Aggregate == name
+		})
+	}
+	return rows
+}
+
+func (d *auditDistribution) storageRows() []AuditStorageRow {
+	rows := storageDistributionRows(d.storage)
+	exemplars := d.exemplars.snapshot().Exemplars
+	for i := range rows {
+		source, subtype := rows[i].Source, rows[i].Subtype
+		rows[i].ExemplarIDs = auditExemplarIDs(exemplars, func(exemplar AuditUnknownExemplar) bool {
+			return exemplar.Visibility == "storage_unknown" && exemplar.Source == auditScrubExemplarLabel(source) && exemplar.Subtype == auditScrubExemplarLabel(subtype)
+		})
+	}
+	return rows
+}
+
+func auditKnownClaudeAttachmentSubtype(subtype string) bool {
+	if subtype == "deferred_tools_delta" {
+		return true
+	}
+	if !strings.HasPrefix(subtype, "hook_") || len(subtype) > 64 || len(subtype) == len("hook_") {
+		return false
+	}
+	for _, char := range subtype[len("hook_"):] {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func auditOpaqueUnknownSubtype(source, typ, rawSubtype string) string {
+	prefix := "record"
+	switch source {
+	case AuditSourceCodex:
+		switch typ {
+		case "response_item":
+			prefix = "response_item"
+		case "event_msg":
+			prefix = "event_msg"
+			if strings.HasPrefix(rawSubtype, "event_msg/item_started/") {
+				prefix = "event_msg/item_started"
+			} else if strings.HasPrefix(rawSubtype, "event_msg/item_completed/") {
+				prefix = "event_msg/item_completed"
+			}
+		}
+	case AuditSourceClaude:
+		switch typ {
+		case "assistant", "attachment", "user":
+			prefix = typ
+		}
+	}
+	return prefix + "/" + auditUnknownDiscriminatorSuffix([]string{"subtype\x00" + rawSubtype})
 }
 
 // observeToolResult deliberately uses only the harness-native call/result IDs:
@@ -530,11 +619,26 @@ func classifyDistributionEvents(source, typ string, payload json.RawMessage, roo
 				return []auditClassifiedEvent{auditVisibleEvent("reasoning", "", "", joinRaw(p["summary"], p["content"]), sub, "inferred_model_visible", "known_response_item_content")}
 			case "message":
 				role := rawString(p["role"])
-				c := "assistant_message"
-				if role == "user" {
+				c := "visible_unknown"
+				knownRole := true
+				switch role {
+				case "user":
 					c = "user_message"
+				case "assistant":
+					c = "assistant_message"
+				default:
+					knownRole = false
 				}
-				return classifyCodexMessageContent(c, sub, p["content"])
+				events := classifyCodexMessageContent(c, sub, p["content"])
+				if !knownRole {
+					for i := range events {
+						events[i].category = "visible_unknown"
+						events[i].visibility = "unresolved"
+						events[i].visibilityReason = "unknown_message_role"
+						events[i].subtype += "/role/" + role
+					}
+				}
+				return events
 			}
 		}
 		if typ == "event_msg" {
@@ -553,7 +657,12 @@ func classifyDistributionEvents(source, typ string, payload json.RawMessage, roo
 			if pt == "item_completed" || pt == "item_started" {
 				var item map[string]json.RawMessage
 				_ = json.Unmarshal(p["item"], &item)
-				return []auditClassifiedEvent{auditStorageEvent("event_msg/"+pt+"/"+firstNonempty(rawString(item["type"]), "unknown_item"), "explicit_storage_only", "known_event_mirror")}
+				itemType := rawString(item["type"])
+				subtype := "event_msg/" + pt + "/" + firstNonempty(itemType, "unknown_item")
+				if itemType != "CommandExecution" {
+					return []auditClassifiedEvent{auditStorageEvent(subtype, "unresolved", "unknown_event_item_subtype")}
+				}
+				return []auditClassifiedEvent{auditStorageEvent(subtype, "explicit_storage_only", "known_event_mirror")}
 			}
 			return []auditClassifiedEvent{auditStorageEvent("event_msg/"+pt, "explicit_storage_only", "known_event_envelope")}
 		}
@@ -572,7 +681,12 @@ func classifyDistributionEvents(source, typ string, payload json.RawMessage, roo
 	if typ == "attachment" {
 		var a map[string]json.RawMessage
 		_ = json.Unmarshal(root["attachment"], &a)
-		return []auditClassifiedEvent{auditStorageEvent("attachment/"+firstNonempty(rawString(a["type"]), "unknown"), "explicit_storage_only", "known_attachment_envelope")}
+		attachmentType := rawString(a["type"])
+		subtype := "attachment/" + firstNonempty(attachmentType, "unknown")
+		if !auditKnownClaudeAttachmentSubtype(attachmentType) {
+			return []auditClassifiedEvent{auditStorageEvent(subtype, "unresolved", "unknown_attachment_subtype")}
+		}
+		return []auditClassifiedEvent{auditStorageEvent(subtype, "explicit_storage_only", "known_attachment_envelope")}
 	}
 	if _, supported := auditClaudeRowSubtypes[typ]; !supported {
 		return []auditClassifiedEvent{auditStorageEvent(firstNonempty(typ, "unknown"), "unresolved", "unknown_row_subtype")}
