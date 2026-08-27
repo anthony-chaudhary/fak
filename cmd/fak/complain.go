@@ -27,7 +27,6 @@ package main
 //	    --rationale "the path is a curated note, not operator-private telemetry; the marker heuristic misfired" --live
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -130,12 +129,7 @@ func runComplain(stdout, stderr io.Writer, argv []string) int {
 	var existing []dogfoodissues.Issue
 	switch {
 	case *existingJSON != "":
-		b, readErr := os.ReadFile(*existingJSON)
-		if readErr != nil {
-			fmt.Fprintf(stderr, "fak complain: %v\n", readErr)
-			return 2
-		}
-		if err := json.Unmarshal(b, &existing); err != nil {
+		if err := readJSONFileInto(*existingJSON, &existing); err != nil {
 			fmt.Fprintf(stderr, "fak complain: --existing-json must contain a JSON list: %v\n", err)
 			return 2
 		}
