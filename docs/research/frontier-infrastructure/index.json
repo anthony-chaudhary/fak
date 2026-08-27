@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9334,
+  "latest_slice_issue": 9340,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -838,29 +838,38 @@
       "source_kind": "peer_reviewed_paper",
       "evidence_class": "production_measurement",
       "confidence": "high",
-      "claim": "A worldwide cloud study found bursty arrivals and differing token behavior across language, multimodal, and reasoning workloads; per-client composition explains aggregate patterns better than one global distribution.",
+      "claim": "ServeGen characterized production text, multimodal, and reasoning workloads and showed that each requires separate generation: text has one-day temporal structure and client heterogeneity, multimodal input sizes cluster by modality, and reasoning output lengths correlate with configured reasoning budgets.",
       "quantified": {
-        "duration_months": 4,
-        "requests": 3540000000,
-        "model_groups": 12,
-        "gpu_scale": "O(10K)",
-        "regions": "dozens",
-        "top_clients_driving_dynamic_behavior": 29,
-        "profiled_clients": 2412,
-        "multimodal_input_length_change_pct_avg": 13,
-        "multimodal_output_length_change_pct_avg": -18
+        "workload_classes": 3,
+        "text_generation_observation_window_days": 1,
+        "text_top_clients_request_share": 0.9,
+        "text_cross_client_cv_variation_multiple_min": 2,
+        "multimodal_prompt_image_90th_percentile": 5,
+        "multimodal_images_over_prompt_fraction": 0.2,
+        "multimodal_client_max_request_rate_multiple": 5,
+        "reasoning_model_max_request_rate_rps": 2.17,
+        "reasoning_client_max_request_rate_rps": 0.047,
+        "reasoning_output_budget_correlation_coefficient": 0.7,
+        "reasoning_minimum_output_budget_ratio": 1.05,
+        "reasoning_output_length_heavy_tail_min_tokens": 4000,
+        "reasoning_max_output_tokens": 40000,
+        "reasoning_multi_turn_request_fraction_approx": 0.1
       },
       "assumptions": [
-        "Client mixture is a primary driver of aggregate workload shape.",
-        "Stationary Poisson arrivals and one token histogram are often inadequate."
+        "Text, multimodal, and reasoning workloads need different temporal and size models.",
+        "Client heterogeneity can exceed aggregate temporal variation and should be represented explicitly.",
+        "Reasoning output distributions are conditional on configured reasoning budgets rather than independent draws.",
+        "Figure-read maxima, percentiles, correlations, and ratios are approximate visual extractions from the released plot assets, not population confidence intervals."
       ],
       "contradictions_or_limits": [
-        "The traces come from one global provider and expose service metadata, not full tenant business context.",
-        "Aggregate behavior is driven disproportionately by a small set of clients; a single pooled distribution loses that structure."
+        "ServeGen is a production study but provider identity, exact population denominators, and universal user distribution are not disclosed.",
+        "The study does not establish a universal Zipf law, tenant concentration parameter, geography mix, retry rate, speculative acceptance rate, or service failure distribution.",
+        "The released trace is provider-specific and reports no population confidence intervals; plot-read values should parameterize envelopes, not universal laws."
       ],
       "fak_implications": [
-        "Generate workloads hierarchically by client and model class, then aggregate.",
-        "Vary prefill and decode load independently as request rate and modality mix shift."
+        "Use workload-class-specific generators and preserve client identity when benchmarking routing, batching, and cache behavior.",
+        "Condition reasoning output lengths on budget and test the observed long tail instead of assuming a fixed completion length.",
+        "Do not infer user popularity or arrival families from aggregate request curves alone."
       ],
       "rumor": {
         "is_rumor": false
@@ -883,32 +892,66 @@
       "source_kind": "preprint",
       "evidence_class": "production_measurement",
       "confidence": "medium_high",
-      "claim": "A four-month global commercial marketplace trace contains 1.48B requests across 57 models from 10 model families. It reports architecture/scale-dependent distribution shifts, second-scale bursts, task-specific token shapes, and sharp traffic changes after releases or availability changes.",
+      "claim": "FineServe analyzed a 23-day production trace of 29 open-source models and 9 task intents from a global marketplace, finding architecture/scale-dependent arrival burstiness and token geometry rather than one universal request process.",
       "quantified": {
-        "task_sample_requests": 100000,
-        "silver_labeled_requests": 20000,
-        "task_classes": 10,
-        "dense_output_peak_input_tokens_low": 1500,
-        "dense_output_peak_input_tokens_high": 2000,
-        "dense_output_drop_long_input_pct_gt": 60,
-        "duration_months": 4,
-        "requests": 1480000000,
-        "models": 57,
-        "model_families": 10,
-        "top_seconds_fraction": 0.05,
-        "least_burst_dominant_top_seconds_traffic_share_approx": 0.095
+        "trace_days": 23,
+        "models": 29,
+        "task_intents": 9,
+        "arrival_window_seconds": 300,
+        "short_horizon_signal_metrics": [
+          "coefficient_of_variation",
+          "mean_squared_successive_difference"
+        ],
+        "arrival_model_selection": "Poisson-family, negative-binomial-family, and self-exciting candidates compared per model/scale; no universal winner published",
+        "dense_output_peak_tokens": 620,
+        "dense_output_peak_input_tokens": 1500,
+        "dense_output_stable_tokens": 165,
+        "dense_output_stable_input_tokens_min": 5000,
+        "moe_output_start_tokens": 100,
+        "moe_output_start_input_tokens": 500,
+        "moe_output_mid_tokens": 290,
+        "moe_output_mid_input_tokens": 5000,
+        "moe_output_max_tokens": 400,
+        "moe_output_max_input_tokens_min": 8000,
+        "task_output_peak_parameters": {
+          "programme": [
+            1100,
+            950,
+            520
+          ],
+          "science": [
+            1200,
+            860,
+            540
+          ],
+          "law": [
+            750,
+            620,
+            280
+          ]
+        },
+        "task_flat_output_tokens": {
+          "social": 140,
+          "writing": 155
+        }
       },
       "assumptions": [
-        "Model architecture and scale correlate with adoption and workload evolution, but do not directly determine arrivals.",
-        "Capacity replay needs second-scale bursts, task intent, token-shape modes, and release-driven distribution shifts."
+        "Request-arrival and token-length structure varies by architecture, parameter scale, and task intent.",
+        "Five-minute CV and MSSD expose different aspects of short-window burstiness; a single average request rate is insufficient.",
+        "Architecture-level input lengths can be modeled with compact parametric marginals while task inputs require mixtures, point masses, or bounded plateaus.",
+        "Piecewise token-geometry values are approximate visual extractions from the paper figures; the 23-day trace does not establish population confidence intervals."
       ],
       "contradictions_or_limits": [
-        "The marketplace population is not a universal cloud or first-party lab workload.",
-        "The paper reports grouped observations rather than one fitted distribution suitable for every model, region, or tenant."
+        "The trace is one 23-day commercial-marketplace window and is not a census of all providers, users, or geographies.",
+        "The paper compares several arrival-process families per workload but does not publish one universal fitted family or parameter vector for all models.",
+        "Task and architecture parameters describe this observed population; they are not production SLO, cache-hit, retry, tenant-concentration, or service-health measurements.",
+        "Maximum context and model scale are model attributes, not evidence of typical request lengths.",
+        "Arrival-family selection varies by workload, and neither universal fitted parameters nor population confidence intervals are reported."
       ],
       "fak_implications": [
-        "Replay both long-term drift and second-scale extremes; hourly averages hide burst demand.",
-        "Condition prompt/output distributions on model architecture, scale, and task intent rather than pooling them."
+        "Benchmark arrival processes and token geometry per model/task class rather than applying one Zipf, Poisson, or lognormal default globally.",
+        "Use the published piecewise output envelopes to stress dynamic memory allocation, while preserving residual uncertainty and source population.",
+        "Record fit candidates, selection criterion, window, and omitted confidence intervals explicitly."
       ],
       "rumor": {
         "is_rumor": false
@@ -931,24 +974,55 @@
       "source_kind": "preprint",
       "evidence_class": "production_measurement",
       "confidence": "medium_high",
-      "claim": "A one-year Chutes trace contains 6.12B unsampled requests across 9,174 models with anonymized user and serving-instance IDs, TTFT, and cache signals. It finds durable burstiness, turnover in dominant models, changing user-model affinity, and bimodal request-level cached fractions.",
+      "claim": "A one-year Chutes trace captured 6.12B requests from 314,970 users across 9,174 models and found evolving model popularity, heterogeneous user cadence, strong token-level prefix reuse, and persistent load imbalance.",
       "quantified": {
-        "duration_months": 12,
+        "trace_days": 365,
         "requests": 6120000000,
+        "users": 314970,
         "models": 9174,
-        "cached_token_logging_months": 2
+        "public_models": 3922,
+        "private_models": 5252,
+        "input_tokens_million": 35795761,
+        "output_tokens_million": 2522394,
+        "models_with_one_user_fraction": 0.75,
+        "models_with_under_100_requests_fraction": 0.67,
+        "users_targeting_one_or_two_models_fraction_min": 0.7,
+        "users_with_daily_periodicity_fraction": 0.22,
+        "user_median_iat_range_seconds": [
+          0.02,
+          105700
+        ],
+        "same_user_model_iat_within_0_1_seconds_fraction_approx": 0.5,
+        "same_user_model_iat_within_10_seconds_fraction_approx": 0.8,
+        "prefix_reuse_distance_within_90_seconds_fraction": 0.5,
+        "prefix_reuse_distance_within_24_hours_fraction": 0.95,
+        "cache_request_hit_ratio_percent_approx": 5,
+        "cache_token_hit_ratio_percent_max": 80,
+        "cache_token_hit_ratio_percent_min": 20,
+        "periodic_models_cacheable_prefix_fraction": 0.85,
+        "periodic_models_token_hit_ratio_percent": 78,
+        "load_balance_max_to_mean_ratio_min": 5.5,
+        "load_balance_max_to_mean_ratio_max": 8.8,
+        "load_balance_max_to_min_ratio": 4.8
       },
       "assumptions": [
-        "Model popularity and user-model affinity drift over months; short traces miss turnover.",
-        "Request-level prefix reuse can be strongly bimodal and differs by model and user."
+        "Model popularity, user tenure, request cadence, and cache locality drift materially over months.",
+        "Request-share concentration and token-share concentration are different distributions.",
+        "Exact prompt repetition can be rare even when token-level prefix reuse is high.",
+        "User-level inter-arrival times and periodicity are heterogeneous enough to require multiple workload classes.",
+        "Figure-read values are approximate visual extractions from the paper assets, not reported confidence intervals; retain their displayed precision only for bounded benchmark envelopes."
       ],
       "contradictions_or_limits": [
-        "The dataset represents one serving marketplace and does not disclose universal tenant or geography distributions.",
-        "Cached-token logging covers only the final two months, and observed cache hits depend on the deployed policy."
+        "This is one decentralized marketplace; its user and model mix is not a direct distribution for hyperscaler APIs or consumer chat products.",
+        "The paper reports empirical shares and intervals, not a universal fitted Zipf exponent or one stationary arrival process.",
+        "Cache ratios depend on tokenization, routing, model, trace period, and prefix definition; request hit ratio must not be substituted for token hit ratio.",
+        "The trace does not expose geography, retries, speculative acceptance, service failure causes, or quality-constrained useful goodput.",
+        "The trace reports no population confidence intervals; several concentration, cache, and imbalance values are approximate reads from plotted empirical distributions rather than fitted-family parameters."
       ],
       "fak_implications": [
-        "Replay model turnover and time-varying user affinity, not a static popularity rank.",
-        "Benchmark cache routing with bimodal reuse and per-model/per-user heterogeneity."
+        "Benchmark popularity and cache policies under monthly drift, model churn, heterogeneous users, and separate request/token concentrations.",
+        "Use tiered prefix TTLs that cover sub-second automation, 90-second locality, and daily/weekly periodic reuse.",
+        "Treat routing imbalance and cache locality jointly; balancing request counts alone can leave 3–4x load skew."
       ],
       "rumor": {
         "is_rumor": false

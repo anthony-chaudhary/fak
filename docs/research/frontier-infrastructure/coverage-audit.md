@@ -13,6 +13,12 @@ financial or site lifecycles, or a resolved rumor history. “Exhaustive” rema
 operating method—explicit taxonomy, dated evidence, and visible gaps—not a claim that
 the open web has a finite or fully enumerated boundary.
 
+Issue #9340 deepened three production traces without changing corpus counts. FineServe,
+ServeGen, and the one-year Chutes trace now parameterize model/task arrivals, client
+concentration, multimodal prompt sizes, reasoning-budget tails, user/model cadence,
+prefix reuse, and load imbalance. This evidence remains anonymized, provider-specific,
+window-scoped, and partly figure-read; it does not establish a universal fitted law.
+
 ## Status vocabulary
 
 | Status | Meaning |
@@ -301,13 +307,21 @@ dates, affected hardware/services, implementation status, and later amendments.
 
 ## Preserved explicit gaps
 
+### Production-distribution parameterization added in issue #9340
+
+- Three existing records were deepened: FineServe (23 days, 29 models, 9 tasks), ServeGen (text, multimodal, and reasoning), and Chutes (365 days, 6.122B requests, 314,970 users, 9,174 models).
+- The parameter matrix records population, window, estimator, empirical family or candidate families, parameters, selection quality, confidence-interval status, drift, and missing fields.
+- Request share is separated from token share, exact-request hits from prefix-token hits, aggregate arrivals from per-client processes, and text from multimodal, reasoning, and agentic workloads.
+- No universal Zipf, log-normal, Pareto, Poisson, Hawkes, or MMPP law is supported. FineServe's selected arrival family varies by workload, while ServeGen and Chutes expose empirical heterogeneity and drift.
+
 The machine-readable `coverage.explicit_gaps` remains authoritative. In plain language,
 the open work is:
 
 1. entity-complete global frontier-lab and sovereign-program coverage;
-2. direct production demand distributions, especially tenants, geography, seasonality,
-   retries, sessions, tools, prefix popularity, and cache opportunity;
-3. exact distribution/quantile/CV/time-window extraction from every workload source;
+2. direct provider geography/timezone and tenant concentration, plus retry/failure,
+   speculative-acceptance, stop-cause, session-length, and non-coding tool-call distributions;
+3. comparable denominators, fit diagnostics, population confidence intervals, and drift
+   extraction from every workload source; figure-read values remain approximate;
 4. normalized hyperscaler/cloud filings and contractual obligations;
 5. named physical-infrastructure and component lifecycle ledgers;
 6. startup failures, acquisitions, cancellations, and delivered economics—not launches

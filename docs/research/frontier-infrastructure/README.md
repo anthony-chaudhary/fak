@@ -1,6 +1,6 @@
 # Frontier infrastructure and workload expectations index
 
-**Status:** initial end-to-end spine, incomplete by design. **As of:** 2026-08-26. **Tracker:** #9269.
+**Status:** initial end-to-end spine, incomplete by design. **As of:** 2026-08-27. **Tracker:** #9269.
 
 This index records what frontier labs, hyperscalers, AI clouds, datacenter operators,
 accelerator vendors, serving-system builders, researchers, reporters, and market actors
@@ -133,7 +133,10 @@ facts:
 The current spine contains **187 dated entries**, **182 unique source URLs**, and
 **154 distinct entity labels** across frontier labs, hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
-and **2 explicit rumors**. It is broad, but it is not entity-complete. The
+and **2 explicit rumors**. FineServe, ServeGen, and the one-year Chutes trace now
+provide source-bounded production parameters, while confidence intervals, geography,
+retries, speculative acceptance, session/tool-call distributions, and comparable
+denominators remain explicit gaps. It is broad, but it is not entity-complete. The
 requirement-level verdict is in [`coverage-audit.md`](coverage-audit.md); the detailed
 missing slices remain machine-readable under `coverage.explicit_gaps` in `index.json`.
 

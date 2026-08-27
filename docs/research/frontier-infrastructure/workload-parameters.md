@@ -1,6 +1,6 @@
 # Production workload parameter ledger
 
-**As of:** 2026-08-26. **Tracker:** #9301. This table records measured populations and
+**As of:** 2026-08-27. **Tracker:** #9301. This table records measured populations and
 parameters instead of collapsing every serving workload into “Poisson arrivals, Zipf
 popularity, fixed token lengths.” The source-level claims and limitations remain in
 [`index.json`](index.json).
@@ -147,6 +147,32 @@ production papers. It does not turn reported observations into universal fitted 
 | Reasoning-mode selection | Model releases expose configurable reasoning, but production selection shares are not public. | Missing. |
 | Speculative acceptance | Sailor2 names a 1B speculative tier, but no acceptance distribution is present. | Missing. |
 | Installed-to-goodput conversion | Physical/capacity evidence exists in other slices. | Missing a joined production distribution from installed → healthy → schedulable → active → useful goodput. |
+
+## Source-bounded production parameter matrix
+
+The matrix below records only what each trace can support. `Approx.` marks a
+value read from a released figure rather than reported in prose or a table. None
+of the three sources reports population confidence intervals.
+
+| Source | Variable | Population | Window | Estimator / metric | Family or empirical form | Parameters | Fit quality / selection | Confidence interval | Drift | Missing fields |
+|---|---|---|---|---|---|---|---|---|---|---|
+| FineServe | arrivals | Global marketplace requests to 29 open-source models and 9 task intents | 23 days; 300-second bins for short-horizon signals | CV and mean squared successive difference; per-workload candidate comparison | Poisson-family, negative-binomial-family, self-exciting / Hawkes, and Markov-modulated candidates | No universal parameter vector reported | Selected family varies by model, scale, and task; no universal winner | Not reported | Architecture, scale, task, and time dependent | Request denominator, geography, tenant shares, retries, and CIs |
+| FineServe | dense-model token geometry | Same trace, dense-model requests | 23 days | Conditional median / trend read from figure | Piecewise empirical envelope | Approx. output peak 620 tokens at 1,500 input; stable near 165 at input >=5,000 | No parametric fit reported | Not reported | Not reported | Per-bin counts and uncertainty |
+| FineServe | MoE token geometry | Same trace, MoE-model requests | 23 days | Conditional median / trend read from figure | Piecewise empirical envelope | Approx. 100 output at 500 input; 290 at 5,000; maximum near 400 at input >=8,000 | No parametric fit reported | Not reported | Not reported | Per-bin counts and uncertainty |
+| FineServe | task-conditioned output | Programme, Science, Law, Social, and Writing intents | 23 days | Conditional trend read from figure | Peaked or approximately flat empirical curves | Approx. Programme `(input peak 1,100, output peak 950, tail 520)`; Science `(1,200, 860, 540)`; Law `(750, 620, 280)`; Social flat near 140; Writing flat near 155 | No parametric fit reported | Not reported | Task dependence reported; temporal drift not reported | Per-task denominators and uncertainty |
+| ServeGen | text client concentration and heterogeneity | 2,412 production text clients | One day | Ranked request share; per-client CV | Empirical ranked share and client distributions | Top 29 clients account for 90% of requests; cross-client CV range exceeds 2x | Generator validates reconstructed marginals; no universal popularity family selected | Not reported | One-day temporal structure modeled; longer drift unresolved | Geography, tenant definition, retry/failure, and CIs |
+| ServeGen | multimodal prompt size and client rate | Production image / audio / video / omni requests | One day | Empirical CDF and client maxima, read from figures | Modality-conditioned empirical distributions | Approx. image count P90 = 5; prompts with >1 image about 20%; maximum client request-rate variation about 5x | No parametric family selected | Not reported | One-day trace only | Population denominators by modality and CIs |
+| ServeGen | reasoning arrival and output geometry | Production reasoning-model requests and clients | One day | Maximum request rate; correlation with configured budget; output / budget ratio; tail extent | Budget-conditioned empirical distribution | Approx. model max 2.17 RPS; client max 0.047 RPS; output-budget correlation 0.7; minimum output / budget ratio 1.05; heavy tail starts near 4K and reaches 40K output tokens; multi-turn share nearly 10% | No universal arrival or length family selected | Not reported | One-day trace only | Budget mix, stop causes, retries, and CIs |
+| A Year in LLM Serving | corpus scale | Chutes production trace | 365 days | Direct counts | Census-like trace summary | 6.122B requests; 314,970 users; 9,174 models; 35,795,761 million input tokens; 2,522,394 million output tokens | Not applicable | Not reported | Monthly evolution analyzed | Geographic and retry/failure fields |
+| A Year in LLM Serving | model and user concentration | Same trace | 365 days | Empirical shares / CDFs, partly read from figures | Empirical heavy concentration; no universal Zipf fit | Approx. 75% of models have one user; 67% have <100 requests; >70% of users target one or two models | No universal popularity exponent reported | Not reported | Model popularity and user behavior evolve over the year | Tenant / organization boundaries and CIs |
+| A Year in LLM Serving | cadence and periodicity | Same users and `(user, model)` pairs | 365 days | Periodicity detection and empirical IAT CDFs | Empirical mixture | Approx. 22% of users show daily periodicity; user median IAT spans 0.02-105,700 s; about 50% of consecutive same-pair requests arrive within 0.1 s and 80% within 10 s | No universal stationary arrival fit | Not reported | Monthly distributions drift | Timezone and geography |
+| A Year in LLM Serving | prefix reuse | Same trace, exact prompts and token prefixes | 365 days | Exact-request hit ratio, token hit ratio, and reuse-distance CDF | Empirical cache-locality curves | Approx. exact-request hit about 5%; token hit varies below 20% to above 80% by model; 50% of prefix reuse within 90 s and 95% within 24 h | Cache result depends on model and metric | Not reported | Monthly drift present | Cache policy sensitivity and uncertainty |
+| A Year in LLM Serving | selected periodic models and load balance | Selected periodic workloads and replica counts | Case-study windows within the year | Cacheable-token share, token-hit ratio, max / mean and max / min load | Empirical case studies | Approx. 85% cacheable input tokens and 78% token hit for selected periodic models; max / mean load 5.5-8.8x; max / min 4.8x | Case studies, not population fits | Not reported | Configuration dependent | Broader-model denominator and CIs |
+
+Use these values as separate benchmark classes, not as one merged synthetic law.
+Request share is not token share; exact prompt hits are not prefix-token hits;
+aggregate arrival curves are not per-client processes; and reconstruction error is
+not a population confidence interval.
 
 ## Agentic accounting additions
 

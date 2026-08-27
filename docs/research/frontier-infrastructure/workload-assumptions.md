@@ -1,6 +1,6 @@
 # Workload and cluster assumption registry
 
-**As of:** 2026-08-26. This registry turns the source ledger into assumptions that can be
+**As of:** 2026-08-27. This registry turns the source ledger into assumptions that can be
 accepted, rejected, or parameterized in fak benchmarks. It is not a substitute for the
 per-source provenance in [`index.json`](index.json).
 
@@ -27,6 +27,33 @@ traffic. “Zipfian” is acceptable only as a transparent synthetic sensitivity
 source provides the fitted population, interval, exponent, goodness-of-fit, and drift. A
 model-popularity Zipf does not justify the same exponent for tenants, prefixes, prompts,
 output lengths, tools, or geography.
+
+### Production-trace distinctions
+
+- **No universal arrival or popularity law is supported.** FineServe selects among Poisson-family, negative-binomial-family, self-exciting / Hawkes, and Markov-modulated candidates per workload; Chutes reports evolving empirical concentration without a universal Zipf exponent.
+- **Keep request share separate from token share.** A client or model can dominate request count without dominating prefill or decode work.
+- **Keep exact prompt hits separate from prefix-token hits.** Chutes shows a small exact-request hit rate alongside much higher token-prefix reuse for some models.
+- **Keep aggregate arrivals separate from client arrivals.** ServeGen's aggregate daily curve coexists with large cross-client rate and burstiness differences.
+- **Partition text, multimodal, reasoning, and agentic traffic.** Modality counts, reasoning budgets, multi-turn sessions, and tool-mediated pauses create different service-time and locality processes.
+- **Treat stationary fits as window-scoped.** A one-day reconstruction, a 23-day fit, and a 365-day evolving trace answer different questions; monthly drift invalidates a single frozen default.
+
+### Production benchmark class matrix
+
+Run at least these workload classes independently before mixing them:
+
+| Class | Required conditioning | Primary stress |
+|---|---|---|
+| Text chat | client, input/output lengths, turn depth, time of day | prefill/decode mix and client burstiness |
+| Multimodal | modality and media-count distribution | encoder cost and prompt-size clusters |
+| Reasoning | model, reasoning budget, output tail, multi-turn flag | long decode occupancy and budget-conditioned tails |
+| Agentic | session, tool-call chain, think/tool/wait timing | synchronized waves, idle gaps, retries, and long-lived state |
+| Marketplace / multi-model | model architecture, scale, task intent, popularity epoch | routing churn, heterogeneous arrivals, and model residency |
+| Cache-locality | exact-request hit and token-prefix hit as separate metrics | TTL, reuse distance, prefix placement, and migration |
+
+Do not collapse this matrix into one Zipf-plus-Poisson default. Record the
+population, observation window, estimator, selected family, parameters, fit
+quality, confidence interval, and drift for every generated trace; write `not
+reported` rather than manufacturing missing evidence.
 
 ## Serving assumptions
 
