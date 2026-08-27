@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -547,14 +548,33 @@ func cmdNewModel(argv []string) {
 	family := fs.String("family", "", "family name, lowercase (e.g. myfamily)")
 	topology := fs.String("topology", "identity", "topology: prenorm, postnorm, parallel, or identity")
 	dryRun := fs.Bool("dry-run", false, "print scaffold without writing files")
+	fromManifest := fs.String("from-manifest", "", "compile a pinned offline release manifest into a read-only onboarding packet")
 	asJSON := fs.Bool("json", false, "emit the result as JSON")
 	if err := fs.Parse(argv); err != nil {
 		os.Exit(2)
 	}
+	if *fromManifest != "" {
+		var incompatible []string
+		fs.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "family", "topology", "dry-run":
+				incompatible = append(incompatible, "--"+f.Name)
+			}
+		})
+		if len(incompatible) != 0 || !*asJSON {
+			fmt.Fprintln(os.Stderr, "fak new-model: --from-manifest requires --json and cannot be combined with --family, --topology, or --dry-run")
+			fmt.Fprintln(os.Stderr, "usage: fak new-model --from-manifest <file> --json")
+			os.Exit(2)
+		}
+		if code := runNewModelManifest(os.Stdout, os.Stderr, *fromManifest); code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
 
 	if *family == "" {
 		fmt.Fprintln(os.Stderr, "fak new-model: --family is required")
-		fmt.Fprintln(os.Stderr, "usage: fak new-model --family <name> [--topology <topology>] [--dry-run] [--json]")
+		fmt.Fprintln(os.Stderr, "usage: fak new-model (--family <name> [--topology <topology>] [--dry-run] | --from-manifest <file>) [--json]")
 		os.Exit(2)
 	}
 
@@ -584,4 +604,30 @@ func cmdNewModel(argv []string) {
 	for _, s := range res.NextSteps {
 		fmt.Printf("%s\n", s)
 	}
+}
+
+func runNewModelManifest(stdout, stderr io.Writer, path string) int {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "fak new-model: read manifest: %v\n", err)
+		return 1
+	}
+	packet, err := newmodel.CompileManifestJSON(raw)
+	if err != nil {
+		var refusal *newmodel.Refusal
+		if errors.As(err, &refusal) {
+			encoded, marshalErr := json.MarshalIndent(refusal, "", "  ")
+			if marshalErr == nil {
+				fmt.Fprintln(stderr, string(encoded))
+				return 1
+			}
+		}
+		fmt.Fprintf(stderr, "fak new-model: compile manifest: %v\n", err)
+		return 1
+	}
+	if _, err := stdout.Write(packet); err != nil {
+		fmt.Fprintf(stderr, "fak new-model: write packet: %v\n", err)
+		return 1
+	}
+	return 0
 }

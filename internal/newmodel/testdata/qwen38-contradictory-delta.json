@@ -1,0 +1,17 @@
+{
+  "schema": "fak.new-model-manifest/1",
+  "release": {"id": "synthetic-qwen38-family", "family": "qwen38", "revision": "synthetic-contract-v1", "evidence_class": "synthetic-non-claiming"},
+  "source": {"uri": "fixture://synthetic/qwen38/config.json", "revision": "ffffffffffffffffffffffffffffffffffffffff", "manifest_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"},
+  "artifact": {"uri": "fixture://synthetic/qwen38/model.gguf", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "tokenizer_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "chat_template_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+  "descriptor": {"aliases": ["Qwen3_8ForCausalLM"], "topology": ["decoder", "hybrid_attention"], "state": [{"kind": "kv", "shape": [32, 128], "bytes_per_element": 2}], "quantization": ["q4_k_m"], "storage": ["gguf"], "tokenizer": ["bpe"], "tools": ["json_tools"], "multimodal": ["text_only"], "backends": ["metal"], "kernels": ["gated_delta_net"], "envelopes": ["m3_pro_p32_t64"], "oracles": ["semantic_answer_quality_v2"], "readiness": ["manifest_only"], "migration": ["retain_previous_native_descriptor"], "forbidden": []},
+  "semantic_deltas": [{"axis": "attention", "value": "hybrid"}, {"axis": "attention", "value": "mla"}],
+  "obligations": [
+    {"id": "confirm_tensor_names", "kind": "semantic", "description": "Confirm tensor names."},
+    {"id": "capture_quality_oracle", "kind": "oracle", "description": "Capture quality oracle."},
+    {"id": "prove_native_backends", "kind": "backend", "description": "Prove native backends."},
+    {"id": "run_conformance", "kind": "test", "description": "Run conformance."},
+    {"id": "update_support_surfaces", "kind": "docs", "description": "Update support docs."},
+    {"id": "match_performance", "kind": "performance", "description": "Match performance."}
+  ],
+  "coupling": {"counts": {}, "budget": {}}
+}
