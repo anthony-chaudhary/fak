@@ -13,6 +13,11 @@ financial or site lifecycles, or a resolved rumor history. “Exhaustive” rema
 operating method—explicit taxonomy, dated evidence, and visible gaps—not a claim that
 the open web has a finite or fully enumerated boundary.
 
+Issue #9330 adds Schneider Electric and Eaton manufacturing milestones plus PJM's
+large-load forecast/verification process. It keeps announced investment, production
+target, qualified output, shipment, site acceptance, energized capacity, and metered load
+as distinct lifecycle states; PJM forecast/request MW is not treated as live capacity.
+
 Issue #9323 adds the first direct regional-demand row: OpenRouter reports weekly
 continent-level spend over more than 100T production tokens, while SkyLB/SkyWalker is
 deepened with six-country diurnal and session-locality evidence. Spend remains distinct
@@ -41,9 +46,9 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **187** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **182** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **154** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Entries | **191** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **186** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **157** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
 | Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 19; `frontier_lab` 59; `hyperscaler` 16; `market_signal` 19; `policy_regulation` 5; `serving_system` 25; `standard` 3; `supply_chain` 20; `workload_model` 3; `workload_trace` 8. |
 | Evidence classes used | **10** | `official_statement` 86; `vendor_claim` 27; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 16; `analyst_estimate` 5; `synthetic_experiment` 6; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
 | Confidence labels | **4** | `high` 111; `medium_high` 54; `medium` 8; `low` 2. Confidence describes evidentiary strength, not business likelihood. |

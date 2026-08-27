@@ -231,6 +231,18 @@ definition**. None alone answers how much AI capacity is operating.
 | 2025-09-04 | Hitachi Energy, U.S. | Multi-site manufacturing investment announced | $1B U.S. program; $457M new large-power-transformer factory in South Boston VA | Construction/output date, MVA throughput, yield, orders, allocation, site commissioning. |
 | 2026-02-03 | Siemens Energy, U.S. | Brownfield expansion and new factory program announced | $1B across transformers/service, gas turbines, and grid components | Product split, factory start, output, lead-time reduction, shipment, commissioning. |
 | 2025-05-14 | GE Vernova T&D India | New manufacturing/testing capacity planned in Chennai and Noida | ~$16M; Electrification backlog reported >3× YoY | Product-specific throughput, domestic/export allocation, shipped/installed equipment, live grid capacity. |
+| 2025-03-25 | Schneider Electric, U.S. | Multi-site electrical manufacturing and test-lab investment announced through 2027 | >$700M planned; >1,000 jobs; medium-voltage products, circuit breakers, switchgear, power distribution, and AI-datacenter test labs | Facility-by-facility completion, unit/MVA output, factory slots, customer allocation, shipment, acceptance, energization. |
+| 2026-04-08 | Eaton, Bellevue NE | 370,000-square-foot medium-voltage switchgear factory announced; production targeted for H1 2027 | >$30M investment; >200 jobs; air- and gas-insulated switchgear | Qualified production, annual units/ratings, backlog allocation, shipment, site acceptance, live datacenter MW. |
+| 2025-10-17 | PJM large-load forecasting | RTO filing documents utility-specific request/verification processes rather than one PJM load-interconnection queue | 32 GW peak growth forecast for 2024-2030, about 30 GW from data centers; disclosed state/utility thresholds include 70 MW, 100 MW, and 25 MW | Customer-level request census, duplicate-screening, financial commitment, probability adjustment, upgrade contract, construction, and energization. |
+
+### Large-load request and forecast discipline
+
+PJM's 2025 filing shows why a “queue MW” headline is not a clean denominator: large-load
+requests originate with utilities and load-serving entities under different thresholds,
+validation rules, probability factors, and duplicate-handling practices. Record forecast
+MW, requested MW, probability-adjusted MW, contracted MW, upgrade-ready MW, energized MW,
+and metered load separately. A forecast is evidence of planning pressure, not evidence that
+the datacenter, substation, generation, or transmission upgrade exists.
 
 ### Electrical delivery chain
 

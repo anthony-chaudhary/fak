@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9323,
+  "latest_slice_issue": 9330,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 188,
+    "entry_count": 191,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -182,6 +182,7 @@
       "OpenRouter",
       "Operator-level LLM autoscaling study",
       "Oracle",
+      "PJM Interconnection",
       "Parrot serving study",
       "Robust KV cache management study",
       "SDAIA / IBM",
@@ -192,6 +193,7 @@
       "Sakana AI",
       "Samsung Electronics",
       "Sarvam AI",
+      "Schneider Electric",
       "Schneider Electric / NVIDIA",
       "Sea AI Lab",
       "SemiAnalysis",
@@ -7272,6 +7274,124 @@
       "fak_implications": [
         "Parameterize geography by metric and epoch; do not convert spend share into request or token share.",
         "Keep language, billing geography, request origin, serving region, sovereignty, WAN latency, and model-price mix as separate fields."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "schneider-us-electrical-expansion-2025",
+      "category": "supply_chain",
+      "entity": "Schneider Electric",
+      "topic": [
+        "electrical equipment",
+        "switchgear",
+        "circuit breakers",
+        "manufacturing expansion"
+      ],
+      "published_at": "2025-03-25",
+      "event_at": "2025-03-25",
+      "source_title": "Schneider Electric Plans to Invest Over $700 million in the U.S., Supporting Energy & AI Sectors and Job Growth",
+      "source_url": "https://www.se.com/us/en/about-us/newsroom/news/press-releases/schneider-electric-plans-to-invest-over-700-million-in-the-u-s-supporting-energy-ai-sectors-and-job-growth-67bdeb3ee4475a5955011b6a/",
+      "source_kind": "vendor press release",
+      "evidence_class": "announced manufacturing investment",
+      "confidence": "high for announced plan; low for delivered output",
+      "claim": "Schneider Electric announced more than $700M of U.S. investment through 2027 across medium-voltage products, circuit breakers, switchgear, power distribution, and test labs, with more than 1,000 planned jobs.",
+      "quantified": {
+        "planned_investment_usd_gt": 700000000,
+        "planned_jobs_gt": 1000,
+        "plan_end_year": 2027,
+        "us_investment_decade_total_usd_gt": 1000000000
+      },
+      "assumptions": [
+        "Manufacturing investment expands a potential supply envelope; it is not equipment output or datacenter energization."
+      ],
+      "contradictions_or_limits": [
+        "No unit/MVA output, factory-slot allocation, customer order, shipment, acceptance, or commissioned-MW schedule is disclosed."
+      ],
+      "fak_implications": [
+        "Track each facility from announced investment through construction, production, shipment, site acceptance, and energization."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "eaton-nebraska-switchgear-factory-2026",
+      "category": "supply_chain",
+      "entity": "Eaton",
+      "topic": [
+        "switchgear",
+        "electrical equipment",
+        "manufacturing expansion",
+        "data center power"
+      ],
+      "published_at": "2026-04-08",
+      "event_at": "2026-04-08",
+      "source_title": "Eaton expands operations in Nebraska with new manufacturing facility to meet increasing switchgear demand driven by AI data center boom",
+      "source_url": "https://www.eaton.com/us/en-us/company/news-insights/news-releases/2026/eaton-expands-operations-in-nebraska-with-new-manufacturing-facility.html",
+      "source_kind": "vendor press release",
+      "evidence_class": "announced factory with production target",
+      "confidence": "high for announced plan; medium for dated production target; low for delivered output",
+      "claim": "Eaton announced a >$30M, 370,000-square-foot Bellevue, Nebraska facility for air- and gas-insulated medium-voltage switchgear, targeting production in the first half of 2027 and more than 200 jobs.",
+      "quantified": {
+        "investment_usd_gt": 30000000,
+        "facility_square_feet": 370000,
+        "planned_jobs_gt": 200,
+        "production_target": "first_half_2027",
+        "eaton_global_manufacturing_investment_since_2023_usd_gt": 1500000000
+      },
+      "assumptions": [
+        "A production target is later than a factory announcement but earlier than qualified output, shipment, and site acceptance."
+      ],
+      "contradictions_or_limits": [
+        "No annual switchgear units, ratings, yield, customer allocation, order backlog, shipment date, or energized datacenter capacity is disclosed."
+      ],
+      "fak_implications": [
+        "Model medium-voltage switchgear as a dated long-lead dependency rather than fungible inventory."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "pjm-large-load-forecast-verification-2025",
+      "category": "policy_regulation",
+      "entity": "PJM Interconnection",
+      "topic": [
+        "large loads",
+        "data centers",
+        "load forecast",
+        "interconnection",
+        "grid reliability"
+      ],
+      "published_at": "2025-10-17",
+      "event_at": "2025-10-17",
+      "source_title": "PJM Answers to FERC Questions on Large Load Forecasting",
+      "source_url": "https://www.pjm.com/-/media/DotCom/documents/ferc/filings/2025/20251017-ad25-8-000.pdf",
+      "source_kind": "RTO filing to federal regulator",
+      "evidence_class": "operative process disclosure",
+      "confidence": "high",
+      "claim": "PJM disclosed that it had no RTO-administered load-interconnection process, relied on utilities and load-serving entities for large-load requests, and faced inconsistent validation and duplicate-request handling across jurisdictions.",
+      "quantified": {
+        "pjm_2024_2030_peak_growth_gw": 32,
+        "pjm_2024_2030_data_center_growth_gw_approx": 30,
+        "indiana_large_load_threshold_mw": 70,
+        "new_jersey_large_load_threshold_mw": 100,
+        "ohio_data_center_threshold_mw": 25
+      },
+      "assumptions": [
+        "A forecasted or requested MW is not contracted, constructed, energized, or continuously served MW."
+      ],
+      "contradictions_or_limits": [
+        "Customer-level requests and commercial probabilities initially reside with utilities; duplicate requests are generally not explicitly accounted for unless known within related territories.",
+        "The filing documents heterogeneous rules and missing uniform verification rather than a clean interconnection-queue census."
+      ],
+      "fak_implications": [
+        "Carry request, probability adjustment, financial commitment, duplicate-screening, ramp, contract, upgrade, and energization as separate lifecycle fields."
       ],
       "rumor": {
         "is_rumor": false,
