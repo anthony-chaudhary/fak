@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,9 +39,10 @@ func runNewModel(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak new-model: read manifest: %v\n", err)
 			return 1
 		}
-		packet, err := newmodel.CompileReleaseManifest(data)
+		packet, err := newmodel.CompileManifestJSON(data)
 		if err != nil {
-			if refusal, ok := newmodel.RefusalFor(err); ok {
+			var refusal *newmodel.Refusal
+			if errors.As(err, &refusal) {
 				enc := json.NewEncoder(stderr)
 				enc.SetIndent("", "  ")
 				_ = enc.Encode(refusal)
@@ -49,10 +51,8 @@ func runNewModel(stdout, stderr io.Writer, argv []string) int {
 			fmt.Fprintf(stderr, "fak new-model: compile manifest: %v\n", err)
 			return 1
 		}
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(packet); err != nil {
-			fmt.Fprintf(stderr, "fak new-model: encode packet: %v\n", err)
+		if _, err := stdout.Write(packet); err != nil {
+			fmt.Fprintf(stderr, "fak new-model: write packet: %v\n", err)
 			return 1
 		}
 		return 0

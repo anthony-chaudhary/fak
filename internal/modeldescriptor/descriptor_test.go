@@ -6,6 +6,13 @@ import (
 	"testing"
 )
 
+func TestBindFakNativeOwnsEngineInvariant(t *testing.T) {
+	d := BindFakNative(Descriptor{})
+	if d.NativeEngine != "fak-native" {
+		t.Fatalf("bound engine = %q, want fak-native", d.NativeEngine)
+	}
+}
+
 func base(id string) Descriptor {
 	return Descriptor{Schema: Schema, ID: id, Revision: "1", Provenance: "fixture", Trust: "witnessed", Aliases: []string{id}, Topology: []string{"dense", "hybrid_attention"}, State: []Geometry{{Kind: "kv", Shape: []int{32, 128}, BytesPerElement: 2}, {Kind: "gdn", Shape: []int{64}, BytesPerElement: 4}}, Quantization: []string{"q4_k"}, Storage: []string{"gguf"}, Tokenizer: []string{"bpe"}, Tools: []string{"json_tools"}, Backends: []string{"metal"}, Kernels: []string{"gemm"}, Envelopes: []string{"m3"}, Oracles: []string{"quality_fixture"}, Readiness: []string{"ready"}, Migration: []string{"v1"}, NativeEngine: "fak-native"}
 }

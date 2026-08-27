@@ -75,13 +75,13 @@ type LandOption func(*landConfig)
 type landConfig struct {
 	// coreLockWitness is the claim supplied out-of-band (the CLI flag). It wins
 	// over the commit-message trailer when both are present.
-	coreLockWitness  string
-	recoveryRemote   string
-	requireRemote    bool
-	progressSink     LandProgressSink
-	progressNow      func() time.Time
-	progressProbe    func() landResourceProbe
-	progressRecorder *landRecorder
+	coreLockWitness string
+	recoveryRemote  string
+	requireRemote   bool
+	progress        func(LandProgressEvent)
+	now             func() time.Time
+	resources       func() landResourceSample
+	tracker         *landProgressTracker
 }
 
 // WithCoreLockWitness supplies the hard-self core-lock maintenance witness claim

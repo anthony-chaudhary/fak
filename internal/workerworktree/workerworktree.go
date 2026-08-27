@@ -196,7 +196,7 @@ type Result struct {
 	Disambiguation   *DisambiguationWitnesses `json:"disambiguation,omitempty"`
 	RecoveryRef      string                   `json:"recovery_ref,omitempty"`
 	RemoteRecovery   *RemoteReadback          `json:"remote_recovery,omitempty"`
-	LandCost         *LandCostReceipt         `json:"land_cost,omitempty"`
+	Cost             *LandCostReceipt         `json:"cost,omitempty"`
 	// pooled is internal lifecycle evidence: unlike generic same-key reuse, this
 	// Prepare exclusively reserved an idle member and may safely destroy it if the
 	// post-materialization owner/state write fails.
@@ -858,13 +858,18 @@ func expandLandPaths(wtPath, diffRef string, requested []string, git GitRunner) 
 	sort.Strings(expanded)
 	return expanded, nil
 }
-func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) (result Result) {
+func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify VerifyHook, git GitRunner, opts ...LandOption) (res Result) {
 	cfg := newLandConfig(opts)
-	recorder := newLandRecorder(cfg)
-	cfg.progressRecorder = recorder
-	defer func() { result.LandCost = recorder.finish(result.OK) }()
-
-	admission := recorder.begin("admission", 0)
+	tracker := newLandProgressTracker(cfg)
+	cfg.tracker = tracker
+	finishAdmission := beginLandPhase(tracker, "admission", 0)
+	admissionActive := true
+	defer func() {
+		if admissionActive {
+			finishAdmission()
+		}
+		res.Cost = tracker.receipt()
+	}()
 	diffRef := baseSHA
 	if diffRef == "" {
 		diffRef = "HEAD"
@@ -876,18 +881,14 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		var err error
 		paths, err = expandLandPaths(wtPath, diffRef, paths, git)
 		if err != nil {
-			admission.complete("failed")
 			return Result{OK: false, Reason: err.Error()}
 		}
 	}
 	rc, diff := run(git, wtPath, []string{"diff", diffRef})
 	if rc != 0 {
-		admission.complete("failed")
 		return Result{OK: false, Reason: "could not read worktree diff vs " + diffRef + " (git error) — fail open"}
 	}
 	if strings.TrimSpace(diff) == "" {
-		recorder.setScan(0, int64(len(diff)))
-		admission.complete("ok")
 		// No net change since the base: the worker landed nothing. The caller's
 		// commit-witness (dos commit-audit) decides whether the slot was productive.
 		return Result{OK: true, Applied: false, Committed: false,
@@ -902,40 +903,32 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	if namesRC != 0 {
 		names = ""
 	}
-	scannedFiles := len(paths)
-	if scannedFiles == 0 {
-		scannedFiles = len(strings.Fields(names))
-	}
-	recorder.setScan(scannedFiles, int64(len(diff)))
-	admission.complete("ok")
-
+	tracker.setScanned(countLandScanFiles(names), int64(len(diff)))
 	droppedOutOfLane := 0
 	if len(paths) > 0 && names != "" {
 		droppedOutOfLane = CountPathsOutsideTrees(strings.Fields(names), paths)
 	}
-	// Admission's successful exact diff read proves that the already-prepared worker
-	// materialization is readable. Surface that capability boundary separately so a
-	// future materializer can replace it without disappearing inside validation wall.
-	materializer := recorder.begin("validation_materializer", 0)
-	materializer.complete("ok")
-
-	validation := recorder.begin("prospective_validation", 0)
-	if verify == nil {
-		validation.complete("skipped")
-	} else if ok, detail := verify(wtPath); !ok {
-		validation.complete("failed")
-		return Result{OK: false, Applied: false, Committed: false,
-			Reason: "worktree verify failed, refusing to land: " + detail}
-	} else {
-		validation.complete("ok")
+	if verify != nil {
+		finishAdmission()
+		admissionActive = false
+		finishValidation := beginLandPhase(tracker, "prospective-validation", 0)
+		if ok, detail := verify(wtPath); !ok {
+			finishValidation()
+			return Result{OK: false, Applied: false, Committed: false,
+				Reason: "worktree verify failed, refusing to land: " + detail}
+		}
+		finishValidation()
 	}
-
-	admissionGate := recorder.begin("admission_gate", 0)
+	if admissionActive {
+		finishAdmission()
+		admissionActive = false
+	}
+	finishPolicyAdmission := beginLandPhase(tracker, "policy-admission", 0)
 	// Resolve a message file: use the caller's, else materialize the worktree tip's
 	// message to a temp file so the landed commit keeps the worker's own subject.
 	msgFile, cleanup, err := resolveMsgFile(wtPath, commitMsgFile, git)
 	if err != nil {
-		admissionGate.complete("failed")
+		finishPolicyAdmission()
 		return Result{OK: false, Applied: false, Committed: false,
 			Reason: "could not resolve commit message: " + err.Error()}
 	}
@@ -951,17 +944,18 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 	// runs no git hook. Refusing here leaves the trunk index, worktree and HEAD
 	// untouched; the worker's diff stays in its worktree.
 	if refusal, fired := coreLockLandGate(root, names, diff, msgFile, cfg, git); fired {
-		admissionGate.complete("failed")
+		finishPolicyAdmission()
 		refusal.DroppedOutOfLane = droppedOutOfLane
 		return refusal
 	}
-	admissionGate.complete("ok")
+	finishPolicyAdmission()
 
-	// Race-free layer-2 land: stage+commit through a THROWAWAY index so the shared
-	// index is never a sweep target. handled=false means it could not isolate safely
-	// (detached HEAD, apply conflict, lost CAS, …) and falls through to the baseline
-	// shared path below. Path-scoped lands only (a whole-tree land has no safe isolated
-	// form here). IsolatedLandEnv controls the gate; it is default-on since #3619.
+	// Opt-in race-free layer-2 land (default OFF): stage+commit through a THROWAWAY
+	// index so the shared index is never a sweep target. handled=false means it could
+	// not isolate safely (detached HEAD, apply conflict, lost CAS, …) and falls through
+	// to the baseline shared path below — so enabling it only ever reduces the #3547
+	// race window, never regresses it. Path-scoped lands only (a whole-tree land has no
+	// safe isolated form here).
 	if isolatedLandEnabled() && len(paths) > 0 {
 		if res, handled := landIsolated(root, wtPath, diff, msgFile, paths, git, isolatedGitEnv, cfg); handled {
 			res.DroppedOutOfLane = droppedOutOfLane
@@ -969,41 +963,34 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 		}
 	}
 
-	applyPhase := recorder.begin("apply_index", 0)
+	tracker.setCache("shared-index-fallback", false)
+	finishApply := beginLandPhase(tracker, "trunk-apply", 0)
 	applied := gitApply(root, diff, git)
+	finishApply()
 	if !applied.OK {
-		applyPhase.complete("failed")
 		return Result{OK: false, Applied: false, Committed: false,
 			Reason: "git apply to trunk failed", Detail: applied.Detail}
 	}
-	applyPhase.complete("ok")
-
-	commitPhase := recorder.begin("commit", 0)
 	commitArgs := []string{"commit", "-s", "-F", msgFile}
 	if len(paths) > 0 {
 		commitArgs = append(commitArgs, "--")
 		commitArgs = append(commitArgs, paths...)
 	}
+	finishCommit := beginLandPhase(tracker, "commit", 0)
 	rc, out := run(git, root, commitArgs)
-	res := Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
-	if rc == 0 {
-		commitPhase.complete("ok")
-	} else {
-		commitPhase.complete("failed")
-	}
-	// Honest-refusal readback confirms the commit actually carries our intended
-	// paths. A missing path means a shared-index race swept it into a concurrent
-	// commit (#3547); refuse rather than return a false success. FAIL-OPEN — only a
-	// positive mismatch flips OK. LandReadbackEnv is default-on since #3619.
+	finishCommit()
+	res = Result{OK: rc == 0, Applied: true, Committed: rc == 0, Detail: tail(out, 300), DroppedOutOfLane: droppedOutOfLane}
+	// Opt-in honest-refusal readback (default OFF): confirm the commit we just made
+	// actually carries our intended paths. A missing path means our staged change
+	// was swept into a concurrent commit on the shared index (#3547); refuse rather
+	// than return a false success. FAIL-OPEN — only a positive mismatch flips OK.
 	if rc == 0 && len(paths) > 0 && landReadbackEnabled() {
-		readback := recorder.begin("readback", 0)
+		finishReadback := beginLandPhase(tracker, "land-readback", 0)
 		if ok, reason := landReadbackVerify(root, paths, git); !ok {
-			readback.complete("failed")
 			res.OK = false
 			res.Reason = reason
-		} else {
-			readback.complete("ok")
 		}
+		finishReadback()
 	}
 	return res
 }
@@ -1102,7 +1089,14 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 	if len(configs) > 0 {
 		cfg = configs[0]
 	}
-	recorder := cfg.progressRecorder
+	tracker := cfg.tracker
+	finishIsolationAdmission := beginLandPhase(tracker, "isolated-admission", 0)
+	isolationAdmissionActive := true
+	defer func() {
+		if isolationAdmissionActive {
+			finishIsolationAdmission()
+		}
+	}()
 	// The branch to move. Detached HEAD → no branch ref to CAS safely; fall back.
 	rc, ref := run(git, root, []string{"symbolic-ref", "--quiet", "HEAD"})
 	branch := strings.TrimSpace(ref)
@@ -1134,6 +1128,9 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 	os.Remove(idx) // read-tree writes it fresh; a pre-existing empty file would also do
 	defer os.Remove(idx)
 	env := map[string]string{"GIT_INDEX_FILE": idx}
+	if tracker != nil {
+		tracker.setCache("fresh-isolated-index", false)
+	}
 
 	// The captured diff and the signed message are attempt-invariant: write them once
 	// so every CAS attempt stages byte-identical content under the same subject.
@@ -1147,6 +1144,8 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 		return Result{}, false
 	}
 	defer cleanupMsg()
+	finishIsolationAdmission()
+	isolationAdmissionActive = false
 
 	// Bounded optimistic-concurrency loop (#3570): each attempt seeds the throwaway
 	// index from the CURRENT base, builds the commit as a child of that exact base,
@@ -1159,90 +1158,89 @@ func landIsolated(root, wtPath, diff, msgFile string, paths []string, git GitRun
 			// A peer is actively landing: back off briefly, then re-resolve the base
 			// the peer just moved so this attempt re-builds on the NEW HEAD.
 			casRetrySleep(attempt)
+			finishRebase := beginLandPhase(tracker, "cas-rebase", attempt)
 			rc, head := run(git, root, []string{"rev-parse", "HEAD"})
+			finishRebase()
 			oldHEAD = strings.TrimSpace(head)
 			if rc != 0 || oldHEAD == "" {
 				return Result{}, false
 			}
 		}
-		applyPhase := recorder.begin("apply_index", attempt)
 		// Seed the throwaway index with the current trunk HEAD's tree.
+		finishIndex := beginLandPhase(tracker, "index-construction", attempt)
 		if rc, _ := runEnv(genv, root, env, []string{"read-tree", oldHEAD}); rc != 0 {
-			applyPhase.complete("failed")
+			finishIndex()
 			return Result{}, false
 		}
 		// Stage the worker diff into the throwaway index ONLY (--cached never touches
-		// the working tree). A conflict means a concurrent same-path change; let the
-		// baseline path adjudicate it exactly as before rather than force it.
+		// the working tree). A conflict here — first try or re-apply after a lost CAS —
+		// means a concurrent change to the SAME paths; let the baseline path adjudicate
+		// it exactly as today rather than force it.
 		if rc, _ := runEnv(genv, root, env, []string{"apply", "--cached", "--whitespace=nowarn", patch}); rc != 0 {
-			applyPhase.complete("failed")
+			finishIndex()
 			return Result{}, false
 		}
 		rc, tree := runEnv(genv, root, env, []string{"write-tree"})
 		treeSHA := strings.TrimSpace(tree)
 		if rc != 0 || treeSHA == "" {
-			applyPhase.complete("failed")
+			finishIndex()
 			return Result{}, false
 		}
-		applyPhase.complete("ok")
+		finishIndex()
 		disambiguation = nil
 		if disambiguationRelevant(paths) {
+			finishAnalysis := beginLandPhase(tracker, "whole-tree-disambiguation", attempt)
 			var valid bool
-			disambiguation, valid = verifyAppliedDisambiguationProgress(root, wtPath, treeSHA, recorder, attempt)
+			disambiguation, valid = verifyAppliedDisambiguation(root, wtPath, treeSHA)
+			finishAnalysis()
 			if !valid {
 				return Result{OK: false, Path: root, Reason: "post-apply disambiguation invariant failed", Detail: disambiguation.compactDetail(), Disambiguation: disambiguation}, true
 			}
 		}
-		commitPhase := recorder.begin("commit", attempt)
+		finishCommit := beginLandPhase(tracker, "commit-construction", attempt)
 		rc, commit := runEnv(genv, root, env, []string{"commit-tree", treeSHA, "-p", oldHEAD, "-F", ctMsg})
+		finishCommit()
 		newCommit := strings.TrimSpace(commit)
 		if rc != 0 || newCommit == "" {
-			commitPhase.complete("failed")
 			return Result{}, false
 		}
-		commitPhase.complete("ok")
 		// Name the off-branch commit before trunk CAS. A process crash from here on
 		// leaves an observable, GC-safe recovery candidate instead of a dangling SHA.
-		recoveryPhase := recorder.begin("recovery_ref_publication", attempt)
+		finishRecovery := beginLandPhase(tracker, "recovery-ref-publication", attempt)
 		recoveryRef, anchorErr := AnchorRecoveryEntry(root, wtPath, newCommit, func(r string, a []string) (int, string) { return runEnv(genv, r, env, a) })
 		if anchorErr != nil {
-			recoveryPhase.complete("failed")
+			finishRecovery()
 			return Result{OK: false, Reason: "isolated land recovery anchor failed — trunk unchanged", Detail: anchorErr.Error()}, true
 		}
-		recoveryPhase.complete("ok")
 		var remoteReceipt *RemoteReadback
-		remotePhase := recorder.begin("remote_recovery_publication", attempt)
 		if cfg.recoveryRemote != "" {
 			receipt := PublishRecoveryRef(root, cfg.recoveryRemote, recoveryRef, newCommit, git)
 			remoteReceipt = &receipt
 			if cfg.requireRemote && !receipt.Witnessed {
-				remotePhase.complete("failed")
+				finishRecovery()
 				return Result{OK: false, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt, Reason: "required remote recovery witness failed — trunk unchanged", Detail: receipt.Reason}, true
 			}
-			remotePhase.complete("ok")
-		} else {
-			remotePhase.complete("skipped")
 		}
+		finishRecovery()
 		// Compare-and-swap: move the branch ONLY if HEAD is still oldHEAD. A peer commit
-		// in the gap fails this → retry on the peer's new HEAD (#3570).
-		casPhase := recorder.begin("cas", attempt)
-		if rc, _ := run(git, root, []string{"update-ref", branch, newCommit, oldHEAD}); rc != 0 {
-			casPhase.complete("retry")
+		// in the gap fails this → retry on the peer's new HEAD (#3570); the throwaway
+		// commit built on the stale base is simply abandoned, unreferenced.
+		finishCAS := beginLandPhase(tracker, "trunk-cas", attempt)
+		rc, _ = run(git, root, []string{"update-ref", branch, newCommit, oldHEAD})
+		finishCAS()
+		if rc != 0 {
 			continue
 		}
-		casPhase.complete("ok")
 		// The ref moved but the shared working tree still holds OLD content for `paths`
 		// (we never touched it). Sync just those paths so trunk builders see the landed
 		// change, matching the baseline post-state. A sync failure does NOT unland.
 		detail := "cas-attempts=" + strconv.Itoa(attempt) + "/" + strconv.Itoa(attempts) + "; recovery-ref=" + recoveryRef
-		syncPhase := recorder.begin("working_tree_sync", attempt)
 		coArgs := append([]string{"checkout", newCommit, "--"}, paths...)
+		finishSync := beginLandPhase(tracker, "working-tree-sync", attempt)
 		if rc, out := run(git, root, coArgs); rc != 0 {
-			syncPhase.complete("failed")
 			detail += "; landed " + shortSHA(newCommit) + " but working-tree sync failed: " + tail(out, 200)
-		} else {
-			syncPhase.complete("ok")
 		}
+		finishSync()
 		return Result{OK: true, Applied: true, Committed: true,
 			Reason: "isolated-index land " + shortSHA(newCommit) + " (race-free, #3547)",
 			Detail: detail, Disambiguation: disambiguation, RecoveryRef: recoveryRef, RemoteRecovery: remoteReceipt}, true

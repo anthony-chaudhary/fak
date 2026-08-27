@@ -399,6 +399,7 @@ concurrent = [
   "studyprio",
   "studytickets",
   "microfleeteconomics",
+  "modeldescriptor",
   # new-leaf:lane -- `fak new-leaf` inserts a generated leaf lane above
 ]
 # `dos.toml` edits change the lane/refusal taxonomy that dispatchers rely on, so
@@ -1184,6 +1185,7 @@ studylink = ["internal/studylink/**"]
 studyprio = ["internal/studyprio/**"]
 studytickets = ["internal/studytickets/**"]
 microfleeteconomics = ["internal/microfleeteconomics/**"]
+modeldescriptor = ["internal/modeldescriptor/**"]
 # new-leaf:tree -- generated leaf trees inserted above this line
 cmd         = ["cmd/**"]
 # internal/experiments is a real leaf too, and the `experiments` lane is the only lane whose

@@ -57,8 +57,7 @@ fak worktree <subcommand>
            [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
            [--require-remote-recovery]
                    Apply the worktree's diff-since-base onto the trunk as one
-                   signed-off commit. Streams phase JSON to stderr, then prints one
-                   terminal {ok, applied, committed, land_cost, ...} receipt.
+                   signed-off commit. Prints {ok, applied, committed, ...}.
                    A diff touching a hard-self core-locked path is REFUSED with
                    CORE_SELF_MODIFY unless the witness claim (flag, or a
                    Core-lock-maintenance-witness: trailer in the commit message)
@@ -144,15 +143,10 @@ func worktreeWorkerEmit(v any) {
 	_ = enc.Encode(v)
 }
 
-// worktreeWorkerProgressSink keeps progress out of stdout, whose one-object final
-// receipt is consumed by dispatch automation. Each stderr line is independently
-// decodable JSON, so an operator sees the first phase without waiting for Land.
-func worktreeWorkerProgressSink(w io.Writer) workerworktree.LandProgressSink {
-	return func(event workerworktree.LandProgressEvent) {
-		enc := json.NewEncoder(w)
-		enc.SetEscapeHTML(false)
-		_ = enc.Encode(event)
-	}
+func worktreeWorkerProgressEmitter(w io.Writer) func(workerworktree.LandProgressEvent) {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return func(event workerworktree.LandProgressEvent) { _ = enc.Encode(event) }
 }
 
 // worktreePrepareOut is the prepare JSON: the primitive's Result plus the child
@@ -245,7 +239,7 @@ func worktreeWorkerLand(argv []string) {
 
 	opts := []workerworktree.LandOption{
 		workerworktree.WithCoreLockWitness(*coreLockWitness),
-		workerworktree.WithLandProgress(worktreeWorkerProgressSink(os.Stderr)),
+		workerworktree.WithLandProgress(worktreeWorkerProgressEmitter(os.Stderr)),
 	}
 	if strings.TrimSpace(*recoveryRemote) != "" || *requireRemote {
 		remote := strings.TrimSpace(*recoveryRemote)

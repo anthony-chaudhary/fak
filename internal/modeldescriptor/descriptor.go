@@ -40,6 +40,13 @@ type Report struct {
 
 var ErrMismatch = errors.New("modeldescriptor: incompatible descriptor")
 
+// BindFakNative records the engine identity required by Validate. Keeping this
+// assignment here makes modeldescriptor the single owner of that invariant.
+func BindFakNative(d Descriptor) Descriptor {
+	d.NativeEngine = "fak-native"
+	return d
+}
+
 func Digest(d Descriptor) (string, error) {
 	d.Aliases = sorted(d.Aliases)
 	d.Topology = sorted(d.Topology)
