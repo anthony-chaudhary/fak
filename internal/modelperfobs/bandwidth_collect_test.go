@@ -42,3 +42,16 @@ func TestCollectBandwidthPreservesUnavailableDRAM(t *testing.T) {
 		t.Fatal("roofline not selected")
 	}
 }
+
+func TestDeriveHostPressureRatesNeedsTwoMonotonicSamples(t *testing.T) {
+	minor1, minor2, major1, major2 := uint64(10), uint64(14), uint64(2), uint64(3)
+	prev := BandwidthSample{Provenance: BandwidthProvenance{SampledAt: "2026-08-27T00:00:00Z"}, Host: HostSignals{ProcessMinorFaults: &minor1, ProcessMajorFaults: &major1}}
+	curr := BandwidthSample{Provenance: BandwidthProvenance{SampledAt: "2026-08-27T00:00:02Z"}, Host: HostSignals{ProcessMinorFaults: &minor2, ProcessMajorFaults: &major2}}
+	deriveHostPressureRates(&prev, &curr)
+	if curr.Host.ProcessMinorFaultsPerSecond == nil || *curr.Host.ProcessMinorFaultsPerSecond != 2 || curr.Host.ProcessMajorFaultsPerSecond == nil || *curr.Host.ProcessMajorFaultsPerSecond != .5 {
+		t.Fatalf("%+v", curr.Host)
+	}
+	if prev.Host.ProcessMinorFaultsPerSecond != nil {
+		t.Fatal("first sample must not fabricate a rate")
+	}
+}

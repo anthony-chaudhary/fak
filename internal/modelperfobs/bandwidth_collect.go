@@ -14,19 +14,22 @@ var MinSampleInterval = 10 * time.Millisecond
 var MaxSampleInterval = time.Minute
 
 type HostSignals struct {
-	PhysicalTotalBytes     *uint64 `json:"physical_total_bytes,omitempty"`
-	PhysicalAvailableBytes *uint64 `json:"physical_available_bytes,omitempty"`
-	ProcessResidentBytes   *uint64 `json:"process_resident_bytes,omitempty"`
-	ProcessReadBytes       *uint64 `json:"process_read_bytes,omitempty"`
-	ProcessWriteBytes      *uint64 `json:"process_write_bytes,omitempty"`
-	SwapTotalBytes         *uint64 `json:"swap_total_bytes,omitempty"`
-	SwapUsedBytes          *uint64 `json:"swap_used_bytes,omitempty"`
-	CommitLimitBytes       *uint64 `json:"commit_limit_bytes,omitempty"`
-	CommitUsedBytes        *uint64 `json:"commit_used_bytes,omitempty"`
-	ProcessMinorFaults     *uint64 `json:"process_minor_faults,omitempty"`
-	ProcessMajorFaults     *uint64 `json:"process_major_faults,omitempty"`
-	ProcessPageFaults      *uint64 `json:"process_page_faults,omitempty"`
-	ProcessIOScope         string  `json:"process_io_scope,omitempty"`
+	PhysicalTotalBytes          *uint64  `json:"physical_total_bytes,omitempty"`
+	PhysicalAvailableBytes      *uint64  `json:"physical_available_bytes,omitempty"`
+	ProcessResidentBytes        *uint64  `json:"process_resident_bytes,omitempty"`
+	ProcessReadBytes            *uint64  `json:"process_read_bytes,omitempty"`
+	ProcessWriteBytes           *uint64  `json:"process_write_bytes,omitempty"`
+	SwapTotalBytes              *uint64  `json:"swap_total_bytes,omitempty"`
+	SwapUsedBytes               *uint64  `json:"swap_used_bytes,omitempty"`
+	CommitLimitBytes            *uint64  `json:"commit_limit_bytes,omitempty"`
+	CommitUsedBytes             *uint64  `json:"commit_used_bytes,omitempty"`
+	ProcessMinorFaults          *uint64  `json:"process_minor_faults,omitempty"`
+	ProcessMajorFaults          *uint64  `json:"process_major_faults,omitempty"`
+	ProcessPageFaults           *uint64  `json:"process_page_faults,omitempty"`
+	ProcessMinorFaultsPerSecond *float64 `json:"process_minor_faults_per_second,omitempty"`
+	ProcessMajorFaultsPerSecond *float64 `json:"process_major_faults_per_second,omitempty"`
+	ProcessPageFaultsPerSecond  *float64 `json:"process_page_faults_per_second,omitempty"`
+	ProcessIOScope              string   `json:"process_io_scope,omitempty"`
 }
 type CollectorAvailability struct {
 	PhysicalMemory bool `json:"physical_memory"`
@@ -129,6 +132,9 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 			s.Capacity.TotalBytes = cloneU64(snap.host.PhysicalTotalBytes)
 			s.Capacity.UsedBytes = &u
 		}
+		if len(cap.Samples) > 0 {
+			deriveHostPressureRates(&cap.Samples[len(cap.Samples)-1], &s)
+		}
 		cap.Samples = append(cap.Samples, s)
 	}
 	report, err := AnalyzeBandwidth(cap)
@@ -150,4 +156,24 @@ func cloneU64(v *uint64) *uint64 {
 	}
 	x := *v
 	return &x
+}
+
+func deriveHostPressureRates(previous, current *BandwidthSample) {
+	prevAt, e1 := time.Parse(time.RFC3339Nano, previous.Provenance.SampledAt)
+	currAt, e2 := time.Parse(time.RFC3339Nano, current.Provenance.SampledAt)
+	if e1 != nil || e2 != nil || !currAt.After(prevAt) {
+		return
+	}
+	seconds := currAt.Sub(prevAt).Seconds()
+	current.Host.ProcessMinorFaultsPerSecond = counterRate(previous.Host.ProcessMinorFaults, current.Host.ProcessMinorFaults, seconds)
+	current.Host.ProcessMajorFaultsPerSecond = counterRate(previous.Host.ProcessMajorFaults, current.Host.ProcessMajorFaults, seconds)
+	current.Host.ProcessPageFaultsPerSecond = counterRate(previous.Host.ProcessPageFaults, current.Host.ProcessPageFaults, seconds)
+}
+
+func counterRate(previous, current *uint64, seconds float64) *float64 {
+	if previous == nil || current == nil || *current < *previous || seconds <= 0 {
+		return nil
+	}
+	rate := float64(*current-*previous) / seconds
+	return &rate
 }
