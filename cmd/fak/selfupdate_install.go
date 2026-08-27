@@ -13,6 +13,7 @@ import (
 )
 
 func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths []string, handoffSession string, handoffTimeout time.Duration, successorArgs []string) {
+	reportSelfUpdateProgress(20, "acquiring self-update lock")
 	installTarget := strings.TrimSpace(*target)
 	if installTarget == "" {
 		exe, err := os.Executable()
@@ -43,6 +44,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// tree: that gives a clean VCS stamp on the installed binary and guarantees we install
 	// exactly verified origin/main, not a build contaminated with peers' work-in-progress.
 	ctx := context.Background()
+	reportSelfUpdateProgress(25, "cleaning stale self-update artifacts")
 
 	// Self-heal first: collect build worktrees leaked by PRIOR self-update ticks that
 	// were killed before their source cleanup ran. This is an explicit apply of a
@@ -86,7 +88,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// A per-invocation temp dir under the OS temp root satisfies both. BuildDirName encodes
 	// our PID so a future run's reaper can tell a live build from a leaked corpse.
 	buildDir := filepath.Join(os.TempDir(), selfinstall.BuildDirName(os.Getpid()))
+	stopHeartbeat := startSelfUpdateHeartbeat(30, "preparing pristine origin/main worktree")
 	_, cleanup, perr := selfinstall.PrepareOrigin(ctx, selfinstall.RealRunner, repoRoot, "origin/main", buildDir)
+	stopHeartbeat()
 	if perr != nil {
 		fmt.Fprintln(os.Stderr, "self-update:", perr)
 		emitSelfUpdateOutcome(outcomePrepareFailed, installTarget, perr.Error())
@@ -103,11 +107,14 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	}
 	if companionBinary != "" {
 		defer os.Remove(companionBinary)
+	} else {
+		reportSelfUpdateProgress(46, "no fak-dev companion installed; continuing")
 	}
 
 	// Select every hot-copy target before changing any deployed bytes. The transaction must use
 	// one pre-update census or a successful early swap can hide a stale later target.
 	census := selfinstall.Census(selfUpdateHost(repoRoot), selfUpdateProbe)
+	reportSelfUpdateProgress(48, "selecting installed targets")
 	staleSiblings := []string{}
 	for _, sib := range selfUpdateSiblings(repoRoot, installTarget) {
 		if selfinstall.NeedsConverge(census, sib, headRev) {
@@ -117,7 +124,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 
 	fmt.Fprintf(selfUpdateProgress, "self-update: building and gating origin/main for %d target(s) …\n", 1+len(staleSiblings)+len(companionPaths))
 	candidate := ""
-	res := selfinstall.Install(ctx, selfinstall.RealRunner, func(source, _ string) error {
+	res := selfinstall.Install(ctx, selfUpdateGateRunner, func(source, _ string) error {
 		candidate = source
 		return nil
 	}, selfinstall.Options{
@@ -156,7 +163,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		selfUpdateReceiptTargets = append(selfUpdateReceiptTargets, selfUpdateReceiptTarget{Role: role, Path: filepath.Clean(copy.Target)})
 	}
 	selfUpdateReceiptAttempted = len(copies)
+	stopHeartbeat = startSelfUpdateHeartbeat(82, "installing verified binaries")
 	transaction := selfinstall.RunTransaction(copies, selfinstall.OSSwap)
+	stopHeartbeat()
 	switch result := transaction.(type) {
 	case selfinstall.Updated:
 		selfUpdateReceiptAttempted, selfUpdateReceiptChanged = result.Attempted, result.Changed
@@ -194,7 +203,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// the build it is stuck on. The audit-only role (the repo-root gate binary, a hand-build in a
 	// shared dirty checkout that may be held live) is never swapped unattended — so an explicit,
 	// greppable audit line is the only thing that keeps it from drifting unnoticed.
+	stopHeartbeat = startSelfUpdateHeartbeat(92, "verifying installed hot copies")
 	audit := selfUpdateAudit(repoRoot, headRev)
+	stopHeartbeat()
 	printHotCopyAudit(audit)
 	if !audit.Converged {
 		emitSelfUpdateOutcome(outcomeHotCopyDivergent, installTarget,
@@ -204,7 +215,9 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	if handoffSession != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), handoffTimeout)
 		defer cancel()
+		stopHeartbeat = startSelfUpdateHeartbeat(97, "handing off to updated binary")
 		handoff := runSelfUpdateHandoff(ctx, installTarget, handoffSession, headRev, successorArgs)
+		stopHeartbeat()
 		selfUpdateReceiptHandoff = &handoff
 		if handoff.State == selfinstall.HandoffRefused {
 			emitSelfUpdateOutcome(outcomeHandoffRefused, installTarget, handoff.Detail)
