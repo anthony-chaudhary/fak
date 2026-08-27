@@ -84,9 +84,28 @@ func Decide(fold guardrsi.Fold, bucket guardrsi.Bucket, threshold int) RouteDeci
 		d.Reason = "empty journal -- no adjudicated row to review; nothing to route"
 		return d
 	}
+	if fold.TotalRows < 0 {
+		d.Reason = fmt.Sprintf("invalid journal -- total_rows=%d cannot be negative; nothing to route", fold.TotalRows)
+		return d
+	}
+
+	// WorstBucket derives child_crash directly from Fold, so any disagreement here
+	// means the caller supplied stale or malformed evidence. Fail closed rather than
+	// fabricate a P1 issue from the bucket alone, or let a hostile bucket downgrade a
+	// real folded crash to an advisory denial.
+	if fold.ChildCrash < 0 || fold.ChildCrash > fold.TotalRows {
+		d.Reason = fmt.Sprintf("invalid child_crash fold -- child_crash=%d is outside [0,total_rows=%d]; nothing to route", fold.ChildCrash, fold.TotalRows)
+		return d
+	}
+	if bucket.Bucket == "child_crash" || fold.ChildCrash > 0 {
+		if bucket.Bucket != "child_crash" || bucket.Count <= 0 || bucket.Count != fold.ChildCrash {
+			d.Reason = fmt.Sprintf("inconsistent child_crash evidence -- fold=%d bucket=%q count=%d; nothing to route", fold.ChildCrash, bucket.Bucket, bucket.Count)
+			return d
+		}
+	}
 
 	switch {
-	case bucket.Bucket == "child_crash" && bucket.Count > 0:
+	case bucket.Bucket == "child_crash":
 		d.Route = true
 		d.Severity = SevP1
 		d.FileIssue = true

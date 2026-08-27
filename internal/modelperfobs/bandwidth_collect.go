@@ -14,8 +14,12 @@ var MinSampleInterval = 10 * time.Millisecond
 var MaxSampleInterval = time.Minute
 
 type HostSignals struct {
-	PhysicalTotalBytes          *uint64  `json:"physical_total_bytes,omitempty"`
-	PhysicalAvailableBytes      *uint64  `json:"physical_available_bytes,omitempty"`
+	PhysicalTotalBytes     *uint64 `json:"physical_total_bytes,omitempty"`
+	PhysicalAvailableBytes *uint64 `json:"physical_available_bytes,omitempty"`
+	// PhysicalAvailableSemantics labels a collector-specific approximation.
+	// Labeled availability remains Host evidence and is not generic Capacity.
+	PhysicalAvailableSemantics  string   `json:"physical_available_semantics,omitempty"`
+	PhysicalFreeBytes           *uint64  `json:"physical_free_bytes,omitempty"`
 	ProcessResidentBytes        *uint64  `json:"process_resident_bytes,omitempty"`
 	ProcessReadBytes            *uint64  `json:"process_read_bytes,omitempty"`
 	ProcessWriteBytes           *uint64  `json:"process_write_bytes,omitempty"`
@@ -55,7 +59,15 @@ type HostSignals struct {
 	MemorySwapInPagesPerSecond                 *float64 `json:"memory_swap_in_pages_per_second,omitempty"`
 	MemorySwapOutPagesTotal                    *uint64  `json:"memory_swap_out_pages_total,omitempty"`
 	MemorySwapOutPagesPerSecond                *float64 `json:"memory_swap_out_pages_per_second,omitempty"`
-	ProcessIOScope                             string   `json:"process_io_scope,omitempty"`
+	// Darwin vm_stat resident-byte states are pressure/occupancy evidence.
+	// Page-in/out counters and rates are paging activity, never memory bandwidth.
+	MemoryWiredResidentBytes      *uint64  `json:"memory_wired_resident_bytes,omitempty"`
+	MemoryCompressedResidentBytes *uint64  `json:"memory_compressed_resident_bytes,omitempty"`
+	MemoryPageInPagesTotal        *uint64  `json:"memory_page_in_pages_total,omitempty"`
+	MemoryPageInPagesPerSecond    *float64 `json:"memory_page_in_pages_per_second,omitempty"`
+	MemoryPageOutPagesTotal       *uint64  `json:"memory_page_out_pages_total,omitempty"`
+	MemoryPageOutPagesPerSecond   *float64 `json:"memory_page_out_pages_per_second,omitempty"`
+	ProcessIOScope                string   `json:"process_io_scope,omitempty"`
 }
 type CollectorAvailability struct {
 	PhysicalMemory bool `json:"physical_memory"`
@@ -162,10 +174,8 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 				s.Provenance.Source = device.provenanceSource
 			}
 		}
-		if !device.available && snap.host.PhysicalTotalBytes != nil && snap.host.PhysicalAvailableBytes != nil && *snap.host.PhysicalTotalBytes >= *snap.host.PhysicalAvailableBytes {
-			u := *snap.host.PhysicalTotalBytes - *snap.host.PhysicalAvailableBytes
-			s.Capacity.TotalBytes = cloneU64(snap.host.PhysicalTotalBytes)
-			s.Capacity.UsedBytes = &u
+		if !device.available {
+			s.Capacity = capacityFromExactHostAvailability(snap.host)
 		}
 		if len(cap.Samples) > 0 {
 			deriveHostPressureRates(&cap.Samples[len(cap.Samples)-1], &s)
@@ -177,6 +187,15 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		return BandwidthCollection{}, err
 	}
 	return BandwidthCollection{Schema: BandwidthCollectionSchema, Engine: "fak-native", MachineClass: runtime.GOOS + "/" + runtime.GOARCH, Collector: collector, IntervalMS: o.Interval.Milliseconds(), Availability: av, Capture: cap, Report: report, RooflineMeasurement: measured}, nil
+}
+
+func capacityFromExactHostAvailability(host HostSignals) CapacitySignals {
+	if host.PhysicalAvailableSemantics != "" || host.PhysicalTotalBytes == nil ||
+		host.PhysicalAvailableBytes == nil || *host.PhysicalTotalBytes < *host.PhysicalAvailableBytes {
+		return CapacitySignals{}
+	}
+	used := *host.PhysicalTotalBytes - *host.PhysicalAvailableBytes
+	return CapacitySignals{TotalBytes: cloneU64(host.PhysicalTotalBytes), UsedBytes: &used}
 }
 
 func collectDeviceSnapshot(ctx context.Context, o CollectionOptions) (deviceSnapshot, error) {
@@ -225,6 +244,8 @@ func deriveHostPressureRates(previous, current *BandwidthSample) {
 	current.Host.MemoryReclaimDirectReclaimedPagesPerSecond = counterRate(previous.Host.MemoryReclaimDirectReclaimedPagesTotal, current.Host.MemoryReclaimDirectReclaimedPagesTotal, seconds)
 	current.Host.MemorySwapInPagesPerSecond = counterRate(previous.Host.MemorySwapInPagesTotal, current.Host.MemorySwapInPagesTotal, seconds)
 	current.Host.MemorySwapOutPagesPerSecond = counterRate(previous.Host.MemorySwapOutPagesTotal, current.Host.MemorySwapOutPagesTotal, seconds)
+	current.Host.MemoryPageInPagesPerSecond = counterRate(previous.Host.MemoryPageInPagesTotal, current.Host.MemoryPageInPagesTotal, seconds)
+	current.Host.MemoryPageOutPagesPerSecond = counterRate(previous.Host.MemoryPageOutPagesTotal, current.Host.MemoryPageOutPagesTotal, seconds)
 }
 
 func counterRate(previous, current *uint64, seconds float64) *float64 {

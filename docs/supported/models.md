@@ -53,6 +53,15 @@ So the supported model list at this layer is "whatever your upstream serves":
 | Llama, Qwen, DeepSeek, Mistral, GLM, any open-weights model | served behind an OpenAI-compatible engine (Ollama, vLLM, SGLang, llm-d, llama.cpp, LM Studio), so it is reached over the OpenAI-compatible wire |
 | a local GGUF on your own box | served by your local OpenAI-compatible server and fronted the same way |
 
+`glm-5.3-flash` also has a model-scoped Z.AI hosted contract in
+`internal/zaitask`: mandatory reasoning (`enabled`; effort `low`, `high`, or
+`max`), buffered/SSE reasoning and content, tools, cached usage, finish reasons,
+and separately gated media forms. Its receipt is deliberately
+`engine=zai-hosted`, `fak_native=false`. This is Layer 1 provider conformance;
+it is not evidence that the Layer 2 `glm5_next` runtime exists or that fak owns
+the provider's kernels, cache, scheduling, latency, price, or output quality.
+See [Clouds & hosted providers](clouds.md#zai-glm-53-flash-model-scoped-hosted-route).
+
 The mechanism is one fact: the gateway speaks the wires your agent already speaks
 (`/v1/chat/completions`, `/v1/messages`, Gemini/xAI providers, and MCP), so the same
 gate sits in front of whichever model serves your tokens. This is the [SHIPPED]
