@@ -14,17 +14,28 @@ var MinSampleInterval = 10 * time.Millisecond
 var MaxSampleInterval = time.Minute
 
 type HostSignals struct {
-	PhysicalTotalBytes     *uint64 `json:"physical_total_bytes,omitempty"`
-	PhysicalAvailableBytes *uint64 `json:"physical_available_bytes,omitempty"`
-	ProcessResidentBytes   *uint64 `json:"process_resident_bytes,omitempty"`
-	ProcessReadBytes       *uint64 `json:"process_read_bytes,omitempty"`
-	ProcessWriteBytes      *uint64 `json:"process_write_bytes,omitempty"`
-	ProcessIOScope         string  `json:"process_io_scope,omitempty"`
+	PhysicalTotalBytes          *uint64  `json:"physical_total_bytes,omitempty"`
+	PhysicalAvailableBytes      *uint64  `json:"physical_available_bytes,omitempty"`
+	ProcessResidentBytes        *uint64  `json:"process_resident_bytes,omitempty"`
+	ProcessReadBytes            *uint64  `json:"process_read_bytes,omitempty"`
+	ProcessWriteBytes           *uint64  `json:"process_write_bytes,omitempty"`
+	SwapTotalBytes              *uint64  `json:"swap_total_bytes,omitempty"`
+	SwapUsedBytes               *uint64  `json:"swap_used_bytes,omitempty"`
+	CommitLimitBytes            *uint64  `json:"commit_limit_bytes,omitempty"`
+	CommitUsedBytes             *uint64  `json:"commit_used_bytes,omitempty"`
+	ProcessMinorFaults          *uint64  `json:"process_minor_faults,omitempty"`
+	ProcessMajorFaults          *uint64  `json:"process_major_faults,omitempty"`
+	ProcessPageFaults           *uint64  `json:"process_page_faults,omitempty"`
+	ProcessMinorFaultsPerSecond *float64 `json:"process_minor_faults_per_second,omitempty"`
+	ProcessMajorFaultsPerSecond *float64 `json:"process_major_faults_per_second,omitempty"`
+	ProcessPageFaultsPerSecond  *float64 `json:"process_page_faults_per_second,omitempty"`
+	ProcessIOScope              string   `json:"process_io_scope,omitempty"`
 }
 type CollectorAvailability struct {
 	PhysicalMemory bool `json:"physical_memory"`
 	ProcessMemory  bool `json:"process_memory"`
 	ProcessIO      bool `json:"process_io"`
+	MemoryPressure bool `json:"memory_pressure"`
 	DRAMCounters   bool `json:"dram_counters"`
 	DeviceCounters bool `json:"device_counters"`
 }
@@ -107,6 +118,7 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 		av.PhysicalMemory = av.PhysicalMemory || snap.availability.PhysicalMemory
 		av.ProcessMemory = av.ProcessMemory || snap.availability.ProcessMemory
 		av.ProcessIO = av.ProcessIO || snap.availability.ProcessIO
+		av.MemoryPressure = av.MemoryPressure || snap.availability.MemoryPressure
 		av.DeviceCounters = av.DeviceCounters || device.available
 		s := BandwidthSample{Phase: o.Phase, Shape: o.Shape, Provenance: BandwidthProvenance{Source: "live-host", Machine: runtime.GOOS + "/" + runtime.GOARCH, Device: "host-memory", Collector: collector, SampledAt: snap.at.UTC().Format(time.RFC3339Nano)}, Rooflines: Rooflines{TheoreticalGBS: cloneFloat(o.TheoreticalGBS), MeasuredSustainableGBS: cloneFloat(o.MeasuredSustainableGBS)}, Request: RequestSignals{LatencyMS: cloneFloat(o.LatencyMS), PromptTokens: cloneI64(o.PromptTokens), CompletionTokens: cloneI64(o.CompletionTokens)}, Host: snap.host, Device: device.device, Software: SoftwareTraffic{LogicalBytes: cloneU64(o.LogicalBytes), PhysicalReadBytes: cloneU64(o.PhysicalSoftwareRead), PhysicalWriteBytes: cloneU64(o.PhysicalSoftwareWrite)}}
 		if device.available {
@@ -119,6 +131,9 @@ func CollectBandwidth(ctx context.Context, o CollectionOptions) (BandwidthCollec
 			u := *snap.host.PhysicalTotalBytes - *snap.host.PhysicalAvailableBytes
 			s.Capacity.TotalBytes = cloneU64(snap.host.PhysicalTotalBytes)
 			s.Capacity.UsedBytes = &u
+		}
+		if len(cap.Samples) > 0 {
+			deriveHostPressureRates(&cap.Samples[len(cap.Samples)-1], &s)
 		}
 		cap.Samples = append(cap.Samples, s)
 	}
@@ -141,4 +156,24 @@ func cloneU64(v *uint64) *uint64 {
 	}
 	x := *v
 	return &x
+}
+
+func deriveHostPressureRates(previous, current *BandwidthSample) {
+	prevAt, e1 := time.Parse(time.RFC3339Nano, previous.Provenance.SampledAt)
+	currAt, e2 := time.Parse(time.RFC3339Nano, current.Provenance.SampledAt)
+	if e1 != nil || e2 != nil || !currAt.After(prevAt) {
+		return
+	}
+	seconds := currAt.Sub(prevAt).Seconds()
+	current.Host.ProcessMinorFaultsPerSecond = counterRate(previous.Host.ProcessMinorFaults, current.Host.ProcessMinorFaults, seconds)
+	current.Host.ProcessMajorFaultsPerSecond = counterRate(previous.Host.ProcessMajorFaults, current.Host.ProcessMajorFaults, seconds)
+	current.Host.ProcessPageFaultsPerSecond = counterRate(previous.Host.ProcessPageFaults, current.Host.ProcessPageFaults, seconds)
+}
+
+func counterRate(previous, current *uint64, seconds float64) *float64 {
+	if previous == nil || current == nil || *current < *previous || seconds <= 0 {
+		return nil
+	}
+	rate := float64(*current-*previous) / seconds
+	return &rate
 }

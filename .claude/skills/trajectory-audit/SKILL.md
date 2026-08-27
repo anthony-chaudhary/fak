@@ -1,6 +1,6 @@
 ---
 name: trajectory-audit
-description: Audit recent Claude and Codex transcript JSONL with the first-class Go `fak trajectory audit` verb: exact token/cache buckets, source coverage, behavior, deterministic bottlenecks, and baseline regressions. Use for cross-session cost/efficiency and churn questions.
+description: "Audit recent Claude and Codex transcript JSONL with the first-class Go `fak trajectory audit` verb: exact token/cache buckets, source coverage, behavior, deterministic bottlenecks, semantic confusion checks, and baseline regressions. Use for cross-session cost, efficiency, repetition, reasoning-quality, and churn questions."
 disable-model-invocation: false
 user-invocable: true
 allowed-tools: Read, Grep, Glob, Bash
@@ -116,10 +116,10 @@ Read the markdown first, then query the JSONL only for drill-down:
 4. Check tool errors, repeated failures, mutation churn, and hook p95 on the
    session rows.
 5. Audit the signal-bearing sessions against the source transcript. Rank by the
-   signal being explained, then inspect at least the top three sessions (or all
-   sessions when fewer than three carry it). Keep transcript content private:
-   record the session ID, aggregate signal counts, tool names, normalized error
-   class, and mutated target only. Do not copy prompts, arguments, outputs, or
+   signal being explained, then run the default semantic spot check below. Keep
+   transcript content private: record session ID, aggregate signal counts, tool
+   names, normalized error class, mutated target, classification, and a short
+   privacy-safe paraphrase only. Do not copy prompts, arguments, outputs, or
    machine-private absolute paths into reports or issues.
 6. Classify each witnessed pattern before recommending work:
    - **skill-solvable**: the relevant skill omits a repeatable action that would
@@ -136,6 +136,52 @@ Read the markdown first, then query the JSONL only for drill-down:
      never a speculative guidance change.
 7. If `--baseline` was supplied, surface only the delta rows that are comparable
    regressions.
+
+## Default semantic spot check
+
+Run this check whenever the request mentions confusion, repetition, reasoning
+quality, state loss, or worse-than-baseline behavior. Also run it whenever a
+baseline regression in repeated failures or mutation churn could be interpreted
+as a model-quality claim. Aggregate counters select the cohort; they never prove
+semantic confusion by themselves.
+
+Use the depth tiers and report card in
+[`references/semantic-review.md`](references/semantic-review.md). The default is
+**Depth 1**, not an optional follow-up:
+
+1. Select a stratified sample, deduplicated by session ID:
+   - the three highest repeated-failure sessions;
+   - up to three sessions with repeated identical **non-wait** failures;
+   - the three highest mutation-churn sessions; and
+   - one low-signal control session from the same source/model/time cohort when
+     one exists.
+2. Read the assistant content immediately before and after each selected signal,
+   not the whole transcript by default. Check whether the model contradicted its
+   own active plan, repeated a question already answered, asserted stale state
+   after contrary tool evidence, retried an unchanged failed action without a
+   changed hypothesis, lost task constraints, expressed unresolved uncertainty,
+   or explicitly corrected itself.
+3. Compare the observed action with the sensible baseline action available at
+   that point. A retry is effective recovery when the model gathered new
+   evidence, changed one condition, or waited on genuinely pending work.
+4. Classify every sampled event as **proven semantic confusion**, **effective
+   recovery**, **task-inherent repetition**, **analyzer false positive**, or
+   **insufficient evidence**. Keep the existing skill/tool-solvable classification
+   as the remediation axis; do not collapse cause and owner into one label.
+5. Report both positive and negative findings. Say explicitly when no sampled
+   content proves confusion; absence in a bounded sample is not proof that the
+   entire corpus is clean.
+
+Escalate to Depth 2 when any sampled event is proven confusion, two or more are
+insufficient evidence for the same signal family, the low-signal control carries
+the same alleged defect, or current/baseline cohort exposure differs by more than
+2x. Depth 2 inspects all sessions in that signal family up to 20 and adds a second
+control per source/model cohort. Escalate to Depth 3 only for a release/blocking
+quality claim or when Depth 2 finds the same proven pattern in at least three
+sessions; inspect the full bounded topical cohort and seek an independent review.
+Stop when a tier finds no proven pattern and no escalation trigger remains, or
+when the next tier would exceed the declared cohort—then report the exact
+coverage and residual uncertainty.
 
 For repeated failures, group normalized error classes across the sampled
 sessions. A one-off malformed command is not skill debt. Repeated timeout polls,
@@ -169,6 +215,9 @@ in `internal/trajectory/PYTHON_PARITY.md`.
 - Versioned JSONL for automation and direct analytical queries.
 - Markdown carrying the same totals, coverage, bottleneck, baseline, and
   unsupported-shape evidence.
+- For confusion/repetition/model-regression questions, a semantic report card
+  naming depth, selected/eligible coverage, event classifications, controls,
+  comparability, and residual uncertainty.
 - A short operator summary naming the exact totals, rank-1 bottleneck, any
   comparable regression, and the artifact paths.
 

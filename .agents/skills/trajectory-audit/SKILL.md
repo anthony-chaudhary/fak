@@ -1,6 +1,6 @@
 ---
 name: trajectory-audit
-description: "Audit recent Claude and Codex transcript JSONL with the first-class Go `fak trajectory audit` verb: exact token/cache buckets, source coverage, behavior, deterministic bottlenecks, and baseline regressions. Use for..."
+description: "Audit recent Claude and Codex transcript JSONL with the first-class Go `fak trajectory audit` verb: exact token/cache buckets, source coverage, behavior, deterministic bottlenecks, semantic confusion checks, and..."
 metadata:
   generated-by: fak project-assets sync
   canonical: ../../../.claude/skills/trajectory-audit/SKILL.md
