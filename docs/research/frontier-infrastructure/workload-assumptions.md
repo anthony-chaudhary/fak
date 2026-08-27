@@ -21,6 +21,14 @@ Provider failure reasons are not client retry counts, and rejected draft tokens 
 work even when they never become output. The current papers provide bounded mechanism
 benchmarks, not a production acceptance or retry distribution; that gap remains explicit.
 
+## Non-coding agent workload boundary (#9367)
+
+Browser pages, enterprise DOMs, API/database mutations, open-web retrieval, files, screenshots,
+GUI actions, and environment resets create workload components absent from coding-only traces.
+The benchmark task/instance counts are designed evaluation populations, not user, session,
+arrival, turn-count, action-count, or tool-frequency distributions. No Zipf or other universal
+popularity law follows from these benchmarks; production trajectory telemetry remains required.
+
 ## Distribution assumptions
 
 | Dimension | Convenient but weak default | Evidence-backed expectation | Benchmark requirement |

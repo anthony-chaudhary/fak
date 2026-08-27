@@ -69,6 +69,14 @@ now contains **232 entries**, **227 unique source URLs**, and **195 entity label
 verified, accepted, rejected, fallback, and emitted tokens remain separate work; benchmark
 speedups are task/model/hardware/load envelopes, not stackable production multipliers.
 
+## Latest slice: non-coding agent workloads (#9367)
+
+Five benchmark families add browser, enterprise, customer-service API, general-assistant, and
+desktop-computer workloads. The corpus now contains **237 entries**, **232 unique source
+URLs**, and **200 entity labels**. Task counts, generated instances, websites, tools, capability
+tags, observations, actions, turns, users, sessions, and production arrivals remain separate
+denominators; benchmark success is not a production workload distribution.
+
 ## Result first
 
 The initial evidence already rejects several convenient defaults:

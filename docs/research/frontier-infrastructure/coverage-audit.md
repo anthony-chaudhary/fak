@@ -94,6 +94,13 @@ speedup examples. Totals are **232 entries**, **227 unique URLs**, and **195 ent
 Production request-level acceptance histograms, draft/rejection waste, fallback rates, client
 retry counts, and load-conditioned distributions remain missing.
 
+## Issue #9367 delta
+
+Issue #9367 adds WebArena, WorkArena/BrowserGym, tau-bench, GAIA, and OSWorld as distinct
+non-coding agent workloads. Totals are **237 entries**, **232 unique URLs**, and **200 entity
+labels**. Production browser/desktop trajectories, action and tool-call histograms, session
+durations, observation bytes, reset costs, escalation rates, and user populations remain missing.
+
 ## Status vocabulary
 
 | Status | Meaning |

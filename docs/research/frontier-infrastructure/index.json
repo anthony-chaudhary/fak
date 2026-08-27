@@ -3,7 +3,7 @@
   "updated_at": "2026-08-27T00:00:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9366,
+  "latest_slice_issue": 9367,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 232,
+    "entry_count": 237,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -136,6 +136,7 @@
       "FERC / Susquehanna-Amazon co-location",
       "FineServe",
       "Fireworks AI",
+      "GAIA",
       "GE Vernova / Crusoe",
       "GE Vernova T&D India",
       "GitHub Copilot coding agent",
@@ -200,6 +201,7 @@
       "NVIDIA Dynamo Planner",
       "NVIDIA Nemotron",
       "Nebius Group",
+      "OSWorld",
       "OctoAI / NVIDIA",
       "OpenAI",
       "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
@@ -262,10 +264,13 @@
       "VAST Data / NVIDIA / CoreWeave",
       "Vertiv",
       "WEKA",
+      "WebArena",
+      "WorkArena / BrowserGym",
       "Xiaomi MiMo",
       "Z.ai / Zhipu AI",
       "iFLYTEK Spark / Open Platform",
       "llm-d / Google",
+      "tau-bench",
       "vLLM / PagedAttention",
       "xAI",
       "xAI Grok 3"
@@ -9018,6 +9023,196 @@
       ],
       "fak_implications": [
         "Batching policy should condition speculative admission on context length, effective batch, draft cost, KV footprint, and measured acceptance."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "webarena-browser-workloads-2023",
+      "category": "workload_model",
+      "entity": "WebArena",
+      "topic": [
+        "browser_agent",
+        "long_horizon",
+        "web_interaction"
+      ],
+      "published_at": "2023-07-25",
+      "event_at": "2023-07-25",
+      "source_title": "WebArena: A Realistic Web Environment for Building Autonomous Agents",
+      "source_url": "https://arxiv.org/abs/2307.13854",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_workload",
+      "confidence": "high",
+      "claim": "WebArena provides 812 long-horizon tasks over five self-hosted websites spanning four application domains—e-commerce, social discussion, collaborative software development, and content management—with functional end-state evaluation; the original best GPT-4 agent achieved 14.41% versus 78.24% human success.",
+      "quantified": {
+        "tasks": 812,
+        "websites": 5,
+        "application_domains": 4,
+        "best_gpt4_success_fraction": 0.1441,
+        "human_success_fraction": 0.7824
+      },
+      "assumptions": [
+        "Browser trajectories include observation rendering, page navigation, actions, external knowledge, and environment state."
+      ],
+      "contradictions_or_limits": [
+        "The 812 tasks are curated benchmark instances, not production browser sessions, users, arrival rates, or action-count distributions.",
+        "Self-hosted sites and evaluator resets differ from live-web availability, authentication, safety, and mutation costs."
+      ],
+      "fak_implications": [
+        "Browser workloads need page/observation bytes, action count, website state, reset cost, and end-state evaluation—not only model tokens."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "workarena-enterprise-workloads-2024",
+      "category": "workload_model",
+      "entity": "WorkArena / BrowserGym",
+      "topic": [
+        "enterprise_agent",
+        "browser_observation",
+        "knowledge_work"
+      ],
+      "published_at": "2024-03-12",
+      "event_at": "2024-03-12",
+      "source_title": "WorkArena: How Capable are Web Agents at Solving Common Knowledge Work Tasks?",
+      "source_url": "https://arxiv.org/abs/2403.07718",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_workload",
+      "confidence": "high",
+      "claim": "WorkArena defines 33 ServiceNow knowledge-work tasks and 19,912 unique instances covering lists, forms, knowledge search, service catalogs, dashboards, and menus; rendered flat HTML can range from 40k to 500k tokens even after basic cleaning.",
+      "quantified": {
+        "task_types": 33,
+        "unique_instances": 19912,
+        "cleaned_html_tokens_min": 40000,
+        "cleaned_html_tokens_max": 500000
+      },
+      "assumptions": [
+        "Enterprise browser state can dominate context size and includes dynamic UI, nested frames, shadow DOM, and proprietary elements."
+      ],
+      "contradictions_or_limits": [
+        "The combinatorial instances are benchmark-generated on developer instances, not 19,912 production users or sessions.",
+        "HTML token range is page representation size, not prompt size after accessibility filtering, compression, or visual-only interaction."
+      ],
+      "fak_implications": [
+        "Agent memory and context planners should budget observation representation separately from conversational history and tool outputs."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "tau-bench-customer-service-2024",
+      "category": "workload_model",
+      "entity": "tau-bench",
+      "topic": [
+        "customer_service_agent",
+        "api_tools",
+        "multi_turn"
+      ],
+      "published_at": "2024-06-17",
+      "event_at": "2024-06-17",
+      "source_title": "tau-bench: A Benchmark for Tool-Agent-User Interaction in Real-World Domains",
+      "source_url": "https://arxiv.org/abs/2406.12045",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_workload",
+      "confidence": "high",
+      "claim": "tau-bench evaluates multi-turn retail and airline customer-service conversations in which a simulated user interacts with an agent that must follow policy and call domain APIs, scoring the resulting database state and repeated-trial reliability; reported agents succeeded on under 50% of tasks and retail pass^8 was under 25%.",
+      "quantified": {
+        "domains": 2,
+        "single_trial_success_fraction_max_exclusive": 0.5,
+        "retail_pass8_fraction_max_exclusive": 0.25,
+        "reliability_trials": 8
+      },
+      "assumptions": [
+        "Tool-call correctness, policy compliance, user clarification, database reads/writes, and repeated-trial consistency are separate workload dimensions."
+      ],
+      "contradictions_or_limits": [
+        "Simulated users and curated tasks are not production call-center traffic, turn-count, tool-frequency, escalation, or retry distributions.",
+        "pass^k is repeated-task reliability, not independent user success probability under arbitrary production mix."
+      ],
+      "fak_implications": [
+        "Customer-service serving should price multi-turn state, read/write tool calls, policy checks, user-simulation variance, and repeated reliability."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "gaia-general-assistant-2023",
+      "category": "workload_model",
+      "entity": "GAIA",
+      "topic": [
+        "general_assistant",
+        "web_browsing",
+        "multimodal_tool_use"
+      ],
+      "published_at": "2023-11-21",
+      "event_at": "2023-11-21",
+      "source_title": "GAIA: A Benchmark for General AI Assistants",
+      "source_url": "https://arxiv.org/abs/2311.12983",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_workload",
+      "confidence": "high",
+      "claim": "GAIA contains 466 human-authored questions across three difficulty levels requiring combinations of reasoning, web browsing, file reading, coding, and multimodality; 355 questions were tagged for web browsing, while humans scored 92% and GPT-4 with plugins 15% in the paper.",
+      "quantified": {
+        "questions": 466,
+        "difficulty_levels": 3,
+        "web_browsing_questions": 355,
+        "coding_questions": 154,
+        "multimodality_questions": 138,
+        "diverse_filetype_questions": 129,
+        "human_success_fraction": 0.92,
+        "gpt4_plugins_success_fraction": 0.15
+      },
+      "assumptions": [
+        "Capability tags overlap; their counts must not be summed into unique questions."
+      ],
+      "contradictions_or_limits": [
+        "GAIA measures exact-answer question completion, not interactive production session lengths, tool-call counts, latency, or user demand.",
+        "Open-web tasks can decay or change, and human-reported solution paths need not match agent paths."
+      ],
+      "fak_implications": [
+        "General-assistant routing needs per-task capability composition and open-world retrieval costs, not one assistant-average context or tool budget."
+      ],
+      "rumor": {
+        "is_rumor": false
+      }
+    },
+    {
+      "id": "osworld-desktop-workloads-2024",
+      "category": "workload_model",
+      "entity": "OSWorld",
+      "topic": [
+        "computer_use_agent",
+        "desktop_gui",
+        "multimodal_interaction"
+      ],
+      "published_at": "2024-04-11",
+      "event_at": "2024-04-11",
+      "source_title": "OSWorld: Benchmarking Multimodal Agents for Open-Ended Tasks in Real Computer Environments",
+      "source_url": "https://arxiv.org/abs/2404.07972",
+      "source_kind": "research_paper",
+      "evidence_class": "benchmark_workload",
+      "confidence": "high",
+      "claim": "OSWorld defines 369 real-computer tasks across web and desktop applications, OS file I/O, and multi-application workflows on Ubuntu, Windows, and macOS, with task-specific initial-state setup and execution-based evaluators; humans achieved over 72.36% while the best evaluated model achieved 12.24%.",
+      "quantified": {
+        "tasks": 369,
+        "operating_systems": 3,
+        "human_success_fraction_min": 0.7236,
+        "best_model_success_fraction": 0.1224
+      },
+      "assumptions": [
+        "Desktop-agent cost includes screenshots or accessibility state, GUI/CLI actions, application startup, files, evaluators, and environment restoration."
+      ],
+      "contradictions_or_limits": [
+        "The 369 curated tasks are not a production desktop-session distribution or evidence of application popularity.",
+        "Success rates are tied to the paper’s agents, versions, environments, and evaluator behavior."
+      ],
+      "fak_implications": [
+        "Computer-use planners should account for multimodal observations, action latency, application state, setup/reset, and cross-app dependencies."
       ],
       "rumor": {
         "is_rumor": false
