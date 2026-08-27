@@ -2,6 +2,7 @@
   "schema": "fak.benchmark-node-baseline.v1",
   "issue": 8486,
   "captured_at": "2026-08-26",
+  "generation": "gen/now",
   "node": "anthony-laptop",
   "route": {"class": "sanctioned-private-bridge", "authenticated_round_trip": true, "private_coordinates_omitted": true},
   "inventory": {
