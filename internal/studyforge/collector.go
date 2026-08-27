@@ -66,6 +66,9 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		if err := validateResume(corpus, full, req.Cutoff, c.BaseURL, expectedEndpoints); err != nil {
 			return Corpus{}, err
 		}
+		if err := validateResumeRevisionEvidence(corpus); err != nil {
+			return Corpus{}, fmt.Errorf("invalid resume: %w", err)
+		}
 		corpus.Receipt.APIBase = c.BaseURL
 		corpus.Receipt.StartedAt = c.Now().UTC().Format(time.RFC3339Nano)
 		corpus.Receipt.CompletedAt = ""
@@ -93,19 +96,18 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		return nil
 	}
 
-	revision, api, err := c.resolveRevision(ctx, req.Owner, req.Repository)
-	corpus.Receipt.API = api
-	if err != nil {
-		corpus.Receipt.Status = StatusFailed
-		corpus.Receipt.CompletedAt = c.Now().UTC().Format(time.RFC3339Nano)
-		sortCorpus(&corpus)
-		refreshChecksums(&corpus)
-		return corpus, errors.Join(err, persist(true))
+	if req.Resume == nil {
+		revision, api, err := c.resolveRevision(ctx, req.Owner, req.Repository)
+		corpus.Receipt.API = api
+		if err != nil {
+			corpus.Receipt.Status = StatusFailed
+			corpus.Receipt.CompletedAt = c.Now().UTC().Format(time.RFC3339Nano)
+			sortCorpus(&corpus)
+			refreshChecksums(&corpus)
+			return corpus, errors.Join(err, persist(true))
+		}
+		corpus.Receipt.Revision = revision
 	}
-	if corpus.Receipt.Revision != "" && corpus.Receipt.Revision != revision {
-		return Corpus{}, fmt.Errorf("resume revision changed from %s to %s", corpus.Receipt.Revision, revision)
-	}
-	corpus.Receipt.Revision = revision
 
 	var failures []error
 	for _, spec := range sourceSpecs {
@@ -171,6 +173,57 @@ func (c *Collector) Capture(ctx context.Context, req CaptureRequest) (Corpus, er
 		return corpus, errors.Join(errors.Join(failures...), reconcileErr, err)
 	}
 	return corpus, errors.Join(errors.Join(failures...), reconcileErr)
+}
+
+// validateResumeRevisionEvidence binds the immutable revision to the repository
+// identity and the original API provenance already stored in a checkpoint. The
+// revision response body is represented by its checksum, so resume must retain
+// these receipts rather than trying to recreate them from a moving upstream HEAD.
+func validateResumeRevisionEvidence(c Corpus) error {
+	repositoryURL := strings.TrimRight(c.Receipt.APIBase, "/") + "/repos/" + escapeRepository(c.Receipt.Repository)
+	var repositoryReceipt, revisionReceipt *APIReceipt
+	for i := range c.Receipt.API {
+		receipt := &c.Receipt.API[i]
+		switch receipt.Purpose {
+		case "repository":
+			if repositoryReceipt != nil {
+				return errors.New("duplicate repository API receipt")
+			}
+			repositoryReceipt = receipt
+		case "revision":
+			if revisionReceipt != nil {
+				return errors.New("duplicate revision API receipt")
+			}
+			revisionReceipt = receipt
+		}
+	}
+	if repositoryReceipt == nil {
+		return errors.New("repository API receipt is required")
+	}
+	if revisionReceipt == nil {
+		return errors.New("revision API receipt is required")
+	}
+	if repositoryReceipt.URL != repositoryURL {
+		return errors.New("repository API receipt contradicts checkpoint repository")
+	}
+	revisionPrefix := repositoryURL + "/commits/"
+	if !strings.HasPrefix(revisionReceipt.URL, revisionPrefix) || strings.TrimPrefix(revisionReceipt.URL, revisionPrefix) == "" {
+		return errors.New("revision API receipt contradicts checkpoint repository")
+	}
+	for _, receipt := range []*APIReceipt{repositoryReceipt, revisionReceipt} {
+		if receipt.StatusCode < http.StatusOK || receipt.StatusCode >= http.StatusMultipleChoices {
+			return fmt.Errorf("%s API receipt is not successful", receipt.Purpose)
+		}
+	}
+	return nil
+}
+
+func escapeRepository(repository string) string {
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 {
+		return ""
+	}
+	return url.PathEscape(parts[0]) + "/" + url.PathEscape(parts[1])
 }
 
 func (c *Collector) defaults() {

@@ -23,6 +23,7 @@ type checkpointFixture struct {
 	cutoff         time.Time
 	mu             sync.Mutex
 	calls          map[string]int
+	liveRevision   string
 	duplicatePage2 bool
 	repeatPage1    bool
 }
@@ -30,12 +31,14 @@ type checkpointFixture struct {
 func newCheckpointFixture(t *testing.T) *checkpointFixture {
 	t.Helper()
 	fixture := &checkpointFixture{
-		cutoff: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
-		calls:  map[string]int{},
+		cutoff:       time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
+		calls:        map[string]int{},
+		liveRevision: "checkpoint-revision-a",
 	}
 	fixture.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fixture.mu.Lock()
 		fixture.calls[r.URL.RequestURI()]++
+		liveRevision := fixture.liveRevision
 		duplicatePage2 := fixture.duplicatePage2
 		repeatPage1 := fixture.repeatPage1
 		fixture.mu.Unlock()
@@ -44,7 +47,7 @@ func newCheckpointFixture(t *testing.T) *checkpointFixture {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
 		case "/repos/acme/widget/commits/main":
-			fmt.Fprint(w, `{"sha":"checkpoint-revision"}`)
+			fmt.Fprintf(w, `{"sha":%q}`, liveRevision)
 		case "/repos/acme/widget/issues":
 			page := r.URL.Query().Get("page")
 			switch page {
@@ -120,6 +123,12 @@ func (f *checkpointFixture) setRepeatPage1(value bool) {
 	f.repeatPage1 = value
 }
 
+func (f *checkpointFixture) setLiveRevision(revision string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.liveRevision = revision
+}
+
 func TestCaptureCheckpointsInsideSourceAndResumesByteEquivalently(t *testing.T) {
 	fixture := newCheckpointFixture(t)
 	dir := t.TempDir()
@@ -192,6 +201,68 @@ func TestCaptureCheckpointsInsideSourceAndResumesByteEquivalently(t *testing.T) 
 	if !bytes.Equal(resumedBytes, uninterruptedBytes) {
 		t.Fatalf("resumed output differs from uninterrupted output\nresumed:\n%s\nuninterrupted:\n%s", resumedBytes, uninterruptedBytes)
 	}
+}
+
+func TestCaptureResumeRetainsCheckpointRevisionAndAPIProvenance(t *testing.T) {
+	fixture := newCheckpointFixture(t)
+	path := filepath.Join(t.TempDir(), "corpus.json")
+
+	_, err := fixture.collector().Capture(context.Background(), CaptureRequest{
+		Owner: "acme", Repository: "widget", Cutoff: fixture.cutoff,
+		Checkpoint: func(corpus Corpus) error {
+			if err := Write(path, corpus); err != nil {
+				return err
+			}
+			return errFixtureInterrupted
+		},
+	})
+	if !errors.Is(err, errFixtureInterrupted) {
+		t.Fatalf("capture error = %v, want interruption", err)
+	}
+	partial, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalAPI := append([]APIReceipt(nil), partial.Receipt.API...)
+	metadataURI := "/repos/acme/widget"
+	revisionURI := "/repos/acme/widget/commits/main"
+	metadataBefore := fixture.callCount(metadataURI)
+	revisionBefore := fixture.callCount(revisionURI)
+	if metadataBefore != 1 || revisionBefore != 1 {
+		t.Fatalf("new capture revision resolution calls: metadata=%d revision=%d, want 1 each", metadataBefore, revisionBefore)
+	}
+	fixture.setLiveRevision("live-revision-b")
+
+	completed, err := fixture.collector().Capture(context.Background(), CaptureRequest{
+		Owner: "acme", Repository: "widget", Cutoff: fixture.cutoff, Resume: &partial,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := completed.Receipt.Revision, "checkpoint-revision-a"; got != want {
+		t.Fatalf("resumed revision = %q, want checkpoint revision %q", got, want)
+	}
+	if !equalAPIReceipts(completed.Receipt.API, originalAPI) {
+		t.Fatalf("resume changed API provenance:\n got: %+v\nwant: %+v", completed.Receipt.API, originalAPI)
+	}
+	if got := fixture.callCount(metadataURI); got != metadataBefore {
+		t.Fatalf("resume called repository metadata endpoint: %d->%d", metadataBefore, got)
+	}
+	if got := fixture.callCount(revisionURI); got != revisionBefore {
+		t.Fatalf("resume called revision endpoint: %d->%d", revisionBefore, got)
+	}
+}
+
+func equalAPIReceipts(a, b []APIReceipt) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestCaptureBoundsCheckpointWriteAmplification(t *testing.T) {
@@ -312,6 +383,18 @@ func TestCaptureRejectsResumeIdentityAndSourceOrderMismatchBeforeRequests(t *tes
 		{name: "repository", mutate: func(*Corpus) {}, owner: "acme", repo: "other", cutoff: fixture.cutoff, wantError: "repository mismatch"},
 		{name: "cutoff", mutate: func(*Corpus) {}, owner: "acme", repo: "widget", cutoff: fixture.cutoff.Add(time.Second), wantError: "cutoff mismatch"},
 		{name: "API base", mutate: func(*Corpus) {}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, baseURL: fixture.server.URL + "/v2", wantError: "API base mismatch"},
+		{name: "missing repository receipt", mutate: func(c *Corpus) {
+			c.Receipt.API = c.Receipt.API[1:]
+		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "repository API receipt is required"},
+		{name: "missing revision receipt", mutate: func(c *Corpus) {
+			c.Receipt.API = c.Receipt.API[:1]
+		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "revision API receipt is required"},
+		{name: "contradictory repository receipt", mutate: func(c *Corpus) {
+			c.Receipt.API[0].URL = fixture.server.URL + "/repos/acme/other"
+		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "repository API receipt contradicts checkpoint repository"},
+		{name: "contradictory revision receipt", mutate: func(c *Corpus) {
+			c.Receipt.API[1].URL = fixture.server.URL + "/repos/acme/other/commits/main"
+		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "revision API receipt contradicts checkpoint repository"},
 		{name: "source order", mutate: func(c *Corpus) {
 			c.Receipt.Sources[0], c.Receipt.Sources[1] = c.Receipt.Sources[1], c.Receipt.Sources[0]
 		}, owner: "acme", repo: "widget", cutoff: fixture.cutoff, wantError: "source order mismatch"},
