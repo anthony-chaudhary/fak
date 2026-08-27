@@ -108,6 +108,7 @@ type BandwidthSample struct {
 	Capacity   CapacitySignals     `json:"capacity"`
 	Transfer   TransferSignals     `json:"transfer"`
 	Software   SoftwareTraffic     `json:"software"`
+	Host       HostSignals         `json:"host"`
 }
 
 type TriggerConfig struct {
@@ -136,6 +137,7 @@ type BandwidthObservation struct {
 	Capacity    CapacitySignals     `json:"capacity"`
 	Transfer    TransferSignals     `json:"transfer"`
 	Software    SoftwareTraffic     `json:"software"`
+	Host        HostSignals         `json:"host"`
 	Bottleneck  Bottleneck          `json:"bottleneck"`
 	DeepCapture TriggerState        `json:"deep_capture"`
 }
@@ -184,7 +186,7 @@ func AnalyzeBandwidth(c BandwidthCapture) (BandwidthReport, error) {
 		report.Observations = append(report.Observations, BandwidthObservation{
 			Schema: BandwidthSchema, Engine: c.Engine, Phase: s.Phase, Shape: s.Shape,
 			Provenance: s.Provenance, Rooflines: s.Rooflines, Live: s.Live, Request: s.Request,
-			Device: s.Device, Capacity: s.Capacity, Transfer: s.Transfer, Software: s.Software,
+			Device: s.Device, Capacity: s.Capacity, Transfer: s.Transfer, Software: s.Software, Host: s.Host,
 			Bottleneck: bottleneck, DeepCapture: state,
 		})
 	}
