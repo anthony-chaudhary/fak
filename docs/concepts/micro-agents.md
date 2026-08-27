@@ -175,6 +175,19 @@ sub-agent collapse spine (with no CLI verb yet). These are concrete implementati
 the universal definitions of micro agent or sub-agent. Full and micro agents may share a runtime
 or use different runtime units; neither processes nor goroutines define the class.
 
+## Activation-bounded agent threshold
+
+An activation, token, kernel launch, or scheduler slot is **not** an agent merely because it contributes to an answer. Admit agent semantics only when the candidate satisfies every row below and the resulting contract predicts control or accounting behavior that the simpler primitive cannot express.
+
+| Requirement | Falsifiable admission test | Simpler primitive when absent |
+|---|---|---|
+| Objective | The unit receives a named success condition before execution; changing it can change the selected work. | Compute/kernel primitive |
+| Bounded state and budget | The unit has an inspectable state boundary plus a hard time, token, call, or memory limit enforced independently of the parent. | Batched task |
+| Attribution | Its contribution can be separated from sibling contributions and tied to its identity. | Activation or tensor slice |
+| Control | It can be cancelled, denied, retried, or replaced as that identity rather than only by stopping the enclosing operation. | Scheduler slot |
+| Receipt | A durable result names the objective, bounds, identity, outcome, and resource use. | Unattributed tool result |
+
+The threshold is conjunctive: failing any row keeps the candidate below the agent boundary. Even a five-row pass remains a task abstraction unless identity-specific control or attribution produces a behavior unavailable from an ordinary bounded function call. This keeps the term operational: a future activation-bounded implementation can falsify the current boundary by showing the five fields in a receipt and demonstrating an identity-specific cancel or replacement while sibling work continues.
 ## What is shipped and what is research
 
 Scope labels here follow [the generation contract](../generation.md). Read this section before quoting anything above as product behavior.
