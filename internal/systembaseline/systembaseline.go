@@ -657,26 +657,26 @@ func (r *Report) Seal() { r.Digest = r.canonicalDigest() }
 func Decode(rd io.Reader) (Report, error) {
 	var r Report
 	if rd == nil {
-		return r, errors.New("systembaseline: decode: nil reader")
+		return r, errors.New("systembaseline: decode: nil reader; provide a report reader")
 	}
 	raw, err := io.ReadAll(io.LimitReader(rd, maxEncodedReportBytes+1))
 	if err != nil {
-		return r, fmt.Errorf("systembaseline: decode: %w", err)
+		return r, fmt.Errorf("systembaseline: decode: %w; retry with readable report input", err)
 	}
 	if len(raw) > maxEncodedReportBytes {
-		return r, fmt.Errorf("systembaseline: decode: input exceeds %d bytes", maxEncodedReportBytes)
+		return r, fmt.Errorf("systembaseline: decode: input exceeds %d bytes; reduce the report to the bounded schema", maxEncodedReportBytes)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&r); err != nil {
-		return r, fmt.Errorf("systembaseline: decode: %w", err)
+		return r, fmt.Errorf("systembaseline: decode: %w; provide one complete JSON report matching the schema", err)
 	}
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return r, errors.New("systembaseline: multiple JSON values")
+			return r, errors.New("systembaseline: multiple JSON values; provide exactly one JSON report")
 		}
-		return r, fmt.Errorf("systembaseline: trailing data: %w", err)
+		return r, fmt.Errorf("systembaseline: trailing data: %w; remove bytes after the single JSON report", err)
 	}
 	return r, nil
 }
@@ -712,16 +712,16 @@ func (r Report) policyVerdict() string {
 
 func (r Report) Validate() error {
 	if r.Schema != Schema {
-		return fmt.Errorf("systembaseline: schema must be %q", Schema)
+		return fmt.Errorf("systembaseline: schema must be %q; set schema to the supported value", Schema)
 	}
 	if r.Verdict != VerdictClean && r.Verdict != VerdictInvestigate && r.Verdict != VerdictInvalid {
-		return errors.New("systembaseline: invalid verdict")
+		return errors.New("systembaseline: invalid verdict; set verdict to clean, investigate, or invalid")
 	}
 	if r.Digest == "" || r.canonicalDigest() != r.Digest {
-		return errors.New("systembaseline: canonical digest mismatch")
+		return errors.New("systembaseline: canonical digest mismatch; call Seal after the final report edit")
 	}
 	if r.Baseline.Samples < 0 || r.Baseline.DurationNS < 0 || r.Baseline.IntervalNS < 0 || r.Window.Samples < 0 || r.Window.DurationNS < 0 || r.Window.IntervalNS < 0 || r.Coverage.ProcessSnapshots < 0 || r.Coverage.ProcessesObserved < 0 || r.Coverage.ProcessReads < 0 || r.Coverage.ProcessUnreadable < 0 || r.Coverage.HostCPUSamples < 0 || r.Coverage.HostMemorySamples < 0 || r.BaselineSampler.CountedSamples < 0 || r.BaselineSampler.WallNS < 0 || r.CommandSampler.CountedSamples < 0 || r.CommandSampler.WallNS < 0 {
-		return errors.New("systembaseline: negative window or coverage value")
+		return errors.New("systembaseline: negative window or coverage value; use non-negative census values")
 	}
 	if err := validateSamplerOverhead("baseline", r.BaselineSampler, r.Baseline); err != nil {
 		return err
@@ -731,24 +731,24 @@ func (r Report) Validate() error {
 	}
 	for _, metric := range []Metric{r.BaselineHost.CPUPercent, r.BaselineHost.MemoryTotalBytes, r.BaselineHost.MemoryAvailableBytes, r.BaselineSampler.DutyPercent, r.Host.CPUPercent, r.Host.MemoryTotalBytes, r.Host.MemoryAvailableBytes, r.Host.ProcessCount, r.CommandSampler.DutyPercent, r.Attribution.SUTCPUPercentOfHost, r.Attribution.NonSUTCPUPercentOfHost, r.Attribution.SUTRSSBytes, r.Attribution.NonSUTRSSBytes} {
 		if metric.Available && (math.IsNaN(metric.Value) || math.IsInf(metric.Value, 0) || metric.Value < 0 || metric.Unit == "") {
-			return errors.New("systembaseline: available metric has invalid value or unit")
+			return errors.New("systembaseline: available metric has invalid value or unit; provide a finite non-negative value and unit or mark it unavailable")
 		}
 	}
 	if want := r.policyVerdict(); r.Verdict != want {
-		return fmt.Errorf("systembaseline: verdict %q contradicts policy evidence; want %q", r.Verdict, want)
+		return fmt.Errorf("systembaseline: verdict %q contradicts policy evidence; want %q; rebuild the report or use the policy-derived verdict", r.Verdict, want)
 	}
 	if len(r.TopNonSUT) > 0 && !r.Policy.IncludeTopConsumers {
-		return errors.New("systembaseline: top consumers present without opt-in policy")
+		return errors.New("systembaseline: top consumers present without opt-in policy; enable include_top_consumers or remove the list")
 	}
 	if len(r.TopNonSUT) > 5 {
-		return errors.New("systembaseline: top consumers exceed bounded disclosure")
+		return errors.New("systembaseline: top consumers exceed bounded disclosure; trim the list to five entries")
 	}
 	for _, c := range r.TopNonSUT {
 		if c.PID <= 0 || c.Image != scrubImage(c.Image) || strings.ContainsAny(c.Image, "/\\") {
-			return errors.New("systembaseline: non-SUT consumer identity is not scrubbed")
+			return errors.New("systembaseline: non-SUT consumer identity is not scrubbed; retain only a basename without path separators")
 		}
 		if math.IsNaN(c.CPUSeconds) || math.IsInf(c.CPUSeconds, 0) || c.CPUSeconds < 0 {
-			return errors.New("systembaseline: non-SUT consumer CPU is invalid")
+			return errors.New("systembaseline: non-SUT consumer CPU is invalid; provide a finite non-negative CPU duration")
 		}
 	}
 	return nil
@@ -759,17 +759,17 @@ func validateSamplerOverhead(name string, overhead SamplerOverhead, window Windo
 		return nil
 	}
 	if overhead.CountedSamples != window.Samples-1 {
-		return fmt.Errorf("systembaseline: %s sampler coverage is inconsistent with its window", name)
+		return fmt.Errorf("systembaseline: %s sampler coverage is inconsistent with its window; set counted samples to window samples minus one", name)
 	}
 	if !overhead.DutyPercent.Available {
 		if overhead.WallNS != 0 || overhead.DutyPercent.Reason == "" {
-			return fmt.Errorf("systembaseline: %s sampler unavailable state is inconsistent", name)
+			return fmt.Errorf("systembaseline: %s sampler unavailable state is inconsistent; set wall time to zero and provide an unavailable reason", name)
 		}
 		return nil
 	}
 	want := float64(overhead.WallNS) / float64(window.DurationNS) * 100
 	if math.Abs(overhead.DutyPercent.Value-want) > 1e-9 {
-		return fmt.Errorf("systembaseline: %s sampler duty does not match census wall time", name)
+		return fmt.Errorf("systembaseline: %s sampler duty does not match census wall time; recompute duty from sampler wall time and window duration", name)
 	}
 	return nil
 }
