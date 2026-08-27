@@ -70,6 +70,10 @@ func TestNativeSchedulerBatchesLanesAndFreesCancelled(t *testing.T) {
 
 	wg.Wait()
 
+	receipt := s.SharedWorkReceipt()
+	if receipt.Steps == 0 || receipt.Panels == 0 || receipt.MACs == 0 {
+		t.Fatalf("scheduler admitted a batch but did not receipt shared model work: %+v", receipt)
+	}
 	// Survivors decode to completion, unaffected by the cancellation.
 	for i := range reqs {
 		if i == cancelIdx {
