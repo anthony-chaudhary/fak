@@ -27,3 +27,7 @@ docs/benchmarks/harness-control-study/README.md text eol=lf
 # Pin repository LF bytes so one digest names the artifact on every OS.
 internal/canon/testdata/token_usage/upstream/*.txt text eol=lf
 internal/modelroute/testdata/provider_contracts/upstream/*.txt text eol=lf
+
+# The new-model replay ledger is generated and compared byte-for-byte; keep its
+# canonical JSON line endings stable under core.autocrlf=true (#9570).
+internal/newmodel/testdata/replay/ledger.json text eol=lf
