@@ -254,6 +254,57 @@ func TestVisibleLauncherRefusesMissingCommandBeforeTerminalSpawn(t *testing.T) {
 	}
 }
 
+func TestPlanVisibleLaunchDarwinKeepsHandlerDataOutOfAppleScriptSource(t *testing.T) {
+	cwd := `/Users/example/Fak Work/'quoted cwd'`
+	command := `/Applications/Codex "nightly"/bin/codex`
+	req := Request{CWD: cwd, Argv: []string{"codex-before-resolution", `say "hello"`, "it's one argument", "-leading-option"}}
+
+	got, err := planVisibleLaunch("darwin", "", req, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := []string{"-", cwd, command, `say "hello"`, "it's one argument", "-leading-option"}
+	if got.bin != "/usr/bin/osascript" || got.dir != cwd || got.stdin != terminalAppleScript || !reflect.DeepEqual(got.args, wantArgs) {
+		t.Fatalf("plan=%+v want bin=/usr/bin/osascript dir=%q args=%q and constant script", got, cwd, wantArgs)
+	}
+	for _, untrusted := range append([]string{cwd, command}, req.Argv[1:]...) {
+		if strings.Contains(got.stdin, untrusted) {
+			t.Fatalf("untrusted value %q was interpolated into AppleScript source", untrusted)
+		}
+	}
+}
+
+func TestPlanVisibleLaunchWindowsRetainsWindowsTerminalArgv(t *testing.T) {
+	cwd := `C:\work trees\fak "quoted"`
+	command := `C:\Program Files\fak\fak.exe`
+	req := Request{CWD: cwd, Argv: []string{"fak-before-resolution", "guard", "--", "codex", "resume arg"}}
+
+	got, err := planVisibleLaunch("windows", "", req, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := []string{"-w", "new", "new-tab", "--startingDirectory", cwd, "--", command, "guard", "--", "codex", "resume arg"}
+	if got.bin != "wt.exe" || got.dir != cwd || got.stdin != "" || !reflect.DeepEqual(got.args, wantArgs) {
+		t.Fatalf("plan=%+v want bin=wt.exe dir=%q args=%q", got, cwd, wantArgs)
+	}
+}
+
+func TestPlanVisibleLaunchUnsupportedHostFailsClosedWithoutInjection(t *testing.T) {
+	req := Request{CWD: "/work/fak", Argv: []string{"fak", "guard"}}
+	if _, err := planVisibleLaunch("plan9", "", req, "/bin/fak"); err == nil || !strings.Contains(err.Error(), "unsupported platform") {
+		t.Fatalf("err=%v want unsupported-platform refusal", err)
+	}
+
+	got, err := planVisibleLaunch("plan9", "/test/injected-terminal", req, "/bin/fak")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgs := []string{"-w", "new", "new-tab", "--startingDirectory", "/work/fak", "--", "/bin/fak", "guard"}
+	if got.bin != "/test/injected-terminal" || !reflect.DeepEqual(got.args, wantArgs) {
+		t.Fatalf("injected plan=%+v want args=%q", got, wantArgs)
+	}
+}
+
 func TestSelectUsesRecordedHarnessAndLogsProvenance(t *testing.T) {
 	report := InventoryReport{Sessions: []Session{{
 		Thread:  &Thread{ID: "0198ec3d-6d66-7c82-a700-cedf64660a44", Source: "session_registration", CWD: `C:\work\fak`},
