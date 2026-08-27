@@ -35,6 +35,20 @@ func TestReadResumeAdmitsOnlyExactPreMetricLegacyCountOnlyCheckpoint(t *testing.
 		delta.Verdict != NonAtomicDeltaVerdictCompatibleUnproven || delta.Accepted {
 		t.Fatalf("loaded pre-metric delta = %+v", delta)
 	}
+
+	// The preserved live checkpoint was written before the explicit false
+	// field existed, so omission is part of the exact historical shape.
+	checkpoint.Receipt.NonAtomicDelta.IdentitySetsAvailable = nil
+	b, err := json.MarshalIndent(checkpoint, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadResume(path); err != nil {
+		t.Fatalf("ReadResume rejected observed omitted identity availability: %v", err)
+	}
 }
 
 func TestReadResumeRejectsPreMetricLegacyCountOnlyMutations(t *testing.T) {
@@ -56,9 +70,6 @@ func TestReadResumeRejectsPreMetricLegacyCountOnlyMutations(t *testing.T) {
 		}},
 		{name: "wrong reason", edit: func(c *Corpus) {
 			c.Receipt.NonAtomicDelta.EvidenceReason = "legacy identities projected"
-		}},
-		{name: "missing identity availability", edit: func(c *Corpus) {
-			c.Receipt.NonAtomicDelta.IdentitySetsAvailable = nil
 		}},
 		{name: "identities marked available", edit: func(c *Corpus) {
 			c.Receipt.NonAtomicDelta.IdentitySetsAvailable = boolPointer(true)

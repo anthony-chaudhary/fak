@@ -405,6 +405,12 @@ func validateExactNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []
 }
 
 func validateLegacyCountOnlyNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []Record, delta NonAtomicDeltaEvidence, requireComplete bool) error {
+	// The first live count-only migration predated the explicit
+	// identity_sets_available=false field. Admit that omission only through
+	// this resume-only pre-metric path; current receipts remain strict.
+	if delta.IdentitySetsAvailable == nil {
+		delta.IdentitySetsAvailable = boolPointer(false)
+	}
 	lower, err := validateLegacyCountOnlyNonAtomicDeltaEvidence(issues, pullRecords, delta)
 	if err != nil {
 		return err
@@ -437,6 +443,13 @@ func validateLegacyPreMetricCountOnlyNonAtomicDelta(r Receipt, issues SourceRece
 	}
 	if delta.EvidenceMode != NonAtomicDeltaEvidenceModeLegacyCountOnly || delta.Policy.Metric != "" {
 		return errors.New("legacy pre-metric count-only non_atomic_delta has a non-legacy metric")
+	}
+	// The first live count-only migration predated the explicit
+	// identity_sets_available=false field. Admit that omission only through
+	// this resume-only pre-metric path; strict current receipt validation still
+	// requires the field.
+	if delta.IdentitySetsAvailable == nil {
+		delta.IdentitySetsAvailable = boolPointer(false)
 	}
 	lower, err := validateLegacyCountOnlyNonAtomicDeltaEvidence(issues, pullRecords, delta)
 	if err != nil {
