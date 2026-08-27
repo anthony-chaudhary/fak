@@ -35,8 +35,11 @@ func TestCaptureRecordsNonAtomicDeltaForConcurrentCreationAndDeletion(t *testing
 	if delta == nil || !delta.Accepted || delta.Type != NonAtomicDeltaType || delta.EvidenceMode != NonAtomicDeltaEvidenceModeExactIdentity || delta.IdentityBasis != identityBasisCaptured {
 		t.Fatalf("non_atomic_delta = %+v", delta)
 	}
-	if delta.IdentitySetsAvailable != nil || delta.Policy.Metric != "" || delta.ObservedEndpointCardinalityDelta != nil {
+	if delta.IdentitySetsAvailable != nil || delta.Policy.Metric != NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference || delta.ObservedEndpointCardinalityDelta != nil {
 		t.Fatalf("exact receipt gained legacy-only fields: %+v", delta)
+	}
+	if delta.Policy.MaxOnlyInMixed != 2 || delta.Policy.MaxOnlyInDedicated != 2 || delta.Policy.MaxTotal != 4 {
+		t.Fatalf("exact receipt policy = %+v", delta.Policy)
 	}
 	if delta.MixedCount != 2 || delta.DedicatedCount != 2 || pointedInt(delta.OverlapCount) != 1 || pointedInt(delta.OnlyInMixedCount) != 1 || pointedInt(delta.OnlyInDedicatedCount) != 1 {
 		t.Fatalf("non_atomic_delta counts = %+v", delta)
@@ -76,7 +79,7 @@ func TestValidateRejectsMissingOrContradictoryNonAtomicDelta(t *testing.T) {
 		{name: "wrong observed cardinality delta", want: "observed endpoint-cardinality delta contradicts", edit: func(c *Corpus) {
 			c.Receipt.NonAtomicDelta.ObservedEndpointCardinalityDelta = intPointer(99)
 		}},
-		{name: "unbounded policy", want: "policy is missing or exceeds", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.Policy.MaxTotal = DefaultNonAtomicDeltaLimit + 1 }},
+		{name: "policy not derived from endpoints", want: "does not match complete endpoint identity counts", edit: func(c *Corpus) { c.Receipt.NonAtomicDelta.Policy.MaxTotal++ }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,7 +106,7 @@ func TestValidateAcceptsAndRewritesAlreadyUpgradedExactLegacyProjection(t *testi
 	delta.RelationEvidence = ""
 	delta.IdentitySetsAvailable = nil
 	delta.ObservedEndpointCardinalityDelta = nil
-	delta.Policy.Metric = ""
+	delta.Policy = defaultNonAtomicDeltaPolicy("")
 	delta.SymmetricDifferenceLowerBound = 0
 	delta.SymmetricDifferenceUpperBound = 0
 	delta.Verdict = ""
@@ -114,51 +117,59 @@ func TestValidateAcceptsAndRewritesAlreadyUpgradedExactLegacyProjection(t *testi
 		t.Fatalf("rewrite exact projection: %v", err)
 	}
 	got := corpus.Receipt.NonAtomicDelta
-	if got.EvidenceMode != NonAtomicDeltaEvidenceModeExactIdentity || got.IdentitySetsAvailable != nil || got.IdentityBasis != identityBasisLegacyProjection || got.RelationEvidence != CrossEndpointEvidenceExactIdentities || got.Policy.Metric != "" || got.ObservedEndpointCardinalityDelta != nil {
+	if got.EvidenceMode != NonAtomicDeltaEvidenceModeExactIdentity || got.IdentitySetsAvailable != nil || got.IdentityBasis != identityBasisLegacyProjection || got.RelationEvidence != CrossEndpointEvidenceExactIdentities || got.Policy.Metric != NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference || got.Policy.MaxOnlyInMixed != 2 || got.Policy.MaxOnlyInDedicated != 2 || got.Policy.MaxTotal != 4 || got.ObservedEndpointCardinalityDelta != nil {
 		t.Fatalf("rewritten exact projection = %+v", got)
 	}
 }
 
-func TestCaptureRecordsPolicyOverflowAsPartial(t *testing.T) {
+func TestValidateAcceptsHistoricalExactPolicyWithoutMetric(t *testing.T) {
+	corpus, err := captureReconciliationFixture(t, []int64{11, 12}, []int64{12, 13})
+	if err != nil {
+		t.Fatal(err)
+	}
+	corpus.Receipt.NonAtomicDelta.Policy = defaultNonAtomicDeltaPolicy("")
+	if err := Validate(corpus); err != nil {
+		t.Fatalf("historical exact receipt rejected: %v", err)
+	}
+}
+
+func TestCaptureAcceptsExactIdentityDeltaLargerThanHistoricalLimit(t *testing.T) {
 	dedicated := make([]int64, DefaultNonAtomicDeltaLimit+1)
 	for i := range dedicated {
 		dedicated[i] = int64(i + 1)
 	}
 	corpus, err := captureReconciliationFixture(t, nil, dedicated)
-	if err == nil || !strings.Contains(err.Error(), "exceeds policy") {
-		t.Fatalf("Capture error = %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if corpus.Receipt.Status != StatusPartial || corpus.Receipt.NonAtomicDelta == nil || corpus.Receipt.NonAtomicDelta.Accepted {
-		t.Fatalf("overflow receipt = %+v", corpus.Receipt)
+	if err := Validate(corpus); err != nil {
+		t.Fatal(err)
 	}
-	if err := validateCheckpoint(corpus); err != nil {
-		t.Fatalf("overflow partial must remain a resumable, internally consistent checkpoint: %v", err)
+	delta := corpus.Receipt.NonAtomicDelta
+	if delta == nil || !delta.Accepted || delta.Policy.Metric != NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference || delta.Policy.MaxOnlyInMixed != 0 || delta.Policy.MaxOnlyInDedicated != len(dedicated) || delta.Policy.MaxTotal != len(dedicated) {
+		t.Fatalf("large exact identity delta = %+v", delta)
 	}
-	if err := Validate(corpus); err == nil || !strings.Contains(err.Error(), "policy overflow") {
-		t.Fatalf("Validate error = %v, want policy overflow", err)
+	if len(delta.OnlyInDedicated) != len(dedicated) {
+		t.Fatalf("only_in_dedicated count = %d, want %d", len(delta.OnlyInDedicated), len(dedicated))
 	}
 }
 
-func TestExactIdentityPolicyStillRejectsIdentitySymmetricDifference(t *testing.T) {
-	mixed := make([]CrossEndpointIdentity, DefaultNonAtomicDeltaLimit+1)
-	dedicated := make([]Record, DefaultNonAtomicDeltaLimit+1)
-	for i := range mixed {
-		mixed[i] = CrossEndpointIdentity{ID: int64(i + 1), Number: i + 1}
-		dedicated[i] = Record{Source: "pulls", ID: int64(DefaultNonAtomicDeltaLimit + i + 2), Number: i + 1}
+func TestValidateRejectsUnexplainedIdentityLossInLargeExactDelta(t *testing.T) {
+	dedicated := make([]int64, DefaultNonAtomicDeltaLimit+1)
+	for i := range dedicated {
+		dedicated[i] = int64(i + 1)
 	}
-	corpus := Corpus{
-		Receipt: Receipt{Sources: []SourceReceipt{
-			{Name: "issues", Status: StatusComplete, ClassifiedPullIdentities: mixed},
-			{Name: "pulls", Status: StatusComplete},
-		}},
-		Records: dedicated,
-	}
-	if err := reconcileNonAtomicDelta(&corpus); err == nil || !strings.Contains(err.Error(), "exceeds policy") {
-		t.Fatalf("reconcile error = %v, want exact identity overflow", err)
+	corpus, err := captureReconciliationFixture(t, nil, dedicated)
+	if err != nil {
+		t.Fatal(err)
 	}
 	delta := corpus.Receipt.NonAtomicDelta
-	if delta == nil || delta.Policy.Metric != "" || delta.ObservedEndpointCardinalityDelta != nil || delta.SymmetricDifferenceLowerBound != 2*(DefaultNonAtomicDeltaLimit+1) || delta.Accepted || delta.Verdict != NonAtomicDeltaVerdictRejected {
-		t.Fatalf("exact identity delta = %+v", delta)
+	delta.OnlyInDedicated = delta.OnlyInDedicated[:len(delta.OnlyInDedicated)-1]
+	*delta.OnlyInDedicatedCount--
+	delta.SymmetricDifferenceLowerBound--
+	delta.SymmetricDifferenceUpperBound--
+	if err := Validate(corpus); err == nil || !strings.Contains(err.Error(), "identity sets contradict endpoint evidence") {
+		t.Fatalf("Validate error = %v, want unexplained identity loss rejection", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package studyforge
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 )
@@ -67,6 +68,22 @@ func defaultNonAtomicDeltaPolicy(metric NonAtomicDeltaPolicyMetric) NonAtomicDel
 		MaxOnlyInDedicated: DefaultNonAtomicDeltaLimit,
 		MaxTotal:           DefaultNonAtomicDeltaLimit,
 	}
+}
+
+func exactNonAtomicDeltaPolicy(mixedCount, dedicatedCount int) (NonAtomicDeltaPolicy, error) {
+	if mixedCount < 0 || dedicatedCount < 0 {
+		return NonAtomicDeltaPolicy{}, errors.New("exact non_atomic_delta endpoint identity counts must be non-negative")
+	}
+	if mixedCount > int(^uint(0)>>1)-dedicatedCount {
+		return NonAtomicDeltaPolicy{}, errors.New("exact non_atomic_delta endpoint identity count sum overflows")
+	}
+	return NonAtomicDeltaPolicy{
+		Type:               NonAtomicDeltaPolicyType,
+		Metric:             NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference,
+		MaxOnlyInMixed:     mixedCount,
+		MaxOnlyInDedicated: dedicatedCount,
+		MaxTotal:           mixedCount + dedicatedCount,
+	}, nil
 }
 
 // reconcileNonAtomicDelta derives the set relation once both endpoint
@@ -143,9 +160,13 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 			onlyDedicated = append(onlyDedicated, identity)
 		}
 	}
-	// Exact receipts retain their established bounded_identity_delta policy
-	// shape. The typed metric is required only for the legacy count-only mode.
-	policy := defaultNonAtomicDeltaPolicy("")
+	// Complete endpoint identity counts define the full possible exact set
+	// relation. Carrying that envelope in the receipt scales with repository size
+	// while the validator can still derive it independently from endpoint proof.
+	policy, err := exactNonAtomicDeltaPolicy(len(mixed), len(dedicated))
+	if err != nil {
+		return err
+	}
 	accepted := len(onlyMixed) <= policy.MaxOnlyInMixed && len(onlyDedicated) <= policy.MaxOnlyInDedicated && len(onlyMixed)+len(onlyDedicated) <= policy.MaxTotal
 	corpus.Receipt.NonAtomicDelta = &NonAtomicDeltaEvidence{
 		Type:                          NonAtomicDeltaType,
@@ -173,7 +194,7 @@ func reconcileNonAtomicDelta(corpus *Corpus) error {
 		Accepted:                      accepted,
 	}
 	if !accepted {
-		return fmt.Errorf("non_atomic_delta exceeds policy: only_in_mixed=%d only_in_dedicated=%d total=%d limit=%d", len(onlyMixed), len(onlyDedicated), len(onlyMixed)+len(onlyDedicated), DefaultNonAtomicDeltaLimit)
+		return fmt.Errorf("non_atomic_delta exceeds policy: only_in_mixed=%d only_in_dedicated=%d total=%d limit=%d", len(onlyMixed), len(onlyDedicated), len(onlyMixed)+len(onlyDedicated), policy.MaxTotal)
 	}
 	return nil
 }

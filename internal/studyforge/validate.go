@@ -293,8 +293,14 @@ func validateNonAtomicDelta(r Receipt, issues, pulls SourceReceipt, pullRecords 
 	}
 	switch delta.EvidenceMode {
 	case NonAtomicDeltaEvidenceModeExactIdentity:
-		if err := validateNonAtomicDeltaPolicy(delta.Policy, NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference, true); err != nil {
-			return err
+		if delta.Policy.Metric == "" {
+			if err := validateNonAtomicDeltaPolicy(delta.Policy, NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference, true); err != nil {
+				return err
+			}
+		} else {
+			if err := validateExactNonAtomicDeltaPolicy(delta.Policy, len(issues.ClassifiedPullIdentities), len(pullRecords)); err != nil {
+				return err
+			}
 		}
 		return validateExactNonAtomicDelta(r, issues, pullRecords, delta, requireComplete, legacyExactShape)
 	case NonAtomicDeltaEvidenceModeLegacyCountOnly:
@@ -405,12 +411,6 @@ func validateExactNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []
 }
 
 func validateLegacyCountOnlyNonAtomicDelta(r Receipt, issues SourceReceipt, pullRecords []Record, delta NonAtomicDeltaEvidence, requireComplete bool) error {
-	// The first live count-only migration predated the explicit
-	// identity_sets_available=false field. Admit that omission only through
-	// this resume-only pre-metric path; current receipts remain strict.
-	if delta.IdentitySetsAvailable == nil {
-		delta.IdentitySetsAvailable = boolPointer(false)
-	}
 	lower, err := validateLegacyCountOnlyNonAtomicDeltaEvidence(issues, pullRecords, delta)
 	if err != nil {
 		return err
@@ -517,6 +517,23 @@ func validateNonAtomicDeltaPolicy(policy NonAtomicDeltaPolicy, metric NonAtomicD
 	}
 	if policy.Metric != metric && !(allowLegacyMissingMetric && policy.Metric == "") {
 		return fmt.Errorf("non_atomic_delta policy metric %q does not match evidence mode", policy.Metric)
+	}
+	return nil
+}
+
+func validateExactNonAtomicDeltaPolicy(policy NonAtomicDeltaPolicy, mixedCount, dedicatedCount int) error {
+	if policy.Type != NonAtomicDeltaPolicyType {
+		return errors.New("non_atomic_delta acceptance policy is missing")
+	}
+	if policy.Metric != NonAtomicDeltaPolicyMetricExactIdentitySymmetricDifference {
+		return fmt.Errorf("non_atomic_delta policy metric %q does not match evidence mode", policy.Metric)
+	}
+	want, err := exactNonAtomicDeltaPolicy(mixedCount, dedicatedCount)
+	if err != nil {
+		return err
+	}
+	if policy != want {
+		return errors.New("exact non_atomic_delta policy does not match complete endpoint identity counts")
 	}
 	return nil
 }

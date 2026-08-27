@@ -26,8 +26,8 @@ const (
 	NonAtomicDeltaType = "non_atomic_delta"
 	// NonAtomicDeltaPolicyType names the deterministic bounded acceptance policy.
 	NonAtomicDeltaPolicyType = "bounded_identity_delta"
-	// DefaultNonAtomicDeltaLimit bounds each side and the total symmetric
-	// difference. The receipt carries this value explicitly; it is not ambient.
+	// DefaultNonAtomicDeltaLimit is the historical repository-independent bound
+	// retained for legacy exact receipts and count-only reconciliation.
 	DefaultNonAtomicDeltaLimit = 1000
 
 	NonAtomicDeltaEvidenceModeExactIdentity   = "exact_identity"
@@ -134,7 +134,8 @@ type CrawlWindow struct {
 }
 
 // NonAtomicDeltaPolicy is the declared, deterministic acceptance envelope.
-// Exact identity evidence applies all three bounds to its proven relation.
+// Exact identity evidence derives all three bounds from the complete endpoint
+// identity counts and applies them to its proven relation.
 // Legacy count-only evidence applies MaxTotal to its endpoint-cardinality
 // delta; the unavailable relation cannot honestly be tested against set bounds.
 type NonAtomicDeltaPolicy struct {
