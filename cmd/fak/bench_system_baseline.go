@@ -57,7 +57,8 @@ func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
 		return 2
 	}
 
-	baselineSamples := captureSystemBaselineWindow(*baselineDuration, *interval)
+	cadencePolicy := systembaseline.CadencePolicy{Minimum: *interval, Maximum: 10 * *interval, MaximumDutyPercent: *maxSamplerDuty}
+	baselineSamples := captureSystemBaselineWindow(*baselineDuration, cadencePolicy)
 	ctx := context.Background()
 	cancel := func() {}
 	if *timeout > 0 {
@@ -72,22 +73,25 @@ func runBenchSystemBaseline(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	rootPID := cmd.Process.Pid
-	samples := []systembaseline.Snapshot{systembaseline.Capture()}
+	sampler := newAdaptiveSystemBaselineSampler(cadencePolicy)
+	samples := []systembaseline.Snapshot{sampler.capture()}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	ticker := time.NewTicker(*interval)
-	defer ticker.Stop()
 	var waitErr error
 waitLoop:
 	for {
+		timer := time.NewTimer(sampler.interval())
 		select {
-		case <-ticker.C:
-			samples = append(samples, systembaseline.Capture())
+		case <-timer.C:
+			samples = append(samples, sampler.capture())
 		case waitErr = <-done:
+			if !timer.Stop() {
+				<-timer.C
+			}
 			break waitLoop
 		}
 	}
-	samples = append(samples, systembaseline.Capture())
+	samples = append(samples, sampler.capture())
 	exitCode := 0
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	if timedOut {
@@ -103,6 +107,8 @@ waitLoop:
 	policy := systembaseline.DefaultPolicy()
 	policy.MaximumNonSUTCPUPercent = *maxAmbient
 	policy.MaximumSamplerDutyPercent = *maxSamplerDuty
+	policy.MinimumCensusIntervalNS = int64(cadencePolicy.Minimum)
+	policy.MaximumCensusIntervalNS = int64(cadencePolicy.Maximum)
 	policy.RequireProcessMemory = *requireMemory
 	policy.IncludeTopConsumers = *topConsumers
 	report := systembaseline.Build(baselineSamples, samples, rootPID, *interval, policy, exitCode, timedOut)
@@ -142,18 +148,40 @@ func writePrivateJSON(path string, raw []byte) error {
 	return f.Close()
 }
 
-func captureSystemBaselineWindow(duration, interval time.Duration) []systembaseline.Snapshot {
-	samples := []systembaseline.Snapshot{systembaseline.Capture()}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+type adaptiveSystemBaselineSampler struct {
+	cadence *systembaseline.CadenceController
+	cache   systembaseline.StableProcessCache
+}
+
+func newAdaptiveSystemBaselineSampler(policy systembaseline.CadencePolicy) *adaptiveSystemBaselineSampler {
+	return &adaptiveSystemBaselineSampler{cadence: systembaseline.NewCadenceController(policy)}
+}
+func (s *adaptiveSystemBaselineSampler) interval() time.Duration { return s.cadence.Effective() }
+func (s *adaptiveSystemBaselineSampler) capture() systembaseline.Snapshot {
+	snapshot := systembaseline.Capture()
+	hits, misses := s.cache.Apply(snapshot.Processes)
+	snapshot.StableCacheHits, snapshot.StableCacheMisses = hits, misses
+	snapshot.CensusStages = map[string]int64{"process_census": snapshot.CensusWallNS}
+	snapshot.EffectiveCadenceNS = int64(s.cadence.Observe(time.Duration(snapshot.CensusWallNS)))
+	snapshot.CoverageLimited = s.cadence.Overloaded()
+	return snapshot
+}
+
+func captureSystemBaselineWindow(duration time.Duration, cadencePolicy systembaseline.CadencePolicy) []systembaseline.Snapshot {
+	sampler := newAdaptiveSystemBaselineSampler(cadencePolicy)
+	samples := []systembaseline.Snapshot{sampler.capture()}
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
 	for {
+		tick := time.NewTimer(sampler.interval())
 		select {
-		case <-ticker.C:
-			samples = append(samples, systembaseline.Capture())
+		case <-tick.C:
+			samples = append(samples, sampler.capture())
 		case <-timer.C:
-			samples = append(samples, systembaseline.Capture())
+			if !tick.Stop() {
+				<-tick.C
+			}
+			samples = append(samples, sampler.capture())
 			return samples
 		}
 	}

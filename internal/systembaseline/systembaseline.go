@@ -43,6 +43,8 @@ type Policy struct {
 	MinimumSamples            int     `json:"minimum_samples"`
 	MaximumNonSUTCPUPercent   float64 `json:"maximum_non_sut_cpu_percent"`
 	MaximumSamplerDutyPercent float64 `json:"maximum_sampler_duty_percent"`
+	MinimumCensusIntervalNS   int64   `json:"minimum_census_interval_ns"`
+	MaximumCensusIntervalNS   int64   `json:"maximum_census_interval_ns"`
 	RequireHostCPU            bool    `json:"require_host_cpu"`
 	RequireSUTCPU             bool    `json:"require_sut_cpu"`
 	RequireProcessMemory      bool    `json:"require_process_memory"`
@@ -50,7 +52,7 @@ type Policy struct {
 }
 
 func DefaultPolicy() Policy {
-	return Policy{MinimumBaselineSamples: 2, MinimumSamples: 2, MaximumNonSUTCPUPercent: 20, MaximumSamplerDutyPercent: 10, RequireHostCPU: true, RequireSUTCPU: true}
+	return Policy{MinimumBaselineSamples: 2, MinimumSamples: 2, MaximumNonSUTCPUPercent: 20, MaximumSamplerDutyPercent: 10, MinimumCensusIntervalNS: int64(10 * time.Millisecond), MaximumCensusIntervalNS: int64(time.Second), RequireHostCPU: true, RequireSUTCPU: true}
 }
 
 type Window struct {
@@ -102,9 +104,14 @@ type Finding struct {
 }
 
 type SamplerOverhead struct {
-	CountedSamples int    `json:"counted_samples"`
-	WallNS         int64  `json:"wall_ns"`
-	DutyPercent    Metric `json:"duty_percent"`
+	CountedSamples     int              `json:"counted_samples"`
+	WallNS             int64            `json:"wall_ns"`
+	DutyPercent        Metric           `json:"duty_percent"`
+	EffectiveCadenceNS int64            `json:"effective_cadence_ns"`
+	Stages             map[string]int64 `json:"stage_wall_ns"`
+	CacheHits          int              `json:"stable_identity_cache_hits"`
+	CacheMisses        int              `json:"stable_identity_cache_misses"`
+	CoverageLimited    bool             `json:"coverage_limited"`
 }
 
 type Report struct {
@@ -154,6 +161,11 @@ type Snapshot struct {
 	ProcessEnumerationOK  bool
 	AttributionIncomplete bool
 	CensusWallNS          int64
+	CensusStages          map[string]int64
+	EffectiveCadenceNS    int64
+	StableCacheHits       int
+	StableCacheMisses     int
+	CoverageLimited       bool
 	ProcessUnreadable     int
 	ProcessNote           string
 }
@@ -236,17 +248,35 @@ func normalizePolicy(p Policy) Policy {
 	if p.MaximumSamplerDutyPercent <= 0 || p.MaximumSamplerDutyPercent > 100 || math.IsNaN(p.MaximumSamplerDutyPercent) || math.IsInf(p.MaximumSamplerDutyPercent, 0) {
 		p.MaximumSamplerDutyPercent = 10
 	}
+	if p.MinimumCensusIntervalNS <= 0 {
+		p.MinimumCensusIntervalNS = int64(10 * time.Millisecond)
+	}
+	if p.MaximumCensusIntervalNS < p.MinimumCensusIntervalNS {
+		p.MaximumCensusIntervalNS = int64(time.Second)
+	}
+	if p.MaximumCensusIntervalNS < p.MinimumCensusIntervalNS {
+		p.MaximumCensusIntervalNS = p.MinimumCensusIntervalNS
+	}
 	return p
 }
 
 func foldSamplerOverhead(samples []Snapshot, window Window) SamplerOverhead {
-	overhead := SamplerOverhead{}
+	overhead := SamplerOverhead{Stages: map[string]int64{}}
 	if len(samples) < 2 || window.DurationNS <= 0 {
 		overhead.DutyPercent = unavailable("percent", "sampler window unavailable")
 		return overhead
 	}
 	overhead.CountedSamples = len(samples) - 1
 	for _, sample := range samples[:len(samples)-1] {
+		if sample.EffectiveCadenceNS > 0 {
+			overhead.EffectiveCadenceNS = sample.EffectiveCadenceNS
+		}
+		overhead.CacheHits += sample.StableCacheHits
+		overhead.CacheMisses += sample.StableCacheMisses
+		overhead.CoverageLimited = overhead.CoverageLimited || sample.CoverageLimited
+		for stage, ns := range sample.CensusStages {
+			overhead.Stages[stage] += ns
+		}
 		if sample.CensusWallNS < 0 {
 			overhead.WallNS = 0
 			overhead.DutyPercent = unavailable("percent", "negative census wall duration")
@@ -262,7 +292,6 @@ func foldSamplerOverhead(samples []Snapshot, window Window) SamplerOverhead {
 	overhead.DutyPercent = available(float64(overhead.WallNS)/float64(window.DurationNS)*100, "percent", "sampler census wall time before final counter endpoint")
 	return overhead
 }
-
 func windowFor(samples []Snapshot, interval time.Duration) Window {
 	if len(samples) == 0 {
 		return Window{}
@@ -607,6 +636,10 @@ func (r *Report) applyPolicy() {
 			r.Verdict = VerdictInvestigate
 		}
 	}
+	if r.BaselineSampler.CoverageLimited || r.CommandSampler.CoverageLimited {
+		r.Findings = append(r.Findings, Finding{Code: "SAMPLER_COVERAGE_LIMITED", Detail: "required census cadence exceeded the declared maximum; churn coverage is insufficient"})
+		r.Verdict = VerdictInvalid
+	}
 	if r.BaselineHost.CPUPercent.Available && r.BaselineHost.CPUPercent.Value > r.Policy.MaximumNonSUTCPUPercent {
 		r.Findings = append(r.Findings, Finding{Code: "BASELINE_HOST_CPU_HIGH", Detail: fmt.Sprintf("quiet baseline host CPU %.2f%% exceeds %.2f%%", r.BaselineHost.CPUPercent.Value, r.Policy.MaximumNonSUTCPUPercent)})
 		if r.Verdict != VerdictInvalid {
@@ -694,6 +727,9 @@ func (r Report) policyVerdict() string {
 	}
 	if p.RequireProcessMemory && (!r.Attribution.SUTRSSBytes.Available || !r.Attribution.NonSUTRSSBytes.Available) {
 		return VerdictInvestigate
+	}
+	if r.BaselineSampler.CoverageLimited || r.CommandSampler.CoverageLimited {
+		return VerdictInvalid
 	}
 	if !r.BaselineSampler.DutyPercent.Available || !r.CommandSampler.DutyPercent.Available {
 		return VerdictInvestigate
