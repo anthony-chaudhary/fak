@@ -166,6 +166,7 @@ func (t *Tree) SetEvictionStrategy(name string) error {
 	} else {
 		t.policy = EvictionLRU
 	}
+	t.SetAdmissionEnabled(s.Name() == "cost-aware")
 	return nil
 }
 

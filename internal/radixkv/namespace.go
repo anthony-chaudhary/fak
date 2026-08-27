@@ -91,6 +91,22 @@ func (t *Tree) forEachRootNS(fn func(ns string, r *node)) {
 	}
 }
 
+// pruneEmptyNamespaceRoot removes a non-default virtual root once its last lease is
+// released and it owns no children. Admission bypass makes this path common for scans over
+// unique namespaces; without pruning, rejected candidates would consume no token budget
+// yet could grow nsRoots without bound.
+func (t *Tree) pruneEmptyNamespaceRoot(root *node) {
+	if root == nil || root == t.root || root.parent != nil || root.refs != 0 || len(root.children) != 0 {
+		return
+	}
+	for ns, candidate := range t.nsRoots {
+		if candidate == root {
+			delete(t.nsRoots, ns)
+			return
+		}
+	}
+}
+
 // Namespaces reports how many distinct NON-default namespaces currently hold a virtual root
 // (an observability/testing seam). The default ("") namespace is always present via t.root
 // and is not counted.

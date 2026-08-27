@@ -22,10 +22,11 @@ package cacheprice
 // threshold gate consumes.
 //
 // Like the rest of cacheprice this is a tier-1 foundation leaf: plain ints, deterministic
-// (inline FNV-1a double hashing, no seeds, no clocks), importing nothing — the disaggregated
-// pool (internal/radixkv or the pool endpoint) calls Touch on every access, Estimate+
-// ShouldReadmit on every re-admission candidate, and this stays the one source of truth for
-// "does this prefix earn its way back into the fast tier".
+// (inline FNV-1a double hashing, no seeds, no clocks), importing nothing. internal/radixkv
+// now feeds Touch from the live demand lookup and uses the threshold half of ShouldReadmit
+// before its value-aware victim comparison; disaggregated pool endpoints can use the full
+// frequency/headroom/in-flight verdict. This stays the one source of truth for "has this
+// prefix demonstrated enough recurring demand to challenge fast-tier residency".
 
 // FrequencySketch is a fixed-size count-min sketch over opaque string keys: depth rows ×
 // width uint8 counters, self-decaying on saturation. The zero value is unusable; construct
@@ -56,6 +57,16 @@ func NewFrequencySketch(width, depth int) *FrequencySketch {
 		depth:    depth,
 		counters: make([]uint8, width*depth),
 	}
+}
+
+// Cells reports the fixed number of uint8 counters owned by the sketch. It is the
+// estimator's complete durable state footprint: Touch never allocates per key, so this
+// value stays constant for the sketch's lifetime regardless of workload cardinality.
+func (s *FrequencySketch) Cells() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.counters)
 }
 
 // fnv1a64 is the 64-bit FNV-1a hash of key, inlined so the leaf keeps importing nothing.

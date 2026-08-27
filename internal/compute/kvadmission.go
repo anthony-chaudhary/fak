@@ -33,11 +33,12 @@ package compute
 //     admission path is inert when the pool does not age (clock ≤ 0). Wiring this in is purely
 //     additive: an all-fail-open call site is identical to no gate at all.
 //
-// HONEST SCOPE — what this is NOT. This is the DECISION (R1), not its live wiring. R2 is
-// radixkv consulting DecideKVAdmission on miss-insert under budget pressure behind the
-// cost-aware policy; R3 is the admission arm in the #2244 eviction-pressure benchmark. This
-// file closes the decidable, host-free core the same way discard_admit.go / prewarm_admit.go
-// shipped their policies ahead of the live serve path.
+// LIVE WIRING. internal/radixkv/admission.go now consults DecideKVAdmission before the real
+// Insert / InsertSnapshot mutation whenever bounded token or snapshot residency would be
+// displaced (#9311). It combines this value comparison with cacheprice's bounded frequency
+// evidence and fails open when that telemetry is absent. The #2244 eviction-pressure
+// benchmark remains the broader cross-policy measurement rung; this file stays the pure
+// deterministic decision core.
 
 // KVAdmitVerdict is the typed outcome of the value-aware KV admission decision.
 type KVAdmitVerdict uint8

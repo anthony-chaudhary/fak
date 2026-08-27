@@ -51,6 +51,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/anthony-chaudhary/fak/internal/cacheprice"
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
@@ -237,6 +238,28 @@ type Tree struct {
 	boundedEvictions      int // victims staged (and detached) by PlanBoundedEviction
 	ledgerConfirmed       int // victims confirmed by ConfirmEvictions, each exactly once
 	ledgerConfirmedTokens int // Σ victim edge tokens over confirmed deletes
+
+	// Value/frequency admission (#9311, admission.go). Cost-aware trees enable the
+	// bounded sketch gate by default; other policies and an explicit rollback keep the
+	// historical insert-always behavior. The sketch has fixed cells, while the reject
+	// journal is a bounded set of candidates awaiting a later successful recovery.
+	admissionEnabled            bool
+	admissionSketch             *cacheprice.FrequencySketch
+	admissionJournal            []admissionRecord
+	admissionObservations       int
+	admissionCandidates         int
+	admissionAdmitted           int
+	admissionRejected           int
+	admissionRejectedTokens     int
+	admissionRejectedBytes      int64
+	admissionTelemetryFallbacks int
+	admissionHotProtected       int
+	admissionRecoveries         int
+	admissionJournalDropped     int
+	admissionRecoveryGapLast    uint64
+	admissionRecoveryGapMax     uint64
+	lastAdmissionFrequency      int
+	lastAdmissionReason         string
 }
 
 // New builds an empty prefix cache. maxTokens is the LRU budget in cached tokens; pass 0
@@ -474,6 +497,7 @@ func (t *Tree) Lookup(tokens []int) (*node, int) { return t.LookupNS("", tokens)
 //	leaf = tree.Insert(b, req[m:], kv)   // moves the lease onto the leaf
 func (t *Tree) LookupNS(ns string, tokens []int) (*node, int) {
 	root := t.rootFor(ns)
+	t.observeAdmission(root, tokens)
 	// Lifecycle bookkeeping (#5804): read whether this namespace held anything BEFORE the
 	// walk, so a miss can be attributed to an empty cache rather than a divergent request.
 	populated := len(root.children) > 0
@@ -578,13 +602,22 @@ func (t *Tree) LookupSnapshotTieredContext(ctx context.Context, tokens []int) (*
 	return n, nil, 0, SnapshotTierMiss, nil
 }
 
-// InsertSnapshot transfers an independently owned device/hybrid snapshot to the tree.
+// InsertSnapshot transfers an independently owned device/hybrid snapshot to the tree. A
+// value/frequency bypass is a successful cache decision: the request already computed the
+// prefix, so the snapshot is closed here and the still-leased boundary is returned for Done.
+// Byte-budget errors retain the historical ownership contract: ownership remains with the
+// caller, which receives the error and closes the rejected snapshot.
 func (t *Tree) InsertSnapshot(boundary *node, suffix []int, snap *model.PrefixSnapshot, logits []float32) (*node, error) {
 	incoming := snapshotResidentBytes(snap, logits)
 	if t.maxSnapshotBytes > 0 && incoming > t.maxSnapshotBytes {
 		return nil, ErrSnapshotByteBudget
 	}
-	n := t.Insert(boundary, suffix, nil)
+	comparisons := t.snapshotAdmissionComparisons(boundary, suffix, incoming)
+	n, admitted := t.insertWithLogits(boundary, suffix, nil, nil, comparisons)
+	if !admitted {
+		snap.Close()
+		return n, nil
+	}
 	if n == nil {
 		return nil, ErrSnapshotByteBudget
 	}
@@ -656,19 +689,42 @@ func (t *Tree) releaseHotSnapshot(n *node) {
 // copied on admission because quantized sessions may reuse their logits buffer on the next
 // Step/Prefill. Passing nil preserves Insert's historical behavior.
 func (t *Tree) InsertWithLogits(boundary *node, suffix []int, kv *model.KVCache, logits []float32) *node {
+	n, _ := t.insertWithLogits(boundary, suffix, kv, logits, nil)
+	return n
+}
+
+func (t *Tree) insertWithLogits(boundary *node, suffix []int, kv *model.KVCache, logits []float32, comparisons []admissionComparison) (*node, bool) {
+	if boundary == nil {
+		return nil, false
+	}
+	keyHash := t.admissionKeyHash(boundary, suffix)
+	if t.admissionEnabled {
+		comparisons = append(comparisons, t.tokenAdmissionComparisons(boundary, suffix)...)
+	} else {
+		comparisons = nil
+	}
+	stamp := t.clock
+	if len(suffix) > 0 {
+		stamp = t.tick()
+	}
+	if len(comparisons) > 0 && !t.admitCandidate(keyHash, comparisons) {
+		return boundary, false
+	}
 	if len(suffix) == 0 {
 		if logits != nil {
 			boundary.logits = append([]float32(nil), logits...)
 		}
-		return boundary // already fully cached; keep the boundary lease for the caller to Done
+		t.noteAdmissionRecovery(keyHash)
+		return boundary, true // already fully cached; keep the boundary lease for the caller to Done
 	}
-	leaf := t.attachLeaf(boundary, suffix, kv, logits, t.tick())
+	leaf := t.attachLeaf(boundary, suffix, kv, logits, stamp)
 	leaf.refs++ // lease the in-flight request's own leaf...
 	if boundary.refs > 0 {
 		boundary.refs-- // ...and release the prefix lease Lookup took (the leaf now guards the path)
 	}
 	t.evictToBudget()
-	return leaf
+	t.noteAdmissionRecovery(keyHash)
+	return leaf, true
 }
 
 // attachLeaf builds a new leaf node hanging suffix off boundary (copying suffix
@@ -703,6 +759,7 @@ func (t *Tree) Done(n *node) {
 	if n != nil && n.refs > 0 {
 		n.refs--
 	}
+	t.pruneEmptyNamespaceRoot(n)
 }
 
 // KV is the reusable kernel-owned cache for this node's full prefix (nil if none). Clone
@@ -756,6 +813,10 @@ func (t *Tree) evictToBudget() {
 // never scored, so a prefix being served is never a victim. Returns nil when every
 // budget-excess leaf is locked — the signal evictToBudget bails on.
 func (t *Tree) victimLeaf() *node {
+	return t.selectVictimLeaf(true)
+}
+
+func (t *Tree) selectVictimLeaf(record bool) *node {
 	strat := t.evictionStrategy()
 	var best *node
 	var bestKey victimKey
@@ -785,7 +846,9 @@ func (t *Tree) victimLeaf() *node {
 			stack = append(stack, c)
 		}
 	}
-	t.recordEvictChoice(strat.Name(), candidates, locked, best)
+	if record {
+		t.recordEvictChoice(strat.Name(), candidates, locked, best)
+	}
 	return best
 }
 
@@ -1027,6 +1090,30 @@ type Stats struct {
 	LookupMissCold      int // misses where nothing could have matched (empty namespace / empty request)
 	LookupMissDivergent int // misses against a populated namespace that shared no leading token
 	Fills               int // leaves attached (demand Insert + prewarm WarmInsert)
+
+	// Value/frequency admission (#9311, admission.go). Candidates count only inserts
+	// that would displace token or snapshot residency; no-pressure fills stay off the
+	// decision hot path. The fixed sketch and bounded pending journal make overhead
+	// explicit, while rejects/recoveries show pollution refused and later heat earned.
+	AdmissionEnabled        bool `json:"admission_enabled"`
+	AdmissionSketchCells    int  `json:"admission_sketch_cells"`
+	AdmissionObservations   int  `json:"admission_observations"`
+	AdmissionCandidates     int  `json:"admission_candidates"`
+	AdmissionAdmitted       int  `json:"admission_admitted"`
+	AdmissionRejected       int  `json:"admission_rejected"`
+	AdmissionRejectedTokens int  `json:"admission_rejected_tokens"` // candidate token writes bypassed
+	// Candidate value-axis footprint bypassed: exact resident bytes for snapshots and
+	// radixkv's existing full-prefix token proxy for regular KV nodes.
+	AdmissionRejectedBytes      int64  `json:"admission_rejected_bytes"`
+	AdmissionTelemetryFallbacks int    `json:"admission_telemetry_fallbacks"`
+	AdmissionHotProtected       int    `json:"admission_hot_protected"`
+	AdmissionRecoveries         int    `json:"admission_recoveries"`
+	AdmissionJournalPending     int    `json:"admission_journal_pending"`
+	AdmissionJournalDropped     int    `json:"admission_journal_dropped"`
+	AdmissionRecoveryGapLast    uint64 `json:"admission_recovery_gap_last"`
+	AdmissionRecoveryGapMax     uint64 `json:"admission_recovery_gap_max"`
+	LastAdmissionFrequency      int    `json:"last_admission_frequency"`
+	LastAdmissionReason         string `json:"last_admission_reason"`
 }
 
 // Stats walks the tree and returns its current shape.
@@ -1095,6 +1182,28 @@ func (t *Tree) Stats() Stats {
 		LookupMissCold:        t.lookupMissCold,
 		LookupMissDivergent:   t.lookupMissDivergent,
 		Fills:                 t.fills,
+		AdmissionEnabled:      t.admissionEnabled,
+		AdmissionSketchCells: func() int {
+			if t.admissionSketch == nil {
+				return 0
+			}
+			return t.admissionSketch.Cells()
+		}(),
+		AdmissionObservations:       t.admissionObservations,
+		AdmissionCandidates:         t.admissionCandidates,
+		AdmissionAdmitted:           t.admissionAdmitted,
+		AdmissionRejected:           t.admissionRejected,
+		AdmissionRejectedTokens:     t.admissionRejectedTokens,
+		AdmissionRejectedBytes:      t.admissionRejectedBytes,
+		AdmissionTelemetryFallbacks: t.admissionTelemetryFallbacks,
+		AdmissionHotProtected:       t.admissionHotProtected,
+		AdmissionRecoveries:         t.admissionRecoveries,
+		AdmissionJournalPending:     t.admissionJournalPending(),
+		AdmissionJournalDropped:     t.admissionJournalDropped,
+		AdmissionRecoveryGapLast:    t.admissionRecoveryGapLast,
+		AdmissionRecoveryGapMax:     t.admissionRecoveryGapMax,
+		LastAdmissionFrequency:      t.lastAdmissionFrequency,
+		LastAdmissionReason:         t.lastAdmissionReason,
 	}
 	var visit func(n *node)
 	visit = func(n *node) {

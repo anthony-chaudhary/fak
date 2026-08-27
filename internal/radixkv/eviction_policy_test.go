@@ -24,6 +24,7 @@ func TestCostAwareEvictionKeepsReusedSpan(t *testing.T) {
 	}
 
 	costAware := NewWithEvictionPolicy(20, EvictionCostAware)
+	costAware.SetAdmissionEnabled(false) // isolate the eviction selector from #9311 admission
 	touchPure(costAware, a)
 	touchPure(costAware, a)
 	touchPure(costAware, b)
@@ -42,6 +43,7 @@ func TestCostAwareEvictionKeepsReusedSpan(t *testing.T) {
 
 func TestCostAwareEvictionStatsExposeVictimTelemetry(t *testing.T) {
 	tree := NewWithEvictionPolicy(20, EvictionCostAware)
+	tree.SetAdmissionEnabled(false) // this test exercises eviction telemetry, not admission
 	a, b, c := distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)
 
 	touchPure(tree, a)
@@ -79,6 +81,7 @@ func TestCostAwareEvictionStatsExposeVictimTelemetry(t *testing.T) {
 
 func TestCostAwareEvictionRespectsLeases(t *testing.T) {
 	tree := NewWithEvictionPolicy(20, EvictionCostAware)
+	tree.SetAdmissionEnabled(false) // preserve the insert-always setup needed to pressure leases
 	a, b, c := distinctReq(0, 10), distinctReq(1, 10), distinctReq(2, 10)
 
 	_, leasedA := servePure(tree, a)
