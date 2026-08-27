@@ -87,6 +87,7 @@ func parseAuditFile(source, path, rel string, denominator *AuditDenominatorRow) 
 			continue
 		}
 		denominator.Records++
+		state.distribution.observe(source, line)
 		var record map[string]any
 		decoder := json.NewDecoder(bytes.NewReader(line))
 		decoder.UseNumber()
