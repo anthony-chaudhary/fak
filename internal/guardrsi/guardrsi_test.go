@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -120,6 +121,33 @@ func TestUpstreamBadRequestIsProviderOutcomeNotUnknownVerdict(t *testing.T) {
 	}
 	if got, want := VerdictQuality(fold), 50.0; got != want {
 		t.Fatalf("quality = %v, want %v; provider outcomes must not dilute the verdict denominator", got, want)
+	}
+}
+
+func TestProviderOutcomeClassificationDeterminism(t *testing.T) {
+	p := writeJournal(t, []map[string]any{
+		{"verdict": "ALLOW", "kind": "DECIDE", "tool": "Read"},
+		{"kind": "UPSTREAM_BAD_REQUEST", "reason": "scrubbed provider detail one"},
+		{"kind": "UPSTREAM_BAD_REQUEST", "reason": "scrubbed provider detail two"},
+		{"kind": "NOVEL_CONTROL"},
+	})
+
+	first := FoldRows([]string{p})
+	second := FoldRows([]string{p})
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("same provider-outcome journal produced different folds:\nfirst:  %+v\nsecond: %+v", first, second)
+	}
+	if first.ProviderOutcomeRows != 2 {
+		t.Fatalf("ProviderOutcomeRows = %d, want 2", first.ProviderOutcomeRows)
+	}
+	if got := first.ByProviderOutcomeKind["UPSTREAM_BAD_REQUEST"]; got != 2 {
+		t.Fatalf("ByProviderOutcomeKind[UPSTREAM_BAD_REQUEST] = %d, want 2", got)
+	}
+	if first.UnknownVerdict != 1 || first.ByVerdict["NOVEL_CONTROL"] != 1 {
+		t.Fatalf("fold = %+v, want only NOVEL_CONTROL classified as unknown", first)
+	}
+	if got := first.ByVerdict["UPSTREAM_BAD_REQUEST"]; got != 0 {
+		t.Fatalf("ByVerdict[UPSTREAM_BAD_REQUEST] = %d, want 0; provider outcomes are not decision verdicts", got)
 	}
 }
 

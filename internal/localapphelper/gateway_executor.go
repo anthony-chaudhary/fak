@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/localappcontract"
 )
+
+// ChatCompleter is injected by the higher-level transport owner.
+// The helper owns task/receipt semantics, not provider wire details.
+type ChatCompleter func(context.Context, *http.Client, string, string, string, string) (string, error)
 
 // NativeClient composes the app helper with an already-running fak-native gateway.
 // The private helper authenticates apps; the gateway endpoint stays loopback/private.
@@ -21,21 +24,23 @@ type NativeClient struct {
 	Artifact string
 	Revision string
 	Client   *http.Client
+	Complete ChatCompleter
 }
 
 func (e NativeClient) Execute(ctx context.Context, task TaskRequest) (TaskResult, error) {
 	if e.Endpoint == "" || e.Model == "" || e.Artifact == "" || e.Revision == "" {
 		return TaskResult{}, errors.New("localapphelper: incomplete native gateway identity")
 	}
+	if e.Complete == nil {
+		return TaskResult{}, errors.New("localapphelper: no native chat transport configured")
+	}
 	client := e.Client
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Minute}
 	}
 	started := time.Now()
-	output, err := agent.CompleteOpenAIChat(ctx, client, e.Endpoint, e.Model, []agent.Message{
-		{Role: "system", Content: "Return only valid JSON for the requested app task."},
-		{Role: "user", Content: string(task.Payload)},
-	})
+	output, err := e.Complete(ctx, client, e.Endpoint, e.Model,
+		"Return only valid JSON for the requested app task.", string(task.Payload))
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("localapphelper native gateway: %w", err)
 	}
