@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **147** (clarity 0 + coverage 147) |
-| **Crystal-clear concepts (and climbing)** | **800** crystal of 2512 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2638 / 2785** (94.7% of the discovered confusable space) |
-| **Undrawn twin-pairs (drive to 0)** | **0** of 203 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **74** of 3478 indexed names |
+| **Crystal-clear concepts (and climbing)** | **802** crystal of 2514 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2640 / 2787** (94.7% of the discovered confusable space) |
+| **Undrawn twin-pairs (drive to 0)** | **0** of 204 confusable name-pairs |
+| **Ambiguous lookup names (drive to 0)** | **74** of 3480 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 96.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2512 concepts - score 96.6/100 (grade A) - disambiguation-debt 147
+concept-disambiguation chart - 2514 concepts - score 96.6/100 (grade A) - disambiguation-debt 147
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #############............... 800
+  * crystal       #############............... 802
   o defined       ############################ 1712
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -48,7 +48,7 @@ clarity mix by family (each cell = one concept):
   evict            ***************oooooooooooooooooooooooooooooooo (47 concept(s); 15 crystal)
   gateway-engine   *****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (146 concept(s); 29 crystal)
   guard-gate       *********************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (430 concept(s); 189 crystal)
-  layout           *****ooooooooo     (14 concept(s); 5 crystal)
+  layout           *******ooooooooo   (16 concept(s); 7 crystal)
   loop             ****************************************oooooooooooooooooooooooooooooooooooooo (78 concept(s); 40 crystal)
   plan             ******************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (306 concept(s); 66 crystal)
   policy-capability *************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (166 concept(s); 61 crystal)
@@ -76,7 +76,7 @@ coverage by family (positioned / discovered):
   attention        ###########################. 81/85
   score-debt       ###########################. 87/91
   decision         ###########################. 58/60
-  layout           #########################... 15/17
+  layout           #########################... 17/19
   pool             ###########################. 38/40
   cross-cluster    ............................ 0/0
   dev-tier         ............................ 0/0
@@ -84,15 +84,15 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 94.7%  (2638/2785 confusable tokens positioned)
+namespace coverage  [##############################..] 94.7%  (2640/2787 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
-  mutual       ############################ 203
+  mutual       ############################ 204
   one-sided    ............................ 0
   undrawn      ............................ 0
-  pairs separated   [################################] 203/203
+  pairs separated   [################################] 204/204
 
-name index: 3478 lookup name(s) -> 2512 concept(s), 74 ambiguous
+name index: 3480 lookup name(s) -> 2514 concept(s), 74 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -114,11 +114,11 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 
 | Separation metric | Value |
 |---|---|
-| Confusable name-pairs discovered | 203 |
-| **Separated from each other (drive to all)** | **203 / 203** (203 mutual, 0 one-sided) |
+| Confusable name-pairs discovered | 204 |
+| **Separated from each other (drive to all)** | **204 / 204** (204 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1716 / 4547 |
+| Boundaries drawn (mutual / total) | 1728 / 4559 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3478 over 2512 concepts |
+| Lookup names indexed | 3480 over 2514 concepts |
 | Lookup names landing on several concepts | 74 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2512 |
+| Concepts carrying a contrast set | 2514 |
 
 ## The concepts (best verdict first)
 
@@ -551,6 +551,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **disaggregatedBodyRef** - Fold predicate reporting whether a note or task body ref is disaggregated and therefore requires a digest-shaped deletion witness on removal. |
 | * | crystal | subsystem | layout | **guard_format_layout** - The guard exit-summary block LAYOUT (guard_format_layout.go) - the pure text layout of the guard summary onto which color is layered at print time (guardColorizeSummary). |
 | * | crystal | symbol | layout | **layout implementation surface for daylayout** - `DayLayout` is the layout symbol declared or used at `cmd/fak/git_daily.go:347` as `// LOCAL date, matching gitdaily.DayLayout — the ledger's day keys are local, so a`. This row positions that concrete implementation surface, not merely the family label. |
+| * | crystal | symbol | layout | **WeightLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.WeightLayout names the checkpoint weight packing/storage contract that native obligation compilation must match before allocation, such as gguf-q4-k. |
+| * | crystal | symbol | layout | **StateLayout (newmodel native envelope)** - newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of recurrent/KV state admitted by obligation compilation, such as contiguous, independent of state kind and residency. |
 | * | crystal | symbol | layout | **Layout (tensor)** - Tensor element physical arrangement: RowMajor, ColMajor, or other ordering |
 | * | crystal | symbol | layout | **Layout (ctxplan)** - Base/Current/Recent/Deep region profile for layout-aware planning |
 | * | crystal | symbol | layout | **MLA KV layout seam** - Attention cache variant seam interface: standardKVLayout vs mlaKVLayout |
@@ -2784,17 +2786,17 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2831/4547 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2512 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2831/4559 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2514 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
-| separation | `pair_separated` | 100 | 0 | all 203 confusable name-pair(s) are separated |
+| separation | `pair_separated` | 100 | 0 | all 204 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3478 lookup name(s) resolves - 74 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3480 lookup name(s) resolves - 74 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2815,7 +2817,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | attention | 81 | 85 | 4 |
 | score-debt | 87 | 91 | 4 |
 | decision | 58 | 60 | 2 |
-| layout | 15 | 17 | 2 |
+| layout | 17 | 19 | 2 |
 | pool | 38 | 40 | 2 |
 | cross-cluster | 0 | 0 | 0 |
 | dev-tier | 0 | 0 | 0 |
