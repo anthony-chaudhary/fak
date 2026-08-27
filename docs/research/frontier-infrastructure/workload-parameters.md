@@ -25,6 +25,16 @@ popularity, fixed token lengths.” The source-level claims and limitations rema
 | EAGLE | Roughly 1.5x-2.8x wall-clock speedup across named LLaMA/Vicuna evaluations | Acceptance is conditional on task, model, temperature, draft position, and load. |
 | MagicDec | Batch 32-256, eight A100s; up to 2x/1.84x for named long-context models | Large batches help only in the measured KV-dominated regime. |
 
+## Non-coding agent workload envelopes (#9367)
+
+| Workload | Bounded population | Systems implication |
+|---|---|---|
+| WebArena | 812 tasks, 5 sites, 4 application domains | Stateful browser actions and end-state evaluators; not production sessions. |
+| WorkArena | 33 task types, 19,912 instances; cleaned HTML 40k-500k tokens | Observation representation can dominate context and varies independently of dialogue. |
+| tau-bench | Retail and airline multi-turn API interaction; pass^8 reliability | Track user turns, policy checks, reads/writes, and repeated-task consistency. |
+| GAIA | 466 questions; 355 web, 154 coding, 138 multimodal, 129 diverse-file tags | Tags overlap; route by capability composition rather than summed counts. |
+| OSWorld | 369 real-computer tasks across 3 operating systems | Budget screenshots/state, GUI/CLI actions, files, apps, evaluators, and resets. |
+
 ## Trace populations
 
 | Trace | Population and window | Scale | Directly observed fields | Boundary |
