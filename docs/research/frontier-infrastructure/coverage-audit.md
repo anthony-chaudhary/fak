@@ -49,8 +49,8 @@ classification, forecast inclusion, completed study, approval, construction, ene
 live load remain separate states. The New York GEIS/report processes, final Batch Zero outputs,
 Fall 2027 statewide transmission plan, and end-2026 forecast including Batch loads remain future
 work. The Texas-governor directive/~474 GW claim remains explicit coverage debt because no
-direct governor source was supplied. **Exact indexed totals: 261 entries, 254 unique URLs, and
-220 entity labels.**
+direct governor source was supplied. **Exact indexed totals: 266 entries, 259 unique URLs, and
+223 entity labels.**
 
 Issue #9325 adds an opened Modine/Airedale cooling factory, a >$4B 2027-2029
 capacity reservation with $165M upfront funding, and a shipping Schneider prefabricated
@@ -176,20 +176,20 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **261** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **254** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **220** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
-| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 65; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 24; `policy_regulation` 14; `serving_system` 40; `standard` 3; `supply_chain` 31; `workload_model` 13; `workload_trace` 21. |
+| Entries | **266** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **259** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **223** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Categories | **13** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 22; `frontier_lab` 65; `hardware_supply` 1; `hyperscaler` 17; `market_signal` 24; `policy_regulation` 14; `serving_system` 45; `standard` 3; `supply_chain` 31; `workload_model` 13; `workload_trace` 21. |
 | Evidence classes used | **48** | Machine-derived counts now include `official_statement` 99, `vendor_claim` 31, `benchmark_measurement` 22, `reported_observation` 15, `production_measurement` 12, `production_observation` 8, `synthetic_experiment` 6, `analyst_estimate` 5, and 63 entries across 40 other bounded lifecycle/benchmark/specification labels. |
 | Confidence labels | **16** | Exact labels include `high` 179, `medium_high` 57, `medium` 11, `low` 2, and 12 source-bounded qualified labels used once each. Confidence describes evidentiary strength, not business likelihood. |
-| Date fields | **261/261 published; 261/261 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
+| Date fields | **266/266 published; 266/266 event** | Presence is complete. Date precision and continuing-event semantics are not separately encoded. |
 | Explicit rumors | **2** | Both are low-confidence and carry state, last-check, expiry, corroboration, and fragment-level resolution metadata; final outcomes remain open. |
 
 ### Structural checks
 
 | Check | Status | Evidence |
 |---|---|---|
-| Required fields present | **Complete** | All 261 entries contain the schema's required fields. |
+| Required fields present | **Complete** | All 266 entries contain the schema's required fields. |
 | JSON parseability | **Complete** | `python3 -m json.tool` is the local validation command. |
 | Unique-entry semantics | **Partial** | IDs are intended to be unique and URLs are counted, but no committed schema/link checker enforces the contract yet. |
 | Source-class separation | **Complete for current entries** | The ledger keeps production, benchmark/synthetic, official, vendor, analyst/reported, and rumor classes distinct. |
@@ -551,3 +551,9 @@ throughput, production occupancy, or task-duration distributions. Public numeric
 queue wait distribution, and universal concurrency quantities remain absent for most providers.
 These absences are retained as gaps rather than inferred from pricing, API rate limits, timeout
 settings, or anecdotal usage.
+
+### Frontier serving-configuration slice added in issue #9382
+
+Five primary-source MLPerf records were added across DeepSeek-R1, Llama 3.1 405B, and Qwen3-VL-235B-A22B; NVIDIA B200/B300, AMD MI355X, and Red Hat's B200 vLLM submission; Server and Interactive scenarios; and tokens/s versus queries/s result units. The NVIDIA configuration files pin TP/PP/EP and configured batching where exposed. AMD and Red Hat records deliberately leave those fields unknown because their published result/config files do not expose them.
+
+**Remaining gaps:** replica count is unstated in all five records; numeric latency/SLO thresholds are not present in the selected submission files; two records omit runtime batch, concurrency, and sequence envelopes; none is production topology or prevalence evidence; no achieved-active-batch distribution is available.

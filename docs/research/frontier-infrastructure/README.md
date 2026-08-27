@@ -53,7 +53,7 @@ assumptions, sensitivities, and forecasts from actual load. It also keeps planne
 60/90-day and twelve-month processes, ERCOT's final Batch Zero classification and Fall 2027
 statewide plan, and the final end-2026 forecast including Batch loads remain future work. The
 Texas governor directive/~474 GW claim remains coverage debt because no direct governor source
-was supplied. The corpus now contains **261 entries**, **254 unique URLs**, and **220 entity
+was supplied. The corpus now contains **266 entries**, **259 unique URLs**, and **220 entity
 labels**.
 
 ## Latest slice: Chinese platform envelopes (#9362)
@@ -233,8 +233,8 @@ facts:
 
 ## Coverage ledger
 
-The current spine contains **261 dated entries**, **254 unique source URLs**, and
-**220 distinct entity labels** across **13 categories** spanning frontier labs,
+The current spine contains **266 dated entries**, **259 unique source URLs**, and
+**223 distinct entity labels** across **13 categories** spanning frontier labs,
 hyperscalers, AI clouds,
 datacenter supply, accelerators, serving systems, workload traces, market signals,
 and **2 explicit rumors**. FineServe, ServeGen, the one-year Chutes trace, OpenRouter geography, and
@@ -351,3 +351,7 @@ Use [`workload-assumptions.md`](workload-assumptions.md#remote-browser-operation
 for benchmark admission rules and
 [`coverage-audit.md`](coverage-audit.md#remote-browser-operational-concurrency-and-boundary-slice-9376)
 for provider-by-boundary coverage and unresolved gaps.
+
+## Current serving-configuration slice
+
+Issue #9382 adds five commit-pinned MLPerf configurations/results with explicit topology and batching omissions. The compact comparison is in [workload-assumptions.md](workload-assumptions.md#topology-and-batching-slice-issue-9382), and the usable parameter rules are in [workload-parameters.md](workload-parameters.md#serving-configuration-parameters-issue-9382). These records are benchmark fixtures only: they do not describe production deployments, schedulable fleets, replica counts, achieved active batches, or prevalence.

@@ -1,9 +1,9 @@
 {
   "schema": "fak-frontier-infrastructure-index/1",
   "updated_at": "2026-08-27",
-  "issue": 9381,
+  "issue": 9382,
   "root_issue": 9269,
-  "latest_slice_issue": 9381,
+  "latest_slice_issue": 9382,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -57,7 +57,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 261,
+    "entry_count": 266,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -176,6 +176,9 @@
       "LiquidStack / Trane Technologies",
       "MBZUAI / G42 Institute of Foundation Models",
       "MBZUAI / Inception / Cerebras / Petuum",
+      "MLCommons / AMD",
+      "MLCommons / NVIDIA",
+      "MLCommons / Red Hat",
       "MagicDec",
       "Marvell / Celestial AI",
       "Medusa",
@@ -306,7 +309,8 @@
       "A systematic rumor chronology with original source, independent corroboration graph, later confirmation/refutation, and expiry.",
       "Automated link checking, schema validation as a committed Go leaf, and scheduled refresh; the manual contradiction matrix exists but project-level reconciliation remains incomplete.",
       "Representative production retry, server/client fallback, and client-side speculative-decoding outcome distributions remain unavailable in the reviewed primary sources.",
-      "Production browser and desktop-agent trajectories remain missing: action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, and retry/failure/tail distributions."
+      "Production browser and desktop-agent trajectories remain missing: action/tool-call distributions, observation bytes, resets, full session duration, escalations, user populations, and retry/failure/tail distributions.",
+      "Benchmark submissions still leave many runtime topology, replica-count, achieved-active-batch, numeric SLO-threshold, and exact sequence-envelope fields unstated; benchmark evidence is not production prevalence."
     ]
   },
   "entries": [
@@ -10238,6 +10242,284 @@
       "rumor": {
         "is_rumor": false
       }
+    },
+    {
+      "id": "mlperf-v51-nvidia-b200-deepseek-r1-server-2025",
+      "entity": "MLCommons / NVIDIA",
+      "category": "serving_system",
+      "topic": "MLPerf Inference v5.1 DeepSeek-R1 server topology and batching",
+      "claim": "At the pinned MLCommons v5.1 commit, NVIDIA submitted a valid DeepSeek-R1 result in the Server submission directory on one DGX B200 system with eight B200-SXM-180GB accelerators. The result completed 4.96 samples/s; the LLM summary also reports 18,592.24 completed tokens/s. The paired NVIDIA config explicitly sets FP4 model precision, FP8 KV cache, TP=8, PP=1, MoE EP=8, a configured GPU batch-size ceiling of 512, max input length 3,140, and max sequence length 23,140.",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "published_at": "2025-09-09",
+      "event_at": "2025-07-28",
+      "source_kind": "official_repository",
+      "source_title": "MLPerf Inference v5.1 NVIDIA B200 DeepSeek-R1 Server result, config, and system description, commit 5ea4f62e",
+      "source_url": "https://github.com/mlcommons/inference_results_v5.1/blob/5ea4f62ef62536e6bf4d78a9b440fb9035ddfb4a/closed/NVIDIA/results/B200-SXM-180GBx8_TRT/deepseek-r1/Server/performance/run_1/mlperf_log_summary.txt",
+      "quantified": {
+        "model": "DeepSeek-R1",
+        "submission_scenario": "Server",
+        "loadgen_scenario": "Server",
+        "result_status": "VALID",
+        "completed_samples_per_second": 4.96,
+        "scheduled_samples_per_second": 5.02,
+        "completed_tokens_per_second": 18592.24,
+        "result_test_datetime_utc": "2025-07-28T23:33:23Z",
+        "system_name": "NVIDIA DGX B200 (8x B200-SXM-180GB, TensorRT)",
+        "host_count": 1,
+        "accelerator_model": "NVIDIA B200-SXM-180GB",
+        "accelerator_count": 8,
+        "accelerator_memory": "180 GB each",
+        "framework": "TensorRT 10.11, CUDA 12.9",
+        "operating_system": "Ubuntu 24.04",
+        "model_precision": "FP4",
+        "kv_cache_dtype": "FP8",
+        "tensor_parallelism": 8,
+        "pipeline_parallelism": 1,
+        "moe_expert_parallelism": 8,
+        "configured_gpu_batch_size_ceiling": 512,
+        "configured_max_input_length": 3140,
+        "configured_max_sequence_length": 23140
+      },
+      "assumptions": [
+        "Explicit result fields come from closed/NVIDIA/results/B200-SXM-180GBx8_TRT/deepseek-r1/Server/performance/run_1/mlperf_log_summary.txt and mlperf_log_detail.txt at commit 5ea4f62e.",
+        "Explicit topology and runtime fields come from closed/NVIDIA/systems/B200-SXM-180GBx8_TRT.json; explicit precision, parallelism, and configured ceilings come from closed/NVIDIA/configs/B200-SXM-180GBx8/Server/deepseek-r1.py at the same commit.",
+        "The configured GPU batch size is a ceiling/tuning control, not evidence that 512 requests were simultaneously active. No replica count is stated.",
+        "published_at is the MLPerf Inference v5.1 result-release date; the cited pinned repository commit itself is dated 2026-01-16."
+      ],
+      "contradictions_or_limits": [
+        "This is one audited benchmark submission, not a production deployment or a fleet-size census.",
+        "Accelerator count is not host or fleet count; TP/PP/EP describe one execution topology and do not establish replica count.",
+        "Completed samples/s is the MLPerf result unit. Completed tokens/s is a separate LLM summary metric and must not be substituted for QPS or samples/s.",
+        "The paired config states max input and max sequence lengths, but not a separate max-output-length field; no output length is inferred by subtraction.",
+        "The pinned commit postdates the test run; published_at records the pinned commit date, while event_at and result_test_datetime_utc record the run."
+      ],
+      "fak_implications": [
+        "Preserve topology, configured batching, offered QPS, latency gate, and achieved token goodput as separate benchmark dimensions.",
+        "Use the pinned config as a reproducible stress point, not as a prevalence prior."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "mlperf-v51-nvidia-b200-llama31-405b-interactive-2025",
+      "entity": "MLCommons / NVIDIA",
+      "category": "serving_system",
+      "topic": "MLPerf Inference v5.1 Llama 3.1 405B interactive topology and batching",
+      "claim": "At the pinned MLCommons v5.1 commit, NVIDIA submitted a valid Llama 3.1 405B result under the Interactive submission directory on one DGX B200 system with eight B200-SXM-180GB accelerators. LoadGen records the executed scenario as Server; the Interactive submission applies LLM TTFT/TPOT latency constraints. The result completed 1.15 samples/s and 751.37 completed tokens/s. The paired config explicitly sets FP4 model precision, TP=4, PP=1, a configured GPU batch-size ceiling of 256, max input length 20,000, and max sequence length 22,000.",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "published_at": "2025-09-09",
+      "event_at": "2025-07-22",
+      "source_kind": "official_repository",
+      "source_title": "MLPerf Inference v5.1 NVIDIA B200 Llama 3.1 405B Interactive result, config, and system description, commit 5ea4f62e",
+      "source_url": "https://github.com/mlcommons/inference_results_v5.1/blob/5ea4f62ef62536e6bf4d78a9b440fb9035ddfb4a/closed/NVIDIA/results/B200-SXM-180GBx8_TRT/llama3.1-405b/Interactive/performance/run_1/mlperf_log_summary.txt",
+      "quantified": {
+        "model": "Llama 3.1 405B",
+        "submission_scenario": "Interactive",
+        "loadgen_scenario": "Server",
+        "result_status": "VALID",
+        "completed_samples_per_second": 1.15,
+        "scheduled_samples_per_second": 1.15,
+        "completed_tokens_per_second": 751.37,
+        "result_test_datetime_utc": "2025-07-22T11:46:29Z",
+        "ttft_99th_percentile_ms": 2510.581561,
+        "tpot_99th_percentile_ms": 77.696851,
+        "ttft_99th_percentile_constraint_ms": 4500,
+        "tpot_99th_percentile_constraint_ms": 80,
+        "system_name": "NVIDIA DGX B200 (8x B200-SXM-180GB, TensorRT)",
+        "host_count": 1,
+        "accelerator_model": "NVIDIA B200-SXM-180GB",
+        "accelerator_count": 8,
+        "accelerator_memory": "180 GB each",
+        "framework": "TensorRT 10.11, CUDA 12.9",
+        "operating_system": "Ubuntu 24.04",
+        "model_precision": "FP4",
+        "tensor_parallelism": 4,
+        "pipeline_parallelism": 1,
+        "configured_gpu_batch_size_ceiling": 256,
+        "configured_max_input_length": 20000,
+        "configured_max_sequence_length": 22000
+      },
+      "assumptions": [
+        "Explicit result and latency fields come from closed/NVIDIA/results/B200-SXM-180GBx8_TRT/llama3.1-405b/Interactive/performance/run_1/mlperf_log_summary.txt and mlperf_log_detail.txt at commit 5ea4f62e.",
+        "Explicit topology and runtime fields come from closed/NVIDIA/systems/B200-SXM-180GBx8_TRT.json; explicit precision, parallelism, and configured ceilings come from closed/NVIDIA/configs/B200-SXM-180GBx8/Interactive/llama3_1-405b.py at the same commit.",
+        "Interactive is the submission-directory taxonomy; the official LoadGen log itself says Scenario: Server and supplies TTFT/TPOT constraints.",
+        "The configured GPU batch size is a ceiling/tuning control, not achieved active batch. TP=4 across an eight-accelerator system does not prove two replicas, so replica count is omitted.",
+        "published_at is the MLPerf Inference v5.1 result-release date; the cited pinned repository commit itself is dated 2026-01-16."
+      ],
+      "contradictions_or_limits": [
+        "This is one audited benchmark submission, not a production deployment or evidence that Interactive is the common production scenario.",
+        "Accelerator count is not host or fleet count; TP/PP do not establish replica count.",
+        "Completed samples/s is the MLPerf result unit. Completed tokens/s is separate and must not be substituted for QPS or samples/s.",
+        "The config states max input and max sequence lengths, but no separate max-output-length field; no output length is inferred.",
+        "The pinned commit postdates the test run; published_at records the pinned commit date, while event_at and result_test_datetime_utc record the run."
+      ],
+      "fak_implications": [
+        "A single accelerator count can coexist with a TP value smaller than device count without proving replicas; retain an explicit unknown replica dimension.",
+        "Benchmark interactive token goodput should remain distinct from tail-latency compliance and production concurrency."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "mlperf-v60-nvidia-b300-deepseek-r1-server-2026",
+      "entity": "MLCommons / NVIDIA",
+      "category": "serving_system",
+      "topic": "MLPerf Inference v6.0 DeepSeek-R1 server topology and batching",
+      "claim": "At the pinned MLCommons v6.0 commit, NVIDIA submitted a valid DeepSeek-R1 Server result on one DGX B300 system with eight B300-SXM-270GB accelerators. The result completed 11.39 samples/s; the LLM summary also reports 42,721.39 completed tokens/s. The paired config explicitly sets FP4 model precision, FP8 KV cache, TP=8, PP=1, MoE EP=8, a configured GPU batch-size ceiling of 640, max input length 3,140, and max sequence length 35,908.",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "published_at": "2026-04-02",
+      "event_at": "2026-02-05",
+      "source_kind": "official_repository",
+      "source_title": "MLPerf Inference v6.0 NVIDIA B300 DeepSeek-R1 Server result, config, and system description, commit 4d3916ac",
+      "source_url": "https://github.com/mlcommons/inference_results_v6.0/blob/4d3916ac9cf474b679cdfcf492d43a0559418ad1/closed/NVIDIA/results/B300-SXM-270GBx8_TRT/deepseek-r1/Server/performance/run_1/mlperf_log_summary.txt",
+      "quantified": {
+        "model": "DeepSeek-R1",
+        "submission_scenario": "Server",
+        "loadgen_scenario": "Server",
+        "result_status": "VALID",
+        "completed_samples_per_second": 11.39,
+        "scheduled_samples_per_second": 11.53,
+        "completed_tokens_per_second": 42721.39,
+        "result_test_datetime_utc": "2026-02-05T14:35:09Z",
+        "system_name": "NVIDIA DGX B300 (8x B300-SXM-270GB, TensorRT)",
+        "host_count": 1,
+        "accelerator_model": "NVIDIA B300-SXM-270GB",
+        "accelerator_count": 8,
+        "accelerator_memory": "270 GB each",
+        "framework": "TensorRT 10.14, CUDA 13.1, cuDNN 9.17, TensorRT-LLM feat/1.2-mlpinf, NVIDIA Dynamo mlperf-v6.0-dynamo-v0.8.0, vLLM CentML:mlperf-inf-mm-q3vl-v6.0",
+        "operating_system": "Ubuntu 24.04",
+        "model_precision": "FP4",
+        "kv_cache_dtype": "FP8",
+        "tensor_parallelism": 8,
+        "pipeline_parallelism": 1,
+        "moe_expert_parallelism": 8,
+        "configured_gpu_batch_size_ceiling": 640,
+        "configured_max_input_length": 3140,
+        "configured_max_sequence_length": 35908
+      },
+      "assumptions": [
+        "Explicit result fields come from closed/NVIDIA/results/B300-SXM-270GBx8_TRT/deepseek-r1/Server/performance/run_1/mlperf_log_summary.txt and mlperf_log_detail.txt at commit 4d3916ac.",
+        "Explicit topology and runtime fields come from closed/NVIDIA/systems/B300-SXM-270GBx8_TRT.json; explicit precision, parallelism, and configured ceilings come from closed/NVIDIA/configs/B300-SXM-270GBx8/Server/deepseek-r1.py at the same commit.",
+        "The configured GPU batch size is a ceiling/tuning control, not evidence that 640 requests were simultaneously active. No replica count is stated.",
+        "published_at is the MLPerf Inference v6.0 result-release date; the cited pinned repository commit itself is dated 2026-04-03."
+      ],
+      "contradictions_or_limits": [
+        "This is one audited benchmark submission, not a production deployment, fleet-size census, or evidence that the best submitted result is prevalent.",
+        "Accelerator count is not host or fleet count; TP/PP/EP describe one execution topology and do not establish replica count.",
+        "Completed samples/s is the MLPerf result unit. Completed tokens/s is a separate LLM summary metric and must not be substituted for QPS or samples/s.",
+        "The paired config states max input and max sequence lengths, but not a separate max-output-length field; no output length is inferred by subtraction.",
+        "The system framework string lists multiple components used by the submission; it does not prove every component was on the DeepSeek-R1 execution path beyond the paired submission metadata.",
+        "The pinned commit postdates the test run; published_at records the pinned commit date, while event_at and result_test_datetime_utc record the run."
+      ],
+      "fak_implications": [
+        "Track software release, topology, batch ceiling, concurrency ceiling, offered load, and achieved token rate independently across benchmark generations.",
+        "Do not convert a best submission into a default hardware or deployment assumption."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "mlperf-v60-amd-mi355x-llama31-405b-interactive-2026",
+      "entity": "MLCommons / AMD",
+      "category": "serving_system",
+      "topic": "MLPerf Inference v6.0 Llama 3.1 405B Interactive on MI355X",
+      "claim": "At the pinned MLCommons v6.0 commit, AMD submitted a valid Llama 3.1 405B result under the Interactive submission directory on one system with eight AMD Instinct MI355X 288GB accelerators. LoadGen records the executed scenario as Server; the Interactive submission applies LLM TTFT/TPOT latency constraints. The result completed 1.04 samples/s and 793.99 completed tokens/s. The checked-in system description explicitly lists the accelerator, host count, PyTorch/ROCm framework string, and Ubuntu version; no result-linked config file at the pinned commit establishes precision, TP/PP/EP, replicas, batch/concurrency ceilings, or sequence-length controls.",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "published_at": "2026-04-02",
+      "event_at": "2026-02-10",
+      "source_kind": "official_repository",
+      "source_title": "MLPerf Inference v6.0 AMD MI355X Llama 3.1 405B Interactive result and system description, commit 4d3916ac",
+      "source_url": "https://github.com/mlcommons/inference_results_v6.0/blob/4d3916ac9cf474b679cdfcf492d43a0559418ad1/open/AMD/results/8xMI355X_2xEPYC_9575F/llama3.1-405b/Interactive/performance/run_1/mlperf_log_summary.txt",
+      "quantified": {
+        "model": "Llama 3.1 405B",
+        "submission_scenario": "Interactive",
+        "loadgen_scenario": "Server",
+        "result_status": "VALID",
+        "completed_samples_per_second": 1.04,
+        "scheduled_samples_per_second": 1.04,
+        "completed_tokens_per_second": 793.99,
+        "result_test_datetime_utc": "2026-02-10T10:17:52Z",
+        "ttft_99th_percentile_ms": 2824.777998,
+        "tpot_99th_percentile_ms": 73.35065,
+        "ttft_99th_percentile_constraint_ms": 4500,
+        "tpot_99th_percentile_constraint_ms": 80,
+        "system_name": "smci355-ccs-aus-m09-17 (AS -4126GS-NMR-LCC)",
+        "host_count": 1,
+        "accelerator_model": "AMD Instinct MI355X 288GB HBM3e",
+        "accelerator_count": 8,
+        "accelerator_memory": "288 GB each",
+        "framework": "PyTorch 2.9.1+git8907517, ROCm 7.0.0, PyTorch 2.9.0a0+git1c57644, ROCm 7.1.0",
+        "operating_system": "Ubuntu 22.04.5 LTS"
+      },
+      "assumptions": [
+        "Explicit result and latency fields come from open/AMD/results/8xMI355X_2xEPYC_9575F/llama3.1-405b/Interactive/performance/run_1/mlperf_log_summary.txt and mlperf_log_detail.txt at commit 4d3916ac.",
+        "Explicit system fields come from open/AMD/systems/8xMI355X_2xEPYC_9575F.json at the same commit.",
+        "Interactive is the submission-directory taxonomy; the official LoadGen log itself says Scenario: Server and supplies TTFT/TPOT constraints.",
+        "No checked-in AMD measurement/config file tied to this result was found at the pinned commit, so precision, TP/PP/EP, replicas, batch/concurrency controls, and sequence-length controls are intentionally omitted.",
+        "published_at is the MLPerf Inference v6.0 result-release date; the cited pinned repository commit itself is dated 2026-04-03."
+      ],
+      "contradictions_or_limits": [
+        "This is one audited benchmark submission, not a production deployment, fleet-size census, or prevalence claim.",
+        "Accelerator count is not host or fleet count. No topology or replica quantity is inferred from the eight-accelerator system name.",
+        "Completed samples/s is the MLPerf result unit. Completed tokens/s is separate and must not be substituted for QPS or samples/s.",
+        "The system framework string contains two PyTorch/ROCm pairs; the source does not disambiguate which pair served this exact result.",
+        "The pinned commit postdates the test run; published_at records the pinned commit date, while event_at and result_test_datetime_utc record the run."
+      ],
+      "fak_implications": [
+        "Represent high-quality benchmark rows even when topology fields are explicitly unknown, so cross-vendor comparisons do not silently fill gaps.",
+        "Keep accelerator count, offered QPS, tokens/s, and latency compliance as separate fields."
+      ],
+      "rumor": false
+    },
+    {
+      "id": "mlperf-v60-redhat-b200-qwen3vl-235b-server-2026",
+      "entity": "MLCommons / Red Hat",
+      "category": "serving_system",
+      "topic": "MLPerf Inference v6.0 Qwen3-VL 235B-A22B Server on vLLM",
+      "claim": "At the pinned MLCommons v6.0 commit, Red Hat submitted a valid Qwen3-VL-235B-A22B Server result on one Dell system with eight NVIDIA B200-SXM-180GB accelerators. The result completed 67.86 samples/s; unlike the LLM text-generation summaries, this result summary does not report completed tokens/s. The checked-in system description explicitly lists the accelerator, host count, vLLM/NVIDIA Dynamo/MLPerf Qwen3-VL harness framework string, and RHEL 10.1; no result-linked config file at the pinned commit establishes precision, TP/PP/EP, replicas, batch/concurrency ceilings, or sequence-length controls.",
+      "evidence_class": "benchmark_measurement",
+      "confidence": "high",
+      "published_at": "2026-04-02",
+      "event_at": "2026-02-12",
+      "source_kind": "official_repository",
+      "source_title": "MLPerf Inference v6.0 Red Hat B200 Qwen3-VL-235B-A22B Server result and system description, commit 4d3916ac",
+      "source_url": "https://github.com/mlcommons/inference_results_v6.0/blob/4d3916ac9cf474b679cdfcf492d43a0559418ad1/closed/RedHat/results/8xb200_NV_vllm_qwen/qwen3-vl-235b-a22b/server/performance/run_1/mlperf_log_summary.txt",
+      "quantified": {
+        "model": "Qwen3-VL-235B-A22B",
+        "submission_scenario": "Server",
+        "loadgen_scenario": "Server",
+        "result_status": "VALID",
+        "completed_samples_per_second": 67.86,
+        "scheduled_samples_per_second": 68.32,
+        "result_test_datetime_utc": "2026-02-12T16:10:06Z",
+        "latency_99th_percentile_ms": 11687.990824,
+        "system_name": "Dell B200,8xB200-SXM-180GB,RHEL 10.1,vLLM CentML:mlperf-inf-mm-q3vl-v6.0",
+        "host_count": 1,
+        "accelerator_model": "NVIDIA B200-SXM-180GB",
+        "accelerator_count": 8,
+        "accelerator_memory": "180 GB each",
+        "framework": "vLLM + NVIDIA-dynamo + MLPerf Inference Qwen3-VL harness, RHEL 10.1",
+        "operating_system": "Red Hat Enterprise Linux 10.1 (Coughlan)"
+      },
+      "assumptions": [
+        "Explicit result fields come from closed/RedHat/results/8xb200_NV_vllm_qwen/qwen3-vl-235b-a22b/server/performance/run_1/mlperf_log_summary.txt and mlperf_log_detail.txt at commit 4d3916ac.",
+        "Explicit system fields come from closed/RedHat/systems/8xb200_NV_vllm_qwen.json at the same commit.",
+        "No checked-in Red Hat measurement/config file tied to this result was found at the pinned commit, so precision, TP/PP/EP, replicas, batch/concurrency controls, and sequence-length controls are intentionally omitted.",
+        "published_at is the MLPerf Inference v6.0 result-release date; the cited pinned repository commit itself is dated 2026-04-03."
+      ],
+      "contradictions_or_limits": [
+        "This is one audited benchmark submission, not a production deployment, fleet-size census, or prevalence claim.",
+        "Accelerator count is not host or fleet count. No topology or replica quantity is inferred from the eight-accelerator system name.",
+        "Completed samples/s is the MLPerf result unit; the source does not report completed tokens/s, so no token-rate conversion is made.",
+        "The 99th-percentile end-to-end latency is a reported observation, not a separately stated latency constraint in the summary.",
+        "The pinned commit postdates the test run; published_at records the pinned commit date, while event_at and result_test_datetime_utc record the run."
+      ],
+      "fak_implications": [
+        "Preserve workload result units exactly, particularly for multimodal serving.",
+        "Unknown runtime topology and batching must remain explicit rather than normalized from aggregate hardware."
+      ],
+      "rumor": false
     }
   ]
 }

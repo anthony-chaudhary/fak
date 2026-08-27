@@ -345,3 +345,17 @@ commit identifier, so the access date is the evidence pin.
   not define browser-task duration. Report task duration from the task witness only.
 - **Provider specifications are not populations.** These records describe account or API
   envelopes, not production traffic distributions, fleet occupancy, or achieved throughput.
+
+## Topology and batching slice (issue #9382)
+
+These are benchmark configurations, not production-deployment disclosures. A configured batch or concurrency value is a ceiling/control, not achieved active batch; accelerator count and TP/PP/EP do not establish replica count. QPS, tokens/s, and queries/s remain different units.
+
+| Record | Model / precision | Accelerator topology | TP / PP / EP | Replicas | Batch / concurrency controls | Length envelope | Scenario / latency gate | Result | Software / result date |
+|---|---|---|---|---|---|---|---|---|---|
+| `mlperf-v51-nvidia-b200-deepseek-r1-server-2025` | DeepSeek-R1; FP4 weights, FP8 KV | 1 node; 8x B200 180GB | 8 / 1 / 8 | unstated | configured GPU batch 512; max concurrency 5,120; target 5 QPS | max input 3,140; max sequence 23,140 tokens | MLPerf Server; TTFT and TPOT early-stopping passed, numeric thresholds not exposed in selected files | 18,592.2 tokens/s | TensorRT-LLM v5.1 submission; 2025-09-04 |
+| `mlperf-v51-nvidia-b200-llama31-405b-interactive-2025` | Llama 3.1 405B; FP4 weights, FP8 KV | 1 node; 8x B200 180GB | 4 / 1 / unstated | unstated | configured GPU batch 256; inflight batching; max concurrency unstated; target 1.15 QPS | max input 20,000; max sequence 22,000 tokens | MLPerf Interactive; TTFT and TPOT early-stopping passed, numeric thresholds not exposed | 751.366 tokens/s | TensorRT-LLM v5.1 submission; 2025-09-04 |
+| `mlperf-v60-nvidia-b300-deepseek-r1-server-2026` | DeepSeek-R1; FP4 weights, FP8 KV | 1 node; 8x B300 270GB | 8 / 1 / 8 | unstated | configured GPU batch 640; max concurrency 10,240; target 9.5 QPS | max input 3,140; max sequence 35,908 tokens | MLPerf Server; TTFT and TPOT early-stopping passed, numeric thresholds not exposed | 42,721.4 tokens/s | TensorRT 10.14, CUDA 13.1, cuDNN 9.17, TensorRT-LLM `feat/1.2-mlpinf`, Dynamo 0.8.0 submission; 2026-03-26 |
+| `mlperf-v60-amd-mi355x-llama31-405b-interactive-2026` | Llama 3.1 405B; FP4 weights | 1 node; 8x MI355X 288GB | unstated / unstated / unstated | unstated | runtime batch and max concurrency unstated; target 1.04 QPS | unstated | MLPerf Interactive; TTFT and TPOT early-stopping passed, numeric thresholds not exposed | 793.994 tokens/s | PyTorch 2.9.x, ROCm 7.0/7.1; 2026-03-26 |
+| `mlperf-v60-redhat-b200-qwen3vl-235b-server-2026` | Qwen3-VL-235B-A22B; FP4 weights | 1 node; 8x B200 180GB | unstated / unstated / unstated | unstated | runtime batch and max concurrency unstated; target 5 QPS | unstated | MLPerf Server; early-stopping passed, numeric threshold not exposed | 67.8642 queries/s | vLLM + NVIDIA Dynamo + Qwen3-VL harness, RHEL 10.1; 2026-03-26 |
+
+The two v6.0 rows with omitted topology demonstrate the intended discipline: the submission exposes accelerator count and a result, but that does not authorize reconstructing TP, replica count, or achieved batch. The Qwen3-VL result also remains in queries/s; it is not converted to tokens/s.

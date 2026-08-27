@@ -295,3 +295,25 @@ tool-cache envelopes.
 | Multi-region mixed SLOs | SageServe evaluates >8M production-trace requests, 4 models, and 3 regions with latency-sensitive/insensitive classes. | Jointly sample region, model, SLO class, and provisioning type; include placement/scale overhead. | Public raw trace, tenant weights, region matrix, and real spot interruptions. |
 | Agent session hotspot | SMetric studies 2 real-world agent traces and finds cache-affinity routing can overload a few instances. | Track per-session cached state and projected remaining work, not only queue or hit. | Production session share, cache size, hardware, tool-gap, and fairness distributions across products. |
 | Tool-gap KV lifetime | Continuum assigns cache TTL from reload cost and eviction-induced queueing during tool calls. | Draw tool-gap and return probability; charge retained-memory time versus offload/reload. | Cross-product tool-gap quantiles, KV sizes, abandonment, and storage bandwidth. |
+
+## Serving-configuration parameters (issue #9382)
+
+Use the new topology/batching records as discrete benchmark fixtures, not fitted production distributions. Parameterize each fixture with the exact fields below and preserve `unknown` rather than deriving topology from device count or throughput.
+
+| Parameter | Values now pinned | Sampling / comparison rule |
+|---|---|---|
+| `model_version` | DeepSeek-R1; Llama 3.1 405B; Qwen3-VL-235B-A22B | Never merge model families or benchmark tasks. |
+| `weight_precision` / `kv_precision` | FP4; FP8 KV where stated | Keep weight and cache precision separate; `unknown` when omitted. |
+| `accelerator_type_count` | 8x B200 180GB; 8x B300 270GB; 8x MI355X 288GB | Count is submission hardware, not fleet capacity. |
+| `tp_pp_ep` | 8/1/8; 4/1/unknown; unknown for AMD and Red Hat rows | Never infer missing values or replicas from unused device arithmetic. |
+| `replica_count` | unknown for all five records | Remains independently unknown. |
+| `configured_batch` | 512, 256, 640, unknown, unknown | Treat as configured maximum, not achieved active batch. |
+| `max_concurrency` | 5,120; unknown; 10,240; unknown; unknown | Benchmark runtime control, not independent users. |
+| `offered_qps` | 5; 1.15; 9.5; 1.04; 5 | Do not convert to tokens/s or queries/s. |
+| `length_envelope_tokens` | 3,140/23,140; 20,000/22,000; 3,140/35,908; unknown; unknown | Store max input and max sequence separately; do not infer output length. |
+| `scenario` | MLPerf Server or Interactive | Never compare directly with Offline or claim production equivalence. |
+| `slo_gate` | early-stopping passed; numeric TTFT/TPOT or latency thresholds not exposed in selected files | A passed gate is not a mean- or tail-latency distribution. |
+| `result` | 18,592.2; 751.366; 42,721.4; 793.994 tokens/s; 67.8642 queries/s | Preserve original unit and scenario. |
+| `result_date` | 2025-09-04 or 2026-03-26 | Dates are pinned repository publication dates, not production rollout dates. |
+
+For benchmark sweeps, select records by model, scenario, precision, hardware, and software commit together. Do not label the fastest record “representative”; prevalence and production fleet shares remain unmeasured.
