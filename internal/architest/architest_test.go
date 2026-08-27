@@ -57,7 +57,7 @@ var tier = map[string]int{
 	"flowcredit":             2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
 	"flowmetrics":            1, // pure flow-metrics fold (#6194): joins issue rows against commit rows into started/closed spans and grades eight Little's-Law KPIs (flow efficiency, queue time, unstarted backlog, aging WIP, atomicity, arrival-vs-service, witnessed progress, local WIP), plus a working-tree WIP census; the twin of growthgate/stallscan — a Classify-shaped fold whose thresholds are fixed constants. Stdlib-only, imports nothing internal, off the hot path.
 	"stallpage":              2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
-	"agenticbench":           2, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
+	"agenticbench":           3, // #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
@@ -639,7 +639,7 @@ var tier = map[string]int{
 	"terminalbarrier":       3, // #6436 (epic #6432): the fail-closed pause barrier terminal relief must clear before any host replacement. Composes fleetbus(2) durable lifecycle envelopes with processforest(1) identity and lifecycleadapter(1) negotiation; the destructive step is an injected Actuator, so the barrier itself can never kill anything.
 	"depthadmit":            1, // The DEPTH mirror of focusscore(1): focusscore folds how BROAD the fleet is (active objectives vs the WIP cap), this folds how FAR DOWN one line got (declared plan phases vs the ones a W3 commit-progress row witnessed), so a `met` that stopped short is refused as DEPTH_NOT_CARRIED instead of reading clean. Pure over stdlib, no ledger and no git: the impure read lives in cmd/fak/trajctl_depth.go.
 	"gardenbudget":          1, // #6493 whole-tick budget/checkpoint primitive: stdlib-only durable cursor plus pure suffix executor/remaining-budget arithmetic; imports nothing internal and stays off the hot path.
-	"armbench":              2, // #6676 off-path multi-arm benchmark integrator; imports the tier-2 windowgate to keep managed child processes invisible on Windows.
+	"armbench":              3, // #6676 off-path multi-arm benchmark integrator; imports the tier-2 windowgate to keep managed child processes invisible on Windows.
 	"codetools":             2, // Kernel-mediated workspace coding engines: canonical confinement, policy rung, bounded Read/Grep/Glob; imports ABI/refutil/vDSO but not core runtime.
 	"portabilitylab":        2, // Hermetic release acceptance harness over the tier-1 portability leaf; stdlib plus portability only, off the hot path.
 	"scratchjanitor":        1, // stdlib-only age and resume-reference guarded harness scratch cleanup; off the runtime hot path.
@@ -702,17 +702,17 @@ var tier = map[string]int{
 	"agentqueue":                 1, // stdlib-only deterministic desired-state planner for bounded agent populations (#8875).
 	"supervisionpolicy":          1, // stdlib-only typed fault-domain and bounded restart policy (#8909).
 	"projectionspine":            1, // stdlib-only disposable projection restart and session reattach spine (#8912).
-	"codexsession":               3, // local Codex app-server adapter projected into the public harness protocol (#8736).
+	"codexsession":               4, // local Codex app-server adapter projected into the public harness protocol (#8736).
 	"hostdiag":                   3,
 	"shellprov":                  1, // stdlib-only privacy-safe receipt primitive for fak-owned shell launch identity (#9086).
 	"qwenworkbudget":             5, // campaign-boundary adapter over canonical trajectory audit rollups and typed Qwen amplification policy; imports trajectory(4).
 	"ultracodetokenizer":         1,
 	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
-	"studydrift":                 1, // stdlib-only source refresh and supersession receipt primitive (#8611).
+	"studydrift":                 2, // external source source refresh and supersession receipt primitive (#8611).
 	"servicewatchdog":            2, // systemd lifecycle read-back and watchdog progress integration (#8654).
 	"computetrace":               1, // stdlib-only bounded compute-event artifact schema and recorder.
 	"ultracodenegcontrol":        1,
-	"computetune":                1, // stdlib-only offline tuning decision primitive over replayable compute traces (#8608).
+	"computetune":                2, // offline offline tuning decision primitive over replayable compute traces (#8608).
 	"ultracodecrossover":         1, // stdlib-only deterministic task-complexity crossover evaluator (#8674).
 	"systembaseline":             1,
 	"ultracodedogfood":           1, // stdlib-only deterministic lifecycle-boundary witness evaluator (#8678).
@@ -1348,6 +1348,8 @@ var chatEndpointRole = map[string]string{
 	"qwen38quantrun":    "the off-path Qwen3.8 quantization corpus runner and production-soak client (#8343/#8319) against a declared OpenAI-compatible endpoint (not a live planner)",
 	"zaitask":           "the off-path bounded non-streaming Z.AI Coding Plan task runner (not a live kernel planner)",
 	"armbench":          "the off-path benchmark clients for fak/OpenAI-compatible generation surfaces (not a live planner)",
+	"cachevalue":        "the off-path Qwen3.8 cache-value cold-arm benchmark runner against a declared OpenAI-compatible endpoint (not a live planner)",
+	"cavemanpairwise":   "the off-path pairwise benchmark judge client against a declared OpenAI-compatible endpoint (not a live planner)",
 	"conformance":       "the off-path provider-conformance probe client (not a live planner)",
 	"serveradapter":     "independent local llama-server adapter and readiness probe owned by the serveradapter leaf",
 }

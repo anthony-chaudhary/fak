@@ -331,6 +331,15 @@ type codexLoopHookRunResult struct {
 // decision exists. A timeout, panic, or ordinary fail-open result therefore returns 0
 // with zero output bytes, regardless of what the inner path attempted to report.
 func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []string) int {
+	if codexSubmitIsUsageSummary(argv) {
+		return emitCodexSubmitUsageSummary(stdout, stderr, codexSubmitHomeArg(argv))
+	}
+	outcome := "allow"
+	defer func() {
+		if err := appendCodexSubmitUsage(argv, outcome); err != nil {
+			fmt.Fprintf(stderr, "fak sessions codex-loop-hook: append usage ledger: %v (continuing)\n", err)
+		}
+	}()
 	diagnose := codexLoopHookDiagnose
 	budget := codexLoopHookBudget
 	resultc := make(chan codexLoopHookRunResult, 1)
@@ -373,12 +382,16 @@ func sessionsCodexLoopHook(stdout, stderr io.Writer, stdin io.Reader, argv []str
 		if output.Decision != "block" && output.additionalContext() == "" {
 			return 0
 		}
+		if output.Decision == "block" {
+			outcome = "block"
+		}
 		if _, err := stdout.Write(result.stdout); err != nil {
 			return 1
 		}
 		return 0
 	case <-timer.C:
 		if codexLoopHookTimeoutMustBlock(argv) {
+			outcome = "block"
 			reason := codexLoopHookTimeoutReason + ": hardened mode could not finish the bounded direct-session diagnosis, so the prompt remains blocked; retry or use the intentional --allow-direct override"
 			if err := json.NewEncoder(stdout).Encode(codexLoopHookOutput{Decision: "block", Reason: reason}); err != nil {
 				return 1
@@ -591,6 +604,7 @@ func sessionsCodexLoopHookUnbounded(stdout, stderr io.Writer, stdin io.Reader, a
 	codexHome := fs.String("codex-home", "", "Codex home directory (default: $CODEX_HOME or ~/.codex)")
 	allowDirect := fs.Bool("allow-direct", false, "explicitly allow this intentional direct-provider continuation")
 	hardened := fs.Bool("hardened", false, "block an unguarded direct-provider continuation")
+	_ = fs.Bool("usage-summary", false, "emit weekly UserPromptSubmit invocation counts")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "usage: fak sessions codex-loop-hook [--codex-home DIR] [--hardened] [--allow-direct] (or set %s=1 / %s=1)\n", codexLoopHookHardenedEnv, codexLoopHookOverrideEnv)
 	}
