@@ -45,6 +45,30 @@ func TestValidateDirRejectsLifecycleDrift(t *testing.T) {
 	}
 }
 
+func TestValidateDirRejectsBoundedOwnerLifecycleDrift(t *testing.T) {
+	for _, invariant := range []string{
+		"`BOUNDED` owners do not launch children; they begin root edits",
+		"the next action is root implementation, not another launch mechanism",
+		"Orphan child closeout remains mandatory",
+	} {
+		t.Run(invariant, func(t *testing.T) {
+			dir := fixtureDir(t)
+			path := filepath.Join(dir, LifecycleFile)
+			canonical, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			withoutInvariant := strings.Replace(string(canonical), invariant, "", 1)
+			if err := os.WriteFile(path, []byte(withoutInvariant), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateDir(dir); err == nil || !strings.Contains(err.Error(), invariant) {
+				t.Fatalf("ValidateDir error = %v, want missing bounded-owner invariant %q", err, invariant)
+			}
+		})
+	}
+}
+
 func fixtureDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

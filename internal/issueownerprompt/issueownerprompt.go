@@ -16,9 +16,12 @@ const (
 var lifecycleInvariants = []string{
 	"implement the root",
 	"`BOUNDED`, `BROAD`, or `BLOCKED_EXTERNAL`",
+	"`BOUNDED` owners do not launch children; they begin root edits",
 	"only one delegation level is allowed",
+	"the next action is root implementation, not another launch mechanism",
 	"Witness effects independently",
 	"Refusal and park contract",
+	"Orphan child closeout remains mandatory",
 	"every owned child, lease, intent, process, and effect",
 }
 
