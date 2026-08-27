@@ -256,6 +256,16 @@ func runCommit(stdout, stderr io.Writer, argv []string) int {
 	// Attach the gate's outcome BEFORE scoring: a commit admitted without its prospective tree
 	// ever being compiled must not be graded like one that passed the gate (#6006).
 	res.BuildCheck = &buildCheck
+	completionClass := safecommit.CompletionVerifiedDelivery
+	if buildCheck.Outcome == safecommit.BuildCheckDisabled {
+		completionClass = safecommit.CompletionRecordOnly
+	}
+	res = safecommit.FinalizeEvidence(res, safecommit.EvidenceContract{
+		CompletionClass: completionClass,
+		RequirePush:     *push,
+		RequireClosure:  *requireIssue,
+		ClosureBound:    *requireIssue,
+	})
 	if res.Committed {
 		artifacts := make([]workdelivery.Artifact, 0, len(res.Paths))
 		for _, path := range res.Paths {
@@ -470,6 +480,8 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 	trunk := fs.String("trunk", "", "expected development branch override (default: configured development branch)")
 	push := fs.Bool("push", false, "push after a VERIFIED rollup commit through the safe sync path (never --force)")
 	noSignoff := fs.Bool("no-signoff", false, "do not add the DCO sign-off (-s is the default)")
+	noBuildCheck := fs.Bool("no-build-check", false, "record the rollup without prospective compile/test verification; recorded work is not eligible to mark intents done")
+	allowBuildCheckTimeout := fs.Bool("allow-build-check-timeout", os.Getenv("FAK_COMMIT_BUILD_CHECK") == "allow-timeout", "record the rollup when prospective validation times out; the unchecked receipt cannot mark intents done")
 	noRollup := fs.Bool("no-rollup", false, "disable batching and drain at most one compatible intent")
 	dryRun := fs.Bool("dry-run", false, "plan only; do not commit or update queue state")
 	asJSON := fs.Bool("json", false, "emit the drain result as JSON")
@@ -522,6 +534,34 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		return safecommit.ExitRefused
 	}
 
+	buildCheckOutcome, buildCheckDetail := safecommit.BuildCheckDisabled, ""
+	if !*noBuildCheck && os.Getenv("FAK_COMMIT_BUILD_CHECK") != "off" {
+		buildCheckOutcome, buildCheckDetail = commitBuildCheckGate(stderr, root, plan.UnionPaths)
+	}
+	buildCheck, admitBuild, buildReason := safecommit.DecideBuildCheck(buildCheckOutcome, buildCheckDetail, *allowBuildCheckTimeout)
+	if !admitBuild {
+		commitRes := safecommit.Result{Paths: plan.UnionPaths, Reason: buildReason, Detail: buildCheck.Detail, BuildCheck: &buildCheck}
+		commitRes = safecommit.FinalizeEvidence(commitRes, safecommit.EvidenceContract{
+			CompletionClass: safecommit.CompletionVerifiedDelivery,
+			RequirePush:     *push,
+			RequireClosure:  true,
+		})
+		commitRes = safecommit.ScoreResult(commitRes)
+		res.Commit = &commitRes
+		if *asJSON {
+			if err := writeIndentedJSON(stdout, res); err != nil {
+				fmt.Fprintf(stderr, "fak commit drain: %v\n", err)
+				return 1
+			}
+		} else {
+			renderCommitDrainResult(stdout, res)
+		}
+		if code, ok := safecommit.BuildCheckExitCode(buildReason); ok {
+			return code
+		}
+		return safecommit.ExitRefused
+	}
+
 	commitRes, err := commitFn(context.Background(), safecommit.Options{
 		Dir:     root,
 		Paths:   plan.UnionPaths,
@@ -534,12 +574,23 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		fmt.Fprintf(stderr, "fak commit drain: %v\n", err)
 		return 1
 	}
-	commitRes = safecommit.ScoreResult(commitRes)
+	commitRes.BuildCheck = &buildCheck
 	pathset := plan.AssertPathset(commitRes.Paths)
+	completionClass := safecommit.CompletionVerifiedDelivery
+	if buildCheck.Outcome == safecommit.BuildCheckDisabled {
+		completionClass = safecommit.CompletionRecordOnly
+	}
+	commitRes = safecommit.FinalizeEvidence(commitRes, safecommit.EvidenceContract{
+		CompletionClass: completionClass,
+		RequirePush:     *push,
+		RequireClosure:  true,
+		ClosureBound:    pathset.OK,
+	})
+	commitRes = safecommit.ScoreResult(commitRes)
 	res.Commit = &commitRes
 	res.Pathset = &pathset
 
-	if commitRes.Reason == "" && commitRes.Verified && pathset.OK {
+	if commitDrainMayMarkDone(commitRes, pathset.OK) {
 		states := commitDrainDoneStates(plan.IntentIDs)
 		queue, err := store.MarkStates(states)
 		if err != nil {
@@ -563,6 +614,13 @@ func runCommitDrain(stdout, stderr io.Writer, argv []string) int {
 		return 1
 	}
 	return commitExitCode(commitRes)
+}
+
+// commitDrainMayMarkDone is the issue/action boundary: recorded or diff-witnessed work is not
+// enough to advance queued intents. Versioned receipts need verified delivery; schema-less
+// results retain the legacy gate during the migration window.
+func commitDrainMayMarkDone(res safecommit.Result, pathsetOK bool) bool {
+	return res.Reason == "" && res.DeliveryVerified() && pathsetOK
 }
 
 func commitSubmitHeadSHA(root string) (string, error) {

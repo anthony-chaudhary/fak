@@ -201,11 +201,14 @@ const (
 // has Committed && Verified && Reason == "". RacedExtra lists the committed files that NO
 // requested path covers — the evidence of a raced commit.
 type Result struct {
-	Committed        bool             `json:"committed"`
-	SHA              string           `json:"committed_sha,omitempty"`
-	Paths            []string         `json:"paths"`
-	Verified         bool             `json:"verified"`
-	Pushed           bool             `json:"pushed"`
+	Committed bool     `json:"committed"`
+	SHA       string   `json:"committed_sha,omitempty"`
+	Paths     []string `json:"paths"`
+	Verified  bool     `json:"verified"`
+	Pushed    bool     `json:"pushed"`
+	// Evidence is the versioned completion contract. When present, Verified is its derived
+	// aggregate; when absent, Verified retains the legacy executor diff-witness contract.
+	Evidence         *CommitEvidence  `json:"evidence,omitempty"`
 	Value            float64          `json:"value"`
 	ValueUnit        string           `json:"value_unit,omitempty"`
 	Score            int              `json:"score"`
