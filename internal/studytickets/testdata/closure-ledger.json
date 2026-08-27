@@ -17,4 +17,3 @@
     {"cluster_id":"memory_residency:body:allocator-fragmentation","candidate_id":"allocator-fragmentation","disposition":"selected","issue":9378,"outcome":"Measure and bound Qwen3.8 allocator fragmentation.","source":"allocator-fragmentation body cluster at pinned join ledger","for":"FAK native memory and residency maintainers","problem":"Allocator fragmentation lacked one measured native ticket.","today":"The pinned join classified this cluster as uncovered.","better_because":"A bounded issue owns measurement, envelope, and rollback evidence.","witness":"Issue #9378 requires matched native fragmentation receipts.","centrality":"Core","p1_p4":"Pass: resident context, net memory value, reusable allocator evidence, operational bounds.","horizon":"next","close_condition":"Issue #9378 publishes a green Qwen3.8 fragmentation witness.","native_constraint":"FAK-native Qwen3.8; no silent llama.cpp fallback."}
   ]
 }
-
