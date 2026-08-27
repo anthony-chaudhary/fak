@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -12,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/accounts"
 	"github.com/anthony-chaudhary/fak/internal/guardsessions"
 	"github.com/anthony-chaudhary/fak/internal/hostresurrect"
 	"github.com/anthony-chaudhary/fak/internal/resume"
@@ -156,6 +158,48 @@ var recoveryJournalCrashes = func(path string, now time.Time) ([]sessionjournal.
 var recoveryLaunch sessionrecovery.Launcher = sessionrecovery.VisibleLauncher{}
 var recoveryNow = time.Now
 var recoverySleep = time.Sleep
+var recoveryClaudeAuthProbe = func(ctx context.Context) (bool, error) {
+	if err := accounts.DefaultRefreshSpawn(ctx, guardClaudeConfigDir()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+const recoveryClaudeAuthProbeTimeout = 30 * time.Second
+
+func reconcileHistoricalClaudeAuth(report *sessionrecovery.InventoryReport) {
+	var authRows []int
+	for i := range report.Sessions {
+		row := &report.Sessions[i]
+		if row.Thread == nil ||
+			row.Thread.Source != "claude_transcript" ||
+			row.Provider != sessionrecovery.ProviderClaude ||
+			row.Category != sessionrecovery.CategoryIdentityBlocked ||
+			row.Action != sessionrecovery.ActionLoginRequired ||
+			row.Bucket != resumesweep.BucketAuth {
+			continue
+		}
+		authRows = append(authRows, i)
+	}
+	if len(authRows) == 0 {
+		return
+	}
+
+	// Historical transcript state is not current account state. Spend one bounded
+	// Claude-owned inference probe for the whole cohort, then admit every historical
+	// AUTH row only on a positive live result. Failure and unknown remain blocked.
+	ctx, cancel := context.WithTimeout(context.Background(), recoveryClaudeAuthProbeTimeout)
+	defer cancel()
+	authenticated, err := recoveryClaudeAuthProbe(ctx)
+	if err != nil || !authenticated {
+		return
+	}
+	for _, i := range authRows {
+		report.Sessions[i].Category = sessionrecovery.CategorySubstantive
+		report.Sessions[i].Action = sessionrecovery.ActionRecover
+		report.Sessions[i].Reason = "claude_current_auth_live"
+	}
+}
 
 func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("session recover", flag.ContinueOnError)
@@ -225,6 +269,7 @@ func runSessionRecover(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak session recover:", err)
 		return 2
 	}
+	reconcileHistoricalClaudeAuth(&before)
 	managerPath, exeErr := os.Executable()
 	if exeErr != nil {
 		fmt.Fprintln(stderr, "fak session recover: resolve current executable:", exeErr)

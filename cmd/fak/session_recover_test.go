@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/resume"
+	resumesweep "github.com/anthony-chaudhary/fak/internal/resume/sweep"
 	"github.com/anthony-chaudhary/fak/internal/sessiondiag"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
@@ -406,6 +408,140 @@ func TestMergeClaudeRecoveryInventoryClassifiesMixedCohortAndHighRecordProbe(t *
 	}
 	if byID[liveID].Category != sessionrecovery.CategoryLive || byID[liveID].Action != sessionrecovery.ActionLeaveLive {
 		t.Fatalf("live=%+v", byID[liveID])
+	}
+}
+
+func TestReconcileHistoricalClaudeAuthAdmitsCohortAfterLiveCurrentAuth(t *testing.T) {
+	oldProbe := recoveryClaudeAuthProbe
+	defer func() { recoveryClaudeAuthProbe = oldProbe }()
+	probes := 0
+	recoveryClaudeAuthProbe = func(context.Context) (bool, error) {
+		probes++
+		return true, nil
+	}
+	report := sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{
+		{Thread: &sessionrecovery.Thread{ID: "auth-1", Source: "claude_transcript"}, Provider: sessionrecovery.ProviderClaude, Category: sessionrecovery.CategoryIdentityBlocked, Action: sessionrecovery.ActionLoginRequired, Reason: "claude_login_required", Bucket: resumesweep.BucketAuth},
+		{Thread: &sessionrecovery.Thread{ID: "auth-2", Source: "claude_transcript"}, Provider: sessionrecovery.ProviderClaude, Category: sessionrecovery.CategoryIdentityBlocked, Action: sessionrecovery.ActionLoginRequired, Reason: "claude_login_required", Bucket: resumesweep.BucketAuth},
+	}}
+
+	reconcileHistoricalClaudeAuth(&report)
+
+	if probes != 1 {
+		t.Fatalf("auth probes=%d, want one cohort-level probe", probes)
+	}
+	for _, row := range report.Sessions {
+		if row.Category != sessionrecovery.CategorySubstantive || row.Action != sessionrecovery.ActionRecover || row.Reason != "claude_current_auth_live" {
+			t.Fatalf("row=%+v, want recoverable after positive current-auth proof", row)
+		}
+	}
+}
+
+func TestReconcileHistoricalClaudeAuthFailsClosedOnFailedOrUnknownCurrentAuth(t *testing.T) {
+	oldProbe := recoveryClaudeAuthProbe
+	defer func() { recoveryClaudeAuthProbe = oldProbe }()
+	for _, tc := range []struct {
+		name string
+		live bool
+		err  error
+	}{
+		{name: "failed", err: errors.New("claude probe failed")},
+		{name: "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probes := 0
+			recoveryClaudeAuthProbe = func(context.Context) (bool, error) {
+				probes++
+				return tc.live, tc.err
+			}
+			report := sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{{
+				Thread: &sessionrecovery.Thread{ID: "auth", Source: "claude_transcript"}, Provider: sessionrecovery.ProviderClaude,
+				Category: sessionrecovery.CategoryIdentityBlocked, Action: sessionrecovery.ActionLoginRequired,
+				Reason: "claude_login_required", Bucket: resumesweep.BucketAuth,
+			}}}
+
+			reconcileHistoricalClaudeAuth(&report)
+
+			row := report.Sessions[0]
+			if probes != 1 || row.Category != sessionrecovery.CategoryIdentityBlocked || row.Action != sessionrecovery.ActionLoginRequired || row.Reason != "claude_login_required" {
+				t.Fatalf("probes=%d row=%+v, want fail-closed login_required", probes, row)
+			}
+		})
+	}
+}
+
+func TestReconcileHistoricalClaudeAuthSkipsProbeWithoutAuthRows(t *testing.T) {
+	oldProbe := recoveryClaudeAuthProbe
+	defer func() { recoveryClaudeAuthProbe = oldProbe }()
+	probes := 0
+	recoveryClaudeAuthProbe = func(context.Context) (bool, error) {
+		probes++
+		return true, nil
+	}
+	report := sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{{
+		Thread: &sessionrecovery.Thread{ID: "substantive", Source: "claude_transcript"}, Provider: sessionrecovery.ProviderClaude,
+		Category: sessionrecovery.CategorySubstantive, Action: sessionrecovery.ActionRecover,
+	}}}
+
+	reconcileHistoricalClaudeAuth(&report)
+
+	if probes != 0 {
+		t.Fatalf("auth probes=%d, want zero without a historical AUTH row", probes)
+	}
+}
+
+func TestSessionRecoverHistoricalClaudeAuthUsesCurrentAuthProof(t *testing.T) {
+	oldInv, oldProbe := recoveryInventory, recoveryClaudeAuthProbe
+	defer func() {
+		recoveryInventory, recoveryClaudeAuthProbe = oldInv, oldProbe
+	}()
+	regDir := t.TempDir()
+	t.Setenv("FLEET_REG_DIR", regDir)
+	if err := os.WriteFile(resume.IdentityLedgerPath(regDir), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
+		return sessionrecovery.InventoryReport{Sessions: []sessionrecovery.Session{{
+			Thread:   &sessionrecovery.Thread{ID: "historical-auth", Source: "claude_transcript", CWD: t.TempDir()},
+			Provider: sessionrecovery.ProviderClaude, Category: sessionrecovery.CategoryIdentityBlocked,
+			Action: sessionrecovery.ActionLoginRequired, Reason: "claude_login_required", Bucket: resumesweep.BucketAuth,
+		}}}, nil
+	}
+	for _, tc := range []struct {
+		name         string
+		live         bool
+		err          error
+		wantStatus   string
+		wantCategory string
+	}{
+		{name: "live", live: true, wantStatus: "candidate", wantCategory: sessionrecovery.CategorySubstantive},
+		{name: "failed", err: errors.New("probe failed"), wantStatus: "identity_blocked", wantCategory: sessionrecovery.CategoryIdentityBlocked},
+		{name: "unknown", wantStatus: "identity_blocked", wantCategory: sessionrecovery.CategoryIdentityBlocked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The recovery audit is fail-closed on its durable identity authority.
+			// Recreate the empty valid ledger per case so no sibling cleanup can make
+			// the auth-probe assertion depend on shared filesystem lifetime.
+			if err := os.WriteFile(resume.IdentityLedgerPath(regDir), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			probes := 0
+			recoveryClaudeAuthProbe = func(context.Context) (bool, error) {
+				probes++
+				return tc.live, tc.err
+			}
+			var stdout, stderr bytes.Buffer
+			code := runSessionRecover(&stdout, &stderr, []string{"--json", "--journal=false", "--receipts", t.TempDir()})
+			if code != 0 {
+				t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			var summary sessionrecovery.Summary
+			if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+				t.Fatal(err)
+			}
+			if probes != 1 || len(summary.Results) != 1 || summary.Results[0].Status != tc.wantStatus || summary.Results[0].Category != tc.wantCategory {
+				t.Fatalf("probes=%d summary=%+v", probes, summary)
+			}
+		})
 	}
 }
 
