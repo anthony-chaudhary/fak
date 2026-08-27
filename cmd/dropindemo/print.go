@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/demoui"
 	"github.com/anthony-chaudhary/fak/internal/dropin"
 )
 
@@ -16,94 +17,64 @@ import (
 // -selfcheck is the browserless invariant check the CI dog-foods.
 // ---------------------------------------------------------------------------
 
-// palette is the small ANSI set the terminal modes share, gated on a TTY + NO_COLOR
-// (https://no-color.org) so piped/redirected output stays plain.
-type palette struct{ cyan, green, yellow, dim, bold, reset string }
-
-func colors() palette {
-	noColor := os.Getenv("NO_COLOR") != ""
-	tty := false
-	if fi, err := os.Stdout.Stat(); err == nil {
-		tty = fi.Mode()&os.ModeCharDevice != 0
-	}
-	if noColor || !tty {
-		return palette{}
-	}
-	return palette{
-		cyan:   "\033[36m",
-		green:  "\033[32m",
-		yellow: "\033[33m",
-		dim:    "\033[2m",
-		bold:   "\033[1m",
-		reset:  "\033[0m",
-	}
-}
-
-func (p palette) paint(code, s string) string {
-	if code == "" {
-		return s
-	}
-	return code + s + p.reset
-}
-
 // renderPlan writes one resolved drop-in plan as an indented block: the command you
 // type, the wire it resolves to, the upstream base URL, and the env var(s) injected
 // into the child. Shared by -print (per agent) and -agent (one agent).
-func renderPlan(p palette, display, invocation string, plan dropin.Plan) {
+func renderPlan(p demoui.Palette, display, invocation string, plan dropin.Plan) {
 	wire := wireLabel(plan.Provider)
 	detect := ""
 	if plan.Autodetected {
-		detect = p.paint(p.dim, "  (wire autodetected from the name)")
+		detect = p.Paint(p.Dim, "  (wire autodetected from the name)")
 	} else if plan.Recognized {
-		detect = p.paint(p.dim, "  (recognized)")
+		detect = p.Paint(p.Dim, "  (recognized)")
 	} else {
-		detect = p.paint(p.yellow, "  (not autodetected — wire from --provider/anthropic fallback)")
+		detect = p.Paint(p.Yellow, "  (not autodetected — wire from --provider/anthropic fallback)")
 	}
-	dot := p.paint(p.green, "●")
-	fmt.Printf("  %s %s\n", dot, p.paint(p.bold, display))
-	fmt.Printf("      %s %s\n", p.paint(p.dim, "run     "), p.paint(p.cyan, invocation))
-	fmt.Printf("      %s %s%s\n", p.paint(p.dim, "wire    "), wire, detect)
+	dot := p.Paint(p.Green, "●")
+	fmt.Printf("  %s %s\n", dot, p.Paint(p.Bold, display))
+	fmt.Printf("      %s %s\n", p.Paint(p.Dim, "run     "), p.Paint(p.Cyan, invocation))
+	fmt.Printf("      %s %s%s\n", p.Paint(p.Dim, "wire    "), wire, detect)
 	base := plan.BaseURL
 	if base == "" {
-		base = p.paint(p.yellow, "(no public default — pass --base-url)")
+		base = p.Paint(p.Yellow, "(no public default — pass --base-url)")
 	}
-	fmt.Printf("      %s %s\n", p.paint(p.dim, "upstream"), base)
+	fmt.Printf("      %s %s\n", p.Paint(p.Dim, "upstream"), base)
 	for i, kv := range plan.EnvVars {
 		label := "injects "
 		if i > 0 {
 			label = "        "
 		}
-		val := p.paint(p.green, kv[0]+"="+kv[1])
+		val := p.Paint(p.Green, kv[0]+"="+kv[1])
 		suffix := ""
 		if i == 0 {
-			suffix = p.paint(p.dim, "   (child process only — your shell is untouched)")
+			suffix = p.Paint(p.Dim, "   (child process only — your shell is untouched)")
 		}
-		fmt.Printf("      %s %s%s\n", p.paint(p.dim, label), val, suffix)
+		fmt.Printf("      %s %s%s\n", p.Paint(p.Dim, label), val, suffix)
 	}
 }
 
 // runPrint renders the whole drop-in gallery to stdout. Returns a process exit code.
 func runPrint(gwURL string) int {
-	p := colors()
+	p := demoui.TerminalPalette(os.Stdout)
 	agents := dropin.KnownAgents()
 
-	fmt.Printf("\n  %s\n", p.paint(p.bold, "fak · drop it in front of the agent you already run"))
-	fmt.Printf("  %s\n\n", p.paint(p.dim, fmt.Sprintf(
+	fmt.Printf("\n  %s\n", p.Paint(p.Bold, "fak · drop it in front of the agent you already run"))
+	fmt.Printf("  %s\n\n", p.Paint(p.Dim, fmt.Sprintf(
 		"one command · one static binary · zero code change — %d autodetected entry points", len(agents))))
 
 	for _, a := range agents {
 		plan := dropin.PlanFor(a.Command, "", "", gwURL)
 		renderPlan(p, a.Display, "fak guard -- "+a.Command, plan)
-		fmt.Printf("      %s\n\n", p.paint(p.dim, a.Note))
+		fmt.Printf("      %s\n\n", p.Paint(p.Dim, a.Note))
 	}
 
 	fmt.Printf("  %s\n", strings.Repeat("─", 72))
-	fmt.Printf("  %s\n", p.paint(p.bold, "the long tail — any tool that lets you set a base URL"))
-	fmt.Printf("  %s\n", p.paint(p.dim, "  not autodetected? name the wire explicitly, same one command:"))
-	fmt.Printf("      %s\n", p.paint(p.cyan, "fak guard --provider openai -- <your-cli>"))
-	fmt.Printf("  %s\n", p.paint(p.dim, "  an IDE / GUI agent (Cursor, Cline, Continue, Zed)? point its base URL at:"))
-	fmt.Printf("      %s\n", p.paint(p.cyan, "fak serve --addr 127.0.0.1:8080   →   set the base URL to http://127.0.0.1:8080"))
-	fmt.Printf("  %s\n\n", p.paint(p.dim, "  44 surveyed harnesses, frameworks, backends & protocols: docs/integrations/compatibility-matrix.md"))
+	fmt.Printf("  %s\n", p.Paint(p.Bold, "the long tail — any tool that lets you set a base URL"))
+	fmt.Printf("  %s\n", p.Paint(p.Dim, "  not autodetected? name the wire explicitly, same one command:"))
+	fmt.Printf("      %s\n", p.Paint(p.Cyan, "fak guard --provider openai -- <your-cli>"))
+	fmt.Printf("  %s\n", p.Paint(p.Dim, "  an IDE / GUI agent (Cursor, Cline, Continue, Zed)? point its base URL at:"))
+	fmt.Printf("      %s\n", p.Paint(p.Cyan, "fak serve --addr 127.0.0.1:8080   →   set the base URL to http://127.0.0.1:8080"))
+	fmt.Printf("  %s\n\n", p.Paint(p.Dim, "  44 surveyed harnesses, frameworks, backends & protocols: docs/integrations/compatibility-matrix.md"))
 	return 0
 }
 
@@ -111,7 +82,7 @@ func runPrint(gwURL string) int {
 // the single-agent dry run. Any command name works, not only the autodetected ones, so
 // an operator can preview the wiring for their own CLI before launching it.
 func runAgent(agentCmd, providerFlag, gwURL string) int {
-	p := colors()
+	p := demoui.TerminalPalette(os.Stdout)
 	plan := dropin.PlanFor(agentCmd, providerFlag, "", gwURL)
 	invocation := "fak guard "
 	if strings.TrimSpace(providerFlag) != "" {
@@ -119,7 +90,7 @@ func runAgent(agentCmd, providerFlag, gwURL string) int {
 	}
 	invocation += "-- " + agentCmd
 
-	fmt.Printf("\n  %s\n\n", p.paint(p.bold, "fak guard — drop-in plan (dry run, nothing launched)"))
+	fmt.Printf("\n  %s\n\n", p.Paint(p.Bold, "fak guard — drop-in plan (dry run, nothing launched)"))
 	renderPlan(p, agentCmd, invocation, plan)
 	fmt.Println()
 	return 0

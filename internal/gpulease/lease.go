@@ -30,6 +30,25 @@ import (
 // ErrBusy is returned by Acquire when NoWait is set and the lease is already held.
 var ErrBusy = errors.New("gpulease: lease is held by another process")
 
+// BusyError describes the current lease owner when a no-wait acquisition is
+// refused. PID is best-effort metadata read from the lockfile; zero means the
+// holder could not be identified. Unwrap preserves errors.Is(err, ErrBusy) for
+// callers that only need the retryable classification.
+type BusyError struct {
+	Path string
+	PID  int
+}
+
+func (e *BusyError) Error() string {
+	if e == nil {
+		return ErrBusy.Error()
+	}
+	return fmt.Sprintf("gpulease: lease %s is held by %s", e.Path, formatHolderPID(e.PID))
+}
+
+// Unwrap keeps BusyError compatible with the original ErrBusy sentinel.
+func (e *BusyError) Unwrap() error { return ErrBusy }
+
 // ErrTimeout is returned by Acquire when Timeout elapses before the lease is free.
 var ErrTimeout = errors.New("gpulease: timed out waiting for the lease")
 
@@ -108,8 +127,9 @@ func Acquire(opts Options) (*Lease, error) {
 			return nil, fmt.Errorf("gpulease: lock %s: %w", path, err)
 		}
 		if opts.NoWait {
+			pid := readHolderPID(f)
 			f.Close()
-			return nil, ErrBusy
+			return nil, &BusyError{Path: path, PID: pid}
 		}
 		if !waited {
 			waited = true
@@ -145,6 +165,10 @@ func (l *Lease) Release() {
 // holderPID reads the pid the current holder wrote into the lockfile, or "?" if it
 // is empty/unreadable. Purely informational for the waiting notice.
 func holderPID(f *os.File) string {
+	return formatHolderPID(readHolderPID(f))
+}
+
+func readHolderPID(f *os.File) int {
 	buf := make([]byte, 16)
 	n, _ := f.ReadAt(buf, 0)
 	s := string(buf[:n])
@@ -152,7 +176,18 @@ func holderPID(f *os.File) string {
 		s = s[:i] // first line only — ignore any stale trailing bytes
 	}
 	if s = strings.TrimSpace(s); s == "" {
+		return 0
+	}
+	pid, err := strconv.Atoi(s)
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
+}
+
+func formatHolderPID(pid int) string {
+	if pid <= 0 {
 		return "pid ?"
 	}
-	return "pid " + s
+	return "pid " + strconv.Itoa(pid)
 }

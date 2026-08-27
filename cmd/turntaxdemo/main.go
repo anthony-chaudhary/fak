@@ -379,28 +379,6 @@ func runSelfcheck() int {
 // (Pairs with cmd/guarddemo -print, which does the same for the SAFETY axis.)
 // ---------------------------------------------------------------------------
 
-// ttPalette / ttPad / ttPaint are the small terminal-rendering helpers, kept local
-// (this weights-free demo shares nothing heavier than internal/demoui with siblings).
-type ttPalette struct{ red, green, dim, bold, reset string }
-
-func ttColors() ttPalette {
-	tty := false
-	if fi, err := os.Stdout.Stat(); err == nil {
-		tty = fi.Mode()&os.ModeCharDevice != 0
-	}
-	if os.Getenv("NO_COLOR") != "" || !tty {
-		return ttPalette{}
-	}
-	return ttPalette{red: "\033[31m", green: "\033[32m", dim: "\033[2m", bold: "\033[1m", reset: "\033[0m"}
-}
-
-func (p ttPalette) paint(code, s string) string {
-	if code == "" {
-		return s
-	}
-	return code + s + p.reset
-}
-
 // ttPad pads OR truncates a plain (un-colored) string to exactly w runes, so a later
 // color wrap never disturbs column alignment.
 func ttPad(s string, w int) string {
@@ -417,7 +395,7 @@ func ttPad(s string, w int) string {
 // runPrint replays one suite and renders the tuned-SOTA-vs-fak turn-tax side-by-side
 // to stdout. Returns a process exit code (0 unless the replay errored / suite absent).
 func runPrint(suite string) int {
-	p := ttColors()
+	p := demoui.TerminalPalette(os.Stdout)
 	t, err := turnbench.LoadTrace(suitePath(suite))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load trace %q: %v (run from the repo root)\n", suite, err)
@@ -430,40 +408,40 @@ func runPrint(suite string) int {
 	}
 
 	const lw, cw, rw = 36, 22, 30
-	fmt.Printf("\n  %s — suite: %s (%d calls)\n", p.paint(p.bold, "fak · the turn tax, side by side"), suite, len(calls))
-	fmt.Printf("  %s\n\n", p.paint(p.dim, "same tool calls, two agents — count the wasted model round-trips"))
+	fmt.Printf("\n  %s — suite: %s (%d calls)\n", p.Paint(p.Bold, "fak · the turn tax, side by side"), suite, len(calls))
+	fmt.Printf("  %s\n\n", p.Paint(p.Dim, "same tool calls, two agents — count the wasted model round-trips"))
 	fmt.Printf("  %s  %s  %s\n",
-		p.paint(p.red, ttPad("tuned SOTA agent (2026)", lw)),
+		p.Paint(p.Red, ttPad("tuned SOTA agent (2026)", lw)),
 		ttPad("the tool call", cw),
-		p.paint(p.green, "fak (1-shot kernel)"))
+		p.Paint(p.Green, "fak (1-shot kernel)"))
 	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
 
 	for _, d := range calls {
 		var lkind, ltext, rkind, rtext string
 		switch {
 		case d.Axis == "turn-tax" && d.Forced:
-			lkind = p.red
+			lkind = p.Red
 			if d.Class == "vdso_dedup" {
 				ltext = "x +1 round-trip — dup read"
-				rkind, rtext = p.green, "# 1-shot — served from cache"
+				rkind, rtext = p.Green, "# 1-shot — served from cache"
 			} else { // grammar
 				ltext = "x +1 round-trip — bad arg"
-				rkind, rtext = p.green, "# 1-shot — repaired in-syscall"
+				rkind, rtext = p.Green, "# 1-shot — repaired in-syscall"
 			}
 		case d.Axis == "turn-tax" && d.Elision:
-			lkind, ltext = p.dim, ". elided (optional call)"
-			rkind, rtext = p.green, "# 1-shot — served locally"
+			lkind, ltext = p.Dim, ". elided (optional call)"
+			rkind, rtext = p.Green, "# 1-shot — served locally"
 		case d.Axis == "safety-floor":
-			lkind, ltext = p.dim, "! would run it (safety)"
-			rkind, rtext = p.dim, "# blocked (see guarddemo)"
+			lkind, ltext = p.Dim, "! would run it (safety)"
+			rkind, rtext = p.Dim, "# blocked (see guarddemo)"
 		default: // control
-			lkind, ltext = p.dim, ". ran"
-			rkind, rtext = p.dim, ". ran"
+			lkind, ltext = p.Dim, ". ran"
+			rkind, rtext = p.Dim, ". ran"
 		}
 		fmt.Printf("  %s  %s  %s\n",
-			p.paint(lkind, ttPad(ltext, lw)),
-			p.paint(p.dim, ttPad(d.Tool, cw)),
-			p.paint(rkind, rtext))
+			p.Paint(lkind, ttPad(ltext, lw)),
+			p.Paint(p.Dim, ttPad(d.Tool, cw)),
+			p.Paint(rkind, rtext))
 	}
 
 	fmt.Printf("  %s  %s  %s\n", strings.Repeat("─", lw), strings.Repeat("─", cw), strings.Repeat("─", rw))
@@ -471,8 +449,8 @@ func runPrint(suite string) int {
 	total := rep.Net.TurnsSaved    // per-turn normalizer only (the report's per-turn rate denominator)
 	leftScore := fmt.Sprintf("tuned SOTA agent: %d forced round-trip%s", forced, numfmt.PluralSuffix(forced))
 	fmt.Printf("  %s  %s\n",
-		p.paint(p.bold+p.red, ttPad(leftScore, lw+2+cw)),
-		p.paint(p.bold+p.green, "fak: 0 extra round-trips"))
+		p.Paint(p.Bold+p.Red, ttPad(leftScore, lw+2+cw)),
+		p.Paint(p.Bold+p.Green, "fak: 0 extra round-trips"))
 	// per-turn price from the report's net (turns are fixed by the kernel; only the
 	// per-turn cost is a knob — the hosted-flash default, 1.5s/turn).
 	perLatS, perDollar := 0.0, 0.0
@@ -481,12 +459,12 @@ func runPrint(suite string) int {
 		perDollar = rep.Net.DollarsSaved / float64(total)
 	}
 	if forced > 0 {
-		fmt.Printf("  %s\n", p.paint(p.dim, fmt.Sprintf(
+		fmt.Printf("  %s\n", p.Paint(p.Dim, fmt.Sprintf(
 			"vs even a TUNED 2026 agent, fak deletes %d forced round-trip%s ≈ %.1fs and $%.4f at hosted-flash rates (1.5s/turn).",
 			forced, numfmt.PluralSuffix(forced), float64(forced)*perLatS, float64(forced)*perDollar)))
-		fmt.Printf("  %s\n", p.paint(p.dim, "the safety floor (poison paged out, destructive op refused) is a SEPARATE axis — see `guarddemo -print`."))
+		fmt.Printf("  %s\n", p.Paint(p.Dim, "the safety floor (poison paged out, destructive op refused) is a SEPARATE axis — see `guarddemo -print`."))
 	} else {
-		fmt.Printf("  %s\n", p.paint(p.dim,
+		fmt.Printf("  %s\n", p.Paint(p.Dim,
 			"a clean happy path inflates nothing — both agents pay the same engine round-trips (the anti-inflation control). "+
 				"the gap only opens on aliased/duplicate/optional calls."))
 	}
