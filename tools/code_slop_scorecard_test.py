@@ -314,6 +314,29 @@ def test_duplication_behavior_gate_keeps_equivalent_generic_owners():
     assert len(cs.kpi_duplication(files)["defects"]) >= 1
 
 
+def test_generic_function_span_readback_pins_body_brace():
+    source = """package ledger
+func appendLedgerLines[T any](path string, rows []T) error {
+    encoded := encode(rows)
+    return atomicReplace(path, encoded)
+}
+
+func stringify[T interface{ ~string | ~[]byte }](value T) string {
+    return string(value)
+}
+"""
+    spans = cs._function_spans(source)
+    assert len(spans) == 2, spans
+
+    _, _, append_signature, append_body = spans[0]
+    assert append_signature.startswith("func appendLedgerLines[T any]")
+    assert "return atomicReplace(path, encoded)" in append_body
+
+    _, _, constrained_signature, constrained_body = spans[1]
+    assert "interface{ ~string | ~[]byte }" in constrained_signature
+    assert constrained_body.strip() == "return string(value)"
+
+
 def test_duplication_behavior_gate_ignores_quote_markers_in_comments():
     # Comments are not Go string/rune literals. An apostrophe or backtick in one must
     # not strand the lightweight owner scanner in quote state and thereby let a
