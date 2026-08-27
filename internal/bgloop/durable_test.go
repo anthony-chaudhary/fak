@@ -1,9 +1,11 @@
-package bgloop
+package bgloop_test
 
 import (
 	"context"
 	"sync"
 	"testing"
+
+	. "github.com/anthony-chaudhary/fak/internal/bgloop"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
@@ -35,7 +37,7 @@ func TestDurableWakeSurvivesRestartAndFiresOnce(t *testing.T) {
 	clock := &manualClock{now: now}
 	path := t.TempDir() + "/loops.json"
 	seedJob(t, path, now, "nightly")
-	first, err := NewDurableScheduler(path, clock, func(context.Context, loopmgr.Job) error { return nil })
+	first, err := NewDurableScheduler(path, clock, loopmgr.BGLoopStore{}, func(context.Context, Job) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +46,7 @@ func TestDurableWakeSurvivesRestartAndFiresOnce(t *testing.T) {
 	}
 	// Simulate process death: discard the scheduler and construct a new one from disk.
 	fired := 0
-	restarted, err := NewDurableScheduler(path, clock, func(_ context.Context, j loopmgr.Job) error { fired++; return nil })
+	restarted, err := NewDurableScheduler(path, clock, loopmgr.BGLoopStore{}, func(_ context.Context, j Job) error { fired++; return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ func TestDurableDutyCycleFiresOnlyInsideOnWindow(t *testing.T) {
 	path := t.TempDir() + "/loops.json"
 	seedJob(t, path, now, "weekday")
 	fired := 0
-	s, err := NewDurableScheduler(path, clock, func(context.Context, loopmgr.Job) error { fired++; return nil })
+	s, err := NewDurableScheduler(path, clock, loopmgr.BGLoopStore{}, func(context.Context, Job) error { fired++; return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

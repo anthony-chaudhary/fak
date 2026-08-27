@@ -2,8 +2,6 @@ package metrics
 
 import (
 	"sync"
-
-	"github.com/anthony-chaudhary/fak/internal/snapshot"
 )
 
 // QuestionReceiptCause is the bounded, content-free reason a question receipt
@@ -24,7 +22,7 @@ const (
 // receipt refusal class and its bounded cause; question and answer contents
 // never enter the aggregation key.
 type QuestionReceiptRefusal struct {
-	Refusal snapshot.ReceiptRefusal
+	Refusal ReceiptRefusal
 	Cause   QuestionReceiptCause
 }
 
@@ -38,14 +36,14 @@ type QuestionEffectBoundary struct {
 // Apply parses and verifies receipt against the governing state at the point of
 // effect. effect is invoked only for a valid, unchanged receipt. Callers may
 // capture an answer in effect; the boundary neither accepts nor retains it.
-func (b *QuestionEffectBoundary) Apply(receipt []byte, current snapshot.QuestionState, effect func()) snapshot.ReceiptCheck {
-	parsed, check := snapshot.ParseQuestionReceipt(receipt)
+func (b *QuestionEffectBoundary) Apply(receipt []byte, current QuestionState, effect func()) ReceiptCheck {
+	parsed, check := ParseQuestionReceipt(receipt)
 	if !check.Accepted {
 		b.count(check)
 		return check
 	}
 
-	check = snapshot.VerifyQuestionReceipt(parsed, current)
+	check = VerifyQuestionReceipt(parsed, current)
 	if !check.Accepted {
 		b.count(check)
 		return check
@@ -66,7 +64,7 @@ func (b *QuestionEffectBoundary) RefusalCounts() map[QuestionReceiptRefusal]uint
 	return counts
 }
 
-func (b *QuestionEffectBoundary) count(check snapshot.ReceiptCheck) {
+func (b *QuestionEffectBoundary) count(check ReceiptCheck) {
 	key := QuestionReceiptRefusal{Refusal: check.Refusal, Cause: QuestionReceiptCause(check.Cause)}
 	b.mu.Lock()
 	defer b.mu.Unlock()

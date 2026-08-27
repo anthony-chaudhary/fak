@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-
-	"github.com/anthony-chaudhary/fak/internal/benchcli"
 )
 
 // Validate checks the registered claim ledger for the structural invariants a
@@ -149,7 +147,7 @@ func ValidateArtifacts(root string, claims []Claim) []error {
 			errs = append(errs, fmt.Errorf("claim %d %q: Artifact %q cannot be read: %v", i, c.ID, p, err))
 			continue
 		}
-		art, ok := benchcli.DecodeArtifact(raw)
+		art, ok := decodeBenchmarkEvidence(raw)
 		if !ok {
 			// Legacy evidence may be a log, markdown dossier, or pre-envelope JSON.
 			// Preserve it. A document that claims to carry the shared envelope,
@@ -160,12 +158,12 @@ func ValidateArtifacts(root string, claims []Claim) []error {
 			}
 			continue
 		}
-		if err := benchcli.ValidateBenchmarkArtifact(art); err != nil {
+		if err := validateBenchmarkEvidence(art); err != nil {
 			errs = append(errs, fmt.Errorf("claim %d %q: Artifact %q has invalid simulation evidence: %v", i, c.ID, p, err))
 			continue
 		}
 		ev := art.SimulationEvidence
-		if ev == nil || ev.EvidenceType == benchcli.EvidenceHardwareMeasurement {
+		if ev == nil || ev.EvidenceType == evidenceHardwareMeasurement {
 			continue
 		}
 		if c.Status == Measured || c.Status == Verified {
