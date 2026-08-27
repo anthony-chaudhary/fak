@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/issuefanout"
+	"github.com/anthony-chaudhary/fak/internal/issuepolicy"
 )
 
 func writeFanoutExistingFixture(t *testing.T, body string) string {
@@ -80,6 +81,126 @@ func TestIssueFanoutLiveFilesUnseenAndRerunFilesZero(t *testing.T) {
 	if !strings.Contains(out.String(), "filed 0, skipped 3, failed 0") || len(calls) != 0 {
 		t.Fatalf("rerun must file zero (gh calls = %d):\n%s", len(calls), out.String())
 	}
+}
+
+func TestIssueFanoutLiveThreeChildBatchRoundTripsStrictDispatchContract(t *testing.T) {
+	fixture := writeFanoutExistingFixture(t, "no fanout markers")
+	var calls [][]string
+	gh := func(args []string) (string, string, bool) {
+		calls = append(calls, append([]string(nil), args...))
+		return fmt.Sprintf("https://github.com/o/r/issues/%d", 9500+len(calls)), "", true
+	}
+	var out, errOut bytes.Buffer
+	code := runIssueFanoutWith(&out, &errOut, []string{
+		"--title", "strict live fanout",
+		"--leaf", "issuefanout",
+		"--spine", "strict-spine",
+		"--areas", "qa",
+		"--max", "3",
+		"--parent-issue", "9507",
+		"--parent-baseline-points", "8",
+		"--target-envelope", "- generated children passing strict review: >= 3 children",
+		"--witnessed-envelope", "- generated children passing strict review: 3 children",
+		"--live",
+		"--existing-json", fixture,
+	}, gh)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr: %s\nstdout: %s", code, errOut.String(), out.String())
+	}
+	if len(calls) != 3 {
+		t.Fatalf("gh create calls = %d, want 3", len(calls))
+	}
+	strict := issuepolicy.Options{
+		Live:              true,
+		DedupeChecked:     true,
+		DedupeCap:         issuefanout.DefaultDedupeCap,
+		StrictBornRouted:  true,
+		StrictModelTier:   true,
+		StrictProjectWork: true,
+		StrictScale:       true,
+		StrictWitness:     true,
+	}
+	for i, call := range calls {
+		title, body, labels := fanoutCreateDraft(t, call)
+		draftLabels := make([]issuepolicy.IssueLabel, 0, len(labels))
+		for _, label := range labels {
+			draftLabels = append(draftLabels, issuepolicy.IssueLabel{Name: label})
+		}
+		review := issuepolicy.ReviewIssueDraft(issuepolicy.IssueDraft{
+			Title:  title,
+			Body:   body,
+			Labels: draftLabels,
+		}, strict)
+		if review.Dispatchability != issuepolicy.Dispatchable || !review.OK {
+			t.Fatalf("child %d not strict-dispatchable: verdict=%s reasons=%v missing=%v\nbody:\n%s", i, review.Verdict, review.Reasons, review.MissingFields, body)
+		}
+		if review.ModelTier.RequiredSource != "body" || review.ModelTier.OptimalSource != "body" || len(review.ModelTier.Flags) != 0 {
+			t.Fatalf("child %d model tier did not survive live body round trip: %+v", i, review.ModelTier)
+		}
+		wantRequired, wantOptimal := "T2", "T1"
+		if i == 0 {
+			wantRequired, wantOptimal = "T1", "T0"
+		}
+		if review.ModelTier.Required != wantRequired || review.ModelTier.Optimal != wantOptimal {
+			t.Fatalf("child %d priority-derived tiers = %s/%s, want %s/%s", i, review.ModelTier.Required, review.ModelTier.Optimal, wantRequired, wantOptimal)
+		}
+		if review.BornRouted.ClassLabel != "class:infra" || len(review.BornRouted.Flags) != 0 {
+			t.Fatalf("child %d live labels are not born-routed: %+v", i, review.BornRouted)
+		}
+	}
+}
+
+func TestIssueFanoutRefusesOverBaselinePlanBeforeLiveWrite(t *testing.T) {
+	fixture := writeFanoutExistingFixture(t, "no fanout markers")
+	calls := 0
+	gh := func(args []string) (string, string, bool) {
+		calls++
+		return "https://github.com/o/r/issues/1", "", true
+	}
+	var out, errOut bytes.Buffer
+	code := runIssueFanoutWith(&out, &errOut, []string{
+		"--title", "undersized parent",
+		"--leaf", "issuefanout",
+		"--spine", "strict-spine",
+		"--areas", "qa",
+		"--max", "3",
+		"--parent-issue", "9507",
+		"--parent-baseline-points", "2",
+		"--live",
+		"--existing-json", fixture,
+	}, gh)
+	if code != 2 || !strings.Contains(errOut.String(), "exceeding the declared parent baseline") {
+		t.Fatalf("exit=%d stderr=%q, want planner refusal", code, errOut.String())
+	}
+	if calls != 0 {
+		t.Fatalf("gh create calls = %d, want zero for a refused plan", calls)
+	}
+}
+
+func fanoutCreateDraft(t *testing.T, args []string) (title, body string, labels []string) {
+	t.Helper()
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--title", "--body", "--label":
+			if i+1 >= len(args) {
+				t.Fatalf("missing value after %s in %v", args[i], args)
+			}
+			value := args[i+1]
+			switch args[i] {
+			case "--title":
+				title = value
+			case "--body":
+				body = value
+			case "--label":
+				labels = append(labels, value)
+			}
+			i++
+		}
+	}
+	if title == "" || body == "" {
+		t.Fatalf("create argv lacks title/body: %v", args)
+	}
+	return title, body, labels
 }
 
 func TestIssueFanoutLiveGhFailureExitsOne(t *testing.T) {
