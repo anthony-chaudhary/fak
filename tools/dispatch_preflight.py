@@ -270,9 +270,10 @@ def _codex_ambient_account() -> dict[str, Any]:
             "model": None, "reason": "no ~/.codex/auth.json — run `codex login`"}
 
 
-def _fak_command(root: Path) -> list[str] | None:
+def _fak_command(root: Path, env: dict[str, str] | None = None) -> list[str] | None:
     """Resolve the trusted Go account router without compiling in the live tree."""
-    configured = os.environ.get("FAK_BIN", "").strip()
+    environ = env if env is not None else os.environ
+    configured = environ.get("FAK_BIN", "").strip()
     if configured:
         return shlex.split(configured, posix=os.name != "nt")
     # The repository-root binary is a developer artifact and can be older, dirty,
@@ -284,7 +285,7 @@ def _fak_command(root: Path) -> list[str] | None:
     # even when an explicit PATH is supplied. Walk PATH directly so a root-level
     # ``fak.exe`` cannot masquerade as the installed artifact.
     names = ("fak.exe", "fak") if os.name == "nt" else ("fak",)
-    for entry in os.environ.get("PATH", "").split(os.pathsep):
+    for entry in environ.get("PATH", "").split(os.pathsep):
         directory = Path(entry.strip().strip('"')) if entry.strip() else None
         if directory is None:
             continue
@@ -446,7 +447,7 @@ def fak_bin_resolutions(root: Path, env: dict[str, str] | None = None,
     ``worker_env`` builder sets ``FAK_BIN`` today, so the two agree; if one ever
     does, this row becomes a prediction rather than a record."""
     e = env if env is not None else dict(os.environ)
-    gate = _fak_command(root)
+    gate = _fak_command(root, e)
     out: dict[str, str | None] = {
         "preflight_gate": gate[0] if gate else None,
         "worker_guard": None,

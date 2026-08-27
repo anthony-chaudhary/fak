@@ -204,3 +204,14 @@ func TestApplyGateSkewNeverOverwritesAHigherPrecedenceRefusal(t *testing.T) {
 		t.Errorf("unmeasured provenance changed the verdict: %q / %q", v, r)
 	}
 }
+
+func TestApplyGateSkewPreservesPythonStaleRefusal(t *testing.T) {
+	p := GateProvenance{Probed: true, GateResolved: true, GateAttested: true, GateDirty: true}
+	for _, verdict := range []string{RefuseBinStale, RefuseBinProvenance} {
+		reason := verdict + ": Python repository admission refused before worker creation"
+		v, r := ApplyGateSkew(verdict, reason, spawnOK, p)
+		if v != verdict || r != reason {
+			t.Errorf("Python refusal %s changed at Go fold: %q / %q", verdict, v, r)
+		}
+	}
+}

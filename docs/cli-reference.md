@@ -1557,3 +1557,5 @@ fak server down --dir DIR --json
 ### Token destination distribution
 
 `fak trajectory audit` records two deliberately separate views: provider-exact request-level input/output/cache token buckets, and a deterministic transcript-payload distribution measured in UTF-8 bytes. The latter shows user messages, assistant messages, reasoning, tool calls, tool results, other records, and a per-tool ranking in JSONL and Markdown. It is an attribution signal—not per-block billed tokens, which providers do not expose. `trajectory.CompactAuditDistributionLine` supplies the stable width-bounded line used by terminal/TUI status surfaces.
+
+`trajectory audit` separates deterministic model-visible content bytes from serialized transcript storage/telemetry overhead. Runtime event mirrors such as Codex `item_completed` and Claude attachments are typed by subtype in a separate table and never inflate the model-visible denominator. `visible_unknown` is explicit and coverage-budgetable.
