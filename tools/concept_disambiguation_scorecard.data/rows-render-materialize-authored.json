@@ -1,0 +1,23 @@
+{
+  "rows": [
+    {
+      "id": "render-materialize-render-adapter-report",
+      "canonical": "RenderAdapterReport (benchmark adapter layout)",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "internal/benchmarkdown RenderAdapterReport renders the shared headings, metadata order, summary table, task table, promotion section, and spacing for an already-projected benchmark adapter report.",
+      "distinction": "Owns only the cross-benchmark adapter-report LAYOUT after callers preformat domain rows - NOT the package-specific RenderMarkdown functions that project measured domain reports, and NOT pre-run contract renderers.",
+      "distinct_from": [
+        "x-render-materialize-rendermarkdown",
+        "x-render-materialize-renderofficialruncontractmarkdown"
+      ],
+      "aliases": [],
+      "grounding": "RenderAdapterReport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

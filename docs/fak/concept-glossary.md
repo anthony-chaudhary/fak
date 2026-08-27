@@ -2424,3 +2424,10 @@ The supervision helper that persists an already-constructed restart-chain hop to
 The modeldescriptor field that pins an onboarding descriptor to fak-native execution before compatibility validation.
 
 **Distinct from:** This descriptor compatibility field is not the campaign ExecutionEngine evidence axis, a backend/device selector, or permission to fall back to an external runtime.
+
+
+### RenderAdapterReport (benchmark adapter layout)
+
+internal/benchmarkdown RenderAdapterReport renders the shared headings, metadata order, summary table, task table, promotion section, and spacing for an already-projected benchmark adapter report.
+
+**Distinct from:** Owns only the cross-benchmark adapter-report LAYOUT after callers preformat domain rows - NOT the package-specific RenderMarkdown functions that project measured domain reports, and NOT pre-run contract renderers.

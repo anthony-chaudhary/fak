@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **147** (clarity 0 + coverage 147) |
-| **Crystal-clear concepts (and climbing)** | **799** crystal of 2511 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2637 / 2784** (94.7% of the discovered confusable space) |
+| **Crystal-clear concepts (and climbing)** | **800** crystal of 2512 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2638 / 2785** (94.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 203 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **74** of 3477 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **74** of 3478 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 96.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2511 concepts - score 96.6/100 (grade A) - disambiguation-debt 147
+concept-disambiguation chart - 2512 concepts - score 96.6/100 (grade A) - disambiguation-debt 147
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       #############............... 799
+  * crystal       #############............... 800
   o defined       ############################ 1712
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -53,7 +53,7 @@ clarity mix by family (each cell = one concept):
   plan             ******************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (306 concept(s); 66 crystal)
   policy-capability *************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (166 concept(s); 61 crystal)
   pool             ******oooooooooooooooooooooooooooooo (36 concept(s); 6 crystal)
-  render-materialize ****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (181 concept(s); 28 crystal)
+  render-materialize *****************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (182 concept(s); 29 crystal)
   score-debt       *********oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (73 concept(s); 9 crystal)
   session-runtime  ****************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (226 concept(s); 64 crystal)
   support-maturity ***************************oooooooooooooooooooooo (49 concept(s); 27 crystal)
@@ -68,7 +68,7 @@ coverage by family (positioned / discovered):
   session-runtime  ###########################. 255/268
   context-ctx      ###########################. 228/237
   guard-gate       ############################ 489/497
-  render-materialize ###########################. 198/206
+  render-materialize ###########################. 199/207
   gateway-engine   ###########################. 185/192
   witness-proof    ###########################. 156/162
   loop             ##########################.. 88/93
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [##############################..] 94.7%  (2637/2784 confusable tokens positioned)
+namespace coverage  [##############################..] 94.7%  (2638/2785 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 203
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 203/203
 
-name index: 3477 lookup name(s) -> 2511 concept(s), 74 ambiguous
+name index: 3478 lookup name(s) -> 2512 concept(s), 74 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **203 / 203** (203 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1712 / 4543 |
+| Boundaries drawn (mutual / total) | 1716 / 4547 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3477 over 2511 concepts |
+| Lookup names indexed | 3478 over 2512 concepts |
 | Lookup names landing on several concepts | 74 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2511 |
+| Concepts carrying a contrast set | 2512 |
 
 ## The concepts (best verdict first)
 
@@ -730,6 +730,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | render-materialize | **GitDailyHealthFragment (git-daily health readout)** - metrics.GitDailyHealthFragment renders a graded git-daily payload and its ledger-derived counts as one deterministic operator line: grade, runs, outcomes, folded objects, refusal streak, and GitDailyDebtKey debt. |
 | * | crystal | symbol | render-materialize | **RenderAuditClusterReport** - Renders the cross-model failure-clustering dogfood section from an already-folded AuditClusterResult: a correlation-not-causation fence, then sufficient clusters split from insufficient or confounded ones, then route-policy proposals. |
 | * | crystal | symbol | render-materialize | **renderNativePerformance** - cmd/fak.renderNativePerformance projects a validated nativeperf.Graph into the human hill-climb report: envelope and comparison headers, the enabled/status/rung checklist, expected-versus-witnessed throughput, feature stack, gaps, and independent envelopes. |
+| * | crystal | symbol | render-materialize | **RenderAdapterReport (benchmark adapter layout)** - internal/benchmarkdown RenderAdapterReport renders the shared headings, metadata order, summary table, task table, promotion section, and spacing for an already-projected benchmark adapter report. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for docrender** - `docrender` is the render-materialize symbol declared or used at `internal/docrender/doc.go:1` as `// Package docrender turns this repo's Markdown into a print-ready HTML page and,`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for materializeraw** - `materializeRaw` is the render-materialize symbol declared or used at `internal/contextq/contextq.go:382` as `materializeRaw(ctx, im, req, &res, frames, entries, selected, excluded)`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | render-materialize | **render-materialize implementation surface for renderings** - `renderings` is the render-materialize symbol declared or used at `internal/gateway/compaction_contract.go:30` as `// One source, two renderings, so they cannot disagree about what the boundary did.`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2783,8 +2784,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 |---|---|---:|:--:|---|
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2831/4543 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2511 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2831/4547 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2512 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2793,7 +2794,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3477 lookup name(s) resolves - 74 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3478 lookup name(s) resolves - 74 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2806,7 +2807,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | session-runtime | 255 | 268 | 13 |
 | context-ctx | 228 | 237 | 9 |
 | guard-gate | 489 | 497 | 8 |
-| render-materialize | 198 | 206 | 8 |
+| render-materialize | 199 | 207 | 8 |
 | gateway-engine | 185 | 192 | 7 |
 | witness-proof | 156 | 162 | 6 |
 | loop | 88 | 93 | 5 |
