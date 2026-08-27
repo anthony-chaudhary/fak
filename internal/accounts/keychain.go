@@ -237,12 +237,16 @@ func ClaudeKeychainAPIKey(dir string) (string, bool) {
 	return "", false
 }
 
-// ClaudeKeychainHasCreds is the login-posture answer: does the Keychain hold a real
+// ClaudeKeychainHasCreds is the login-posture answer: does the Keychain hold a live
 // credential for this config home? It is hasClaudeCredentials' darwin fallback, so a
-// keychain-only Mac seat reads ready instead of needs_login.
+// keychain-only Mac seat reads ready instead of needs_login. A positive recorded expiry
+// must still be in the future; ExpiresAt<=0 keeps Claude Code's non-expiring convention.
 func ClaudeKeychainHasCreds(dir string) bool {
-	_, ok := ClaudeKeychainCred(dir)
-	return ok
+	cred, ok := ClaudeKeychainCred(dir)
+	if !ok {
+		return false
+	}
+	return cred.ExpiresAt <= 0 || time.UnixMilli(cred.ExpiresAt).After(time.Now())
 }
 
 // ClaudeKeychainAccessToken returns the Keychain access token when it is safe to SEND

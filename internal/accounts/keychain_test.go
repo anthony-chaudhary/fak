@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -152,6 +153,50 @@ func TestHasClaudeCredentialsKeychainFallback(t *testing.T) {
 	}
 	if !hasClaudeCredentials(dir) {
 		t.Fatal("placeholder file beside a keychain login: must still read as creds")
+	}
+}
+
+// TestExpiredKeychainOAuthNeedsLogin pins #9344's operator-visible failure: token
+// presence is not liveness when Keychain records a positive expiry already in the
+// past. An expired Keychain-only seat must not enter the servable pool, and its
+// status must name the concrete human repair rather than attempting to mutate the
+// credential or log in automatically.
+func TestExpiredKeychainOAuthNeedsLogin(t *testing.T) {
+	dir := t.TempDir()
+	stubKeychain(t, map[string]string{
+		keychainServiceFor(dir): `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-expired","refreshToken":"refresh-present","expiresAt":1}}`,
+	})
+
+	id := DeriveIdentity(dir)
+	if id.HasCreds {
+		t.Fatal("expired Keychain OAuth: HasCreds=true, want false")
+	}
+	report := (Registry{Homes: []Home{{Name: "expired", Dir: dir, Identity: id}}}).LoginReport()
+	if len(report.Seats) != 1 {
+		t.Fatalf("seats=%d, want 1", len(report.Seats))
+	}
+	seat := report.Seats[0]
+	if seat.Status != LoginNeedsLogin || seat.CanServe {
+		t.Fatalf("expired Keychain OAuth: status=%q can_serve=%v, want needs_login false", seat.Status, seat.CanServe)
+	}
+	if !strings.Contains(seat.NextAction, "/login") || !strings.Contains(seat.NextAction, "CLAUDE_CONFIG_DIR") {
+		t.Fatalf("expired Keychain OAuth: next_action=%q, want concrete /login action for this CLAUDE_CONFIG_DIR", seat.NextAction)
+	}
+
+	// A missing/non-positive expiry is Claude Code's explicit non-expiring
+	// convention, not evidence that the credential is stale.
+	noExpiryDir := t.TempDir()
+	stubKeychain(t, map[string]string{
+		keychainServiceFor(noExpiryDir): `{"claudeAiOauth":{"accessToken":"sk-ant-oat01-no-expiry","expiresAt":0}}`,
+	})
+	noExpiryID := DeriveIdentity(noExpiryDir)
+	if !noExpiryID.HasCreds {
+		t.Fatal("no-expiry Keychain OAuth: HasCreds=false, want true")
+	}
+	noExpiryReport := (Registry{Homes: []Home{{Name: "no-expiry", Dir: noExpiryDir, Identity: noExpiryID}}}).LoginReport()
+	noExpirySeat := noExpiryReport.Seats[0]
+	if noExpirySeat.Status != LoginReady || !noExpirySeat.CanServe {
+		t.Fatalf("no-expiry Keychain OAuth: status=%q can_serve=%v, want ready true", noExpirySeat.Status, noExpirySeat.CanServe)
 	}
 }
 
