@@ -8688,6 +8688,16 @@
           "category": "incidental",
           "reason": "Internal receipt mapping record for existing self-update outcomes; it does not introduce a new operator capability or policy concept.",
           "token": "selfUpdateCheckPosture"
+        },
+        {
+          "category": "incidental",
+          "reason": "local numeric variable for policy outcome health",
+          "token": "policyScore"
+        },
+        {
+          "category": "incidental",
+          "reason": "local scorecard defect list, not a policy capability",
+          "token": "policyDefects"
         }
       ],
       "exclude": [
@@ -8828,10 +8838,12 @@
         "orgPostureGloss",
         "phasePolicy",
         "policies",
+        "policyDefects",
         "policyErr",
         "policyLabels",
         "policyLocked",
         "policyOf",
+        "policyScore",
         "policy_admission",
         "policy_changed",
         "policyblocks",
@@ -9751,6 +9763,21 @@
           "category": "incidental",
           "reason": "Internal validation diagnostic for malformed baseline debt input, not a distinct score-debt concept.",
           "token": "baseline_debt_non_integer"
+        },
+        {
+          "category": "incidental",
+          "reason": "package-local constant naming the shared scorecard debt key",
+          "token": "ScorecardDebtKey"
+        },
+        {
+          "category": "incidental",
+          "reason": "schema field for this package's scorecard debt count",
+          "token": "system_baseline_debt"
+        },
+        {
+          "category": "incidental",
+          "reason": "package-local scorecard constructor rather than a distinct score-debt concept",
+          "token": "HealthScorecard"
         }
       ],
       "id": "score-debt",
@@ -9764,6 +9791,7 @@
         "DebtWitnesses",
         "DomainDebtIncluded",
         "GitDailyDebtKey",
+        "HealthScorecard",
         "LateFoundDebt",
         "NegationOperatorDebtKey",
         "OriginDebt",
@@ -9771,6 +9799,7 @@
         "ReleaseDebt",
         "ScorecardAxis",
         "ScorecardAxisOracle",
+        "ScorecardDebtKey",
         "TestModeDebtGradeInvariants",
         "TotalDebtSemantics",
         "UnboundPaneDebt",
@@ -9802,7 +9831,8 @@
         "scorecardportfolio",
         "scorecards",
         "sortDebtWitnesses",
-        "splitDebtWitnesses"
+        "splitDebtWitnesses",
+        "system_baseline_debt"
       ],
       "known_tokens": [],
       "min_files": 3,
