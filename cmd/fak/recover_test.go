@@ -73,6 +73,24 @@ func TestRecoverManualPlanRefusesExecute(t *testing.T) {
 	}
 }
 
+func TestRecoverSystemCommitHeadroomIsBoundedAndManual(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"SYSTEM_COMMIT_HEADROOM", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	for _, want := range []string{"recover SYSTEM_COMMIT_HEADROOM", "in-flight managed worker", "sanctioned fleet node", "do not lower FAK_SYSTEM_COMMIT_HEADROOM_MB"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("plan missing %q:\n%s", want, out.String())
+		}
+	}
+	out.Reset()
+	errB := &errb
+	errB.Reset()
+	if rc := runRecover(&out, errB, []string{"SYSTEM_COMMIT_HEADROOM", "--execute"}); rc != 3 {
+		t.Fatalf("execute rc=%d want 3; stdout=%s stderr=%s", rc, out.String(), errB.String())
+	}
+}
+
 // TestRecoverStaleUntrackedRoutesToTheContentComparison binds the STALE_UNTRACKED refusal
 // (#5408) to an actionable playbook. The two things the printed plan must carry are the ones
 // the refusal itself was written to correct: compare the trunk copy content-to-content rather

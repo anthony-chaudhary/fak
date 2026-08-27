@@ -1,5 +1,10 @@
 package procguard
 
+import (
+	"strconv"
+	"strings"
+)
+
 // MemoryMetric names the operating-system quantity represented by a
 // MemorySnapshot. Commit charge and resident set size are different metrics and
 // must never share a metric-specific field or receipt label.
@@ -8,7 +13,59 @@ type MemoryMetric string
 const (
 	MemoryMetricCommit MemoryMetric = "commit"
 	MemoryMetricRSS    MemoryMetric = "rss"
+
+	// DefaultSystemCommitHeadroomBytes is the reserve managed worker launches
+	// keep below the operating-system commit limit. Guard monitoring and launch
+	// preflight must derive policy from this one value.
+	DefaultSystemCommitHeadroomBytes = uint64(16) << 30
 )
+
+const SystemCommitHeadroomReason = "SYSTEM_COMMIT_HEADROOM"
+
+// SystemCommitHeadroom is the side-effect-free admission result shared by the
+// launch-time check and the running child guard.
+type SystemCommitHeadroom struct {
+	Supported     bool
+	Refuse        bool
+	Reason        string
+	ObservedBytes uint64
+	RequiredBytes uint64
+	SystemBytes   uint64
+	SystemLimit   uint64
+}
+
+// RequiredSystemCommitHeadroom reads the guard's positive-megabyte override.
+// Empty, malformed, zero, signed, and overflowing values preserve the default;
+// an invalid setting can never silently disable containment.
+func RequiredSystemCommitHeadroom(getenv func(string) string) uint64 {
+	raw := strings.TrimSpace(getenv("FAK_SYSTEM_COMMIT_HEADROOM_MB"))
+	mb, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || mb == 0 || mb > ^uint64(0)>>20 {
+		return DefaultSystemCommitHeadroomBytes
+	}
+	return mb << 20
+}
+
+// EvaluateSystemCommitHeadroom applies the exact guard boundary to one
+// metric-typed snapshot. Unsupported metrics/zero limits abstain, matching the
+// guard's platform contract. At the boundary (observed == required) admission
+// refuses so a child cannot consume the reserve itself.
+func EvaluateSystemCommitHeadroom(snapshot MemorySnapshot, required uint64) SystemCommitHeadroom {
+	result := SystemCommitHeadroom{
+		Supported:     snapshot.Metric == MemoryMetricCommit && snapshot.SystemLimit > 0,
+		RequiredBytes: required,
+		SystemBytes:   snapshot.SystemBytes,
+		SystemLimit:   snapshot.SystemLimit,
+	}
+	if snapshot.SystemLimit >= snapshot.SystemBytes {
+		result.ObservedBytes = snapshot.SystemLimit - snapshot.SystemBytes
+	}
+	if result.Supported && required > 0 && result.ObservedBytes <= required {
+		result.Refuse = true
+		result.Reason = SystemCommitHeadroomReason
+	}
+	return result
+}
 
 // MemorySnapshot is a point-in-time accounting of one owned process tree.
 // TreeBytes and each process Bytes use Metric's semantics. SystemBytes and

@@ -118,6 +118,42 @@ func TestManifestCompilerNormalizesStateAndRejectsNegativeCoupling(t *testing.T)
 	}
 }
 
+func TestPinRefusalPrecedenceIsDeterministic(t *testing.T) {
+	var manifest ReleaseManifest
+	if err := json.Unmarshal(fixture(t, "qwen38-valid.json"), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Source.URI = ""
+	manifest.Artifact.URI = ""
+	manifest.Source.ManifestSHA256 = "bad"
+	manifest.Artifact.SHA256 = "bad"
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		_, err := CompileManifest(raw)
+		var refusal *Refusal
+		if !errors.As(err, &refusal) || refusal.Reason != RefusalPinInvalid || refusal.Axis != "source.uri" {
+			t.Fatalf("iteration %d refusal = %#v, err = %v; want source.uri first", i, refusal, err)
+		}
+	}
+
+	manifest.Source.URI = "fixture://source"
+	manifest.Artifact.URI = "fixture://artifact"
+	raw, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100; i++ {
+		_, err := CompileManifest(raw)
+		var refusal *Refusal
+		if !errors.As(err, &refusal) || refusal.Axis != "source.manifest_sha256" {
+			t.Fatalf("iteration %d refusal = %#v, err = %v; want source.manifest_sha256 first", i, refusal, err)
+		}
+	}
+}
+
 func fixture(t *testing.T, name string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", name))
