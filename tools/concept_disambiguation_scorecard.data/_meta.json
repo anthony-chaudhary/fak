@@ -5679,6 +5679,11 @@
           "category": "incidental",
           "reason": "Function parameter carrying the existing graceful-handoff session identity, not a distinct runtime concept.",
           "token": "handoffSession"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local coordinator name for authenticated event wakes and cohort jitter; not a distinct operator-facing runtime concept.",
+          "token": "EventScheduler"
         }
       ],
       "id": "session-runtime",
@@ -5697,6 +5702,7 @@
         "DiagnoseHistoryIndex",
         "ErrSessionNotFound",
         "EvaluateLifecycleSession",
+        "EventScheduler",
         "FAK_HANDOFF_SESSION_ID",
         "FAK_SESSION_CLIENT_TOKEN",
         "FAK_SESSION_STATE",
