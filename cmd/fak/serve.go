@@ -24,6 +24,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/gatewayusageledger"
 	"github.com/anthony-chaudhary/fak/internal/ggufload"
+	"github.com/anthony-chaudhary/fak/internal/gpulease"
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 	fakmodel "github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
@@ -424,7 +425,14 @@ func cmdServe(argv []string) {
 	// before the gateway exists but installed only after it does.
 	rt.resolveCompute(sf)
 	defer rt.closeEPGroup()
-	rt.loadModel(sf)
+	releaseMetalResidency, err := loadServeModelWithMetalLease(rt.useMetal, *sf.ggufPath, gpulease.Options{}, func() {
+		rt.loadModel(sf)
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	defer releaseMetalResidency()
 	rt.configureEPDecode()
 	rt.resolveSessionPlane(sf)
 	rt.resolveObservers(sf)
