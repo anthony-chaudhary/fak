@@ -16,7 +16,9 @@ import (
 func main() {
 	fs := flag.NewFlagSet("zaitask", flag.ExitOnError)
 	model := fs.String("model", zaitask.DefaultModel, "Z.AI model")
-	base := fs.String("base-url", zaitask.DefaultBaseURL, "Z.AI Coding Plan API base URL")
+	base := fs.String("base-url", zaitask.DefaultBaseURL, "Z.AI API base URL (GLM-5.3-Flash resolves the direct general endpoint)")
+	reasoningEffort := fs.String("reasoning-effort", "max", "GLM-5.3-Flash reasoning effort: low, high, or max")
+	stream := fs.Bool("stream", false, "request and assemble an SSE response (GLM-5.3-Flash)")
 	max := fs.Int("max-tokens", 4000, "maximum completion tokens")
 	timeout := fs.Duration("timeout", 3*time.Minute, "request timeout")
 	jsonOut := fs.Bool("json", false, "emit content plus usage receipt as JSON")
@@ -37,7 +39,20 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
-	got, err := (zaitask.Client{BaseURL: *base, APIKey: os.Getenv("ZAI_API_KEY")}).Run(ctx, prompt, *model, *max)
+	client := zaitask.Client{BaseURL: *base, APIKey: os.Getenv("ZAI_API_KEY")}
+	var got zaitask.Result
+	var err error
+	if *model == zaitask.GLM53FlashModel {
+		got, err = client.RunChat(ctx, zaitask.Request{
+			Model: *model, Messages: []zaitask.Message{{Role: "user", Content: prompt}},
+			MaxTokens: *max, Stream: *stream, ReasoningEffort: *reasoningEffort,
+		})
+	} else {
+		if *stream || *reasoningEffort != "max" {
+			fail(fmt.Errorf("--stream and --reasoning-effort are supported only with --model %s", zaitask.GLM53FlashModel))
+		}
+		got, err = client.Run(ctx, prompt, *model, *max)
+	}
 	if err != nil {
 		fail(err)
 	}
@@ -54,10 +69,13 @@ func main() {
 	fmt.Print(got.Content)
 	receipt := struct {
 		Model     string        `json:"model"`
+		Provider  string        `json:"provider"`
+		Engine    string        `json:"engine"`
+		FakNative bool          `json:"fak_native"`
 		RequestID string        `json:"request_id"`
 		Usage     zaitask.Usage `json:"usage"`
 		LatencyMS int64         `json:"latency_ms"`
-	}{got.Model, got.RequestID, got.Usage, got.LatencyMS}
+	}{got.Model, got.Provider, got.Engine, got.FakNative, got.RequestID, got.Usage, got.LatencyMS}
 	raw, _ := json.Marshal(receipt)
 	fmt.Fprintf(os.Stderr, "\n[zaitask receipt] %s\n", raw)
 }
