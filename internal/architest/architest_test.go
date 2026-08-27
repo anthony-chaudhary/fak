@@ -57,7 +57,7 @@ var tier = map[string]int{
 	"flowcredit":             2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
 	"flowmetrics":            1, // pure flow-metrics fold (#6194): joins issue rows against commit rows into started/closed spans and grades eight Little's-Law KPIs (flow efficiency, queue time, unstarted backlog, aging WIP, atomicity, arrival-vs-service, witnessed progress, local WIP), plus a working-tree WIP census; the twin of growthgate/stallscan — a Classify-shaped fold whose thresholds are fixed constants. Stdlib-only, imports nothing internal, off the hot path.
 	"stallpage":              2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
-	"agenticbench":           2, // pure #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
+	"agenticbench":           3, // #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
 	"apihostprobe":           1, // API host readiness/acceptance probe: stdlib HTTP probes + roster parsing for cmd/fak api-host; off the hot path.
 	"accountprobe":           1, // pure account-probe ledger reader (probe_ledger.jsonl): last-probe-by-account + probe recency for the roster fresh-probe fold; stdlib-only, imports nothing internal, off the hot path.
