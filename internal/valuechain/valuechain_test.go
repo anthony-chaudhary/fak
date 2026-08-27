@@ -53,6 +53,34 @@ func TestUnknownCostStaysAbsent(t *testing.T) {
 	}
 }
 
+func TestAuditAdvisesWhenDeclaredEvidenceIsUnwitnessed(t *testing.T) {
+	manifest := Manifest{
+		Schema:   Schema,
+		Name:     "unwitnessed",
+		Stages:   []Stage{{ID: "outcome", Kind: "outcome"}},
+		Arms:     []Arm{{ID: "baseline", Default: true}},
+		Outcomes: []Outcome{{ID: "done", Unit: "task"}},
+	}
+	input := Input{Schema: Schema, Observations: []Observation{{
+		ID: "claim", TraceID: "trace", StageID: "outcome", Arm: "baseline", Provenance: "claim-only",
+	}}}
+
+	report, err := Audit(manifest, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Warnings) != 1 || report.Warnings[0] != "VALUECHAIN_UNWITNESSED" {
+		t.Fatalf("warnings = %q, want VALUECHAIN_UNWITNESSED", report.Warnings)
+	}
+	got, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(got), `"warnings":["VALUECHAIN_UNWITNESSED"]`) != 1 {
+		t.Fatalf("report JSON does not carry one deterministic advisory: %s", got)
+	}
+}
+
 func TestAuditKeepsDerivedRatesUnknownWithPartialBillingEvidence(t *testing.T) {
 	m := Manifest{Schema: Schema, Name: "partial", Stages: []Stage{{ID: "outcome", Kind: "outcome"}}, Arms: []Arm{{ID: "baseline", Default: true}}, Outcomes: []Outcome{{ID: "done", Unit: "task"}}}
 	cost := 1.0

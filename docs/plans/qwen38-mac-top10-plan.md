@@ -44,7 +44,7 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 - [ ] M6 - Paged Qwen hybrid state live arm (#9076/#8395; exact Metal receipt #9492 blocked by M1-M4)
 - [ ] M7 - Exact-prefix block reuse (#8395; ship-alone child required)
 - [ ] M8 - Bounded chunked-prefill scheduling (#9066, #1912, #8395)
-- [ ] M9 - Resident hybrid co-batching (#9074/#9075/#8395; linear substrate #9515 shipped, full-attention substrate #9516 open)
+- [ ] M9 - Resident hybrid co-batching (#9074/#9075/#8395; linear #9515 and full-attention #9516 substrates shipped, integration/receipt outstanding)
 - [ ] M10 - Matched parity reconvergence (#8697, #2723)
 
 ### 1. M1 - No-copy streamed Q4_K Metal spans (#9073)
@@ -98,7 +98,7 @@ Run the final same-artifact fak-native versus pinned llama.cpp/MLX Mac campaign.
 - The closed #8848 no longer owns the still-open measurement loop. #9495 owns the real Metal profile after M1, #9497 owns the independently runnable real CUDA profile, and #9498 owns returned-receipt workflow consumption after both bundles validate.
 - M6 correctness substrate #9076 remains synthetic-only. #9492 owns the exact same-binary NativeScheduler Metal paged-swap OFF/ON implementation plus live receipt; it is blocked by accepted M1-M4 receipts and the `composition-9280-full` modelengine lease.
 - M7-M8 retain partial prerequisites but no accepted isolated Mac arm under this plan.
-- M9 linear-attention B=2..8 substrate #9515 is validly shipped at `14dd0d1e405273e4b37da742ed2529053dc0f243`, enabling-only. Full-attention substrate #9516 is open after its cited `24c2fd7a7c` closure was disproved: the object and the two new files/test symbol are absent. #9074 integration remains open. #9075 was likewise reopened after its cited `82f1a635c8098ae569dac2db0c3b222765098226` proved absent and its prior audit showed rendezvous rather than shared Qwen execution.
+- M9 linear-attention B=2..8 substrate #9515 remains validly shipped at `14dd0d1e405273e4b37da742ed2529053dc0f243`, enabling-only. The repaired and reviewed four-path exact-Qwen3.8 full-attention substrate #9516 is validly shipped at `a50f903efc503da8d6df6ae2c9b63f36ff8eac4b` (`internal/metalgemm@r63+ga50f903ef`), also enabling-only. #9074/#9075 remain open for integration and an exact receipt; neither substrate advances KEEP.
 - Umbrella #9430 was incorrectly closed from plan-document-only commit `a6fa45cd25e047865c763384beaf27ee9a2a2149` and has been reopened: both this plan and the issue body remain `0 / 10 KEEP` with ten unchecked tasks.
 - M10 remains the close-out receipt.
 - Rejected/default-off #9093, #9192, and #8833 experiments are excluded from KEEP credit.
@@ -126,7 +126,7 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 - 2026-08-27: registered #9525 as M2's exact P32 receipt child after #9456; it requires missing receipt fields and cannot run until #8325 restores a safe exact-Mac envelope.
 - 2026-08-27: shipped M3 mechanism #9486 at `46fdd8a52` and M4 block mechanism #9488 at `99ea660ae`; retained both phase boxes unchecked because neither closure contains an accepted Mac performance receipt.
 - 2026-08-27: audited M6: #9076 is synthetic correctness only and #9492 owns the blocked exact Metal NativeScheduler paged-swap arm.
-- 2026-08-27: audited M9: #9515's linear batch substrate is shipped at `14dd0d1e4`; #9516 was falsely closed against absent `24c2fd7a7c` and reopened with no implementation on trunk; #9074 still owns mixed-layer integration.
+- 2026-08-27: repaired and reviewed M9 #9516's four-path exact-Qwen3.8 full-attention substrate, validly shipped at `a50f903efc503da8d6df6ae2c9b63f36ff8eac4b` (`internal/metalgemm@r63+ga50f903ef`); #9515 and #9516 are enabling-only, #9074/#9075 integration and receipt work remain open, and M9 records no KEEP.
 - 2026-08-27: found and corrected tracker drift: #9075 was reclosed against absent `82f1a635c8098ae569dac2db0c3b222765098226` after its own audit refuted shared Qwen execution, and umbrella #9430 was closed from docs-only `a6fa45cd25e047865c763384beaf27ee9a2a2149` despite `0 / 10 KEEP`; both issues are reopened and neither closure changes plan completion.
 
 ## Completion audit

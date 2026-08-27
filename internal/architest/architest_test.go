@@ -45,7 +45,9 @@ const modPrefix = "github.com/anthony-chaudhary/fak/internal/"
 // a leaf a conscious layering decision instead of an accident.
 var tier = map[string]int{
 
-	"agentquery": 1,
+	"agentquery": 2, // typed agent-state query/schema engine; composes maputil for deterministic schema-key ordering.
+	"bgloop":     2, // durable background-loop runtime; composes dormancy stamps and horizon classification for persisted wake events.
+	"cmdutil":    2, // shared command benchmark/render helpers; composes benchids for deterministic synthetic token streams.
 	"abi":        0,
 
 	"citeverify":      2, // mechanical source-line claim verification; stdlib-only, off the hot path.
@@ -55,7 +57,7 @@ var tier = map[string]int{
 
 	"envconfiglint":          2, // CONFIG_NOT_ENV ratchet banning new non-secret env reads; imports windowgate(1), off the hot path.
 	"flowcredit":             2, // receiver-granted credit ledger for KV-transfer backpressure; stdlib-only, imports nothing internal, off the hot path.
-	"flowmetrics":            1, // pure flow-metrics fold (#6194): joins issue rows against commit rows into started/closed spans and grades eight Little's-Law KPIs (flow efficiency, queue time, unstarted backlog, aging WIP, atomicity, arrival-vs-service, witnessed progress, local WIP), plus a working-tree WIP census; the twin of growthgate/stallscan — a Classify-shaped fold whose thresholds are fixed constants. Stdlib-only, imports nothing internal, off the hot path.
+	"flowmetrics":            2, // deterministic flow-metrics fold (#6194); composes maputil for stable issue/commit row traversal while grading Little's-Law KPIs and working-tree WIP.
 	"stallpage":              2, // durable deduped operator page for stallscan reboot high-water; imports stallscan(1)+choicetriage(1)+flock, off the hot path.
 	"agenticbench":           3, // #868 artifact rollup gate over committed benchmark evidence; stdlib-only, off the hot path.
 	"ailuminate":             1, // pure MLCommons-AILuminate benchmark-entry scoping/go-no-go contract (#1070); stdlib-only, off the hot path.
@@ -80,6 +82,7 @@ var tier = map[string]int{
 	"benchckpt":              1, // per-cell write-ahead checkpoint/resume ledger the compute-bench executors write through (#2382); stdlib-only, off the hot path.
 	"devcheckpoint":          2, // append-only developer milestone checkpoint records; imports flock(1)+stdlib, off the hot path.
 	"benchlineagegate":       2, // pure benchmark-emitter lineage hygiene gate; stdlib-only source scanner, off the hot path.
+	"benchmarkdown":          1, // stdlib-only typed layout renderer for byte-stable benchmark adapter Markdown reports.
 	"conceptbench":           2, // dos-refereed conceptbench grader (#2732): maps a concept + transcript + fixture to a referee-sourced verdict; imports taskmgr(1)+hooks(1), off the hot path.
 	"cachevalueledger":       2, // durable, append-only cache-value observation ledger for fak sessions; JSONL persistence over cacheobs stats.
 	"cacheprice":             1, // the ONE source of truth for the provider prompt-cache price multipliers (read 0.1x / write 1.25x / 2.0x): a pure leaf gateway(4) and resume(1) read (and the agent(4) fire gate is test-pinned to) so an identical cached token is priced identically (#2798). Imports nothing internal, off the hot path.
@@ -122,7 +125,7 @@ var tier = map[string]int{
 	"amdgpu":                 2, // AMD GPU fact probe and perf-counter JSON fold for Windows harness diagnostics; imports windowgate(1), off the hot path.
 	"accounts":               2, "accountobs": 1, "guardaudit": 2, "appversion": 2, "blob": 1, "boundarylint": 1, "cachemeta": 2, "cacheobs": 1, "cachevalue": 2, "canon": 1, "compute": 2, "deletioncert": 1, "demoui": 2, "ggufload": 2, "gpulease": 2, "fleetreap": 2, "hfhub": 2, "intlist": 1, "leakcheck": 1, "metalgemm": 1, "metrics": 2, "model": 2, "orphanscan": 1, "pathlint": 1, "pathutil": 1, "privatepath": 2, "provenance": 1, "swebench": 2, "urllint": 1, "webbench": 2,
 	// stdlib-only foundation leaves (import nothing internal); off the hot path.
-	"auditpane": 2, "bgloop": 1, "binstamp": 2, "cachewitness": 2, "cmdutil": 1, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 2, "fleetaccounts": 2, "fleetbottleneck": 2, "flock": 1, "framevisibility": 1, "ghspam": 1, "issuecontractrepair": 2, "jsonlledger": 1, "kvbudget": 2, "maputil": 1, "mathx": 1, "modeldescriptor": 1, "newleaf": 1, "numfmt": 1, "randhex": 1, "refutil": 2, "selfinstall": 2, "sessionaudit": 2, "strmatch": 1,
+	"auditpane": 2, "binstamp": 2, "cachewitness": 2, "codexmemory": 1, "covmatrix": 1, "defaultvaluescore": 1, "demoutil": 1, "experiments": 2, "fleetaccounts": 2, "fleetbottleneck": 2, "flock": 1, "framevisibility": 1, "ghspam": 1, "issuecontractrepair": 2, "jsonlledger": 1, "kvbudget": 2, "maputil": 1, "mathx": 1, "modeldescriptor": 1, "newleaf": 1, "numfmt": 1, "randhex": 1, "refutil": 2, "selfinstall": 2, "sessionaudit": 2, "strmatch": 1,
 	"newmodel":      2,                                                                            // deterministic onboarding compiler composed over the primitive modeldescriptor contract (#9421).
 	"sessiondiag":   2,                                                                            // bounded redacted Codex SQLite/log and process-incident classifier (#5992); stdlib-only, off the hot path.
 	"deepseekbench": 1, "deepseekv4kv": 1, "deepseekv4moe": 1, "dispatchaging": 1, "linkstate": 1, // stdlib-only leaves: DeepSeek V4 bench/KV/MoE fixture cores (#3014/#3017/#3018), fleet-dispatch priority-aging, link-state phase vocab; import nothing internal, off the hot path.
@@ -700,12 +703,12 @@ var tier = map[string]int{
 	"fleetsearch":                3, // read-only join over lifecycle/sessionjournal/toolproc evidence; no runtime kernel.
 	"discoveryrouter":            3, // bounded read-only composition over existing discovery sources; no storage or runtime kernel.
 	"nativefirst":                1, // stdlib-only native-engine substitution policy shared by CLI lint and commit gates.
-	"agentqueue":                 1, // stdlib-only deterministic desired-state planner for bounded agent populations (#8875).
-	"supervisionpolicy":          1, // stdlib-only typed fault-domain and bounded restart policy (#8909).
-	"projectionspine":            1, // stdlib-only disposable projection restart and session reattach spine (#8912).
+	"agentqueue":                 2, // bounded agent desired-state planner and crash-safe store (#8875, #8876); composes flock for serialized durable state updates.
+	"supervisionpolicy":          2, // typed fault-domain, bounded restart, and epoch-fenced adoption policy (#8909, #9053); composes flock for cross-process child takeover.
+	"projectionspine":            2, // disposable projection restart and session reattach spine (#8912); composes supervisionpolicy restart budgets and fault domains.
 	"codexsession":               4, // local Codex app-server adapter projected into the public harness protocol (#8736).
 	"hostdiag":                   3,
-	"shellprov":                  1, // stdlib-only privacy-safe receipt primitive for fak-owned shell launch identity (#9086).
+	"shellprov":                  2, // privacy-safe receipt store for fak-owned shell launch identity (#9086); composes flock for serialized broker receipt updates.
 	"qwenworkbudget":             5, // campaign-boundary adapter over canonical trajectory audit rollups and typed Qwen amplification policy; imports trajectory(4).
 	"ultracodetokenizer":         1,
 	"studybench":                 1, // stdlib-only deterministic offline retrieval benchmark and quality/context report (#8612).
