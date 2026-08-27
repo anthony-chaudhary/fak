@@ -36,6 +36,12 @@ scrape_configs:
     # Start it with, for example:
     #   ./fak serve --addr 127.0.0.1:8080
     #
+    # The tracked target below is the manual Compose default. When a gateway
+    # starts the bundled stack from a rich-dashboard click, fak writes a
+    # temporary copy with this one target changed to that gateway's actual
+    # listener port and points Compose at the copy. The tracked file is never
+    # rewritten, and the gateway remains bound to its configured interface.
+    #
     # If the gateway is started with --require-key-env, add Prometheus auth here
     # (for example bearer_token_file) or run a separate loopback-only scrape proxy.
     metrics_path: /metrics

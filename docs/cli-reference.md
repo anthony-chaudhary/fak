@@ -353,15 +353,24 @@ long completions are no longer truncated.) Full walkthrough (Tiers 0–2):
 
 The default listener serves a lightweight live dashboard at [http://127.0.0.1:8080/](http://127.0.0.1:8080/). It polls `/healthz` and `/metrics` every five seconds and keeps its last good values through a failed refresh.
 
-**Rich dashboards are lazy.** Selecting one shows startup progress, reuses a healthy Grafana at `http://localhost:3000`, or starts the bundled `tools/grafana/docker-compose.yml` stack on demand. Once Grafana is ready, the same route redirects to the selected dashboard. No Docker or Grafana probe runs before the first click.
+**Rich dashboards are lazy.** Selecting one shows startup progress, reuses a healthy Grafana at `http://localhost:3000`, or asks Docker Compose to start the bundled `tools/grafana/docker-compose.yml` stack on demand. FAK does **not** start Docker Desktop or another Docker daemon. Once Grafana is ready, the same route redirects to the selected dashboard. No Docker or Grafana probe runs before the first click.
+
+For an owned bundled start, FAK derives the Prometheus target from the gateway's actual bound listener. A gateway on `127.0.0.1:61666`, for example, is scraped through Docker's host bridge on port `61666`; FAK does not widen the gateway bind to `0.0.0.0` or otherwise expose it off-host. Startup writes a temporary Prometheus config and passes it to Compose through `FAK_PROMETHEUS_CONFIG`; the tracked `tools/grafana/prometheus.yml` remains unchanged.
 
 Environment controls:
 
 - `FAK_GRAFANA_URL=https://grafana.example` reuses an existing HTTP(S) Grafana endpoint instead of Docker.
-- `FAK_GRAFANA_COMPOSE=/path/to/docker-compose.yml` selects a Compose bundle for on-demand startup.
+- `FAK_GRAFANA_COMPOSE=/path/to/docker-compose.yml` selects a Compose bundle for on-demand startup. The bundle must retain the `${FAK_PROMETHEUS_CONFIG:-./prometheus.yml}` mount used by the shipped Compose file.
 - `FAK_DASHBOARDS=off` disables only Rich dashboards; the lightweight live dashboard stays available.
 
-The gateway stops only a Compose stack it started itself. Missing Docker, missing bundle files, startup errors, readiness timeout, and unsafe URLs render an actionable failure page instead of silently changing behavior.
+Lifecycle and ownership:
+
+- If Grafana is already healthy at `http://localhost:3000`, FAK adopts it without running Compose and leaves it running when the gateway exits.
+- If the click starts the bundled Compose stack, that gateway owns it, stops it when the gateway exits, and removes its temporary Prometheus config after Compose is down.
+- FAK never starts Docker Desktop. If Docker is stopped, start Docker and click again (or set `FAK_GRAFANA_URL`).
+- After a Docker or host restart, restart Docker and the gateway, then click a rich dashboard again so the on-demand check/start path runs against the live gateway address.
+
+Missing Docker, missing bundle files, an unavailable gateway listener address, startup errors, readiness timeout, and unsafe URLs render an actionable failure page instead of silently changing behavior.
 ## Syscall subsystem check — useful, not the headline KPI (call-mix-independent)
 
 `fak bench --suite tau2-smoke` replays a frozen tool-call trace through the one

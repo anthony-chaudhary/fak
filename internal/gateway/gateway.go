@@ -203,7 +203,6 @@ func New(cfg Config) (*Server, error) {
 		toolPreferences:              cfg.ToolPreferences,
 		engineID:                     engineID,
 		model:                        model,
-		richDashboards:               newRichDashboardManager(cfg.RichDashboards),
 		servedSide:                   servedSide,
 		upstream:                     upstreamSide,
 		requireKey:                   cfg.RequireKey,
@@ -279,6 +278,7 @@ func New(cfg Config) (*Server, error) {
 
 		pinUpstreamCredential: cfg.PinUpstreamCredential,
 	}
+	s.installRichDashboardManager(cfg.RichDashboards)
 
 	// #4003: seed the model-routing hot-reload seam behind POST /v1/fak/route/reload.
 	// The watcher is normally installed AFTER New via SetRouteWatcher (it needs the
@@ -310,6 +310,16 @@ func New(cfg Config) (*Server, error) {
 	s.loops = newBgloopSupervisor(s)
 
 	return s, nil
+}
+
+func (s *Server) installRichDashboardManager(cfg RichDashboardConfig) {
+	s.richDashboards = newRichDashboardManager(cfg)
+	s.richDashboards.listenerAddress = func() string {
+		if addr := s.boundAddr.Load(); addr != nil {
+			return *addr
+		}
+		return ""
+	}
 }
 
 // selectChatPlanner picks the chat backend for the /v1/chat/completions and

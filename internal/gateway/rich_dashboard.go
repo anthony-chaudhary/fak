@@ -5,19 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	richDashboardDefaultUID = "fak-gateway-observability"
-	richDashboardTimeout    = 90 * time.Second
+	richDashboardDefaultUID         = "fak-gateway-observability"
+	richDashboardTimeout            = 90 * time.Second
+	bundledGrafanaURL               = "http://localhost:3000"
+	bundledPrometheusConfigEnv      = "FAK_PROMETHEUS_CONFIG"
+	bundledPrometheusConfigMount    = "${FAK_PROMETHEUS_CONFIG:-./prometheus.yml}"
+	bundledPrometheusTemplateTarget = "host.docker.internal:8080"
 )
 
 var dashboardDockerAvailable = func() bool {
@@ -78,10 +84,13 @@ type richDashboardManager struct {
 	reason          string
 	baseURL         string
 	compose         string
+	stack           richDashboardStack
 	dockerAvailable func() bool
+	listenerAddress func() string
 	owned           bool
-	start           func(context.Context, string) error
-	stop            func(context.Context, string) error
+	closed          bool
+	start           func(context.Context, string, string) (richDashboardStack, error)
+	stop            func(context.Context, richDashboardStack) error
 	probe           func(context.Context, string) error
 	startedAt       time.Time
 }
@@ -99,6 +108,12 @@ type RichDashboardConfig struct {
 	Disabled    bool
 }
 
+type richDashboardStack struct {
+	composePath          string
+	prometheusConfigPath string
+	tempDir              string
+}
+
 func newRichDashboardManager(cfg RichDashboardConfig) *richDashboardManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &richDashboardManager{
@@ -107,6 +122,7 @@ func newRichDashboardManager(cfg RichDashboardConfig) *richDashboardManager {
 		compose: strings.TrimSpace(cfg.ComposePath),
 	}
 	m.dockerAvailable = dashboardDockerAvailable
+	m.listenerAddress = func() string { return "" }
 	m.start = startBundledGrafana
 	m.stop = stopBundledGrafana
 	m.probe = probeGrafana
@@ -134,7 +150,7 @@ func safeDashboardBaseURL(raw string) (*url.URL, error) {
 
 func (m *richDashboardManager) ensure() richDashboardSnapshot {
 	m.mu.Lock()
-	if m.state != "dormant" {
+	if m.state != "dormant" || m.closed {
 		s := m.snapshotLocked()
 		m.mu.Unlock()
 		return s
@@ -150,13 +166,18 @@ func (m *richDashboardManager) activate() {
 	base := m.baseURL
 	compose := m.compose
 	owned := false
+	var stack richDashboardStack
 	if base == "" {
-		base = "http://localhost:3000"
+		base = bundledGrafanaURL
 		ctx, cancel := context.WithTimeout(m.ctx, 3*time.Second)
 		ready := m.probe(ctx, base) == nil
 		cancel()
 		if ready {
 			m.mu.Lock()
+			if m.closed {
+				m.mu.Unlock()
+				return
+			}
 			m.baseURL, m.owned, m.state, m.reason = base, false, "ready", ""
 			m.mu.Unlock()
 			return
@@ -169,11 +190,16 @@ func (m *richDashboardManager) activate() {
 			return
 		}
 		if !m.dockerAvailable() {
-			m.fail("Docker is not available. Install/start Docker, or set FAK_GRAFANA_URL to an existing Grafana.")
+			m.fail("Docker is not available. FAK does not start Docker Desktop; start Docker, or set FAK_GRAFANA_URL to an existing Grafana.")
 			return
 		}
+		listenerAddress := ""
+		if m.listenerAddress != nil {
+			listenerAddress = m.listenerAddress()
+		}
 		ctx, cancel = context.WithTimeout(m.ctx, richDashboardTimeout)
-		err := m.start(ctx, compose)
+		var err error
+		stack, err = m.start(ctx, compose, listenerAddress)
 		cancel()
 		if err != nil {
 			m.fail("Bundled Grafana could not start: " + boundedDashboardError(err))
@@ -189,14 +215,23 @@ func (m *richDashboardManager) activate() {
 		cancel()
 		if err == nil {
 			m.mu.Lock()
-			m.baseURL, m.owned, m.compose, m.state, m.reason = base, owned, compose, "ready", ""
+			if m.closed {
+				m.mu.Unlock()
+				if owned {
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					_ = m.stop(ctx, stack)
+					cancel()
+				}
+				return
+			}
+			m.baseURL, m.owned, m.compose, m.stack, m.state, m.reason = base, owned, compose, stack, "ready", ""
 			m.mu.Unlock()
 			return
 		}
 		if time.Now().After(deadline) || m.ctx.Err() != nil {
 			if owned {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				_ = m.stop(ctx, compose)
+				_ = m.stop(ctx, stack)
 				cancel()
 			}
 			m.fail("Grafana did not become ready within 90 seconds. Check Docker and tools/grafana, or set FAK_GRAFANA_URL.")
@@ -225,12 +260,18 @@ func (m *richDashboardManager) snapshotLocked() richDashboardSnapshot {
 func (m *richDashboardManager) close() {
 	m.cancel()
 	m.mu.Lock()
-	owned, compose := m.owned, m.compose
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
+	m.closed = true
+	owned, stack := m.owned, m.stack
 	m.owned = false
+	m.stack = richDashboardStack{}
 	m.mu.Unlock()
-	if owned && compose != "" {
+	if owned && stack.composePath != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		_ = m.stop(ctx, compose)
+		_ = m.stop(ctx, stack)
 		cancel()
 	}
 }
@@ -253,20 +294,122 @@ func findBundledGrafanaCompose() string {
 	}
 }
 
-func startBundledGrafana(ctx context.Context, compose string) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", compose, "--profile", "local-prometheus", "up", "-d")
-	cmd.Dir = filepath.Dir(compose)
+func startBundledGrafana(ctx context.Context, compose, listenerAddress string) (richDashboardStack, error) {
+	stack, err := prepareBundledGrafanaStack(compose, listenerAddress)
+	if err != nil {
+		return richDashboardStack{}, err
+	}
+	cmd := bundledGrafanaComposeCommand(ctx, stack, "--profile", "local-prometheus", "up", "-d")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
+		cleanupErr := cleanupBundledGrafanaStack(stack)
+		return richDashboardStack{}, errors.Join(fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out))), cleanupErr)
 	}
-	return nil
+	return stack, nil
 }
 
-func stopBundledGrafana(ctx context.Context, compose string) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", compose, "down")
-	cmd.Dir = filepath.Dir(compose)
-	return cmd.Run()
+func stopBundledGrafana(ctx context.Context, stack richDashboardStack) error {
+	err := bundledGrafanaComposeCommand(ctx, stack, "down").Run()
+	return errors.Join(err, cleanupBundledGrafanaStack(stack))
+}
+
+func prepareBundledGrafanaStack(compose, listenerAddress string) (richDashboardStack, error) {
+	compose, err := filepath.Abs(strings.TrimSpace(compose))
+	if err != nil {
+		return richDashboardStack{}, fmt.Errorf("resolve Compose path: %w", err)
+	}
+	composeBytes, err := os.ReadFile(compose)
+	if err != nil {
+		return richDashboardStack{}, fmt.Errorf("read bundled Compose config: %w", err)
+	}
+	if !strings.Contains(string(composeBytes), bundledPrometheusConfigMount) {
+		return richDashboardStack{}, fmt.Errorf("bundled Compose config does not mount %s", bundledPrometheusConfigMount)
+	}
+	target, err := bundledPrometheusTargetForListener(listenerAddress)
+	if err != nil {
+		return richDashboardStack{}, err
+	}
+	templatePath := filepath.Join(filepath.Dir(compose), "prometheus.yml")
+	templateBytes, err := os.ReadFile(templatePath)
+	if err != nil {
+		return richDashboardStack{}, fmt.Errorf("read bundled Prometheus config: %w", err)
+	}
+	rendered, err := rewriteBundledPrometheusTarget(string(templateBytes), target)
+	if err != nil {
+		return richDashboardStack{}, err
+	}
+	tempDir, err := os.MkdirTemp("", "fak-grafana-")
+	if err != nil {
+		return richDashboardStack{}, fmt.Errorf("create temporary Grafana config directory: %w", err)
+	}
+	stack := richDashboardStack{
+		composePath:          compose,
+		prometheusConfigPath: filepath.Join(tempDir, "prometheus.yml"),
+		tempDir:              tempDir,
+	}
+	if err := os.WriteFile(stack.prometheusConfigPath, []byte(rendered), 0o644); err != nil {
+		_ = cleanupBundledGrafanaStack(stack)
+		return richDashboardStack{}, fmt.Errorf("write temporary Prometheus config: %w", err)
+	}
+	return stack, nil
+}
+
+func bundledPrometheusTargetForListener(listenerAddress string) (string, error) {
+	_, port, err := net.SplitHostPort(strings.TrimSpace(listenerAddress))
+	if err != nil {
+		return "", fmt.Errorf("gateway listener address %q is unavailable: %w", listenerAddress, err)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return "", fmt.Errorf("gateway listener address %q has an invalid port", listenerAddress)
+	}
+	// The container reaches the selected listener port through Docker's host alias.
+	// This never changes the gateway bind, so a loopback-only gateway stays off-host.
+	return net.JoinHostPort("host.docker.internal", strconv.Itoa(n)), nil
+}
+
+func rewriteBundledPrometheusTarget(templateText, target string) (string, error) {
+	needle := `targets: ["` + bundledPrometheusTemplateTarget + `"]`
+	if strings.Count(templateText, needle) != 1 {
+		return "", fmt.Errorf("bundled Prometheus config must contain exactly one default gateway target")
+	}
+	return strings.Replace(templateText, needle, `targets: ["`+target+`"]`, 1), nil
+}
+
+func bundledGrafanaComposeCommand(ctx context.Context, stack richDashboardStack, args ...string) *exec.Cmd {
+	argv := []string{"compose", "-f", stack.composePath}
+	argv = append(argv, args...)
+	cmd := exec.CommandContext(ctx, "docker", argv...)
+	cmd.Dir = filepath.Dir(stack.composePath)
+	cmd.Env = dashboardComposeEnv(os.Environ(), stack.prometheusConfigPath)
+	return cmd
+}
+
+func dashboardComposeEnv(env []string, prometheusConfigPath string) []string {
+	out := make([]string, 0, len(env)+1)
+	prefix := bundledPrometheusConfigEnv + "="
+	for _, entry := range env {
+		if len(entry) >= len(prefix) && strings.EqualFold(entry[:len(prefix)], prefix) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, prefix+prometheusConfigPath)
+}
+
+func cleanupBundledGrafanaStack(stack richDashboardStack) error {
+	var errs []error
+	if stack.prometheusConfigPath != "" {
+		if err := os.Remove(stack.prometheusConfigPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	if stack.tempDir != "" {
+		if err := os.Remove(stack.tempDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func probeGrafana(ctx context.Context, base string) error {
@@ -315,7 +458,7 @@ var richDashboardPage = template.Must(template.New("rich-dashboard").Parse(`<!do
 <title>fak rich dashboards</title>{{if eq .State "starting"}}<meta http-equiv="refresh" content="2">{{end}}
 <style>body{margin:0;background:#0b1020;color:#edf2ff;font:16px/1.5 system-ui,sans-serif}main{width:min(680px,calc(100% - 32px));margin:12vh auto;padding:28px;border:1px solid #2a3652;border-radius:16px;background:#141b2d}a{color:#8eb5ff}.state{color:#76e6c5;font-weight:700;text-transform:uppercase;letter-spacing:.08em}.error{color:#ffb4a8}</style></head>
 <body><main><div class="state {{if or (eq .State "unavailable") (eq .State "disabled")}}error{{end}}" role="status">{{.State}}</div><h1>Rich dashboards</h1>
-{{if eq .State "starting"}}<p>Starting the bundled Grafana stack on demand. Nothing heavy ran before this click. This page will continue automatically.</p>
+{{if eq .State "starting"}}<p>Checking for a healthy Grafana, then starting the bundled Compose stack on demand if needed. FAK does not start Docker Desktop.</p><p>A stack started by this gateway stops with the gateway; an already-healthy Grafana is adopted and left running. After a Docker or host restart, start Docker and the gateway, then click a rich dashboard again.</p>
 {{else}}<p>{{.Reason}}</p>{{end}}<p><a href="/">Return to the lightweight live dashboard</a></p></main></body></html>`))
 
 func (s *Server) handleRichDashboard(w http.ResponseWriter, r *http.Request) bool {

@@ -230,6 +230,9 @@ const DefaultDeferColdTools = true
 // Config configures a gateway Server. The zero value is not valid — use New,
 // which fills defaults and validates against the registered ABI.
 type Config struct {
+	// RichDashboards controls the lazy Grafana integration. New wires the manager
+	// to the Server's actual bound listener so owned bundled Prometheus instances
+	// scrape the live port, including an ephemeral or non-default loopback port.
 	RichDashboards RichDashboardConfig
 	// OTLPEndpoint enables bounded asynchronous OTLP/HTTP JSON trace export. Empty disables it.
 	OTLPEndpoint      string

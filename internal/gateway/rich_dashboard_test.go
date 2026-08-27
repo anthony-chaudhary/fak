@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -30,7 +32,12 @@ func TestRichDashboardDormantUntilFirstClickThenRedirects(t *testing.T) {
 
 	first := httptest.NewRecorder()
 	s.Handler().ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/?dashboard=rich&uid=fak-cache-health", nil))
-	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), "Starting the bundled Grafana stack on demand") {
+	body := first.Body.String()
+	if first.Code != http.StatusOK ||
+		!strings.Contains(body, "FAK does not start Docker Desktop") ||
+		!strings.Contains(body, "stops with the gateway") ||
+		!strings.Contains(body, "adopted and left running") ||
+		!strings.Contains(body, "After a Docker or host restart") {
 		t.Fatalf("first click = %d %q, want progress render", first.Code, first.Body.String())
 	}
 	waitDashboardState(t, m, "ready")
@@ -50,7 +57,7 @@ func TestRichDashboardConcurrentClicksDeduplicateStart(t *testing.T) {
 	defer m.close()
 	m.compose = "test-compose.yml"
 	m.baseURL = ""
-	m.start = func(context.Context, string) error { return nil }
+	m.listenerAddress = func() string { return "127.0.0.1:61666" }
 	var probes atomic.Int32
 	m.probe = func(context.Context, string) error {
 		if probes.Add(1) == 1 {
@@ -63,7 +70,12 @@ func TestRichDashboardConcurrentClicksDeduplicateStart(t *testing.T) {
 	m.dockerAvailable = func() bool { return true }
 
 	var starts atomic.Int32
-	m.start = func(context.Context, string) error { starts.Add(1); time.Sleep(20 * time.Millisecond); return nil }
+	m.start = func(context.Context, string, string) (richDashboardStack, error) {
+		starts.Add(1)
+		time.Sleep(20 * time.Millisecond)
+		return richDashboardStack{composePath: "test-compose.yml"}, nil
+	}
+	m.stop = func(context.Context, richDashboardStack) error { return nil }
 
 	const callers = 8
 	done := make(chan struct{}, callers)
@@ -76,6 +88,45 @@ func TestRichDashboardConcurrentClicksDeduplicateStart(t *testing.T) {
 	waitDashboardState(t, m, "ready")
 	if got := starts.Load(); got != 1 {
 		t.Fatalf("%d concurrent clicks started stack %d times, want 1", callers, got)
+	}
+}
+
+func TestRichDashboardCloseDuringActivationStopsLateOwnedStack(t *testing.T) {
+	m := newRichDashboardManager(RichDashboardConfig{})
+	m.compose = "compose.yml"
+	m.listenerAddress = func() string { return "127.0.0.1:61666" }
+	m.dockerAvailable = func() bool { return true }
+	var probes atomic.Int32
+	m.probe = func(context.Context, string) error {
+		if probes.Add(1) == 1 {
+			return errors.New("not ready before start")
+		}
+		return nil
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	m.start = func(context.Context, string, string) (richDashboardStack, error) {
+		close(started)
+		<-release
+		return richDashboardStack{composePath: "compose.yml"}, nil
+	}
+	stopped := make(chan struct{}, 1)
+	m.stop = func(context.Context, richDashboardStack) error {
+		stopped <- struct{}{}
+		return nil
+	}
+
+	m.ensure()
+	<-started
+	m.close()
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("stack that finished starting after gateway close was not stopped")
+	}
+	if m.snapshot().State == "ready" {
+		t.Fatal("closed manager accepted a late ready transition")
 	}
 }
 
@@ -129,9 +180,10 @@ func TestRichDashboardConfiguredURLOverrideSkipsDocker(t *testing.T) {
 }
 func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 	m := newRichDashboardManager(RichDashboardConfig{})
-	m.owned, m.compose = true, "compose.yml"
+	m.owned = true
+	m.stack = richDashboardStack{composePath: "compose.yml"}
 	var stops atomic.Int32
-	m.stop = func(context.Context, string) error { stops.Add(1); return nil }
+	m.stop = func(context.Context, richDashboardStack) error { stops.Add(1); return nil }
 	m.close()
 	m.close()
 	if got := stops.Load(); got != 1 {
@@ -140,7 +192,7 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 
 	external := newRichDashboardManager(RichDashboardConfig{})
 	external.baseURL = "http://grafana.test"
-	external.stop = func(context.Context, string) error { return errors.New("must not stop external Grafana") }
+	external.stop = func(context.Context, richDashboardStack) error { return errors.New("must not stop external Grafana") }
 	external.close()
 }
 
@@ -210,8 +262,11 @@ func TestRichDashboardReusesReadyBundledStackWithoutOwnership(t *testing.T) {
 	startCalls, stopCalls := 0, 0
 	m.probe = func(context.Context, string) error { return nil }
 	m.dockerAvailable = func() bool { t.Fatal("ready stack should not require Docker discovery"); return false }
-	m.start = func(context.Context, string) error { startCalls++; return nil }
-	m.stop = func(context.Context, string) error { stopCalls++; return nil }
+	m.start = func(context.Context, string, string) (richDashboardStack, error) {
+		startCalls++
+		return richDashboardStack{}, nil
+	}
+	m.stop = func(context.Context, richDashboardStack) error { stopCalls++; return nil }
 
 	if got := m.ensure(); got.State != "starting" {
 		t.Fatalf("first state = %q, want starting", got.State)
@@ -230,5 +285,144 @@ func TestRichDashboardReusesReadyBundledStackWithoutOwnership(t *testing.T) {
 	m.close()
 	if stopCalls != 0 {
 		t.Fatalf("stop calls = %d, want 0 for pre-existing stack", stopCalls)
+	}
+}
+
+func TestRichDashboardOwnedStartUsesServerBoundGatewayAddress(t *testing.T) {
+	s := &Server{}
+	s.installRichDashboardManager(RichDashboardConfig{})
+	m := s.richDashboards
+	defer m.close()
+	m.compose = "compose.yml"
+	m.dockerAvailable = func() bool { return true }
+	var probes atomic.Int32
+	m.probe = func(context.Context, string) error {
+		if probes.Add(1) == 1 {
+			return errors.New("not ready before start")
+		}
+		return nil
+	}
+	var gotAddress string
+	m.start = func(_ context.Context, compose, listenerAddress string) (richDashboardStack, error) {
+		gotAddress = listenerAddress
+		return richDashboardStack{composePath: compose}, nil
+	}
+	m.stop = func(context.Context, richDashboardStack) error { return nil }
+
+	bound := "127.0.0.1:61666"
+	s.boundAddr.Store(&bound)
+	m.ensure()
+	waitDashboardState(t, m, "ready")
+	if gotAddress != bound {
+		t.Fatalf("owned start gateway address = %q, want actual bound address %q", gotAddress, bound)
+	}
+}
+
+func TestPrepareBundledGrafanaStackUsesLivePortWithoutMutatingTemplate(t *testing.T) {
+	dir := t.TempDir()
+	compose := filepath.Join(dir, "docker-compose.yml")
+	composeText := "services:\n  prometheus:\n    volumes:\n      - \"" + bundledPrometheusConfigMount + ":/etc/prometheus/prometheus.yml:ro\"\n"
+	if err := os.WriteFile(compose, []byte(composeText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	templatePath := filepath.Join(dir, "prometheus.yml")
+	templateText := "scrape_configs:\n  - job_name: fak_gateway\n    static_configs:\n      - targets: [\"host.docker.internal:8080\"]\n"
+	if err := os.WriteFile(templatePath, []byte(templateText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stack, err := prepareBundledGrafanaStack(compose, "127.0.0.1:61666")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := os.ReadFile(stack.prometheusConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(generated); !strings.Contains(got, `targets: ["host.docker.internal:61666"]`) || strings.Contains(got, `targets: ["host.docker.internal:8080"]`) {
+		t.Fatalf("generated Prometheus config did not select live gateway port: %s", got)
+	}
+	tracked, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(tracked) != templateText {
+		t.Fatalf("tracked Prometheus template mutated:\n%s", tracked)
+	}
+	if stack.prometheusConfigPath == templatePath || filepath.Dir(stack.prometheusConfigPath) == dir {
+		t.Fatalf("generated config %q must be isolated from Compose source %q", stack.prometheusConfigPath, dir)
+	}
+	if err := cleanupBundledGrafanaStack(stack); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stack.prometheusConfigPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("generated config remains after cleanup: %v", err)
+	}
+	if _, err := os.Stat(stack.tempDir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("temporary directory remains after cleanup: %v", err)
+	}
+}
+
+func TestBundledGrafanaFilesWireGeneratedConfigMount(t *testing.T) {
+	compose := findBundledGrafanaCompose()
+	if compose == "" {
+		t.Fatal("bundled Grafana Compose file not found")
+	}
+	composeBytes, err := os.ReadFile(compose)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(composeBytes), bundledPrometheusConfigMount) {
+		t.Fatalf("bundled Compose does not mount generated Prometheus config through %s", bundledPrometheusConfigMount)
+	}
+	stack, err := prepareBundledGrafanaStack(compose, "127.0.0.1:61666")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := cleanupBundledGrafanaStack(stack); err != nil {
+			t.Error(err)
+		}
+	}()
+	generated, err := os.ReadFile(stack.prometheusConfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(generated), `targets: ["host.docker.internal:61666"]`) {
+		t.Fatalf("bundled generated config did not use live gateway port:\n%s", generated)
+	}
+}
+
+func TestBundledPrometheusTargetUsesOnlyValidatedListenerPort(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:61666", "[::1]:61666", "0.0.0.0:61666"} {
+		got, err := bundledPrometheusTargetForListener(addr)
+		if err != nil {
+			t.Fatalf("target(%q): %v", addr, err)
+		}
+		if got != "host.docker.internal:61666" {
+			t.Fatalf("target(%q) = %q, want Docker host alias with live port", addr, got)
+		}
+	}
+	for _, addr := range []string{"", "127.0.0.1", "127.0.0.1:not-a-port", "127.0.0.1:70000"} {
+		if _, err := bundledPrometheusTargetForListener(addr); err == nil {
+			t.Fatalf("target(%q) accepted unavailable/invalid listener", addr)
+		}
+	}
+}
+
+func TestDashboardComposeEnvOverridesStaleConfigPath(t *testing.T) {
+	got := dashboardComposeEnv([]string{
+		"A=1",
+		"fak_prometheus_config=stale.yml",
+		"B=2",
+	}, `C:\Temp\fak-grafana\prometheus.yml`)
+	var matches []string
+	for _, entry := range got {
+		if strings.HasPrefix(strings.ToUpper(entry), bundledPrometheusConfigEnv+"=") {
+			matches = append(matches, entry)
+		}
+	}
+	if len(matches) != 1 || matches[0] != `FAK_PROMETHEUS_CONFIG=C:\Temp\fak-grafana\prometheus.yml` {
+		t.Fatalf("Compose env config entries = %#v, want one current path", matches)
 	}
 }

@@ -4,7 +4,7 @@
 #
 # Network path (default):
 #   Grafana → http://prometheus:9091 → Prometheus → host.docker.internal:9095 → fleet_bottleneck.py
-#   Grafana → http://prometheus:9091 → Prometheus → host.docker.internal:8080 → fak serve
+#   Grafana → http://prometheus:9091 → Prometheus → host.docker.internal:<gateway-port> → fak serve
 #   Prometheus → alertmanager:9093 → host.docker.internal:9096 → fak slack alert (→ Slack outbox)
 #
 # Start the metrics sources first (on the host):
@@ -32,7 +32,10 @@ services:
     depends_on:
       - alertmanager
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # On-demand gateway startup sets FAK_PROMETHEUS_CONFIG to a generated,
+      # per-process copy whose fak_gateway target uses the live listener port.
+      # Manual `docker compose up` keeps using the tracked :8080 default.
+      - "${FAK_PROMETHEUS_CONFIG:-./prometheus.yml}:/etc/prometheus/prometheus.yml:ro"
       - ./prometheus-alerts.yml:/etc/prometheus/prometheus-alerts.yml:ro
       - fleet-prometheus-data:/prometheus
     command:
