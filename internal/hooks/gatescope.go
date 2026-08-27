@@ -66,6 +66,7 @@ func gateScopes() []gateScopeRow {
 		{"INDEX_SYNC", "gate_indexsync.go", SeamPreCommit, ClassLandsTree, ""},
 		{"FILE_ADMISSION", "gate_fileadmission.go", SeamPreCommit, ClassLandsTree, ""},
 		{"UNTIERED_LEAF", "gate_untieredleaf.go", SeamPreCommit, ClassLandsTree, ""},
+		{"CART_BEFORE_HORSE", "gate_cartbeforehorse.go", SeamPreCommit, ClassLandsTree, ""},
 		{"CONCEPT_ADMISSION", "gate_conceptadmission.go", SeamPreCommit, ClassLandsTree, ""},
 		{"TRUST_WIDENING", "gate_trustwidening.go", SeamPreCommit, ClassLandsTree, ""},
 		{"GOFMT", "gate_gofmt.go", SeamPreCommit, ClassLandsTree, ""},

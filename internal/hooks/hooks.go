@@ -137,6 +137,11 @@ func PreCommitGates() []Gate {
 		// the exact one-line edit (or `fak new-leaf`). Set FLEET_TIER_GUARD=block to hard-enforce it,
 		// ALLOW_UNTIERED_LEAF=1 to skip it once.
 		{Name: "UNTIERED_LEAF", ModeEnv: "FLEET_TIER_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_UNTIERED_LEAF", Check: gateUntieredLeaf},
+		// CART_BEFORE_HORSE is ADVISORY (#2521): for a newly introduced internal leaf, warn when
+		// benchmark/perf/profile/soak/fuzz/proof-matrix/testdata breadth arrives before a named,
+		// runnable applied path and its ordinary spine test/witness. The full HEAD-plus-staged view
+		// keeps an already-staged spine visible; existing leaves and docs-only commits are out of scope.
+		{Name: "CART_BEFORE_HORSE", ModeEnv: "FLEET_CART_BEFORE_HORSE_GUARD", DefaultMode: "warn", EscapeEnv: "ALLOW_CART_BEFORE_HORSE", Check: gateCartBeforeHorse},
 		{Name: "PARALLEL_FABRIC_NUDGE", ModeEnv: "FLEET_PF_NUDGE", DefaultMode: "warn", EscapeEnv: "ALLOW_PF_NUDGE", Check: checkParallelFabricNudge},
 		// GIT_HYGIENE_BYPASS is ADVISORY (issue #5588): DefaultMode "warn" so it never reds a shared
 		// trunk out of the box. It fires when a staged commit adds hand-rolled git-lock reclamation
