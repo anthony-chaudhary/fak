@@ -13,6 +13,11 @@ financial or site lifecycles, or a resolved rumor history. “Exhaustive” rema
 operating method—explicit taxonomy, dated evidence, and visible gaps—not a claim that
 the open web has a finite or fully enumerated boundary.
 
+Issue #9318 adds completed lifecycle outcomes for Graphcore/SoftBank, OctoAI/NVIDIA,
+and Ampere/SoftBank, including Ampere's disclosed pre-deal revenue decline and operating
+losses. Acquisition price, retained IP/team, shipped product, and useful goodput remain
+separate evidence states.
+
 Issue #9315 adds the operative post-Diffusion advanced-computing timeline: the May 2025
 withdrawal, January 2026 China case-by-case H200/MI325X review, and July 2026 UAE A:5 /
 approved-end-user treatment. License posture remains separate from shipment and capacity.
@@ -50,9 +55,9 @@ The following counts are derived from `index.json`, not hand-maintained estimate
 
 | Measure | Current value | Audit note |
 |---|---:|---|
-| Entries | **193** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
-| Unique source URLs | **188** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
-| Distinct entity labels | **158** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
+| Entries | **196** | Every entry has an ID, entity, category, evidence class, confidence, `published_at`, `event_at`, source title, and source URL. |
+| Unique source URLs | **191** | Repeated URLs represent distinct claims/events extracted from the same source; they are not independent corroboration. |
+| Distinct entity labels | **161** | Joint labels such as “OpenAI / Oracle / SoftBank” are one ledger label, not three independently audited entities. |
 | Categories | **12** | `accelerator_platform` 3; `ai_cloud` 7; `datacenter_physical` 19; `frontier_lab` 59; `hyperscaler` 16; `market_signal` 19; `policy_regulation` 5; `serving_system` 25; `standard` 3; `supply_chain` 20; `workload_model` 3; `workload_trace` 8. |
 | Evidence classes used | **10** | `official_statement` 86; `vendor_claim` 27; `reported_observation` 15; `production_measurement` 9; `production_observation` 8; `benchmark_measurement` 16; `analyst_estimate` 5; `synthetic_experiment` 6; `rumor` 2; `reported_estimate` 1. The allowed `inference` class currently has zero entries. |
 | Confidence labels | **4** | `high` 111; `medium_high` 54; `medium` 8; `low` 2. Confidence describes evidentiary strength, not business likelihood. |

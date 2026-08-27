@@ -76,6 +76,18 @@ Nebius, Crusoe, Lambda, Together AI, Fluidstack, Nscale, Groq, Cerebras, SambaNo
 d-Matrix, Tenstorrent, Positron, inference/runtime vendors, KV-cache/storage vendors, optical
 and cooling startups, and generation/datacenter developers.
 
+## Completed acquisition outcomes
+
+| Date | Company / acquirer | Outcome | Evidence preserved | Missing operating proof |
+|---|---|---|---|---|
+| 2024-07-11 | Graphcore / SoftBank | Completed; Graphcore became a wholly owned subsidiary retaining its name and UK headquarters | Completed ownership change and strategic accelerator option | Purchase price, shipped post-deal systems, customer adoption, useful goodput |
+| 2024-09-30 | OctoAI / NVIDIA | Acquired team and serving technology later appear in NVIDIA personnel and FlashInfer provenance | Post-deal team/technology integration | Transaction terms, hosted-service migration/shutdown, retained customers/revenue |
+| 2025-11-25 | Ampere / SoftBank | Completed $6.5B acquisition; the original filing disclosed steep revenue decline and three operating-loss years | Completion, price, and historical financial deterioration | Unit shipments, customer concentration, roadmap delivery, AI-workload share |
+
+`Acquired` is neither `active-independent` nor `failed-without-value`. Record ownership,
+retained team/IP/product, customer migration, shipped artifacts, and runtime evidence
+separately.
+
 ## Event-state rules
 
 1. Funding is evidence of financing, not technical capability, adoption, profitability, or

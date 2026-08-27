@@ -3,7 +3,7 @@
   "updated_at": "2026-08-26T20:52:00-07:00",
   "issue": 9269,
   "root_issue": 9269,
-  "latest_slice_issue": 9315,
+  "latest_slice_issue": 9318,
   "status": "initial_spine_incomplete",
   "scope_statement": "Dated, source-linked evidence about frontier labs, hyperscalers, AI clouds, datacenters, accelerators, serving systems, workload distributions, economics, releases, news, startups, and rumors that can change fak architecture or benchmark assumptions.",
   "methodology": {
@@ -56,7 +56,7 @@
     "rumor"
   ],
   "coverage": {
-    "entry_count": 193,
+    "entry_count": 196,
     "categories": [
       "accelerator_platform",
       "ai_cloud",
@@ -92,6 +92,7 @@
       "Alibaba Qwen",
       "Alphabet",
       "Amazon",
+      "Ampere Computing / SoftBank",
       "Anthropic",
       "Anthropic / AWS",
       "Anthropic / Decart",
@@ -130,6 +131,7 @@
       "Google Cloud",
       "Google DeepMind",
       "Google internal developer tools",
+      "Graphcore / SoftBank",
       "Groq",
       "HUMAIN / SDAIA",
       "HeteroScale production study",
@@ -171,6 +173,7 @@
       "NVIDIA Dynamo Planner",
       "NVIDIA Nemotron",
       "Nebius Group",
+      "OctoAI / NVIDIA",
       "OpenAI",
       "OpenAI / G42 / Oracle / NVIDIA / Cisco / SoftBank",
       "OpenAI / Georgia Power",
@@ -7473,6 +7476,118 @@
       ],
       "fak_implications": [
         "Version hardware-availability envelopes by destination, end user, item, license/exception, effective date, and actual delivery receipts."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "graphcore-softbank-acquisition-2024",
+      "category": "market_signal",
+      "entity": "Graphcore / SoftBank",
+      "topic": [
+        "acquisition",
+        "alternative accelerator",
+        "AI compute",
+        "startup lifecycle"
+      ],
+      "published_at": "2024-07-11",
+      "event_at": "2024-07-11",
+      "source_title": "Graphcore joins SoftBank Group to build next generation of AI compute",
+      "source_url": "https://www.graphcore.ai/posts/graphcore-joins-softbank-group-to-build-next-generation-of-ai-compute",
+      "source_kind": "company acquisition announcement",
+      "evidence_class": "completed acquisition",
+      "confidence": "high",
+      "claim": "Graphcore announced that SoftBank had acquired the company; Graphcore became a wholly owned subsidiary and continued under its existing name and UK headquarters.",
+      "quantified": {},
+      "assumptions": [
+        "A completed acquisition is a company-lifecycle outcome, not evidence that IPU hardware is deployed, competitive, or schedulable for frontier workloads."
+      ],
+      "contradictions_or_limits": [
+        "Purchase price and pre-acquisition financial condition were not disclosed in the company announcement.",
+        "Post-acquisition hiring and roadmap claims do not establish shipped systems or useful goodput."
+      ],
+      "fak_implications": [
+        "Track accelerator vendors through independence, strategic acquisition, retained roadmap, shipped systems, and engine/runtime evidence."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "ampere-softbank-completed-2025",
+      "category": "market_signal",
+      "entity": "Ampere Computing / SoftBank",
+      "topic": [
+        "acquisition",
+        "CPU",
+        "AI compute",
+        "startup lifecycle",
+        "financials"
+      ],
+      "published_at": "2025-11-26",
+      "event_at": "2025-11-25",
+      "source_title": "Completion of Acquisition of Ampere Computing Holdings LLC",
+      "source_url": "https://group.softbank/en/news/press/20251126",
+      "source_kind": "acquirer completion notice and transaction filing",
+      "evidence_class": "completed acquisition with disclosed financial history",
+      "confidence": "high",
+      "claim": "SoftBank completed its $6.5B acquisition of Ampere, making it a wholly owned subsidiary; the original filing disclosed revenue falling from $151.8M in 2022 to $16.5M in 2024 alongside three years of operating losses.",
+      "quantified": {
+        "acquisition_price_usd": 6500000000,
+        "revenue_2022_usd": 151822000,
+        "revenue_2023_usd": 46704000,
+        "revenue_2024_usd": 16460000,
+        "operating_loss_2022_usd": 518290000,
+        "operating_loss_2023_usd": 714689000,
+        "operating_loss_2024_usd": 510623000,
+        "net_assets_2024_usd": -1513315000
+      },
+      "assumptions": [
+        "Acquisition value reflects strategic control and option value; it is not a neutral measure of product revenue, installed CPUs, or AI goodput."
+      ],
+      "contradictions_or_limits": [
+        "The completion notice does not disclose customer concentration, unit shipments, roadmap delivery, or AI-workload share.",
+        "Historic financials are company-wide accounting results, not product benchmark evidence."
+      ],
+      "fak_implications": [
+        "Preserve financial distress, strategic acquisition, architecture roadmap, shipment, and workload fitness as separate dimensions."
+      ],
+      "rumor": {
+        "is_rumor": false,
+        "status": "not_applicable"
+      }
+    },
+    {
+      "id": "octoai-nvidia-acquisition-2024",
+      "category": "market_signal",
+      "entity": "OctoAI / NVIDIA",
+      "topic": [
+        "acquisition",
+        "inference platform",
+        "serving software",
+        "startup lifecycle"
+      ],
+      "published_at": "2025-05-22",
+      "event_at": "2024-09-30",
+      "source_title": "Blackwell Breaks the 1,000 TPS/User Barrier With Meta’s Llama 4 Maverick",
+      "source_url": "https://developer.nvidia.com/blog/blackwell-breaks-the-1000-tps-user-barrier-with-metas-llama-4-maverick/",
+      "source_kind": "acquirer technical publication with personnel provenance",
+      "evidence_class": "post-acquisition integration evidence",
+      "confidence": "medium-high",
+      "claim": "NVIDIA identifies former OctoAI product staff as having joined through NVIDIA’s 2024 acquisition of OctoAI; later NVIDIA material also identifies FlashInfer as originating partly at OctoAI and continuing in NVIDIA’s serving stack.",
+      "quantified": {},
+      "assumptions": [
+        "Personnel and open-source technology integration are post-acquisition evidence, not proof that the former hosted OctoAI service continued unchanged."
+      ],
+      "contradictions_or_limits": [
+        "NVIDIA did not publish transaction terms or a standalone acquisition announcement in this source.",
+        "The source establishes team/technology provenance but not OctoAI customer migration, service shutdown dates, revenue, or retained contracts."
+      ],
+      "fak_implications": [
+        "Track whether acquired serving technology persists as a product, library, team, or kernel contribution rather than treating the startup as simply active or failed."
       ],
       "rumor": {
         "is_rumor": false,
