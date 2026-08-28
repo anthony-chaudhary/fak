@@ -198,6 +198,65 @@ class NativeFallbackTest(unittest.TestCase):
             self.fail("owned supervisor was not stopped by down.sh")
         self.assertFalse(pid_file.exists())
 
+    def test_launchctl_submit_preserves_bash_c_argument_positions(self) -> None:
+        root = self.make_fixture()
+        run_dir = root / "tools" / "grafana" / ".run"
+        run_dir.mkdir()
+        script = (root / "tools" / "grafana" / "up.sh").read_text(
+            encoding="utf-8"
+        )
+        start = script.index("start_bg() {")
+        end = script.index("\n}\n", start) + 3
+        owner = "launchctl-argv-owner"
+        env = os.environ.copy()
+        env.update({"RUN_DIR_UNDER_TEST": str(run_dir), "RUN_ID_UNDER_TEST": owner})
+
+        subprocess.run(
+            [
+                "/bin/bash",
+                "-c",
+                (
+                    f"{script[start:end]}\n"
+                    "port_live() { return 1; }\n"
+                    "log() { :; }\n"
+                    "die() { printf '%s\\n' \"$*\" >&2; exit 1; }\n"
+                    "uname() { printf 'Darwin\\n'; }\n"
+                    "launchctl() {\n"
+                    "  [ \"${1:-}\" = submit ] || return 0\n"
+                    "  shift\n"
+                    "  local executable= arg0\n"
+                    "  while [ \"${1:-}\" != -- ]; do\n"
+                    "    [ \"$1\" != -p ] || executable=\"$2\"\n"
+                    "    shift 2\n"
+                    "  done\n"
+                    "  shift\n"
+                    "  if [ -z \"$executable\" ]; then executable=\"$1\"; shift; fi\n"
+                    "  arg0=\"$1\"\n"
+                    "  shift\n"
+                    "  (exec -a \"$arg0\" \"$executable\" \"$@\")\n"
+                    "}\n"
+                    "RUN_DIR=\"$RUN_DIR_UNDER_TEST\"\n"
+                    "RUN_ID=\"$RUN_ID_UNDER_TEST\"\n"
+                    "start_bg launchctl_argv '65534 /' /usr/bin/true\n"
+                ),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        pid_file = run_dir / "launchctl_argv.pid"
+        metadata = dict(
+            line.split("=", 1)
+            for line in pid_file.read_text(encoding="utf-8").splitlines()
+        )
+        self.assertEqual(metadata["owner"], owner)
+        self.assertEqual(metadata["supervisor"], "launchd")
+        self.assertEqual(
+            metadata["label"], self.launchd_label("launchctl_argv", owner)
+        )
+
     @unittest.skipUnless(sys.platform == "darwin", "requires real launchd")
     def test_real_up_down_launchd_lifecycle_and_adoption(self) -> None:
         try:

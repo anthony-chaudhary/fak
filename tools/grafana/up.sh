@@ -118,7 +118,9 @@ start_bg() {  # name port-check-path command… → records only processes this 
     local label="com.fak.grafana.$(id -u).${name//_/-}.$RUN_ID"
     # launchd owns the wrapper after this launcher exits. The wrapper records
     # its current PID on every launchd restart and forwards teardown to its child.
+    # With -p, launchctl takes argv[0] after --, so supply it before Bash's -c.
     launchctl submit \
+      -p /bin/bash \
       -l "$label" \
       -o "$RUN_DIR/$name.log" \
       -e "$RUN_DIR/$name.log" \
