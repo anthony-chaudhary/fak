@@ -1,6 +1,7 @@
 package nativeperf
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -174,5 +175,35 @@ func TestFrontDoorErrorsRequireRecovery(t *testing.T) {
 				t.Fatalf("error = %v, want recovery containing %q", err, test.recovery)
 			}
 		})
+	}
+}
+
+func TestFrontDoorDeterminism(t *testing.T) {
+	graph := ActiveGraph()
+	asOf := time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)
+	first, err := BuildFrontDoorSnapshot(graph, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := BuildFrontDoorSnapshot(graph, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("same graph and date produced different snapshots:\nfirst:  %+v\nsecond: %+v", first, second)
+	}
+
+	for _, surface := range []string{FrontDoorSurfaceREADME, FrontDoorSurfaceIndex, FrontDoorSurfaceLatest} {
+		firstBlock, err := FrontDoorBlock(first, surface)
+		if err != nil {
+			t.Fatalf("first FrontDoorBlock(%q): %v", surface, err)
+		}
+		secondBlock, err := FrontDoorBlock(second, surface)
+		if err != nil {
+			t.Fatalf("second FrontDoorBlock(%q): %v", surface, err)
+		}
+		if firstBlock != secondBlock {
+			t.Fatalf("same snapshot produced different %q bytes:\nfirst:  %q\nsecond: %q", surface, firstBlock, secondBlock)
+		}
 	}
 }
