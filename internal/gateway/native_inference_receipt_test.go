@@ -9,12 +9,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelengine"
 )
 
 func nativeReceiptServer(t *testing.T) *Server {
 	t.Helper()
+	// Gateway tests intentionally reset the process-global ABI registry. Restore
+	// the production in-kernel engine so this wire witness is order-independent.
+	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_SEED", "9070")
 	cfg := kvmmuSynthCfg()
@@ -71,6 +76,9 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	if receipt.Model != "synthetic-live" || receipt.Engine != "inkernel" || receipt.Backend != "cpu-ref" || receipt.ForwardPath != "cpu/reference" || receipt.Q4K || receipt.FallbackActive {
 		t.Fatalf("execution identity = %+v, want exact synthetic inkernel cpu/reference without Q4K or fallback", receipt)
 	}
+	if receipt.Qwen35MetalForwardSequence != nil {
+		t.Fatalf("CPU receipt acquired Metal sequence evidence: %+v", receipt.Qwen35MetalForwardSequence)
+	}
 }
 
 func TestNativeInferenceReceiptDefaultWireOmission(t *testing.T) {
@@ -119,11 +127,28 @@ func TestNativeInferenceReceiptUnsupportedRequestsFailClosed(t *testing.T) {
 }
 
 func TestNativeInferenceReceiptJSONShapeUsesChosenTokenArrays(t *testing.T) {
-	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{TokenIDs: []int{7}, TokenLogprobs: []float64{-1}}})
+	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{
+		TokenIDs:      []int{7},
+		TokenLogprobs: []float64{-1},
+		Qwen35MetalForwardSequence: &model.Qwen35MetalForwardSequenceReceipt{
+			Path:              model.Qwen35MetalGDNSequenceForwardPath,
+			Available:         true,
+			Tokens:            32,
+			CommandBuffers:    1,
+			Encoders:          7,
+			TerminalWaits:     1,
+			TerminalReadbacks: 1,
+			Committed:         true,
+			CompletedWait:     true,
+			TimingAvailable:   true,
+			GPUMilliseconds:   2.5,
+			WaitMilliseconds:  3.5,
+		},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`} {
+	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`, `"qwen35_metal_forward_sequence"`, `"path":"metal/qwen35-gdn-preprojected-sequence-v1"`, `"tokens":32`, `"command_buffers":1`, `"encoders":7`, `"terminal_waits":1`, `"terminal_readbacks":1`, `"committed":true`, `"completed_wait":true`, `"timing_available":true`, `"gpu_milliseconds":2.5`, `"wait_milliseconds":3.5`} {
 		if !bytes.Contains(raw, []byte(field)) {
 			t.Fatalf("receipt JSON %s missing %s", raw, field)
 		}

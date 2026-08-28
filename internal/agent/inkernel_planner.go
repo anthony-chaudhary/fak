@@ -1061,19 +1061,25 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 
 func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *NativeInferenceReceipt {
 	backend, forwardPath := p.executionIdentity()
+	var qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt
+	if measurement.qwen35MetalForwardSequence.Available {
+		snapshot := measurement.qwen35MetalForwardSequence
+		qwen35MetalForwardSequence = &snapshot
+	}
 	return &NativeInferenceReceipt{
-		TokenIDs:           append([]int(nil), measurement.tokenIDs...),
-		TokenLogprobs:      append([]float64(nil), measurement.logprobs...),
-		PrefillSeconds:     prefillS,
-		TTFTSeconds:        measurement.ttftS,
-		DecodeSeconds:      decodeS,
-		Model:              p.modelID,
-		Engine:             "inkernel",
-		Backend:            backend,
-		ForwardPath:        forwardPath,
-		Q4K:                p.q4k,
-		FallbackActive:     false,
-		PrefillChunkTokens: p.nativeInferencePrefillChunkTokens(),
+		TokenIDs:                   append([]int(nil), measurement.tokenIDs...),
+		TokenLogprobs:              append([]float64(nil), measurement.logprobs...),
+		PrefillSeconds:             prefillS,
+		TTFTSeconds:                measurement.ttftS,
+		DecodeSeconds:              decodeS,
+		Model:                      p.modelID,
+		Engine:                     "inkernel",
+		Backend:                    backend,
+		ForwardPath:                forwardPath,
+		Q4K:                        p.q4k,
+		FallbackActive:             false,
+		PrefillChunkTokens:         p.nativeInferencePrefillChunkTokens(),
+		Qwen35MetalForwardSequence: qwen35MetalForwardSequence,
 	}
 }
 

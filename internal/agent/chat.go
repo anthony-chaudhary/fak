@@ -19,6 +19,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/cachemeta"
 	"github.com/anthony-chaudhary/fak/internal/httptrust"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
 )
 
@@ -460,6 +461,9 @@ type NativeInferenceReceipt struct {
 	Q4K                bool      `json:"q4k"`
 	FallbackActive     bool      `json:"fallback_active"`
 	PrefillChunkTokens int       `json:"prefill_chunk_tokens"`
+	// Qwen35MetalForwardSequence is present only when the model session produced
+	// terminal evidence for the native whole-sequence Metal graph.
+	Qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt `json:"qwen35_metal_forward_sequence,omitempty"`
 }
 
 // InKernelQwenQ4KPrefillChunkConfigError is retained by a planner when the

@@ -38,6 +38,10 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // it is sized to the logits vocab on first use and never persists across turns.
 func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	p.qwen35MetalGDNExecuted.Store(false)
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
+	}
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -234,6 +238,9 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
 		var executed bool
 		executed, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
+		if measurement != nil && !measurement.inferenceDisabled {
+			measurement.qwen35MetalForwardSequence = s.Qwen35MetalForwardSequenceReceipt()
+		}
 		if err != nil {
 			return
 		}
@@ -287,10 +294,6 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	var counts []int32
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
-	}
-	var measurement *nativeInferenceMeasurement
-	if len(measurementOpt) > 0 {
-		measurement = measurementOpt[0]
 	}
 	ln := &decodeLane{
 		s:           s,
@@ -402,16 +405,17 @@ type decodeLane struct {
 }
 
 type nativeInferenceMeasurement struct {
-	startedAt             time.Time
-	tokenIDs              []int
-	logprobs              []float64
-	ttftS                 float64
-	inferenceDisabled     bool
-	traceNow              func() time.Time
-	traceStartedAt        time.Time
-	traceEvents           []NativeDecodeTraceEvent
-	decodeTokenIDsEnabled bool
-	decodeTokenIDs        []int
+	startedAt                  time.Time
+	tokenIDs                   []int
+	logprobs                   []float64
+	ttftS                      float64
+	inferenceDisabled          bool
+	traceNow                   func() time.Time
+	traceStartedAt             time.Time
+	traceEvents                []NativeDecodeTraceEvent
+	decodeTokenIDsEnabled      bool
+	decodeTokenIDs             []int
+	qwen35MetalForwardSequence model.Qwen35MetalForwardSequenceReceipt
 }
 
 func (m *nativeInferenceMeasurement) reset() {
@@ -424,6 +428,7 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.traceStartedAt = time.Time{}
 	m.traceEvents = m.traceEvents[:0]
 	m.decodeTokenIDs = m.decodeTokenIDs[:0]
+	m.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{}
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {

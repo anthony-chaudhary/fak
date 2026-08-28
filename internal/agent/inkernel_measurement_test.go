@@ -128,6 +128,59 @@ func TestNativeInferenceMeasurementOOMRetryDropsPartialAttempt(t *testing.T) {
 	}
 }
 
+func TestNativeInferenceReceiptCarriesRequestLocalQwen35MetalForwardSequence(t *testing.T) {
+	p := &InKernelPlanner{modelID: "qwen35-metal-receipt", metal: true, q4k: true}
+	const requests = 32
+	type result struct {
+		index   int
+		receipt *NativeInferenceReceipt
+	}
+	results := make(chan result, requests)
+	start := make(chan struct{})
+	for i := 0; i < requests; i++ {
+		go func(index int) {
+			measurement := &nativeInferenceMeasurement{}
+			if index%2 == 0 {
+				measurement.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{
+					Path:              model.Qwen35MetalGDNSequenceForwardPath,
+					Available:         true,
+					Tokens:            index + 1,
+					CommandBuffers:    1,
+					Encoders:          7,
+					TerminalWaits:     1,
+					TerminalReadbacks: 1,
+					Committed:         true,
+					CompletedWait:     true,
+					TimingAvailable:   true,
+					GPUMilliseconds:   2.5,
+					WaitMilliseconds:  3.5,
+				}
+			}
+			<-start
+			got := p.buildNativeInferenceReceipt(measurement, 0, 0)
+			measurement.reset()
+			results <- result{index: index, receipt: got}
+		}(i)
+	}
+	close(start)
+	for range requests {
+		got := <-results
+		sequence := got.receipt.Qwen35MetalForwardSequence
+		if got.index%2 != 0 {
+			if sequence != nil {
+				t.Fatalf("request %d received another request's Metal sequence receipt: %+v", got.index, sequence)
+			}
+			continue
+		}
+		if sequence == nil || !sequence.Available || sequence.Tokens != got.index+1 {
+			t.Fatalf("request %d sequence receipt = %+v, want available request-local T%d receipt", got.index, sequence, got.index+1)
+		}
+		if sequence.Path != model.Qwen35MetalGDNSequenceForwardPath || sequence.CommandBuffers != 1 || sequence.Encoders != 7 || sequence.TerminalWaits != 1 || sequence.TerminalReadbacks != 1 || !sequence.Committed || !sequence.CompletedWait || !sequence.TimingAvailable || sequence.GPUMilliseconds != 2.5 || sequence.WaitMilliseconds != 3.5 {
+			t.Fatalf("request %d sequence receipt lost typed model witnesses: %+v", got.index, sequence)
+		}
+	}
+}
+
 func TestNativeInferenceReceiptRejectsModifiedLogits(t *testing.T) {
 	p := NewInKernelPlanner(model.NewSynthetic(tinyConcurrencyConfig()), loadProbeTok(t), "synthetic-strict", false, nil, false)
 	positive := 0.5
