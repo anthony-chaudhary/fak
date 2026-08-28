@@ -27,8 +27,8 @@
     },
     {
       "id": "dispatch-status-doc",
-      "name": "Issue-dispatch status headline",
-      "path": "docs/dispatch-status.md",
+      "name": "Issue-dispatch operating guide",
+      "path": "docs/dispatch-loop.md",
       "note": "The fleet operations surface. closure_rate is an HONESTY ratio, not throughput; the formula is printed inline."
     }
   ]
