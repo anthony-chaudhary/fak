@@ -1046,14 +1046,20 @@ func runResumeHold(stdout, stderr io.Writer, argv []string) int {
 	regDirFlag := fs.String("reg-dir", "", "registry dir holding resume_drivestate.jsonl (default: the same regDir the watchdog resolves — $FLEET_REG_DIR, else the host Fleet registry, else <repo>/tools/_registry)")
 	list := fs.Bool("list", false, "list the current effective operator holds instead of setting one")
 	asJSON := fs.Bool("json", false, "with --list, emit the holds as JSON")
-	if !parseFlags(fs, argv) {
+	if listRequestedRaw(argv) {
+		if !parseFlags(fs, argv) {
+			return 2
+		}
+		return renderResumeHolds(stdout, stderr, resolveSweepRegDir(*regDirFlag), *asJSON)
+	}
+	sid, parsed := parseInterspersedResumeHold(fs, argv, stderr)
+	if !parsed {
 		return 2
 	}
 	regDir := resolveSweepRegDir(*regDirFlag)
-	if *list || fs.NArg() == 0 {
+	if *list {
 		return renderResumeHolds(stdout, stderr, regDir, *asJSON)
 	}
-	sid := strings.TrimSpace(fs.Arg(0))
 	st, ok := normalizeHoldState(*state)
 	if !ok {
 		fmt.Fprintf(stderr, "fak resume hold: bad --state %q (want paused, draining, or stopped)\n", *state)
