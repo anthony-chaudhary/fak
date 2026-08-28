@@ -1,0 +1,202 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "enable": true,
+        "expr": "changes(fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\",state!=\"ready\"}[1m]) > 0",
+        "iconColor": "red",
+        "name": "Unavailable artifact transitions",
+        "tagKeys": "state,correlation_key",
+        "textFormat": "[Open exact artifact](https://artifacts.example.invalid/native/{{correlation_key}}/{{kind}}) \u2014 {{state}}",
+        "titleFormat": "Native artifact unavailable"
+      }
+    ]
+  },
+  "description": "Bounded fak-native artifact index. Exact correlation links fail honestly for broken, expired, private, untrusted-scheme, and redacted evidence.",
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "targetBlank": true,
+              "title": "Open exact artifact",
+              "url": "https://artifacts.example.invalid/native/${__field.labels.correlation_key}/${__field.labels.kind}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 18,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\"}",
+          "instant": true,
+          "legendFormat": "{{kind}} \u00b7 {{state}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Exact native artifacts",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "links": [
+            {
+              "targetBlank": true,
+              "title": "Open exact artifact",
+              "url": "https://artifacts.example.invalid/native/${__field.labels.correlation_key}/${__field.labels.kind}"
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "editorMode": "code",
+          "expr": "count by (state) (fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\"})",
+          "instant": true,
+          "legendFormat": "{{kind}} \u00b7 {{state}}",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "Artifact states",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 6,
+        "x": 18,
+        "y": 7
+      },
+      "id": 3,
+      "options": {
+        "content": "### Honest drill-down\n- Engine is **fak-native** only.\n- Select one exact `npc1_\u2026` key.\n- Broken, expired, private, untrusted-scheme, and redacted links remain unavailable.\n- Fixture URLs use `.invalid`; they are UI proof, not benchmark evidence.",
+        "mode": "markdown"
+      },
+      "title": "Artifact guardrails",
+      "type": "text"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "fak",
+    "native-performance",
+    "artifacts"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      },
+      {
+        "allValue": "npc1_[0-9a-f]{32}",
+        "current": {
+          "selected": true,
+          "text": "npc1_0123456789abcdef0123456789abcdef",
+          "value": "npc1_0123456789abcdef0123456789abcdef"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(fak_native_artifact_info{engine=\"fak-native\"}, correlation_key)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Correlation key",
+        "multi": false,
+        "name": "correlation_key",
+        "options": [],
+        "query": {
+          "query": "label_values(fak_native_artifact_info{engine=\"fak-native\"}, correlation_key)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "/^npc1_[0-9a-f]{32}$/",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "fak-native performance artifacts",
+  "uid": "fak-native-artifacts",
+  "version": 1,
+  "weekStart": ""
+}

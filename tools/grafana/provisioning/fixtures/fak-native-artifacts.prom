@@ -1,0 +1,12 @@
+# Synthetic dashboard fixture only; .invalid links cannot resolve to private infrastructure.
+# TYPE fak_native_artifact_info gauge
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_0123456789abcdef0123456789abcdef",kind="benchmark_receipt",state="ready"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_0123456789abcdef0123456789abcdef",kind="metal_profile_bundle",state="ready"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_0123456789abcdef0123456789abcdef",kind="cuda_profile_bundle",state="ready"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_0123456789abcdef0123456789abcdef",kind="kernel_trace",state="ready"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_0123456789abcdef0123456789abcdef",kind="comparison_report",state="ready"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_11111111111111111111111111111111",kind="benchmark_receipt",state="broken"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_22222222222222222222222222222222",kind="benchmark_receipt",state="expired"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_33333333333333333333333333333333",kind="benchmark_receipt",state="private"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_44444444444444444444444444444444",kind="benchmark_receipt",state="untrusted_scheme"} 1
+fak_native_artifact_info{engine="fak-native",correlation_key="npc1_55555555555555555555555555555555",kind="benchmark_receipt",state="redacted"} 1

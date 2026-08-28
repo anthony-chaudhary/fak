@@ -1,0 +1,33 @@
+{
+  "schema": "fak-grafana-dashboard-contract/1",
+  "dashboard": "../../dashboards/fak-native-artifacts.json",
+  "uid": "fak-native-artifacts",
+  "engine": "fak-native",
+  "correlation": {
+    "label": "correlation_key",
+    "pattern": "^npc1_[0-9a-f]{32}$",
+    "cardinality": "bounded index only; never an unbounded request label"
+  },
+  "artifact_kinds": [
+    "benchmark_receipt",
+    "metal_profile_bundle",
+    "cuda_profile_bundle",
+    "kernel_trace",
+    "comparison_report"
+  ],
+  "states": [
+    "ready",
+    "broken",
+    "expired",
+    "private",
+    "untrusted_scheme",
+    "redacted"
+  ],
+  "required_queries": [
+    "fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\"}",
+    "count by (state) (fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\"})",
+    "changes(fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\",state!=\"ready\"}[1m]) > 0"
+  ],
+  "required_data_link": "https://artifacts.example.invalid/native/${__field.labels.correlation_key}/${__field.labels.kind}",
+  "fixture": "../fixtures/fak-native-artifacts.prom"
+}
