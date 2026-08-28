@@ -40,6 +40,50 @@ func TestCollectiveCommRowCoversNCCLProcessGroup(t *testing.T) {
 	}
 }
 
+func TestCUDAQwenGDNPriorArt(t *testing.T) {
+	op, ok := BySlug("cuda-qwen-gdn")
+	if !ok {
+		t.Fatal("cuda-qwen-gdn row missing from the SOTA matrix")
+	}
+	for _, p := range []string{
+		"internal/compute/cuda_qwen35_gdn.go",
+		"internal/compute/cuda_qwen35_gdn_sequence.go",
+		"internal/compute/cuda_kernels.go",
+		"internal/compute/cuda_kernels.cu",
+	} {
+		if !anyGlobMatches(op.FileGlobs, p) {
+			t.Errorf("cuda-qwen-gdn FileGlobs %v do not cover %s", op.FileGlobs, p)
+		}
+	}
+	if op.Route != RouteBorrow {
+		t.Errorf("cuda-qwen-gdn route = %q, want %q", op.Route, RouteBorrow)
+	}
+	for _, pin := range []string{
+		"FLA@bccaf2d3cf4d9badc8be050a2c71616220b246d7",
+		"llama.cpp@ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0",
+		"MLX-LM@cc8521569694a3240b52c98acffd100d59b4c755",
+	} {
+		if !strings.Contains(op.SOTA, pin) {
+			t.Errorf("cuda-qwen-gdn SOTA %q does not name pinned source %q", op.SOTA, pin)
+		}
+	}
+	for _, obligation := range []string{
+		"per-step output",
+		"convolution-state",
+		"recurrent-state",
+		"exact deterministic greedy-token equality",
+		"fak-native CUDA",
+		"zero fallback",
+	} {
+		if !strings.Contains(op.Oracle, obligation) {
+			t.Errorf("cuda-qwen-gdn oracle %q does not name %q", op.Oracle, obligation)
+		}
+	}
+	if !strings.Contains(op.Note, "no runtime or backend fallback") {
+		t.Errorf("cuda-qwen-gdn note %q does not reject runtime/backend fallback", op.Note)
+	}
+}
+
 func TestMetalQwenGDNPriorArt(t *testing.T) {
 	op, ok := BySlug("metal-qwen-gdn")
 	if !ok {

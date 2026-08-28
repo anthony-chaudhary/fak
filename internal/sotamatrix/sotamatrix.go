@@ -272,6 +272,26 @@ var matrix = []Op{
 		Note:        "Bind to NCCL's collectives directly (-lnccl); fak's value is the honest Approx fence around a hardware-ordered reduce, not a new all-reduce.",
 	},
 	{
+		Slug:  "cuda-qwen-gdn",
+		Title: "CUDA Qwen3.8 Gated-DeltaNet recurrence",
+		FileGlobs: []string{
+			"internal/compute/cuda_qwen35_gdn*.go",
+			"internal/compute/cuda_kernels.go",
+			"internal/compute/cuda_kernels.cu",
+		},
+		FakPath:     "internal/compute/cuda_qwen35_gdn.go + cuda_qwen35_gdn_sequence.go + cuda_kernels.go + cuda_kernels.cu (Qwen GDN decode and sequence recurrence)",
+		SOTA:        "FLA@bccaf2d3cf4d9badc8be050a2c71616220b246d7 fused-recurrent and chunked Gated-DeltaNet; llama.cpp@ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0 Qwen3.5 state order; MLX-LM@cc8521569694a3240b52c98acffd100d59b4c755 Qwen3.5 cache semantics (all MIT)",
+		PrimaryLink: "https://github.com/fla-org/flash-linear-attention/blob/bccaf2d3cf4d9badc8be050a2c71616220b246d7/fla/ops/gated_delta_rule/fused_recurrent.py",
+		Route:       RouteBorrow,
+		Oracle:      "existing internal/model and internal/compute CPU reference: per-step output, convolution-state, and recurrent-state parity at the declared floor; exact deterministic greedy-token equality; engine/path identity fak-native CUDA; zero fallback; reject a kernel-time win that worsens end-to-end quality, synchronization, memory, or setup cost",
+		Papers: []string{
+			"FLA chunked lower-triangular/KKT solve and occupancy tradeoff (bccaf2d3cf4d9badc8be050a2c71616220b246d7): https://github.com/fla-org/flash-linear-attention/blob/bccaf2d3cf4d9badc8be050a2c71616220b246d7/fla/ops/gated_delta_rule/chunk_fwd.py",
+			"llama.cpp Qwen3.5 convolution, normalization, recurrence, and output order (ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0): https://github.com/ggml-org/llama.cpp/blob/ebd048fc5e4b43ec4e0b4abe0b9bf66e1724dad0/src/models/qwen35.cpp",
+			"MLX-LM Qwen3.5 GDN/cache semantics (cc8521569694a3240b52c98acffd100d59b4c755): https://github.com/ml-explore/mlx-lm/blob/cc8521569694a3240b52c98acffd100d59b4c755/mlx_lm/models/qwen3_5.py",
+		},
+		Note: "Borrow the pinned state order and GPU recurrence techniques only after measuring the current recurrence; FLA is a technique reference, never a runtime dependency. Default to the smallest parity-preserving adaptation and permit no runtime or backend fallback.",
+	},
+	{
 		Slug:        "fused-attention",
 		Title:       "Fused attention (MHA/GQA/MQA)",
 		FileGlobs:   []string{"internal/compute/cuda_kernels.cu", "internal/compute/flash*.go"},
