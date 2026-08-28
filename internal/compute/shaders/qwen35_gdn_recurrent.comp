@@ -62,7 +62,7 @@ void main() {
         barrier();
 
         for (int d = lane; d < pc.vHd; d += 64)
-            core[t * pc.nV * pc.vHd + h * pc.vHd + d] = gated[d] * rmsInv * norm[d];
+            core[t * pc.nV * pc.vHd + h * pc.vHd + d] = gated[d] * rmsInv * norm[h * pc.vHd + d];
         barrier();
     }
 }

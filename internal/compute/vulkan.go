@@ -1358,48 +1358,6 @@ func (v *vulkanBackend) Qwen35GDNPath() string { return qwen35GDNVulkanPath }
 // Qwen35GDNPreprojected runs the causal convolution and recurrent GDN panel on
 // Vulkan-resident tensors. Both auxiliary states are updated in place; the
 // operation performs no host readback and has no CPU fallback.
-// Qwen35GDNDecode composes the four input projections, the device-resident
-// recurrent seam, and the output projection without making any host readback.
-func (v *vulkanBackend) Qwen35GDNDecode(
-	normalizedInput,
-	inProjQKV, inProjZ, inProjB, inProjA,
-	conv1D, aLog, dtBias, norm, outProj,
-	convState, recurrentState Tensor,
-	numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
-	rmsNormEpsilon float32,
-) (output, nextConvState, nextRecurrentState Tensor, err error) {
-	_, _, _, _, err = validateQwen35GDNGeometry(
-		normalizedInput,
-		inProjQKV, inProjZ, inProjB, inProjA,
-		conv1D, aLog, dtBias, norm, outProj,
-		convState, recurrentState,
-		numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel,
-		rmsNormEpsilon,
-	)
-	if err != nil {
-		return Tensor{}, Tensor{}, Tensor{}, err
-	}
-	operands := qwen35GDNOperands(normalizedInput, inProjQKV, inProjZ, inProjB, inProjA, conv1D, aLog, dtBias, norm, outProj, convState, recurrentState)
-	for _, operand := range operands {
-		if _, ok := operand.t.buf.(*vulkanBuf); !ok {
-			return Tensor{}, Tensor{}, Tensor{}, fmt.Errorf("compute: vulkan Qwen GDN %s is not Vulkan-resident; no host fallback", operand.name)
-		}
-	}
-
-	mixed := v.MatMul(inProjQKV, normalizedInput)
-	z := v.MatMul(inProjZ, normalizedInput)
-	beta := v.MatMul(inProjB, normalizedInput)
-	alpha := v.MatMul(inProjA, normalizedInput)
-	core, err := v.Qwen35GDNPreprojected(
-		mixed, z, beta, alpha, conv1D, aLog, dtBias, norm, convState, recurrentState,
-		1, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel, rmsNormEpsilon,
-	)
-	if err != nil {
-		return Tensor{}, Tensor{}, Tensor{}, err
-	}
-	output = v.MatMul(outProj, core)
-	return output, convState, recurrentState, nil
-}
 func (v *vulkanBackend) Qwen35GDNPreprojected(
 	mixed, z, beta, alpha, conv1D, aLog, dtBias, norm, convState, recurrentState Tensor,
 	tokens, numKeyHeads, numValueHeads, keyHeadDim, valueHeadDim, convKernel int,
@@ -1423,7 +1381,7 @@ func (v *vulkanBackend) Qwen35GDNPreprojected(
 		want("mixed", mixed, tokens*convDim), want("z", z, tokens*valueDim),
 		want("beta", beta, tokens*numValueHeads), want("alpha", alpha, tokens*numValueHeads),
 		want("conv1d", conv1D, convDim*convKernel), want("a_log", aLog, numValueHeads),
-		want("dt_bias", dtBias, numValueHeads), want("norm", norm, valueHeadDim),
+		want("dt_bias", dtBias, numValueHeads), want("norm", norm, valueDim),
 		want("conv_state", convState, (convKernel-1)*convDim),
 		want("recurrent_state", recurrentState, numValueHeads*keyHeadDim*valueHeadDim),
 	}
