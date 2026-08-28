@@ -138,6 +138,20 @@ func TestAuditToolResultsCodexExecOutcomesAndDirectIDs(t *testing.T) {
 	}
 }
 
+func TestAuditToolResultMetadataNestedMapPrecedenceDeterministic(t *testing.T) {
+	payload := make(map[string]any, 2)
+	payload["z_later"] = map[string]any{"exit_code": 9, "duration_ms": 90}
+	payload["a_first"] = map[string]any{"exit_code": 0, "duration_ms": 10}
+
+	for attempt := 0; attempt < 256; attempt++ {
+		var got auditToolResult
+		auditToolResultMetadata(payload, &got)
+		if !got.exitKnown || got.exitCode != 0 || !got.durationKnown || got.durationMS != 10 {
+			t.Fatalf("attempt %d metadata = %+v, want lexically first nested envelope", attempt, got)
+		}
+	}
+}
+
 func TestAuditToolResultsClaudeMCPAndResultBeforeCall(t *testing.T) {
 	d := newAuditDistribution()
 	d.observe(AuditSourceClaude, []byte(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"mcp-1","is_error":false,"content":[{"type":"text","text":"ok"}]}]}}`))

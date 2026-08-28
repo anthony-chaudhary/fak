@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,103 @@ import (
 )
 
 const auditSnapshotSecret = "private-prompt-never-publish"
+
+func TestAuditSnapshotLargeCorpusToolMetadataRendersDeterministically(t *testing.T) {
+	base := t.TempDir()
+	claudeRoot, codexRoot := writeAuditSnapshotLargeMetadataRoots(t, base)
+	staged := filepath.Join(base, "staged")
+	if err := os.Mkdir(staged, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	manifest := AuditSnapshotManifest{
+		Schema: AuditSnapshotSchema, AuditSchema: AuditSchema,
+		CapturedAtUTC: time.Date(2026, 8, 28, 0, 0, 0, 0, time.UTC).Format(time.RFC3339Nano),
+	}
+	for _, source := range []AuditSource{
+		{Name: AuditSourceClaude, Root: claudeRoot, RootLabel: "claude/projects"},
+		{Name: AuditSourceCodex, Root: codexRoot, RootLabel: "codex/sessions"},
+	} {
+		meta, files, err := captureAuditSnapshotSource(staged, source, AuditOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Sources = append(manifest.Sources, meta)
+		manifest.Files = append(manifest.Files, files...)
+	}
+	sortSnapshotManifest(&manifest)
+	var err error
+	manifest.CorpusDigest, err = auditSnapshotCorpusDigest(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var firstJSON, firstMarkdown []byte
+	for run := 0; run < 16; run++ {
+		result, err := runAuditSnapshotCorpus(staged, manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Summary.RawFragments != 432 || result.Summary.CanonicalTranscripts != 430 {
+			t.Fatalf("corpus shape = %d raw/%d canonical, want 432/430", result.Summary.RawFragments, result.Summary.CanonicalTranscripts)
+		}
+		if result.Summary.UnknownExemplars.DroppedObservations == 0 {
+			t.Fatal("large corpus did not cross the bounded unknown-exemplar reservoir")
+		}
+		metadata := auditToolResultByName(result.Summary.ToolResults, "exec_command")
+		if metadata.Results != 432 || metadata.ExitKnown != 432 || metadata.ExitZero != 432 || metadata.ExitNonzero != 0 || metadata.DurationKnown != 432 || metadata.DurationMS != 4320 {
+			t.Fatalf("run %d tool metadata = %+v, want lexical nested-envelope precedence", run, metadata)
+		}
+		jsonl, markdown := renderAuditSnapshotResult(t, result)
+		if run == 0 {
+			firstJSON, firstMarkdown = jsonl, markdown
+			continue
+		}
+		if !bytes.Equal(firstJSON, jsonl) || !bytes.Equal(firstMarkdown, markdown) {
+			t.Fatalf("run %d rendered audit drifted: jsonl_equal=%t markdown_equal=%t", run, bytes.Equal(firstJSON, jsonl), bytes.Equal(firstMarkdown, markdown))
+		}
+	}
+}
+
+func writeAuditSnapshotLargeMetadataRoots(t *testing.T, base string) (string, string) {
+	t.Helper()
+	claudeRoot := filepath.Join(base, "live-claude", "projects")
+	codexRoot := filepath.Join(base, "live-codex", "sessions")
+	if err := os.MkdirAll(claudeRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for fragment := 0; fragment < 432; fragment++ {
+		session := fragment
+		if session >= 430 {
+			session -= 430
+		}
+		shape := map[string]any{"type": fmt.Sprintf("unknown_%03d", fragment%64)}
+		for field := 0; field < 32; field++ {
+			shape[fmt.Sprintf("shape_field_%02d_with_bounded_content_free_name", field)] = map[string]any{"nested": field}
+		}
+		shapeJSON, err := json.Marshal(shape)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows := []string{
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:00Z","type":"session_meta","payload":{"id":"session-%03d","model_provider":"test-provider","cli_version":"1.2.3"}}`, session),
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:01Z","type":"turn_context","payload":{"model":"qwen-test-%d","turn_id":"turn-a"}}`, fragment%3),
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:02Z","type":"turn_context","payload":{"model":"qwen-test-%d","turn_id":"turn-b"}}`, (fragment+1)%3),
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:03Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","call_id":"call-%03d","arguments":"{}"}}`, fragment),
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:04Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-%03d","output":{"z_later":{"exit_code":9,"duration_ms":90},"a_first":{"exit_code":0,"duration_ms":10}}}}`, fragment),
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:05Z","type":"response_item","payload":%s}`, shapeJSON),
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:06Z","type":"event_msg","payload":{"type":"unknown_event_%03d","shape":{"leaf":true}}}`, fragment%64),
+			fmt.Sprintf(`{"timestamp":"2026-08-28T00:00:07Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d,"cached_input_tokens":1,"cache_write_input_tokens":0,"output_tokens":2,"reasoning_output_tokens":0,"total_tokens":%d}}}}`, session+10, session+12),
+		}
+		path := filepath.Join(codexRoot, fmt.Sprintf("batch-%03d", fragment/50), fmt.Sprintf("fragment-%03d.jsonl", fragment))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(strings.Join(rows, "\n")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return claudeRoot, codexRoot
+}
 
 func TestAuditSnapshotCaptureDeleteRootsReplayDeterministically(t *testing.T) {
 	base := t.TempDir()

@@ -496,8 +496,16 @@ func auditToolResultMetadata(value any, result *auditToolResult) {
 		result.stdout = result.stdout || hasStdout
 		result.stderr = result.stderr || hasStderr
 		result.combinedOutput = result.combinedOutput || hasOutput
-		for _, child := range typed {
-			auditToolResultMetadata(child, result)
+		// Metadata on the current envelope wins. Nested envelopes use lexical
+		// key order so sibling exit and duration fields cannot inherit Go's
+		// randomized map iteration order into a persisted audit receipt.
+		keys := make([]string, 0, len(typed))
+		for key := range typed {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			auditToolResultMetadata(typed[key], result)
 		}
 	case []any:
 		for _, child := range typed {
