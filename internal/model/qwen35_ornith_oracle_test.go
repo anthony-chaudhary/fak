@@ -1,8 +1,11 @@
 package model
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -39,13 +42,82 @@ const ornithOracleDir = ".cache/oracle-ornith"
 const ornithOracleModel = ".cache/ornith-tiny"
 const ornithOraclePromptIDsJSON = `[[785,6722,315,9621,374],[16,11,220,17,11,220,18,11,220,19,11],[750,912,2877,11,293,982,262,470]]`
 
-// ornithOracleExportHint mirrors qwen35OracleExportHint: build a tiny text-only Ornith
-// (qwen3_5 / qwen3_5_moe) checkpoint, then export the HF reference traces through the same
-// export_oracle.py path the other qwen35 fixtures use. The tiny-model builder is owed by a
-// sibling lane (#1027/#1029); this scaffold only consumes the export once it exists.
-const ornithOracleExportHint = "from fak/: python internal/model/make_qwen35_tiny.py " + ornithOracleModel +
-	" --ornith && python internal/model/export_oracle.py --online --model " + ornithOracleModel +
+// ornithOracleExportHint builds the dense Ornith-9B text surrogate with the exact
+// M-RoPE/partial-RoPE/gated-attention axes, then exports HF reference traces through
+// the shared qwen35 exporter. The 35B MoE builder and both committed parity fixtures
+// remain acceptance work for #1031; this command repairs only the dense regeneration spine.
+const ornithOracleExportHint = "from fak/: python3 internal/model/make_qwen35_tiny.py " + ornithOracleModel +
+	" --ornith && python3 internal/model/export_oracle.py --online --model " + ornithOracleModel +
 	" --out internal/model/" + ornithOracleDir + " --prompt-ids-json '" + ornithOraclePromptIDsJSON + "'"
+
+func TestOrnithOracleExportHintUsesRealBuilderContract(t *testing.T) {
+	if strings.Contains(ornithOracleExportHint, "python ") ||
+		!strings.Contains(ornithOracleExportHint, "python3 internal/model/make_qwen35_tiny.py") ||
+		!strings.Contains(ornithOracleExportHint, " --ornith") {
+		t.Fatalf("Ornith regeneration hint does not use the python3 --ornith builder contract: %s", ornithOracleExportHint)
+	}
+	builder, err := os.ReadFile("make_qwen35_tiny.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, option := range []string{`add_argument("--ornith"`, `add_argument("--describe"`} {
+		if !strings.Contains(string(builder), option) {
+			t.Fatalf("Ornith regeneration hint names an unavailable builder option %q", option)
+		}
+	}
+	if !strings.Contains(string(builder), `Qwen3_5TextConfig(**spec["config_kwargs"])`) {
+		t.Fatal("Ornith Qwen3_5TextConfig construction is not fed by the described shared spec")
+	}
+}
+
+func TestOrnithOracleBuilderContract(t *testing.T) {
+	python := "python3"
+	if runtime.GOOS == "windows" {
+		python = "python"
+	}
+	out, err := exec.Command(python, "-S", "make_qwen35_tiny.py", "--ornith", "--describe").CombinedOutput()
+	if err != nil {
+		t.Fatalf("describe Ornith builder contract: %v\n%s", err, out)
+	}
+	var got struct {
+		Schema               string `json:"schema"`
+		Scope                string `json:"scope"`
+		PublishedWrapperType string `json:"published_wrapper_model_type"`
+		BuilderConfigType    string `json:"builder_config_model_type"`
+		TextOnly             bool   `json:"text_only"`
+		RotaryDim            int    `json:"rotary_dim"`
+		ConfigKwargs         struct {
+			HeadDim             int  `json:"head_dim"`
+			AttentionOutputGate bool `json:"attn_output_gate"`
+			RopeParameters      struct {
+				MROPEInterleaved    bool    `json:"mrope_interleaved"`
+				MROPESection        []int   `json:"mrope_section"`
+				PartialRotaryFactor float64 `json:"partial_rotary_factor"`
+			} `json:"rope_parameters"`
+		} `json:"config_kwargs"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decode Ornith builder contract: %v\n%s", err, out)
+	}
+	if got.Schema != "fak.model.ornith-tiny-builder/1" ||
+		got.Scope != "dense-9b-text-oracle-builder-not-parity-evidence" ||
+		got.PublishedWrapperType != "qwen3_5" || got.BuilderConfigType != "qwen3_5_text" ||
+		!got.TextOnly || got.ConfigKwargs.HeadDim != 256 ||
+		got.ConfigKwargs.RopeParameters.PartialRotaryFactor != 0.25 || got.RotaryDim != 64 ||
+		!got.ConfigKwargs.RopeParameters.MROPEInterleaved || !got.ConfigKwargs.AttentionOutputGate {
+		t.Fatalf("Ornith builder contract drifted: %+v", got)
+	}
+	wantSection := []int{11, 11, 10}
+	section := got.ConfigKwargs.RopeParameters.MROPESection
+	if len(section) != len(wantSection) {
+		t.Fatalf("mrope_section = %v, want %v", section, wantSection)
+	}
+	for i := range wantSection {
+		if section[i] != wantSection[i] {
+			t.Fatalf("mrope_section = %v, want %v", section, wantSection)
+		}
+	}
+}
 
 // ornithFixtureDir resolves the fixture directory: the FAK_ORNITH_ORACLE_DIR override wins
 // when set, otherwise the in-tree default. The actual present/absent decision (and the
