@@ -1169,17 +1169,24 @@ func cmdAgent(argv []string) {
 		os.Exit(2)
 	}
 	defer restoreStyle()
-	work, err := resolveAgentWorkProfile(*workProfile)
+	workProfileExplicit := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "work-profile" {
+			workProfileExplicit = true
+		}
+	})
+	work, err := resolveAgentWorkProfilePreference(*workProfile, workProfileExplicit)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	restoreWork, err := applyAgentWorkProfile(work)
+	restoreWork, err := applyAgentWorkProfile(work.Profile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent: set --work-profile: %v\n", err)
 		os.Exit(2)
 	}
 	defer restoreWork()
+	printAgentProfileValue(os.Stderr, preference, work)
 	applyPolicy(*policyPath)
 	loadedRoute, loadedAccounts, runOpts, err := loadAgentRouteOptionsWithAccounts(*routeManifest, *routeAccounts)
 	must(err)
