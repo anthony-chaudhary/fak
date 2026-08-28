@@ -279,6 +279,12 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [TencentDB Agent Memory: borrow the durability seams, not the product stack (2026-08-28)](docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md) — pinned memory/knowledge/proxy study; keeps FAK's native policy and prompt-placement substrate, records license and evidence fences, and files artifact checkpoints, capture hygiene, session skill pins, and CJK recall as #9865-#9868.
+
+- [JetBrains go-modern-guidelines: version-aware guidance is the borrow; the current corpus is WATCH (2026-08-28)](docs/notes/CONCEPT-STUDY-GO-MODERN-GUIDELINES-2026-08-28.md) — exhaustive pinned repository/forge/history study; keeps FAK's generic skill paging as the default and files the optional version-resolver, safe rule-detail, conformance, and deterministic `go fix` recipe track #9854-#9858.
+
+- [Go inference runtimes on GitHub (2026-08-28)](docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md) — source-pinned 23-repository inventory separating native Go execution, Go-governed native backends, binding/framework routes, translated provenance, and research implementations; machine inventory lives under `docs/research/inventory/` and the sole absent documentation spine is tracked by #9846.
+
 - [SPECTRA transform-coded KV compression deep study (2026-08-28)](docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md) — pinned paper/code analysis, FAK seam and candidate dispositions, durable study receipt, SOTA discovery guard, and Qwen3.8-native follow-on #9789.
 - [Path-portable Go verification builds: zero cross-root compiles and a named-artifact Make split (2026-08-27)](docs/notes/CONCEPT-GO-BUILD-PATH-CACHE-2026-08-27.md) — issues #9661/#9671/#9672's falsifiers: verification-only `-trimpath` cut cross-root compiles from 590 to 1; removing redundant `${SRCDIR}` experimentally cut 1 to 0 while retaining Metal; and separating `make build`'s four named artifacts from the explicit `build-all` command fleet cut the Darwin warm link census 147→0 and 15.83s→1.26s while `make ci` still depends directly on both. The matched 5+5 Windows target remains open. Receipt: [`fak.build10x.make_build_link_census.v1`](docs/_witnesses/build10x/make-build-link-census-2026-08-28.json).
 

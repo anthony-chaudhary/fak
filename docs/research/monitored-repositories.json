@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-28T14:34:48Z",
+  "updated_at": "2026-08-28T21:45:00Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -2236,6 +2236,979 @@
       "stars_at_check": 601,
       "last_push_at_check": "2026-08-25T20:32:23Z",
       "study_note": "docs/notes/study-mlx-dspark-borrow-scout-2026-07-10.md"
+    },
+    {
+      "repository": "ollama/ollama",
+      "url": "https://github.com/ollama/ollama",
+      "status": "studied",
+      "priority": 37,
+      "why": "Hybrid production runtime: Go owns model graphs and orchestration while MLX/llama.cpp owns tensor execution; the exact boundary is a key native-inference comparison.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a",
+      "stars_at_check": 179656,
+      "last_push_at_check": "2026-08-28T19:46:41Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "mudler/LocalAI",
+      "url": "https://github.com/mudler/LocalAI",
+      "status": "studied",
+      "priority": 38,
+      "why": "Go-governed backend marketplace: API, lifecycle, coalescing and supervision in Go over declared foreign inference workers.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "0cdc31dcb30cf1464a7402b2065e4c9bc3fe3646",
+      "stars_at_check": 48724,
+      "last_push_at_check": "2026-08-28T20:04:54Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "0cdc31dcb30cf1464a7402b2065e4c9bc3fe3646",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "ardanlabs/kronk",
+      "url": "https://github.com/ardanlabs/kronk",
+      "status": "studied",
+      "priority": 39,
+      "why": "Embeddable Go model lifecycle, batching and queueing over llama.cpp, whisper.cpp and diffusion native engines.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "6fadebdfeb9e8c40dd3fd237fca2e8253cfcf51e",
+      "stars_at_check": 766,
+      "last_push_at_check": "2026-08-28T18:20:04Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "6fadebdfeb9e8c40dd3fd237fca2e8253cfcf51e",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "born-ml/born",
+      "url": "https://github.com/born-ml/born",
+      "status": "studied",
+      "priority": 40,
+      "why": "Emerging native Go tensor and LLaMA runtime with Go/assembly CPU and Go-owned WebGPU/WGSL execution.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "b1237ec5135d1108f56af6dfd5068638068ad8d3",
+      "stars_at_check": 124,
+      "last_push_at_check": "2026-08-25T11:51:06Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "b1237ec5135d1108f56af6dfd5068638068ad8d3",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "townsendmerino/goinfer",
+      "url": "https://github.com/townsendmerino/goinfer",
+      "status": "studied",
+      "priority": 41,
+      "why": "Emerging native Go decoder runtime owning loaders, quantization, CPU execution and optional cgo-free accelerator paths.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "bf6bdc3afc633ac8c118a7a982fc00c4ff8d2bdc",
+      "stars_at_check": 8,
+      "last_push_at_check": "2026-08-28T17:53:44Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "bf6bdc3afc633ac8c118a7a982fc00c4ff8d2bdc",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "rostamlabs/rembed",
+      "url": "https://github.com/rostamlabs/rembed",
+      "status": "studied",
+      "priority": 42,
+      "why": "Focused native Go/assembly embedding runtime with SafeTensors/Hugging Face model support.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "19d673b357bd8c244aa1a6d17d83769224fa98c9",
+      "stars_at_check": 2,
+      "last_push_at_check": "2026-08-26T21:24:58Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "19d673b357bd8c244aa1a6d17d83769224fa98c9",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "magomedcoder/gogguf",
+      "url": "https://github.com/magomedcoder/gogguf",
+      "status": "studied",
+      "priority": 43,
+      "why": "Experimental pure-Go quantized GGUF CPU runtime with broad model claims and an explicit CGo CUDA boundary.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "c157545050743f73356da7ea9db7532e9129013e",
+      "stars_at_check": 4,
+      "last_push_at_check": "2026-08-27T08:55:09Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "c157545050743f73356da7ea9db7532e9129013e",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "nlpodyssey/spago",
+      "url": "https://github.com/nlpodyssey/spago",
+      "status": "studied",
+      "priority": 44,
+      "why": "Paused but substantial native Go/assembly tensor, autograd and NLP framework reference.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "3130dda657565c0b6b8e494070d8c35a037eee4e",
+      "stars_at_check": 1850,
+      "last_push_at_check": "2025-04-01T10:17:42Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "3130dda657565c0b6b8e494070d8c35a037eee4e",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "gorgonia/gorgonia",
+      "url": "https://github.com/gorgonia/gorgonia",
+      "status": "studied",
+      "priority": 45,
+      "why": "Mature native Go graph compiler and VM substrate, distinct from pretrained-model serving runtimes.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "d7a3ce27c9a1ffbee531d7850485229584db8d97",
+      "stars_at_check": 5930,
+      "last_push_at_check": "2024-08-12T04:53:17Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "d7a3ce27c9a1ffbee531d7850485229584db8d97",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "zerfoo/zerfoo",
+      "url": "https://github.com/zerfoo/zerfoo",
+      "status": "studied",
+      "priority": 46,
+      "why": "Broad native Go GGUF/model/runtime implementation whose rapid feature claims need independent operating-envelope verification.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "a6c9dcbdc0117f929269c4d90bf4204c74afa372",
+      "stars_at_check": 5,
+      "last_push_at_check": "2026-08-24T01:03:45Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "a6c9dcbdc0117f929269c4d90bf4204c74afa372",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "goccy/go-llama",
+      "url": "https://github.com/goccy/go-llama",
+      "status": "studied",
+      "priority": 47,
+      "why": "Static Go execution produced by compiling llama.cpp to Wasm and translating it to Go; provenance differs from Go-authored kernels.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "6b608ae6947a4f6a27b2f05f85cb0c56ac3253b9",
+      "stars_at_check": 150,
+      "last_push_at_check": "2026-08-28T12:30:56Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "6b608ae6947a4f6a27b2f05f85cb0c56ac3253b9",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "gomlx/gomlx",
+      "url": "https://github.com/gomlx/gomlx",
+      "status": "studied",
+      "priority": 48,
+      "why": "Active Go model/graph framework with separable pure-Go, OpenXLA/PJRT and ONNX Runtime execution routes.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "f847c57c9a4e10c1c66c737bbc44625fd4d1e538",
+      "stars_at_check": 1624,
+      "last_push_at_check": "2026-08-28T11:27:46Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "f847c57c9a4e10c1c66c737bbc44625fd4d1e538",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "knights-analytics/hugot",
+      "url": "https://github.com/knights-analytics/hugot",
+      "status": "studied",
+      "priority": 49,
+      "why": "Go transformer pipeline framework whose ORT, XLA and GoMLX-Go routes make per-backend evidence mandatory.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "e08591494e5383c534e1c3cef92ac9d766e461b0",
+      "stars_at_check": 638,
+      "last_push_at_check": "2026-08-27T08:43:42Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "e08591494e5383c534e1c3cef92ac9d766e461b0",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "yalue/onnxruntime_go",
+      "url": "https://github.com/yalue/onnxruntime_go",
+      "status": "studied",
+      "priority": 50,
+      "why": "Principal general ONNX Runtime Go binding in the corpus; CGo owns API crossing while ORT owns all computation.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "8ce7fa5882bb3ac038bacdd53bfe02da3691899f",
+      "stars_at_check": 704,
+      "last_push_at_check": "2026-08-19T14:03:58Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "8ce7fa5882bb3ac038bacdd53bfe02da3691899f",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "sugarme/gotch",
+      "url": "https://github.com/sugarme/gotch",
+      "status": "studied",
+      "priority": 51,
+      "why": "Go/libtorch binding that inherits PyTorch model and kernel breadth while accepting CGo and native ABI burden.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "db661550e5a88582a40830e54bb1777e6afd32e7",
+      "stars_at_check": 653,
+      "last_push_at_check": "2025-02-25T22:41:10Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "db661550e5a88582a40830e54bb1777e6afd32e7",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "oramasearch/onnx-go",
+      "url": "https://github.com/oramasearch/onnx-go",
+      "status": "studied",
+      "priority": 52,
+      "why": "ONNX decoder and graph importer with pluggable execution backends; format ownership is separate from computation.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "5befeb870169e8cd10af28c1552ed14662f82390",
+      "stars_at_check": 906,
+      "last_push_at_check": "2024-09-02T01:46:08Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "5befeb870169e8cd10af28c1552ed14662f82390",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "hybridgroup/yzma",
+      "url": "https://github.com/hybridgroup/yzma",
+      "status": "studied",
+      "priority": 53,
+      "why": "Current no-CGo llama.cpp binding reference: purego improves distribution while foreign native libraries retain compute ownership.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "c4fed7865c4c5cb116d7ae9105a1765bc0398803",
+      "stars_at_check": 573,
+      "last_push_at_check": "2026-08-28T19:22:08Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "c4fed7865c4c5cb116d7ae9105a1765bc0398803",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "go-skynet/go-llama.cpp",
+      "url": "https://github.com/go-skynet/go-llama.cpp",
+      "status": "studied",
+      "priority": 54,
+      "why": "Historical high-level CGo llama.cpp binding with a stale pinned native engine but useful API/provenance lessons.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "6a8041ef6b46d4712afc3ae791d1c2d73da0ad1c",
+      "stars_at_check": 937,
+      "last_push_at_check": "2026-08-28T11:42:24Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "6a8041ef6b46d4712afc3ae791d1c2d73da0ad1c",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "benedoc-inc/onnxer",
+      "url": "https://github.com/benedoc-inc/onnxer",
+      "status": "studied",
+      "priority": 55,
+      "why": "Emerging purego ORT/GenAI binding with multi-runtime isolation and mixed file-level licensing signals.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "d3f86f897e42e0f5544494d62bfe5d8ead6370fd",
+      "stars_at_check": 4,
+      "last_push_at_check": "2026-08-07T13:52:28Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "d3f86f897e42e0f5544494d62bfe5d8ead6370fd",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "dianlight/gollama.cpp",
+      "url": "https://github.com/dianlight/gollama.cpp",
+      "status": "studied",
+      "priority": 56,
+      "why": "Generated purego llama.cpp binding lineage reference; Yzma is the more material current descendant.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "6376d0d4e0a2d59f6f048a7c1ca121a5c1129604",
+      "stars_at_check": 38,
+      "last_push_at_check": "2026-08-28T12:10:54Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "6376d0d4e0a2d59f6f048a7c1ca121a5c1129604",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "nikolaydubina/llama2.go",
+      "url": "https://github.com/nikolaydubina/llama2.go",
+      "status": "studied",
+      "priority": 57,
+      "why": "Archived pure-Go Llama-2/llama2.c implementation retained as a compact educational reference.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "836881ddaeb0d96d8c11efe3cd59dbc5a8ea15d2",
+      "stars_at_check": 192,
+      "last_push_at_check": "2024-11-30T03:17:10Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "836881ddaeb0d96d8c11efe3cd59dbc5a8ea15d2",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "adalkiran/llama-nuts-and-bolts",
+      "url": "https://github.com/adalkiran/llama-nuts-and-bolts",
+      "status": "studied",
+      "priority": 58,
+      "why": "Source-addressable pure-Go Llama 3.1 educational implementation over official weights.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "ccbe25e9fdc0f2ca80c6a5de9d7eb8c82554bf89",
+      "stars_at_check": 316,
+      "last_push_at_check": "2024-08-20T15:10:00Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "ccbe25e9fdc0f2ca80c6a5de9d7eb8c82554bf89",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "divy-sh/llama3-go",
+      "url": "https://github.com/divy-sh/llama3-go",
+      "status": "studied",
+      "priority": 59,
+      "why": "Unlicensed experimental pure-Go Llama-family implementation; discovery-only and DO-NOT-USE.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "a68a81fe918bd20f43cce845cdcc362b16bce236",
+      "stars_at_check": 2,
+      "last_push_at_check": "2026-07-18T07:54:33Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-INFERENCE-RUNTIMES-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/go-inference-runtimes-github-2026-08-28.json",
+        "indexed_revision": "a68a81fe918bd20f43cce845cdcc362b16bce236",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 1,
+        "candidate_count": 1,
+        "filed_issue_count": 1,
+        "completeness_critic": "Shared 23-repository manifest records the pinned runtime tree boundary, implementation/test anchors, activity and license/provenance, fak self-query, candidate dispositions, explicit exclusions, query ledger, and a family-level completeness critique.",
+        "issue_refs": [
+          "#9846"
+        ]
+      }
+    },
+    {
+      "repository": "JetBrains/go-modern-guidelines",
+      "url": "https://github.com/JetBrains/go-modern-guidelines",
+      "status": "studied",
+      "priority": 60,
+      "why": "Version-aware, progressively disclosed modern-Go guidance for coding agents, with semantics-safe adaptation fences.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "40781f167719913666fe2a7dc1c77ea6f256df0a",
+      "stars_at_check": 2558,
+      "last_push_at_check": "2026-08-19T17:39:58Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-GO-MODERN-GUIDELINES-2026-08-28.md"
+    },
+    {
+      "repository": "TencentCloud/TencentDB-Agent-Memory",
+      "url": "https://github.com/TencentCloud/TencentDB-Agent-Memory",
+      "status": "studied",
+      "priority": 61,
+      "why": "Layered agent memory, replay-safe extraction, governed memory/skill bridges, graph recall, and cross-harness adapters; four FAK-native correctness gaps survived dedupe.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "5299c00aaf65481703c180fd69df066d11254eb7",
+      "stars_at_check": 25025,
+      "last_push_at_check": "2026-08-27T06:49:32Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/tencentcloud-tencentdb-agent-memory.json",
+        "indexed_revision": "5299c00aaf65481703c180fd69df066d11254eb7",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 11,
+        "candidate_count": 11,
+        "filed_issue_count": 4,
+        "completeness_critic": "The local map walked 995 files across 11 subsystems; three isolated study lanes covered runtime, tests, docs, roadmap, releases, forge governance, and provenance. Private advisories/reviews, expired Actions, image SBOMs, external provenance repositories, and a transitive license audit remain unavailable or out of scope; retained candidates were independently reopened before filing.",
+        "issue_refs": [
+          "#9851",
+          "#9865",
+          "#9866",
+          "#9867",
+          "#9868",
+          "#2349",
+          "#2621",
+          "#2624"
+        ],
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api -X GET search/issues -f q='repo:TencentCloud/TencentDB-Agent-Memory type:issue'",
+              "gh api -X GET search/issues -f q='repo:TencentCloud/TencentDB-Agent-Memory type:pr'",
+              "gh api repos/TencentCloud/TencentDB-Agent-Memory/releases?per_page=100",
+              "docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md#source-and-forge-coverage"
+            ],
+            "note": "Public forge coverage included 320 issues, 858 pull requests, 14 releases, discussions, and targeted comment/review/timeline reads."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities 'layered agent memory persona distillation'",
+              "fak capabilities 'memory asset loadout ACL'",
+              "fak capabilities 'versioned skill asset session pin'",
+              "fak capabilities 'wiki link graph memory recall'",
+              "docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md#fak-on-axis-witness"
+            ],
+            "note": "Capabilities, index surfaces, raw source, and issue searches were ablated into PRESENT/PARTIAL/ABSENT findings."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md#candidate-matrix",
+              "study_94cd1dad91c0ac9eccb06ae666e7ac0d161223e6161d9282ff1e433b8988fb04"
+            ],
+            "note": "Eleven candidates have on-axis status, disposition, and evidence; direct reuse and unproven headline numbers are excluded."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9851",
+              "https://github.com/anthony-chaudhary/fak/issues/9865",
+              "https://github.com/anthony-chaudhary/fak/issues/9866",
+              "https://github.com/anthony-chaudhary/fak/issues/9867",
+              "https://github.com/anthony-chaudhary/fak/issues/9868"
+            ],
+            "note": "The tracker and four bounded implementation issues were independently read back after creation."
+          }
+        ]
+      }
     }
   ]
 }
