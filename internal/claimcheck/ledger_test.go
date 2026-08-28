@@ -235,6 +235,15 @@ func TestAttributedDocumentSetMarkerUsesChildPages(t *testing.T) {
 	}
 }
 
+func TestDocumentSetLedgerAcceptsExposureSuffix(t *testing.T) {
+	root := t.TempDir()
+	writeLedgerFixture(t, root, "CLAIMS.md", "<!-- fak:document-set -->\n\n- [SHIPPED] [Alpha](claims/alpha.md) [exposure: default-on]\n")
+	writeLedgerFixture(t, root, "claims/alpha.md", "# Alpha\n\n- [SHIPPED] Alpha is real.\n")
+	if rep, err := LintLedgerFile(filepath.Join(root, "CLAIMS.md")); err != nil || !rep.OK() || rep.Capability != 1 {
+		t.Fatalf("aggregate index suffix should preserve child authority: err=%v report=%s", err, rep.String())
+	}
+}
+
 func TestDocumentSetLedgerUsesChildPagesAsAuthority(t *testing.T) {
 	root := t.TempDir()
 	writeLedgerFixture(t, root, "CLAIMS.md", strings.Join([]string{
