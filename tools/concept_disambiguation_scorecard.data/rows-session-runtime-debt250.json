@@ -580,7 +580,8 @@
       "distinct_from": [
         "x2-session-runtime-sessionobs",
         "cov-debt250-session-runtime-sessiondiag",
-        "x-session-runtime-sessioncapfield"
+        "x-session-runtime-sessioncapfield",
+        "coverage-9678-session-runtime-sessionage"
       ],
       "aliases": [],
       "grounding": "sessiontag",

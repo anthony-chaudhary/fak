@@ -80,7 +80,8 @@
       "definition": "`tWITNESS` is the witness-proof symbol declared or used at `cmd/dispatchworker/main.go:188` as `fmt.Fprintln(w, \"REGISTRATION\\tPARENT\\tROOT\\tISSUE\\tKIND\\tRUNTIME\\tPID\\tSTATE\\tWITNESS\")`. This row positions that concrete implementation surface, not merely the family label.",
       "distinction": "Use `tWITNESS` for the operation evidenced at `cmd/dispatchworker/main.go:188`. Unlike `x2-witness-proof-witnessstatus`, it names this exact implementation surface; unlike `witness-proof`, it is not the umbrella domain.",
       "distinct_from": [
-        "x2-witness-proof-witnessstatus"
+        "x2-witness-proof-witnessstatus",
+        "coverage-9678-witness-proof-twitnessed"
       ],
       "aliases": [],
       "grounding": "twitness",

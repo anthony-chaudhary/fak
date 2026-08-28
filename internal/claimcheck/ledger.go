@@ -57,7 +57,7 @@ const exposureGated = "gated"
 
 // documentSetMarker identifies a bounded index whose local Markdown links are
 // navigation and whose linked pages carry the authoritative claim records.
-const documentSetMarker = "<!-- fak:document-set -->"
+const documentSetMarker = "<!-- fak:document-set"
 
 // gateProse is the narrow, false-positive-free set of phrases a capability line
 // uses when it discloses gating in prose. Narrow by design (the same discipline as
