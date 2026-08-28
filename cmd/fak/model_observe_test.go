@@ -651,3 +651,44 @@ func TestModelObserveUsageAdvertisesOnlyHostAppleMemoryScopes(t *testing.T) {
 		}
 	}
 }
+
+func TestModelObserveNUMAImportRequiresInput(t *testing.T) {
+	if err := runModelObserveBandwidth([]string{"numa-import"}); err == nil || !strings.Contains(err.Error(), "--input is required") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestModelObserveNUMAImportWritesVerifiedMatrix(t *testing.T) {
+	capture := `{"schema":"fak-host-memory-roofline-numa-capture/1","topology":{"provenance":"linux-sysfs","node_root":"/sys/devices/system/node","online_source":"/sys/devices/system/node/online","cpuset_source":"/proc/self/status:Cpus_allowed_list","online_node_ids":[0],"allowed_cpu_ids":[0],"cpuset_restricted":false,"nodes":[{"id":0,"online":true,"memory_bytes":1073741824,"cpu_ids":[0],"allowed_cpu_ids":[0],"eligible":true}]},"working_set_bytes":67108864,"peak_buffer_bytes":134217728,"target_duration_ms":100,"runtime_budget_ms":1000,"dram_isolation":"not-proven","pairs":[{"requested_cpu_node":0,"requested_memory_node":0,"requested_command":["numactl","--cpunodebind=0","--membind=0"],"verified":{"cpu_node":0,"memory_node":0,"cpu_verifier":"sched_getcpu plus sysfs cpu/node","memory_verifier":"/proc/self/numa_maps resident-page counts","cpu_evidence":"cpu=0 node=0","memory_evidence":"N0=16384"},"trials":[{"index":0,"iterations":1,"duration_ms":100,"traffic_bytes":1000000000,"gb_s":10},{"index":1,"iterations":1,"duration_ms":100,"traffic_bytes":1100000000,"gb_s":11},{"index":2,"iterations":1,"duration_ms":100,"traffic_bytes":1200000000,"gb_s":12}]}]}`
+	input := filepath.Join(t.TempDir(), "capture.json")
+	output := filepath.Join(t.TempDir(), "matrix.json")
+	if err := os.WriteFile(input, []byte(capture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := runModelObserveBandwidth([]string{"numa-import", "--input", input, "--output", output, "--pretty=false"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matrix modelperfobs.NUMARooflineMatrix
+	if err := json.Unmarshal(data, &matrix); err != nil {
+		t.Fatal(err)
+	}
+	if matrix.Schema != modelperfobs.NUMARooflineMatrixSchema || len(matrix.Pairs) != 1 || matrix.Pairs[0].SustainableGBS != 11 {
+		t.Fatalf("matrix=%+v", matrix)
+	}
+}
+
+func TestModelObserveUsageAdvertisesNUMAImportNotPretendMeasurement(t *testing.T) {
+	usage := modelObserveUsage()
+	for _, want := range []string{"bandwidth numa-topology", "bandwidth numa-import --input FILE"} {
+		if !strings.Contains(usage, want) {
+			t.Fatalf("usage missing %q: %s", want, usage)
+		}
+	}
+	if strings.Contains(usage, "measure-numa-roofline") {
+		t.Fatalf("usage advertises an unverified in-process NUMA measurement: %s", usage)
+	}
+}
