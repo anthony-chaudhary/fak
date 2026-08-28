@@ -3,8 +3,8 @@
 #
 #   pure-kernel model engine  →  fak serve --engine inkernel (real weights)   :8080/metrics
 #   fleet bottleneck engine   →  fleet_bottleneck.py serve                    :9095/metrics
-#   scrape + alerts           →  Prometheus (docker)                          :9091
-#   dashboards                →  Grafana (docker, admin/fleet)                :3000
+#   scrape + alerts           →  Prometheus (Docker; Homebrew fallback)       :9091
+#   dashboards                →  Grafana (Docker; Homebrew fallback)          :3000
 #
 # It is idempotent: re-running adopts anything already healthy instead of
 # colliding on a port. Tear it all down with ./down.sh.
@@ -24,6 +24,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GRAFANA_DIR="$ROOT/tools/grafana"
 RUN_DIR="$GRAFANA_DIR/.run"
 mkdir -p "$RUN_DIR"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
 
 GATEWAY_ADDR="${FAK_GATEWAY_ADDR:-0.0.0.0:8080}"   # 0.0.0.0 so Docker's host.docker.internal can scrape it
 GATEWAY_HOSTPORT="127.0.0.1:8080"                  # where WE health-check it
@@ -36,17 +37,18 @@ log()  { printf '\033[1;36m[up]\033[0m %s\n' "$*" >&2; }
 warn() { printf '\033[1;33m[up]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[1;31m[up] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-# ---- docker CLI discovery (Docker Desktop ships the CLI inside the app bundle) ----
+# ---- Docker CLI discovery (Docker Desktop ships the CLI inside the app bundle) ----
 find_docker() {
   if command -v docker >/dev/null 2>&1; then echo docker; return; fi
   for c in /Applications/Docker.app/Contents/Resources/bin/docker "$HOME/.docker/bin/docker"; do
     [ -x "$c" ] && { echo "$c"; return; }
   done
-  die "docker not found. Install Docker Desktop (macOS/Windows) or docker engine (Linux)."
+  return 1
 }
-DOCKER="$(find_docker)"
+DOCKER=""
 
 ensure_docker_daemon() {
+  DOCKER="$(find_docker)" || return 1
   if "$DOCKER" info >/dev/null 2>&1; then return; fi
   if [ "$(uname)" = "Darwin" ] && [ -d /Applications/Docker.app ]; then
     log "Docker daemon down — starting Docker Desktop…"
@@ -55,23 +57,157 @@ ensure_docker_daemon() {
       "$DOCKER" info >/dev/null 2>&1 && { log "Docker daemon up after ~$((i*3))s"; return; }
       sleep 3
     done
-    die "Docker daemon did not come up within 90s."
+    warn "Docker daemon did not come up within 90s."
   fi
-  die "Docker daemon is not running (and not Docker Desktop on macOS to auto-start)."
+  return 1
 }
 
 # ---- a host process is already serving this port? ----
 port_live() { curl -sf -m 3 "http://127.0.0.1:$1$2" >/dev/null 2>&1; }
 
-start_bg() {  # name port-check-path "command…"  → records a pidfile
+start_bg() {  # name port-check-path command… → records only processes this invocation owns
   local name="$1" check="$2"; shift 2
+  rm -f "$RUN_DIR/$name.pid"
   if port_live "${check%% *}" "${check#* }"; then
     log "$name already healthy — adopting it."
     return
   fi
   log "starting ${name}…"
-  ( "$@" >"$RUN_DIR/$name.log" 2>&1 & echo $! >"$RUN_DIR/$name.pid" )
+  bash -c '
+    child=""
+    stop_child() {
+      [ -z "$child" ] || kill "$child" 2>/dev/null || true
+      [ -z "$child" ] || wait "$child" 2>/dev/null || true
+      exit 0
+    }
+    trap stop_child TERM INT HUP
+    "$@" &
+    child=$!
+    wait "$child"
+  ' "fak-grafana-owner=$RUN_ID" "$@" >"$RUN_DIR/$name.log" 2>&1 &
+  local pid=$!
+  {
+    printf 'pid=%s\n' "$pid"
+    printf 'owner=%s\n' "$RUN_ID"
+  } >"$RUN_DIR/$name.pid"
+  chmod 600 "$RUN_DIR/$name.pid"
 }
+
+# ---- native macOS configuration (generated; tracked Docker config is untouched) ----
+NATIVE_DIR="$RUN_DIR/native"
+NATIVE_PROVISIONING="$NATIVE_DIR/provisioning"
+
+write_native_configs() {
+  mkdir -p \
+    "$NATIVE_PROVISIONING/datasources" \
+    "$NATIVE_PROVISIONING/dashboards" \
+    "$NATIVE_DIR/prometheus-data" \
+    "$NATIVE_DIR/grafana-data/plugins" \
+    "$NATIVE_DIR/grafana-logs"
+
+  awk -v rules="$GRAFANA_DIR/prometheus-alerts.yml" '
+    /^# Where firing alerts go\./ { skip_alerting = 1 }
+    skip_alerting && /^scrape_configs:/ { skip_alerting = 0 }
+    skip_alerting { next }
+    {
+      gsub(/host[.]docker[.]internal/, "127.0.0.1")
+      if ($0 == "  - \"prometheus-alerts.yml\"") {
+        print "  - \"" rules "\""
+      } else {
+        print
+      }
+    }
+  ' "$GRAFANA_DIR/prometheus.yml" >"$NATIVE_DIR/prometheus.yml"
+
+  sed 's#http://prometheus:9091#http://127.0.0.1:9091#g' \
+    "$GRAFANA_DIR/provisioning/datasources/datasource.yml" \
+    >"$NATIVE_PROVISIONING/datasources/datasource.yml"
+
+  cat >"$NATIVE_PROVISIONING/dashboards/dashboards.yml" <<EOF
+apiVersion: 1
+
+providers:
+  - name: FleetBottleneck
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: $GRAFANA_DIR/dashboards
+      foldersFromFilesStructure: false
+EOF
+}
+
+find_brew() {
+  if command -v brew >/dev/null 2>&1; then echo brew; return; fi
+  for c in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [ -x "$c" ] && { echo "$c"; return; }
+  done
+  return 1
+}
+
+start_native_stack() {
+  local brew prometheus_bin prometheus_prefix grafana_bin grafana_prefix grafana_home
+  local -a grafana_command
+  brew="$(find_brew)" || die "Docker is unavailable and Homebrew was not found. Install Homebrew, then run: brew install prometheus grafana"
+
+  prometheus_bin="${FAK_PROMETHEUS_BIN:-}"
+  [ -n "$prometheus_bin" ] || prometheus_bin="$(command -v prometheus 2>/dev/null || true)"
+  if [ -z "$prometheus_bin" ]; then
+    prometheus_prefix="$("$brew" --prefix prometheus 2>/dev/null || true)"
+    [ -z "$prometheus_prefix" ] || prometheus_bin="$prometheus_prefix/bin/prometheus"
+  fi
+
+  grafana_bin="${FAK_GRAFANA_BIN:-}"
+  [ -n "$grafana_bin" ] || grafana_bin="$(command -v grafana 2>/dev/null || true)"
+  [ -n "$grafana_bin" ] || grafana_bin="$(command -v grafana-server 2>/dev/null || true)"
+  grafana_prefix="$("$brew" --prefix grafana 2>/dev/null || true)"
+  if [ -z "$grafana_bin" ] && [ -n "$grafana_prefix" ]; then
+    grafana_bin="$grafana_prefix/bin/grafana"
+  fi
+
+  [ -x "$prometheus_bin" ] && [ -x "$grafana_bin" ] \
+    || die "Docker is unavailable and the Homebrew services are missing. Run: brew install prometheus grafana"
+
+  [ -n "$grafana_prefix" ] || grafana_prefix="$(cd "$(dirname "$grafana_bin")/.." && pwd)"
+  grafana_home="${FAK_GRAFANA_HOME:-$grafana_prefix/share/grafana}"
+  [ -d "$grafana_home" ] || die "Grafana home not found at $grafana_home (override with FAK_GRAFANA_HOME)."
+  if [ "$(basename "$grafana_bin")" = grafana-server ]; then
+    grafana_command=("$grafana_bin")
+  else
+    grafana_command=("$grafana_bin" server)
+  fi
+
+  write_native_configs
+  log "Docker unavailable — using Homebrew Prometheus :9091 and Grafana :3000."
+  start_bg prometheus "9091 /-/ready" \
+    "$prometheus_bin" \
+      --config.file="$NATIVE_DIR/prometheus.yml" \
+      --storage.tsdb.path="$NATIVE_DIR/prometheus-data" \
+      --storage.tsdb.retention.time=30d \
+      --web.enable-lifecycle \
+      --web.listen-address=127.0.0.1:9091
+
+  start_bg grafana "3000 /api/health" \
+    env \
+      GF_PATHS_PROVISIONING="$NATIVE_PROVISIONING" \
+      GF_PATHS_DATA="$NATIVE_DIR/grafana-data" \
+      GF_PATHS_LOGS="$NATIVE_DIR/grafana-logs" \
+      GF_PATHS_PLUGINS="$NATIVE_DIR/grafana-data/plugins" \
+      GF_SECURITY_ADMIN_USER=admin \
+      GF_SECURITY_ADMIN_PASSWORD=fleet \
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH="$GRAFANA_DIR/dashboards/fleet-bottleneck-overview.json" \
+      GF_SERVER_HTTP_ADDR=127.0.0.1 \
+      GF_SERVER_HTTP_PORT=3000 \
+      "${grafana_command[@]}" --homepath "$grafana_home" --packaging=brew
+}
+
+if [ "${FAK_GRAFANA_NATIVE_CONFIG_ONLY:-0}" = "1" ]; then
+  write_native_configs
+  exit 0
+fi
 
 # ===== 1. real weights for the pure kernel =====
 # $ROOT is the repository root and the Go module root (AGENTS.md: "the Go module is the
@@ -122,9 +258,17 @@ else
 fi
 
 # ===== 4. Prometheus + Grafana =====
-ensure_docker_daemon
-log "docker compose up -d (Prometheus :9091, Grafana :3000)…"
-( cd "$GRAFANA_DIR" && "$DOCKER" compose up -d ) || die "docker compose up failed."
+STACK_MODE=docker
+if ensure_docker_daemon; then
+  log "docker compose up -d (Prometheus :9091, Grafana :3000)…"
+  ( cd "$GRAFANA_DIR" && "$DOCKER" compose up -d ) || die "docker compose up failed."
+else
+  [ "$(uname)" = "Darwin" ] \
+    || die "Docker daemon is unavailable. Install Docker engine, or use the macOS/Homebrew fallback on a Mac."
+  STACK_MODE=native
+  start_native_stack
+fi
+printf '%s\n' "$STACK_MODE" >"$RUN_DIR/stack.mode"
 
 # ===== 5. wait for health =====
 log "waiting for the stack to report healthy…"
@@ -141,7 +285,11 @@ echo
 if [ "$ok" = 0 ]; then
   log "✅ observability stack is up."
 else
-  warn "stack started but not all health checks passed in time — see $RUN_DIR/*.log and 'docker compose ps'."
+  if [ "$STACK_MODE" = docker ]; then
+    warn "stack started but not all health checks passed in time — see $RUN_DIR/*.log and 'docker compose ps'."
+  else
+    warn "stack started but not all health checks passed in time — see $RUN_DIR/*.log."
+  fi
 fi
 cat >&2 <<EOF
 

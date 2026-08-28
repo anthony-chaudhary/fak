@@ -26,7 +26,7 @@ Prometheus-scrapes-`:9095/metrics` → Grafana shape, scoped to fleet signals.
 
 ```bash
 tools/grafana/up.sh        # brings up the whole stack; open http://localhost:3000 (admin / fleet)
-tools/grafana/down.sh      # tears it all down  (--purge also drops the data volumes)
+tools/grafana/down.sh      # stops only processes this stack owns (--purge drops Docker volumes)
 ```
 
 `up.sh` is idempotent — it starts (or adopts, if already healthy) all the pieces:
@@ -47,9 +47,37 @@ tools/grafana/down.sh      # tears it all down  (--purge also drops the data vol
    durable session registry and the gateway-usage ledger straight off disk — so it
    starts even under `FAK_NO_GATEWAY=1`, which is the "chart fleet metrics only" mode
    this exporter most belongs to.
-5. **Prometheus** (`:9091`) and **Grafana** (`:3000`) via `docker compose`. On
-   macOS it finds the Docker Desktop CLI in the app bundle and starts the daemon if
-   it is down.
+5. **Prometheus** (`127.0.0.1:9091`) and **Grafana** (`127.0.0.1:3000`). Docker
+   Compose remains the default. On macOS, `up.sh` first finds the Docker Desktop
+   CLI in the app bundle and starts its daemon if needed; only when Docker remains
+   unavailable does it use locally installed Homebrew Prometheus and Grafana.
+
+### macOS without Docker
+
+Install the native services once:
+
+```bash
+brew install prometheus grafana
+tools/grafana/up.sh
+```
+
+The fallback runs the formula binaries directly rather than using `brew services`,
+so ownership stays attributable to this invocation. It generates all runtime state
+under the ignored `tools/grafana/.run/native/` directory:
+
+- Prometheus scrape targets are rewritten from `host.docker.internal` to
+  `127.0.0.1`, and the container-only Alertmanager dependency is omitted.
+- Grafana receives a generated Prometheus datasource at
+  `http://127.0.0.1:9091` and provisions the tracked `dashboards/` directory,
+  including the bundled native-performance dashboards.
+- Prometheus binds only `127.0.0.1:9091`; Grafana binds only
+  `127.0.0.1:3000`.
+
+Healthy services already on those endpoints are adopted, not restarted. `up.sh`
+records only the supervisor processes it actually launches, with an invocation
+token checked against the live command line. `down.sh` therefore leaves adopted,
+stale-PID, and ownership-mismatched processes running. Native data remains under
+`.run/native/`; `--purge` retains its existing Docker-volume meaning.
 
 > **Why the pure kernel, not a proxy.** The default model source is fak's own
 > in-kernel engine (`--engine inkernel`) so the dashboards chart REAL adjudicated
@@ -257,7 +285,7 @@ lock-step with emitted metric names (`fleet_bottleneck_test.py` asserts this).
 | 9097 | `fak cachevalue metrics --serve` | Cache-value roll-up + ablation exposition (host) |
 | 9098 | `fak fleet metrics --serve` | Live fleet-session inventory + roll-up exposition (host) |
 | 9091 | Prometheus | Prometheus UI + API |
-| 9093 | Alertmanager | Alert routing UI + API (POSTs the webhook) |
+| 9093 | Alertmanager | Docker-only alert routing UI + API (POSTs the webhook) |
 | 9096 | `fak slack alert --serve` | Webhook receiver → durable Slack outbox (host) |
 | 3000 | Grafana | Dashboard UI (localhost only) |
 
@@ -319,7 +347,8 @@ correctly show as down.
 
 ## Alerts → Slack (Alertmanager → fak receiver → durable outbox)
 
-Firing rules are only useful if they reach someone. The stack routes them to Slack:
+Firing rules are only useful if they reach someone. The Docker stack routes them
+to Slack:
 
 ```
 Prometheus :9091 ──(alerting: block)──▶ Alertmanager :9093 ──(webhook)──▶
@@ -332,6 +361,10 @@ authenticates with the shared **bot token** (`.env.slack.local`, see `fak slack 
 The `fak slack alert` receiver reuses that one token *and* the **durable outbox**
 (`internal/slackoutbox`), so an alert survives a crash / 429 / token blip and its
 delivery is witnessable with `fak slack outbox status | calls` — not fire-and-forgotten.
+
+The macOS/Homebrew fallback still evaluates and displays the Prometheus rules, but
+intentionally has no native Alertmanager dependency. Use Docker Compose for the
+bundled Alertmanager → Slack route.
 
 **Bring it up:**
 
