@@ -1,0 +1,30 @@
+# Synthetic Grafana render fixture for issue #9811. Not live performance evidence.
+# Existing bounded gateway/native identity metrics.
+fak_engine_model_info{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 1
+fak_gateway_inference_requests_total{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 240
+fak_gateway_inference_output_tokens_per_second{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 118.4
+fak_gateway_inference_queue_seconds_total{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 8
+fak_gateway_inference_prefill_seconds_total{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 31
+fak_gateway_inference_decode_seconds_total{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 142
+fak_gateway_inference_kv_cache_usage_ratio{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.68
+# Proposed bounded metric contract, populated only for the synthetic render witness.
+fak_native_regression_state{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 1
+fak_native_missing_telemetry{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 2
+fak_native_transfer_seconds_per_request{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.07
+fak_native_kernel_seconds_per_request{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.41
+fak_native_ttft_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="0.25"} 70
+fak_native_ttft_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="0.5"} 170
+fak_native_ttft_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="1"} 230
+fak_native_ttft_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="+Inf"} 240
+fak_native_tpot_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="0.02"} 80
+fak_native_tpot_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="0.04"} 190
+fak_native_tpot_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="0.08"} 235
+fak_native_tpot_seconds_bucket{engine="fak-native",model="Qwen3.8-4B",le="+Inf"} 240
+fak_native_queue_depth{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 3
+fak_native_kv_reuse_ratio{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.74
+fak_native_accelerator_utilization_ratio{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.83
+fak_native_memory_pressure_ratio{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.77
+fak_native_transfer_time_ratio{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.09
+fak_native_kernel_time_ratio{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 0.63
+fak_native_evidence_age_seconds{engine="fak-native",model="Qwen3.8-4B",instance="fixture"} 42
+fak_native_telemetry_contract_info{engine="fak-native",model="Qwen3.8-4B",schema="v1",instance="fixture"} 1
