@@ -6,6 +6,14 @@ permalink: /configuration/
 
 # How to configure fak
 
+**Audience:** operators configuring a first or existing fak deployment. **Prerequisite:** a working `fak` binary.
+
+```bash
+fak serve --help
+```
+
+Expected result: the command prints configuration flags and exits without starting a server.
+
 These concise answers cover the decisions people most often make when configuring fak. For every `fak serve` flag, environment variable, and manifest field, use the [complete server configuration reference](server-config.md).
 
 <script type="application/ld+json">

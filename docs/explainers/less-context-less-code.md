@@ -44,7 +44,7 @@ Use only concise-output guidance when verbose answers are the whole problem. Add
 
 ## Does fak replace Ponytail?
 
-No. Ponytail's public positioning at the revision observed below is a coding-agent discipline: behave like a lazy senior developer and prefer code that never needs to be written. fak is not a code-style persona and does not decide that a requested feature is unnecessary.
+No. Ponytail's public positioning at the revision observed below is a coding-agent discipline: behave like a lazy senior developer and prefer code that never needs captured in a follow-up witness. fak is not a code-style persona and does not decide that a requested feature is unnecessary.
 
 The ideas meet at a boundary: Ponytail can reduce the implementation an agent chooses, while fak can avoid repeated inference and block an unnecessary or disallowed effect before it runs. Use YAGNI guidance alone for over-engineering. Add fak when the runtime also needs managed context, caching, crash resume, multi-agent scheduling, or enforceable tool policy.
 

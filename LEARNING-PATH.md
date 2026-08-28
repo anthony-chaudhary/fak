@@ -2760,3 +2760,22 @@ when adding a new surface.
 without trusting your working tree, (b) see which ready issues are starving, and (c) get
 an offline per-task spend readout mid-run. (Answers: `fak validate` / `fak ci-preflight`,
 `fak dispatch-aging`, `fak budget`.)
+
+## Current shipped-surface map (August 2026)
+
+Use this compact map after the core course when a current issue or receipt names a newer leaf. Each entry names the implementation surface and its operator-facing purpose; follow the linked package or command help before changing behavior.
+
+- Desktop trust helpers: `cmd/localappcert` provisions the local app certificate contract, while `cmd/localapphelper` hosts the narrowly scoped desktop helper.
+- Coordination and recovery: run `fak coordinate --help` for the coordinator surface and `fak watchdog-audit-health --help` for the watchdog health audit.
+- Fleet economics: `internal/microfleeteconomics` computes bounded micro-fleet cost and value evidence.
+- Model identity: `internal/modeldescriptor` owns normalized model descriptors rather than scattering model-name parsing.
+- Placement accounting: `internal/placementtax` measures the incremental cost of placing compute and state across boundaries.
+- Study pipeline: `internal/studyadjacency`, `internal/studyclass`, `internal/studylink`, `internal/studyprio`, and `internal/studytickets` turn external-study evidence into classified, linked, prioritized tickets.
+- Baseline evidence: `internal/systembaseline` captures the host baseline used to interpret benchmark receipts.
+
+```bash
+fak coordinate --help
+fak watchdog-audit-health --help
+```
+
+Expected result: both commands print their current flags and exit successfully; use package tests for internal-only leaves.

@@ -6,6 +6,8 @@ last_reviewed: 2026-08-11
 
 # TensorRT-LLM vs SGLang: where fak fits
 
+**Audience:** inference engineers choosing where the fak boundary sits. **Prerequisite:** the native-inference goal and one serving-engine deployment.
+
 ## Short answer
 
 **TensorRT-LLM and SGLang are inference/serving systems; fak is an agent runtime and
