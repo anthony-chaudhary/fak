@@ -11,7 +11,7 @@ import (
 
 var qwenSwapRestoreSink *KVCache
 
-func TestQwenHybridPagedSwapRoundTrip(t *testing.T) {
+func TestQwenHybridPagedSwapRoundTripDeterminism(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	m := NewSynthetic(cfg)
 	prompt := []int{3, 7, 11, 5, 17, 19, 23}
