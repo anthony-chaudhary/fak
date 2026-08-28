@@ -746,6 +746,15 @@ func RefuseMemoryPlanIfTooBigForHost(plan MemoryPlan, headroom float64) error {
 	return refuseMemoryPlanForHostMem(plan, total, free, known, headroom)
 }
 
+// RefuseMemoryPlanIfTooBigForReportedHost is the injectable, exported twin of
+// RefuseMemoryPlanIfTooBigForHost: callers provide the already-measured host
+// memory snapshot instead of reading the live machine. It preserves the same
+// fail-open semantics and host-scoped FitError contract, so higher-level
+// diagnostics can prove a would-be CPU load refusal without touching a payload.
+func RefuseMemoryPlanIfTooBigForReportedHost(plan MemoryPlan, total, free int64, known bool, headroom float64) error {
+	return refuseMemoryPlanForHostMem(plan, total, free, known, headroom)
+}
+
 // refuseMemoryPlanForHostMem is the injectable core of RefuseMemoryPlanIfTooBigForHost: it takes
 // the host (total, free, known) explicitly so the refusal logic is testable without a live
 // /proc/meminfo. The FitError's Scope is host, since the demand is anonymous host RAM.

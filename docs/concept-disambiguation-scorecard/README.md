@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **3** (clarity 2 + coverage 1) |
+| **Disambiguation-debt (drive to 0)** | **10** (clarity 2 + coverage 8) |
 | **Crystal-clear concepts (and climbing)** | **959** crystal of 2673 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2794 / 2795** (100.0% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2794 / 2802** (99.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **77** of 3792 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.7/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2673 concepts - score 98.9/100 (grade A) - disambiguation-debt 3
+concept-disambiguation chart - 2673 concepts - score 98.7/100 (grade A) - disambiguation-debt 10
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ################............ 959
@@ -62,8 +62,10 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (155 concept(s); 75 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ############################ 497/498
-  session-runtime  ############################ 268/269
+  guard-gate       ############################ 497/500
+  policy-capability ############################ 209/212
+  session-runtime  ############################ 268/270
+  witness-proof    ############################ 162/163
   attention        ############################ 85/85
   cache            ############################ 298/298
   context-ctx      ############################ 237/237
@@ -75,16 +77,14 @@ coverage by family (positioned / discovered):
   layout           ############################ 19/19
   loop             ############################ 93/93
   plan             ############################ 404/404
-  policy-capability ############################ 209/209
   pool             ############################ 40/40
   render-materialize ############################ 209/209
   score-debt       ############################ 92/92
   support-maturity ############################ 62/62
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
-  witness-proof    ############################ 162/162
 
-namespace coverage  [################################] 100.0%  (2794/2795 confusable tokens positioned)
+namespace coverage  [################################] 99.7%  (2794/2802 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -2962,8 +2962,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 497 | 498 | 1 |
-| session-runtime | 268 | 269 | 1 |
+| guard-gate | 497 | 500 | 3 |
+| policy-capability | 209 | 212 | 3 |
+| session-runtime | 268 | 270 | 2 |
+| witness-proof | 162 | 163 | 1 |
 | attention | 85 | 85 | 0 |
 | cache | 298 | 298 | 0 |
 | context-ctx | 237 | 237 | 0 |
@@ -2975,12 +2977,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | layout | 19 | 19 | 0 |
 | loop | 93 | 93 | 0 |
 | plan | 404 | 404 | 0 |
-| policy-capability | 209 | 209 | 0 |
 | pool | 40 | 40 | 0 |
 | render-materialize | 209 | 209 | 0 |
 | score-debt | 92 | 92 | 0 |
 | support-maturity | 62 | 62 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-| witness-proof | 162 | 162 | 0 |
 
