@@ -226,6 +226,24 @@ func (v *vulkanBackend) DeviceMemory() (total, free int64, known bool) {
 	return v.totalMem, FreeUnknown, true
 }
 
+// DeviceWeightBudget reports the explicit device-local weight cap. A positive
+// cap means immutable weights above it are deliberately placed in host-visible
+// Vulkan storage; callers must plan those excess bytes against host RAM rather
+// than rejecting the full checkpoint against VRAM.
+// MaxWeightBufferBytes reports the single-resource ceiling used to decide
+// whether a table-shaped weight can be addressed directly by a Vulkan kernel.
+func (v *vulkanBackend) MaxWeightBufferBytes() int64 {
+	if v == nil {
+		return 0
+	}
+	return v.maxBufferBytes
+}
+func (v *vulkanBackend) DeviceWeightBudget() (int64, bool) {
+	if v == nil || v.budgetBytes <= 0 {
+		return 0, false
+	}
+	return v.budgetBytes, true
+}
 func (v *vulkanBackend) HostMemory() (total, free int64, known bool) {
 	return hostSystemMemory()
 }
@@ -463,7 +481,7 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 		qh := q.buf.(HostBuffer)
 		return v.uploadQ8Locked(q.Shape, qh.I8(), q.Quant.Scale, q.Quant.Block)
 	}
-	buf := v.dallocForClass(t.Numel()*F32.Bytes(), MemoryWeights, what)
+	buf := v.dallocWeightFor(t.Numel()*F32.Bytes(), what)
 	out := makeF32TensorLike(v, t, buf)
 	return finishF32Upload(out, f, func(values []float32) {
 		C.fvk_h2d(buf.ptr, unsafe.Pointer(&values[0]), C.size_t(len(values)*4))
@@ -503,7 +521,7 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 	// stay fast even when the codes spill host-visible.
 	shapeName := shapeText(shape)
 	codeBuf := v.dallocWeightFor(len(codes), "Q8_0 weight code buffer "+shapeName)
-	scaleBuf := v.dallocForClass(len(scales)*F32.Bytes(), MemoryWeights, "Q8_0 weight scale buffer "+shapeName)
+	scaleBuf := v.dallocWeightFor(len(scales)*F32.Bytes(), "Q8_0 weight scale buffer "+shapeName)
 	if len(codes) > 0 {
 		C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[0]), C.size_t(len(codes)))
 	}
@@ -535,7 +553,7 @@ func (v *vulkanBackend) uploadQ8ChunksLocked(shape []int, codes []int8, scales [
 		codeLabel := "Q8_0 weight code chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
 		scaleLabel := "Q8_0 weight scale chunk " + strconv.Itoa(i) + " rows " + strconv.Itoa(chunk.start) + ":" + strconv.Itoa(chunk.start+chunk.rows) + " " + shapeName
 		codeBuf := v.dallocWeightFor(codeEnd-codeStart, codeLabel)
-		scaleBuf := v.dallocForClass((scaleEnd-scaleStart)*F32.Bytes(), MemoryWeights, scaleLabel)
+		scaleBuf := v.dallocWeightFor((scaleEnd-scaleStart)*F32.Bytes(), scaleLabel)
 		if codeEnd > codeStart {
 			C.fvk_h2d(codeBuf.ptr, unsafe.Pointer(&codes[codeStart]), C.size_t(codeEnd-codeStart))
 		}

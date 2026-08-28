@@ -1292,6 +1292,52 @@ func serveFitBudgetBase(total, free int64, known bool) int64 {
 	return free
 }
 
+type deviceWeightBudgetBackend interface {
+	DeviceWeightBudget() (bytes int64, enabled bool)
+}
+
+// applyDeviceWeightBudget splits immutable weight demand across the explicit
+// device-local cap and host-visible Vulkan storage. Runtime/KV/scratch demands
+// remain device-scoped. This is planning only: the backend's allocator is the
+// source of truth for each actual placement.
+func applyDeviceWeightBudget(plan compute.MemoryPlan, be compute.Backend) compute.MemoryPlan {
+	budgeter, ok := be.(deviceWeightBudgetBackend)
+	if !ok {
+		return plan
+	}
+	budget, enabled := budgeter.DeviceWeightBudget()
+	if !enabled || budget <= 0 {
+		return plan
+	}
+	remaining := budget
+	out := make(compute.MemoryPlan, 0, len(plan)+1)
+	for _, demand := range plan {
+		if demand.Class != compute.MemoryWeights || !demand.DeviceScoped() || demand.Bytes <= 0 {
+			out = append(out, demand)
+			continue
+		}
+		deviceBytes := demand.Bytes
+		if deviceBytes > remaining {
+			deviceBytes = remaining
+		}
+		if deviceBytes > 0 {
+			device := demand
+			device.Bytes = deviceBytes
+			device.Scope = compute.MemoryScopeDevice
+			device.Detail += ":device-local-budget"
+			out = append(out, device)
+			remaining -= deviceBytes
+		}
+		if spill := demand.Bytes - deviceBytes; spill > 0 {
+			host := demand
+			host.Bytes = spill
+			host.Scope = compute.MemoryScopeHost
+			host.Detail += ":host-visible-offload"
+			out = append(out, host)
+		}
+	}
+	return out
+}
 func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resident bool, contextBudgetTokens int) error {
 	if ws == nil || be == nil {
 		return nil
@@ -1300,6 +1346,7 @@ func fitServeGGUFOnDevice(ws *ggufload.WeightSource, be compute.Backend, f32Resi
 	if err != nil {
 		return err
 	}
+	plan = applyDeviceWeightBudget(plan, be)
 	return compute.RefuseMemoryPlanIfTooBig(be, plan, serveGGUFDeviceHeadroom)
 }
 
@@ -1452,6 +1499,9 @@ func withGGUFWeights(ggufPath string, plan func(*ggufload.WeightSource) (compute
 
 func fitAndPlanServeGGUFPathOnDevice(ggufPath string, be compute.Backend, f32Resident bool, contextBudgetTokens int) (compute.MemoryPlan, error) {
 	plan, err := serveGGUFPathMemoryPlan(ggufPath, f32Resident, contextBudgetTokens, serveDeviceFitBudget(be))
+	if err == nil {
+		plan = applyDeviceWeightBudget(plan, be)
+	}
 	return refuseIfTooBigOnDevice(plan, err, be)
 }
 
