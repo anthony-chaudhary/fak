@@ -20,24 +20,95 @@ const (
 
 	NativeObligationRequired = "required-correctness"
 	NativeObligationFusion   = "optional-fusion"
+
+	NativeLaunchAdmitted                 NativeLaunchDecisionReason = "ADMITTED"
+	NativeLaunchDomainInvalid            NativeLaunchDecisionReason = "LAUNCH_DOMAIN_INVALID"
+	NativeLaunchEmptyBatch               NativeLaunchDecisionReason = "EMPTY_BATCH_DISALLOWED"
+	NativeLaunchUnknownDimension         NativeLaunchDecisionReason = "UNKNOWN_DIMENSION"
+	NativeLaunchUnboundedDimension       NativeLaunchDecisionReason = "UNBOUNDED_DIMENSION"
+	NativeLaunchContradictoryRange       NativeLaunchDecisionReason = "CONTRADICTORY_DIMENSION_RANGE"
+	NativeLaunchShapeOutOfRange          NativeLaunchDecisionReason = "DIMENSION_OUT_OF_RANGE"
+	NativeLaunchNonDivisible             NativeLaunchDecisionReason = "DIMENSION_NOT_DIVISIBLE"
+	NativeLaunchGridIllegal              NativeLaunchDecisionReason = "GRID_ILLEGAL"
+	NativeLaunchBlockIllegal             NativeLaunchDecisionReason = "BLOCK_ILLEGAL"
+	NativeLaunchWorkspaceUnbounded       NativeLaunchDecisionReason = "WORKSPACE_UNBOUNDED"
+	NativeLaunchWorkspaceExceedsEnvelope NativeLaunchDecisionReason = "WORKSPACE_EXCEEDS_ENVELOPE"
+	NativeLaunchOverflow                 NativeLaunchDecisionReason = "LAUNCH_ARITHMETIC_OVERFLOW"
+	NativeLaunchBackendLimitsMissing     NativeLaunchDecisionReason = "BACKEND_LIMITS_MISSING"
+	NativeLaunchOptionalFusionIneligible NativeLaunchDecisionReason = "OPTIONAL_FUSION_INELIGIBLE"
+	NativeLaunchPathFusion               string                     = "optional-fusion"
+	NativeLaunchPathCorrectness          string                     = "native-correctness-path"
+	NativeLaunchEmptyBatchPolicyReject   string                     = "reject"
 )
+
+// NativeLaunchDecisionReason is the closed launch-domain admission vocabulary.
+// Every non-admitted result preserves the fak-native correctness path.
+type NativeLaunchDecisionReason string
 
 // NativeHardwareEnvelope is one checkpoint-bound planning envelope. It is not
 // an execution or performance receipt and cannot select a foreign runtime.
 type NativeHardwareEnvelope struct {
-	Schema                  string `json:"schema"`
-	ID                      string `json:"id"`
-	Engine                  string `json:"engine"`
-	Platform                string `json:"platform"`
-	Backend                 string `json:"backend"`
-	Quantization            string `json:"quantization"`
-	QuantizationAuthority   string `json:"quantization_authority"`
-	ArtifactSHA256          string `json:"artifact_sha256"`
-	WeightLayout            string `json:"weight_layout"`
-	StateLayout             string `json:"state_layout"`
-	StateResidency          string `json:"state_residency"`
-	MemoryBudgetBytes       uint64 `json:"memory_budget_bytes"`
-	ExternalRuntimeFallback bool   `json:"external_runtime_fallback"`
+	Schema                  string                     `json:"schema"`
+	ID                      string                     `json:"id"`
+	Engine                  string                     `json:"engine"`
+	Platform                string                     `json:"platform"`
+	Backend                 string                     `json:"backend"`
+	Quantization            string                     `json:"quantization"`
+	QuantizationAuthority   string                     `json:"quantization_authority"`
+	ArtifactSHA256          string                     `json:"artifact_sha256"`
+	WeightLayout            string                     `json:"weight_layout"`
+	StateLayout             string                     `json:"state_layout"`
+	StateResidency          string                     `json:"state_residency"`
+	MemoryBudgetBytes       uint64                     `json:"memory_budget_bytes"`
+	ExternalRuntimeFallback bool                       `json:"external_runtime_fallback"`
+	LaunchLimits            *NativeBackendLaunchLimits `json:"launch_limits,omitempty"`
+	FusionLaunches          []NativeFusionLaunchDomain `json:"fusion_launches,omitempty"`
+}
+
+// NativeBackendLaunchLimits are the platform/backend limits admitted by the
+// hardware envelope. Zero-valued or mismatched limits are not inferred.
+type NativeBackendLaunchLimits struct {
+	Platform           string    `json:"platform"`
+	Backend            string    `json:"backend"`
+	MaxGrid            [3]uint64 `json:"max_grid"`
+	MaxBlock           [3]uint64 `json:"max_block"`
+	MaxThreadsPerBlock uint64    `json:"max_threads_per_block"`
+	MaxWorkspaceBytes  uint64    `json:"max_workspace_bytes"`
+}
+
+// NativeFusionLaunchDomain is one concrete launch inside explicitly bounded
+// dynamic dimensions. It is evidence for planning, not a runtime allocation.
+type NativeFusionLaunchDomain struct {
+	Operation          string                  `json:"operation"`
+	EmptyBatchPolicy   string                  `json:"empty_batch_policy"`
+	Dimensions         []NativeLaunchDimension `json:"dimensions"`
+	Grid               [3]uint64               `json:"grid"`
+	Block              [3]uint64               `json:"block"`
+	WorkspaceBounded   bool                    `json:"workspace_bounded"`
+	PeakWorkspaceBytes uint64                  `json:"peak_workspace_bytes"`
+}
+
+type NativeLaunchDimension struct {
+	Name        string `json:"name"`
+	Known       bool   `json:"known"`
+	Bounded     bool   `json:"bounded"`
+	Value       uint64 `json:"value"`
+	Min         uint64 `json:"min"`
+	Max         uint64 `json:"max"`
+	DivisibleBy uint64 `json:"divisible_by"`
+}
+
+type NativeLaunchAdmission struct {
+	Engine              string                     `json:"engine"`
+	Phase               string                     `json:"phase"`
+	Path                string                     `json:"path"`
+	Admitted            bool                       `json:"admitted"`
+	Reason              NativeLaunchDecisionReason `json:"reason"`
+	Detail              string                     `json:"detail"`
+	Domain              NativeFusionLaunchDomain   `json:"domain"`
+	Limits              *NativeBackendLaunchLimits `json:"limits,omitempty"`
+	ResidentBytes       uint64                     `json:"resident_bytes"`
+	MemoryEnvelopeBytes uint64                     `json:"memory_envelope_bytes"`
 }
 
 type NativeObligationGraph struct {
@@ -62,6 +133,7 @@ type NativeObligation struct {
 	PromotionWitness NativePromotionWitness       `json:"promotion_witness"`
 	Eligible         bool                         `json:"eligible"`
 	Blockers         []string                     `json:"blockers"`
+	LaunchAdmission  *NativeLaunchAdmission       `json:"launch_admission,omitempty"`
 }
 
 type NativeOracleObligation struct {
@@ -178,9 +250,22 @@ func CompileNativeObligationGraph(packet Packet, envelope NativeHardwareEnvelope
 		nodes = append(nodes, required)
 		if rule.CandidateID != "" {
 			candidate := nativeNode(rule.CandidateID, NativeObligationFusion, rule.CandidateOp, []string{rule.RequiredID}, oracleID, envelope, constraint, "promotion-test", "promote-"+strings.ReplaceAll(rule.CandidateOp, ".", "-"), "Fusion is optional and may be promoted only after its unfused correctness dependency passes.")
-			candidate.Eligible = contains(rule.CandidateBackends, envelope.Backend)
-			if !candidate.Eligible {
-				candidate.Blockers = []string{"backend:" + envelope.Backend + ":checkpoint-specific-fusion-not-witnessed"}
+			domain, domainCount := nativeFusionLaunchFor(envelope.FusionLaunches, rule.CandidateOp)
+			admission := admitNativeFusionLaunch(
+				contains(rule.CandidateBackends, envelope.Backend),
+				rule.CandidateOp,
+				domain,
+				domainCount,
+				envelope.LaunchLimits,
+				envelope.Platform,
+				envelope.Backend,
+				stateBytes,
+				envelope.MemoryBudgetBytes,
+			)
+			candidate.LaunchAdmission = &admission
+			candidate.Eligible = admission.Admitted
+			if !admission.Admitted {
+				candidate.Blockers = []string{"launch:" + string(admission.Reason) + ":" + admission.Detail}
 			}
 			nodes = append(nodes, candidate)
 		}
@@ -252,6 +337,152 @@ func nativeOperationRuleFor(axis, value string) (nativeOperationRule, bool) {
 		}
 	}
 	return nativeOperationRule{}, false
+}
+
+func nativeFusionLaunchFor(domains []NativeFusionLaunchDomain, operation string) (NativeFusionLaunchDomain, int) {
+	var match NativeFusionLaunchDomain
+	count := 0
+	for _, domain := range domains {
+		if domain.Operation == operation {
+			match = domain
+			count++
+		}
+	}
+	return match, count
+}
+
+func admitNativeFusionLaunch(
+	optionalFusionEligible bool,
+	operation string,
+	domain NativeFusionLaunchDomain,
+	domainCount int,
+	limits *NativeBackendLaunchLimits,
+	platform string,
+	backend string,
+	residentBytes uint64,
+	memoryEnvelopeBytes uint64,
+) NativeLaunchAdmission {
+	decision := nativeLaunchDecision(domain, limits, residentBytes, memoryEnvelopeBytes)
+	refuseLaunch := func(reason NativeLaunchDecisionReason, detail string) NativeLaunchAdmission {
+		decision.Path = NativeLaunchPathCorrectness
+		decision.Admitted = false
+		decision.Reason = reason
+		decision.Detail = detail
+		return decision
+	}
+	if !optionalFusionEligible {
+		return refuseLaunch(NativeLaunchOptionalFusionIneligible, fmt.Sprintf("operation %q has no checkpoint-specific fusion witness for backend %q", operation, backend))
+	}
+	if domainCount != 1 || operation == "" || domain.Operation != operation {
+		return refuseLaunch(NativeLaunchDomainInvalid, fmt.Sprintf("operation %q requires exactly one matching launch domain; found %d", operation, domainCount))
+	}
+	if limits == nil || limits.Platform == "" || limits.Backend == "" || limits.Platform != platform || limits.Backend != backend || limits.MaxThreadsPerBlock == 0 || limits.MaxWorkspaceBytes == 0 || hasZeroAxis(limits.MaxGrid) || hasZeroAxis(limits.MaxBlock) {
+		return refuseLaunch(NativeLaunchBackendLimitsMissing, fmt.Sprintf("complete launch limits for %s/%s are required", platform, backend))
+	}
+	if domain.EmptyBatchPolicy != NativeLaunchEmptyBatchPolicyReject || len(domain.Dimensions) == 0 {
+		return refuseLaunch(NativeLaunchDomainInvalid, "a non-empty dimension set and the reject empty-batch policy are required")
+	}
+	seenDimensions := make(map[string]struct{}, len(domain.Dimensions))
+	for _, dimension := range domain.Dimensions {
+		if dimension.Name == "" {
+			return refuseLaunch(NativeLaunchUnknownDimension, "dimension name is unknown")
+		}
+		if _, duplicate := seenDimensions[dimension.Name]; duplicate {
+			return refuseLaunch(NativeLaunchDomainInvalid, fmt.Sprintf("dimension %q is declared more than once", dimension.Name))
+		}
+		seenDimensions[dimension.Name] = struct{}{}
+		if !dimension.Known {
+			return refuseLaunch(NativeLaunchUnknownDimension, fmt.Sprintf("dimension %q has no concrete value", dimension.Name))
+		}
+		if !dimension.Bounded {
+			return refuseLaunch(NativeLaunchUnboundedDimension, fmt.Sprintf("dimension %q has no finite bounds", dimension.Name))
+		}
+		if dimension.Min > dimension.Max {
+			return refuseLaunch(NativeLaunchContradictoryRange, fmt.Sprintf("dimension %q has min %d greater than max %d", dimension.Name, dimension.Min, dimension.Max))
+		}
+		if dimension.Name == "batch" && dimension.Value == 0 {
+			return refuseLaunch(NativeLaunchEmptyBatch, "batch dimension is empty and policy is reject")
+		}
+		if dimension.Value < dimension.Min || dimension.Value > dimension.Max {
+			return refuseLaunch(NativeLaunchShapeOutOfRange, fmt.Sprintf("dimension %q value %d is outside [%d,%d]", dimension.Name, dimension.Value, dimension.Min, dimension.Max))
+		}
+		if dimension.DivisibleBy == 0 || dimension.Value%dimension.DivisibleBy != 0 {
+			return refuseLaunch(NativeLaunchNonDivisible, fmt.Sprintf("dimension %q value %d is not divisible by %d", dimension.Name, dimension.Value, dimension.DivisibleBy))
+		}
+	}
+	if _, found := seenDimensions["batch"]; !found {
+		return refuseLaunch(NativeLaunchUnknownDimension, "batch dimension is not declared")
+	}
+	for axis := range domain.Grid {
+		if domain.Grid[axis] == 0 || domain.Grid[axis] > limits.MaxGrid[axis] {
+			return refuseLaunch(NativeLaunchGridIllegal, fmt.Sprintf("grid axis %d value %d exceeds legal range [1,%d]", axis, domain.Grid[axis], limits.MaxGrid[axis]))
+		}
+	}
+	gridSize, ok := checkedProduct(domain.Grid[:])
+	if !ok {
+		return refuseLaunch(NativeLaunchOverflow, "grid size overflows uint64")
+	}
+	for axis := range domain.Block {
+		if domain.Block[axis] == 0 || domain.Block[axis] > limits.MaxBlock[axis] {
+			return refuseLaunch(NativeLaunchBlockIllegal, fmt.Sprintf("block axis %d value %d exceeds legal range [1,%d]", axis, domain.Block[axis], limits.MaxBlock[axis]))
+		}
+	}
+	blockSize, ok := checkedProduct(domain.Block[:])
+	if !ok {
+		return refuseLaunch(NativeLaunchOverflow, "block size overflows uint64")
+	}
+	if blockSize > limits.MaxThreadsPerBlock {
+		return refuseLaunch(NativeLaunchBlockIllegal, fmt.Sprintf("block has %d threads; backend permits %d", blockSize, limits.MaxThreadsPerBlock))
+	}
+	if gridSize > math.MaxUint64/blockSize {
+		return refuseLaunch(NativeLaunchOverflow, "total launch threads overflow uint64")
+	}
+	if !domain.WorkspaceBounded {
+		return refuseLaunch(NativeLaunchWorkspaceUnbounded, "peak workspace has no finite bound")
+	}
+	if domain.PeakWorkspaceBytes > limits.MaxWorkspaceBytes {
+		return refuseLaunch(NativeLaunchWorkspaceExceedsEnvelope, fmt.Sprintf("peak workspace %d exceeds backend limit %d", domain.PeakWorkspaceBytes, limits.MaxWorkspaceBytes))
+	}
+	if residentBytes > math.MaxUint64-domain.PeakWorkspaceBytes {
+		return refuseLaunch(NativeLaunchOverflow, "resident bytes plus peak workspace overflow uint64")
+	}
+	peakBytes := residentBytes + domain.PeakWorkspaceBytes
+	if peakBytes > memoryEnvelopeBytes {
+		return refuseLaunch(NativeLaunchWorkspaceExceedsEnvelope, fmt.Sprintf("resident plus peak workspace requires %d bytes; envelope permits %d", peakBytes, memoryEnvelopeBytes))
+	}
+	decision.Path = NativeLaunchPathFusion
+	decision.Admitted = true
+	decision.Reason = NativeLaunchAdmitted
+	decision.Detail = fmt.Sprintf("operation %q launch is within the declared %s/%s domain", operation, platform, backend)
+	return decision
+}
+
+func nativeLaunchDecision(domain NativeFusionLaunchDomain, limits *NativeBackendLaunchLimits, residentBytes, memoryEnvelopeBytes uint64) NativeLaunchAdmission {
+	domain.Dimensions = append([]NativeLaunchDimension(nil), domain.Dimensions...)
+	var limitsCopy *NativeBackendLaunchLimits
+	if limits != nil {
+		copy := *limits
+		limitsCopy = &copy
+	}
+	return NativeLaunchAdmission{
+		Engine: "fak-native", Phase: "pre-allocation", Domain: domain, Limits: limitsCopy,
+		ResidentBytes: residentBytes, MemoryEnvelopeBytes: memoryEnvelopeBytes,
+	}
+}
+
+func hasZeroAxis(values [3]uint64) bool {
+	return values[0] == 0 || values[1] == 0 || values[2] == 0
+}
+
+func checkedProduct(values []uint64) (uint64, bool) {
+	product := uint64(1)
+	for _, value := range values {
+		if value == 0 || product > math.MaxUint64/value {
+			return 0, false
+		}
+		product *= value
+	}
+	return product, true
 }
 
 func nativeStateRequirement(state []modeldescriptor.Geometry) ([]string, uint64, error) {
