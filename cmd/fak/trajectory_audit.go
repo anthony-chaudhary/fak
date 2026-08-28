@@ -25,6 +25,8 @@ func runTrajectory(stdout, stderr io.Writer, args []string) int {
 	switch args[0] {
 	case "audit":
 		return runTrajectoryAudit(stdout, stderr, args[1:])
+	case "nightly":
+		return runTrajectoryNightly(stdout, stderr, args[1:])
 	case "assurance":
 		return runTrajectoryAssurance(os.Stdin, stdout, stderr, args[1:])
 	default:
@@ -154,8 +156,9 @@ func writeTrajectoryAuditFile(path string, write func(io.Writer) error) error {
 }
 
 func printTrajectoryUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: fak trajectory <audit|assurance> [options]")
+	fmt.Fprintln(w, "usage: fak trajectory <audit|nightly|assurance> [options]")
 	fmt.Fprintln(w, "  audit      audit transcript usage and behavior")
+	fmt.Fprintln(w, "  nightly    run the bounded attribution audit and append a scrubbed receipt")
 	fmt.Fprintln(w, "  assurance  read typed evidence JSON on stdin and emit a shadow health receipt")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Audit exact Claude and Codex transcript usage, source denominators, behavior, and baseline regressions.")

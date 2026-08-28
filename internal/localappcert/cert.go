@@ -18,6 +18,7 @@ type Status string
 
 const (
 	StatusPass        Status = "PASS"
+	StatusFail        Status = "FAIL"
 	StatusUnsupported Status = "UNSUPPORTED"
 )
 
@@ -40,11 +41,13 @@ type Receipt struct {
 }
 
 type Scenario struct {
-	Name     string   `json:"name"`
-	Status   Status   `json:"status"`
-	Evidence string   `json:"evidence,omitempty"`
-	Reason   string   `json:"reason,omitempty"`
-	Receipt  *Receipt `json:"receipt,omitempty"`
+	Name           string   `json:"name"`
+	Status         Status   `json:"status"`
+	Evidence       string   `json:"evidence,omitempty"`
+	EvidenceSHA256 string   `json:"evidence_sha256,omitempty"`
+	EvidenceBytes  int64    `json:"evidence_bytes"`
+	Reason         string   `json:"reason,omitempty"`
+	Receipt        *Receipt `json:"receipt,omitempty"`
 }
 
 type Envelope struct {

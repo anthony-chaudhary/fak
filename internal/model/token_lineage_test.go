@@ -169,33 +169,59 @@ func TestTokenLineageVerificationDetectsMismatchAndCorruption(t *testing.T) {
 }
 
 func TestRestoreTokenLineagePublishesOnlyGeometryMatchedHistory(t *testing.T) {
-	m := NewSynthetic(tokenLineageDenseQwen38Config())
-	s := m.NewSession()
-	defer s.Close()
-	history := []int{3, 7, 11}
-	s.Prefill(history)
+	m := NewSynthetic(qwen35HybridTestCfg())
+	history := []int{3, 7, 11, 5}
+	source := m.NewSession()
+	source.Prefill(history)
+	defer source.Close()
 
-	// A Qwen host-swap restore reconstructs resident positions but has no lineage
-	// payload. Exercise that state directly at the model-owned restoration seam.
-	s.Cache.lineage = tokenLineage{}
-	report, err := s.RestoreTokenLineage(history)
+	blob, err := QwenHybridKVCacheToHost(source.Cache, 2)
 	if err != nil {
-		t.Fatalf("RestoreTokenLineage(%v): %v", history, err)
+		t.Fatalf("swap to host: %v", err)
+	}
+	cache, err := QwenHybridKVCacheFromHost(m.Cfg, blob)
+	if err != nil {
+		t.Fatalf("swap from host: %v", err)
+	}
+	restored := &Session{M: m, Cache: cache}
+	defer restored.Close()
+
+	if report, err := restored.RestoreTokenLineage(history[:len(history)-1]); !errors.Is(err, ErrTokenLineageMismatch) {
+		t.Fatalf("short history restore report=%+v error=%v, want ErrTokenLineageMismatch", report, err)
+	}
+	if got := restored.TokenLineageMetadataBytes(); got != 0 {
+		t.Fatalf("refused restore published %d lineage bytes, want 0", got)
+	}
+	if _, err := restored.VerifyTokenLineage(history); !errors.Is(err, ErrTokenLineageMismatch) {
+		t.Fatalf("refused restore verification error=%v, want unpublished lineage", err)
+	}
+	restored.Cache.pos[2] = 9
+	if report, err := restored.RestoreTokenLineage(history); !errors.Is(err, ErrTokenLineageMismatch) {
+		t.Fatalf("non-contiguous restore report=%+v error=%v, want ErrTokenLineageMismatch", report, err)
+	}
+	if got := restored.TokenLineageMetadataBytes(); got != 0 {
+		t.Fatalf("non-contiguous restore published %d lineage bytes, want 0", got)
+	}
+	restored.Cache.pos[2] = 2
+
+	report, err := restored.RestoreTokenLineage(history)
+	if err != nil {
+		t.Fatalf("matched history restore: %v", err)
 	}
 	if report.Positions != len(history) || report.MetadataBytes != int64(len(history)*tokenLineageBytesPerPosition) {
-		t.Fatalf("restoration report=%+v, want positions=%d metadata_bytes=%d", report, len(history), len(history)*tokenLineageBytesPerPosition)
+		t.Fatalf("restore report=%+v, want positions=%d metadata_bytes=%d", report, len(history), len(history)*tokenLineageBytesPerPosition)
 	}
-	requireTokenLineage(t, s, history)
-
-	for _, invalid := range [][]int{
-		{3, 7},
-		{3, -1, 11},
-	} {
-		if _, err := s.RestoreTokenLineage(invalid); !errors.Is(err, ErrTokenLineageMismatch) {
-			t.Fatalf("RestoreTokenLineage(%v) error=%v, want ErrTokenLineageMismatch", invalid, err)
-		}
-		requireTokenLineage(t, s, history)
+	requireTokenLineage(t, restored, history)
+	if _, err := restored.RestoreTokenLineage(history[:len(history)-1]); !errors.Is(err, ErrTokenLineageMismatch) {
+		t.Fatalf("second short restore error=%v, want ErrTokenLineageMismatch", err)
 	}
+	requireTokenLineage(t, restored, history)
+	malformed := append([]int(nil), history...)
+	malformed[1] = -1
+	if _, err := restored.RestoreTokenLineage(malformed); !errors.Is(err, ErrTokenLineageMismatch) {
+		t.Fatalf("negative-token restore error=%v, want ErrTokenLineageMismatch", err)
+	}
+	requireTokenLineage(t, restored, history)
 }
 
 func containsInt(values []int, want int) bool {

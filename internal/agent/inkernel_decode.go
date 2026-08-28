@@ -574,7 +574,7 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 // continuous-batching WIRING, correctness-equivalent and GPU-free. A lane that finishes (a
 // token-ID stop, a string-suffix stop, or maxNew) simply drops out of the active mask while the
 // others keep batching. Each lane owns its own *Session, so per-lane KV is never shared.
-func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *model.Model, quant bool) {
+func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *model.Model, quant bool) (sharedPanels int, sharedMACs int64) {
 	if len(lanes) == 0 {
 		return
 	}
@@ -607,7 +607,14 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		if !anyActive {
 			return
 		}
-		out := bs.StepBatchActive(ids, active)
+		out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
+		if !probed {
+			out = bs.StepBatchActive(ids, active)
+			panels = bs.LastStepSharedPanels()
+			macs = bs.LastStepMACs()
+		}
+		sharedPanels += panels
+		sharedMACs += macs
 		for i := range lanes {
 			if active[i] {
 				lanes[i].logits = out[i]

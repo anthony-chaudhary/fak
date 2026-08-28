@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 )
 
 const (
@@ -340,6 +341,157 @@ func TestGDNSequenceMetalInjectedPostSubmitFailureCleansOwner(t *testing.T) {
 	if got := GDNLiveBufferCount(); got != start {
 		t.Fatalf("injected failure leaked buffers=%d, want %d", got, start)
 	}
+}
+
+func TestGDNExactQwenOwnerRegistrySupportsB8Capacity(t *testing.T) {
+	if !Available() {
+		t.Skip("Metal unavailable")
+	}
+	const (
+		requiredOwners   = 48 * 8
+		reviewedCapacity = 512
+	)
+	geometry := GDNGeometry{
+		NumKeyHeads: 16, NumValueHeads: 48,
+		KeyHeadDim: 128, ValueHeadDim: 128, ConvKernel: 4,
+	}
+	if got := gdnOwnerCapacity(); got != reviewedCapacity {
+		t.Fatalf("native GDN owner capacity=%d, want reviewed bound %d", got, reviewedCapacity)
+	}
+	baselineBuffers := GDNLiveBufferCount()
+	if baselineBuffers != 0 {
+		t.Fatalf("capacity witness requires an empty registry, live buffers=%d", baselineBuffers)
+	}
+	baselineAllocated := gdnCurrentAllocatedBytes()
+	started := time.Now()
+	owners := make([]*GDNState, 0, reviewedCapacity)
+	defer func() {
+		for _, owner := range owners {
+			owner.Close()
+		}
+	}()
+	seenHandles := make(map[GDNStateHandle]struct{}, 2*reviewedCapacity)
+	openOwner := func(index int) *GDNState {
+		t.Helper()
+		owner, err := NewGDNState(geometry)
+		if err != nil {
+			t.Fatalf("allocate exact-Qwen owner %d: %v", index, err)
+		}
+		convHandle, recurrentHandle := owner.Handles()
+		for _, handle := range []GDNStateHandle{convHandle, recurrentHandle} {
+			if handle == 0 {
+				t.Fatalf("owner %d published a zero handle", index)
+			}
+			if _, exists := seenHandles[handle]; exists {
+				t.Fatalf("owner %d reused live handle %d", index, handle)
+			}
+			seenHandles[handle] = struct{}{}
+		}
+		owners = append(owners, owner)
+		return owner
+	}
+
+	for index := 0; index < requiredOwners; index++ {
+		openOwner(index)
+	}
+	if got, want := GDNLiveBufferCount(), baselineBuffers+2*requiredOwners; got != want {
+		t.Fatalf("B8 live buffers=%d, want %d", got, want)
+	}
+	peakB8Allocated := gdnCurrentAllocatedBytes()
+
+	convSeed := make([]float32, (geometry.ConvKernel-1)*geometry.convDim())
+	recurrentSeed := make([]float32, geometry.NumValueHeads*geometry.KeyHeadDim*geometry.ValueHeadDim)
+	seedLocation := func(index, length, stride int) int { return (index * stride) % length }
+	seedValue := func(index, offset int) float32 { return float32(index*2+offset+1) / 2048 }
+	for index, owner := range owners[:requiredOwners] {
+		convIndex := seedLocation(index, len(convSeed), 73)
+		recurrentIndex := seedLocation(index, len(recurrentSeed), 7919)
+		convSeed[convIndex] = seedValue(index, 0)
+		recurrentSeed[recurrentIndex] = -seedValue(index, 1)
+		if err := owner.Seed(convSeed, recurrentSeed); err != nil {
+			t.Fatalf("seed exact-Qwen owner %d: %v", index, err)
+		}
+		convSeed[convIndex] = 0
+		recurrentSeed[recurrentIndex] = 0
+	}
+	assertSeededOwners := func(stage string) {
+		t.Helper()
+		for index, owner := range owners[:requiredOwners] {
+			conv, recurrent, err := owner.Snapshot()
+			if err != nil {
+				t.Fatalf("%s snapshot owner %d: %v", stage, index, err)
+			}
+			convIndex := seedLocation(index, len(conv), 73)
+			recurrentIndex := seedLocation(index, len(recurrent), 7919)
+			for element, got := range conv {
+				want := float32(0)
+				if element == convIndex {
+					want = seedValue(index, 0)
+				}
+				if got != want {
+					t.Fatalf("%s owner %d convolution[%d]=%g, want %g", stage, index, element, got, want)
+				}
+			}
+			for element, got := range recurrent {
+				want := float32(0)
+				if element == recurrentIndex {
+					want = -seedValue(index, 1)
+				}
+				if got != want {
+					t.Fatalf("%s owner %d recurrent[%d]=%g, want %g", stage, index, element, got, want)
+				}
+			}
+		}
+	}
+	assertSeededOwners("B8 seeded isolation")
+
+	for index := requiredOwners; index < reviewedCapacity; index++ {
+		openOwner(index)
+	}
+	if got, want := GDNLiveBufferCount(), baselineBuffers+2*reviewedCapacity; got != want {
+		t.Fatalf("full registry live buffers=%d, want %d", got, want)
+	}
+	peakCapacityAllocated := gdnCurrentAllocatedBytes()
+	failedOwner, err := NewGDNState(geometry)
+	var declined *GDNDeclinedError
+	if failedOwner != nil || !errors.As(err, &declined) {
+		if failedOwner != nil {
+			failedOwner.Close()
+		}
+		t.Fatalf("capacity+1 owner=%v err=%T %v, want clean decline", failedOwner, err, err)
+	}
+	if got, want := GDNLiveBufferCount(), baselineBuffers+2*reviewedCapacity; got != want {
+		t.Fatalf("capacity+1 changed published buffers=%d, want %d", got, want)
+	}
+	assertSeededOwners("after capacity+1 decline")
+
+	for _, owner := range owners {
+		owner.Close()
+	}
+	owners = owners[:0]
+	if got := GDNLiveBufferCount(); got != baselineBuffers {
+		t.Fatalf("release-to-baseline live buffers=%d, want %d", got, baselineBuffers)
+	}
+	replacement, err := NewGDNState(geometry)
+	if err != nil {
+		t.Fatalf("allocate after full release: %v", err)
+	}
+	for _, handle := range func() []GDNStateHandle {
+		conv, recurrent := replacement.Handles()
+		return []GDNStateHandle{conv, recurrent}
+	}() {
+		if _, reused := seenHandles[handle]; reused {
+			t.Fatalf("post-release allocation reused handle %d", handle)
+		}
+	}
+	replacement.Close()
+	if got := GDNLiveBufferCount(); got != baselineBuffers {
+		t.Fatalf("replacement release live buffers=%d, want %d", got, baselineBuffers)
+	}
+	t.Logf("exact-Qwen GDN owner receipt: required=%d capacity=%d live_peak=%d state_bytes_each=%d metal_allocated_baseline=%d metal_allocated_B8=%d metal_allocated_capacity=%d elapsed=%s capacity_plus_one=declined cleanup=baseline",
+		requiredOwners, reviewedCapacity, 2*reviewedCapacity,
+		uint64((geometry.ConvKernel-1)*geometry.convDim()+geometry.NumValueHeads*geometry.KeyHeadDim*geometry.ValueHeadDim)*4,
+		baselineAllocated, peakB8Allocated, peakCapacityAllocated, time.Since(started).Round(time.Millisecond))
 }
 
 func gdnPanelTransientBytes(g GDNGeometry, tokens int) uint64 {

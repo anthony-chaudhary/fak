@@ -1,0 +1,6 @@
+self-hosted-runner:
+  labels:
+    - trajectory-audit
+    - fak-local
+    - fak-fleet
+    - cuda

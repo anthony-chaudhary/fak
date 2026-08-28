@@ -193,11 +193,11 @@ func (s *Session) VerifyTokenLineage(expected []int) (TokenLineageVerification, 
 	return s.Cache.lineage.verify(s.Cache.pos, expected)
 }
 
-// RestoreTokenLineage installs authoritative token history for an already-restored
-// native KV session. The candidate lineage must exactly match the session's resident
-// position authority before it is published, so a refusal leaves existing lineage
-// untouched.
-func (s *Session) RestoreTokenLineage(tokenIDs []int) (TokenLineageVerification, error) {
+// RestoreTokenLineage reconstructs exact token identity for a session whose KV
+// tensors and positions were restored through a format that does not carry the
+// lineage sidecar. The candidate stays private until its token count and every
+// resident position agree, so a refusal leaves the session's prior lineage intact.
+func (s *Session) RestoreTokenLineage(history []int) (TokenLineageVerification, error) {
 	if s == nil {
 		return TokenLineageVerification{}, fmt.Errorf("%w: nil session", ErrTokenLineageMismatch)
 	}
@@ -205,12 +205,12 @@ func (s *Session) RestoreTokenLineage(tokenIDs []int) (TokenLineageVerification,
 	defer s.cacheGeometryMu.Unlock()
 
 	candidate := tokenLineage{}
-	candidate.appendSpan(tokenIDs)
+	candidate.appendSpan(history)
 	if s.Backend != nil {
 		if s.halKV == nil {
 			return TokenLineageVerification{}, fmt.Errorf("%w: backend session has no KV store", ErrTokenLineageMismatch)
 		}
-		report, err := candidate.verify(s.halKV.Pos(), tokenIDs)
+		report, err := candidate.verify(s.halKV.Pos(), history)
 		if err != nil {
 			return report, err
 		}
@@ -220,7 +220,7 @@ func (s *Session) RestoreTokenLineage(tokenIDs []int) (TokenLineageVerification,
 	if s.Cache == nil {
 		return TokenLineageVerification{}, fmt.Errorf("%w: session has no host KV cache", ErrTokenLineageMismatch)
 	}
-	report, err := candidate.verify(s.Cache.pos, tokenIDs)
+	report, err := candidate.verify(s.Cache.pos, history)
 	if err != nil {
 		return report, err
 	}

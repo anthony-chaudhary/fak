@@ -99,8 +99,8 @@ var Catalog = map[string]string{
 	// Qwen3.8-27B is a dense multimodal hybrid (GDN + full attention).
 	// Q4_K_M is the portable default for Metal and CUDA prove-outs; the
 	// official FP8 checkpoint is exposed separately for A100-class engines.
-	"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
-	"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+	"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
 	"qwen38:27b-fp8": "hf://Qwen/Qwen3.8-27B-FP8",
 	// Ornith 1.0 — DeepReinforce's MIT-licensed Qwen3.5-family agentic-coding models
 	// (released 2026-06-25, HF org deepreinforce-ai; the collection is exactly 7 public

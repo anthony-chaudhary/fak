@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ type healthHub struct {
 	historyTS    map[string]string // channel -> ts of its newest message ("" => empty channel)
 	historyErr   map[string]string // channel -> slack error code (e.g. "not_in_channel")
 	authOK       bool
-	historyHits  int
+	historyHits  atomic.Int64
 	historyDelay map[string]time.Duration
 }
 
@@ -54,7 +55,7 @@ func newHealthHub(t *testing.T) *healthHub {
 				_, _ = w.Write([]byte(`{"ok":false,"error":"invalid_auth"}`))
 			}
 		case strings.HasSuffix(r.URL.Path, "conversations.history"):
-			h.historyHits++
+			h.historyHits.Add(1)
 			ch := r.URL.Query().Get("channel")
 			if delay := h.historyDelay[ch]; delay > 0 {
 				time.Sleep(delay)
@@ -102,7 +103,7 @@ func TestSlackHealthFreshVsStale(t *testing.T) {
 	runAuthChecks(reports, hub.base())
 	health := foldSlackHealth(reports, hub.base(), now)
 
-	if hub.historyHits == 0 {
+	if hub.historyHits.Load() == 0 {
 		t.Fatal("staleness must be witnessed by a real conversations.history read; server saw none")
 	}
 
@@ -199,8 +200,8 @@ func TestSlackHealthIncompleteAndAuthFail(t *testing.T) {
 	if sb == nil || sb.Verdict != verdictAuthFail {
 		t.Fatalf("rejected token should be AUTH_FAIL: %+v", sb)
 	}
-	if hub.historyHits != 0 {
-		t.Fatalf("auth-failed surfaces must not be probed for history; saw %d reads", hub.historyHits)
+	if hits := hub.historyHits.Load(); hits != 0 {
+		t.Fatalf("auth-failed surfaces must not be probed for history; saw %d reads", hits)
 	}
 
 	// marketing: an OPTIONAL surface (no #marketing channel exists yet) with no channel set

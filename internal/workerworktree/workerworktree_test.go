@@ -1,11 +1,13 @@
 package workerworktree
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeGit records every (root, args) call and replies from a per-verb queue or a
@@ -1000,5 +1002,127 @@ func TestLandReportsDroppedOutOfLanePaths(t *testing.T) {
 	}
 	if res.DroppedOutOfLane != 1 {
 		t.Fatalf("DroppedOutOfLane = %d, want 1", res.DroppedOutOfLane)
+	}
+}
+
+func TestPrepareOwnedBoundedCreatesVerifiedCleanWorktree(t *testing.T) {
+	fixture := newReapProofFixture(t)
+	wtRoot := t.TempDir()
+	res := PrepareOwnedBounded(fixture.repo, "test", "ready", fixture.base, wtRoot, OwnerStamp{PID: os.Getpid(), LeaseID: "lease-ready"}, 10*time.Second)
+	if !res.OK || res.Code != "" || res.BaseSHA != fixture.base {
+		t.Fatalf("prepare result = %+v", res)
+	}
+	if got := strings.TrimSpace(reapProofGit(t, res.Path, "rev-parse", "HEAD")); got != fixture.base {
+		t.Fatalf("HEAD = %q, want %q", got, fixture.base)
+	}
+	if got := strings.TrimSpace(reapProofGit(t, res.Path, "status", "--porcelain")); got != "" {
+		t.Fatalf("prepared worktree is dirty: %q", got)
+	}
+	stamp, err := readOwnerStamp(res.Path)
+	if err != nil || stamp.LeaseID != "lease-ready" {
+		t.Fatalf("owner stamp = %+v, %v", stamp, err)
+	}
+}
+
+func TestPrepareOwnedBoundedTimeoutEmitsNoOwnerReceipt(t *testing.T) {
+	root := t.TempDir()
+	wtRoot := t.TempDir()
+	base := strings.Repeat("a", 40)
+	cancelled := false
+	calls := 0
+	var cleanupCalls []string
+	git := func(root string, args []string) (int, string) {
+		calls++
+		if len(args) > 1 && args[0] == "rev-parse" {
+			return 0, base + "\n"
+		}
+		if len(args) > 1 && args[0] == "worktree" && args[1] == "add" {
+			cancelled = true
+			return ReapTimeoutExitCode, context.Canceled.Error()
+		}
+		if len(args) > 1 && args[0] == "worktree" && (args[1] == "remove" || args[1] == "prune") {
+			cleanupCalls = append(cleanupCalls, strings.Join(args, " "))
+		}
+		return 0, ""
+	}
+	res := prepareOwnedWithBackend(root, "test", "timeout", base, wtRoot, git, defaultIsolationBackend, OwnerStamp{PID: 42, LeaseID: "lease"}, true)
+	if res.OK || res.Code != "PREPARE_TIMEOUT" || !strings.Contains(res.Reason, "no ready receipt") {
+		t.Fatalf("timeout result = %+v", res)
+	}
+	if calls == 0 || !cancelled {
+		t.Fatal("git runner was not called")
+	}
+	if _, err := os.Stat(OwnerStampPath(res.Path)); !os.IsNotExist(err) {
+		t.Fatalf("owner receipt exists after timeout: %v", err)
+	}
+	wantCleanup := []string{"worktree remove --force " + res.Path, "worktree prune"}
+	if strings.Join(cleanupCalls, "\n") != strings.Join(wantCleanup, "\n") {
+		t.Fatalf("cleanup calls = %q, want %q", cleanupCalls, wantCleanup)
+	}
+}
+
+func TestVerifyPreparedWorktreeRejectsDirtyAndLockedCheckout(t *testing.T) {
+	base := strings.Repeat("b", 40)
+	wt := filepath.Join(t.TempDir(), "fak-worker-wt-verify")
+	if err := os.MkdirAll(filepath.Join(wt, ".gitdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git := func(root string, args []string) (int, string) {
+		joined := strings.Join(args, " ")
+		switch joined {
+		case "rev-parse HEAD":
+			return 0, base + "\n"
+		case "status --porcelain":
+			return 0, " M partial.go\n"
+		case "rev-parse --git-dir":
+			return 0, filepath.Join(wt, ".gitdir")
+		}
+		return 1, "unexpected"
+	}
+	res := verifyPreparedWorktree(Result{OK: true, Path: wt, BaseSHA: base}, git)
+	if res.OK || res.Code != "PREPARE_NOT_READY" || !strings.Contains(res.Reason, "not clean") {
+		t.Fatalf("dirty result = %+v", res)
+	}
+
+	wrongHead := strings.Repeat("c", 40)
+	git = func(root string, args []string) (int, string) {
+		if strings.Join(args, " ") == "rev-parse HEAD" {
+			return 0, wrongHead + "\n"
+		}
+		return 1, "unexpected"
+	}
+	res = verifyPreparedWorktree(Result{OK: true, Path: wt, BaseSHA: base}, git)
+	if res.OK || res.Code != "PREPARE_NOT_READY" || !strings.Contains(res.Reason, "does not match") {
+		t.Fatalf("wrong-head result = %+v", res)
+	}
+
+	git = func(root string, args []string) (int, string) {
+		switch strings.Join(args, " ") {
+		case "rev-parse HEAD":
+			return 0, base + "\n"
+		case "status --porcelain":
+			return 0, ""
+		case "rev-parse --git-dir":
+			return 0, filepath.Join(wt, ".gitdir")
+		}
+		return 1, "unexpected"
+	}
+	lock := filepath.Join(wt, ".gitdir", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res = verifyPreparedWorktree(Result{OK: true, Path: wt, BaseSHA: base}, git)
+	if res.OK || !strings.Contains(res.Reason, "index lock") {
+		t.Fatalf("lock result = %+v", res)
+	}
+}
+
+func TestBoundedGitRunnerCancelsBlockedCommand(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	time.Sleep(time.Millisecond)
+	rc, out := BoundedGitRunner(ctx)(t.TempDir(), []string{"status"})
+	if rc != ReapTimeoutExitCode || !strings.Contains(out, "deadline") {
+		t.Fatalf("bounded runner = (%d, %q)", rc, out)
 	}
 }

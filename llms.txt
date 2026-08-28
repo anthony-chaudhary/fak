@@ -105,3 +105,4 @@ For an unlisted task, start at [`INDEX.md`](INDEX.md) and select the current aud
 - [KV capacity normalization](docs/kv-capacity-normalization.md): normalize block and direct runtime KV metrics across tokens, bytes, and occupancy with typed honesty diagnostics.
 
 - [Frontier infrastructure and workload expectations](docs/research/frontier-infrastructure/README.md) — dated evidence on labs, clouds, datacenters, serving workloads, distributions, releases, startups, and rumors
+- [Release branch regime and actionable CI base-red diagnosis](docs/release-branch-regime-status.md): Exact-run CI diagnosis, typed causes, package work units, and operator-owned billing.

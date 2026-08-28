@@ -1,0 +1,147 @@
+{
+  "schema": "fak.build10x.cgo_path_cache.v1",
+  "observed_at": "2026-08-28T04:40:23Z",
+  "issues": [9661, 9671],
+  "source_tree": {
+    "head": "0f36db3068126dc8c70d4a6956fc71639e82d912",
+    "baseline": "the committed HEAD above",
+    "treatment": "the same HEAD plus the uncommitted #9671 deletion of the redundant #cgo CFLAGS -I${SRCDIR} directive and its regression test",
+    "materialization": "HEAD was exported into distinct roots; the treatment diff was applied to distinct copies",
+    "unrelated_worktree_changes_included": false,
+    "evidence_status": "experimental pre-edit/treatment comparison; committed-tip verification remains owed after landing"
+  },
+  "environment": {
+    "go_version": "go1.26.6",
+    "goos": "darwin",
+    "goarch": "arm64",
+    "cgo_enabled": "1",
+    "cc": "clang",
+    "compiler_id": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+    "cache_setup": "one initially empty GOCACHE shared by the two baseline roots and a separate initially empty GOCACHE shared by the two treatment roots"
+  },
+  "target": "./cmd/fak",
+  "commands": {
+    "build": "GOCACHE=<arm-cache> /usr/bin/time -p go build -x -trimpath -buildvcs=false -o <root>/fak-experimental ./cmd/fak",
+    "action_hash": "GODEBUG=gocachehash=1 GOCACHE=<arm-cache> go build -trimpath -buildvcs=false -o /dev/null ./cmd/fak",
+    "symbols": "go tool nm <artifact> | rg 'fmetal_init|mg_init'",
+    "policy_smoke": "<artifact> preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args '{}'"
+  },
+  "action_key": {
+    "baseline_root_a_cc_flags": ["-O2", "-g", "-I/tmp/fak-9671.WSYqf4/before-a/internal/compute"],
+    "baseline_root_b_cc_flags": ["-O2", "-g", "-I/tmp/fak-9671.WSYqf4/before-b/internal/compute"],
+    "baseline_root_a_compute_hash": "d2886bd367e0080ca504eccf24d1c60235ad37bfbc59048d854bcfa062eeb05a",
+    "baseline_root_b_compute_hash": "8bc74e1f2beb94c03ea78907982b4dd00872455040b8fac47669e759498ea5b0",
+    "treatment_cc_flags": ["-O2", "-g"],
+    "treatment_root_a_compute_hash": "cc8fc79949a69df2f235959ee914d1dac38f49ca532818224d6d1c14edde9ef7",
+    "treatment_root_b_compute_hash": "cc8fc79949a69df2f235959ee914d1dac38f49ca532818224d6d1c14edde9ef7",
+    "mechanism": "Go hashes source-declared cgo CFLAGS into the build action. ${SRCDIR} expands to the absolute package directory, while cgo already supplies the source directory as an implied include path. Removing only the redundant directive makes the existing internal/compute archive action path-portable under -trimpath."
+  },
+  "samples": [
+    {
+      "name": "baseline-root-a",
+      "cache_state": "empty",
+      "real_seconds": 27.34,
+      "user_seconds": 118.22,
+      "sys_seconds": 18.82,
+      "compile_actions": 840,
+      "link_actions": 1
+    },
+    {
+      "name": "baseline-root-b",
+      "cache_state": "populated by baseline-root-a under a different absolute root",
+      "real_seconds": 12.15,
+      "user_seconds": 8.04,
+      "sys_seconds": 3.42,
+      "compile_actions": 1,
+      "compile_action_packages": ["github.com/anthony-chaudhary/fak/internal/compute"],
+      "link_actions": 1
+    },
+    {
+      "name": "treatment-root-a",
+      "cache_state": "empty",
+      "real_seconds": 25.17,
+      "user_seconds": 116.36,
+      "sys_seconds": 18.92,
+      "compile_actions": 840,
+      "link_actions": 1
+    },
+    {
+      "name": "treatment-root-b",
+      "cache_state": "populated by treatment-root-a under a different absolute root",
+      "real_seconds": 6.43,
+      "user_seconds": 6.02,
+      "sys_seconds": 3.24,
+      "compile_actions": 0,
+      "link_actions": 1
+    }
+  ],
+  "result": {
+    "second_root_baseline_seconds": 12.15,
+    "second_root_treatment_seconds": 6.43,
+    "second_root_speedup": 1.88958,
+    "second_root_seconds_removed": 5.72,
+    "second_root_compile_actions_before": 1,
+    "second_root_compile_actions_after": 0,
+    "claim": "The uncommitted #9671 treatment removed the last cross-root compile action in this Darwin/arm64+cgo experiment. The final executable link remains and #9661's matched Windows completion matrix is still owed."
+  },
+  "negative_native_input": {
+    "change": "added one comment line to internal/compute/metal_shim.m in a third treatment root",
+    "cache_state": "populated by the unchanged treatment roots",
+    "real_seconds": 16.01,
+    "user_seconds": 40.78,
+    "sys_seconds": 4.42,
+    "compile_actions": 11,
+    "link_actions": 1,
+    "compute_action_hash": "44b330b1ee4d6f47b8466a6e451e4e0d634d3c55697e96003ef0c6fc1133d9e8",
+    "verdict": "native source bytes still invalidate internal/compute and its dependent package chain"
+  },
+  "artifact": {
+    "baseline_root_a_sha256": "06bd71bfdece2e66ca2c852ea1250f92e9052c023c2dc3c280e20efd14aa683c",
+    "baseline_root_b_sha256": "06bd71bfdece2e66ca2c852ea1250f92e9052c023c2dc3c280e20efd14aa683c",
+    "treatment_root_a_sha256": "2dc0d6fb1f893dc1e3ab96467fc3bc1b6f18a6bd2b34ff5e9344301cdc45f100",
+    "treatment_root_b_sha256": "2dc0d6fb1f893dc1e3ab96467fc3bc1b6f18a6bd2b34ff5e9344301cdc45f100",
+    "size_bytes": 85260210,
+    "treatment_build_id": "Wwc-v2S4M276sromPOw6/QtFY308E_U__HKIsx9-3/euqYu-EbAArJ4uwmnY1e/P6IYjTiYQcC3sgjyuVRG",
+    "native_symbols": ["_fmetal_init", "_mg_init"],
+    "policy_output": "verdict=DENY reason=POLICY_BLOCK by=monitor",
+    "treatment_cross_root_outputs_byte_identical": true,
+    "native_path_statement": "The treatment retains the darwin && arm64 && cgo tags, Objective-C source, Metal frameworks, shared metalgemm device seam, and linked fmetal_init/mg_init symbols."
+  },
+  "focused_tests": [
+    {
+      "command": "copy internal/compute/metal_cache_test.go into the committed baseline root, then go test ./internal/compute -run TestMetalCgoFlagsArePathPortable -count=1",
+      "result": "EXPECTED FAIL: cgo flag -I/tmp/fak-9671.WSYqf4/before-a/internal/compute embeds the checkout path"
+    },
+    {
+      "command": "go test ./internal/compute -run 'TestMetalCgoFlagsArePathPortable|TestMetalOwnerLifecycle' -count=1",
+      "result": "PASS"
+    },
+    {
+      "command": "go test ./internal/architest -run TestMetalComputeSharesMetalgemmDeviceSeam -count=1",
+      "result": "PASS"
+    },
+    {
+      "command": "go test ./cmd/fak -run TestResolveServeMetal -count=1",
+      "result": "PASS"
+    },
+    {
+      "command": "go test -v ./internal/compute -run 'TestMetal(MatMulApproxMatchesRef|CommandOwnerBatchesTwoMatMuls|ForwardMatchesRef)$' -count=1",
+      "result": "PASS with all three runtime cases SKIPPED because no reachable Metal device was registered; linked native symbols, architecture test, and selection test are the available host witnesses"
+    }
+  ],
+  "committed_tip_verification": {
+    "status": "OWED",
+    "reason": "this receipt was captured before the #9671 diff was committed and landed",
+    "required": [
+      "rerun the focused tests at the landed commit",
+      "run the scope-correct repository gate",
+      "confirm a fresh second root executes zero compile actions",
+      "record the landed internal/compute module@rev and witnessed commit"
+    ]
+  },
+  "honest_limits": [
+    "This receipt is Darwin/arm64 with cgo enabled and does not substitute for #9661's Windows/amd64 five-cold/five-warm matrix.",
+    "The treatment removes the last cross-root compile action; Go still performs one final executable link per requested output.",
+    "The negative native-input run rebuilds internal/compute plus dependent packages, so its 11 compile actions are an invalidation witness rather than a steady-state timing claim."
+  ]
+}

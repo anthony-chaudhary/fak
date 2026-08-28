@@ -290,7 +290,6 @@ var maintainerDevCommands = []string{
 	"test",
 	"test-quality",
 	"tier-calibrate",
-	"thought-check",
 	"token-defaults-scorecard",
 	"token-profile",
 	"tool-coverage-audit",

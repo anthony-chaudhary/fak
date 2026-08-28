@@ -1,0 +1,167 @@
+{
+  "schema": "fak.build10x.make_build_link_census.v1",
+  "observed_at": "2026-08-28T05:03:26Z",
+  "issues": [9661, 9672],
+  "source_tree": {
+    "head": "b262395b602bfe67d6bd9183cf405457b91bf866",
+    "baseline": "the pinned source with the former make build command graph: go build ./... followed by the named fak and hook artifacts",
+    "treatment": "the same source with #9672 moving go build ./... to the explicit build-all target while make build retains the named fak and hook artifacts",
+    "unrelated_worktree_changes_included": false,
+    "evidence_status": "matched pre-edit/treatment measurement in a managed detached worker; committed-tip verification remains owed after landing"
+  },
+  "environment": {
+    "go_version": "go1.26.6",
+    "goos": "darwin",
+    "goarch": "arm64",
+    "cgo_enabled": "1",
+    "kernel": "Darwin 25.6.0 arm64",
+    "cache_setup": "one initially empty GOCACHE per arm; each arm reused its own cache and exact named output paths for the warm sample",
+    "trace": "GOFLAGS=-x; compile, cgo, and link actions counted from the Go command trace"
+  },
+  "contract": {
+    "build": "emit a debuggable fak plus native repoguard, Windows repoguard.exe, and native dispatchworker",
+    "build_all": "compile every package and link every command with go build ./...",
+    "ci": "name build and build-all as direct prerequisites",
+    "unchanged": [
+      "scripts/build.sh and its release/dev/race flags",
+      "all four named artifact paths",
+      "the Windows hook cross-build",
+      "CI process-parallelism safeguards"
+    ]
+  },
+  "commands": {
+    "baseline": "GOCACHE=<baseline-cache> GOFLAGS=-x sh -c 'go build ./... && OUT=<baseline-out>/fak PROFILE=dev sh scripts/build.sh && go build -o <baseline-out>/repoguard ./cmd/repoguard && GOOS=windows GOARCH=amd64 go build -o <baseline-out>/repoguard.exe ./cmd/repoguard && go build -o <baseline-out>/dispatchworker ./cmd/dispatchworker'",
+    "treatment": "GOCACHE=<treatment-cache> GOFLAGS=-x sh -c 'OUT=<treatment-out>/fak PROFILE=dev sh scripts/build.sh && go build -o <treatment-out>/repoguard ./cmd/repoguard && GOOS=windows GOARCH=amd64 go build -o <treatment-out>/repoguard.exe ./cmd/repoguard && go build -o <treatment-out>/dispatchworker ./cmd/dispatchworker'",
+    "warm_method": "rerun the same arm with its populated GOCACHE and exact existing output paths",
+    "target_build": "make build",
+    "target_build_all": "make build-all"
+  },
+  "samples": [
+    {
+      "name": "baseline-cold",
+      "cache_state": "empty; named outputs absent",
+      "real_seconds": 53.62,
+      "user_seconds": 262.39,
+      "sys_seconds": 50.63,
+      "compile_actions": 1330,
+      "cgo_actions": 14,
+      "link_actions": 151
+    },
+    {
+      "name": "treatment-cold",
+      "cache_state": "empty; named outputs absent",
+      "real_seconds": 31.14,
+      "user_seconds": 120.49,
+      "sys_seconds": 21.23,
+      "compile_actions": 947,
+      "cgo_actions": 14,
+      "link_actions": 4
+    },
+    {
+      "name": "baseline-warm",
+      "cache_state": "populated by baseline-cold; named outputs retained",
+      "real_seconds": 15.83,
+      "user_seconds": 98.85,
+      "sys_seconds": 24.62,
+      "compile_actions": 0,
+      "cgo_actions": 0,
+      "link_actions": 147
+    },
+    {
+      "name": "treatment-warm",
+      "cache_state": "populated by treatment-cold; named outputs retained",
+      "real_seconds": 1.26,
+      "user_seconds": 0.67,
+      "sys_seconds": 1.81,
+      "compile_actions": 0,
+      "cgo_actions": 0,
+      "link_actions": 0
+    }
+  ],
+  "result": {
+    "cold_link_actions_before": 151,
+    "cold_link_actions_after": 4,
+    "cold_seconds_before": 53.62,
+    "cold_seconds_after": 31.14,
+    "cold_speedup": 1.72190,
+    "cold_seconds_removed": 22.48,
+    "warm_link_actions_before": 147,
+    "warm_link_actions_after": 0,
+    "warm_seconds_before": 15.83,
+    "warm_seconds_after": 1.26,
+    "warm_speedup": 12.56349,
+    "warm_seconds_removed": 14.57,
+    "mechanism": "go build ./... links every main package to a disposable output on every invocation. Named outputs are real retained binaries whose embedded Go build IDs let an unchanged warm build skip linking. Separating the whole-tree gate removes 147 unrelated command links from make build without removing them from make ci."
+  },
+  "artifacts": {
+    "fak": {
+      "size_bytes": 85553650,
+      "sha256": "530357e7723395f9c5d85d6b38a12ca5789709c78fd47bb70c8ec96bc7359cd0",
+      "baseline_treatment_byte_identical": true
+    },
+    "repoguard": {
+      "size_bytes": 4031426,
+      "sha256": "a285e1a593c9dd9f7bd222dff0cc12aa34852d193d8fff3a31cb63ce62be7c53",
+      "baseline_treatment_byte_identical": true
+    },
+    "repoguard_exe": {
+      "size_bytes": 4301824,
+      "sha256": "aa97337bc6c28e829da68f2f38217d877c2689e65c61769bf1cf7438c1f8e679",
+      "baseline_treatment_byte_identical": true,
+      "format": "PE32+ x86-64",
+      "goos": "windows",
+      "goarch": "amd64"
+    },
+    "dispatchworker": {
+      "size_bytes": 7052898,
+      "sha256": "671dafc21bdf6943aa38c333681c025f7b98a549513e5e2c58805ec26e0c888a",
+      "baseline_treatment_byte_identical": true
+    }
+  },
+  "smokes": [
+    {
+      "command": "<fak> version",
+      "result": "0.45.0; go1.26.6 darwin/arm64; no VCS stamp in the detached measurement output"
+    },
+    {
+      "command": "<fak> preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args '{}'",
+      "result": "verdict=DENY reason=POLICY_BLOCK by=monitor"
+    },
+    {
+      "command": "<repoguard> -selftest",
+      "result": "41/41 passed (18 deny, 23 allow)"
+    },
+    {
+      "command": "<dispatchworker> -dry-run -json -lane build10x-9672 -workspace .",
+      "result": "ok=true, guarded=true, dry_run=true"
+    },
+    {
+      "command": "file <repoguard.exe> && go version -m <repoguard.exe>",
+      "result": "PE32+ x86-64; GOOS=windows; GOARCH=amd64"
+    }
+  ],
+  "target_verification": [
+    {
+      "command": "python3 tools/build_entrypoint_test.py",
+      "result": "PASS, 14 tests"
+    },
+    {
+      "command": "make -n build; make -n build-all; make -n ci",
+      "result": "PASS: build omits go build ./...; build-all owns it; ci expands both directly"
+    },
+    {
+      "command": "make build",
+      "result": "PASS in 29.69s; all four named artifacts emitted"
+    },
+    {
+      "command": "make build-all",
+      "result": "PASS in 31.52s"
+    }
+  ],
+  "honest_limits": [
+    "This is a Darwin/arm64 diagnostic with one cold and one warm sample per arm. It does not substitute for #9673's five-cold/five-warm Windows/amd64 matrix.",
+    "The 12.56x warm result applies to make build with retained named outputs; make build-all intentionally still pays for all 147 command links when explicitly invoked or reached through make ci.",
+    "The 1.72x cold result does not by itself satisfy #9661's end-to-end 10x completion target.",
+    "The detached output did not carry VCS provenance, so committed-tip verification and module@rev stamping remain required after landing."
+  ]
+}

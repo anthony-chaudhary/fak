@@ -350,14 +350,14 @@ func runValidate(stdout, stderr io.Writer, argv []string) int {
 			// entire repository and was the dominant #6568 timeout signature.
 			phase = recorder.start("build")
 			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "build", errors.New("affected package build failed"), *asJSON, func() (string, bool) {
-				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"build"}, buildTargets...)...)
+				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("build", buildTargets)...)
 			}); timedOut {
 				return code
 			}
 
 			phase = recorder.start("vet")
 			if code, timedOut := runValidateCheckPhase(stdout, &res, &recorder, phase, "vet", errors.New("affected package vet failed"), *asJSON, func() (string, bool) {
-				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, append([]string{"vet"}, buildTargets...)...)
+				return validateRunGoCheckWithin(ctx, dir, wslWorkspace, validateGoCheckArgs("vet", buildTargets)...)
 			}); timedOut {
 				return code
 			}
@@ -808,11 +808,18 @@ func validateTestRunner(goos string, wsl bool) string {
 }
 
 func validateTestArgs(testRun string, targets []string) []string {
-	args := []string{"test", "-count=1"}
+	args := []string{"test", "-trimpath", "-count=1"}
 	if testRun != "" {
 		args = append(args, "-run", testRun)
 	}
 	return append(args, targets...)
+}
+
+func validateGoCheckArgs(mode string, targets []string) []string {
+	// validate materializes the same committed bytes under a fresh root on every run.
+	// Normalize that disposable root in compile identities so the shared Go cache can
+	// reuse artifacts without changing the developer/release build's debug-path contract.
+	return append([]string{mode, "-trimpath"}, targets...)
 }
 
 func runValidateTestsWithin(ctx context.Context, repo, dir, tip string, args []string, wsl bool) (string, bool) {

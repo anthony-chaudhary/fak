@@ -368,7 +368,6 @@ var verbManifest = []Verb{
 	{Name: "test", Synopsis: "host-aware test runner: resolve the right go test invocation (Windows->WSL via test.ps1)", Lane: "cmd"},
 	{Name: "test-quality", Synopsis: "score test-source defects against a shrinks-only baseline and emit repair candidates", Lane: "cmd"},
 	{Name: "tier-calibrate", Synopsis: "outcome-calibration fold over recorded tier decisions: propose threshold moves from witnessed outcomes", Lane: "cmd"},
-	{Name: "thought-check", Synopsis: "catalog, prepare, upsert, and verify one marker-keyed Top-5 GitHub issue review", Lane: "cmd"},
 	{Name: "token-defaults-scorecard", Synopsis: "native token-saving-defaults control-pane payload", Lane: "cmd"},
 	{Name: "token-profile", Synopsis: "price a forecast of uncached/cached input and reserved output tokens into USD + scheduler weight units", Lane: "tokenprofile"},
 	{Name: "tool-coverage-audit", Synopsis: "audit load-bearing tool coverage for a workspace against the advisory minimum floor", Lane: "cmd"},

@@ -1,0 +1,102 @@
+{
+  "schema": "fak.build10x.path_cache.v1",
+  "observed_at": "2026-08-28T04:02:09Z",
+  "issue": 9661,
+  "source_tree": {
+    "commit": "ee6f393f419042c130a1b4b08a69883a962bc3f8",
+    "materialization": "git archive HEAD extracted into a new root for every sample",
+    "benchmark_root": "/tmp/fak-build10x.TXzvax",
+    "uncommitted_changes_included": false
+  },
+  "environment": {
+    "go_version": "go1.26.6",
+    "goos": "darwin",
+    "goarch": "arm64",
+    "cgo_enabled": "1",
+    "module_cache": "/Users/anthony/go/pkg/mod",
+    "cache_setup": "two initially empty GOCACHE directories, one shared only by control samples and one shared only by treatment samples"
+  },
+  "target": "./cmd/fak",
+  "order": [
+    "control-1",
+    "trimpath-1",
+    "control-2",
+    "trimpath-2"
+  ],
+  "samples": [
+    {
+      "name": "control-1",
+      "root": "/tmp/fak-build10x.TXzvax/control-1",
+      "cache_state": "empty",
+      "command": "GOCACHE=<control-cache> go build -x -buildvcs=false -o /dev/null ./cmd/fak",
+      "real_seconds": 26.00,
+      "user_seconds": 115.82,
+      "sys_seconds": 19.15,
+      "compile_actions": 840,
+      "link_actions": 1
+    },
+    {
+      "name": "trimpath-1",
+      "root": "/tmp/fak-build10x.TXzvax/trim-1",
+      "cache_state": "empty",
+      "command": "GOCACHE=<trim-cache> go build -x -trimpath -buildvcs=false -o /dev/null ./cmd/fak",
+      "real_seconds": 27.31,
+      "user_seconds": 116.15,
+      "sys_seconds": 20.20,
+      "compile_actions": 840,
+      "link_actions": 1
+    },
+    {
+      "name": "control-2",
+      "root": "/tmp/fak-build10x.TXzvax/control-2",
+      "cache_state": "populated by control-1 under a different absolute root",
+      "command": "GOCACHE=<control-cache> go build -x -buildvcs=false -o /dev/null ./cmd/fak",
+      "real_seconds": 23.59,
+      "user_seconds": 95.02,
+      "sys_seconds": 14.92,
+      "compile_actions": 590,
+      "link_actions": 1
+    },
+    {
+      "name": "trimpath-2",
+      "root": "/tmp/fak-build10x.TXzvax/trim-2",
+      "cache_state": "populated by trimpath-1 under a different absolute root",
+      "command": "GOCACHE=<trim-cache> go build -x -trimpath -buildvcs=false -o /dev/null ./cmd/fak",
+      "real_seconds": 9.14,
+      "user_seconds": 7.52,
+      "sys_seconds": 2.38,
+      "compile_actions": 1,
+      "compile_action_packages": [
+        "github.com/anthony-chaudhary/fak/internal/compute"
+      ],
+      "link_actions": 1
+    }
+  ],
+  "result": {
+    "second_root_control_seconds": 23.59,
+    "second_root_trimpath_seconds": 9.14,
+    "second_root_speedup": 2.58096,
+    "control_second_root_compile_actions": 590,
+    "trimpath_second_root_compile_actions": 1,
+    "avoided_compile_actions": 589,
+    "avoided_compile_action_fraction": 0.998305,
+    "cold_control_seconds": 26.00,
+    "cold_trimpath_seconds": 27.31,
+    "claim": "Path normalization eliminated 589 of 590 second-root compile actions and made the second-root build 2.58x faster in this 2+2 falsifier. It did not prove the issue's 10x completion target; cgo/Metal compilation plus linking remain."
+  },
+  "behavior": {
+    "command": "<artifact> preflight --policy examples/customer-support-readonly-policy.json --tool refund_payment --args '{}'",
+    "control_output": "verdict=DENY reason=POLICY_BLOCK by=monitor",
+    "trimpath_output": "verdict=DENY reason=POLICY_BLOCK by=monitor",
+    "outputs_byte_equal": true,
+    "control_binary_size_bytes": 85375842,
+    "trimpath_binary_size_bytes": 85260210,
+    "control_sha256": "0a9e88ed89d6db055bbfbd0418f34f2b791fee0a735e89c60054c5da51848406",
+    "trimpath_sha256": "89e6db3af59e6b3584f7f45c48fd0f340d626d223372a7e9434b3cf818b62333"
+  },
+  "honest_limits": [
+    "Two samples per arm falsify or support the path-key mechanism but do not satisfy #9661's required five cold and five warm completion matrix.",
+    "The control and treatment binaries intentionally differ because -trimpath changes debug/build metadata; behavior output, not byte identity, is the equivalence witness.",
+    "The measurement is Darwin/arm64 with cgo enabled and cannot be substituted for the matched Windows/amd64 65,555 ms completion baseline."
+  ]
+}

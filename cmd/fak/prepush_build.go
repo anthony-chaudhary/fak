@@ -20,6 +20,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 	"github.com/anthony-chaudhary/fak/internal/hooks"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
+	"github.com/anthony-chaudhary/fak/internal/workflowlint"
 )
 
 // cmd/fak/prepush_build.go — `fak hooks pre-push`: the push-seam compile gate
@@ -86,7 +87,113 @@ var (
 	prepushNow                  = time.Now
 	prepushCommitPathsCoveredFn = prepushCommitPathsCovered
 	prepushTreeResolveFn        = prepushGitRevParse
+	prepushWorkflowChangedFiles = gitChangedFilesBetweenTrees
+	prepushWorkflowTipPaths     = gitWorkflowPathsAtTip
+	prepushWorkflowExtractTip   = prepushArchiveTip
+	prepushWorkflowCheckTree    = workflowlint.CheckTree
 )
+
+type workflowStructureResult struct {
+	Schema   string                 `json:"schema"`
+	Verdict  string                 `json:"verdict"`
+	OK       bool                   `json:"ok"`
+	Touched  bool                   `json:"touched"`
+	Root     string                 `json:"root,omitempty"`
+	Base     string                 `json:"base,omitempty"`
+	Ref      string                 `json:"ref,omitempty"`
+	Findings []workflowlint.Finding `json:"findings"`
+	Detail   string                 `json:"detail,omitempty"`
+}
+
+// evaluatePrePushWorkflow is the real workflow path gate. Range selection reads committed
+// names only; when relevant, extraction and CheckTree both operate on the immutable pushed tip.
+func evaluatePrePushWorkflow(root, base, tip string) (workflowStructureResult, int) {
+	res := workflowStructureResult{Schema: "fak.workflow_structure.v1", Verdict: "COULD_NOT_RUN", Root: root, Base: base, Ref: tip}
+	if strings.Trim(tip, "0 ") == "" {
+		tip = "HEAD"
+	}
+	res.Base, res.Ref = base, tip
+	newRef := strings.Trim(base, "0 ") == ""
+	var (
+		paths []string
+		err   error
+	)
+	if newRef {
+		// A new ref has no remote-old tree. Never substitute origin/main (which may be an
+		// unrelated history and can miss workflows already present in tip); inspect tip's
+		// complete workflow subtree and gate whenever it is non-empty.
+		paths, err = prepushWorkflowTipPaths(root, tip)
+	} else {
+		// Pre-push gives us exact old/new objects. Compare those trees directly, including
+		// non-fast-forward updates; a merge-base/three-dot diff answers a different question.
+		paths, err = prepushWorkflowChangedFiles(root, base, tip)
+	}
+	if err != nil {
+		res.Detail = err.Error()
+		return res, 2
+	}
+	for _, path := range paths {
+		if strings.HasPrefix(filepath.ToSlash(path), ".github/workflows/") {
+			res.Touched = true
+			break
+		}
+	}
+	if !res.Touched {
+		res.Verdict, res.OK, res.Findings = "NOOP", true, []workflowlint.Finding{}
+		return res, 0
+	}
+	dir, err := prepushWorkflowExtractTip(root, tip)
+	if err != nil {
+		res.Detail = err.Error()
+		return res, 2
+	}
+	defer os.RemoveAll(dir)
+	findings, err := prepushWorkflowCheckTree(dir)
+	res.Findings = findings
+	if err != nil {
+		res.Detail = err.Error()
+		return res, 2
+	}
+	if len(findings) > 0 {
+		res.Verdict = "WORKFLOW_STRUCTURE"
+		return res, 1
+	}
+	res.Verdict, res.OK = "OK", true
+	return res, 0
+}
+
+// gitChangedFilesBetweenTrees returns paths changed between the exact remote-old and
+// local-new trees. Unlike gitChangedFilesRange it deliberately uses two-dot semantics: the
+// pre-push protocol has already supplied both immutable endpoints, including for non-FF pushes.
+func gitChangedFilesBetweenTrees(root, oldTip, newTip string) ([]string, error) {
+	out, err := gitOut(root, "diff", "--name-only", oldTip, newTip, "--")
+	if err != nil {
+		return nil, err
+	}
+	return nonEmptySlashPaths(out), nil
+}
+
+// gitWorkflowPathsAtTip lists the complete workflow subtree of a newly-created ref. There is
+// no old tree to diff, so any path in this subtree makes the push relevant and prevents an
+// unrelated local upstream from narrowing the gate.
+func gitWorkflowPathsAtTip(root, tip string) ([]string, error) {
+	out, err := gitOut(root, "ls-tree", "-r", "--name-only", tip, "--", ".github/workflows")
+	if err != nil {
+		return nil, err
+	}
+	return nonEmptySlashPaths(out), nil
+}
+
+func nonEmptySlashPaths(out string) []string {
+	var paths []string
+	for _, path := range strings.Split(out, "\n") {
+		if path = strings.TrimSpace(path); path != "" {
+			paths = append(paths, filepath.ToSlash(path))
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
 
 // prepushTestQuality is the seam over the ADVISORY test-quality ratchet this gate runs after its
 // own verdict (see the call site in runHooksPrePush). It exists to pin the two properties `go vet`

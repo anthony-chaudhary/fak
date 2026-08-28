@@ -107,11 +107,11 @@ func TestBuildCheckArgs(t *testing.T) {
 		pkgs, want               []string
 	}{
 		{"build discards to null", "build", "", "NUL", []string{"./..."},
-			[]string{"build", "-o", "NUL", "./..."}},
+			[]string{"build", "-trimpath", "-o", "NUL", "./..."}},
 		{"build with overlay and out dir", "build", "ov.json", "out", []string{"./cmd/fak"},
-			[]string{"build", "-overlay", "ov.json", "-o", "out", "./cmd/fak"}},
+			[]string{"build", "-trimpath", "-overlay", "ov.json", "-o", "out", "./cmd/fak"}},
 		{"vet never takes -o", "vet", "ov.json", "out", []string{"./..."},
-			[]string{"vet", "-overlay", "ov.json", "./..."}},
+			[]string{"vet", "-trimpath", "-overlay", "ov.json", "./..."}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,6 +120,24 @@ func TestBuildCheckArgs(t *testing.T) {
 				t.Errorf("buildCheckArgs = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildCheckArgsCarryOneTrimpathFlag(t *testing.T) {
+	for _, mode := range []string{"build", "vet"} {
+		got := buildCheckArgs(mode, "", "NUL", []string{"./p"})
+		if len(got) < 2 || got[1] != "-trimpath" {
+			t.Fatalf("%s args = %v; want -trimpath as the first build flag", mode, got)
+		}
+		count := 0
+		for _, arg := range got {
+			if arg == "-trimpath" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("%s args = %v; want exactly one -trimpath", mode, got)
+		}
 	}
 }
 

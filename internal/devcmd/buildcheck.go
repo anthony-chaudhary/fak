@@ -322,7 +322,11 @@ func RunBuildCheck(stdout, stderr io.Writer, argv []string) int {
 // buildoverlay.Build maps each masked repo-relative file to an EMPTY backing path (absolute,
 // OS-native — how the go command keys the overlay), which hides it from the compile.
 func buildCheckArgs(mode, overlayPath, outTarget string, pkgs []string) []string {
-	args := []string{mode}
+	// Every buildcheck checkout is disposable and may live under a different absolute
+	// root. Keep that root out of compile action identities so Go's shared content-addressed
+	// cache can reuse sound artifacts. This is verification-only: the debuggable developer
+	// build deliberately keeps host paths.
+	args := []string{mode, "-trimpath"}
 	if overlayPath != "" {
 		args = append(args, "-overlay", overlayPath)
 	}

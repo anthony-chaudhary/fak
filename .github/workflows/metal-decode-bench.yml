@@ -46,6 +46,9 @@ jobs:
           go test ./internal/model/ \
             -run '^TestQwen35HybridQ4KStepBatchActiveMatchesSerial$' \
             -count=1 -v
+          go test ./internal/agent/ \
+            -run '^TestInKernelPlannerCoalescesRealQwenMetalTurns$' \
+            -count=1 -v
       # The measurement: n separate command buffers (Single) vs one batched (Batch), ms/layer.
       # The Single/Batch ms ratio is the #1382 command-buffer-collapse speedup on the mlp_decode cost.
       - name: benchmark - batched vs single fused expert MLP

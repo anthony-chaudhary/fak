@@ -10842,9 +10842,15 @@
           "category": "incidental",
           "reason": "Go JSON field for one existing portfolio coverage debt row, not a support-maturity concept.",
           "token": "CoverageDebtUnit"
+        },
+        {
+          "category": "false-positive",
+          "reason": "AuditConclusionStatus.BroadEfficiencySupported is a receipt boolean derived from parser refusals; reuse by the nightly audit does not introduce a support-maturity rung or lifecycle concept.",
+          "token": "broadefficiencysupported"
         }
       ],
       "exclude": [
+        "broadefficiencysupported",
         "factual_correctness"
       ],
       "id": "support-maturity",

@@ -14,21 +14,21 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 ## Corpus
 
-**Slop-debt (total HARD defects): 179** — the primary, unbounded metric. Drive it to 0; every retired clone/dead symbol/vacuous test moves it. (The /100 score below saturates at zero defects and is NOT the driver.)
+**Slop-debt (total HARD defects): 187** — the primary, unbounded metric. Drive it to 0; every retired clone/dead symbol/vacuous test moves it. (The /100 score below saturates at zero defects and is NOT the driver.)
 
 | Metric | Value |
 |---|---|
-| **Slop-debt (total HARD defects)** | **179** |
-| Legacy bounded score (saturates; not the driver) | -1.0/100 (grade F) |
-| Soft signals (advisory) | 2152 |
+| **Slop-debt (total HARD defects)** | **187** |
+| Legacy bounded score (saturates; not the driver) | -6.3/100 (grade F) |
+| Soft signals (advisory) | 2180 |
 
 ## Per-KPI (worst-first)
 
 | KPI | Score | Slop-debt | Detail |
 |---|---:|---:|---|
-| duplication | -236/100 | 168 | 168 duplicated block(s): 11 extractable · 81 local · 76 pair (payoff-weighted debt 89.5) |
-| dead_code | 70/100 | 6 | 6 dead unexported symbol(s) |
-| vacuous_tests | 50/100 | 5 | 5 vacuous of 30466 Test func(s) |
+| duplication | -248/100 | 174 | 174 duplicated block(s): 10 extractable · 88 local · 76 pair (payoff-weighted debt 92.0) |
+| dead_code | 60/100 | 8 | 8 dead unexported symbol(s) |
+| vacuous_tests | 50/100 | 5 | 5 vacuous of 30602 Test func(s) |
 | comment_slop | 100/100 | 0 | no comment slop |
 | stub_masquerade | 100/100 | 0 | no exported stub-masquerade |
 | churn_bloat | 100/100 | 0 | no commits in range (skipped) |
@@ -56,6 +56,6 @@ description: "fak's code-slop scorecard grades the Go module on six deterministi
 
 > When `promotable` is yes: review the elapsed window for any false positive, then move the `stub_masquerade` finding from `soft` to `defects` and bump `KPI_WEIGHTS["stub_masquerade"]` in `tools/code_slop_scorecard.py` — the deliberate flip.
 
-> 179 unit(s) of slop-debt; score -1.0/100 (grade F); heaviest KPI: duplication (168 defect(s))
+> 187 unit(s) of slop-debt; score -6.3/100 (grade F); heaviest KPI: duplication (174 defect(s))
 
 > next: retire slop-debt worst-first (see corpus.breakdown + per-KPI defects): de-duplicate clones, delete dead unexported symbols, drop commented-out code + tautological doc comments, add assertions to vacuous tests; re-run to prove the drop

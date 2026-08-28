@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,24 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/armbench"
 	"github.com/anthony-chaudhary/fak/internal/committedbuildwitness"
 )
+
+func TestCIPreflightGoArgsArePathPortable(t *testing.T) {
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{"generated check", ciPreflightDisambiguationArgs(), []string{"run", "-trimpath", "./cmd/fak", "disambiguation", "generate", "--check", "--json"}},
+		{"committed build", ciPreflightBuildArgs(), []string{"build", "-trimpath", "./..."}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tc.got, tc.want) {
+				t.Fatalf("args = %v, want exact %v", tc.got, tc.want)
+			}
+		})
+	}
+}
 
 // ci_preflight_test.go — proves `fak ci-preflight` reads the COMMITTED tip (not the working
 // tree): it seeds a real temp git repo, commits a clean/dirty tip, and asserts the verdict.

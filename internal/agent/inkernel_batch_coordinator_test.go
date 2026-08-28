@@ -10,6 +10,22 @@ import (
 )
 
 func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
+	restoreProbe := installQwenSharedReceiptProbeForTest(func(bs *model.BatchSession, ids []int, active []bool) ([][]float32, int, int64, bool) {
+		out := make([][]float32, len(ids))
+		lanes := 0
+		for i, on := range active {
+			if !on {
+				continue
+			}
+			out[i] = bs.Seqs[i].Step(ids[i])
+			lanes++
+		}
+		if lanes < 2 {
+			return out, 0, 0, true
+		}
+		return out, 1, int64(lanes), true
+	})
+	defer restoreProbe()
 	cfg := tinyConcurrencyConfig()
 	cfg.EOSTokenID = -1
 	cfg.LayerTypes = []string{"linear_attention"}
@@ -24,6 +40,8 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 		p := NewInKernelPlanner(m, loadProbeTok(t), "synthetic-qwen-coalesce", true, nil, false)
 		p.maxNew = 6
 		p.batchDecode = enabled
+		// Synthetic tests install a shared-panel hook; production additionally gates on Metal.
+		p.metal = enabled
 		return p
 	}
 	messages := [][]Message{
@@ -47,6 +65,14 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	var mu sync.Mutex
 	var batches []int
 	p.coalesceBatchHook = func(n int) { mu.Lock(); batches = append(batches, n); mu.Unlock() }
+	var sharedPanels int
+	var sharedMACs int64
+	p.coalesceSharedHook = func(panels int, macs int64) {
+		mu.Lock()
+		sharedPanels += panels
+		sharedMACs += macs
+		mu.Unlock()
+	}
 	type answer struct {
 		c   *Completion
 		err error
@@ -70,6 +96,21 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	}
 	readyOnce.Do(func() { close(ready) })
 	wg.Wait()
+	var cohortID uint64
+	for i := range answers {
+		if answers[i].c == nil || answers[i].c.InKernelBatch == nil {
+			t.Fatalf("coalesced[%d] missing batch receipt", i)
+		}
+		r := answers[i].c.InKernelBatch
+		if r.CohortSize != len(messages) || r.SharedPanels == 0 || r.SharedMACs == 0 || r.SessionCloses != uint32(len(messages)) {
+			t.Fatalf("coalesced[%d] receipt=%+v", i, r)
+		}
+		if cohortID == 0 {
+			cohortID = r.CohortID
+		} else if r.CohortID != cohortID {
+			t.Fatalf("coalesced receipts identify different cohorts: %d != %d", r.CohortID, cohortID)
+		}
+	}
 	for i := range answers {
 		if answers[i].err != nil {
 			t.Fatalf("coalesced[%d]: %v", i, answers[i].err)
@@ -83,6 +124,9 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	mu.Unlock()
 	if len(observed) == 0 || observed[0] < 2 {
 		t.Fatalf("observed batches %v, want a forward with B>=2", observed)
+	}
+	if sharedPanels == 0 || sharedMACs == 0 {
+		t.Fatalf("B>=2 was admitted but no shared model work executed: panels=%d macs=%d", sharedPanels, sharedMACs)
 	}
 
 	// Cancellation is request-scoped: a canceled ready lane retires while its peer
@@ -131,5 +175,29 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	got, err := off.Complete(context.Background(), messages[0], nil)
 	if err != nil || got.Message.Content != refs[0].Message.Content {
 		t.Fatalf("default-off=%#v err=%v", got, err)
+	}
+}
+
+func TestCoalescedDecodeDoesNotReplayAfterAcceptedPass(t *testing.T) {
+	var calls int
+	restoreProbe := installQwenSharedReceiptProbeForTest(func(*model.BatchSession, []int, []bool) ([][]float32, int, int64, bool) {
+		calls++
+		return nil, 0, 0, true
+	})
+	defer restoreProbe()
+
+	req := &inKernelCoalesceRequest{}
+	req.decodePass.Store(1) // one cohort pass was already accepted and may have mutated state
+	ln := &decodeLane{s: model.NewSynthetic(tinyConcurrencyConfig()).NewSession()}
+	ctx := context.WithValue(context.Background(), inKernelCoalesceContextKey{}, req)
+	coordinated, err := coalescedDecode(ctx, ln)
+	if !coordinated || err != nil {
+		t.Fatalf("coordinated=%v err=%v", coordinated, err)
+	}
+	if calls != 0 {
+		t.Fatalf("accepted coordinated pass replayed %d model forwards", calls)
+	}
+	if got := req.decodePass.Load(); got != 2 {
+		t.Fatalf("decode pass count=%d, want 2 attempts with only the first executed", got)
 	}
 }

@@ -21,7 +21,6 @@
 package compute
 
 /*
-#cgo CFLAGS: -I${SRCDIR}
 #cgo LDFLAGS: -framework Foundation -framework Metal -framework MetalPerformanceShaders
 #include <stdlib.h>
 #include "metal_backend.h"

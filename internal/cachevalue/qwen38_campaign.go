@@ -13,7 +13,7 @@ const (
 	Qwen38CampaignSchema = "fak.qwen38_cache_campaign.v1"
 	Qwen38ReportSchema   = "fak.qwen38_cache_report.v1"
 	Qwen38DefaultAlias   = "qwen38:27b"
-	Qwen38DefaultRef     = "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf"
+	Qwen38DefaultRef     = "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf"
 )
 
 var qwen38Modes = []string{"cold", "native", "fak", "combined"}

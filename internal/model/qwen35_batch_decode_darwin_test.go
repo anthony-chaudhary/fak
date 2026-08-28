@@ -3,6 +3,7 @@
 package model
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -10,6 +11,19 @@ import (
 )
 
 func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
+	for _, active := range [][]bool{
+		{true, true},
+		{true, true, true},
+		{true, false, true, true, true},
+	} {
+		active := active
+		t.Run(qwen35BatchCaseName(active), func(t *testing.T) {
+			qwen35HybridQ4KStepBatchActiveMatchesSerial(t, active)
+		})
+	}
+}
+
+func qwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T, active []bool) {
 	if !metalgemm.Available() {
 		t.Skip("Metal unavailable")
 	}
@@ -21,13 +35,13 @@ func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
 	cfg.QKNormEps = 3e-5
 	m := NewSynthetic(cfg)
 	m.Quantize()
-	fillQ4KMajority(t, m, cfg)
+	fillQwen35BatchQ4KFixture(t, m, cfg)
 	t.Cleanup(func() {
 		m.releaseMetalQ8Residency()
 		releaseMetalQ4KResidency(m)
 	})
 
-	const lanes = 5 // four active rows after ragged compaction
+	lanes := len(active)
 	serial := make([]*Session, lanes)
 	batched := make([]*Session, lanes)
 	prompts := make([][]int, lanes)
@@ -42,9 +56,19 @@ func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
 		defer batched[i].Close()
 	}
 
-	active := []bool{true, false, true, true, true}
-	ids := []int{41, 43, 47, 53, 59}
-	beforeInactive := qwen35BatchStateSnapshot(t, batched[1])
+	ids := make([]int, lanes)
+	for i := range ids {
+		ids[i] = []int{41, 43, 47, 53, 59}[i]
+	}
+	var beforeInactive qwen35BatchSnapshot
+	inactive := -1
+	for i, enabled := range active {
+		if !enabled {
+			inactive = i
+			beforeInactive = qwen35BatchStateSnapshot(t, batched[i])
+			break
+		}
+	}
 	want := make([][]float32, lanes)
 	for i := range serial {
 		if active[i] {
@@ -70,9 +94,31 @@ func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
 		}
 		qwen35BatchCompareSession(t, i, serial[i], batched[i])
 	}
-	if after := qwen35BatchStateSnapshot(t, batched[1]); !reflect.DeepEqual(beforeInactive, after) {
-		t.Fatal("inactive lane state mutated")
+	if inactive >= 0 {
+		if after := qwen35BatchStateSnapshot(t, batched[inactive]); !reflect.DeepEqual(beforeInactive, after) {
+			t.Fatal("inactive lane state mutated")
+		}
 	}
+}
+
+// fillQwen35BatchQ4KFixture adds the resident output head required by the
+// production batch preflight. fillQ4KMajority intentionally covers projection
+// weights only; serial Q4_K decode can use another resident head format, while
+// the native B-row path requires one Q4_K head for its shared final dispatch.
+func fillQwen35BatchQ4KFixture(t *testing.T, m *Model, cfg Config) {
+	t.Helper()
+	fillQ4KMajority(t, m, cfg)
+	fillQ4KW(t, m, [][2]any{{"model.embed_tokens.weight", cfg.VocabSize}}, 9074)
+}
+
+func qwen35BatchCaseName(active []bool) string {
+	activeCount := 0
+	for _, enabled := range active {
+		if enabled {
+			activeCount++
+		}
+	}
+	return fmt.Sprintf("B%d_active%d", len(active), activeCount)
 }
 
 func qwen35BatchPreparedSession(t *testing.T, m *Model, prompt []int) *Session {
@@ -168,22 +214,34 @@ func qwen35BatchCompareSession(t *testing.T, lane int, want, got *Session) {
 		if !cfg.isLinearAttnLayer(l) {
 			continue
 		}
-		host := want.Cache.linear.layer(cfg, l)
-		snap := got.qwen35HAL.sequenceBackend.(qwen35GDNSequenceSnapshotter)
-		c, r, e := snap.SnapshotQwen35GDNAuxState(got.qwen35HAL.sequenceLayers[l])
-		if e != nil {
-			t.Fatal(e)
+		wantSnap := want.qwen35HAL.sequenceBackend.(qwen35GDNSequenceSnapshotter)
+		wc, wr, err := wantSnap.SnapshotQwen35GDNAuxState(want.qwen35HAL.sequenceLayers[l])
+		if err != nil {
+			t.Fatal(err)
 		}
-		var wc, wr []float32
-		for _, x := range host.conv {
-			wc = append(wc, x...)
-		}
-		for _, x := range host.recurrent {
-			wr = append(wr, x...)
+		gotSnap := got.qwen35HAL.sequenceBackend.(qwen35GDNSequenceSnapshotter)
+		c, r, err := gotSnap.SnapshotQwen35GDNAuxState(got.qwen35HAL.sequenceLayers[l])
+		if err != nil {
+			t.Fatal(err)
 		}
 		assertCosineAtLeast(t, "conv", wc, c, Qwen35GDNParityCosineMin)
 		assertMaxAbsAtMost(t, "conv", wc, c, 2e-4)
 		assertCosineAtLeast(t, "recurrent", wr, r, Qwen35GDNParityCosineMin)
 		assertMaxAbsAtMost(t, "recurrent", wr, r, 2e-4)
 	}
+}
+
+// NewQwen35HybridQ4KMetalFixture exposes the already-bounded real Metal fixture
+// to cross-package integration tests. It uses the same mixed Q4_K/Q8 weights and
+// topology as TestQwen35HybridQ4KStepBatchActiveMatchesSerial.
+func NewQwen35HybridQ4KMetalFixture(t *testing.T) *Model {
+	t.Helper()
+	cfg := qwen35HybridQ4KTestCfg()
+	cfg.ModelType = "qwen3_5_text"
+	cfg.QKNorm = true
+	cfg.QKNormEps = 3e-5
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQwen35BatchQ4KFixture(t, m, cfg)
+	return m
 }

@@ -37,7 +37,7 @@ helpers:
   # `git add -A` sweep before commit.
   release_lock: tools/release_lock.py
   # /plan-audit — reconciles the plan surface(s) into one completion view.
-  plan_audit: tools/plan_audit.py
+  plan_audit: fak dev plan-audit
   # /issue-triage — read-only fetch/classify/rank + proposed-actions for the
   # open GitHub issue backlog. Applying actions is the skill's gated step.
   issue_triage: tools/issue_triage.py

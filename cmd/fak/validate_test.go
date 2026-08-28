@@ -376,9 +376,25 @@ func resetValidateWSLCapabilityCacheForTest() {
 
 func TestValidateTestArgsDisableCacheAndKeepRunBeforeTargets(t *testing.T) {
 	got := validateTestArgs("^TestOwned$", []string{"./internal/owned"})
-	want := []string{"test", "-count=1", "-run", "^TestOwned$", "./internal/owned"}
+	want := []string{"test", "-trimpath", "-count=1", "-run", "^TestOwned$", "./internal/owned"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("validate test args = %v, want %v", got, want)
+	}
+}
+
+func TestValidateBuildAndVetArgsArePathPortable(t *testing.T) {
+	tests := []struct {
+		mode string
+		want []string
+	}{
+		{"build", []string{"build", "-trimpath", "./internal/owned"}},
+		{"vet", []string{"vet", "-trimpath", "./internal/owned"}},
+	}
+	for _, tc := range tests {
+		got := validateGoCheckArgs(tc.mode, []string{"./internal/owned"})
+		if strings.Join(got, "|") != strings.Join(tc.want, "|") {
+			t.Fatalf("%s args = %v, want exact %v", tc.mode, got, tc.want)
+		}
 	}
 }
 

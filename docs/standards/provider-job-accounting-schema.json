@@ -1,0 +1,881 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anthony-chaudhary/fak/docs/standards/provider-job-accounting-schema.json",
+  "title": "fak provider-neutral completed-job accounting record v1 (#9575)",
+  "description": "One record in an append-only JSONL ledger. Corrections append a new record and name corrects_record_id; existing records are never rewritten.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/official_terms_record"
+    },
+    {
+      "$ref": "#/$defs/job_receipt_record"
+    },
+    {
+      "$ref": "#/$defs/provider_counter_observation_record"
+    }
+  ],
+  "$defs": {
+    "nullable_nonnegative_integer": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "nullable_nonnegative_number": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "source_ref": {
+      "type": "string",
+      "minLength": 1
+    },
+    "common": {
+      "type": "object",
+      "required": [
+        "schema",
+        "issue",
+        "record_id",
+        "record_kind",
+        "recorded_at",
+        "producer",
+        "corrects_record_id",
+        "provenance"
+      ],
+      "properties": {
+        "schema": {
+          "const": "fak-provider-job-accounting/1"
+        },
+        "issue": {
+          "const": "#9575"
+        },
+        "record_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record_kind": {
+          "enum": [
+            "official_commercial_terms",
+            "job_receipt",
+            "provider_counter_observation"
+          ]
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "producer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "corrects_record_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "provenance": {
+          "type": "object",
+          "required": [
+            "sources",
+            "scrubbed",
+            "notes"
+          ],
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "source_id",
+                  "source_kind",
+                  "artifact_ref",
+                  "observed_at"
+                ],
+                "properties": {
+                  "source_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "source_kind": {
+                    "enum": [
+                      "official_provider_document",
+                      "provider_usage_export",
+                      "provider_invoice",
+                      "local_harness_receipt",
+                      "quality_gate_artifact",
+                      "operator_record",
+                      "estimate"
+                    ]
+                  },
+                  "artifact_ref": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "observed_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "scrubbed": {
+              "type": "boolean"
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "token_rates": {
+      "type": "object",
+      "required": [
+        "input_per_mtok_usd",
+        "cached_input_per_mtok_usd",
+        "cache_write_per_mtok_usd",
+        "output_per_mtok_usd"
+      ],
+      "properties": {
+        "input_per_mtok_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cached_input_per_mtok_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cache_write_per_mtok_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "output_per_mtok_usd": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "official_terms_record": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        },
+        {
+          "type": "object",
+          "required": [
+            "official_commercial_terms"
+          ],
+          "properties": {
+            "record_kind": {
+              "const": "official_commercial_terms"
+            },
+            "official_commercial_terms": {
+              "type": "object",
+              "required": [
+                "provider",
+                "model",
+                "checked_on",
+                "currency",
+                "standard_rates",
+                "long_context",
+                "context_window_tokens",
+                "max_output_tokens",
+                "tool_fees_separate",
+                "promotional_pricing",
+                "official_source_refs"
+              ],
+              "properties": {
+                "provider": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "model": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "checked_on": {
+                  "type": "string",
+                  "format": "date"
+                },
+                "currency": {
+                  "const": "USD"
+                },
+                "standard_rates": {
+                  "$ref": "#/$defs/token_rates"
+                },
+                "long_context": {
+                  "type": "object",
+                  "required": [
+                    "threshold_input_tokens_exclusive",
+                    "applies_to_full_request",
+                    "input_multiplier",
+                    "output_multiplier",
+                    "rates"
+                  ],
+                  "properties": {
+                    "threshold_input_tokens_exclusive": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "applies_to_full_request": {
+                      "type": "boolean"
+                    },
+                    "input_multiplier": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "output_multiplier": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "rates": {
+                      "$ref": "#/$defs/token_rates"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "context_window_tokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max_output_tokens": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "tool_fees_separate": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "meter",
+                      "rate_usd",
+                      "unit",
+                      "notes"
+                    ],
+                    "properties": {
+                      "meter": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "rate_usd": {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      "unit": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "notes": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "promotional_pricing": {
+                  "type": "object",
+                  "required": [
+                    "active_when_checked",
+                    "available_through_at_least"
+                  ],
+                  "properties": {
+                    "active_when_checked": {
+                      "type": "boolean"
+                    },
+                    "available_through_at_least": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "official_source_refs": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "#/$defs/source_ref"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "workload_envelope": {
+      "type": "object",
+      "required": [
+        "context_bucket_tokens",
+        "input_to_output_ratio"
+      ],
+      "properties": {
+        "context_bucket_tokens": {
+          "enum": [
+            35000,
+            64000,
+            128000,
+            200000
+          ]
+        },
+        "input_to_output_ratio": {
+          "enum": [
+            200,
+            300
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "terms_application": {
+      "type": "object",
+      "required": [
+        "terms_record_id",
+        "application",
+        "notes"
+      ],
+      "properties": {
+        "terms_record_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "application": {
+          "enum": [
+            "applied",
+            "not_applicable",
+            "unknown"
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "raw_provider_counters": {
+      "type": "object",
+      "description": "Provider-emitted counters only. Every counter is required; unavailable counters are null and MUST NOT be inferred.",
+      "required": [
+        "aggregation_scope",
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "reasoning_token_relation",
+        "tool_calls",
+        "search_calls",
+        "container_sessions",
+        "request_attempts",
+        "provider_reported_cost_usd",
+        "source_refs"
+      ],
+      "properties": {
+        "aggregation_scope": {
+          "enum": [
+            "entire_job_including_setup_retries_and_compaction",
+            "final_attempt_only",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "input_tokens": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "cached_input_tokens": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "cache_write_tokens": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "output_tokens": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "reasoning_tokens": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "reasoning_token_relation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "subset_of_output",
+            "additional_to_output",
+            "unknown",
+            null
+          ]
+        },
+        "tool_calls": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "search_calls": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "container_sessions": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "request_attempts": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "provider_reported_cost_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source_ref"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "local_job_outcome": {
+      "type": "object",
+      "required": [
+        "status",
+        "quality_gate",
+        "wall_time_seconds",
+        "setup_seconds",
+        "retry_count",
+        "retry_seconds",
+        "compaction_count",
+        "compaction_seconds",
+        "operator_intervention_count",
+        "operator_intervention_seconds",
+        "source_refs"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "attempted",
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "quality_gate": {
+          "type": "object",
+          "required": [
+            "gate_id",
+            "status",
+            "score",
+            "threshold",
+            "evidence_refs"
+          ],
+          "properties": {
+            "gate_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "enum": [
+                "pass",
+                "fail",
+                "not_run",
+                "unknown"
+              ]
+            },
+            "score": {
+              "$ref": "#/$defs/nullable_nonnegative_number"
+            },
+            "threshold": {
+              "$ref": "#/$defs/nullable_nonnegative_number"
+            },
+            "evidence_refs": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/source_ref"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "wall_time_seconds": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "setup_seconds": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "retry_count": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "retry_seconds": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "compaction_count": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "compaction_seconds": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "operator_intervention_count": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "operator_intervention_seconds": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source_ref"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "meter_costs": {
+      "type": "object",
+      "required": [
+        "input_usd",
+        "cached_input_usd",
+        "cache_write_usd",
+        "output_usd",
+        "tool_usd",
+        "search_usd",
+        "container_usd",
+        "local_compute_usd",
+        "operator_intervention_usd",
+        "other_usd"
+      ],
+      "properties": {
+        "input_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "cached_input_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "cache_write_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "output_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "tool_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "search_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "container_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "local_compute_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "operator_intervention_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "other_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "phase_costs": {
+      "type": "object",
+      "description": "A non-overlapping attribution of attempted_job_cost_usd. It is an alternate partition, not additive with meter_cost_usd.",
+      "required": [
+        "setup_usd",
+        "primary_attempts_usd",
+        "retries_usd",
+        "compaction_usd",
+        "operator_intervention_usd",
+        "other_usd"
+      ],
+      "properties": {
+        "setup_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "primary_attempts_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "retries_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "compaction_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "operator_intervention_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "other_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "uncertainty": {
+      "type": "object",
+      "required": [
+        "classification",
+        "lower_bound_usd",
+        "upper_bound_usd",
+        "notes"
+      ],
+      "properties": {
+        "classification": {
+          "enum": [
+            "exact",
+            "bounded",
+            "estimated",
+            "unknown"
+          ]
+        },
+        "lower_bound_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "upper_bound_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "derived_accounting": {
+      "type": "object",
+      "required": [
+        "attempted_job_cost_usd",
+        "quality_qualified_completed_job_cost_usd",
+        "qualified_wall_time_seconds",
+        "meter_cost_usd",
+        "phase_cost_attribution_usd",
+        "calculation_basis",
+        "provenance_refs",
+        "uncertainty"
+      ],
+      "properties": {
+        "attempted_job_cost_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "quality_qualified_completed_job_cost_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "qualified_wall_time_seconds": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "meter_cost_usd": {
+          "$ref": "#/$defs/meter_costs"
+        },
+        "phase_cost_attribution_usd": {
+          "$ref": "#/$defs/phase_costs"
+        },
+        "calculation_basis": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "provenance_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/source_ref"
+          }
+        },
+        "uncertainty": {
+          "$ref": "#/$defs/uncertainty"
+        }
+      },
+      "additionalProperties": false
+    },
+    "job_receipt_record": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        },
+        {
+          "type": "object",
+          "required": [
+            "workload_envelope",
+            "official_commercial_terms",
+            "raw_provider_counters",
+            "local_job_outcome",
+            "derived_accounting"
+          ],
+          "properties": {
+            "record_kind": {
+              "const": "job_receipt"
+            },
+            "workload_envelope": {
+              "$ref": "#/$defs/workload_envelope"
+            },
+            "official_commercial_terms": {
+              "$ref": "#/$defs/terms_application"
+            },
+            "raw_provider_counters": {
+              "$ref": "#/$defs/raw_provider_counters"
+            },
+            "local_job_outcome": {
+              "$ref": "#/$defs/local_job_outcome"
+            },
+            "derived_accounting": {
+              "$ref": "#/$defs/derived_accounting"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "provider_counter_turn": {
+      "type": "object",
+      "required": [
+        "turn_ordinal",
+        "input_tokens",
+        "cached_input_tokens",
+        "cache_write_input_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "outcome",
+        "quality_result",
+        "elapsed_seconds",
+        "cost_usd"
+      ],
+      "properties": {
+        "turn_ordinal": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cached_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_write_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "reasoning_tokens": {
+          "$ref": "#/$defs/nullable_nonnegative_integer"
+        },
+        "outcome": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quality_result": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "elapsed_seconds": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        },
+        "cost_usd": {
+          "$ref": "#/$defs/nullable_nonnegative_number"
+        }
+      },
+      "additionalProperties": false
+    },
+    "provider_counter_observation_record": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/common"
+        },
+        {
+          "type": "object",
+          "required": [
+            "provider",
+            "model",
+            "observation_scope",
+            "turns",
+            "unavailable_fields",
+            "next_evidence"
+          ],
+          "properties": {
+            "record_kind": {
+              "const": "provider_counter_observation"
+            },
+            "provider": {
+              "type": "string",
+              "minLength": 1
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "observation_scope": {
+              "const": "counter_only_not_a_quality_qualified_job_receipt"
+            },
+            "turns": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/provider_counter_turn"
+              }
+            },
+            "unavailable_fields": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "task_revision",
+                  "output_tokens",
+                  "reasoning_tokens",
+                  "outcome",
+                  "quality_result",
+                  "elapsed_seconds",
+                  "cost_usd",
+                  "realized_ratio"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "next_evidence": {
+              "type": "object",
+              "required": [
+                "#9552",
+                "#9578"
+              ],
+              "properties": {
+                "#9552": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "#9578": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
