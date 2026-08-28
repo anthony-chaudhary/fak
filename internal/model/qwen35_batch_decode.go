@@ -5,7 +5,7 @@ package model
 var qwen35HybridQ4KBatchStep func(*BatchSession, []int) ([][]float32, bool)
 
 func (bs *BatchSession) qwen35HybridQ4KBatchOK(batch int) bool {
-	return bs != nil && bs.M != nil && batch >= 4 && batch <= 8 &&
+	return bs != nil && bs.M != nil && batch >= 2 && batch <= 8 &&
 		bs.M.Cfg.IsQwen35Hybrid() && bs.M.Cfg.BlockTopology == PreNorm && !bs.M.Cfg.IsMoE() && qwen35HybridQ4KBatchStep != nil
 }
 

@@ -23,9 +23,9 @@ func TestQwen35HybridQ4KBatchGateAndRaggedReceipt(t *testing.T) {
 	m := NewSynthetic(cfg)
 	old := qwen35HybridQ4KBatchStep
 	defer func() { qwen35HybridQ4KBatchStep = old }()
-	calls := 0
+	var batches []int
 	qwen35HybridQ4KBatchStep = func(bs *BatchSession, ids []int) ([][]float32, bool) {
-		calls++
+		batches = append(batches, len(ids))
 		bs.lastStepSharedPanels = 7
 		bs.recordStepMACs(len(ids))
 		out := make([][]float32, len(ids))
@@ -34,22 +34,29 @@ func TestQwen35HybridQ4KBatchGateAndRaggedReceipt(t *testing.T) {
 		}
 		return out, true
 	}
+	for _, batch := range []int{2, 3, 8} {
+		ids := make([]int, batch)
+		for i := range ids {
+			ids[i] = 8 + i
+		}
+		bs := m.NewBatchSession(batch)
+		got := bs.StepBatch(ids)
+		if batches[len(batches)-1] != batch || bs.LastStepSharedPanels() != 7 || bs.LastStepMACs() == 0 {
+			t.Fatalf("B=%d batches=%v panels=%d macs=%d", batch, batches, bs.LastStepSharedPanels(), bs.LastStepMACs())
+		}
+		for i := range got {
+			if got[i][0] != float32(ids[i]) {
+				t.Fatalf("B=%d row %d=%v", batch, i, got[i])
+			}
+		}
+	}
+
 	bs := m.NewBatchSession(4)
 	got := bs.StepBatchActive([]int{4, 5, 6, 7}, []bool{true, false, true, true})
-	if calls != 0 || bs.LastStepSharedPanels() != 0 {
-		t.Fatalf("B=3 must stay serial: calls=%d receipt=%d", calls, bs.LastStepSharedPanels())
+	if batches[len(batches)-1] != 3 || bs.LastStepSharedPanels() != 7 || bs.LastStepMACs() == 0 {
+		t.Fatalf("ragged batches=%v panels=%d macs=%d", batches, bs.LastStepSharedPanels(), bs.LastStepMACs())
 	}
 	if got[1] != nil {
 		t.Fatal("inactive lane produced logits")
-	}
-
-	got = bs.StepBatch([]int{8, 9, 10, 11})
-	if calls != 1 || bs.LastStepSharedPanels() != 7 || bs.LastStepMACs() == 0 {
-		t.Fatalf("calls=%d panels=%d macs=%d", calls, bs.LastStepSharedPanels(), bs.LastStepMACs())
-	}
-	for i := range got {
-		if got[i][0] != float32(8+i) {
-			t.Fatalf("row %d=%v", i, got[i])
-		}
 	}
 }
