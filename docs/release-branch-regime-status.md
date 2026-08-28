@@ -30,3 +30,13 @@ Operator actions:
 | `*_HEAD_UNKNOWN` or `BRANCH_ROLE_CONFIG` | Refresh refs or fix `dos.toml [branch_roles]` before trusting the status. |
 
 Do not read a quiet `main` as "nothing shipped" once `development_branch` is `dev`; read `branch_regime.development_ahead` and `promotion_blockers` instead.
+
+## Actionable CI base-red diagnosis
+
+Run `fak release status --json` and read `rolling.ci_diagnosis` when the exact release candidate is red. A diagnosis is actionable only when its `run_id` and `head_sha` bind to that exact candidate; do not substitute a newer run, a different branch head, or a locally reproduced approximation.
+
+The diagnosis keeps `CI_BASE_RED` as the compatibility umbrella while reporting a typed cause from the committed release-status vocabulary. The classifier covers the declared workflow families and retains `unknown` as the fail-closed fallback: an unrecognized or incomplete failure must not be presented as a known cause.
+
+When a cause maps to repository work, `work_units` identifies the affected package-scoped units rather than treating the whole tree as one repair. Empty work units are evidence too: they mean the diagnosis has not yet located a dispatchable repository change and must not be invented from adjacent failures.
+
+Provider and runner billing remain operator-owned. The status report may attribute observed jobs and durations, but it does not authorize retries, cancel unrelated runs, or claim provider charges it cannot witness. The operator chooses whether to retry, repair a named work unit, or hold the release.
