@@ -1,11 +1,28 @@
 # Plan: #9430 - next ten fak-native Qwen Mac performance items
 
 - Owner: Codex coordinator, 2026-08-27
-- Umbrella: #9430; parent context #8011
+- Reconciliation: #9739 (open); audited 2026-08-28 against live GitHub state and the official cached upstream inputs listed below
+- Umbrella: #9430 (open); parent context #8011 (open)
 - Authority: `fak native-performance --current` for runnable-now packets and live holds; `docs/benchmarks/NATIVE-PERFORMANCE-HILLCLIMB.md` / `--next` remain the semantic graph-ready lever view.
 - Centrality: Core
 - Work shape: finite phased deliverable; one accepted Mac receipt per KEEP
-- Target: Apple M3 Pro, 18 GPU cores, 36 GiB unified memory; exact Qwen3.8-27B Q4_K_M artifact
+- Target: Apple M3 Pro, 18 GPU cores, 36 GiB unified memory; exact dense `Qwen/Qwen3.8-27B` Q4_K_M artifact
+
+## Model identity and upstream provenance
+
+This plan targets the dense `Qwen/Qwen3.8-27B` model only. Its official configuration uses `model_type=qwen3_5`, `architectures=[Qwen3_5ForConditionalGeneration]`, 64 text layers, hidden size 5120, and a 3:1 Gated DeltaNet/Gated Attention cadence (`full_attention` in the config). Those identifiers explain the durable `qwen35` / `qwen3_5` names in fak and upstream source; they do not make the target a Qwen3.5 or Qwen3.6 receipt.
+
+The separate [`QwenLM/Qwen3.8-Flash-Next`](https://github.com/QwenLM/Qwen3.8-Flash-Next) source repository and `Qwen/Qwen3.8-Flash-Next` weights describe a multimodal MoE preview whose README calls it an early preview of the architecture used in Qwen4 and whose design citation names the Qwen3.8-Next architecture. Use `QwenNext` only as explicitly Flash-Next/Qwen3.8-Next-scoped shorthand. The preview has a 125B-parameter main model plus 51B N-gram embeddings, 6B activated per token, GDN + QSA hybrid attention, Gated Residual, and N-gram Embedding. It is not an alias, artifact, or receipt source for this dense-27B plan. Architecture statements here classify scope only and imply no fak performance result.
+
+Official cached inputs observed 2026-08-28:
+
+| Input | Official source | Cached SHA-256 | Use in this reconciliation |
+|---|---|---|---|
+| `Qwen3.8-27B` README | [`Qwen/Qwen3.8-27B` model card](https://huggingface.co/Qwen/Qwen3.8-27B/blob/main/README.md) | `57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641` | Dense identity and published architecture facts only |
+| `Qwen3.8-27B` config | [`config.json`](https://huggingface.co/Qwen/Qwen3.8-27B/blob/main/config.json) | `191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab` | Exact model/config identifiers and dimensions |
+| `Qwen3.8-Flash-Next` README | [`QwenLM/Qwen3.8-Flash-Next` README](https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/README.md) | `34d45d3486c29dcc23dade1472b5cbf1347ffe0a1adc3334aec83b3dc4e08c50` | Separate-preview scope boundary only |
+
+Historical Qwen3.6 artifacts and receipts, including the Qwen3.6 laptop evidence under #9050, remain Qwen3.6 historical evidence. They must not be renamed, promoted, or counted as Qwen3.8-27B evidence.
 
 ## Hero metric
 
@@ -17,7 +34,7 @@ Rejected experiments, default-off candidates, enabling-only commits, synthetic-o
 
 ## For / Problem / Today / Better because / Witness
 
-- **For:** operators running exact Qwen3.8-27B Q4_K_M through fak-native Metal on a MacBook-class machine.
+- **For:** operators running the exact dense `Qwen/Qwen3.8-27B` Q4_K_M artifact through fak-native Metal on a MacBook-class machine.
 - **Problem:** accepted native decode is 2.3-2.9 tok/s, the closest approximate point is 3.3 tok/s versus the pinned 6.966061 tok/s comparator, and a fresh exact receipt is blocked by a 55.73 GiB startup estimate on the sanctioned 36 GiB M3 Pro.
 - **Today:** the accepted P32/T64 profile is synchronization-bound: 14,833 command buffers, 23,025 encoders, 15.322 s GPU execution, and 39.773 s host wait.
 - **Better because:** each phase removes one measured memory, submission, state, or scheduling boundary and is retained only if the full fak-native receipt improves.
@@ -27,7 +44,7 @@ Rejected experiments, default-off candidates, enabling-only commits, synthetic-o
 
 - P1 quality: preserve exact artifact, tokens, context, KV/recurrent state, and deterministic output gates.
 - P2 accounting: count load, transfer, command-buffer lifecycle, synchronization, verification, memory, and ambient-system evidence.
-- P3 envelope: keep the M3 Pro/Qwen3.8/P32-T64 raw-path controls fixed; serving arms use identical prompts and arrival traces; fail closed on any non-native engine or fallback.
+- P3 envelope: keep the M3 Pro/dense-Qwen3.8-27B/P32-T64 raw-path controls fixed; serving arms use identical prompts and arrival traces; fail closed on any non-native engine or fallback.
 - P4 proof: pushed issue-bound commit, scope-correct tests, replayable command, immutable public-safe receipt, and rollback per KEEP.
 
 ## Why ten when the committed graph has eight Metal levers
@@ -39,13 +56,13 @@ The eight `metal.*` levers remain the semantic authority. This execution plan ad
 - [ ] M1 - No-copy streamed Q4_K Metal spans (#8325; mechanism #9073 shipped, exact campaign #9482 HOLD)
 - [ ] M2 - Forward-owned quantized Qwen sequence boundary (#9230/#9257; mechanism #9456 shipped, exact receipt child #9525 blocked after #8325)
 - [ ] M3 - Q8 projection-to-GDN device handoff (#9216; mechanism #9486 shipped, exact Mac receipt outstanding)
-- [ ] M4 - Coarse resident hybrid decode graph (#8324; block mechanism #9488 shipped, exact Mac receipt outstanding)
-- [ ] M5 - Quality-clean exact P32/T64 receipt (#8972)
+- [ ] M4 - Coarse resident hybrid decode graph (#8324; mechanism-only #9488 closed from landed commit, while the exact-artifact performance receipt remains with #8324/#9430)
+- [ ] M5 - Quality-clean exact P32/T64 receipt (#8972 closed without its gate; replacement ship-alone leaf still required under #9430)
 - [ ] M6 - Paged Qwen hybrid state live arm (#9076/#8395; exact Metal receipt #9492 blocked by M1-M4)
-- [ ] M7 - Exact-prefix block reuse (#8395; ship-alone child required)
+- [ ] M7 - Exact-prefix block reuse (#8395; mechanism child #9499 open, blocked by M6 #9492 and overlapping M8 paths)
 - [ ] M8 - Bounded chunked-prefill scheduling (#9066, #1912, #8395)
 - [ ] M9 - Resident hybrid co-batching (#9074/#9075/#8395; linear #9515 and full-attention #9516 substrates shipped, integration/receipt outstanding)
-- [ ] M10 - Matched parity reconvergence (#8697, #2723)
+- [ ] M10 - Matched parity reconvergence (#9513; replaces the invalidly closed #8697/#8972 receipt boundary, while #2723 remains the broader comparator program)
 
 ### 1. M1 - No-copy streamed Q4_K Metal spans (#9073)
 
@@ -55,6 +72,8 @@ Route mapped GGUF spans into Metal without a second host copy. KEEP requires ide
 
 Consume landed #9259/#9267 primitives to encode quantized operations into device activation/result handles owned by one sequence submission. Compatibility wrappers that retain per-op waits do not satisfy this phase. #9257 was reopened after unrelated issue-number collisions falsely closed it.
 
+#9230 owns the broader resident-prefill contract, #9257 remains its open sequence-prefill contract, and #9525 owns this plan's exact M2 keep/reject receipt.
+
 ### 3. M3 - Q8 projection-to-GDN device handoff (#9216)
 
 Encode the linear-attention Q8 projections into the resident GDN submission and read back core once. KEEP requires exact P32 parity and positive end-to-end movement; rejected #9093 grouping remains evidence only.
@@ -63,7 +82,9 @@ Encode the linear-attention Q8 projections into the resident GDN submission and 
 
 Finish `metal.command-buffer-amortization` and `metal.fused-hybrid-graph-coverage` across GDN/full-attention decode. Target at least 5 tok/s before default enablement, with CPU-reference cosine >=0.9999 and exact greedy tokens.
 
-### 5. M5 - Quality-clean exact P32/T64 receipt (#8972)
+#9488 is closed as the landed mechanism-only child. It earns no M4 KEEP; open parent #8324 and umbrella #9430 retain the broader same-artifact Mac performance receipt.
+
+### 5. M5 - Quality-clean exact P32/T64 receipt (replacement for #8972 required)
 
 After M1-M4 fit safely, capture three repetitions of the frozen exact native/control campaign with hash, identities, system baselines, memory, profiles, quality, and zero fallback.
 
@@ -71,9 +92,9 @@ After M1-M4 fit safely, capture three repetitions of the frozen exact native/con
 
 Exercise the shipped swap/preemption state on the exact serving trace. KEEP requires occupancy, peak memory, TTFT/ITL, aggregate throughput, state parity, and fallback evidence; implementation-only #9076 is not enough.
 
-### 7. M7 - Exact-prefix block reuse (#8395)
+### 7. M7 - Exact-prefix block reuse (#9499, #8395)
 
-File or reconcile one ship-alone child before implementation. Run the isolated prefix arm with paged state fixed on and retain only a complete quality/latency/throughput/cache receipt.
+#9499 is the open ship-alone mechanism child. It must wait for M6 receipt bridge #9492 and overlapping M8 paths to clear, then run the isolated prefix arm with paged state fixed on. Retain only a complete quality/latency/throughput/cache receipt; #9499 alone makes no throughput claim.
 
 ### 8. M8 - Bounded chunked-prefill scheduling (#9066, #1912, #8395)
 
@@ -83,24 +104,24 @@ Build on the landed append-capable Q4_K prefill and finish live scheduler interl
 
 Panelize shared Q4_K/Q8 projections while preserving each session's KV, position, convolution, and recurrent state, then exercise the live coalescer. KEEP requires non-serial execution evidence and positive aggregate throughput.
 
-### 10. M10 - Matched parity reconvergence (#8697, #2723)
+### 10. M10 - Matched parity reconvergence (#9513, #2723)
 
-Run the final same-artifact fak-native versus pinned llama.cpp/MLX Mac campaign. Publish the exact current result without mixing envelopes; the plan exits after this phase rather than expanding into another optimization queue.
+Run #9513's final same-artifact fak-native versus pinned llama.cpp Mac campaign; MLX may appear only as a separately typed observation unless it proves the identical artifact hash. Publish the exact current result without mixing envelopes; the plan exits after this phase rather than expanding into another optimization queue.
 
 ## Current state
 
-- M1 mechanism #9073 landed at `58fc89e29`, but the exact #9482/#8325 campaign is HOLD, not KEEP or REJECT: control arm 01 exited 137 after 48.075 s with 12,959,285,248-byte sampled peak RSS, +12,534,876,733-byte swap, no profile, and no candidate arms. Restart requires a durable clean source witness, restored and soaked incumbent identity, stricter pressure gates, and fresh quiescence checks.
+- M1 mechanism #9073 landed at `58fc89e29`, but the exact #9482/#8325 campaign is HOLD, not KEEP or REJECT: control arm 01 exited 137 after 48.075 s with 12,959,285,248-byte sampled peak RSS, +12,534,876,733-byte swap, no profile, and no candidate arms. Open blocker #9714 now owns restoration and an ownership-only drill for the managed incumbent before any exact model arm; restart also requires a durable clean source witness, stricter pressure gates, and fresh quiescence checks.
 - M2's invalid #9444 child remains rejected. Corrected mechanism #9456 landed at `8a423b8a5`; #9525 now owns the typed receipt instrumentation and exact six-arm P32 A/B under #9230, with a hard dependency after #8325 establishes a recovered safe envelope. M2 remains `0 KEEP`.
-- M3 mechanism #9486 landed at `46fdd8a52fd70b3e29345cd311be3cc89443e8fc` with one P=1 Qwen GDN mixer command buffer, and M4 block mechanism #9488 landed at `99ea660ae222dd6a75dd661c54778f470904f9e7` with the GDN-through-residual/norm/MLP block. Both closures explicitly deny throughput KEEP credit; their exact Mac receipts remain outstanding.
+- M3 mechanism #9486 landed at `46fdd8a52fd70b3e29345cd311be3cc89443e8fc` with one P=1 Qwen GDN mixer command buffer. The M4 block mechanism landed at `99ea660ae222dd6a75dd661c54778f470904f9e7`; live #9488 closed at 2026-08-28T12:52:12Z as a mechanism-only leaf. Its completion reconciliation assigns the still-missing exact-artifact performance receipt to #8324/#9430. Neither mechanism advances KEEP.
 - M1-M4 remain the memory/submission spine and are ordered by current dependencies, not by issue age. M1 then M2 are same-Mac measurement packets; later source work may run only when paths and device receipts are disjoint.
 - M5 is not runnable on the 36 GiB host until the startup envelope is reduced or a sanctioned >=64 GiB Apple-Silicon node is available.
 - The old M5 receipt leaf #8972 was manually closed without meeting its acceptance gate. #9430 must create or reconcile a replacement ship-alone receipt leaf after M1-M4; closure is not evidence.
 - The closed #8848 no longer owns the still-open measurement loop. #9495 owns the real Metal profile after M1, #9497 owns the independently runnable real CUDA profile, and #9498 owns returned-receipt workflow consumption after both bundles validate.
 - M6 correctness substrate #9076 remains synthetic-only. #9492 owns the exact same-binary NativeScheduler Metal paged-swap OFF/ON implementation plus live receipt; it is blocked by accepted M1-M4 receipts and the `composition-9280-full` modelengine lease.
-- M7-M8 retain partial prerequisites but no accepted isolated Mac arm under this plan.
+- M7 mechanism child #9499 is open but blocked by #9492 and overlapping M8 paths; M7-M8 have no accepted isolated Mac arm under this plan.
 - M9 linear-attention B=2..8 substrate #9515 remains validly shipped at `14dd0d1e405273e4b37da742ed2529053dc0f243`, enabling-only. The repaired and reviewed four-path exact-Qwen3.8 full-attention substrate #9516 is validly shipped at `a50f903efc503da8d6df6ae2c9b63f36ff8eac4b` (`internal/metalgemm@r63+ga50f903ef`), also enabling-only. #9074/#9075 remain open for integration and an exact receipt; neither substrate advances KEEP.
 - Umbrella #9430 was incorrectly closed from plan-document-only commit `a6fa45cd25e047865c763384beaf27ee9a2a2149` and has been reopened: both this plan and the issue body remain `0 / 10 KEEP` with ten unchecked tasks.
-- M10 remains the close-out receipt.
+- M10 is now owned by open #9513. Closed #8697 and #8972 remain historical evidence and do not satisfy the close-out receipt.
 - Rejected/default-off #9093, #9192, and #8833 experiments are excluded from KEEP credit.
 - Managed worker inventory contains overlapping stale Metal/model worktrees; harvest against git truth before dispatching any overlapping phase.
 
@@ -108,7 +129,7 @@ Run the final same-artifact fak-native versus pinned llama.cpp/MLX Mac campaign.
 
 - DEFAULT: fak-native execution throughout.
 - ADAPT: pinned llama.cpp/MLX-LM Metal graph and buffer-lifetime techniques for M2-M4; vLLM/SGLang mechanism separation for M6-M9.
-- EXCLUDE: silent external-runtime fallback, generic graph compiler work, MoE/multi-GPU expansion, and microkernel-only gains without exact end-to-end movement.
+- EXCLUDE: silent external-runtime fallback, generic graph compiler work, the separate Qwen3.8-Flash-Next/Qwen3.8-Next/QwenNext MoE preview, other MoE/multi-GPU expansion, and microkernel-only gains without exact end-to-end movement.
 
 Kernel/runtime commits must follow `fak sota`, name the exact source revision/path/license, and carry the applicable `Prior-art:` trailer.
 
@@ -119,15 +140,17 @@ Kernel/runtime commits must follow `fak sota`, name the exact source revision/pa
 - 2026-08-27: opened umbrella #9430 with all ten task-list items and full completion contract.
 - 2026-08-27: independently reopened #9257 after its closing commits proved unrelated Open SWE harder-eval work.
 - 2026-08-27: #9073 landed the no-copy mechanism; retained M1 at `0 KEEP` pending #8325's exact startup/steady-memory receipt.
-- 2026-08-27: replaced invalid compute-HAL child #9444 with backend-nil product-path child #9456; its implementation landed at `8a423b8a5`, while #9230 still owns M2's keep/reject receipt.
+- 2026-08-27: replaced invalid compute-HAL child #9444 with backend-nil product-path child #9456; its implementation landed at `8a423b8a5`. #9230 retains the broader resident-prefill contract; exact M2 keep/reject receipt ownership is now #9525.
 - 2026-08-27: recorded #8972 as closed-without-gate and required a replacement M5 receipt child rather than counting closure.
 - 2026-08-27: repaired the closed-#8848 ownership gap with exact leaves #9495, #9497, and #9498.
 - 2026-08-27: M1 exact campaign #9482 entered HOLD after control arm 01 exited 137 at 48.075 s with 12,959,285,248-byte sampled peak RSS, +12,534,876,733-byte swap, no profile, and no candidate arms; #8325 remains the keep/reject owner.
 - 2026-08-27: registered #9525 as M2's exact P32 receipt child after #9456; it requires missing receipt fields and cannot run until #8325 restores a safe exact-Mac envelope.
-- 2026-08-27: shipped M3 mechanism #9486 at `46fdd8a52` and M4 block mechanism #9488 at `99ea660ae`; retained both phase boxes unchecked because neither closure contains an accepted Mac performance receipt.
+- 2026-08-27: shipped M3 mechanism #9486 at `46fdd8a52` and recorded the then-closed M4 block mechanism #9488 at `99ea660ae`; retained both phase boxes unchecked because neither closure contained an accepted Mac performance receipt.
 - 2026-08-27: audited M6: #9076 is synthetic correctness only and #9492 owns the blocked exact Metal NativeScheduler paged-swap arm.
 - 2026-08-27: repaired and reviewed M9 #9516's four-path exact-Qwen3.8 full-attention substrate, validly shipped at `a50f903efc503da8d6df6ae2c9b63f36ff8eac4b` (`internal/metalgemm@r63+ga50f903ef`); #9515 and #9516 are enabling-only, #9074/#9075 integration and receipt work remain open, and M9 records no KEEP.
 - 2026-08-27: found and corrected tracker drift: #9075 was reclosed against absent `82f1a635c8098ae569dac2db0c3b222765098226` after its own audit refuted shared Qwen execution, and umbrella #9430 was closed from docs-only `a6fa45cd25e047865c763384beaf27ee9a2a2149` despite `0 / 10 KEEP`; both issues are reopened and neither closure changes plan completion.
+- 2026-08-28: reconciled live tracker state: #8011 is open; mechanism-only #9488 is closed with the missing exact-artifact performance receipt retained by #8324/#9430; #9499 is the open M7 mechanism child; #9513 is the open M10 close-out leaf replacing the invalid #8697/#8972 receipt boundary; #9714 is the open incumbent-ownership blocker for #9482/#8325; and #9525 owns the exact M2 keep/reject receipt under #9230.
+- 2026-08-28: reconciled official upstream identity: this plan remains dense `Qwen/Qwen3.8-27B`; the separate `QwenLM/Qwen3.8-Flash-Next` multimodal MoE preview and every historical Qwen3.6 receipt remain outside the plan's evidence numerator.
 
 ## Completion audit
 
