@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-25T19:30:00-07:00",
+  "updated_at": "2026-08-28T13:48:46Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -1611,16 +1611,16 @@
       "status": "studied",
       "priority": 21,
       "why": "Production GPU-kernel control-plane analogue: reusable attention plans/workspace, correctness-gated profile tuning, JIT/artifact identity, and trace/replay mechanisms map directly to FAK compute HAL gaps.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
-      "stars_at_check": 6209,
-      "last_push_at_check": "2026-08-22T11:34:52Z",
-      "study_note": "docs/notes/flashinfer-study-2026-08-22.md",
-      "refresh_issue": "#9002",
+      "last_checked": "2026-08-28",
+      "checked_revision": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+      "stars_at_check": 6273,
+      "last_push_at_check": "2026-08-28T09:53:20Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-FLASHINFER-REFRESH-2026-08-28.md",
+      "refresh_issue": "#9757",
       "inventory": {
         "mode": "exhaustive",
         "map_path": "docs/research/inventory/flashinfer-ai-flashinfer.json",
-        "indexed_revision": "fb28d7242b3506a2348265962041acc1fb56cca4",
+        "indexed_revision": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
         "source_classes": [
           "readme_docs",
           "architecture_design",
@@ -1636,77 +1636,71 @@
           "issue_tracking"
         ],
         "subsystem_count": 20,
-        "candidate_count": 5,
-        "filed_issue_count": 3,
-        "completeness_critic": "exhaustive pinned local-tree map plus full Git history and tags; paged GitHub issues, pull requests, releases, and all discussions through the pinned commit timestamp; distributed TODOs, license provenance, fak self-query, candidate adjudication, and issue read-back recorded under non_tree_study; skipped dependency/cache/control directories: .git",
+        "candidate_count": 30,
+        "filed_issue_count": 1,
+        "completeness_critic": "Generated exhaustive main-tree inventory plus validated forge corpus, exact eight-commit delta, divergent v0.6.18rc10 branch/tag review, NOTICE/licenses/gitlinks, FAK self-query, and live issue outcome read-back. External private dashboards are unavailable and were not treated as evidence.",
         "source_evidence": [
           {
             "class": "history_changelog_releases",
             "evidence": [
-              "git rev-list --count fb28d7242b3506a2348265962041acc1fb56cca4",
-              "git tag --merged fb28d7242b3506a2348265962041acc1fb56cca4",
-              "gh api --paginate repos/flashinfer-ai/flashinfer/releases?per_page=100"
+              "docs/research/inventory/flashinfer-ai-flashinfer-corpus-2026-08-28.jsonl",
+              "docs/research/flashinfer-2026-08-28/main-delta.json",
+              "docs/research/flashinfer-2026-08-28/release-divergence.json"
             ],
-            "note": "2,850 commits, 311 merged tags, and 359 releases through the pinned timestamp; no checked-in changelog."
+            "note": "Validated forge corpus, exact eight-commit main delta, and divergent v0.6.18rc10 history."
           },
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
+              "docs/research/inventory/flashinfer-ai-flashinfer-corpus-2026-08-28.jsonl",
               "gh api --paginate repos/flashinfer-ai/flashinfer/issues?state=all&per_page=100",
               "gh pr list --repo flashinfer-ai/flashinfer --state all --limit 1000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
               "gh api graphql repository(owner:flashinfer-ai,name:flashinfer) discussions(first:100)"
             ],
-            "note": "Pinned denominator: 1,211 issues, 3,434 pull requests, and all 24 discussions; states read back on 2026-08-25."
+            "note": "Complete accepted issue/pull/discussion pages at the recorded sequential cutoff."
           },
           {
             "class": "roadmap_todos",
             "evidence": [
-              "docs/research/inventory/flashinfer-ai-flashinfer.json#non_tree_study.history_roadmap_license"
+              "docs/research/flashinfer-2026-08-28/source-completeness.json"
             ],
-            "note": "No roadmap file; 408 TODO/FIXME lines in 170 runtime files plus the complete tracker ledger cover distributed planning evidence."
+            "note": "No dedicated roadmap file; tracker and delta review carry current direction."
           },
           {
             "class": "license_provenance",
             "evidence": [
-              "./LICENSE",
-              "./NOTICE",
-              "licenses/LICENSE.cutlass.txt",
-              "licenses/LICENSE.flashattention3.txt",
-              "licenses/LICENSE.fmt.txt",
-              "licenses/LICENSE.spdlog.txt"
-            ],
-            "note": "Apache-2.0 repository with NVIDIA notice and bundled dependency licenses; no source copied into fak."
+              "docs/research/flashinfer-2026-08-28/license-provenance.json"
+            ]
           },
           {
             "class": "fak_selfquery_witness",
             "evidence": [
-              "fak capabilities reusable attention plan workspace lifecycle correctness gated profile tuning JIT artifact identity trace replay GPU kernels",
-              "fak capabilities FlashInfer cubin cache workspace plan replay profiler"
-            ],
-            "note": "Queries returned context/cache surfaces but no native compute-HAL substitute; existing issues #8607-#8609 remain the applicable gaps."
+              "docs/research/flashinfer-2026-08-28/self-query.json#fak-selfquery-witness"
+            ]
           },
           {
             "class": "candidate_matrix",
             "evidence": [
-              "docs/research/inventory/flashinfer-ai-flashinfer.json#non_tree_study.candidate_matrix"
+              "docs/research/flashinfer-2026-08-28/candidate-ledger.json#candidate-matrix"
             ]
           },
           {
             "class": "issue_tracking",
             "evidence": [
-              "https://github.com/anthony-chaudhary/fak/issues/9002",
-              "https://github.com/anthony-chaudhary/fak/issues/8607",
-              "https://github.com/anthony-chaudhary/fak/issues/8608",
-              "https://github.com/anthony-chaudhary/fak/issues/8609"
-            ],
-            "note": "GitHub read-back confirmed all three FlashInfer-derived follow-ons remain open; no duplicate follow-on was filed."
+              "docs/research/flashinfer-2026-08-28/dedup-map.json#issue-tracking"
+            ]
           }
         ],
         "issue_refs": [
-          "#9002",
+          "#9757",
+          "#1479",
+          "#3254",
+          "#4180",
           "#8607",
-          "#8608",
-          "#8609"
+          "#8657",
+          "#9137",
+          "#9139",
+          "#9209"
         ]
       }
     },

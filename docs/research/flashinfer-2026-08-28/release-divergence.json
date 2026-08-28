@@ -1,0 +1,265 @@
+{
+  "schema": "fak-upstream-release-divergence/1",
+  "repository": "flashinfer-ai/flashinfer",
+  "observed_at": "2026-08-28T13:48:46Z",
+  "main_revision": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+  "release_tag": "v0.6.18rc10",
+  "tag_object": "0c56704d4c731a37142f7e7d362a4aa304e847de",
+  "release_commit": "e62941a1da605fb9b3c8c50b23c9720df12cf6b4",
+  "release_commit_at": "2026-08-28T01:28:32Z",
+  "merge_base": "61a6c651872a7d3f2f6dcc1ced61633d8f8ba3dd",
+  "left_right_counts": {
+    "main_only": 66,
+    "release_only": 45
+  },
+  "release_only_commits": [
+    {
+      "sha": "d5e45b38e943fac7875902c2f0041e7b1e054154",
+      "source_event_at": "2026-08-19T01:09:29Z",
+      "subject": "feat: CuTe DSL kernels for Rubin (SM107) and batched FP8 GEMM for Blackwell (#4526)"
+    },
+    {
+      "sha": "87ba7ff1ede0fcb3a462fab7ea10bd966bdaf378",
+      "source_event_at": "2026-08-19T01:09:53Z",
+      "subject": "create rc4"
+    },
+    {
+      "sha": "c3b96d0e1d362d29774f43e17a21aa98764f56ca",
+      "source_event_at": "2026-08-17T19:41:36-07:00",
+      "subject": "ci: build jit-cache wheels for CUDA 13.4 with 10.7a (Rubin/SM107)"
+    },
+    {
+      "sha": "0e9c946f6ae35a09a4db73235556b646c9ac737e",
+      "source_event_at": "2026-08-19T17:25:07Z",
+      "subject": "fix(trace): model the SM100/103 cute-dsl mm_bf16_fp4 prepared layout"
+    },
+    {
+      "sha": "57c6951347f7dde9ee48ae1e290e13d137ec3b56",
+      "source_event_at": "2026-08-20T01:19:11+08:00",
+      "subject": "fix(moe): restore SM12x MoE kernels broken by self-resolved helper in borrowed dense methods (#4602)"
+    },
+    {
+      "sha": "549a7ce5f918b606375600b9d90a0585d3abc16c",
+      "source_event_at": "2026-08-19T21:14:59+08:00",
+      "subject": "add backward-compatible aliases for bsa_attn_fwd and bsa_attn_blk64_fwd (#4590)"
+    },
+    {
+      "sha": "a35db6c8a6a265ad645d8039ec71e4c02957d59d",
+      "source_event_at": "2026-08-19T23:52:06Z",
+      "subject": "revert: #3975 and #4129 (mamba checkpointing ssu 2-split + doc)"
+    },
+    {
+      "sha": "66b1a122ef3c46084d1ce02518c8554ac8ab3496",
+      "source_event_at": "2026-08-19T23:52:58Z",
+      "subject": "create rc5"
+    },
+    {
+      "sha": "84c1aa5ef3f4e5de5713ea925d4c4bf44627f4c2",
+      "source_event_at": "2026-08-19T04:29:55Z",
+      "subject": "test: enable the unified MoE fuzzer by default and prune legacy UTs (#4475)"
+    },
+    {
+      "sha": "de96e24fcf3874fcf8e2c30005e135f51f2d736f",
+      "source_event_at": "2026-08-20T18:17:32Z",
+      "subject": "create rc6"
+    },
+    {
+      "sha": "211c18900d92550255d36e77922f8f87303f6acf",
+      "source_event_at": "2026-08-20T17:08:45-07:00",
+      "subject": "fix(gemm,moe): restore bmm_fp8 auto fallback and drop an over-strict SM107 tactic guard (#4645)"
+    },
+    {
+      "sha": "1629abae3fecee10d3bf1e407dadf1fa52b589f7",
+      "source_event_at": "2026-08-19T23:38:22-07:00",
+      "subject": "feat: trtllm-gen FMHA features for sm107 (spcompress, fp16softmax) (#4596)"
+    },
+    {
+      "sha": "76f8fe6e9dbd4737b5996b25bd327a4df7a51701",
+      "source_event_at": "2026-07-16T22:15:38Z",
+      "subject": "fix(moe): unify the NVFP4 profiler workspace predicate and fix gated fc1 SF sizing"
+    },
+    {
+      "sha": "34f84cb865e70d687c3e0d61bfb11bd3d2c6ffa3",
+      "source_event_at": "2026-08-20T16:16:27-07:00",
+      "subject": "feat: collect a union of TEST_PATH targets in unit CI (#4641)"
+    },
+    {
+      "sha": "3b3e688a5427a057dc9ebf4658fe9e31b9714668",
+      "source_event_at": "2026-08-21T00:09:39Z",
+      "subject": "create rc7"
+    },
+    {
+      "sha": "6ad46552ae4d42307cf632102b0faa165f83b8ec",
+      "source_event_at": "2026-08-15T15:37:52+09:00",
+      "subject": "fix(gdn): support WY ucache kernels on SM121"
+    },
+    {
+      "sha": "98b0a6db8fc5763c5d5f4a42757bb34148eac9d5",
+      "source_event_at": "2026-08-25T00:42:48Z",
+      "subject": "fix(attention): enable SM121 FMHA v2 prefill (#4661)"
+    },
+    {
+      "sha": "24f9b90c36eeaa2ff9dcaae1d2025902b46e63ee",
+      "source_event_at": "2026-08-25T01:01:04Z",
+      "subject": "fix(cute_dsl): consult the arch gate in the GEMM and GDN dispatchers (#4649)"
+    },
+    {
+      "sha": "325096fbc62f6bec6b8e76a869b8a3efb6868440",
+      "source_event_at": "2026-08-25T01:02:10Z",
+      "subject": "fix: support SM107 (Rubin) in topk_varlen, FlashKDA, and router GEMM capability gates (#4710)"
+    },
+    {
+      "sha": "23381da19d6bdc67a431605c9e6d170d6754baa0",
+      "source_event_at": "2026-08-24T18:29:44-07:00",
+      "subject": "fix: align the nvidia-cutlass-dsl floor on release-v0.6.18 with main (>=4.6.2a0) (#4715)"
+    },
+    {
+      "sha": "49a47af304700f66633ad2da9e558d3097614f5e",
+      "source_event_at": "2026-08-25T01:32:18Z",
+      "subject": "create rc8"
+    },
+    {
+      "sha": "2852cb4ebce8cf3f65d789b11a67479aef9775fc",
+      "source_event_at": "2026-08-26T15:12:12-07:00",
+      "subject": "ci: pin nvidia-cutlass-dsl 4.6.2 on release-v0.6.18 (#4758)"
+    },
+    {
+      "sha": "c46060f9101a67722437f63a6ce42092041a6480",
+      "source_event_at": "2026-08-26T16:28:30-07:00",
+      "subject": "ci: keep Rubin cute-dsl pins after the 4.6.2 CI pin (#4762)"
+    },
+    {
+      "sha": "21a95d7341de56a5284837d27fa5295a6dcf32c1",
+      "source_event_at": "2026-08-26T23:41:15Z",
+      "subject": "fix(kda): fall back to Cake when CuTe DSL predates cutlass.experimental (#4667)"
+    },
+    {
+      "sha": "dc642a9f75013d0a13f9bbece69a6749a76229a2",
+      "source_event_at": "2026-08-26T23:41:23Z",
+      "subject": "fix(sparse-mla): prevent SM120/SM121 prefill KV-handshake hang (#4732)"
+    },
+    {
+      "sha": "f703c8ed6978bd497b225bd2cffa21925579001b",
+      "source_event_at": "2026-08-26T23:41:33Z",
+      "subject": "Revert \"ci: build jit-cache wheels for CUDA 13.4 with 10.7a (Rubin/SM107)\""
+    },
+    {
+      "sha": "66779252bd5a1e18342d3ea01a7d74649aab9489",
+      "source_event_at": "2026-08-21T19:43:47-05:00",
+      "subject": "ci: consolidate CUDA coverage and validate candidate images (#4469)"
+    },
+    {
+      "sha": "d23e7d461250c83aef97fc06b9dbe7cc40bef520",
+      "source_event_at": "2026-08-24T14:29:48-05:00",
+      "subject": "ci: disable sccache for cu134 nvcc (#4682)"
+    },
+    {
+      "sha": "8edb1f39faefb0acfa245ce423fcda3283ff7bd7",
+      "source_event_at": "2026-08-25T18:44:45-05:00",
+      "subject": "ci: coordinate CUDA dependency policy (#4711)"
+    },
+    {
+      "sha": "117883f62ac83952feed352b7e8e4a6b6fbe948d",
+      "source_event_at": "2026-08-26T16:25:43-05:00",
+      "subject": "fix(ci): skip source-only CUDA config test in nightlies (#4750)"
+    },
+    {
+      "sha": "89aa0feb41dff1250f1d589b220b36aaf62913bd",
+      "source_event_at": "2026-08-26T23:44:28Z",
+      "subject": "build(jit): reduce JIT-cache wheel size (#4757)"
+    },
+    {
+      "sha": "c8e9e59d41076e3d3db7b068ddd71f2e96007dfd",
+      "source_event_at": "2026-08-26T23:44:39Z",
+      "subject": "chore(aot): exclude single prefill/decode modules from jit-cache prebuilds (#4760)"
+    },
+    {
+      "sha": "7f17ca2a143f061e3f0816a98ab06764a422d9c8",
+      "source_event_at": "2026-08-26T11:19:47-07:00",
+      "subject": "feat(prims_ts): accept SM107 (Rubin) in the attention-ts device gate"
+    },
+    {
+      "sha": "066a52fe2693d048b334272b939b8c2779cf2ef9",
+      "source_event_at": "2026-08-26T23:45:13Z",
+      "subject": "fix: SM107 (Rubin) MoE tactic guard and batched-GEMM cubin pin (#4761)"
+    },
+    {
+      "sha": "1073859e71fbd0d586c00e267bed8876dfd0964e",
+      "source_event_at": "2026-08-26T23:46:30Z",
+      "subject": "fix(cute_dsl): make the optional-dependency guard independent of cutlass (#4753)"
+    },
+    {
+      "sha": "c2becaea8d8f6e68eaee62db9c40a59b67bc4f7d",
+      "source_event_at": "2026-08-20T16:44:46-07:00",
+      "subject": "Refresh trtllm-gen cubins after multi-arch generation is supported"
+    },
+    {
+      "sha": "3c17a4f5108d7b7488eb0e3289da8b1cb18e19af",
+      "source_event_at": "2026-08-27T00:31:29Z",
+      "subject": "ci: install cutlass-dsl 4.6.2 with its libs wheels"
+    },
+    {
+      "sha": "59b16e6e48bdbd2621aa748bb037e9016171a03a",
+      "source_event_at": "2026-08-27T00:54:40Z",
+      "subject": "fix(cute_dsl): restore the GDN compile arch helper"
+    },
+    {
+      "sha": "eadfae36776e687c22716f54ac8a69b69d085ba2",
+      "source_event_at": "2026-08-27T01:06:40Z",
+      "subject": "create rc9"
+    },
+    {
+      "sha": "dfdc50a3fddf0231bed25e7ca20033063a294912",
+      "source_event_at": "2026-08-26T03:30:38+09:00",
+      "subject": "fix: SageAttention support block size doesn't divide sequence; support K-smoothing (#4654)"
+    },
+    {
+      "sha": "95562551cbfec802258e076cab487e4687816117",
+      "source_event_at": "2026-08-27T13:18:16-07:00",
+      "subject": "fix: skip SM107 low-latency GEMM cubins on Blackwell (#4773) (#4786)"
+    },
+    {
+      "sha": "9ac0f5dbad7503afc45fc18a9f97c41c28e22e75",
+      "source_event_at": "2026-08-27T14:19:23-07:00",
+      "subject": "fix(moe): filter the trtllm-gen kernel manifest per arch to restore MoE JIT build time (#4789)"
+    },
+    {
+      "sha": "89cafe9a40a79e4123721db6268f04e097cdb333",
+      "source_event_at": "2026-08-27T15:01:23-07:00",
+      "subject": "[release-v0.6.18] Rubin (SM107) open-issue fixes (#4790)"
+    },
+    {
+      "sha": "f0ff7f3502bb4f4eb2338b460207ad8c171386c9",
+      "source_event_at": "2026-08-27T17:52:57-07:00",
+      "subject": "[release-v0.6.18] Five SM107 (Rubin) fixes: 133 CI failures (#4792)"
+    },
+    {
+      "sha": "e62941a1da605fb9b3c8c50b23c9720df12cf6b4",
+      "source_event_at": "2026-08-28T01:28:32Z",
+      "subject": "create rc10"
+    }
+  ],
+  "decision_changing_review": [
+    {
+      "commit": "9ac0f5dbad7503afc45fc18a9f97c41c28e22e75",
+      "anchor": "flashinfer/jit/trtllm_gen_metainfo.py:72-168@93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+      "finding": "release branch filters a multi-arch TRTLLM manifest before JIT; generated filtered bytes are the build input and therefore need their own derived identity, rather than inheriting raw artifact identity"
+    },
+    {
+      "commit": "f0ff7f3502bb4f4eb2338b460207ad8c171386c9",
+      "anchor": "release-v0.6.18 commit f0ff7f3502bb4f4eb2338b460207ad8c171386c9",
+      "finding": "release hardening aggregates five SM107 fixes and reports 133 CI failures; treat review/branch evidence as release-specific negative knowledge, not main-tree proof"
+    },
+    {
+      "commit": "e62941a1da605fb9b3c8c50b23c9720df12cf6b4",
+      "anchor": "tag v0.6.18rc10^{commit}",
+      "finding": "rc10 is a release-branch commit, not an ancestor of pinned main; main-only evidence cannot represent released contents"
+    }
+  ],
+  "gitlink_divergence": {
+    "path": "3rdparty/cccl",
+    "main": "16bd510c9b712e82b0ab6cbb630d8e29ba1f7116",
+    "v0.6.18rc10": "876867684f7fac130e0f5911236e0a92a970d4fd"
+  },
+  "refresh_trigger": "new v0.6.18 release candidate/final tag, merge/cherry-pick of release-only fixes to main, or a new CCCL/artifact pin"
+}

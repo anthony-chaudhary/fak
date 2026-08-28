@@ -1,0 +1,131 @@
+{
+  "schema": "fak-upstream-dedup-map/2",
+  "repository": "flashinfer-ai/flashinfer",
+  "observed_at": "2026-08-28T13:48:46Z",
+  "revision": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+  "durable_receipt": "study_6a93ae6773023dd3e547b7e25d2b705701dbc77f6b875a9cc150b744edcfdc57",
+  "method": "GitHub issue read-back via gh issue view --json number,title,state,closedAt,url plus candidate-to-issue mapping",
+  "issue_outcomes": [
+    {
+      "number": 969,
+      "state": "CLOSED",
+      "closed_at": "2026-06-27T10:41:13Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 1479,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 3088,
+      "state": "CLOSED",
+      "closed_at": "2026-08-17T05:05:34Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 3254,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 4180,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 4184,
+      "state": "CLOSED",
+      "closed_at": "2026-07-16T13:23:45Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 4202,
+      "state": "CLOSED",
+      "closed_at": "2026-08-27T16:49:51Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 4356,
+      "state": "CLOSED",
+      "closed_at": "2026-07-12T19:30:40Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 6042,
+      "state": "CLOSED",
+      "closed_at": "2026-08-27T16:51:30Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 8607,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 8608,
+      "state": "CLOSED",
+      "closed_at": "2026-08-26T13:22:30Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 8609,
+      "state": "CLOSED",
+      "closed_at": "2026-08-26T13:27:31Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 8657,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 9137,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 9139,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 9209,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    },
+    {
+      "number": 9238,
+      "state": "CLOSED",
+      "closed_at": "2026-08-26T20:53:06Z",
+      "effect": "closed outcome is evidence to inspect, not an active landing target"
+    },
+    {
+      "number": 9757,
+      "state": "OPEN",
+      "closed_at": null,
+      "effect": "active dedup target"
+    }
+  ],
+  "required_closed_outcome_audit": [
+    3088,
+    4184,
+    4202,
+    4356,
+    6042,
+    8608,
+    8609
+  ],
+  "new_issue_numbers": [
+    9757
+  ],
+  "decision": "No additional implementation issue was filed. C25 DCP is ABSENT on-axis but remains hardware-envelope WATCH under research issue #9757; other gaps remap to active issues or closed outcomes that must be read before reuse."
+}

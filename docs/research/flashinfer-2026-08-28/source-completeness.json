@@ -1,0 +1,84 @@
+{
+  "schema": "fak-upstream-study-completeness/2",
+  "repository": "flashinfer-ai/flashinfer",
+  "revision": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+  "cutoff": "2026-08-28T13:46:58Z",
+  "observed_at": "2026-08-28T13:48:46Z",
+  "durable_receipt": "study_6a93ae6773023dd3e547b7e25d2b705701dbc77f6b875a9cc150b744edcfdc57",
+  "source_classes": [
+    {
+      "class": "forge issues",
+      "status": "complete",
+      "count": 1232,
+      "evidence": "docs/research/inventory/flashinfer-ai-flashinfer-corpus-2026-08-28.jsonl"
+    },
+    {
+      "class": "forge pulls",
+      "status": "complete",
+      "count": 3543,
+      "evidence": "same corpus"
+    },
+    {
+      "class": "forge discussions",
+      "status": "complete",
+      "count": 24,
+      "evidence": "same corpus"
+    },
+    {
+      "class": "forge releases",
+      "status": "complete",
+      "count": 360,
+      "evidence": "same corpus"
+    },
+    {
+      "class": "forge labels",
+      "status": "complete",
+      "count": 87,
+      "evidence": "same corpus"
+    },
+    {
+      "class": "forge milestones",
+      "status": "complete",
+      "count": 2,
+      "evidence": "same corpus"
+    },
+    {
+      "class": "pinned main tree and eight-commit delta",
+      "status": "complete",
+      "count": 8,
+      "evidence": "main-delta.json and inventory map"
+    },
+    {
+      "class": "divergent release branch/tag and review",
+      "status": "complete",
+      "count": 45,
+      "evidence": "release-divergence.json"
+    },
+    {
+      "class": "license NOTICE bundled licenses gitlinks",
+      "status": "complete",
+      "count": 11,
+      "evidence": "license-provenance.json"
+    },
+    {
+      "class": "FAK self-query and raw grep",
+      "status": "complete",
+      "count": 6,
+      "evidence": "self-query.json"
+    },
+    {
+      "class": "candidate adjudication",
+      "status": "complete",
+      "count": 30,
+      "evidence": "candidate-ledger.json"
+    },
+    {
+      "class": "FAK issue dedup/outcome read-back",
+      "status": "complete",
+      "count": 18,
+      "evidence": "dedup-map.json"
+    }
+  ],
+  "forge_atomicity": "Endpoint crawls were sequential rather than one atomic forge snapshot. The corpus receipt records bounded identity deltas between mixed issues and dedicated pulls; validator acceptance proves recorded bytes/schema, not cross-endpoint simultaneity.",
+  "completeness_critic": "All decision-changing source classes were opened. The refresh reuses the prior full-tree deep read, walks the exact eight-commit main delta, independently reviews the divergent rc10 branch/tag, and rechecks provenance and FAK state. External private dashboards and unpublished benchmark logs remain unavailable and are not treated as evidence."
+}
