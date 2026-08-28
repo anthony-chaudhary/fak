@@ -195,6 +195,7 @@ Choose the command by intent:
 ```bash
 fak-dev buildcheck --vet              # repository compile/vet check; no in-tree binary
 make build                            # produce a debuggable ./fak for local use
+make build-all                        # compile every package and link every command
 ./fak --help                          # every verb on the produced binary
 ./fak doctor --help                   # the read-only diagnostic described below
 ```
@@ -204,6 +205,12 @@ is not a collision-safe verification command on the shared Windows trunk. The 60
 no-key/no-model/no-GPU proof uses that produced binary — see `AGENTS.md` and the full
 [repro packet](repro-packet.md). The build-profile table below applies to that runtime
 artifact; `fak-dev` is the separately built contributor command.
+
+`make build` emits the artifacts an operator asked for: the debuggable `./fak` plus the
+native/Windows repository-guard hooks and dispatch worker. It does not also link every
+demo and benchmark command. Use the explicit `make build-all` target when the question is
+whether the complete package tree builds. `make ci` names both targets as direct
+prerequisites, so separating the fast artifact build does not narrow the green-bar gate.
 
 ### Build profiles
 
@@ -217,7 +224,7 @@ reds if any of them re-inlines the recipe). You select a **profile** with `$PROF
 | Profile   | `make` target     | `-trimpath` | strip `-s -w` | DWARF   | `CGO_ENABLED` | `-race` | Use |
 |-----------|-------------------|:-----------:|:-------------:|:-------:|:-------------:|:-------:|-----|
 | `release` | `make release`    | ✓           | ✓             | stripped| `0` (static)  | —       | the **shipped** binary — stripped, reproducible-ready, stamped |
-| `dev`     | `make build`      | —           | —             | kept    | `0` (static)  | —       | fast local build; `dlv` (the Go debugger) can set a breakpoint and step |
+| `dev`     | `make build`      | —           | —             | kept    | `0` (static)  | —       | fast local artifact + hook build; `dlv` (the Go debugger) can set a breakpoint and step |
 | `race`    | `make build-race` | —           | —             | kept    | `1` (cgo)     | ✓       | opt-in race-detector variant; **not** the static pure-Go binary |
 
 The `dev` profile keeps DWARF/symbols and host paths so a debugger works out of the box; add
@@ -271,7 +278,8 @@ elapsed time instead of hand-ordered package lists.
 | `make test` | `go test ./...` (full suite incl. the ~538 MB f32/safetensors model oracle) | the authoritative gate before you trust a model-touching change |
 | `make test-affected` | `fak affected` → `go test` for only the packages your working-tree change can reach (changed + transitive importers, test imports included) | the fast inner loop on the REAL oracle (no `-short`) for a one-leaf edit |
 | `make test-race` | `CGO_ENABLED=1 go test -short -race ./...`, cgo-preflighted (refuses on a compiler-less box rather than building a race-blind false green) | catch a data race locally instead of minutes later in CI — see [testing/race-detector.md](https://github.com/anthony-chaudhary/fak/blob/main/docs/testing/race-detector.md) |
-| `make ci` | the full gate: `build` + `gofmt-check` + `vet` + `test` + `claims-lint` + the doc/scorecard gates | the green-bar definition the guards expect before you ship |
+| `make build-all` | `go build ./...`: compile every package and link every command | explicit whole-tree build proof; also a direct `make ci` prerequisite |
+| `make ci` | the full gate: `build` + `build-all` + `gofmt-check` + `vet` + `test` + `claims-lint` + the doc/scorecard gates | the green-bar definition the guards expect before you ship |
 
 For a single package, `go test ./internal/<pkg>/... -count=1` is the direct form
 (`-count=1` defeats the test cache when you want a clean re-run).

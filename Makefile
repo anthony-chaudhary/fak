@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build cross-build-harnessres clean vet architest-gate test test-fast smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -26,15 +26,13 @@ ARCHITEST_GATE_RE ?= ^(TestEveryPackageDeclaresTier|TestNoUpwardImports|TestRoot
 # runs the model-free terminal witnesses from run-the-demos.md.
 # cuda-check is the GPU-free CUDA ABI/header preflight — deterministic, no CUDA toolkit,
 # so it joins the local gate the same way (the cuda-build.yml `static` job is its CI mirror).
-ci: build cross-build-harnessres gofmt-check disambiguation-generated-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
+ci: build build-all cross-build-harnessres gofmt-check disambiguation-generated-check vet test claims-lint cache-headline-lint cachedoc-numbers-lint cache-default-readiness gitdaily-score salience dos-lint index-sync hygiene demo-tool-tests demo-scorecards scorecard-ratchet cache-proving demo-smoke demo-headless-smoke gated-tests cuda-check
 	@echo "CI OK"
 
 build:
-	go build ./...
 	# Emit a debuggable ./fak through the ONE build entrypoint (dev profile, #3710):
 	# DWARF/symbols kept + host paths intact so Delve can step, BuildVersion stamped so
-	# `fak version` is honest — the object cache is shared with the `go build ./...` above,
-	# so this is a link step, not a rebuild. Set GCFLAGS='all=-N -l' for pristine stepping.
+	# `fak version` is honest. Set GCFLAGS='all=-N -l' for pristine stepping.
 	# The shipped stripped/reproducible binary is `make release`; the race variant is
 	# `make build-race`; see docs/dev-tooling.md for the profile flag-delta table.
 	OUT=fak PROFILE=dev sh scripts/build.sh
@@ -53,6 +51,13 @@ build:
 	# Likewise the Go DOS dispatch-worker launcher — the interpreter-free cutover
 	# target for tools/dispatch_worker.py (parity-tested; see dos.toml [supervise]).
 	go build -o tools/.bin/dispatchworker ./cmd/dispatchworker
+
+# Compile every package and link every command. Keep this explicit: `make build` emits
+# the developer binary and hook binaries operators asked for, while this whole-tree gate
+# also links the repository's large demo/benchmark command fleet. `ci` names both as
+# direct prerequisites so the complete pre-commit contract is unchanged.
+build-all:
+	go build ./...
 
 .PHONY: release
 # The release binary, built through the ONE canonical recipe every shipping consumer
