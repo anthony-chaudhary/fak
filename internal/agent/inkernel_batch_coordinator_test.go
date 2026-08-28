@@ -102,7 +102,7 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 			t.Fatalf("coalesced[%d] missing batch receipt", i)
 		}
 		r := answers[i].c.InKernelBatch
-		if r.CohortSize != len(messages) || r.SharedPanels == 0 || r.SharedMACs == 0 {
+		if r.CohortSize != len(messages) || r.SharedPanels == 0 || r.SharedMACs == 0 || r.SessionCloses != uint32(len(messages)) {
 			t.Fatalf("coalesced[%d] receipt=%+v", i, r)
 		}
 		if cohortID == 0 {

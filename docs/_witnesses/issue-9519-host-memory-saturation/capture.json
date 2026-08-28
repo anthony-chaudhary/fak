@@ -1,0 +1,430 @@
+{
+  "schema": "fak-model-bandwidth-collection/1",
+  "engine": "fak-native",
+  "machine_class": "linux/amd64",
+  "collector": "procfs",
+  "interval_ms": 10,
+  "availability": {
+    "physical_memory": true,
+    "process_memory": true,
+    "process_io": true,
+    "memory_pressure": true,
+    "dram_counters": false,
+    "device_counters": false
+  },
+  "capture": {
+    "schema": "fak-model-bandwidth/1",
+    "engine": "fak-native",
+    "trigger": {
+      "symptom_window": 2,
+      "resource_window": 2,
+      "latency_threshold_ms": 1e+100,
+      "resource_utilization": 1
+    },
+    "samples": [
+      {
+        "phase": "other",
+        "shape": "small",
+        "provenance": {
+          "source": "live-host",
+          "machine": "linux/amd64",
+          "device": "host-memory",
+          "collector": "procfs",
+          "sampled_at": "2026-08-28T00:29:57.467685814Z"
+        },
+        "rooflines": {
+          "measured_sustainable_gb_s": 23.442986811437393
+        },
+        "live": {},
+        "request": {},
+        "device": {},
+        "capacity": {
+          "used_bytes": 13440126976,
+          "total_bytes": 33661472768
+        },
+        "transfer": {},
+        "software": {},
+        "host": {
+          "physical_total_bytes": 33661472768,
+          "physical_available_bytes": 20221345792,
+          "process_resident_bytes": 583405568,
+          "process_read_bytes": 0,
+          "process_write_bytes": 0,
+          "swap_total_bytes": 0,
+          "swap_used_bytes": 0,
+          "process_minor_faults": 135642,
+          "process_major_faults": 0,
+          "memory_pressure_some_avg10_percent": 0,
+          "memory_pressure_some_avg60_percent": 0,
+          "memory_pressure_some_avg300_percent": 0,
+          "memory_pressure_some_total_stall_microseconds": 219336851,
+          "memory_pressure_full_avg10_percent": 0,
+          "memory_pressure_full_avg60_percent": 0,
+          "memory_pressure_full_avg300_percent": 0,
+          "memory_pressure_full_total_stall_microseconds": 216960739,
+          "memory_reclaim_kswapd_scanned_pages_total": 235584747,
+          "memory_reclaim_direct_scanned_pages_total": 61795857,
+          "memory_reclaim_kswapd_reclaimed_pages_total": 181017638,
+          "memory_reclaim_direct_reclaimed_pages_total": 6643957,
+          "memory_swap_in_pages_total": 5348440,
+          "memory_swap_out_pages_total": 13710119,
+          "process_io_scope": "process-storage-io-not-dram"
+        }
+      }
+    ]
+  },
+  "report": {
+    "schema": "fak-model-bandwidth/1",
+    "engine": "fak-native",
+    "observations": [
+      {
+        "schema": "fak-model-bandwidth/1",
+        "engine": "fak-native",
+        "phase": "other",
+        "shape": "small",
+        "provenance": {
+          "source": "live-host",
+          "machine": "linux/amd64",
+          "device": "host-memory",
+          "collector": "procfs",
+          "sampled_at": "2026-08-28T00:29:57.467685814Z"
+        },
+        "rooflines": {
+          "measured_sustainable_gb_s": 23.442986811437393,
+          "selected_gb_s": 23.442986811437393,
+          "selected_source": "measured-sustainable"
+        },
+        "live": {},
+        "request": {},
+        "device": {},
+        "capacity": {
+          "used_bytes": 13440126976,
+          "total_bytes": 33661472768,
+          "utilization": 0.39927328993093686
+        },
+        "transfer": {},
+        "software": {},
+        "host": {
+          "physical_total_bytes": 33661472768,
+          "physical_available_bytes": 20221345792,
+          "process_resident_bytes": 583405568,
+          "process_read_bytes": 0,
+          "process_write_bytes": 0,
+          "swap_total_bytes": 0,
+          "swap_used_bytes": 0,
+          "process_minor_faults": 135642,
+          "process_major_faults": 0,
+          "memory_pressure_some_avg10_percent": 0,
+          "memory_pressure_some_avg60_percent": 0,
+          "memory_pressure_some_avg300_percent": 0,
+          "memory_pressure_some_total_stall_microseconds": 219336851,
+          "memory_pressure_full_avg10_percent": 0,
+          "memory_pressure_full_avg60_percent": 0,
+          "memory_pressure_full_avg300_percent": 0,
+          "memory_pressure_full_total_stall_microseconds": 216960739,
+          "memory_reclaim_kswapd_scanned_pages_total": 235584747,
+          "memory_reclaim_direct_scanned_pages_total": 61795857,
+          "memory_reclaim_kswapd_reclaimed_pages_total": 181017638,
+          "memory_reclaim_direct_reclaimed_pages_total": 6643957,
+          "memory_swap_in_pages_total": 5348440,
+          "memory_swap_out_pages_total": 13710119,
+          "process_io_scope": "process-storage-io-not-dram"
+        },
+        "bottleneck": "unknown",
+        "deep_capture": {
+          "symptom_streak": 0,
+          "resource_streak": 0,
+          "triggered": false
+        }
+      }
+    ],
+    "truncated": false
+  },
+  "roofline_measurement": {
+    "schema": "fak-host-memory-roofline-sweep/1",
+    "scope": "host-memory",
+    "machine_class": "linux/amd64",
+    "method": "parallel-copy",
+    "aggregation": "median",
+    "traffic_accounting": "read-plus-write-2-bytes-per-copied-byte",
+    "overhead_accounting": "first-touch-and-calibration-reported-separately-from-measured-trials",
+    "dram_isolation": "not-proven",
+    "interpretation": "sustained-host-memory-copy-throughput-not-hardware-counter-dram-bandwidth",
+    "caveats": [
+      "cache-residency-not-measured",
+      "numa-placement-os-managed",
+      "copy-kernel-and-scheduler-dependent",
+      "peak-buffer-bytes-excludes-go-runtime-and-os-retention",
+      "buffers-reallocated-and-first-touched-per-worker-count",
+      "per-point-buffer-release-is-go-runtime-mediated",
+      "invalid-points-are-omitted-and-reported-not-zero-filled"
+    ],
+    "working_set_bytes": 268435456,
+    "peak_buffer_bytes": 536870912,
+    "target_duration_ms": 100,
+    "runtime_budget_ms": 67000,
+    "command_budget_ms": 77000,
+    "total_duration_ms": 7948.769226,
+    "threads": 8,
+    "measured_sustainable_gb_s": 23.442986811437393,
+    "applied_host_observation_count": 1,
+    "requested_point_count": 4,
+    "point_count": 4,
+    "knee_threshold": 0.9,
+    "stability_rule": "maximum-lower-median-of-two-adjacent-valid-points; knee-is-earliest-valid-point-with-it-and-all-later-valid-points-at-or-above-threshold-times-sustainable-peak",
+    "raw_observed_peak_worker_count": 4,
+    "raw_observed_peak_median_gb_s": 28.250185919868574,
+    "plateau_worker_counts": [
+      4,
+      8
+    ],
+    "saturation_knee_worker_count": 4,
+    "points": [
+      {
+        "worker_count": 1,
+        "median_gb_s": 7.3163338302800005,
+        "efficiency_versus_sustainable_peak": 0.3120905151348078,
+        "warmup_duration_ms": 489.482929,
+        "warmup_bytes_touched": 805306368,
+        "buffer_cleanup_duration_ms": 1.715157,
+        "trials": [
+          {
+            "index": 1,
+            "iterations": 2,
+            "duration_ms": 146.759545,
+            "traffic_bytes": 1073741824,
+            "gb_s": 7.3163338302800005,
+            "calibration_rounds": 2,
+            "calibration_duration_ms": 219.105026,
+            "calibration_traffic_bytes": 1610612736
+          },
+          {
+            "index": 2,
+            "iterations": 2,
+            "duration_ms": 146.871492,
+            "traffic_bytes": 1073741824,
+            "gb_s": 7.310757243481942,
+            "calibration_rounds": 2,
+            "calibration_duration_ms": 220.847144,
+            "calibration_traffic_bytes": 1610612736
+          },
+          {
+            "index": 3,
+            "iterations": 2,
+            "duration_ms": 146.801272,
+            "traffic_bytes": 1073741824,
+            "gb_s": 7.314254225263116,
+            "calibration_rounds": 2,
+            "calibration_duration_ms": 219.799494,
+            "calibration_traffic_bytes": 1610612736
+          },
+          {
+            "index": 4,
+            "iterations": 2,
+            "duration_ms": 146.474421,
+            "traffic_bytes": 1073741824,
+            "gb_s": 7.330575650474836,
+            "calibration_rounds": 2,
+            "calibration_duration_ms": 219.89025,
+            "calibration_traffic_bytes": 1610612736
+          },
+          {
+            "index": 5,
+            "iterations": 2,
+            "duration_ms": 146.495186,
+            "traffic_bytes": 1073741824,
+            "gb_s": 7.329536576034656,
+            "calibration_rounds": 2,
+            "calibration_duration_ms": 220.311941,
+            "calibration_traffic_bytes": 1610612736
+          }
+        ]
+      },
+      {
+        "worker_count": 2,
+        "median_gb_s": 14.477724844520525,
+        "efficiency_versus_sustainable_peak": 0.6175716840593501,
+        "marginal_gain_gb_s": 7.161391014240524,
+        "marginal_gain_fraction": 0.9788223419497049,
+        "warmup_duration_ms": 121.178484,
+        "warmup_bytes_touched": 805306368,
+        "buffer_cleanup_duration_ms": 1.481329,
+        "trials": [
+          {
+            "index": 1,
+            "iterations": 3,
+            "duration_ms": 112.06774,
+            "traffic_bytes": 1610612736,
+            "gb_s": 14.371778497540863,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 237.14973,
+            "calibration_traffic_bytes": 3221225472
+          },
+          {
+            "index": 2,
+            "iterations": 3,
+            "duration_ms": 111.975322,
+            "traffic_bytes": 1610612736,
+            "gb_s": 14.383640138136865,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 223.487888,
+            "calibration_traffic_bytes": 3221225472
+          },
+          {
+            "index": 3,
+            "iterations": 3,
+            "duration_ms": 111.247641,
+            "traffic_bytes": 1610612736,
+            "gb_s": 14.477724844520525,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 223.665037,
+            "calibration_traffic_bytes": 3221225472
+          },
+          {
+            "index": 4,
+            "iterations": 3,
+            "duration_ms": 111.123243,
+            "traffic_bytes": 1610612736,
+            "gb_s": 14.493932075038522,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 223.089355,
+            "calibration_traffic_bytes": 3221225472
+          },
+          {
+            "index": 5,
+            "iterations": 3,
+            "duration_ms": 111.033073,
+            "traffic_bytes": 1610612736,
+            "gb_s": 14.505702602683076,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 222.09768,
+            "calibration_traffic_bytes": 3221225472
+          }
+        ]
+      },
+      {
+        "worker_count": 4,
+        "median_gb_s": 28.250185919868574,
+        "efficiency_versus_sustainable_peak": 1.2050591568001838,
+        "marginal_gain_gb_s": 13.77246107534805,
+        "marginal_gain_fraction": 0.9512862844993631,
+        "warmup_duration_ms": 73.164631,
+        "warmup_bytes_touched": 805306368,
+        "buffer_cleanup_duration_ms": 1.609129,
+        "trials": [
+          {
+            "index": 1,
+            "iterations": 6,
+            "duration_ms": 112.929235,
+            "traffic_bytes": 3221225472,
+            "gb_s": 28.52428312296634,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 228.816486,
+            "calibration_traffic_bytes": 6442450944
+          },
+          {
+            "index": 2,
+            "iterations": 6,
+            "duration_ms": 113.091395,
+            "traffic_bytes": 3221225472,
+            "gb_s": 28.483382595112563,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 227.500374,
+            "calibration_traffic_bytes": 6442450944
+          },
+          {
+            "index": 3,
+            "iterations": 6,
+            "duration_ms": 129.288367,
+            "traffic_bytes": 3221225472,
+            "gb_s": 24.91504492434343,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 226.56718,
+            "calibration_traffic_bytes": 6442450944
+          },
+          {
+            "index": 4,
+            "iterations": 6,
+            "duration_ms": 114.02493,
+            "traffic_bytes": 3221225472,
+            "gb_s": 28.250185919868574,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 228.87396,
+            "calibration_traffic_bytes": 6442450944
+          },
+          {
+            "index": 5,
+            "iterations": 6,
+            "duration_ms": 114.313255,
+            "traffic_bytes": 3221225472,
+            "gb_s": 28.178932285674133,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 228.863876,
+            "calibration_traffic_bytes": 6442450944
+          }
+        ]
+      },
+      {
+        "worker_count": 8,
+        "median_gb_s": 23.442986811437393,
+        "efficiency_versus_sustainable_peak": 1,
+        "marginal_gain_gb_s": -4.807199108431181,
+        "marginal_gain_fraction": -0.17016522022427616,
+        "warmup_duration_ms": 63.170989,
+        "warmup_bytes_touched": 805306368,
+        "trials": [
+          {
+            "index": 1,
+            "iterations": 5,
+            "duration_ms": 114.505655,
+            "traffic_bytes": 2684354560,
+            "gb_s": 23.442986811437393,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 228.64317,
+            "calibration_traffic_bytes": 5368709120
+          },
+          {
+            "index": 2,
+            "iterations": 5,
+            "duration_ms": 114.365441,
+            "traffic_bytes": 2684354560,
+            "gb_s": 23.471728316948475,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 230.565074,
+            "calibration_traffic_bytes": 5368709120
+          },
+          {
+            "index": 3,
+            "iterations": 5,
+            "duration_ms": 114.46832,
+            "traffic_bytes": 2684354560,
+            "gb_s": 23.45063297862675,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 230.668518,
+            "calibration_traffic_bytes": 5368709120
+          },
+          {
+            "index": 4,
+            "iterations": 5,
+            "duration_ms": 115.246088,
+            "traffic_bytes": 2684354560,
+            "gb_s": 23.29237032323388,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 228.592922,
+            "calibration_traffic_bytes": 5368709120
+          },
+          {
+            "index": 5,
+            "iterations": 5,
+            "duration_ms": 114.559741,
+            "traffic_bytes": 2684354560,
+            "gb_s": 23.43191889723284,
+            "calibration_rounds": 3,
+            "calibration_duration_ms": 231.819855,
+            "calibration_traffic_bytes": 5368709120
+          }
+        ]
+      }
+    ]
+  }
+}
