@@ -42,7 +42,7 @@ func (e *Qwen35MTPIncompleteError) Error() string {
 
 // Qwen35MTPMode is the conservative admission result for the native MTP head.
 // Enabled means the retained checkpoint substrate is complete and not explicitly
-// disabled. It does not claim that draft forward execution is wired yet.
+// disabled, so NewQwen35MTPForward may bind the native one-layer draft head.
 type Qwen35MTPMode struct {
 	Eligible bool
 	Enabled  bool
