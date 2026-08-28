@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -29,6 +30,131 @@ func TestAll16ExactlyOnceAndDeterministic(t *testing.T) {
 	bj, _ := json.Marshal(b)
 	if !bytes.Equal(aj, bj) {
 		t.Fatal("nondeterministic output")
+	}
+}
+
+func committedCompositionInputs(t *testing.T) []ComposeInput {
+	t.Helper()
+	names := []string{
+		"issue-9780-performance-rsi-cycle.json",
+		"issue-9781-performance-rsi-improvement.json",
+		"issue-9782-performance-rsi-provenance.json",
+		"issue-9783-performance-rsi-learning.json",
+	}
+	inputs := make([]ComposeInput, 0, len(names))
+	for _, name := range names {
+		path := filepath.Join("..", "..", "docs", "_witnesses", name)
+		e, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inputs = append(inputs, ComposeInput{Source: name, Evidence: e})
+	}
+	return inputs
+}
+
+func TestComposeV1CommittedReceiptsIsScorecardReadyAndDeterministic(t *testing.T) {
+	inputs := committedCompositionInputs(t)
+	got, err := ComposeV1("issue-9823-composed", inputs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed := append([]ComposeInput(nil), inputs...)
+	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
+		reversed[i], reversed[j] = reversed[j], reversed[i]
+	}
+	again, err := ComposeV1("issue-9823-composed", reversed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(got)
+	b, _ := json.Marshal(again)
+	if !bytes.Equal(a, b) {
+		t.Fatal("composition changed with receipt argument order")
+	}
+
+	wantContracts := map[string]struct {
+		unit   string
+		target float64
+	}{
+		"cycle_time":          {unit: "hours", target: 0.02},
+		"improvement_yield":   {unit: "percent", target: 100},
+		"production_transfer": {unit: "hours", target: 100},
+		"compounding_rate":    {unit: "percent", target: 100},
+	}
+	for _, d := range got.Dimensions {
+		want, ok := wantContracts[d.ID]
+		if !ok {
+			continue
+		}
+		if d.Unit != want.unit || d.Target == nil || *d.Target != want.target {
+			t.Errorf("%s contract=%+v, want unit=%q target=%g", d.ID, d, want.unit, want.target)
+		}
+		delete(wantContracts, d.ID)
+	}
+	if len(wantContracts) != 0 {
+		t.Fatalf("missing owner-selected contracts: %v", wantContracts)
+	}
+
+	report := Score(got)
+	if report.UnknownDebt != 1 {
+		t.Fatalf("UNKNOWN debt=%d, want 1", report.UnknownDebt)
+	}
+	var unknown []string
+	for _, d := range report.Dimensions {
+		if d.Status == "UNKNOWN" {
+			unknown = append(unknown, d.ID)
+		}
+	}
+	if strings.Join(unknown, ",") != "hardware_utilization" {
+		t.Fatalf("UNKNOWN dimensions=%v, want only hardware_utilization", unknown)
+	}
+
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(bytes.NewReader(encoded)); err != nil {
+		t.Fatalf("composed evidence was not accepted by scorecard decoder: %v", err)
+	}
+}
+
+func TestComposeV1RejectsDuplicateSectionOwnersDeterministically(t *testing.T) {
+	inputs := committedCompositionInputs(t)
+	cycle := inputs[0].Evidence
+	_, err := ComposeV1("duplicate-cycle", []ComposeInput{
+		{Source: "z-cycle.json", Evidence: cycle},
+		{Source: "a-cycle.json", Evidence: cycle},
+	})
+	want := `fak-performance-rsi-composition/1: section "cycle" has multiple owners "a-cycle.json" and "z-cycle.json"; provide exactly one receipt for that section`
+	if err == nil || err.Error() != want {
+		t.Fatalf("error=%v, want %q", err, want)
+	}
+}
+
+func TestComposeV1RejectsIncompatibleUnownedDimensionContract(t *testing.T) {
+	inputs := committedCompositionInputs(t)
+	for i := range inputs[1].Evidence.Dimensions {
+		if inputs[1].Evidence.Dimensions[i].ID == "hardware_utilization" {
+			target := 90.0
+			inputs[1].Evidence.Dimensions[i].Target = &target
+		}
+	}
+	_, err := ComposeV1("hardware-conflict", inputs)
+	if err == nil {
+		t.Fatal("accepted incompatible hardware contract without a hardware receipt")
+	}
+	for _, want := range []string{
+		`fak-performance-rsi-composition/1`,
+		`dimension "hardware_utilization"`,
+		`without owning section "hardware"`,
+		`issue-9780-performance-rsi-cycle.json`,
+		`issue-9781-performance-rsi-improvement.json`,
+		`add one "hardware" receipt or align the contracts`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error=%q, want substring %q", err, want)
+		}
 	}
 }
 
