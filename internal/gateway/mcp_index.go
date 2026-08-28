@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/selfquery"
 )
@@ -68,6 +69,60 @@ type CapabilitiesRequest struct {
 	Limit int    `json:"limit,omitempty"`
 }
 
+// capabilitiesReuseHits bounds how long an identical successful discovery can
+// stay resident without being recomputed. Four hits cover observed retries 2..5;
+// call 6 refreshes the entry, so repository-backed discovery never stays stale
+// indefinitely merely because a client keeps repeating one request.
+const capabilitiesReuseHits = 4
+
+// capabilitiesReuseCache is deliberately a single-entry cache. Capability
+// discovery is side-effect-free, so the immediately repeated request can reuse a
+// successful result; a changed request invalidates the entry and executes. A
+// single entry plus a hit budget keeps both memory and staleness strictly bounded.
+type capabilitiesReuseCache struct {
+	mu sync.Mutex
+
+	valid      bool
+	key        CapabilitiesRequest
+	response   selfquery.CapabilitiesResponse
+	remaining  int
+	executions uint64
+	hits       uint64
+}
+
+func (c *capabilitiesReuseCache) load(
+	req CapabilitiesRequest,
+	fn func() (selfquery.CapabilitiesResponse, error),
+) (selfquery.CapabilitiesResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.valid && c.key == req && c.remaining > 0 {
+		c.remaining--
+		c.hits++
+		return c.response, nil
+	}
+
+	// A different request (or an exhausted entry) must not fall back to the old
+	// result if execution fails. Invalidate before running the real discovery.
+	c.valid = false
+	c.executions++
+	resp, err := fn()
+	if err != nil {
+		return selfquery.CapabilitiesResponse{}, err
+	}
+	c.valid = true
+	c.key = req
+	c.response = resp
+	c.remaining = capabilitiesReuseHits
+	return resp, nil
+}
+
+func (c *capabilitiesReuseCache) snapshot() (executions, hits uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.executions, c.hits
+}
+
 var capabilitiesInputSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -78,11 +133,13 @@ var capabilitiesInputSchema = json.RawMessage(`{
 }`)
 
 func (s *Server) capabilities(req CapabilitiesRequest) (selfquery.CapabilitiesResponse, error) {
-	cat, err := selfquery.Load(req.Root, selfquery.Options{
-		Tools: selfquery.ToolDescriptorsFromMaps(s.exposedToolDescriptors()),
+	return s.capabilitiesReuse.load(req, func() (selfquery.CapabilitiesResponse, error) {
+		cat, err := selfquery.Load(req.Root, selfquery.Options{
+			Tools: selfquery.ToolDescriptorsFromMaps(s.exposedToolDescriptors()),
+		})
+		if err != nil {
+			return selfquery.CapabilitiesResponse{}, err
+		}
+		return cat.Capabilities(selfquery.CapabilitiesRequest{Query: req.Query, Limit: req.Limit})
 	})
-	if err != nil {
-		return selfquery.CapabilitiesResponse{}, err
-	}
-	return cat.Capabilities(selfquery.CapabilitiesRequest{Query: req.Query, Limit: req.Limit})
 }

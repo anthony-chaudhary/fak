@@ -288,6 +288,21 @@ func livelockObservationOf(trace string, a ToolAdjudication) guardrsi.LivelockOb
 	}
 }
 
+// reusableCapabilityDiscovery reports the exact tool identities through
+// which fak's MCP capabilities operation reaches adjudication. That operation is
+// side-effect-free and its MCP implementation bounds successful-result reuse, so
+// applying the generic call-level livelock advisory as well only spams the model.
+// Exact identities are intentional: another discovery tool, another MCP server,
+// or any stateful call keeps the generic detector.
+func reusableCapabilityDiscovery(a ToolAdjudication) bool {
+	if !a.Admitted || a.Verdict.Kind != "ALLOW" {
+		return false
+	}
+	return a.Tool == "fak_capabilities" ||
+		a.Tool == "mcp__fak__fak_capabilities" ||
+		a.Tool == "mcp__fak_guard__fak_capabilities"
+}
+
 // annotateToolLivelock attaches the livelock envelope to each repeated adjudication
 // and, when an admitted call's envelope has armed the hard Fuse, converts that call
 // into a retryable DENY in place. It returns the set of tool-call IDs it fused so the
@@ -306,8 +321,15 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map
 	}
 	var hits []hit
 	sawObservation := false
+	sawReusableDiscovery := false
 	for i := range adjs {
 		a := adjs[i]
+		if reusableCapabilityDiscovery(a) {
+			// Ignore rather than clear: interleaving a cached discovery call must
+			// not reset a stateful tool's generic livelock run.
+			sawReusableDiscovery = true
+			continue
+		}
 		switch {
 		case a.Admitted && (a.Verdict.Kind == "ALLOW" || a.Verdict.Kind == "TRANSFORM") && a.Verdict.Reason != "SERVED_INLINE":
 			sawObservation = true
@@ -325,7 +347,7 @@ func (s *Server) annotateToolLivelock(trace string, adjs []ToolAdjudication) map
 			hits = append(hits, hit{idx: i, env: env})
 		}
 	}
-	if !sawObservation {
+	if !sawObservation && !sawReusableDiscovery {
 		s.livelock.Clear(trace)
 	}
 	s.livelockMu.Unlock()
