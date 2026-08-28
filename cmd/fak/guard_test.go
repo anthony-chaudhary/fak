@@ -151,6 +151,7 @@ func TestGuardDefaultPolicyDeniesDangerAllowsBenign(t *testing.T) {
 		{"Codex unnamespaced fak adjudicate allowed", "fak_adjudicate", `{"tool":"exec_command","arguments":{},"read_only":true}`, abi.VerdictAllow},
 		{"Codex unnamespaced DOS arbitrate allowed", "dos_arbitrate", `{"lane":"guard","tree":["cmd/fak"]}`, abi.VerdictAllow},
 		{"Codex subagent spawn allowed", "spawn_agent", `{"message":"review guard policy"}`, abi.VerdictAllow},
+		{"Codex subagent wait allowed", "wait_agent", `{"ids":["worker-1"]}`, abi.VerdictAllow},
 		{"Unknown substrate-shaped tool stays denied", "fak_not_a_real_tool", `{}`, abi.VerdictDeny},
 		{"Hosted web tool allowed (built-in read/search surface)", "web.run", `{"search_query":[{"q":"fak agent kernel"}]}`, abi.VerdictAllow},
 		{"Hosted image tool allowed (built-in generation surface)", "image_gen.imagegen", `{"prompt":"diagram"}`, abi.VerdictAllow},

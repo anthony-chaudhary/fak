@@ -84,6 +84,7 @@
     "spawn_agent",
     "send_input",
     "wait",
+    "wait_agent",
     "close_agent",
 
     "mcp__dos__dos_verify",
