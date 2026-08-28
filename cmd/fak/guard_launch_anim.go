@@ -20,8 +20,8 @@ import (
 // The detail is real; it just wants to LIVE in `fak info --startup` (where it already does),
 // not flash-and-vanish.
 //
-// So an attended interactive launch now plays a short, in-place, self-clearing ICON
-// animation instead — a single line that redraws over itself (carriage return, no scroll)
+// Explicit --banner=animate plays a short, in-place, self-clearing ICON animation — a
+// single line that redraws over itself (carriage return, no scroll)
 // showing fak's capability floor rising under the agent, then landing on ONE iconic identity
 // line. It is a loading motif in the spirit of the host agent's own spinner: motion, not a
 // paragraph. The full report stays one command away (`fak info --startup`) and is spilled in

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -197,21 +198,29 @@ func renderGuardStartupReport(v guardStartupView) string {
 // emitGuardStartupBanner spills to stderr exactly what bannerMode asks for, using the already
 // rendered full report for the full-banner case. The full report is on the gateway either way.
 func emitGuardStartupBanner(v guardStartupView, report string) {
+	writeGuardStartupBanner(os.Stderr, v, report, guardFdIsTerminal(int(os.Stderr.Fd())), os.Getenv("NO_COLOR") != "", os.Getenv(guardLaunchAnimEnv), guardLaunchStderrWidth())
+}
+
+// writeGuardStartupBanner is the byte-level render seam. In particular, the healthy default
+// progress mode writes nothing here; its delayed surface is emitted after setup begins.
+func writeGuardStartupBanner(w io.Writer, v guardStartupView, report string, stderrTTY, noColor bool, animEnv string, width int) {
 	switch v.bannerMode {
 	case guardBannerFull:
-		fmt.Fprint(os.Stderr, report)
+		fmt.Fprint(w, report)
 	case guardBannerCompact:
-		printGuardCompactBanner(os.Stderr, guardBannerVersion(), guardShortBuildID(), v.gwURL, v.command, v.refusalCarryForward)
+		printGuardCompactBanner(w, guardBannerVersion(), guardShortBuildID(), v.gwURL, v.command, v.refusalCarryForward)
 	case guardBannerAnimate:
 		// Attended interactive: play the in-place icon animation instead of flashing text, but
 		// only into a real color TTY that has not opted out — otherwise fall back to the static
 		// compact banner so a piped stderr / NO_COLOR / FAK_GUARD_LAUNCH_ANIM=off run stays
 		// byte-clean and motion-free. The full report is on the gateway either way.
-		if guardLaunchAnimEnabled(v.bannerMode, guardFdIsTerminal(int(os.Stderr.Fd())), os.Getenv("NO_COLOR") != "", os.Getenv(guardLaunchAnimEnv)) {
-			printGuardLaunchAnimation(os.Stderr, guardBannerVersion(), guardShortBuildID(), v.gwURL, v.command, v.refusalCarryForward, guardLaunchStderrWidth())
+		if guardLaunchAnimEnabled(v.bannerMode, stderrTTY, noColor, animEnv) {
+			printGuardLaunchAnimation(w, guardBannerVersion(), guardShortBuildID(), v.gwURL, v.command, v.refusalCarryForward, width)
 		} else {
-			printGuardCompactBanner(os.Stderr, guardBannerVersion(), guardShortBuildID(), v.gwURL, v.command, v.refusalCarryForward)
+			printGuardCompactBanner(w, guardBannerVersion(), guardShortBuildID(), v.gwURL, v.command, v.refusalCarryForward)
 		}
+	case guardBannerProgress:
+		// Progress is rendered only after the startup delay. Off remains silent via no case.
 	}
 }
 

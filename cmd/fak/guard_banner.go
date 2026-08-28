@@ -16,11 +16,12 @@ import (
 // full report to a buffer regardless, hands it to the in-process gateway
 // (Server.SetStartupReport), and prints per --banner:
 //
-//	auto (default)  compact for an ATTENDED INTERACTIVE launch; the FULL report for
-//	                headless / piped / scripted launches, byte-for-byte — a captured
-//	                fleet log wants the detail and has no TUI to corrupt.
+//	auto (default)  delayed startup progress only, for interactive and noninteractive
+//	                launches. Healthy startup emits no report, identity, or settle lines.
 //	full            always the full report (today's pre-flag behavior, forced).
 //	compact         always the compact banner.
+//	animate         always request the attended animation (with its existing compact
+//	                fallback when animation is unavailable).
 //	off             no banner at all (narrower than --quiet, which also silences the
 //	                exit summary and per-turn notes).
 //
@@ -31,7 +32,11 @@ const (
 	guardBannerFull    = "full"
 	guardBannerCompact = "compact"
 	guardBannerOff     = "off"
-	// guardBannerAnimate is the attended-interactive default: instead of the compact banner's
+	// guardBannerProgress is the internal healthy-default mode. It deliberately is not an
+	// accepted --banner value: auto/empty resolve here so startup keeps the delayed progress
+	// surface without emitting any startup-report or launch-animation bytes.
+	guardBannerProgress = "progress"
+	// guardBannerAnimate is the explicit attended-animation mode: instead of the compact banner's
 	// three static lines flashing before the agent's TUI paints over them, play a short in-place
 	// icon animation that lands on one iconic identity line (see guard_launch_anim.go). It
 	// degrades to the compact banner off a color TTY or under FAK_GUARD_LAUNCH_ANIM=off, so the
@@ -41,11 +46,9 @@ const (
 
 // guardBannerModeDecision resolves the --banner flag to a concrete mode. Precedence,
 // highest first: --quiet silences everything (its existing contract — the banner is part
-// of what it already suppressed); an explicit full/compact/off is a knowing choice and
-// wins; AUTO keys on the same attended-vs-headless split guardDebugStatsToSharedStderr
-// and --split auto use — an interactive stdin AND an interactive child mean a human is
-// about to hand the terminal to a full-screen agent UI, so the wall of text buys nothing
-// there. An unknown value is a loud usage error, never a silent fallback.
+// of what it already suppressed); an explicit full/compact/animate/off is a knowing choice
+// and wins; AUTO/empty resolves to the private progress-only mode for every launch shape.
+// An unknown value is a loud usage error, never a silent fallback.
 func guardBannerModeDecision(banner string, quiet, stdinInteractive, childInteractive bool) (string, error) {
 	mode := strings.ToLower(strings.TrimSpace(banner))
 	if mode == "" {
@@ -62,13 +65,13 @@ func guardBannerModeDecision(banner string, quiet, stdinInteractive, childIntera
 	if mode != guardBannerAuto {
 		return mode, nil
 	}
-	if stdinInteractive && childInteractive {
-		// Attended interactive: a human is about to hand the terminal to a full-screen agent UI,
-		// so the wall of text buys nothing. Play the icon animation instead of flashing the
-		// compact banner. The render site degrades this to compact off a color TTY / on opt-out.
-		return guardBannerAnimate, nil
-	}
-	return guardBannerFull, nil
+	return guardBannerProgress, nil
+}
+
+// guardDumpStartupOnLaunchFail decides whether a launch failure still needs the full report
+// spilled. Only explicit full already printed it; every other mode, including progress, spills.
+func guardDumpStartupOnLaunchFail(bannerMode string) bool {
+	return bannerMode != guardBannerFull
 }
 
 // printGuardCompactBanner is the attended-launch banner: three lines instead of the

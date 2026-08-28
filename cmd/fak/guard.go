@@ -161,7 +161,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	dumpPolicy := fs.Bool("dump-policy", false, "print the built-in guard capability floor (an editable manifest) and exit")
 	probeMode := fs.Bool("probe", false, "local one-shot smoke mode: keep the normal guarded gateway but default the task-handoff Stop gate OFF, so `fak guard --probe -- claude -p \"say pong\"` proves the wire without demanding a fleet handoff. Explicit --task-handoff still wins.")
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
-	bannerFlag := fs.String("banner", guardBannerAuto, "how much of the startup report to print before handing the terminal to the agent: auto|full|compact|animate|off. AUTO (default): a short in-place icon ANIMATION for an attended interactive launch (a loading motif that lands on one iconic identity line, instead of a wall of text the agent's full-screen UI paints over seconds later; falls back to the compact 3-line banner off a color TTY or under FAK_GUARD_LAUNCH_ANIM=off), and the FULL report for headless/piped/scripted launches (a captured log wants the detail; byte-for-byte the pre-flag output). The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars), and it is spilled to the terminal in full only when the launch itself fails. --quiet still silences everything.")
+	bannerFlag := fs.String("banner", guardBannerAuto, "startup surface before handing the terminal to the agent: auto|full|compact|animate|off. AUTO (default) emits only delayed loading progress for healthy interactive and noninteractive launches: no guard report, profiles, identity/configuration, animation, or persistent settle lines. Explicit full, compact, and animate retain those displays; off suppresses the startup surface. The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars), and it is spilled to the terminal in full when the launch itself fails. --quiet still silences everything.")
 	resourceStats := fs.Bool("resource-stats", true, "ON by default — track the HARNESS's own hardware-resource use this session (CPU, memory/RSS, disk-I/O) for BOTH halves: the kernel (this guard process + the in-process gateway, sampled continuously) and the agent (the wrapped child, folded from its exit state). Reported as one line in the exit summary and appended to .fak/nightrun/harness-resources.jsonl. Pass --resource-stats=false to disable (epic #2044).")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens, and session-to-date current/previous/average/median/high/low cache savings), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
@@ -426,9 +426,8 @@ func cmdManageCommand(commandName string, argv []string) {
 		cmdGuardStdinInteractive(), launchPlan.interactive())
 
 	// Startup-banner verbosity: resolve --banner now, fail-loud on a bad value before
-	// any gateway binds. AUTO compacts only the attended interactive launch — the same
-	// attended-vs-headless split as the debug-stats auto-suppress above — so headless/
-	// piped launches keep the full startup report byte-for-byte. See guard_banner.go.
+	// any gateway binds. AUTO/empty selects the private delayed-progress-only mode for
+	// both interactive and noninteractive launches. See guard_banner.go.
 	bannerMode, bannerErr := guardBannerModeDecision(*bannerFlag, *quiet, cmdGuardStdinInteractive(), launchPlan.interactive())
 	if bannerErr != nil {
 		fmt.Fprintf(os.Stderr, "fak guard: %v\n", bannerErr)
@@ -1467,7 +1466,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	spawnMeta := newGuardChildSpawnMetadata(guardTraceID, policyDigest, up, rt, launchPlan)
 	// On a genuine launch FAILURE, spill the full startup report to stderr — except under
 	// --banner=full, which already streamed it at boot (avoid printing it twice).
-	dumpStartupOnLaunchFail := bannerMode != guardBannerFull
+	dumpStartupOnLaunchFail := guardDumpStartupOnLaunchFail(bannerMode)
 	startupProgress.Phase("lease admission")
 	var arbitrateStderr strings.Builder
 	arbitrateLease, arbitrateErr := guardArbitrateAcquire(context.Background(), &arbitrateStderr, guardArbitrateConfig{

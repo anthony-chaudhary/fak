@@ -6,11 +6,8 @@ import (
 )
 
 // TestGuardBannerModeDecision pins the --banner precedence: --quiet silences everything;
-// an explicit mode wins over auto; AUTO plays the icon ANIMATION for the attended interactive
-// launch (interactive stdin AND interactive child) and keeps the full report byte-for-byte for
-// every headless/piped shape — the fleet-log contract; unknown values fail loud. (The animate
-// mode degrades to the compact banner at the RENDER site off a color TTY / on opt-out; that
-// fallback is guardLaunchAnimEnabled's job, tested separately.)
+// an explicit mode wins over auto; AUTO/empty resolve to the private progress-only mode for
+// interactive and noninteractive launches; unknown and internal values fail loud.
 func TestGuardBannerModeDecision(t *testing.T) {
 	for _, tc := range []struct {
 		name                     string
@@ -19,17 +16,20 @@ func TestGuardBannerModeDecision(t *testing.T) {
 		want                     string
 		wantErr                  bool
 	}{
-		{name: "auto attended interactive animates", banner: "auto", stdinTTY: true, childUI: true, want: guardBannerAnimate},
-		{name: "auto piped stdin keeps full", banner: "auto", stdinTTY: false, childUI: true, want: guardBannerFull},
-		{name: "auto headless -p child keeps full", banner: "auto", stdinTTY: true, childUI: false, want: guardBannerFull},
-		{name: "empty means auto", banner: "", stdinTTY: true, childUI: true, want: guardBannerAnimate},
-		{name: "explicit full wins over attended auto-animate", banner: "full", stdinTTY: true, childUI: true, want: guardBannerFull},
-		{name: "explicit compact wins over headless auto-full", banner: "compact", stdinTTY: false, childUI: false, want: guardBannerCompact},
+		{name: "auto attended interactive uses progress", banner: "auto", stdinTTY: true, childUI: true, want: guardBannerProgress},
+		{name: "auto piped stdin uses progress", banner: "auto", stdinTTY: false, childUI: true, want: guardBannerProgress},
+		{name: "auto headless child uses progress", banner: "auto", stdinTTY: true, childUI: false, want: guardBannerProgress},
+		{name: "auto fully noninteractive uses progress", banner: "auto", stdinTTY: false, childUI: false, want: guardBannerProgress},
+		{name: "empty interactive means progress", banner: "", stdinTTY: true, childUI: true, want: guardBannerProgress},
+		{name: "empty noninteractive means progress", banner: "", stdinTTY: false, childUI: false, want: guardBannerProgress},
+		{name: "explicit full wins over auto", banner: "full", stdinTTY: true, childUI: true, want: guardBannerFull},
+		{name: "explicit compact wins over auto", banner: "compact", stdinTTY: false, childUI: false, want: guardBannerCompact},
 		{name: "explicit animate honored headless", banner: "animate", stdinTTY: false, childUI: false, want: guardBannerAnimate},
 		{name: "explicit off", banner: "off", stdinTTY: true, childUI: true, want: guardBannerOff},
 		{name: "quiet wins over explicit full", banner: "full", quiet: true, stdinTTY: true, childUI: true, want: guardBannerOff},
-		{name: "quiet wins over attended auto-animate", banner: "auto", quiet: true, stdinTTY: true, childUI: true, want: guardBannerOff},
+		{name: "quiet wins over auto progress", banner: "auto", quiet: true, stdinTTY: true, childUI: true, want: "off"},
 		{name: "case and space tolerated", banner: "  Full ", stdinTTY: true, childUI: true, want: guardBannerFull},
+		{name: "private progress value is not selectable", banner: "progress", wantErr: true},
 		{name: "unknown value fails loud", banner: "verbose", wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,6 +48,76 @@ func TestGuardBannerModeDecision(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Errorf("mode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGuardStartupProgressAndLaunchFailureDecisions(t *testing.T) {
+	if !guardDumpStartupOnLaunchFail(guardBannerProgress) {
+		t.Error("default progress mode must spill the full report on launch failure")
+	}
+	if guardDumpStartupOnLaunchFail(guardBannerFull) {
+		t.Error("explicit full must not duplicate the report on launch failure")
+	}
+}
+
+func TestGuardDefaultLaunchFailureSpillsFullReport(t *testing.T) {
+	const report = "fak guard FULL STARTUP REPORT\nresponse profile\nwork profile\nidentity/configuration\n"
+	for _, tc := range []struct {
+		name                       string
+		banner                     string
+		stdinTTY, childInteractive bool
+	}{
+		{name: "auto interactive", banner: "auto", stdinTTY: true, childInteractive: true},
+		{name: "auto noninteractive", banner: "auto"},
+		{name: "empty interactive", stdinTTY: true, childInteractive: true},
+		{name: "empty noninteractive"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mode, err := guardBannerModeDecision(tc.banner, false, tc.stdinTTY, tc.childInteractive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out strings.Builder
+			guardWriteLaunchFailReport(&out, report, guardDumpStartupOnLaunchFail(mode))
+			if !strings.Contains(out.String(), "launch failed") || !strings.Contains(out.String(), report) {
+				t.Fatalf("default launch failure did not spill full report: %q", out.String())
+			}
+		})
+	}
+}
+
+// TestWriteGuardStartupBannerExplicitModes pins the existing explicit render semantics while
+// proving the internal progress mode emits no banner bytes. Animate is exercised through its
+// established non-TTY compact fallback; its TTY frames are witnessed in guard_launch_anim_test.
+func TestWriteGuardStartupBannerExplicitModes(t *testing.T) {
+	const report = "FULL STARTUP REPORT\nresponse profile\nwork profile\nidentity/configuration\n"
+	view := guardStartupView{gwURL: "http://127.0.0.1:9", command: []string{"codex"}}
+
+	for _, tc := range []struct {
+		name, mode string
+		want       string
+		silent     bool
+	}{
+		{name: "full", mode: guardBannerFull, want: report},
+		{name: "compact", mode: guardBannerCompact, want: "fak info --startup"},
+		{name: "animate non-TTY fallback", mode: guardBannerAnimate, want: "fak info --startup"},
+		{name: "off", mode: "off", silent: true},
+		{name: "progress", mode: guardBannerProgress, silent: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			view.bannerMode = tc.mode
+			writeGuardStartupBanner(&out, view, report, false, false, "", 80)
+			if tc.silent {
+				if out.Len() != 0 {
+					t.Fatalf("mode %q emitted banner bytes: %q", tc.mode, out.String())
+				}
+				return
+			}
+			if !strings.Contains(out.String(), tc.want) {
+				t.Fatalf("mode %q output %q missing %q", tc.mode, out.String(), tc.want)
 			}
 		})
 	}
