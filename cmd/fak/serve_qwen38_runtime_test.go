@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/deploymanifest"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
 	"github.com/anthony-chaudhary/fak/internal/llamacppinterop"
+	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelengine"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/quantmeta"
 )
 
@@ -45,6 +51,146 @@ func TestQwen38RuntimeOmissionStaysFakNativeAndObservable(t *testing.T) {
 	if !startupMessagesContain(rt.startupMessages, "execution_runtime=fak-native", "delegation=disabled") {
 		t.Fatalf("native runtime identity missing: %+v", rt.startupMessages)
 	}
+}
+
+func TestQwen38NativeRuntimeForcedSwapExecutionReceipt(t *testing.T) {
+	fs, sf := newServeFlagSet()
+	if err := fs.Parse([]string{"--gguf", "synthetic-qwen3.8.gguf"}); err != nil {
+		t.Fatal(err)
+	}
+	rt := &serveRuntime{}
+	if err := rt.maybeStartQwen38Delegation(sf); err != nil {
+		t.Fatal(err)
+	}
+	if !startupMessagesContain(rt.startupMessages, "execution_runtime=fak-native", "delegation=disabled") {
+		t.Fatalf("native runtime controller state missing: %+v", rt.startupMessages)
+	}
+
+	calls := []*abi.ToolCall{
+		qwen38RuntimeInlineCall("qwen38_runtime_first", `{"prompt":"alpha"}`),
+		qwen38RuntimeInlineCall("qwen38_runtime_second", `{"prompt":"bravo"}`),
+	}
+	wantTokens, _, _ := runQwen38RuntimeAdmissions(t, calls, modelengine.NativePreemptionPolicy{})
+	gotTokens, results, stats := runQwen38RuntimeAdmissions(t, calls, modelengine.NativePreemptionPolicy{
+		Mode:        modelengine.NativePreemptSwap,
+		MaxBlocks:   1,
+		BlockTokens: 128,
+	})
+	if !reflect.DeepEqual(gotTokens, wantTokens) {
+		t.Fatalf("forced-swap output changed from uninterrupted control:\n got %v\nwant %v", gotTokens, wantTokens)
+	}
+	for i, tokens := range gotTokens {
+		if len(tokens) < 3 {
+			t.Fatalf("request %d emitted %d continuation steps, want at least 3", i, len(tokens))
+		}
+	}
+	if stats.SwapPreemptions == 0 || stats.Readmitted == 0 || stats.SwapBytes == 0 {
+		t.Fatalf("forced swap did not produce a byte-bearing readmit: %+v", stats)
+	}
+	if stats.SwapRestoredBytes != stats.SwapBytes || stats.SwappedOut != 0 || stats.RecomputeCount != 0 {
+		t.Fatalf("forced swap did not restore all bytes without recompute: %+v", stats)
+	}
+
+	forwardPath := ""
+	for i, result := range results {
+		if result == nil || result.Status != abi.StatusOK {
+			t.Fatalf("result %d = %+v, want StatusOK", i, result)
+		}
+		if i == 0 {
+			forwardPath = result.Meta["engine"]
+		} else if got := result.Meta["engine"]; got != forwardPath {
+			t.Fatalf("result %d forward path=%q, want observed %q", i, got, forwardPath)
+		}
+	}
+	receipt := nativeperf.ExecutionIdentity{
+		Engine:        qwen38RuntimeIdentity(*sf.qwen38Runtime),
+		ForwardPath:   forwardPath,
+		FallbackCount: qwen38ObservedFallbackCount(rt, sf),
+	}
+	if receipt.Engine != "fak-native" || receipt.ForwardPath != modelengine.EngineID || receipt.FallbackCount != 0 {
+		t.Fatalf("execution receipt=%+v, want fak-native/inkernel/zero-fallback", receipt)
+	}
+	t.Logf("execution_receipt=%+v swap_bytes=%d restored_bytes=%d readmitted=%d recompute=%d", receipt, stats.SwapBytes, stats.SwapRestoredBytes, stats.Readmitted, stats.RecomputeCount)
+}
+
+func qwen38RuntimeInlineCall(tool, args string) *abi.ToolCall {
+	payload := []byte(args)
+	return &abi.ToolCall{Tool: tool, Args: abi.Ref{Kind: abi.RefInline, Inline: payload, Len: int64(len(payload))}}
+}
+
+func runQwen38RuntimeAdmissions(t *testing.T, calls []*abi.ToolCall, policy modelengine.NativePreemptionPolicy) ([][]int, []*abi.Result, modelengine.NativePreemptionStats) {
+	t.Helper()
+	cfg := modelengine.SyntheticConfig()
+	cfg.ModelType = "qwen3_8"
+	cfg.NumLayers = 4
+	cfg.LayerTypes = []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"}
+	cfg.FullAttentionInterval = 4
+	cfg.LinearConvKernelDim = 3
+	cfg.LinearKeyHeadDim = cfg.HeadDim
+	cfg.LinearValueHeadDim = cfg.HeadDim
+	cfg.LinearNumKeyHeads = cfg.NumKVHeads
+	cfg.LinearNumValueHeads = cfg.NumHeads
+	cfg.AttnOutputGate = true
+	cfg.NormGain1p = true
+
+	engine := modelengine.New()
+	engine.Preload(model.NewSynthetic(cfg))
+	if policy.MaxBlocks > 0 {
+		engine.SetKVPreemptionPolicy(policy)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	reqs := make([]abi.EngineRequest, len(calls))
+	for i, call := range calls {
+		req, err := engine.Admit(ctx, call)
+		if err != nil {
+			t.Fatalf("Admit %d: %v", i, err)
+		}
+		reqs[i] = req
+	}
+
+	tokens := make([][]int, len(reqs))
+	var wg sync.WaitGroup
+	for i, req := range reqs {
+		wg.Add(1)
+		go func(i int, req abi.EngineRequest) {
+			defer wg.Done()
+			for token := range req.Tokens() {
+				tokens[i] = append(tokens[i], token.ID)
+			}
+		}(i, req)
+	}
+	drained := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-ctx.Done():
+		t.Fatalf("timed out draining Qwen3.8 runtime admissions: %v", ctx.Err())
+	}
+
+	results := make([]*abi.Result, len(reqs))
+	for i, req := range reqs {
+		result, err := req.Result()
+		if err != nil {
+			t.Fatalf("Result %d: %v", i, err)
+		}
+		results[i] = result
+	}
+	return tokens, results, engine.KVPreemptionStats()
+}
+
+func qwen38ObservedFallbackCount(rt *serveRuntime, sf *serveFlags) int {
+	count := len(sf.replicaBaseURLs.Values())
+	if strings.TrimSpace(*sf.baseURL) != "" {
+		count++
+	}
+	if rt.llamaProcess != nil {
+		count++
+	}
+	return count
 }
 
 func TestQwen38RuntimeIdentityAppearsInEffectiveConfig(t *testing.T) {
