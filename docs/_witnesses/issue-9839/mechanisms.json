@@ -1,0 +1,247 @@
+{
+  "schema": "fak.learning-mesh-input/1",
+  "mechanisms": [
+    {
+      "id": "amd-wavefront-tile",
+      "mechanism": "wavefront-aligned quantized tile",
+      "rule": "Align tile width to the native wavefront before tuning shared-memory staging.",
+      "source": {
+        "id": "amd-fak-native",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "revision": "ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+            "path": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "exact": true,
+            "record_digest": "a7faf86d8be3ee3b2b7835b59713cdf44c5133c40ed017352d5af0851d7997df"
+          }
+        ]
+      },
+      "default_disposition": "unknown",
+      "rules": [
+        {
+          "target": {
+            "engine": "fak-native",
+            "hardware": "amd"
+          },
+          "disposition": "copy",
+          "reason": "same native hardware family and execution owner"
+        },
+        {
+          "target": {
+            "engine": "fak-native",
+            "hardware": "nvidia"
+          },
+          "disposition": "adapt",
+          "reason": "transfer tile intent but retune for warp width and CUDA memory hierarchy"
+        }
+      ]
+    },
+    {
+      "id": "llamacpp-kv-layout",
+      "mechanism": "contiguous grouped-query KV layout",
+      "rule": "Borrow the layout mechanism, not the comparator runtime.",
+      "source": {
+        "id": "llamacpp-amd",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "revision": "05454413d0a05e5ff6c22b43be7c25344c96d35b",
+            "path": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "exact": true,
+            "record_digest": "355f189af78bb7a680f0d3541c2092a4b63e6f2fc7de973d00547441b28f85b9"
+          }
+        ]
+      },
+      "rules": [
+        {
+          "target": {
+            "engine": "fak-native"
+          },
+          "disposition": "adapt",
+          "reason": "adapt layout under fak-native memory ownership"
+        }
+      ]
+    },
+    {
+      "id": "vllm-paged-attention",
+      "mechanism": "paged attention block table",
+      "rule": "Use the scheduling and addressing concept as a baseline-derived native candidate.",
+      "source": {
+        "id": "vllm-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "revision": "db6f55e35bcd4f43326110be29bf52aa48e19a88",
+            "path": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "exact": true,
+            "record_digest": "e4b1d66263157c948fa8aef0bfd2f029350d33e3464b92d0f1000af16c6f1090"
+          }
+        ]
+      },
+      "rules": [
+        {
+          "target": {
+            "engine": "fak-native",
+            "hardware": "nvidia"
+          },
+          "disposition": "copy",
+          "reason": "copy the provider-neutral block-table mechanism into fak-native CUDA ownership"
+        },
+        {
+          "target": {
+            "engine": "fak-native",
+            "hardware": "amd"
+          },
+          "disposition": "adapt",
+          "reason": "adapt block-table mechanism and remeasure ROCm memory behavior"
+        }
+      ]
+    },
+    {
+      "id": "dynamo-router-split",
+      "mechanism": "prefill-decode router split",
+      "rule": "Treat orchestration evidence as a candidate, preserving fak-native execution below the router.",
+      "source": {
+        "id": "dynamo-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "interoperability",
+        "role": "baseline"
+      },
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "revision": "cd0da5fc3f28c2d968737c542bc562641464e451",
+            "path": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "exact": true,
+            "record_digest": "ce2bec1330bff542e335faf477f95f90a706a728868e8cdbd44aa8c0acf6fc5c"
+          }
+        ]
+      },
+      "rules": [
+        {
+          "target": {
+            "engine": "fak-native",
+            "workload": "serving"
+          },
+          "disposition": "unknown",
+          "reason": "needs a fak-native queueing and quality-constrained experiment before adoption"
+        }
+      ]
+    }
+  ],
+  "targets": [
+    {
+      "id": "amd-native-decode",
+      "hardware": "amd",
+      "backend": "rocm",
+      "framework": "fak-native",
+      "engine": "fak-native",
+      "model": "qwen3.8",
+      "workload": "decode",
+      "role": "product"
+    },
+    {
+      "id": "nvidia-native-decode",
+      "hardware": "nvidia",
+      "backend": "cuda",
+      "framework": "fak-native",
+      "engine": "fak-native",
+      "model": "qwen3.8",
+      "workload": "decode",
+      "role": "product"
+    },
+    {
+      "id": "nvidia-native-serving",
+      "hardware": "nvidia",
+      "backend": "cuda",
+      "framework": "fak-native",
+      "engine": "fak-native",
+      "model": "qwen3.8",
+      "workload": "serving",
+      "role": "product"
+    },
+    {
+      "id": "llamacpp-amd-baseline",
+      "hardware": "amd",
+      "backend": "hip",
+      "framework": "llama.cpp",
+      "engine": "llama.cpp",
+      "model": "qwen3.8",
+      "workload": "decode",
+      "purpose": "benchmark",
+      "role": "baseline"
+    },
+    {
+      "id": "vllm-nvidia-baseline",
+      "hardware": "nvidia",
+      "backend": "cuda",
+      "framework": "vllm",
+      "engine": "vllm",
+      "model": "qwen3.8",
+      "workload": "serving",
+      "purpose": "benchmark",
+      "role": "baseline"
+    },
+    {
+      "id": "dynamo-production-forbidden",
+      "hardware": "nvidia",
+      "backend": "cuda",
+      "framework": "dynamo",
+      "engine": "dynamo",
+      "model": "qwen3.8",
+      "workload": "serving",
+      "purpose": "production",
+      "role": "product"
+    },
+    {
+      "id": "amd-native-decode",
+      "hardware": "amd",
+      "backend": "rocm",
+      "framework": "fak-native",
+      "engine": "fak-native",
+      "model": "qwen3.8",
+      "workload": "decode",
+      "role": "product"
+    }
+  ]
+}

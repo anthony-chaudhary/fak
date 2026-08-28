@@ -1,0 +1,1225 @@
+{
+  "schema": "fak.learning-mesh-candidates/1",
+  "input_digest": "0a1182a94f7b707baa8713996a3a0e49e624b3b57aff6bfd859da3380af057e4",
+  "candidate_count": 24,
+  "candidates": [
+    {
+      "id": "lm-02c0b32a7dc4e8c084f9",
+      "mechanism_id": "vllm-paged-attention",
+      "mechanism": "paged attention block table",
+      "source": {
+        "id": "vllm-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "vllm-nvidia-baseline",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": null,
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "revision": "db6f55e35bcd4f43326110be29bf52aa48e19a88",
+            "path": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "exact": true,
+            "record_digest": "e4b1d66263157c948fa8aef0bfd2f029350d33e3464b92d0f1000af16c6f1090"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_c2e29f8ad7a1376a5d274eb2f4c93cf2",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md@db6f55e35bcd4f43326110be29bf52aa48e19a88",
+        "content": "{\"candidate_id\":\"lm-02c0b32a7dc4e8c084f9\",\"mechanism_id\":\"vllm-paged-attention\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"vllm-nvidia-baseline\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"vllm\",\"engine\":\"vllm\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    },
+    {
+      "id": "lm-0ae630112ef8e6faf646",
+      "mechanism_id": "llamacpp-kv-layout",
+      "mechanism": "contiguous grouped-query KV layout",
+      "source": {
+        "id": "llamacpp-amd",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "vllm-nvidia-baseline",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "revision": "05454413d0a05e5ff6c22b43be7c25344c96d35b",
+            "path": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "exact": true,
+            "record_digest": "355f189af78bb7a680f0d3541c2092a4b63e6f2fc7de973d00547441b28f85b9"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_04343a73cca74978719e9b1bc92fba2a",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md@05454413d0a05e5ff6c22b43be7c25344c96d35b",
+        "content": "{\"candidate_id\":\"lm-0ae630112ef8e6faf646\",\"mechanism_id\":\"llamacpp-kv-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"vllm-nvidia-baseline\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"vllm\",\"engine\":\"vllm\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    },
+    {
+      "id": "lm-0bbbe1dfb1bef69b8211",
+      "mechanism_id": "amd-wavefront-tile",
+      "mechanism": "wavefront-aligned quantized tile",
+      "source": {
+        "id": "amd-fak-native",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "amd-native-decode",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": null,
+      "disposition": "copy",
+      "reason": "same native hardware family and execution owner",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "revision": "ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+            "path": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "exact": true,
+            "record_digest": "a7faf86d8be3ee3b2b7835b59713cdf44c5133c40ed017352d5af0851d7997df"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_f505f5249fae3a2852e74cdf5f5e8836",
+        "kind": "candidate",
+        "source": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md@ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+        "content": "{\"candidate_id\":\"lm-0bbbe1dfb1bef69b8211\",\"mechanism_id\":\"amd-wavefront-tile\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"amd-native-decode\",\"hardware\":\"amd\",\"backend\":\"rocm\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"copy\"}"
+      }
+    },
+    {
+      "id": "lm-0ce76d752fcb25ff0bb4",
+      "mechanism_id": "amd-wavefront-tile",
+      "mechanism": "wavefront-aligned quantized tile",
+      "source": {
+        "id": "amd-fak-native",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "nvidia-native-decode",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "transfer tile intent but retune for warp width and CUDA memory hierarchy",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "revision": "ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+            "path": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "exact": true,
+            "record_digest": "a7faf86d8be3ee3b2b7835b59713cdf44c5133c40ed017352d5af0851d7997df"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_000e19d950fef93e8a99d6fda1a8e66f",
+        "kind": "candidate",
+        "source": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md@ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+        "content": "{\"candidate_id\":\"lm-0ce76d752fcb25ff0bb4\",\"mechanism_id\":\"amd-wavefront-tile\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-decode\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-172f7f973890aedde63b",
+      "mechanism_id": "amd-wavefront-tile",
+      "mechanism": "wavefront-aligned quantized tile",
+      "source": {
+        "id": "amd-fak-native",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "dynamo-production-forbidden",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "production",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "reject",
+      "reason": "fak-native invariant: comparator engines are permitted only for benchmark, parity, or interoperability targets",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "revision": "ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+            "path": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "exact": true,
+            "record_digest": "a7faf86d8be3ee3b2b7835b59713cdf44c5133c40ed017352d5af0851d7997df"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_ec3e23dede7b57b5fdb2196453f66bdf",
+        "kind": "candidate",
+        "source": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md@ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+        "content": "{\"candidate_id\":\"lm-172f7f973890aedde63b\",\"mechanism_id\":\"amd-wavefront-tile\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"dynamo-production-forbidden\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"dynamo\",\"engine\":\"dynamo\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"production\",\"role\":\"product\"},\"disposition\":\"reject\"}"
+      }
+    },
+    {
+      "id": "lm-330488972c58db004156",
+      "mechanism_id": "vllm-paged-attention",
+      "mechanism": "paged attention block table",
+      "source": {
+        "id": "vllm-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "nvidia-native-decode",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "baseline",
+        "framework"
+      ],
+      "disposition": "copy",
+      "reason": "copy the provider-neutral block-table mechanism into fak-native CUDA ownership",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "revision": "db6f55e35bcd4f43326110be29bf52aa48e19a88",
+            "path": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "exact": true,
+            "record_digest": "e4b1d66263157c948fa8aef0bfd2f029350d33e3464b92d0f1000af16c6f1090"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_86a22494c270f180ceba136224c298de",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md@db6f55e35bcd4f43326110be29bf52aa48e19a88",
+        "content": "{\"candidate_id\":\"lm-330488972c58db004156\",\"mechanism_id\":\"vllm-paged-attention\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-decode\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"copy\"}"
+      }
+    },
+    {
+      "id": "lm-3b6d2302c4fc1ea35fd7",
+      "mechanism_id": "dynamo-router-split",
+      "mechanism": "prefill-decode router split",
+      "source": {
+        "id": "dynamo-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "interoperability",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "nvidia-native-decode",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "baseline",
+        "framework"
+      ],
+      "disposition": "unknown",
+      "reason": "no compatibility rule matched",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "revision": "cd0da5fc3f28c2d968737c542bc562641464e451",
+            "path": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "exact": true,
+            "record_digest": "ce2bec1330bff542e335faf477f95f90a706a728868e8cdbd44aa8c0acf6fc5c"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_49cfa9266513d0159b4cce146373abde",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md@cd0da5fc3f28c2d968737c542bc562641464e451",
+        "content": "{\"candidate_id\":\"lm-3b6d2302c4fc1ea35fd7\",\"mechanism_id\":\"dynamo-router-split\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-decode\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"unknown\"}"
+      }
+    },
+    {
+      "id": "lm-435a0f494dc9e93a5719",
+      "mechanism_id": "amd-wavefront-tile",
+      "mechanism": "wavefront-aligned quantized tile",
+      "source": {
+        "id": "amd-fak-native",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "nvidia-native-serving",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "transfer tile intent but retune for warp width and CUDA memory hierarchy",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "revision": "ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+            "path": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "exact": true,
+            "record_digest": "a7faf86d8be3ee3b2b7835b59713cdf44c5133c40ed017352d5af0851d7997df"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_dc1af6ebf1133301c85f99314e5207ab",
+        "kind": "candidate",
+        "source": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md@ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+        "content": "{\"candidate_id\":\"lm-435a0f494dc9e93a5719\",\"mechanism_id\":\"amd-wavefront-tile\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-serving\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-54c693b0aa5ac6dd0e7d",
+      "mechanism_id": "llamacpp-kv-layout",
+      "mechanism": "contiguous grouped-query KV layout",
+      "source": {
+        "id": "llamacpp-amd",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "llamacpp-amd-baseline",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": null,
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "revision": "05454413d0a05e5ff6c22b43be7c25344c96d35b",
+            "path": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "exact": true,
+            "record_digest": "355f189af78bb7a680f0d3541c2092a4b63e6f2fc7de973d00547441b28f85b9"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_b78a02a874de4b61fb5adeb3ec98c4f6",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md@05454413d0a05e5ff6c22b43be7c25344c96d35b",
+        "content": "{\"candidate_id\":\"lm-54c693b0aa5ac6dd0e7d\",\"mechanism_id\":\"llamacpp-kv-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"llamacpp-amd-baseline\",\"hardware\":\"amd\",\"backend\":\"hip\",\"framework\":\"llama.cpp\",\"engine\":\"llama.cpp\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    },
+    {
+      "id": "lm-71ab080ebd0379f5f505",
+      "mechanism_id": "vllm-paged-attention",
+      "mechanism": "paged attention block table",
+      "source": {
+        "id": "vllm-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "llamacpp-amd-baseline",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "revision": "db6f55e35bcd4f43326110be29bf52aa48e19a88",
+            "path": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "exact": true,
+            "record_digest": "e4b1d66263157c948fa8aef0bfd2f029350d33e3464b92d0f1000af16c6f1090"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_36da6cccba6343e2702956bc8c48f98f",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md@db6f55e35bcd4f43326110be29bf52aa48e19a88",
+        "content": "{\"candidate_id\":\"lm-71ab080ebd0379f5f505\",\"mechanism_id\":\"vllm-paged-attention\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"llamacpp-amd-baseline\",\"hardware\":\"amd\",\"backend\":\"hip\",\"framework\":\"llama.cpp\",\"engine\":\"llama.cpp\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    },
+    {
+      "id": "lm-8f388d436fe5bc74fcff",
+      "mechanism_id": "dynamo-router-split",
+      "mechanism": "prefill-decode router split",
+      "source": {
+        "id": "dynamo-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "interoperability",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "llamacpp-amd-baseline",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "revision": "cd0da5fc3f28c2d968737c542bc562641464e451",
+            "path": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "exact": true,
+            "record_digest": "ce2bec1330bff542e335faf477f95f90a706a728868e8cdbd44aa8c0acf6fc5c"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_f871ab278c3c22f2fac8c08f07a29a38",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md@cd0da5fc3f28c2d968737c542bc562641464e451",
+        "content": "{\"candidate_id\":\"lm-8f388d436fe5bc74fcff\",\"mechanism_id\":\"dynamo-router-split\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"llamacpp-amd-baseline\",\"hardware\":\"amd\",\"backend\":\"hip\",\"framework\":\"llama.cpp\",\"engine\":\"llama.cpp\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    },
+    {
+      "id": "lm-92588eeba70495f868e5",
+      "mechanism_id": "vllm-paged-attention",
+      "mechanism": "paged attention block table",
+      "source": {
+        "id": "vllm-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "amd-native-decode",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "adapt block-table mechanism and remeasure ROCm memory behavior",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "revision": "db6f55e35bcd4f43326110be29bf52aa48e19a88",
+            "path": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "exact": true,
+            "record_digest": "e4b1d66263157c948fa8aef0bfd2f029350d33e3464b92d0f1000af16c6f1090"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_276b202e9a29c04b192a434548ec3601",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md@db6f55e35bcd4f43326110be29bf52aa48e19a88",
+        "content": "{\"candidate_id\":\"lm-92588eeba70495f868e5\",\"mechanism_id\":\"vllm-paged-attention\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"amd-native-decode\",\"hardware\":\"amd\",\"backend\":\"rocm\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-982d83e5b6e50d309140",
+      "mechanism_id": "dynamo-router-split",
+      "mechanism": "prefill-decode router split",
+      "source": {
+        "id": "dynamo-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "interoperability",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "vllm-nvidia-baseline",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": [
+        "baseline",
+        "framework"
+      ],
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "revision": "cd0da5fc3f28c2d968737c542bc562641464e451",
+            "path": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "exact": true,
+            "record_digest": "ce2bec1330bff542e335faf477f95f90a706a728868e8cdbd44aa8c0acf6fc5c"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_09da55d41378572ff9db9a21de438cfb",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md@cd0da5fc3f28c2d968737c542bc562641464e451",
+        "content": "{\"candidate_id\":\"lm-982d83e5b6e50d309140\",\"mechanism_id\":\"dynamo-router-split\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"vllm-nvidia-baseline\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"vllm\",\"engine\":\"vllm\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    },
+    {
+      "id": "lm-985f6490f0ce6c9f851a",
+      "mechanism_id": "vllm-paged-attention",
+      "mechanism": "paged attention block table",
+      "source": {
+        "id": "vllm-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "nvidia-native-serving",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "baseline",
+        "framework"
+      ],
+      "disposition": "copy",
+      "reason": "copy the provider-neutral block-table mechanism into fak-native CUDA ownership",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "revision": "db6f55e35bcd4f43326110be29bf52aa48e19a88",
+            "path": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "exact": true,
+            "record_digest": "e4b1d66263157c948fa8aef0bfd2f029350d33e3464b92d0f1000af16c6f1090"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_00785872d4dd0cfbe7c640ef59eced83",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md@db6f55e35bcd4f43326110be29bf52aa48e19a88",
+        "content": "{\"candidate_id\":\"lm-985f6490f0ce6c9f851a\",\"mechanism_id\":\"vllm-paged-attention\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-serving\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"role\":\"product\"},\"disposition\":\"copy\"}"
+      }
+    },
+    {
+      "id": "lm-a7b5c0222d2d77f3b2c2",
+      "mechanism_id": "dynamo-router-split",
+      "mechanism": "prefill-decode router split",
+      "source": {
+        "id": "dynamo-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "interoperability",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "nvidia-native-serving",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "baseline",
+        "framework"
+      ],
+      "disposition": "unknown",
+      "reason": "needs a fak-native queueing and quality-constrained experiment before adoption",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "revision": "cd0da5fc3f28c2d968737c542bc562641464e451",
+            "path": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "exact": true,
+            "record_digest": "ce2bec1330bff542e335faf477f95f90a706a728868e8cdbd44aa8c0acf6fc5c"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_1bc35044032f544a1f723375cc6a39a4",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md@cd0da5fc3f28c2d968737c542bc562641464e451",
+        "content": "{\"candidate_id\":\"lm-a7b5c0222d2d77f3b2c2\",\"mechanism_id\":\"dynamo-router-split\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-serving\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"role\":\"product\"},\"disposition\":\"unknown\"}"
+      }
+    },
+    {
+      "id": "lm-a9834ee964b3a2d197f3",
+      "mechanism_id": "dynamo-router-split",
+      "mechanism": "prefill-decode router split",
+      "source": {
+        "id": "dynamo-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "interoperability",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "dynamo-production-forbidden",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "production",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "baseline"
+      ],
+      "disposition": "reject",
+      "reason": "fak-native invariant: comparator engines are permitted only for benchmark, parity, or interoperability targets",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "revision": "cd0da5fc3f28c2d968737c542bc562641464e451",
+            "path": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "exact": true,
+            "record_digest": "ce2bec1330bff542e335faf477f95f90a706a728868e8cdbd44aa8c0acf6fc5c"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_15c89296c1e248a0467ddebad89bd20a",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md@cd0da5fc3f28c2d968737c542bc562641464e451",
+        "content": "{\"candidate_id\":\"lm-a9834ee964b3a2d197f3\",\"mechanism_id\":\"dynamo-router-split\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"dynamo-production-forbidden\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"dynamo\",\"engine\":\"dynamo\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"production\",\"role\":\"product\"},\"disposition\":\"reject\"}"
+      }
+    },
+    {
+      "id": "lm-ba722346dcaed4a0bd97",
+      "mechanism_id": "llamacpp-kv-layout",
+      "mechanism": "contiguous grouped-query KV layout",
+      "source": {
+        "id": "llamacpp-amd",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "dynamo-production-forbidden",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "production",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "reject",
+      "reason": "fak-native invariant: comparator engines are permitted only for benchmark, parity, or interoperability targets",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "revision": "05454413d0a05e5ff6c22b43be7c25344c96d35b",
+            "path": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "exact": true,
+            "record_digest": "355f189af78bb7a680f0d3541c2092a4b63e6f2fc7de973d00547441b28f85b9"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_f78b6047cccf392ed8afee55e7abb4b4",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md@05454413d0a05e5ff6c22b43be7c25344c96d35b",
+        "content": "{\"candidate_id\":\"lm-ba722346dcaed4a0bd97\",\"mechanism_id\":\"llamacpp-kv-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"dynamo-production-forbidden\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"dynamo\",\"engine\":\"dynamo\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"production\",\"role\":\"product\"},\"disposition\":\"reject\"}"
+      }
+    },
+    {
+      "id": "lm-bc8577ecb7988cfa4d8f",
+      "mechanism_id": "llamacpp-kv-layout",
+      "mechanism": "contiguous grouped-query KV layout",
+      "source": {
+        "id": "llamacpp-amd",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "nvidia-native-decode",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "adapt layout under fak-native memory ownership",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "revision": "05454413d0a05e5ff6c22b43be7c25344c96d35b",
+            "path": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "exact": true,
+            "record_digest": "355f189af78bb7a680f0d3541c2092a4b63e6f2fc7de973d00547441b28f85b9"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_eb8f07c9656e724b18f76290d1469ebf",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md@05454413d0a05e5ff6c22b43be7c25344c96d35b",
+        "content": "{\"candidate_id\":\"lm-bc8577ecb7988cfa4d8f\",\"mechanism_id\":\"llamacpp-kv-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-decode\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-c92c7491ba8f63013f9b",
+      "mechanism_id": "llamacpp-kv-layout",
+      "mechanism": "contiguous grouped-query KV layout",
+      "source": {
+        "id": "llamacpp-amd",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "nvidia-native-serving",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "adapt",
+      "reason": "adapt layout under fak-native memory ownership",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "revision": "05454413d0a05e5ff6c22b43be7c25344c96d35b",
+            "path": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "exact": true,
+            "record_digest": "355f189af78bb7a680f0d3541c2092a4b63e6f2fc7de973d00547441b28f85b9"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_f4d9222502714fe897d8cf5c59583237",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md@05454413d0a05e5ff6c22b43be7c25344c96d35b",
+        "content": "{\"candidate_id\":\"lm-c92c7491ba8f63013f9b\",\"mechanism_id\":\"llamacpp-kv-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"nvidia-native-serving\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-d024f55bcf4ed50d44a9",
+      "mechanism_id": "dynamo-router-split",
+      "mechanism": "prefill-decode router split",
+      "source": {
+        "id": "dynamo-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "interoperability",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "amd-native-decode",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "unknown",
+      "reason": "no compatibility rule matched",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "revision": "cd0da5fc3f28c2d968737c542bc562641464e451",
+            "path": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md",
+            "exact": true,
+            "record_digest": "ce2bec1330bff542e335faf477f95f90a706a728868e8cdbd44aa8c0acf6fc5c"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_e708c457417d2383b1140dc81e484a0b",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-DYNAMO-EXHAUSTIVE-2026-08-26.md@cd0da5fc3f28c2d968737c542bc562641464e451",
+        "content": "{\"candidate_id\":\"lm-d024f55bcf4ed50d44a9\",\"mechanism_id\":\"dynamo-router-split\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"amd-native-decode\",\"hardware\":\"amd\",\"backend\":\"rocm\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"unknown\"}"
+      }
+    },
+    {
+      "id": "lm-dd123a909ee643332878",
+      "mechanism_id": "amd-wavefront-tile",
+      "mechanism": "wavefront-aligned quantized tile",
+      "source": {
+        "id": "amd-fak-native",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "llamacpp-amd-baseline",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework"
+      ],
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "revision": "ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+            "path": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "exact": true,
+            "record_digest": "a7faf86d8be3ee3b2b7835b59713cdf44c5133c40ed017352d5af0851d7997df"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_182e959b8e1369044d95b0277090259f",
+        "kind": "candidate",
+        "source": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md@ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+        "content": "{\"candidate_id\":\"lm-dd123a909ee643332878\",\"mechanism_id\":\"amd-wavefront-tile\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"llamacpp-amd-baseline\",\"hardware\":\"amd\",\"backend\":\"hip\",\"framework\":\"llama.cpp\",\"engine\":\"llama.cpp\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    },
+    {
+      "id": "lm-e29794db751e6e8cf8a2",
+      "mechanism_id": "vllm-paged-attention",
+      "mechanism": "paged attention block table",
+      "source": {
+        "id": "vllm-nvidia",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "dynamo-production-forbidden",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "dynamo",
+        "engine": "dynamo",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "production",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "baseline",
+        "framework"
+      ],
+      "disposition": "reject",
+      "reason": "fak-native invariant: comparator engines are permitted only for benchmark, parity, or interoperability targets",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "revision": "db6f55e35bcd4f43326110be29bf52aa48e19a88",
+            "path": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md",
+            "exact": true,
+            "record_digest": "e4b1d66263157c948fa8aef0bfd2f029350d33e3464b92d0f1000af16c6f1090"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_a8ff0be99e5c0322380c638e258ebed1",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-VLLM-2026-07-18.md@db6f55e35bcd4f43326110be29bf52aa48e19a88",
+        "content": "{\"candidate_id\":\"lm-e29794db751e6e8cf8a2\",\"mechanism_id\":\"vllm-paged-attention\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"dynamo-production-forbidden\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"dynamo\",\"engine\":\"dynamo\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"production\",\"role\":\"product\"},\"disposition\":\"reject\"}"
+      }
+    },
+    {
+      "id": "lm-e933e3e4459e65649987",
+      "mechanism_id": "llamacpp-kv-layout",
+      "mechanism": "contiguous grouped-query KV layout",
+      "source": {
+        "id": "llamacpp-amd",
+        "hardware": "amd",
+        "backend": "hip",
+        "framework": "llama.cpp",
+        "engine": "llama.cpp",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "target": {
+        "id": "amd-native-decode",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework"
+      ],
+      "disposition": "adapt",
+      "reason": "adapt layout under fak-native memory ownership",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "revision": "05454413d0a05e5ff6c22b43be7c25344c96d35b",
+            "path": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md",
+            "exact": true,
+            "record_digest": "355f189af78bb7a680f0d3541c2092a4b63e6f2fc7de973d00547441b28f85b9"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_8c1dd89d757ad2156a89164a26e58ac0",
+        "kind": "candidate",
+        "source": "docs/notes/CONCEPT-STUDY-LLAMACPP-2026-08-26.md@05454413d0a05e5ff6c22b43be7c25344c96d35b",
+        "content": "{\"candidate_id\":\"lm-e933e3e4459e65649987\",\"mechanism_id\":\"llamacpp-kv-layout\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"amd-native-decode\",\"hardware\":\"amd\",\"backend\":\"rocm\",\"framework\":\"fak-native\",\"engine\":\"fak-native\",\"model\":\"qwen3.8\",\"workload\":\"decode\",\"role\":\"product\"},\"disposition\":\"adapt\"}"
+      }
+    },
+    {
+      "id": "lm-fbc167f085f3e83e0f45",
+      "mechanism_id": "amd-wavefront-tile",
+      "mechanism": "wavefront-aligned quantized tile",
+      "source": {
+        "id": "amd-fak-native",
+        "hardware": "amd",
+        "backend": "rocm",
+        "framework": "fak-native",
+        "engine": "fak-native",
+        "model": "qwen3.8",
+        "workload": "decode",
+        "role": "product"
+      },
+      "target": {
+        "id": "vllm-nvidia-baseline",
+        "hardware": "nvidia",
+        "backend": "cuda",
+        "framework": "vllm",
+        "engine": "vllm",
+        "model": "qwen3.8",
+        "workload": "serving",
+        "purpose": "benchmark",
+        "role": "baseline"
+      },
+      "transfer_axes": [
+        "backend",
+        "baseline",
+        "framework",
+        "hardware"
+      ],
+      "disposition": "benchmark-only",
+      "reason": "comparator target retained as evidence/reference only",
+      "provenance": {
+        "artifacts": [
+          {
+            "kind": "repo-doc",
+            "id": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "revision": "ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+            "path": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md",
+            "exact": true,
+            "record_digest": "a7faf86d8be3ee3b2b7835b59713cdf44c5133c40ed017352d5af0851d7997df"
+          }
+        ]
+      },
+      "learning_observation": {
+        "id": "lo_4d88174869c0b646d6aecec41d922bd7",
+        "kind": "candidate",
+        "source": "docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md@ec6461e30b64bede08c7d9288dfa6d35cd65cc11",
+        "content": "{\"candidate_id\":\"lm-fbc167f085f3e83e0f45\",\"mechanism_id\":\"amd-wavefront-tile\",\"source_use\":\"explicit study/borrowing/benchmark reference\",\"target\":{\"id\":\"vllm-nvidia-baseline\",\"hardware\":\"nvidia\",\"backend\":\"cuda\",\"framework\":\"vllm\",\"engine\":\"vllm\",\"model\":\"qwen3.8\",\"workload\":\"serving\",\"purpose\":\"benchmark\",\"role\":\"baseline\"},\"disposition\":\"benchmark-only\"}"
+      }
+    }
+  ]
+}
