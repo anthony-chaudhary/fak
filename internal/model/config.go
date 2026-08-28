@@ -451,6 +451,18 @@ func (c *Config) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(lm, &hints); err != nil {
 		return err
 	}
+	if len(probe.TextConfig) > 0 && string(probe.TextConfig) != "null" {
+		// Top-level wrapper values overlay text_config values above. Mirror that
+		// precedence for presence-sensitive hints so an explicit wrapper false is
+		// not mistaken for an absent field and replaced by a family default.
+		var wrapperHints configJSONHints
+		if err := json.Unmarshal(b, &wrapperHints); err != nil {
+			return err
+		}
+		if wrapperHints.NormTopKProb != nil {
+			hints.NormTopKProb = wrapperHints.NormTopKProb
+		}
+	}
 	c.EOSTokenIDs = aux.EOS.ids
 	if len(c.EOSTokenIDs) > 0 {
 		c.EOSTokenID = c.EOSTokenIDs[0]
@@ -629,6 +641,10 @@ func (c *Config) deriveConfigAxes(h configJSONHints) error {
 	if strings.Contains(family, "mixtral") && c.NumExperts > 0 && h.NormTopKProb == nil {
 		// HF Mixtral does not serialize norm_topk_prob, but MixtralSparseMoeBlock
 		// normalizes the selected top-k router weights before the expert weighted sum.
+		c.NormTopKProb = true
+	}
+	if (c.ModelType == "qwen3_5_moe" || c.ModelType == "qwen3_5_moe_text") && c.NumExperts > 0 && h.NormTopKProb == nil {
+		// Qwen3.5-MoE always renormalizes selected router weights; published Ornith configs omit this field.
 		c.NormTopKProb = true
 	}
 	if strings.Contains(family, "minimax") && h.NormGain1p == nil {

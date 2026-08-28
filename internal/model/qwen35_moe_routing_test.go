@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 )
@@ -52,7 +53,8 @@ func refRoutedDelta(H, I int) []float64 {
 		b := float64(e + 1)
 		out := make([]float64, H)
 		for i := 0; i < I; i++ {
-			s := float64(silu(float32(0.1*b))) * (0.2 * b)
+			x := 0.1 * b
+			s := (x / (1 + math.Exp(-x))) * (0.2 * b)
 			out[i] = 0.3 * b * s
 		}
 		return out
@@ -67,22 +69,72 @@ func refRoutedDelta(H, I int) []float64 {
 	return delta
 }
 
-// TestQwen35MoESharedExpertAdded pins the #1032 fix: qwen3_5_moe adds an always-on,
-// sigmoid-GATED shared expert (singular mlp.shared_expert.* / mlp.shared_expert_gate.weight)
-// on top of the routed top-k sum. moeFFN.apply must return routedSum + gate*sharedFFN(x),
-// and the shared contribution must be non-zero.
+func parsedQwen35MoETestConfig(t *testing.T) Config {
+	t.Helper()
+	const raw = `{
+		"model_type":"qwen3_5_moe",
+		"hidden_size":2,
+		"num_attention_heads":1,
+		"num_key_value_heads":1,
+		"head_dim":2,
+		"num_hidden_layers":1,
+		"vocab_size":4,
+		"intermediate_size":2,
+		"num_experts":4,
+		"num_experts_per_tok":2,
+		"moe_intermediate_size":2,
+		"shared_expert_intermediate_size":2,
+		"rms_norm_eps":0.00001,
+		"rope_theta":10000
+	}`
+	var cfg Config
+	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("unmarshal bounded Qwen3.5-MoE config: %v", err)
+	}
+	cfg.EOSTokenID = -1
+	return cfg
+}
+
+// TestQwen35MoEAbsentNormalizationUsesProductionRouting is the issue's named
+// acceptance witness for absent config normalization through route and moeFFN.
+func TestQwen35MoEAbsentNormalizationUsesProductionRouting(t *testing.T) {
+	testQwen35MoEProductionRoutingAndSharedExpert(t)
+}
+
+// TestQwen35MoESharedExpertAdded keeps the shared-expert acceptance surface explicit.
 func TestQwen35MoESharedExpertAdded(t *testing.T) {
+	testQwen35MoEProductionRoutingAndSharedExpert(t)
+}
+
+// testQwen35MoEProductionRoutingAndSharedExpert is a bounded synthetic production-path
+// regression: a parsed qwen3_5_moe config must normalize routed weights and add its
+// always-on, sigmoid-gated shared expert. It is not a full-checkpoint or external-oracle witness.
+func testQwen35MoEProductionRoutingAndSharedExpert(t *testing.T) {
+	t.Helper()
 	const H, I, E, K, SI = 2, 2, 4, 2, 2
-	cfg := Config{
-		HiddenSize: H, NumLayers: 1, NumHeads: 1, NumKVHeads: 1, HeadDim: 2,
-		IntermediateSize: I, VocabSize: 4, RMSNormEps: 1e-5, RopeTheta: 10000,
-		NumExperts: E, NumExpertsPerTok: K, NormTopKProb: true,
-		SharedIntermediateSize: SI, EOSTokenID: -1,
+	cfg := parsedQwen35MoETestConfig(t)
+	if cfg.NumExperts != E || cfg.NumExpertsPerTok != K || cfg.SharedIntermediateSize != SI {
+		t.Fatalf("parsed bounded axes = experts:%d top-k:%d shared:%d, want %d/%d/%d",
+			cfg.NumExperts, cfg.NumExpertsPerTok, cfg.SharedIntermediateSize, E, K, SI)
 	}
 	router := []float32{2, 0, 0, 3, 1, 1, -1, -1}
 	xn := []float32{1, 1}
 
-	tensors := qwen35MoEBaseTensors(H, I, E, router)
+	baseTensors := qwen35MoEBaseTensors(H, I, E, router)
+	routedOnly, err := NewFromF32Tensors(cfg, baseTensors)
+	if err != nil {
+		t.Fatalf("build routed-only model: %v", err)
+	}
+	picks := route(routedOnly, 0, xn, f32Kernel{routedOnly})
+	if len(picks) != K || picks[0].expert != 1 || picks[1].expert != 0 {
+		t.Fatalf("route picks = %+v, want experts [1 0]", picks)
+	}
+	if sum := picks[0].weight + picks[1].weight; math.Abs(float64(sum)-1) > 1e-6 {
+		t.Fatalf("normalized routed weight sum = %v, want 1", sum)
+	}
+	routedGot := moeFFN{}.apply(routedOnly, 0, xn, f32Kernel{routedOnly})
+
+	tensors := append([]NamedTensorF32(nil), baseTensors...)
 	// Shared expert (SwiGLU at width SI) + scalar hidden->1 sigmoid gate.
 	tensors = append(tensors,
 		NamedTensorF32{Name: qwen35SharedExpertName(0, "gate_proj.weight"), Shape: []int{SI, H}, Data: []float32{0.5, 0, 0, 0.5}},
@@ -99,7 +151,7 @@ func TestQwen35MoESharedExpertAdded(t *testing.T) {
 	//   g = 0.5, u = 0.4 (per channel); silu(g)*u; down scales by 0.6.
 	//   gate scalar = sigmoid(0.25*1 + 0.25*1) = sigmoid(0.5).
 	gate := 1.0 / (1.0 + math.Exp(-0.5))
-	sharedCh := 0.6 * (float64(silu(0.5)) * 0.4)
+	sharedCh := 0.6 * ((0.5 / (1 + math.Exp(-0.5))) * 0.4)
 	want := refRoutedDelta(H, I)
 	for i := 0; i < H; i++ {
 		want[i] += gate * sharedCh
@@ -109,6 +161,9 @@ func TestQwen35MoESharedExpertAdded(t *testing.T) {
 	for i := 0; i < H; i++ {
 		if math.Abs(float64(got[i])-want[i]) > 1e-5 {
 			t.Fatalf("delta[%d] = %v, want %v (routed + gated shared expert)", i, got[i], want[i])
+		}
+		if math.Abs(float64(got[i]-routedGot[i])-gate*sharedCh) > 1e-5 {
+			t.Fatalf("shared additive delta[%d] = %v, want %v", i, got[i]-routedGot[i], gate*sharedCh)
 		}
 	}
 	// Shared contribution must be non-zero (else the test would pass even if the branch were dead).

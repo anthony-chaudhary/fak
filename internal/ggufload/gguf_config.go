@@ -249,6 +249,9 @@ func (f *File) Config() (model.Config, error) {
 	if arch == "qwen3moe" {
 		applyQwen3MoEConfig(f, p, &cfg)
 	}
+	if canonicalGGUFArch(arch) == "qwen35moe" {
+		applyQwen35MoEConfig(f, p, &cfg)
+	}
 	return cfg, nil
 }
 
@@ -310,6 +313,17 @@ func applyMoEExpertCounts(f *File, p string, cfg *model.Config) {
 func applyQwen3MoEConfig(f *File, p string, cfg *model.Config) {
 	applyMoEExpertCounts(f, p, cfg)
 	if cfg.NumExperts > 0 {
+		cfg.NormTopKProb = true
+	}
+}
+
+func applyQwen35MoEConfig(f *File, p string, cfg *model.Config) {
+	applyMoEExpertCounts(f, p, cfg)
+	if norm, ok := f.Bool(p + glmKeyExpertWeightsNorm); ok {
+		cfg.NormTopKProb = norm
+	} else if cfg.NumExperts > 0 {
+		// Qwen3.5-MoE renormalizes selected router weights even when its GGUF
+		// metadata omits the optional expert_weights_norm declaration.
 		cfg.NormTopKProb = true
 	}
 }
