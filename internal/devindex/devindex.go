@@ -453,7 +453,7 @@ func (c *Catalog) parseDocsFrom(source, text string) {
 	}
 }
 
-var inlineCodePathRE = regexp.MustCompile("`((?:docs/)?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\\.(?:md|txt))`")
+var inlineCodePathRE = regexp.MustCompile("`((?:docs/|[A-Za-z0-9_.-]+/)[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\\.(?:md|txt))`")
 var anyMarkdownLinkRE = regexp.MustCompile(`\[[^]]+\]\(([^)]+\.(?:md|txt))(?:#[^)]+)?\)`)
 
 func markdownLinkedDocs(line, source string) []Doc {
