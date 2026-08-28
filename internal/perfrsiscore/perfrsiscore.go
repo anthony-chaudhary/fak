@@ -17,6 +17,7 @@ import (
 
 const (
 	EvidenceSchema    = "fak-performance-rsi-evidence/1"
+	CompositionSchema = "fak-performance-rsi-composition/1"
 	CycleSchema       = "fak-performance-rsi-cycle/1"
 	ImprovementSchema = "fak-performance-rsi-improvement/1"
 	ProvenanceSchema  = "fak-performance-rsi-provenance/1"
@@ -43,6 +44,13 @@ type Evidence struct {
 	Provenance       *Provenance  `json:"provenance,omitempty"`
 	Learning         *Learning    `json:"learning,omitempty"`
 	Hardware         *Hardware    `json:"hardware,omitempty"`
+}
+
+// ComposeInput names one independently validated evidence receipt. Source is
+// diagnostic provenance (normally its path), not evidence content.
+type ComposeInput struct {
+	Source   string
+	Evidence Evidence
 }
 
 // Hardware is a strict ledger of directly measured accelerator utilization.
@@ -313,6 +321,197 @@ func Load(path string) (Evidence, error) {
 		return Evidence{}, err
 	}
 	return Decode(bytes.NewReader(b))
+}
+
+// LoadAndComposeV1 loads strict receipts and assembles one EvidenceSchema
+// document using the versioned CompositionSchema contract.
+func LoadAndComposeV1(snapshot string, paths []string) (Evidence, error) {
+	inputs := make([]ComposeInput, 0, len(paths))
+	for _, path := range paths {
+		e, err := Load(path)
+		if err != nil {
+			return Evidence{}, fmt.Errorf("%s: %w", path, err)
+		}
+		inputs = append(inputs, ComposeInput{Source: path, Evidence: e})
+	}
+	return ComposeV1(snapshot, inputs)
+}
+
+// ComposeV1 binds every derived dimension to the receipt section that owns it.
+// Non-owning copies of that dimension are deliberately ignored. A dimension
+// without a supplied owner is retained only when every receipt agrees on its
+// scoring contract; its measurement is cleared so the scorecard reports honest
+// UNKNOWN debt rather than inheriting an unrelated receipt's baseline.
+func ComposeV1(snapshot string, inputs []ComposeInput) (Evidence, error) {
+	snapshot = strings.TrimSpace(snapshot)
+	if snapshot == "" {
+		return Evidence{}, fmt.Errorf("%s: snapshot is required", CompositionSchema)
+	}
+	if len(inputs) == 0 {
+		return Evidence{}, fmt.Errorf("%s: at least one receipt is required", CompositionSchema)
+	}
+
+	sorted := append([]ComposeInput(nil), inputs...)
+	for i := range sorted {
+		sorted[i].Source = strings.TrimSpace(sorted[i].Source)
+	}
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Source < sorted[j].Source })
+	seenSources := make(map[string]bool, len(sorted))
+	for i := range sorted {
+		if sorted[i].Source == "" {
+			return Evidence{}, fmt.Errorf("%s: receipt %d source is required", CompositionSchema, i)
+		}
+		if seenSources[sorted[i].Source] {
+			return Evidence{}, fmt.Errorf("%s: receipt source %q appears more than once", CompositionSchema, sorted[i].Source)
+		}
+		seenSources[sorted[i].Source] = true
+		validated := sorted[i].Evidence
+		if err := validate(&validated); err != nil {
+			return Evidence{}, fmt.Errorf("%s: receipt %q is invalid: %w", CompositionSchema, sorted[i].Source, err)
+		}
+		sorted[i].Evidence = validated
+	}
+
+	type sectionOwner struct {
+		source   string
+		evidence Evidence
+	}
+	owners := make(map[string]sectionOwner)
+	for _, input := range sorted {
+		sections := evidenceSections(input.Evidence)
+		if len(sections) == 0 {
+			return Evidence{}, fmt.Errorf("%s: receipt %q has no composable section", CompositionSchema, input.Source)
+		}
+		for _, section := range sections {
+			if prior, exists := owners[section]; exists {
+				return Evidence{}, fmt.Errorf(
+					"%s: section %q has multiple owners %q and %q; provide exactly one receipt for that section",
+					CompositionSchema, section, prior.source, input.Source,
+				)
+			}
+			owners[section] = sectionOwner{source: input.Source, evidence: input.Evidence}
+		}
+	}
+
+	dimensionsByInput := make([]map[string]Dimension, len(sorted))
+	for i, input := range sorted {
+		dimensionsByInput[i] = make(map[string]Dimension, len(input.Evidence.Dimensions))
+		for _, d := range input.Evidence.Dimensions {
+			dimensionsByInput[i][d.ID] = d
+		}
+	}
+
+	composed := Evidence{
+		Schema:           EvidenceSchema,
+		Snapshot:         snapshot,
+		TargetMultiplier: TargetMultiple,
+		Dimensions:       make([]Dimension, 0, len(dimensionIDs)),
+	}
+	for _, id := range dimensionIDs {
+		section := owningSection(id)
+		var selected Dimension
+		if owner, ok := owners[section]; ok {
+			selected = dimensionByID(owner.evidence.Dimensions, id)
+		} else {
+			selected = dimensionsByInput[0][id]
+			for i := 1; i < len(sorted); i++ {
+				candidate := dimensionsByInput[i][id]
+				if !sameDimensionContract(selected, candidate) {
+					return Evidence{}, fmt.Errorf(
+						"%s: dimension %q has incompatible contracts without owning section %q: %q (%s) versus %q (%s); add one %q receipt or align the contracts",
+						CompositionSchema, id, section,
+						sorted[0].Source, renderDimensionContract(selected),
+						sorted[i].Source, renderDimensionContract(candidate),
+						section,
+					)
+				}
+			}
+		}
+		selected.Current = nil
+		selected.EvidenceKind = ""
+		selected.Engine = ""
+		composed.Dimensions = append(composed.Dimensions, selected)
+	}
+
+	if owner, ok := owners["cycle"]; ok {
+		composed.Cycle = owner.evidence.Cycle
+	}
+	if owner, ok := owners["improvement"]; ok {
+		composed.Improvement = owner.evidence.Improvement
+	}
+	if owner, ok := owners["provenance"]; ok {
+		composed.Provenance = owner.evidence.Provenance
+	}
+	if owner, ok := owners["learning"]; ok {
+		composed.Learning = owner.evidence.Learning
+	}
+	if owner, ok := owners["hardware"]; ok {
+		composed.Hardware = owner.evidence.Hardware
+	}
+	if err := validate(&composed); err != nil {
+		return Evidence{}, fmt.Errorf("%s: assembled evidence is invalid: %w", CompositionSchema, err)
+	}
+	return composed, nil
+}
+
+func evidenceSections(e Evidence) []string {
+	var sections []string
+	if e.Cycle != nil {
+		sections = append(sections, "cycle")
+	}
+	if e.Improvement != nil {
+		sections = append(sections, "improvement")
+	}
+	if e.Provenance != nil {
+		sections = append(sections, "provenance")
+	}
+	if e.Learning != nil {
+		sections = append(sections, "learning")
+	}
+	if e.Hardware != nil {
+		sections = append(sections, "hardware")
+	}
+	return sections
+}
+
+func owningSection(id string) string {
+	switch id {
+	case "cycle_time", "evaluation_latency", "experiment_throughput", "automation_coverage":
+		return "cycle"
+	case "improvement_yield", "receipt_coverage", "quality_gate_coverage", "attribution_quality":
+		return "improvement"
+	case "discovery_freshness", "adaptation_speed", "reuse_ratio", "production_transfer":
+		return "provenance"
+	case "hypothesis_calibration", "learning_retention", "compounding_rate":
+		return "learning"
+	case "hardware_utilization":
+		return "hardware"
+	default:
+		return ""
+	}
+}
+
+func dimensionByID(dimensions []Dimension, id string) Dimension {
+	for _, d := range dimensions {
+		if d.ID == id {
+			return d
+		}
+	}
+	return Dimension{}
+}
+
+func sameDimensionContract(a, b Dimension) bool {
+	if a.ID != b.ID || a.Direction != b.Direction || a.Unit != b.Unit {
+		return false
+	}
+	if a.Target == nil || b.Target == nil {
+		return a.Target == nil && b.Target == nil
+	}
+	return *a.Target == *b.Target
+}
+
+func renderDimensionContract(d Dimension) string {
+	return fmt.Sprintf("direction=%q unit=%q target=%s", d.Direction, d.Unit, number(d.Target))
 }
 
 func Decode(r io.Reader) (Evidence, error) {

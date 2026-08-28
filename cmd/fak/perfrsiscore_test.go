@@ -20,6 +20,16 @@ func fixturePath() string {
 	return filepath.Join("..", "..", "internal", "perfrsiscore", "testdata", "complete.json")
 }
 
+func performanceRSICommittedReceiptPaths() []string {
+	base := filepath.Join("..", "..", "docs", "_witnesses")
+	return []string{
+		filepath.Join(base, "issue-9780-performance-rsi-cycle.json"),
+		filepath.Join(base, "issue-9781-performance-rsi-improvement.json"),
+		filepath.Join(base, "issue-9782-performance-rsi-provenance.json"),
+		filepath.Join(base, "issue-9783-performance-rsi-learning.json"),
+	}
+}
+
 func performanceRSILearningTestReceipt(t *testing.T) []byte {
 	t.Helper()
 	b, err := os.ReadFile(fixturePath())
@@ -144,6 +154,78 @@ func TestPerformanceRSIRenderers(t *testing.T) {
 		}
 	}
 }
+
+func TestPerformanceRSIComposeFeedsExistingScorecard(t *testing.T) {
+	args := append([]string{"compose", "--snapshot", "issue-9823-cli-regression"}, performanceRSICommittedReceiptPaths()...)
+	code, composed, errText := runPerfRSI(t, args...)
+	if code != 0 {
+		t.Fatalf("compose code=%d err=%s", code, errText)
+	}
+	var evidence struct {
+		Schema   string `json:"schema"`
+		Snapshot string `json:"snapshot"`
+	}
+	if err := json.Unmarshal([]byte(composed), &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Schema != "fak-performance-rsi-evidence/1" || evidence.Snapshot != "issue-9823-cli-regression" {
+		t.Fatalf("composed evidence header=%+v", evidence)
+	}
+
+	input := filepath.Join(t.TempDir(), "composed.json")
+	if err := os.WriteFile(input, []byte(composed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errText := runPerfRSI(t, "--input", input, "--json")
+	if code != 0 {
+		t.Fatalf("scorecard code=%d err=%s", code, errText)
+	}
+	var report struct {
+		UnknownDebt int `json:"unknown_debt"`
+		Dimensions  []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"dimensions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.UnknownDebt != 1 {
+		t.Fatalf("UNKNOWN debt=%d, want 1", report.UnknownDebt)
+	}
+	var unknown []string
+	for _, d := range report.Dimensions {
+		if d.Status == "UNKNOWN" {
+			unknown = append(unknown, d.ID)
+		}
+	}
+	if strings.Join(unknown, ",") != "hardware_utilization" {
+		t.Fatalf("UNKNOWN dimensions=%v, want only hardware_utilization", unknown)
+	}
+
+	reversed := performanceRSICommittedReceiptPaths()
+	for i, j := 0, len(reversed)-1; i < j; i, j = i+1, j-1 {
+		reversed[i], reversed[j] = reversed[j], reversed[i]
+	}
+	reverseArgs := append([]string{"compose", "--snapshot", "issue-9823-cli-regression"}, reversed...)
+	code, reordered, errText := runPerfRSI(t, reverseArgs...)
+	if code != 0 || reordered != composed {
+		t.Fatalf("reordered compose code=%d err=%s deterministic=%v", code, errText, reordered == composed)
+	}
+}
+
+func TestPerformanceRSIComposeRequiresSnapshotAndReceipts(t *testing.T) {
+	for _, args := range [][]string{
+		{"compose"},
+		{"compose", "--snapshot", "missing-receipts"},
+	} {
+		code, _, errText := runPerfRSI(t, args...)
+		if code != 2 || strings.TrimSpace(errText) == "" {
+			t.Fatalf("%v code=%d err=%q", args, code, errText)
+		}
+	}
+}
+
 func TestPerformanceRSIComparison(t *testing.T) {
 	code, out, err := runPerfRSI(t, "--input", fixturePath(), "--json")
 	if code != 0 {

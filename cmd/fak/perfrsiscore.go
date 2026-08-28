@@ -15,6 +15,9 @@ func cmdPerformanceRSIScorecard(argv []string) {
 }
 
 func runPerformanceRSIScorecard(stdout, stderr io.Writer, argv []string) int {
+	if len(argv) > 0 && argv[0] == "compose" {
+		return runPerformanceRSICompose(stdout, stderr, argv[1:])
+	}
 	fs := flag.NewFlagSet("fak performance-rsi-scorecard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	input := fs.String("input", "", "versioned performance RSI evidence JSON")
@@ -69,5 +72,34 @@ func runPerformanceRSIScorecard(stdout, stderr io.Writer, argv []string) int {
 		return 0
 	}
 	fmt.Fprintln(stdout, perfrsiscore.RenderHuman(r))
+	return 0
+}
+
+func runPerformanceRSICompose(stdout, stderr io.Writer, argv []string) int {
+	fs := flag.NewFlagSet("fak performance-rsi-scorecard compose", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	snapshot := fs.String("snapshot", "", "snapshot name for the composed evidence")
+	if !parseFlags(fs, argv) {
+		return 2
+	}
+	if *snapshot == "" {
+		fmt.Fprintln(stderr, "fak performance-rsi-scorecard compose: --snapshot is required")
+		return 2
+	}
+	if fs.NArg() == 0 {
+		fmt.Fprintln(stderr, "fak performance-rsi-scorecard compose: provide one or more receipt paths")
+		return 2
+	}
+	e, err := perfrsiscore.LoadAndComposeV1(*snapshot, fs.Args())
+	if err != nil {
+		fmt.Fprintf(stderr, "fak performance-rsi-scorecard compose: %v\n", err)
+		return 2
+	}
+	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(e); err != nil {
+		fmt.Fprintf(stderr, "fak performance-rsi-scorecard compose: %v\n", err)
+		return 2
+	}
 	return 0
 }

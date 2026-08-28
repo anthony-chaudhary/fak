@@ -24,9 +24,12 @@ type receiptMetricKey struct {
 }
 
 type receiptMetricTotals struct {
-	requests uint64
-	phases   [len(receiptMetricPhases)]float64
-	bytes    [len(receiptMetricByteKinds)]uint64
+	requests    uint64
+	phases      [len(receiptMetricPhases)]float64
+	bytes       [len(receiptMetricByteKinds)]uint64
+	phaseWall   [len(phaseOrder)]float64
+	phaseActive [len(phaseOrder)]float64
+	phaseWait   [len(phaseOrder)]float64
 }
 
 type receiptMetricLatest struct {
@@ -112,6 +115,47 @@ func (m *ReceiptMetrics) Observe(receipt *agent.NativeInferenceReceipt, observed
 	return true
 }
 
+// ObservePhases records reconciled exclusive phase accounting. Inclusive child
+// timings remain available on the receipt but never enter counters, so nested or
+// asynchronous work cannot be double-counted.
+func (m *ReceiptMetrics) ObservePhases(receipt PhaseReceipt, observedAt time.Time) bool {
+	if m == nil {
+		return false
+	}
+	if err := receipt.Validate(time.Nanosecond); err != nil {
+		m.ObserveUnsupported(observedAt)
+		return false
+	}
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
+	key := receiptMetricKey{engine: boundedEngine(receipt.Engine), backend: boundedBackend(receipt.Backend), forwardPath: boundedForwardPath(receipt.ForwardPath)}
+	m.mu.Lock()
+	totals := m.totals[key]
+	for _, accounting := range receipt.Phases {
+		index := phaseIndex(accounting.Phase)
+		if index < 0 {
+			continue
+		}
+		totals.phaseWall[index] += accounting.Exclusive.Wall.Seconds()
+		totals.phaseActive[index] += accounting.Exclusive.Active.Seconds()
+		totals.phaseWait[index] += accounting.Exclusive.Wait.Seconds()
+	}
+	m.totals[key] = totals
+	m.latest.at = observedAt
+	m.mu.Unlock()
+	return true
+}
+
+func phaseIndex(want Phase) int {
+	for index, phase := range phaseOrder {
+		if phase == want {
+			return index
+		}
+	}
+	return -1
+}
+
 func (m *ReceiptMetrics) ObserveUnsupported(observedAt time.Time) {
 	if m == nil {
 		return
@@ -180,6 +224,17 @@ func (m *ReceiptMetrics) Prometheus(now time.Time) string {
 		t := totals[k]
 		for i, phase := range receiptMetricPhases {
 			fmt.Fprintf(&b, "fak_native_receipt_phase_seconds_total%s,phase=%q} %s\n", strings.TrimSuffix(receiptLabels(k), "}"), phase, formatMetricFloat(t.phases[i]))
+		}
+	}
+	b.WriteString("# HELP fak_native_phase_seconds_total Reconciled exclusive fak-native phase time by bounded phase and wall/active/wait kind.\n")
+	b.WriteString("# TYPE fak_native_phase_seconds_total counter\n")
+	for _, k := range keys {
+		t := totals[k]
+		for i, phase := range phaseOrder {
+			labels := strings.TrimSuffix(receiptLabels(k), "}")
+			fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, "wall", formatMetricFloat(t.phaseWall[i]))
+			fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, "active", formatMetricFloat(t.phaseActive[i]))
+			fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, "wait", formatMetricFloat(t.phaseWait[i]))
 		}
 	}
 	b.WriteString("# HELP fak_native_receipt_bytes_total Cumulative bytes projected from native execution receipts.\n")
