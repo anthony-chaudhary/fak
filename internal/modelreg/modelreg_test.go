@@ -295,8 +295,8 @@ func writeRegistry(t *testing.T, dir string, m map[string]string) {
 
 func TestEmbeddedQwen38Aliases(t *testing.T) {
 	want := map[string]string{
-		"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
-		"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38":         "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+		"qwen38:27b":     "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
 		"qwen38:27b-fp8": "hf://Qwen/Qwen3.8-27B-FP8",
 	}
 	for alias, target := range want {
@@ -315,7 +315,7 @@ func TestQwen38IsFirstClassDefault(t *testing.T) {
 	if DefaultAlias != "qwen38:27b" {
 		t.Fatalf("DefaultAlias = %q, want qwen38:27b", DefaultAlias)
 	}
-	want := "hf://unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q4_K_M.gguf"
+	want := "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf"
 	if got := DefaultRef(); got != want {
 		t.Fatalf("DefaultRef() = %q, want %q", got, want)
 	}
