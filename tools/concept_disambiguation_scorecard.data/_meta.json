@@ -8738,46 +8738,6 @@
           "category": "incidental",
           "reason": "Private launcher-selected environment key for one helper bearer secret; it is not a new capability-policy concept",
           "token": "FAK_APP_CAPABILITY"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "delegateStableLaunch"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "policyFlag"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "UpdatePolicy"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "UpdatePolicyPrior"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "UpdatePolicyWait"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "UpdatePolicyFail"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "FAK_UPDATE_LAUNCH_POLICY"
-        },
-        {
-          "category": "incidental",
-          "reason": "Implementation identifier for issue #9593's bounded self-update launch policy; not a distinct capability-policy concept.",
-          "token": "UpdateLaunchPolicy"
         }
       ],
       "exclude": [
