@@ -107,7 +107,7 @@ const (
 	Qwen35GDNCUDAPath   = "cuda/qwen35-gdn-ssm-decode-v1"
 	Qwen35GDNVulkanPath = "vulkan/qwen35-gdn-ssm-decode-v1"
 )
-`r`n
+
 // Qwen35GDNParityCosineMin is the deterministic device/reference acceptance floor.
 const Qwen35GDNParityCosineMin = 0.999
 
