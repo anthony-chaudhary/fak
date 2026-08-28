@@ -179,6 +179,7 @@ int fvk_qwen35_gdn_preprojected_f32(
     const void* conv1d, const void* a_log, const void* dt_bias, const void* norm,
     void* conv_state, void* recurrent_state, void* core,
     int tokens, int conv_dim, int n_k, int n_v, int k_hd, int v_hd, int kernel, float eps);
+void fvk_q4k_matmul_f32(const void *dQ4K, const void *dX, void *dY, int out, int in, int P);
 #ifdef __cplusplus
 }
 #endif

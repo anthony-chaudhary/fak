@@ -1,0 +1,48 @@
+#version 450
+
+layout(local_size_x = 64) in;
+layout(set=0,binding=0) readonly buffer Q4K { uint raw[]; };
+layout(set=0,binding=1) readonly buffer X { float x[]; };
+layout(set=0,binding=2) writeonly buffer Y { float y[]; };
+layout(push_constant) uniform PC { int outDim; int inDim; int tokens; } pc;
+
+uint byteAt(uint off) {
+    uint w = raw[off >> 2];
+    return (w >> ((off & 3u) * 8u)) & 255u;
+}
+float halfAt(uint off) {
+    uint bits = byteAt(off) | (byteAt(off + 1u) << 8u);
+    return unpackHalf2x16(bits).x;
+}
+void scaleMin(uint base, int group, out uint sc, out uint mn) {
+    int j = group;
+    if (j < 4) {
+        sc = byteAt(base + uint(j)) & 63u;
+        mn = byteAt(base + uint(j + 4)) & 63u;
+    } else {
+        sc = (byteAt(base + uint(j + 4)) & 15u) | ((byteAt(base + uint(j - 4)) >> 6u) << 4u);
+        mn = (byteAt(base + uint(j + 4)) >> 4u) | ((byteAt(base + uint(j)) >> 6u) << 4u);
+    }
+}
+void main() {
+    int row = int(gl_GlobalInvocationID.x);
+    int token = int(gl_GlobalInvocationID.y);
+    if (row >= pc.outDim || token >= pc.tokens) return;
+    int blocks = pc.inDim / 256;
+    float sum = 0.0;
+    for (int sb = 0; sb < blocks; ++sb) {
+        uint base = uint((row * blocks + sb) * 144);
+        float d = halfAt(base);
+        float dm = halfAt(base + 2u);
+        for (int group = 0; group < 8; ++group) {
+            uint sc, mn; scaleMin(base + 4u, group, sc, mn);
+            for (int lane = 0; lane < 32; ++lane) {
+                uint packed = byteAt(base + 16u + uint((group >> 1) * 32 + lane));
+                uint code = ((group & 1) != 0) ? packed >> 4u : packed & 15u;
+                float w = d * float(sc) * float(code) - dm * float(mn);
+                sum += w * x[token * pc.inDim + sb * 256 + group * 32 + lane];
+            }
+        }
+    }
+    y[token * pc.outDim + row] = sum;
+}
