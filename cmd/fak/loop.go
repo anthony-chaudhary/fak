@@ -19,6 +19,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/dispatchpost"
 	"github.com/anthony-chaudhary/fak/internal/loopmgr"
 	"github.com/anthony-chaudhary/fak/internal/pathutil"
+	"github.com/anthony-chaudhary/fak/internal/perfrsiscore"
 	"github.com/anthony-chaudhary/fak/internal/procguard"
 	"github.com/anthony-chaudhary/fak/internal/repoguard"
 	"github.com/anthony-chaudhary/fak/internal/scoreboard"
@@ -350,6 +351,14 @@ func runLoopRun(stdout, stderr io.Writer, argv []string) int {
 			HeadBefore: headBefore,
 			HeadAfter:  dispatchpost.HeadSHA(ctx(), ""),
 		})
+
+	// This is the ONE automatic performance-RSI seam: the child has completed and
+	// its dispatch result has already been finalized. Scoring calls the internal Go
+	// package directly, never a shell. Its receipt is always observable on stderr,
+	// while missing/invalid independently produced input remains nonfatal so the
+	// dispatch's exit code and stdout report keep their existing meaning.
+	performanceRSIReceipt := perfrsiscore.ScoreLoopTurnFromEnvironment()
+	fmt.Fprintf(stderr, "fak loop run: performance-rsi loop-turn %s\n", perfrsiscore.FormatLoopTurnReceipt(performanceRSIReceipt))
 
 	if *asJSON {
 		if !writeLoopRunReport(stdout, stderr, *ledger, *loopID, *runID, map[string]any{

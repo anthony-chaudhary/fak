@@ -1,0 +1,10 @@
+$ FAK_PERFORMANCE_RSI_INPUT=docs/_witnesses/issue-9768-performance-rsi-dogfood/input.json go run ./cmd/fak loop run --ledger /tmp/issue-9777-loop-turn.jsonl --loop dispatch/issues --run issue-9777-loop-turn --source witness --no-guard -- sh -c true
+[exit]
+0
+[stderr]
+# github.com/anthony-chaudhary/fak/cmd/fak
+ld: warning: ignoring duplicate libraries: '-lobjc'
+fak loop run: WARNING --no-guard disables fak guard containment for this run
+fak loop run: performance-rsi loop-turn {"schema":"fak-performance-rsi-loop-turn/1","status":"scored","reason":"SCORE_COMPLETE","input":"docs/_witnesses/issue-9768-performance-rsi-dogfood/input.json","snapshot":"issue-9768-live-repository-dogfood-2026-08-28","loop_health":{"score":62.6,"grade":"D","clean":false,"interpretation":"grade describes performance-RSI loop health; it does not prove the explicit target multiplier was achieved"},"performance_rsi_debt":9,"dominant_bottleneck":"cycle_time"}
+[stdout]
+loop run issue-9777-loop-turn exit=0 ledger=/tmp/issue-9777-loop-turn.jsonl

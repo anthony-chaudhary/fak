@@ -1,0 +1,134 @@
+{
+  "schema": "fak-repository-inventory/1",
+  "repository": "cactus-compute/needle",
+  "url": "https://github.com/cactus-compute/needle",
+  "observed_at": "2026-08-28T21:45:00Z",
+  "revision": "ee221ce7c13579d9809209b979a9b7a50936614c",
+  "tree_files": 58,
+  "commit_count": 283,
+  "study_receipt": "study_ca43928a48a872230ea6bdbfd676249cb26d8d22fd095441b9c792919ad8b49c",
+  "tracker": "https://github.com/anthony-chaudhary/fak/issues/9852",
+  "subsystems": [
+    {
+      "id": "public-api-runtime",
+      "paths": ["needle/__init__.py", "needle/agent/fetch.py", "needle/agent/playground.py"],
+      "load_bearing": true,
+      "finding": "A Python ctypes facade owns one process-global native engine, performs fail-fast resident-weight identity checks, executes at most eight returned calls, and downloads the platform library from Hugging Face without a pinned digest."
+    },
+    {
+      "id": "tool-schema",
+      "paths": ["needle/agent/tools.py", "tests/test_tools.py"],
+      "load_bearing": true,
+      "finding": "Callable annotations, literals, enums, defaults, docstrings, and Pydantic models compile to schemas; union handling collapses to the first member."
+    },
+    {
+      "id": "environment-evaluation",
+      "paths": ["needle/environments/", "tests/test_environments.py"],
+      "load_bearing": true,
+      "finding": "Six device-action domains share positive, missing-detail, irrelevant-tool, negation, invalid-input, and parallel-call cases; pass requires at least 90 percent plus zero critical failures."
+    },
+    {
+      "id": "data-and-finetuning",
+      "paths": ["needle/model/finetune.py", "docs/FINETUNING.md"],
+      "load_bearing": true,
+      "finding": "Bounded concurrent teacher generation is deduplicated; the training target shares the tool-call rendering shape and masks prompt tokens; LoRA factors stay fp32 and zero groups are skipped."
+    },
+    {
+      "id": "model-architecture",
+      "paths": ["needle/model/architecture.py", "needle/model/decode.py"],
+      "load_bearing": true,
+      "finding": "The visible model uses lexical Engram memory, mHC residual routing, gated grouped-query attention, and Walsh-Hadamard MLP transforms; cached-decoder parity and document-prefix sinks lack tests, and the prefix helper currently returns zero."
+    },
+    {
+      "id": "quantization",
+      "paths": ["needle/model/quantize.py", "tests/test_quantize.py"],
+      "load_bearing": true,
+      "finding": "CQ uses Walsh-Hadamard groups, Lloyd-Max codebooks, fp16 norms, ternary packing, and longest-prefix mixed bit-width selection; several divisibility assumptions are not validated."
+    },
+    {
+      "id": "artifact-export",
+      "paths": ["needle/model/export.py", "tests/test_export.py"],
+      "load_bearing": true,
+      "finding": "The cact artifact is layer-major, 64-byte aligned, pretransposed, embeds tokenizer and KV numerics, and rejects unsupported head, lexicon, and sliding-window layouts."
+    },
+    {
+      "id": "telemetry",
+      "paths": ["needle/_telemetry.py", "tests/test_telemetry.py"],
+      "load_bearing": true,
+      "finding": "Anonymous outbound telemetry is enabled by default with DO_NOT_TRACK and CI opt-outs; this default conflicts with FAK's explicit egress ownership."
+    },
+    {
+      "id": "packaging-release",
+      "paths": ["pyproject.toml", ".github/workflows/release.yaml"],
+      "load_bearing": true,
+      "finding": "Current source declares version 2.0.8 while tags reach v2.0.10; the release workflow tags HEAD after only a workspace-local version mutation and excludes slow tests."
+    },
+    {
+      "id": "history-community-license",
+      "paths": ["LICENSE", "Git history", "GitHub issues", "GitHub pull requests"],
+      "load_bearing": true,
+      "finding": "Current main is Apache-2.0 after a 2026-08-17 MIT-to-Apache transition. The observed forge has 43 issues and 55 PRs, sparse review evidence, no GitHub Releases, and unresolved model-quality, multi-weight, and portability work."
+    }
+  ],
+  "source_classes": [
+    "readme_docs",
+    "architecture_design",
+    "runtime_source",
+    "tests_fixtures",
+    "history_changelog_releases",
+    "open_closed_issues_prs_discussions",
+    "roadmap_todos",
+    "license_provenance",
+    "fak_selfquery_witness",
+    "candidate_matrix",
+    "completeness_critic",
+    "issue_tracking"
+  ],
+  "candidate_matrix": [
+    {"id": "C01", "axis": "tool-call acceptance corpus breadth", "fak_status": "PARTIAL", "portfolio": "DEFAULT", "license": "ADAPT", "issue": "https://github.com/anthony-chaudhary/fak/issues/9864"},
+    {"id": "C02", "axis": "Python callable to JSON schema compiler", "fak_status": "ABSENT", "portfolio": "EXCLUDE", "license": "INSPIRE-ONLY"},
+    {"id": "C03", "axis": "deployment artifact identity and numerics", "fak_status": "PRESENT", "portfolio": "DEFAULT", "license": "INSPIRE-ONLY"},
+    {"id": "C04", "axis": "mixed tensor precision selection", "fak_status": "PRESENT", "portfolio": "DEFAULT", "license": "INSPIRE-ONLY"},
+    {"id": "C05", "axis": "fixed-byte tiny-device KV window", "fak_status": "PARTIAL", "portfolio": "WATCH", "license": "INSPIRE-ONLY"},
+    {"id": "C06", "axis": "shared training/runtime renderer", "fak_status": "ABSENT", "portfolio": "RECIPE", "license": "INSPIRE-ONLY"},
+    {"id": "C07", "axis": "fp32 sparse LoRA training", "fak_status": "ABSENT", "portfolio": "WATCH", "license": "INSPIRE-ONLY"},
+    {"id": "C08", "axis": "Needle native model architecture", "fak_status": "ABSENT", "portfolio": "WATCH", "license": "INSPIRE-ONLY"},
+    {"id": "C09", "axis": "model confidence as execution authority", "fak_status": "ABSENT", "portfolio": "EXCLUDE", "license": "INSPIRE-ONLY"},
+    {"id": "C10", "axis": "unpinned fetched native library", "fak_status": "ABSENT", "portfolio": "EXCLUDE", "license": "INSPIRE-ONLY"},
+    {"id": "C11", "axis": "default-on anonymous telemetry", "fak_status": "ABSENT", "portfolio": "EXCLUDE", "license": "INSPIRE-ONLY"}
+  ],
+  "fak_selfquery": [
+    "fak capabilities confidence calibrated tool call threshold",
+    "fak capabilities frozen environment suite critical negation invalid parallel",
+    "fak capabilities model artifact topology quantization tokenizer kv numerics",
+    "fak capabilities native library checksum signature revision",
+    "fak dev index docs model artifact checksum provenance",
+    "fak dev index leaves tool schema model acceptance",
+    "raw search: internal/modelaccept, internal/modeldescriptor, internal/kvquantmeta, internal/quantprov, internal/mixedprecision, internal/kvbudget"
+  ],
+  "coverage": {
+    "inspected": [
+      "all 58 tracked files by subsystem map",
+      "all model/runtime/schema/environment implementation files",
+      "focused tests for runtime, tools, fetch, weights, environments, packaging, model, quantization, export, and telemetry",
+      "all 283 commits and 10 tags at metadata/history level",
+      "all 43 issues and all 55 pull requests at metadata/conversation level, with material threads deep-read",
+      "GitHub Releases, discussions capability, milestones, wiki remote, TODO/FIXME/roadmap markers, root and package license, NOTICE/submodule/vendor/generated signals",
+      "candidate-specific FAK capability/index queries and raw package search"
+    ],
+    "skipped_or_unavailable": [
+      "GitHub Projects V2: token lacks read:project",
+      "individual diffs and tests for every open PR: metadata and review state covered; material mechanisms deep-read",
+      "GitHub Actions logs and PyPI wheels/sdists",
+      "Hugging Face weights, tokenizer, and native engine artifacts",
+      "the separate cactus runtime and needle-rs repositories",
+      "binary asset authorship and provenance"
+    ],
+    "impact": "Unavailable external artifacts prevent runtime, benchmark, release-integrity, and binary-license claims. They do not change the source-level corpus-breadth issue or the exclusions recorded here."
+  },
+  "worker_witness": {
+    "runtime": "Fresh local source read-back plus 45 passing focused tests and one expected native-engine skip confirmed the runtime, schema, environment, and negative-case findings.",
+    "model": "Fresh local source read-back and clean pinned checkout confirmed the architecture, quantization, artifact, LoRA, and test-gap findings; no model execution claim was accepted.",
+    "history": "Fresh GitHub API and local history read-back confirmed 43 issues, 55 PRs, zero Releases, 283 commits, current version/license metadata, export refusals, and a clean pinned checkout."
+  }
+}

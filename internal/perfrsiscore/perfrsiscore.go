@@ -26,7 +26,14 @@ const (
 	LearningSchema    = "fak-performance-rsi-learning/1"
 	HardwareSchema    = "fak-performance-rsi-hardware/1"
 	ReportSchema      = "fak-performance-rsi-scorecard/1"
+	LoopTurnSchema    = "fak-performance-rsi-loop-turn/1"
+	LoopTurnInputEnv  = "FAK_PERFORMANCE_RSI_INPUT"
 	TargetMultiple    = 100.0
+)
+
+const (
+	LoopTurnScored      = "scored"
+	LoopTurnUnavailable = "unavailable"
 )
 
 type Direction string
@@ -347,6 +354,22 @@ type Report struct {
 	Comparison         *Comparison    `json:"comparison,omitempty"`
 }
 
+// LoopTurnReceipt is the bounded evidence emitted when a dispatch loop turn
+// automatically attempts the performance-RSI score. Unavailable or invalid
+// input remains observable without turning score telemetry into a dispatch
+// failure.
+type LoopTurnReceipt struct {
+	Schema                string         `json:"schema"`
+	Status                string         `json:"status"`
+	Reason                string         `json:"reason"`
+	Input                 string         `json:"input,omitempty"`
+	Snapshot              string         `json:"snapshot,omitempty"`
+	LoopHealth            *HealthSummary `json:"loop_health,omitempty"`
+	PerformanceRSIDebt    *int           `json:"performance_rsi_debt,omitempty"`
+	DominantBottleneck    string         `json:"dominant_bottleneck,omitempty"`
+	UnavailableDiagnostic string         `json:"unavailable_diagnostic,omitempty"`
+}
+
 var dimensionIDs = []string{
 	"cycle_time", "improvement_yield", "evaluation_latency", "receipt_coverage",
 	"quality_gate_coverage", "experiment_throughput", "hypothesis_calibration", "discovery_freshness",
@@ -355,6 +378,58 @@ var dimensionIDs = []string{
 }
 
 func DimensionIDs() []string { return append([]string(nil), dimensionIDs...) }
+
+// ScoreLoopTurnFromEnvironment is the single automatic loop-turn entry point.
+// It intentionally returns a receipt instead of an error: performance scoring
+// is observability at this seam and must not replace the completed dispatch's
+// exit status when its independently produced input is absent or unreadable.
+func ScoreLoopTurnFromEnvironment() LoopTurnReceipt {
+	return ScoreLoopTurn(os.Getenv(LoopTurnInputEnv))
+}
+
+// ScoreLoopTurn loads and scores one evidence document using the same strict
+// Load and Score path as the performance-rsi-scorecard command.
+func ScoreLoopTurn(input string) LoopTurnReceipt {
+	input = strings.TrimSpace(input)
+	receipt := LoopTurnReceipt{
+		Schema: LoopTurnSchema,
+		Status: LoopTurnUnavailable,
+		Reason: "SCORE_INPUT_UNAVAILABLE",
+		Input:  input,
+	}
+	if input == "" {
+		receipt.UnavailableDiagnostic = LoopTurnInputEnv + " is not set"
+		return receipt
+	}
+
+	evidence, err := Load(input)
+	if err != nil {
+		receipt.UnavailableDiagnostic = err.Error()
+		return receipt
+	}
+	report := Score(evidence)
+	health, debt := reportHealth(report)
+	receipt.Status = LoopTurnScored
+	receipt.Reason = "SCORE_COMPLETE"
+	receipt.Snapshot = report.Snapshot
+	receipt.LoopHealth = &health
+	receipt.PerformanceRSIDebt = intPointer(debt.PerformanceRSIDebt)
+	receipt.DominantBottleneck = report.DominantBottleneck
+	return receipt
+}
+
+// FormatLoopTurnReceipt makes the automatic invocation one stable transcript
+// line. LoopTurnReceipt contains only JSON-safe bounded scalar data.
+func FormatLoopTurnReceipt(receipt LoopTurnReceipt) string {
+	b, err := json.Marshal(receipt)
+	if err != nil {
+		return fmt.Sprintf(`{"schema":%q,"status":"unavailable","reason":"RECEIPT_ENCODE_FAILED","unavailable_diagnostic":%q}`,
+			LoopTurnSchema, err.Error())
+	}
+	return string(b)
+}
+
+func intPointer(v int) *int { return &v }
 
 func Load(path string) (Evidence, error) {
 	b, err := os.ReadFile(path)
