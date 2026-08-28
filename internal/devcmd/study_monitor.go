@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -11,7 +11,7 @@ import (
 
 const defaultStudyMonitorRegistry = "docs/research/monitored-repositories.json"
 
-func runStudyMonitor(stdout, stderr io.Writer, args []string) int {
+func RunStudyMonitor(stdout, stderr io.Writer, args []string) int {
 	if len(args) > 0 && args[0] == "import" {
 		return runStudyImport(stdout, stderr, args[1:])
 	}

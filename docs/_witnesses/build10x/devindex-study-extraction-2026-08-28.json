@@ -1,0 +1,134 @@
+{
+  "schema": "fak-build10x-devindex-extraction/1",
+  "issue": 9691,
+  "parent_issue": 6022,
+  "goal_issue": 9661,
+  "observed_at": "2026-08-28T06:45:38Z",
+  "source_revision": "8c1e6ab8b9bc2e8cfa1fc8700dd348a55af95a44",
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "kernel": "Darwin 25.6.0 arm64",
+    "go": "go1.26.6"
+  },
+  "claim_boundary": "One same-host Darwin diagnostic pair from matched sibling external roots at the pinned revision. Clean-build timing is directional rather than a Windows or multi-sample 10x claim; graph, compile-input, reproducible artifact, refusal, and handoff observations are exact for the captured artifacts.",
+  "component": {
+    "runtime_command_retained": "study",
+    "moved_commands": [
+      "study-monitor",
+      "study-inventory",
+      "study-forge",
+      "study-classify",
+      "study-link",
+      "study-priority",
+      "study-tickets",
+      "study-adjacency",
+      "idea-scout",
+      "borrow-provenance",
+      "customization-index"
+    ],
+    "moved_runtime_source_files": 12,
+    "exclusive_internal_packages_removed": 9,
+    "shared_packages_retained": [
+      "internal/borrowprovenance"
+    ],
+    "runtime_shared_doc_leaf": "internal/docsearch",
+    "runtime_forbidden_package": "internal/devindex"
+  },
+  "method": {
+    "dependency_command": "GOCACHE=<fresh> go list -deps -json ./cmd/fak",
+    "clean_command": "GOCACHE=<fresh-per-arm> go build -trimpath -buildvcs=false -x -o <external-receipt-root>/fak ./cmd/fak",
+    "warm_command": "GOCACHE=<same-arm-cache> go build -trimpath -buildvcs=false -x -o <external-receipt-root>/fak-warm ./cmd/fak",
+    "build_roots": {
+      "baseline": "<external-receipt-root>/baseline (git archive source_revision)",
+      "applied": "<external-receipt-root>/applied (same archive plus exact staged patch)"
+    },
+    "parity_fixture": "--definitely-invalid",
+    "notes": [
+      "Baseline and applied builds used matched sibling external roots, separate fresh caches, and the same Go toolchain.",
+      "Each warm build reused only its arm's clean cache.",
+      "Both clean and warm artifacts in each arm had identical SHA-256 digests under -trimpath -buildvcs=false.",
+      "The fixture intentionally exercises deterministic parser/refusal behavior without network, model, GPU, or repository mutation."
+    ]
+  },
+  "before": {
+    "clean_real_seconds": 23.65,
+    "warm_real_seconds": 5.64,
+    "package_count": 840,
+    "internal_package_count": 586,
+    "direct_import_count": 566,
+    "compile_actions": 839,
+    "link_actions": 1,
+    "production_source_files": 1063,
+    "production_source_bytes": 11193547,
+    "artifact_bytes": 85142306,
+    "artifact_sha256": "d7dcf705c8ed398b1b9a477d796852cd00cc6542f1f6b9b08cbf7f8331afe66a",
+    "warm_artifact_sha256": "d7dcf705c8ed398b1b9a477d796852cd00cc6542f1f6b9b08cbf7f8331afe66a"
+  },
+  "after": {
+    "clean_real_seconds": 23.00,
+    "warm_real_seconds": 5.38,
+    "package_count": 831,
+    "internal_package_count": 577,
+    "direct_import_count": 556,
+    "compile_actions": 830,
+    "link_actions": 1,
+    "production_source_files": 1051,
+    "production_source_bytes": 11139800,
+    "artifact_bytes": 83867378,
+    "artifact_sha256": "3668d0cc799fee7712de98bc39770c9d64b52df99a41d0a22badec90212fc9d6",
+    "warm_artifact_sha256": "3668d0cc799fee7712de98bc39770c9d64b52df99a41d0a22badec90212fc9d6",
+    "fak_dev_artifact_bytes": 19250450,
+    "fak_dev_artifact_sha256": "3e85ea0ec42b4da1469038ff8d359f83fa090dc79c2ab478ab751b79d3596bf2"
+  },
+  "delta": {
+    "clean_real_seconds": -0.65,
+    "clean_speedup": 1.028,
+    "warm_real_seconds": -0.26,
+    "warm_speedup": 1.048,
+    "package_count": -9,
+    "internal_package_count": -9,
+    "direct_import_count": -10,
+    "compile_actions": -9,
+    "production_source_files": -12,
+    "production_source_bytes": -53747,
+    "artifact_bytes": -1274928
+  },
+  "behavior_witness": {
+    "bare_runtime_refusals": {
+      "checked": 11,
+      "exit_code": 2,
+      "required_marker": "DEV_COMMAND_MOVED",
+      "passed": 11
+    },
+    "fak_dev_vs_fak_dev_handoff_parity": {
+      "checked": 11,
+      "compared": [
+        "exit_code",
+        "stdout_bytes",
+        "stderr_bytes"
+      ],
+      "passed": 11
+    },
+    "missing_companion": {
+      "exit_code": 2,
+      "actionable_install_or_build_message": true
+    },
+    "runtime_study": {
+      "exit_code": 2,
+      "runtime_usage_prefix": "usage: fak study",
+      "retained": true
+    },
+    "runtime_compile_argv": {
+      "moved_source_paths_checked": 12,
+      "moved_source_paths_present": 0
+    },
+    "runtime_graph_boundary": {
+      "forbidden_package": "github.com/anthony-chaudhary/fak/internal/devindex",
+      "reachable": false,
+      "shared_leaf": "github.com/anthony-chaudhary/fak/internal/docsearch",
+      "zero_dev_owned_leaks": true
+    }
+  },
+  "verdict": "The source-ownership extraction spine is behaviorally equivalent on the offline fixture and measurably reduces the runtime graph. It does not establish the full build-10x goal."
+}

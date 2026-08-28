@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ func TestStudyInventoryJSONMapsLocalCheckout(t *testing.T) {
 	writeStudyInventoryFixture(t, root, "cmd/app/main.go", "package main\nfunc main() {}\n")
 
 	var stdout, stderr bytes.Buffer
-	code := runStudyInventory(&stdout, &stderr, []string{
+	code := RunStudyInventory(&stdout, &stderr, []string{
 		"--root", root,
 		"--repository", "owner/repo",
 		"--revision", "abc123",
@@ -48,7 +48,7 @@ func TestStudyInventoryWritesMarkdown(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "inventory.md")
 
 	var stdout, stderr bytes.Buffer
-	code := runStudyInventory(&stdout, &stderr, []string{
+	code := RunStudyInventory(&stdout, &stderr, []string{
 		"--root", root,
 		"--repository", "owner/repo",
 		"--revision", "abc123",

@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/ideascout"
 )
 
-func runIdeaScout(stdout, stderr io.Writer, argv []string) int {
+func RunIdeaScout(stdout, stderr io.Writer, argv []string) int {
 	fs := flag.NewFlagSet("idea-scout", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	workspace := fs.String("workspace", ".", "repo root holding the .idea-scout cache")

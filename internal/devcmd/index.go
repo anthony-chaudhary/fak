@@ -491,14 +491,29 @@ func flushTab(tw *tabwriter.Writer, stderr io.Writer, label string) int {
 
 func indexOwnership(stdout, stderr io.Writer, root string, args []string, inheritedJSON bool) int {
 	asJSON := inheritedJSON
+	writeManifest := false
 	for _, arg := range args {
 		switch arg {
 		case "--json":
 			asJSON = true
+		case "--write-manifest":
+			writeManifest = true
 		default:
 			fmt.Fprintf(stderr, "fak-dev index ownership: unexpected argument %q\n", arg)
 			return 2
 		}
+	}
+	if writeManifest {
+		if asJSON {
+			fmt.Fprintln(stderr, "fak-dev index ownership: --write-manifest and --json are mutually exclusive")
+			return 2
+		}
+		if err := devindex.WriteDevHandoffManifest(root); err != nil {
+			fmt.Fprintf(stderr, "fak-dev index ownership: write manifest: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, devindex.DevHandoffManifestPath)
+		return 0
 	}
 	// One implementation only (#6022). This dispatch used to build its own report
 	// with pattern "./...", which counts the WHOLE MODULE's dependency closure

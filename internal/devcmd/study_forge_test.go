@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -27,6 +27,8 @@ func TestStudyForgeCaptureCLIResumesWithinSourceCheckpoint(t *testing.T) {
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/acme/widget/commits":
+			fmt.Fprint(w, `[{"sha":"cli-revision"}]`)
 		case "/repos/acme/widget/commits/main":
 			fmt.Fprint(w, `{"sha":"cli-revision"}`)
 		case "/repos/acme/widget/issues":
@@ -60,7 +62,7 @@ func TestStudyForgeCaptureCLIResumesWithinSourceCheckpoint(t *testing.T) {
 		"--out", out, "--base-url", server.URL, "--retries", "0",
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runStudyForge(&stdout, &stderr, args); code != 1 {
+	if code := RunStudyForge(&stdout, &stderr, args); code != 1 {
 		t.Fatalf("first capture exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	partial, err := studyforge.Read(out)
@@ -76,7 +78,7 @@ func TestStudyForgeCaptureCLIResumesWithinSourceCheckpoint(t *testing.T) {
 	mu.Unlock()
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyForge(&stdout, &stderr, append(args, "--resume")); code != 0 {
+	if code := RunStudyForge(&stdout, &stderr, append(args, "--resume")); code != 0 {
 		t.Fatalf("resume exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	mu.Lock()
@@ -157,7 +159,7 @@ func TestStudyForgeCaptureCLIResumesPreMetricLegacyCountOnlyCheckpoint(t *testin
 		"--base-url", server.URL, "--retries", "0", "--resume",
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runStudyForge(&stdout, &stderr, append(args, "--out", invalidPath)); code != 1 {
+	if code := RunStudyForge(&stdout, &stderr, append(args, "--out", invalidPath)); code != 1 {
 		t.Fatalf("invalid resume exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	mu.Lock()
@@ -169,7 +171,7 @@ func TestStudyForgeCaptureCLIResumesPreMetricLegacyCountOnlyCheckpoint(t *testin
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyForge(&stdout, &stderr, append(args, "--out", out)); code != 0 {
+	if code := RunStudyForge(&stdout, &stderr, append(args, "--out", out)); code != 0 {
 		t.Fatalf("legacy resume exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	mu.Lock()

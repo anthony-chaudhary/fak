@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -25,7 +25,7 @@ func TestStudyClassifyCLIRoundTripAndDeterminism(t *testing.T) {
 	indexA := filepath.Join(dir, "a", "index.json")
 	var stdout, stderr bytes.Buffer
 	args := []string{"classify", "--corpus", corpusPath, "--out", fullA, "--index-out", indexA, "--related-limit", "1"}
-	if code := runStudyClassify(&stdout, &stderr, args); code != 0 {
+	if code := RunStudyClassify(&stdout, &stderr, args); code != 0 {
 		t.Fatalf("classify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{"records: 1", "source.issues: 1", "disposition.regression_bug: 1", "mechanism.kv_cache: 1", "state.open: 1", "confidence.high: 1"} {
@@ -61,12 +61,12 @@ func TestStudyClassifyCLIRoundTripAndDeterminism(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"validate", "--classification", fullA, "--corpus", corpusPath}); code != 0 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"validate", "--classification", fullA, "--corpus", corpusPath}); code != 0 {
 		t.Fatalf("validate exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"validate-index", "--index", indexA, "--classification", fullA, "--corpus", corpusPath}); code != 0 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"validate-index", "--index", indexA, "--classification", fullA, "--corpus", corpusPath}); code != 0 {
 		t.Fatalf("validate-index exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
@@ -74,7 +74,7 @@ func TestStudyClassifyCLIRoundTripAndDeterminism(t *testing.T) {
 	indexB := filepath.Join(dir, "b", "index.json")
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath, "--out", fullB, "--index-out", indexB, "--related-limit", "1", "--json"}); code != 0 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath, "--out", fullB, "--index-out", indexB, "--related-limit", "1", "--json"}); code != 0 {
 		t.Fatalf("second classify exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var summary studyclass.Summary
@@ -94,7 +94,7 @@ func TestStudyClassifyCLICorruptionAndUsage(t *testing.T) {
 	full := filepath.Join(dir, "full.json")
 	index := filepath.Join(dir, "index.json")
 	var stdout, stderr bytes.Buffer
-	if code := runStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath, "--out", full, "--index-out", index}); code != 0 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath, "--out", full, "--index-out", index}); code != 0 {
 		t.Fatalf("classify exit=%d stderr=%q", code, stderr.String())
 	}
 	b, err := os.ReadFile(full)
@@ -108,7 +108,7 @@ func TestStudyClassifyCLICorruptionAndUsage(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"validate", "--classification", corrupt, "--corpus", corpusPath}); code != 1 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"validate", "--classification", corrupt, "--corpus", corpusPath}); code != 1 {
 		t.Fatalf("corrupt validate exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "unknown field") {
@@ -125,7 +125,7 @@ func TestStudyClassifyCLICorruptionAndUsage(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corruptCorpus, "--out", full, "--index-out", index}); code != 1 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corruptCorpus, "--out", full, "--index-out", index}); code != 1 {
 		t.Fatalf("unknown-field corpus exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "unknown field") {
@@ -153,7 +153,7 @@ func TestStudyClassifyCLICorruptionAndUsage(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"validate-index", "--index", tamperedIndexPath, "--classification", full, "--corpus", corpusPath}); code != 1 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"validate-index", "--index", tamperedIndexPath, "--classification", full, "--corpus", corpusPath}); code != 1 {
 		t.Fatalf("tampered index exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "does not match full classification") {
@@ -162,19 +162,19 @@ func TestStudyClassifyCLICorruptionAndUsage(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath}); code != 2 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath}); code != 2 {
 		t.Fatalf("incomplete args exit=%d", code)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath, "--out", full, "--index-out", full}); code != 2 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"classify", "--corpus", corpusPath, "--out", full, "--index-out", full}); code != 2 {
 		t.Fatalf("same outputs exit=%d", code)
 	}
 }
 
 func TestStudyClassifyCLISchema(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := runStudyClassify(&stdout, &stderr, []string{"schema"}); code != 0 {
+	if code := RunStudyClassify(&stdout, &stderr, []string{"schema"}); code != 0 {
 		t.Fatalf("schema exit=%d stderr=%q", code, stderr.String())
 	}
 	var schema map[string]any
@@ -196,6 +196,8 @@ func writeStudyClassifyCorpus(t *testing.T) string {
 		switch r.URL.Path {
 		case "/repos/acme/widget":
 			fmt.Fprint(w, `{"default_branch":"main"}`)
+		case "/repos/acme/widget/commits":
+			fmt.Fprint(w, `[{"sha":"study-classify-revision"}]`)
 		case "/repos/acme/widget/commits/main":
 			fmt.Fprint(w, `{"sha":"study-classify-revision"}`)
 		case "/repos/acme/widget/issues":

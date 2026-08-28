@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/devindex"
 	"github.com/anthony-chaudhary/fak/internal/discoveryrouter"
+	"github.com/anthony-chaudhary/fak/internal/docsearch"
 	"github.com/anthony-chaudhary/fak/internal/fleetsearch"
 	"github.com/anthony-chaudhary/fak/internal/sessionjournal"
 	"github.com/anthony-chaudhary/fak/internal/sessionregistry"
@@ -29,7 +29,7 @@ func runDiscovery(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "fak search repository: exactly one QUERY is required")
 		return 2
 	}
-	cat, err := devindex.Load(*root)
+	cat, err := docsearch.Load(*root)
 	if err != nil {
 		fmt.Fprintf(stderr, "fak search repository: load docs: %v\n", err)
 		return 1

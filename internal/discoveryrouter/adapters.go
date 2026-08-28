@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthony-chaudhary/fak/internal/devindex"
+	"github.com/anthony-chaudhary/fak/internal/docsearch"
 	"github.com/anthony-chaudhary/fak/internal/fleetsearch"
 )
 
 type DocsAdapter struct {
-	Catalog  *devindex.Catalog
+	Catalog  *docsearch.Catalog
 	Revision string
 }
 

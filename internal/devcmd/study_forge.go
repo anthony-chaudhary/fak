@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/studyforge"
 )
 
-func runStudyForge(stdout, stderr io.Writer, args []string) int {
+func RunStudyForge(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: fak study-forge capture|validate [flags]")
 		return 2

@@ -4,11 +4,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/devindex"
+	"github.com/anthony-chaudhary/fak/internal/docsearch"
 )
 
 func TestDocsAdapterRetainsOwnerRevisionAndReason(t *testing.T) {
-	cat, err := devindex.Load(filepath.Clean(filepath.Join("..", "..")))
+	cat, err := docsearch.Load(filepath.Clean(filepath.Join("..", "..")))
 	if err != nil {
 		t.Fatal(err)
 	}

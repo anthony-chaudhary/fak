@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -13,7 +13,7 @@ import (
 
 const defaultCustomizationIndex = "docs/research/agent-customization-index.json"
 
-func runCustomizationIndex(stdout, stderr io.Writer, args []string) int {
+func RunCustomizationIndex(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("customization-index", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	indexPath := fs.String("index", defaultCustomizationIndex, "path to the agent customization index")

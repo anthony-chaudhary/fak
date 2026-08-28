@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 )
 
-func runStudyInventory(stdout, stderr io.Writer, args []string) int {
+func RunStudyInventory(stdout, stderr io.Writer, args []string) int {
 	fs := flag.NewFlagSet("study-inventory", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	root := fs.String("root", "", "local checkout root to inventory")
