@@ -28,8 +28,9 @@ import (
 )
 
 var (
-	metalHybridMu sync.Mutex
-	metalHybridWt = map[*Model]map[string]*metalgemm.Weight{} // per-Model name -> GPU f16 weight
+	metalHybridMu           sync.Mutex
+	metalHybridWt           = map[*Model]map[string]*metalgemm.Weight{} // per-Model name -> GPU f16 weight
+	metalHybridMPSAvailable = metalgemm.MPSAvailable
 )
 
 type metalQwen35GDNSequenceBackend struct {
@@ -419,6 +420,13 @@ func (m *Model) metalWeightsQwen35Hybrid() map[string]*metalgemm.Weight {
 // CPU hybrid paths build (so decode stays valid) and returns the last token's post-final-norm
 // hidden (caller applies the head). Reached only for a fresh prefill via metalQwen35HybridPrefillOK.
 func (s *Session) prefillBatchedMetalQwen35Hybrid(ids []int) []float32 {
+	// The hybrid f16 projections require MPS in addition to the shared Metal
+	// device. Decline before uploading weights or mutating prompt state when that
+	// capability is absent; the established Q8 implementation remains fak-native
+	// and preserves the same hidden-state contract for the caller-owned head.
+	if !metalHybridMPSAvailable() {
+		return s.prefillQwen35HybridQHidden(ids)
+	}
 	m := s.M
 	P := len(ids)
 	gw := m.metalWeightsQwen35Hybrid()

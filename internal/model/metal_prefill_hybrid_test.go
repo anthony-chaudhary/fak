@@ -33,9 +33,34 @@ import (
 // the device prefill produces the same final-token distribution (logit cosine + argmax) and
 // advances the KV cache to the same per-layer state within the f16-GEMM drift band.
 func TestPrefillQwen35HybridMetalMatchesCPU(t *testing.T) {
+	if !metalgemm.MPSAvailable() {
+		t.Skip("MPS f16 projection capability unavailable")
+	}
+	assertPrefillQwen35HybridMetalMatchesCPU(t)
+}
+
+// TestPrefillQwen35HybridMetalDeclinesBeforeMutationWithoutMPS pins the #1112
+// capability decline independently of the host's MPS setting. A missing MPS
+// projection lane must use the existing fak-native Q8 hybrid path before GPU
+// weights or prompt state are touched; it never consumes an unwritten output.
+func TestPrefillQwen35HybridMetalDeclinesBeforeMutationWithoutMPS(t *testing.T) {
 	if !metalgemm.Available() {
 		t.Skip("no Metal device available")
 	}
+	previous := metalHybridMPSAvailable
+	metalHybridMPSAvailable = func() bool { return false }
+	t.Cleanup(func() { metalHybridMPSAvailable = previous })
+	m := assertPrefillQwen35HybridMetalMatchesCPU(t)
+	metalHybridMu.Lock()
+	_, uploaded := metalHybridWt[m]
+	metalHybridMu.Unlock()
+	if uploaded {
+		t.Fatal("MPS-unavailable decline uploaded Metal hybrid weights")
+	}
+}
+
+func assertPrefillQwen35HybridMetalMatchesCPU(t *testing.T) *Model {
+	t.Helper()
 	defer metalgemm.Reset()
 
 	cfg := qwen35HybridTestCfg()
@@ -89,4 +114,5 @@ func TestPrefillQwen35HybridMetalMatchesCPU(t *testing.T) {
 			t.Errorf("metal hybrid prefill V layer %d cosine=%.6f (want >=0.999)", l, c)
 		}
 	}
+	return m
 }
