@@ -30,7 +30,7 @@ func TestModelDefaultJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != "fak-model-default/v1" || got.Alias != "qwen38:27b" || !strings.Contains(got.Ref, "Qwen3.8-27B-Q4_K_M.gguf") || !got.Coding || !got.ToolCapable || got.Verdict != "HOLD" {
+	if got.Schema != "fak-model-default/v1" || got.Alias != "qwen38:27b" || !strings.Contains(got.Ref, "Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf") || !got.Coding || !got.ToolCapable || got.Verdict != "HOLD" {
 		t.Fatalf("unexpected default: %+v", got)
 	}
 	wantReasons := map[string]string{
