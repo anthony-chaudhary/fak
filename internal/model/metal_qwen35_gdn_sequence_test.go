@@ -41,12 +41,16 @@ func TestMetalQwen35BackendNilP32WholeSequenceSingleFenceAndDecodeOwner(t *testi
 	}
 	owners := append([]Qwen35GDNAuxState(nil), got.qwen35HAL.sequenceLayers...)
 	actual := got.Prefill(prompt)
-	receipt, ok := got.qwen35MetalForwardSequenceReceipt()
-	if !ok {
+	receipt := got.Qwen35MetalForwardSequenceReceipt()
+	if !receipt.Available {
 		t.Fatal("backend-nil P32 prefill did not select the model-owned forward sequence")
 	}
-	if receipt.Tokens != 32 || receipt.CommandBuffers != 1 || receipt.TerminalWaits != 1 || receipt.TerminalReadbacks != 1 || !receipt.Committed || !receipt.CompletedWait || receipt.Encoders <= 1 {
+	if receipt.Path != Qwen35MetalGDNSequenceForwardPath || receipt.Tokens != 32 || receipt.CommandBuffers != 1 || receipt.TerminalWaits != 1 || receipt.TerminalReadbacks != 1 || !receipt.Committed || !receipt.CompletedWait || receipt.Encoders <= 1 || !receipt.TimingAvailable || receipt.GPUMilliseconds <= 0 || receipt.WaitMilliseconds <= 0 {
 		t.Fatalf("whole-sequence receipt=%+v", receipt)
+	}
+	receipt.Tokens = 0
+	if got.Qwen35MetalForwardSequenceReceipt().Tokens != 32 {
+		t.Fatal("caller mutation changed the stored whole-sequence receipt")
 	}
 	if !reflect.DeepEqual(got.qwen35HAL.sequenceLayers, owners) {
 		t.Fatal("whole-sequence prefill replaced resident GDN owner identity")
@@ -132,14 +136,14 @@ func TestMetalQwen35BackendNilP32AppendUsesResidentPrefixAndOwners(t *testing.T)
 	}
 	owners := append([]Qwen35GDNAuxState(nil), got.qwen35HAL.sequenceLayers...)
 	got.PrefillNoLogits(prompt[:32])
-	firstReceipt, ok := got.qwen35MetalForwardSequenceReceipt()
-	if !ok || firstReceipt.CommandBuffers != 1 || firstReceipt.TerminalWaits != 1 || firstReceipt.TerminalReadbacks != 1 {
-		t.Fatalf("first P32 receipt=%+v ok=%v", firstReceipt, ok)
+	firstReceipt := got.Qwen35MetalForwardSequenceReceipt()
+	if !firstReceipt.Available || firstReceipt.CommandBuffers != 1 || firstReceipt.TerminalWaits != 1 || firstReceipt.TerminalReadbacks != 1 {
+		t.Fatalf("first P32 receipt=%+v", firstReceipt)
 	}
 	actual := got.Prefill(prompt[32:])
-	secondReceipt, ok := got.qwen35MetalForwardSequenceReceipt()
-	if !ok || secondReceipt.Tokens != 32 || secondReceipt.CommandBuffers != 1 || secondReceipt.TerminalWaits != 1 || secondReceipt.TerminalReadbacks != 1 || !secondReceipt.Committed || !secondReceipt.CompletedWait {
-		t.Fatalf("appended P32 receipt=%+v ok=%v", secondReceipt, ok)
+	secondReceipt := got.Qwen35MetalForwardSequenceReceipt()
+	if !secondReceipt.Available || secondReceipt.Tokens != 32 || secondReceipt.CommandBuffers != 1 || secondReceipt.TerminalWaits != 1 || secondReceipt.TerminalReadbacks != 1 || !secondReceipt.Committed || !secondReceipt.CompletedWait {
+		t.Fatalf("appended P32 receipt=%+v", secondReceipt)
 	}
 	if got.Cache.Len() != 64 || got.q4kHybridPrefillChunks != 2 || got.q4kHybridPrefillLastBase != 32 {
 		t.Fatalf("appended state cache=%d chunks=%d base=%d", got.Cache.Len(), got.q4kHybridPrefillChunks, got.q4kHybridPrefillLastBase)
@@ -199,9 +203,9 @@ func TestMetalQwen35BackendNilP32PostSubmitFailureIsTerminal(t *testing.T) {
 	if err == nil {
 		t.Fatal("injected post-submit failure returned without fail-closed panic")
 	}
-	receipt, ok := s.qwen35MetalForwardSequenceReceipt()
-	if !ok || !receipt.Committed || !receipt.CompletedWait || receipt.CommandBuffers != 1 || receipt.TerminalWaits != 1 || receipt.TerminalReadbacks != 0 || receipt.Encoders <= 1 {
-		t.Fatalf("post-submit receipt=%+v ok=%v", receipt, ok)
+	receipt := s.Qwen35MetalForwardSequenceReceipt()
+	if !receipt.Available || receipt.Path != Qwen35MetalGDNSequenceForwardPath || receipt.Tokens != 32 || !receipt.Committed || !receipt.CompletedWait || receipt.CommandBuffers != 1 || receipt.TerminalWaits != 1 || receipt.TerminalReadbacks != 0 || receipt.Encoders <= 1 || !receipt.TimingAvailable || receipt.GPUMilliseconds <= 0 || receipt.WaitMilliseconds <= 0 {
+		t.Fatalf("post-submit receipt=%+v", receipt)
 	}
 	if s.Cache.Len() != 0 || s.q4kHybridPrefillChunks != 0 {
 		t.Fatalf("post-submit failure replayed/mutated host path: cache=%d chunks=%d", s.Cache.Len(), s.q4kHybridPrefillChunks)
@@ -299,5 +303,8 @@ func TestMetalQwen35GDNProductionPreflightDeclinesBeforeMutation(t *testing.T) {
 	assertKVCacheQuantClose(t, "preflight decline", before, s.Cache)
 	if s.qwen35HAL != nil {
 		t.Fatalf("preflight decline attached state: %#v", s.qwen35HAL)
+	}
+	if receipt := s.Qwen35MetalForwardSequenceReceipt(); receipt != (Qwen35MetalForwardSequenceReceipt{}) {
+		t.Fatalf("unavailable path returned execution evidence: %+v", receipt)
 	}
 }

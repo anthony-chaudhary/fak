@@ -96,14 +96,28 @@ type qwen35GDNSequenceSnapshotter interface {
 	SnapshotQwen35GDNAuxState(Qwen35GDNAuxState) (conv, recurrent []float32, err error)
 }
 
-type qwen35MetalForwardSequenceReceipt struct {
-	Tokens, CommandBuffers, Encoders, TerminalWaits, TerminalReadbacks int
-	Committed, CompletedWait                                           bool
+// Qwen35MetalForwardSequenceReceipt is an immutable value snapshot of the
+// model-owned whole-sequence Metal graph. Available is false when that route
+// has not produced a terminal receipt; a committed post-submit failure remains
+// available so callers can distinguish it from the default path.
+type Qwen35MetalForwardSequenceReceipt struct {
+	Path              string  `json:"path"`
+	Available         bool    `json:"available"`
+	Tokens            int     `json:"tokens"`
+	CommandBuffers    int     `json:"command_buffers"`
+	Encoders          int     `json:"encoders"`
+	TerminalWaits     int     `json:"terminal_waits"`
+	TerminalReadbacks int     `json:"terminal_readbacks"`
+	Committed         bool    `json:"committed"`
+	CompletedWait     bool    `json:"completed_wait"`
+	TimingAvailable   bool    `json:"timing_available"`
+	GPUMilliseconds   float64 `json:"gpu_milliseconds"`
+	WaitMilliseconds  float64 `json:"wait_milliseconds"`
 }
 
 type qwen35MetalForwardSequenceRunner interface {
-	Qwen35MetalForwardSequence(*Session, []int) ([]float32, qwen35MetalForwardSequenceReceipt, bool, error)
-	Qwen35MetalForwardSequenceReceipt() (qwen35MetalForwardSequenceReceipt, bool)
+	Qwen35MetalForwardSequence(*Session, []int) ([]float32, Qwen35MetalForwardSequenceReceipt, bool, error)
+	Qwen35MetalForwardSequenceReceipt() (Qwen35MetalForwardSequenceReceipt, bool)
 }
 
 // EnableQwen35MetalGDNPreprojectedSequence admits the opt-in owner before any
@@ -197,7 +211,7 @@ func (s *Session) tryPrefillQwen35HybridQ4K(ids []int, wantLogits bool) ([]float
 	var hidden []float32
 	if s.qwen35HAL != nil && s.qwen35HAL.sequenceAccepted {
 		if runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner); ok && len(ids) == 32 {
-			var receipt qwen35MetalForwardSequenceReceipt
+			var receipt Qwen35MetalForwardSequenceReceipt
 			var accepted bool
 			var err error
 			hidden, receipt, accepted, err = runner.Qwen35MetalForwardSequence(s, ids)
@@ -242,15 +256,22 @@ func (s *Session) failQwen35MetalForwardSequence(cause error) error {
 	return err
 }
 
-func (s *Session) qwen35MetalForwardSequenceReceipt() (qwen35MetalForwardSequenceReceipt, bool) {
+// Qwen35MetalForwardSequenceReceipt returns the last terminal whole-sequence
+// receipt as a scalar-only value snapshot. The zero value has Available=false
+// and means this session has no such execution evidence.
+func (s *Session) Qwen35MetalForwardSequenceReceipt() Qwen35MetalForwardSequenceReceipt {
 	if s == nil || s.qwen35HAL == nil {
-		return qwen35MetalForwardSequenceReceipt{}, false
+		return Qwen35MetalForwardSequenceReceipt{}
 	}
 	runner, ok := s.qwen35HAL.sequenceBackend.(qwen35MetalForwardSequenceRunner)
 	if !ok {
-		return qwen35MetalForwardSequenceReceipt{}, false
+		return Qwen35MetalForwardSequenceReceipt{}
 	}
-	return runner.Qwen35MetalForwardSequenceReceipt()
+	receipt, ok := runner.Qwen35MetalForwardSequenceReceipt()
+	if !ok {
+		return Qwen35MetalForwardSequenceReceipt{}
+	}
+	return receipt
 }
 
 func (s *Session) prefillQwen35HybridQ4KHidden(ids []int) []float32 {
