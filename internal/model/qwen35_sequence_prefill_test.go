@@ -13,6 +13,7 @@ type sequencePrefillBackend struct {
 	err  error
 
 	calls    int
+	retires  int
 	requests []compute.Qwen35SequencePrefillRequest
 	badKV    bool
 	badCount bool
@@ -24,6 +25,8 @@ func newSequencePrefillBackend(m *Model) *sequencePrefillBackend {
 }
 
 func (b *sequencePrefillBackend) Qwen35SequencePrefillPath() string { return b.path }
+
+func (b *sequencePrefillBackend) RetireRequestResources() { b.retires++ }
 
 func (b *sequencePrefillBackend) Qwen35SequencePrefill(req compute.Qwen35SequencePrefillRequest) (compute.Qwen35SequencePrefillResult, error) {
 	b.calls++
@@ -95,6 +98,9 @@ func TestQwen35SequencePrefillDispatchCarriesResidentStateAndKV(t *testing.T) {
 	if be.gdnCalls != 0 {
 		t.Fatalf("sequence success replayed scalar GDN %d times", be.gdnCalls)
 	}
+	if be.retires != 1 {
+		t.Fatalf("request retirement calls=%d, want 1 after successful sequence prefill", be.retires)
+	}
 }
 
 func TestQwen35SequencePrefillNoCapabilityFallsBack(t *testing.T) {
@@ -156,5 +162,8 @@ func TestQwen35SequencePrefillNoLogitsUsesSameContract(t *testing.T) {
 	s.PrefillNoLogits([]int{3, 7})
 	if be.calls != 1 || be.requests[0].NeedLogits || s.halKV.Len() != 2 {
 		t.Fatalf("calls=%d need_logits=%v kv=%d", be.calls, be.requests[0].NeedLogits, s.halKV.Len())
+	}
+	if be.retires != 1 {
+		t.Fatalf("request retirement calls=%d, want 1 after successful no-logits sequence prefill", be.retires)
 	}
 }

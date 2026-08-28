@@ -806,7 +806,9 @@ func (s *Session) Prefill(ids []int) []float32 {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
 		}
-		return s.Backend.Read(result.Logits)
+		logits := s.Backend.Read(result.Logits)
+		s.retireRequestResources()
+		return logits
 	}
 	// Coordinated expert-parallel serve (#4835): announce this forward to the follower ranks
 	// and hold the group until it completes, so they replay it and reach the same per-layer
@@ -923,6 +925,7 @@ func (s *Session) PrefillNoLogits(ids []int) {
 		if err != nil {
 			s.failBackendForward(-1, "sequence prefill", err)
 		}
+		s.retireRequestResources()
 		return
 	}
 	if s.M.Cfg.usesMLAMoELayout() {

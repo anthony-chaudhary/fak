@@ -372,6 +372,12 @@ type BackendResourceTeardown interface {
 	TeardownResources() error
 }
 
+// BackendRequestRetirer is implemented by backends that need an explicit
+// request-end fence before request-owned resources can be recycled safely.
+type BackendRequestRetirer interface {
+	RetireRequestResources()
+}
+
 // TeardownBackendResources releases resources owned by backend when it exposes
 // the optional lifecycle contract. Stateless backends require no teardown.
 func TeardownBackendResources(backend Backend) error {
@@ -379,6 +385,19 @@ func TeardownBackendResources(backend Backend) error {
 		return teardown.TeardownResources()
 	}
 	return nil
+}
+
+// RetireBackendRequestResources releases request-owned resources when backend
+// exposes the optional lifecycle contract. Backends without request-end state
+// may rely on the legacy transient recycle hook instead.
+func RetireBackendRequestResources(backend Backend) {
+	if retire, ok := backend.(BackendRequestRetirer); ok {
+		retire.RetireRequestResources()
+		return
+	}
+	if recycle, ok := backend.(interface{ Recycle() }); ok {
+		recycle.Recycle()
+	}
 }
 
 type Backend interface {

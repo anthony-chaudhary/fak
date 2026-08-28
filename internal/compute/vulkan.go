@@ -250,11 +250,16 @@ var _ TensorCloner = (*vulkanBackend)(nil)
 
 const vulkanGoPoolBucketCap = 64
 
-// Recycle returns every transient buffer from the current op cycle to the per-size
-// free pool (recycling or freeing each) and trims the shim's device pool if oversized.
-func (v *vulkanBackend) Recycle() {
+// RetireRequestResources fences any recorded work before returning request-owned
+// transient buffers to reusable capacity. Cancellation and request-end paths call
+// this explicitly; token-boundary Recycle uses the same ordering.
+func (v *vulkanBackend) RetireRequestResources() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
+	// The Go transient pool bypasses fvk_free, so it cannot rely on the shim's
+	// g_batchFreed parking. Complete the command buffer first: only then may an
+	// address be handed to the next request or token.
+	C.fvk_retire_request()
 	for _, b := range v.transient {
 		if b.ptr != nil {
 			v.recycleTransientLocked(b)
@@ -263,6 +268,12 @@ func (v *vulkanBackend) Recycle() {
 	}
 	v.transient = v.transient[:0]
 	C.fvk_trim_pool_if_over(512)
+}
+
+// Recycle returns every transient buffer from the current op cycle to the per-size
+// free pool after the completion fence required by their recorded descriptors.
+func (v *vulkanBackend) Recycle() {
+	v.RetireRequestResources()
 }
 
 // Trim frees all pooled transient buffers and asks the C++ shim to release its idle

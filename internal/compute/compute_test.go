@@ -328,6 +328,29 @@ type teardownFakeDevice struct {
 	err   error
 }
 
+type requestRetireFakeDevice struct {
+	fakeDevice
+	retires  int
+	recycles int
+}
+
+func (d *requestRetireFakeDevice) RetireRequestResources() {
+	d.retires++
+}
+
+func (d *requestRetireFakeDevice) Recycle() {
+	d.recycles++
+}
+
+type requestRecycleFakeDevice struct {
+	fakeDevice
+	recycles int
+}
+
+func (d *requestRecycleFakeDevice) Recycle() {
+	d.recycles++
+}
+
 func (d *teardownFakeDevice) TeardownResources() error {
 	d.calls++
 	return d.err
@@ -351,6 +374,25 @@ func TestTeardownBackendResources(t *testing.T) {
 	dev.err = want
 	if err := TeardownBackendResources(dev); !errors.Is(err, want) {
 		t.Fatalf("teardown error = %v, want %v", err, want)
+	}
+}
+
+func TestRetireBackendRequestResourcesPrefersExplicitRetirer(t *testing.T) {
+	dev := &requestRetireFakeDevice{}
+	RetireBackendRequestResources(dev)
+	if dev.retires != 1 {
+		t.Fatalf("request retires=%d, want 1", dev.retires)
+	}
+	if dev.recycles != 0 {
+		t.Fatalf("legacy recycles=%d, want 0 when explicit retirer exists", dev.recycles)
+	}
+}
+
+func TestRetireBackendRequestResourcesFallsBackToRecycle(t *testing.T) {
+	dev := &requestRecycleFakeDevice{}
+	RetireBackendRequestResources(dev)
+	if dev.recycles != 1 {
+		t.Fatalf("fallback recycles=%d, want 1", dev.recycles)
 	}
 }
 
