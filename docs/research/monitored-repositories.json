@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-28T21:45:00Z",
+  "updated_at": "2026-08-28T21:55:00Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -2195,13 +2195,14 @@
     {
       "repository": "apache/maka",
       "url": "https://github.com/apache/maka",
-      "status": "candidate",
+      "status": "studied",
       "priority": 33,
-      "why": "Local-first AI-agent workspace with append-only logs for model messages, tool calls, tool results, permission decisions, and termination events. Candidate for agentic performance-process work where replayable logs and durable causality reduce wasted reorientation.",
-      "last_checked": "2026-08-25",
-      "checked_revision": "ee7da140ddf3ee522fb6eb5e0d9c215422e4e1fd",
-      "stars_at_check": 3276,
-      "last_push_at_check": "2026-08-25T20:37:24Z"
+      "why": "Local-first agent workspace whose single Runtime Host authority, immutable runtime facts, source-bound context projections, graph admission, and typed effect uncertainty offer narrowly re-derived lessons for FAK; current ASF DISCLAIMER-WIP makes all absent/partial borrows inspire-only.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "2c066316545e432459e327734c634dd2cb61fa40",
+      "stars_at_check": 3889,
+      "last_push_at_check": "2026-08-28T19:06:56Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-APACHE-MAKA-2026-08-28.md"
     },
     {
       "repository": "superplanehq/superplane",
@@ -3206,6 +3207,85 @@
               "https://github.com/anthony-chaudhary/fak/issues/9868"
             ],
             "note": "The tracker and four bounded implementation issues were independently read back after creation."
+          }
+        ]
+      }
+    },
+    {
+      "repository": "cactus-compute/needle",
+      "url": "https://github.com/cactus-compute/needle",
+      "status": "studied",
+      "priority": 62,
+      "why": "Tiny-device tool calling, negative-case environment suites, custom quantized artifacts, and model/runtime boundary lessons; one attributed Qwen3.8 corpus gap survived FAK self-query.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "ee221ce7c13579d9809209b979a9b7a50936614c",
+      "stars_at_check": 9575,
+      "last_push_at_check": "2026-08-28T13:50:22Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/cactus-compute-needle.json",
+        "indexed_revision": "ee221ce7c13579d9809209b979a9b7a50936614c",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 10,
+        "candidate_count": 11,
+        "filed_issue_count": 1,
+        "completeness_critic": "All 58 tracked files were mapped across ten load-bearing subsystems; focused runtime tests passed 45 with one native-engine skip; 283 commits, 10 tags, all 43 issues, all 55 PR states/conversations, Releases, roadmap signals, and current-tree license were covered. GitHub Projects V2, external native/model artifacts, separate runtimes, every PR diff/test, Actions logs, PyPI contents, and asset authorship remain unavailable or out of scope and therefore support no runtime/performance/binary-license claims.",
+        "issue_refs": [
+          "#9852",
+          "#9864"
+        ],
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "gh api repos/cactus-compute/needle/issues?state=all&per_page=100",
+              "gh api repos/cactus-compute/needle/pulls?state=all&per_page=100",
+              "gh api repos/cactus-compute/needle/releases",
+              "docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md#source-and-history-ledger"
+            ],
+            "note": "Public forge read-back found 43 issues, 55 pull requests, zero GitHub Releases, disabled Discussions, and sparse review evidence at the observation cutoff."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities confidence calibrated tool call threshold",
+              "fak capabilities frozen environment suite critical negation invalid parallel",
+              "fak capabilities model artifact topology quantization tokenizer kv numerics",
+              "fak capabilities native library checksum signature revision",
+              "docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md#fak-on-axis-witness"
+            ],
+            "note": "Capability/index queries plus raw package search found descriptor, provenance, mixed-precision, KV-budget, and exact-model acceptance mechanisms already present; only the six-class corpus breadth remained partial."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/research/inventory/cactus-compute-needle.json#candidate_matrix",
+              "docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md#candidate-matrix",
+              "study_ca43928a48a872230ea6bdbfd676249cb26d8d22fd095441b9c792919ad8b49c"
+            ],
+            "note": "Eleven candidates have on-axis FAK status, portfolio/license disposition, evidence, and disconfirming boundaries."
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9852",
+              "https://github.com/anthony-chaudhary/fak/issues/9864"
+            ],
+            "note": "Tracker and sole surviving implementation issue were independently read back; the candidate passed the live, dedupe-armed issue contract as dispatchable."
           }
         ]
       }

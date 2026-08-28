@@ -279,6 +279,10 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Cactus Needle: borrow the negative tool-call corpus, not the runtime (2026-08-28)](docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md) — pinned source, tests, history, forge, and license study; keeps FAK's descriptor/acceptance/native-engine contracts, excludes unpinned binaries/confidence authority/default telemetry, and files the attributed six-class Qwen3.8 tool-call corpus as #9864.
+
+- [Apache Maka: durable runtime authority and crash-safe orchestration (2026-08-28)](docs/notes/CONCEPT-STUDY-APACHE-MAKA-2026-08-28.md) — exhaustive pinned runtime/project study; preserves FAK's stricter security boundary, records the ASF IP-clearance fence, and files source-bound compaction, runtime-fact graph activation, and bounded cancel settlement as #9870-#9872.
+
 - [TencentDB Agent Memory: borrow the durability seams, not the product stack (2026-08-28)](docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md) — pinned memory/knowledge/proxy study; keeps FAK's native policy and prompt-placement substrate, records license and evidence fences, and files artifact checkpoints, capture hygiene, session skill pins, and CJK recall as #9865-#9868.
 
 - [JetBrains go-modern-guidelines: version-aware guidance is the borrow; the current corpus is WATCH (2026-08-28)](docs/notes/CONCEPT-STUDY-GO-MODERN-GUIDELINES-2026-08-28.md) — exhaustive pinned repository/forge/history study; keeps FAK's generic skill paging as the default and files the optional version-resolver, safe rule-detail, conformance, and deterministic `go fix` recipe track #9854-#9858.
