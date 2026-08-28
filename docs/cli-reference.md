@@ -19,6 +19,15 @@ in-process, served from a local **tool vDSO** when possible, screened by a
 **pre-flight + grammar ladder** before it fires, and admitted through a
 **context-MMU** before tool results enter model context.
 
+## `runtime-capabilities`: inspect the deployable runtime before payload load
+
+```text
+fak runtime-capabilities [--backend NAME]
+```
+
+Emits stable, machine-readable `fak-runtime-capabilities/1` JSON. The command performs no model-weight load and keeps three states separate: the executable runs, the governed control plane runs, and a requested fak-native model backend can execute. `--backend` is an exact lookup: unknown, uncompiled, unavailable, or platform-unsupported backends return structured reasons and remediation without falling back to `cpu-ref` or another engine.
+
+The report includes `goos`, `goarch`, build tags, registered backend names/classes/tiers, portable `cpu-ref` status, `engine: "fak-native"` when execution is available, and `payload_compatibility: "not_checked"` until payload-aware admission occurs. This is distinct from `fak preflight`, which adjudicates a tool call against policy and grammar.
 ## `native-performance`: query the raw-model hill climb
 
 `fak native-performance` renders the committed Qwen3.8-27B optimization graph as a

@@ -15,6 +15,22 @@ independent of the server and its silicon. **Next action:** choose an engine fro
 [serving-engine table](engines.md#1-local--self-hosted-engines-over-the-openai-compatible-wire)
 and use that row's wiring route.
 
+## Inspect this binary before loading a model
+
+Run `fak runtime-capabilities` to get the stable `fak-runtime-capabilities/1` JSON report for the current executable and host. The probe does not open or load a model payload. It reports:
+
+- whether the binary and governed control plane are runnable;
+- `goos`, `goarch`, build tags, and every backend that actually registered;
+- the always-portable fak-native `cpu-ref` reference tier when present;
+- whether an exact `--backend` request is available, unavailable, or unsupported; and
+- the selected engine/backend identity (`fak-native`) without silently substituting another backend.
+
+```console
+fak runtime-capabilities
+fak runtime-capabilities --backend cuda
+```
+
+A default build normally reports only `cpu-ref`. CUDA and Vulkan require their build tags and vendor/runtime prerequisites; Metal requires a cgo-enabled Darwin/arm64 build and a reachable Metal device. A missing requested accelerator is a diagnostic result, not permission to switch engines. Model-format and workload-fit checks remain `not_checked` until a later payload-aware admission step; resource-fit policy stays with issue #8163.
 ## Choose by operating envelope
 
 | Choose | When it fits | Current support boundary | Continue with |
