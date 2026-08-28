@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/tokenizer"
 )
 
 // TestRenderChatML pins the ChatML shape the in-kernel planner feeds the tokenizer:
@@ -227,5 +230,224 @@ func TestRenderInKernelQwenHybridSuppressesThinking(t *testing.T) {
 	raw := renderInKernelChatMLTools([]Message{{Role: "user", Content: "ping"}}, nil, cfg)
 	if strings.Contains(raw, qwenNoThinkAssistantSeed) {
 		t.Fatalf("FAK_INKERNEL_ENABLE_THINKING=1 should leave raw thinking mode: %q", raw)
+	}
+}
+
+func ornithQwen35Config() model.Config {
+	return model.Config{
+		ModelType: "qwen3_5",
+		LayerTypes: []string{
+			"linear_attention", "linear_attention", "linear_attention", "full_attention",
+		},
+	}
+}
+
+func ornithTemplateMessages() []Message {
+	return []Message{
+		{Role: RoleSystem, Content: "  You are Ornith.  "},
+		{Role: RoleUser, Content: "  inspect main.go  "},
+		{
+			Role:             RoleAssistant,
+			Content:          "I will inspect it.",
+			ReasoningContent: "Need the file.",
+			ToolCalls: []ToolCall{{
+				ID: "call_1", Type: "function",
+				Function: Func{Name: "Read", Arguments: `{"file_path":"main.go","line_start":1}`},
+			}},
+		},
+		{Role: RoleTool, ToolCallID: "call_1", Name: "Read", Content: "package main"},
+		{Role: RoleTool, ToolCallID: "call_2", Name: "Symbols", Content: "func main() {}"},
+		{Role: RoleAssistant, Content: "The file is valid."},
+		{Role: RoleUser, Content: "Now summarize."},
+	}
+}
+
+func ornithTemplateTools() []ToolDef {
+	return []ToolDef{{
+		Type: "function",
+		Function: ToolDefFunction{
+			Name:        "Read",
+			Description: "Read a file.",
+			Parameters:  json.RawMessage(`{"type":"object","properties":{"file_path":{"type":"string"},"line_start":{"type":"integer"}},"required":["file_path"]}`),
+		},
+	}}
+}
+
+// ornithQwen35ChatTemplateThinkingOffGolden is the byte-exact result of applying
+// deepreinforce-ai/Ornith-1.0-9B's published chat_template.jinja at immutable model
+// revision 4402d8dc236fe9e09d12aeed907a763b66a60533 to ornithTemplateMessages and
+// ornithTemplateTools with add_generation_prompt=true and enable_thinking=false.
+// It is deliberately checked in instead of generated: template drift must fail offline.
+const ornithQwen35ChatTemplateThinkingOffGolden = `<|im_start|>system
+# Tools
+
+You have access to the following functions:
+
+<tools>
+{"type":"function","function":{"name":"Read","description":"Read a file.","parameters":{"type":"object","properties":{"file_path":{"type":"string"},"line_start":{"type":"integer"}},"required":["file_path"]}}}
+</tools>
+
+If you choose to call a function ONLY reply in the following format with NO suffix:
+
+<tool_call>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+<parameter=example_parameter_2>
+This is the value for the second parameter
+that can span
+multiple lines
+</parameter>
+</function>
+</tool_call>
+
+<IMPORTANT>
+Reminder:
+- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags
+- Required parameters MUST be specified
+- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after
+- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls
+</IMPORTANT>
+
+You are Ornith.<|im_end|>
+<|im_start|>user
+inspect main.go<|im_end|>
+<|im_start|>assistant
+<think>
+Need the file.
+</think>
+
+I will inspect it.
+
+<tool_call>
+<function=Read>
+<parameter=file_path>
+main.go
+</parameter>
+<parameter=line_start>
+1
+</parameter>
+</function>
+</tool_call><|im_end|>
+<|im_start|>user
+<tool_response>
+package main
+</tool_response>
+<tool_response>
+func main() {}
+</tool_response><|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+The file is valid.<|im_end|>
+<|im_start|>user
+Now summarize.<|im_end|>
+<|im_start|>assistant
+<think>
+
+</think>
+
+`
+
+func TestOrnithQwen35ChatTemplateGolden(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "")
+	got := renderInKernelChatMLTools(ornithTemplateMessages(), ornithTemplateTools(), ornithQwen35Config())
+	if got != ornithQwen35ChatTemplateThinkingOffGolden {
+		t.Fatalf("Ornith chat_template.jinja drift:\n--- got ---\n%q\n--- want ---\n%q", got, ornithQwen35ChatTemplateThinkingOffGolden)
+	}
+
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "1")
+	got = renderInKernelChatMLTools(ornithTemplateMessages(), ornithTemplateTools(), ornithQwen35Config())
+	want := strings.TrimSuffix(ornithQwen35ChatTemplateThinkingOffGolden, qwenNoThinkAssistantSeed) + "<think>\n"
+	if got != want {
+		t.Fatalf("Ornith thinking-on opener drift:\n--- got ---\n%q\n--- want ---\n%q", got, want)
+	}
+}
+
+// TestOrnithGGUFQwen35IdentitySelectsTemplate models the Config that ggufload
+// derives from general.architecture=qwen35. GGUF serving canonicalizes the HF
+// qwen3_5 name to qwen35 while preserving the hybrid layer schedule, so this
+// production identity must select the same pinned Ornith renderer.
+func TestOrnithGGUFQwen35IdentitySelectsTemplate(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "")
+	cfg := ornithQwen35Config()
+	cfg.ModelType = "qwen35"
+	if !cfg.IsQwen35Hybrid() {
+		t.Fatal("representative ggufload qwen35 config must retain the hybrid layer schedule")
+	}
+	got := renderInKernelChatMLTools(ornithTemplateMessages(), ornithTemplateTools(), cfg)
+	if got != ornithQwen35ChatTemplateThinkingOffGolden {
+		t.Fatalf("GGUF qwen35 identity did not select the Ornith template:\n--- got ---\n%q\n--- want ---\n%q", got, ornithQwen35ChatTemplateThinkingOffGolden)
+	}
+}
+
+func TestOrnithRequestConstraintsPreserveOriginalSystemPrompt(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "")
+	responseFormat := json.RawMessage(`{"type":"json_schema","json_schema":{"name":"probe","strict":true,"schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}}}`)
+	toolChoice := json.RawMessage(`{"type":"function","function":{"name":"record_probe"}}`)
+	tools := []ToolDef{{Type: "function", Function: ToolDefFunction{
+		Name:       "record_probe",
+		Parameters: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"]}`),
+	}}}
+	const originalSystem = "Never disclose the private control channel."
+	got := renderInKernelChatMLRequest([]Message{
+		{Role: RoleSystem, Content: originalSystem},
+		{Role: RoleUser, Content: "Record the probe."},
+	}, tools, ornithQwen35Config(), responseFormat, toolChoice)
+	for _, want := range []string{
+		"Return only one valid JSON object matching this schema exactly.",
+		`"const":"record_probe"`,
+		originalSystem,
+		"<|im_start|>user\nRecord the probe.<|im_end|>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("constrained Ornith request dropped %q:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "<|im_start|>system\n") != 1 {
+		t.Fatalf("constraints and original system prompt must fold into one deterministic block:\n%s", got)
+	}
+	if systemAt, originalAt, userAt := strings.Index(got, "<|im_start|>system\n"), strings.Index(got, originalSystem), strings.Index(got, "<|im_start|>user\n"); !(systemAt == 0 && originalAt > systemAt && userAt > originalAt) {
+		t.Fatalf("system content order is unsafe: system=%d original=%d user=%d\n%s", systemAt, originalAt, userAt, got)
+	}
+}
+
+func TestOrnithQwen35ToolSystemPrefixStable(t *testing.T) {
+	t.Setenv("FAK_INKERNEL_ENABLE_THINKING", "")
+	a := renderInKernelChatMLTools(ornithTemplateMessages(), ornithTemplateTools(), ornithQwen35Config())
+	b := renderInKernelChatMLTools([]Message{
+		{Role: RoleSystem, Content: "You are Ornith."},
+		{Role: RoleUser, Content: "a different task"},
+	}, ornithTemplateTools(), ornithQwen35Config())
+	end := strings.Index(a, "<|im_end|>\n")
+	if end < 0 {
+		t.Fatalf("Ornith render has no folded system terminator: %q", a)
+	}
+	end += len("<|im_end|>\n")
+	if !strings.HasPrefix(b, a[:end]) {
+		t.Fatalf("same system+tools did not preserve a byte-stable prefix:\n a=%q\n b=%q", a[:end], b)
+	}
+}
+
+func TestOrnithQwen35TwoEOSStopIDsExact(t *testing.T) {
+	const doc = `{
+	  "model": {"type":"BPE","vocab":{"H":72,"i":73,"Hi":74,"<|endoftext|>":248044,"<|im_end|>":248046},"merges":["H i"]},
+	  "decoder": {"type":"ByteLevel"},
+	  "added_tokens": [
+	    {"id":248044,"content":"<|endoftext|>","special":true},
+	    {"id":248046,"content":"<|im_end|>","special":true}
+	  ]
+	}`
+	tok, err := tokenizer.ParseJSON([]byte(doc))
+	if err != nil {
+		t.Fatalf("parse Ornith stop fixture: %v", err)
+	}
+	got := StopIDs(tok, model.Config{EOSTokenID: 248044, EOSTokenIDs: []int{248044, 248046}})
+	want := map[int]bool{248044: true, 248046: true}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Ornith StopIDs = %v, want exact two-id set %v", got, want)
 	}
 }

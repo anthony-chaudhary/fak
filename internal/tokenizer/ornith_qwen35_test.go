@@ -1,6 +1,9 @@
 package tokenizer
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -182,6 +185,58 @@ func TestOrnithQwen35JSONVocabAndTwoEOS(t *testing.T) {
 	}
 	if _, ok := specials[248068]; ok {
 		t.Fatal("<think> is an added token but not a special token")
+	}
+}
+
+// TestOptionalOrnithQwen35CodingPromptMatchesReference is the real-tokenizer leg
+// of #1030. It stays offline and cache-gated: the directory must contain the model's
+// tokenizer.json plus coding_prompt.ids.json exported independently with the pinned
+// HF tokenizer (AutoTokenizer.encode(prompt, add_special_tokens=false)). CI without
+// that reference skips; when cached, fak must match every id and decode byte-exactly.
+func TestOptionalOrnithQwen35CodingPromptMatchesReference(t *testing.T) {
+	dir := os.Getenv("FAK_ORNITH_TOKENIZER_ORACLE_DIR")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			t.Skip("home directory unavailable and FAK_ORNITH_TOKENIZER_ORACLE_DIR unset")
+		}
+		dir = filepath.Join(home, ".cache", "fak-models", "tokenizers", "ornith-1.0-9b")
+	}
+	tokenizerPath := filepath.Join(dir, "tokenizer.json")
+	referencePath := filepath.Join(dir, "coding_prompt.ids.json")
+	if _, err := os.Stat(tokenizerPath); err != nil {
+		t.Skipf("Ornith tokenizer reference not cached at %s", tokenizerPath)
+	}
+	referenceJSON, err := os.ReadFile(referencePath)
+	if err != nil {
+		t.Skipf("Ornith independent id reference not cached at %s", referencePath)
+	}
+	var want []int
+	if err := json.Unmarshal(referenceJSON, &want); err != nil {
+		t.Fatalf("decode %s: %v", referencePath, err)
+	}
+	if len(want) == 0 {
+		t.Fatalf("%s contains no reference ids", referencePath)
+	}
+
+	tok, err := LoadJSON(tokenizerPath)
+	if err != nil {
+		t.Fatalf("LoadJSON(%s): %v", tokenizerPath, err)
+	}
+	const prompt = "<|im_start|>user\nImplement parseConfig in internal/config/parser.go and add a regression test.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+	got, err := tok.Encode(prompt)
+	if err != nil {
+		t.Fatalf("Encode coding prompt: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Ornith reference ids mismatch\n got=%v\nwant=%v", got, want)
+	}
+	roundTrip, err := tok.Decode(got)
+	if err != nil {
+		t.Fatalf("Decode coding prompt ids: %v", err)
+	}
+	if roundTrip != prompt {
+		t.Fatalf("Ornith coding prompt roundtrip drift\n got=%q\nwant=%q", roundTrip, prompt)
 	}
 }
 

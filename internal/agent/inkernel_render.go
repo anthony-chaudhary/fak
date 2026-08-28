@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"regexp"
@@ -53,6 +54,7 @@ func renderChatMLTools(messages []Message, tools []ToolDef) string {
 }
 
 const qwenNoThinkAssistantSeed = "<think>\n\n</think>\n\n"
+const qwenThinkAssistantSeed = "<think>\n"
 
 // renderInKernelChatMLTools is the live in-kernel prompt renderer. For Qwen3.5/Qwen3.6 hybrid
 // reasoning checkpoints it mirrors tokenizer.apply_chat_template(enable_thinking=false) by
@@ -81,11 +83,243 @@ func renderInKernelChatMLRequest(messages []Message, tools []ToolDef, cfg model.
 	if inKernelEffectiveToolName(toolChoice, tools) != "" {
 		tools = nil
 	}
+	if inKernelUsesOrnithQwen35Template(cfg) {
+		return renderOrnithQwen35ChatMLTools(messages, tools, os.Getenv("FAK_INKERNEL_ENABLE_THINKING") == "1")
+	}
 	chat := renderChatMLTools(messages, tools)
 	if inKernelSuppressQwenThinking(cfg) {
 		chat += qwenNoThinkAssistantSeed
 	}
 	return chat
+}
+
+// inKernelUsesOrnithQwen35Template selects the published Qwen3.5-family template
+// only when the checkpoint identifies that family as well as carrying hybrid layers.
+// IsQwen35Hybrid alone is intentionally insufficient: older callers and tests that
+// construct only LayerTypes retain their historical hardcoded ChatML byte stream.
+func inKernelUsesOrnithQwen35Template(cfg model.Config) bool {
+	if !cfg.IsQwen35Hybrid() {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(cfg.ModelType)) {
+	case "qwen3_5", "qwen3_5_text", "qwen3_5_moe", "qwen35", "qwen35moe":
+		return true
+	}
+	for _, arch := range cfg.Architectures {
+		if strings.Contains(strings.ToLower(arch), "qwen3_5") {
+			return true
+		}
+	}
+	return false
+}
+
+// ornithToolSpecPrefix/Suffix pin the text-only tool surface published in
+// deepreinforce-ai/Ornith-1.0-9B's chat_template.jinja at model revision
+// 4402d8dc236fe9e09d12aeed907a763b66a60533. The schemas between them remain
+// model/request-driven and declaration-ordered, preserving a deterministic radix prefix.
+const ornithToolSpecPrefix = "# Tools\n\nYou have access to the following functions:\n\n<tools>"
+
+const ornithToolSpecSuffix = `
+</tools>
+
+If you choose to call a function ONLY reply in the following format with NO suffix:
+
+<tool_call>
+<function=example_function_name>
+<parameter=example_parameter_1>
+value_1
+</parameter>
+<parameter=example_parameter_2>
+This is the value for the second parameter
+that can span
+multiple lines
+</parameter>
+</function>
+</tool_call>
+
+<IMPORTANT>
+Reminder:
+- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags
+- Required parameters MUST be specified
+- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after
+- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls
+</IMPORTANT>`
+
+// renderOrnithQwen35ChatMLTools is a faithful text-only Go port of Ornith's pinned
+// chat_template.jinja. The generic renderer remains the fallback for every other
+// family; this function is reached only through inKernelUsesOrnithQwen35Template.
+func renderOrnithQwen35ChatMLTools(messages []Message, tools []ToolDef, enableThinking bool) string {
+	var b strings.Builder
+	renderOrnithQwen35Transcript(&b, messages, tools)
+	b.WriteString("<|im_start|>assistant\n")
+	if enableThinking {
+		b.WriteString(qwenThinkAssistantSeed)
+	} else {
+		b.WriteString(qwenNoThinkAssistantSeed)
+	}
+	return b.String()
+}
+
+func renderOrnithQwen35Transcript(b *strings.Builder, messages []Message, tools []ToolDef) {
+	// Request-level response-format/tool-choice constraints are prepended as a
+	// synthetic system message. Fold every system message in transcript order so
+	// that instruction cannot displace the caller's original safety prompt.
+	var systemParts []string
+	for _, message := range messages {
+		if message.Role != RoleSystem {
+			continue
+		}
+		if content := strings.TrimSpace(message.Content); content != "" {
+			systemParts = append(systemParts, content)
+		}
+	}
+	leadingSystem := strings.Join(systemParts, "\n")
+	if len(tools) > 0 {
+		b.WriteString("<|im_start|>system\n")
+		b.WriteString(ornithToolSpecPrefix)
+		for _, tool := range tools {
+			encoded, err := json.Marshal(tool)
+			if err != nil {
+				continue
+			}
+			b.WriteByte('\n')
+			b.Write(encoded)
+		}
+		b.WriteString(ornithToolSpecSuffix)
+		if leadingSystem != "" {
+			b.WriteString("\n\n")
+			b.WriteString(leadingSystem)
+		}
+		b.WriteString("<|im_end|>\n")
+	} else if len(systemParts) > 0 {
+		b.WriteString("<|im_start|>system\n")
+		b.WriteString(leadingSystem)
+		b.WriteString("<|im_end|>\n")
+	}
+
+	for i, message := range messages {
+		content := strings.TrimSpace(message.Content)
+		switch message.Role {
+		case RoleSystem:
+			continue
+		case RoleUser:
+			b.WriteString("<|im_start|>user\n")
+			b.WriteString(content)
+			b.WriteString("<|im_end|>\n")
+		case RoleAssistant:
+			reasoning := strings.TrimSpace(message.ReasoningContent)
+			if reasoning == "" {
+				reasoning, content = ornithReasoningFromContent(content)
+			}
+			b.WriteString("<|im_start|>assistant\n<think>\n")
+			b.WriteString(reasoning)
+			b.WriteString("\n</think>\n\n")
+			b.WriteString(content)
+			for callIndex, call := range message.ToolCalls {
+				if callIndex == 0 && content != "" {
+					b.WriteString("\n\n")
+				} else if callIndex > 0 {
+					b.WriteByte('\n')
+				}
+				renderOrnithQwen35ToolCall(b, call.Function)
+			}
+			b.WriteString("<|im_end|>\n")
+		case RoleTool:
+			if i == 0 || messages[i-1].Role != RoleTool {
+				b.WriteString("<|im_start|>user")
+			}
+			b.WriteString("\n<tool_response>\n")
+			b.WriteString(content)
+			b.WriteString("\n</tool_response>")
+			if i == len(messages)-1 || messages[i+1].Role != RoleTool {
+				b.WriteString("<|im_end|>\n")
+			}
+		}
+	}
+}
+
+func ornithReasoningFromContent(content string) (reasoning, visible string) {
+	closeAt := strings.Index(content, thinkClose)
+	if closeAt < 0 {
+		return "", content
+	}
+	reasoning = strings.TrimSpace(content[:closeAt])
+	if openAt := strings.LastIndex(reasoning, thinkOpen); openAt >= 0 {
+		reasoning = strings.TrimSpace(reasoning[openAt+len(thinkOpen):])
+	}
+	return reasoning, strings.TrimSpace(content[closeAt+len(thinkClose):])
+}
+
+type ornithToolArgument struct {
+	name  string
+	value string
+}
+
+func renderOrnithQwen35ToolCall(b *strings.Builder, fn Func) {
+	b.WriteString("<tool_call>\n<function=")
+	b.WriteString(strings.TrimSpace(fn.Name))
+	b.WriteString(">\n")
+	for _, arg := range ornithToolArguments(fn.Arguments) {
+		b.WriteString("<parameter=")
+		b.WriteString(arg.name)
+		b.WriteString(">\n")
+		b.WriteString(arg.value)
+		b.WriteString("\n</parameter>\n")
+	}
+	b.WriteString("</function>\n</tool_call>")
+}
+
+// ornithToolArguments walks the raw JSON object in source order. The OpenAI adapter
+// deliberately preserves Function.Arguments verbatim, so retaining that order matches
+// Jinja's mapping-items traversal and avoids a map-induced prefix drift.
+func ornithToolArguments(raw string) []ornithToolArgument {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	start, err := decoder.Token()
+	if err != nil || start != json.Delim('{') {
+		return nil
+	}
+	var out []ornithToolArgument
+	for decoder.More() {
+		name, err := decoder.Token()
+		if err != nil {
+			return nil
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil
+		}
+		out = append(out, ornithToolArgument{name: name.(string), value: ornithToolArgumentValue(value)})
+	}
+	return out
+}
+
+func ornithToolArgumentValue(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return ""
+	}
+	if raw[0] == '"' {
+		var value string
+		if json.Unmarshal(raw, &value) == nil {
+			return value
+		}
+	}
+	if raw[0] == '{' || raw[0] == '[' {
+		var compact bytes.Buffer
+		if json.Compact(&compact, raw) == nil {
+			return compact.String()
+		}
+	}
+	switch string(raw) {
+	case "true":
+		return "True"
+	case "false":
+		return "False"
+	case "null":
+		return "None"
+	default:
+		return string(raw)
+	}
 }
 
 func inKernelSuppressQwenThinking(cfg model.Config) bool {
