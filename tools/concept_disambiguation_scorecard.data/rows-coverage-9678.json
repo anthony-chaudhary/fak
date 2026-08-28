@@ -1,0 +1,2804 @@
+{
+  "rows": [
+    {
+      "id": "coverage-9678-plan-explicitnoncandidate",
+      "canonical": "plan implementation surface for explicitnoncandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`explicitnoncandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `explicitnoncandidate` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "explicitnoncandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-workflowplan",
+      "canonical": "plan implementation surface for workflowplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`workflowplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `workflowplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "workflowplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-dispositionreleasemetadatanoncandidate",
+      "canonical": "plan implementation surface for dispositionreleasemetadatanoncandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`dispositionreleasemetadatanoncandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `dispositionreleasemetadatanoncandidate` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "dispositionreleasemetadatanoncandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-mechanismexplicitnoncandidate",
+      "canonical": "plan implementation surface for mechanismexplicitnoncandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`mechanismexplicitnoncandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `mechanismexplicitnoncandidate` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "mechanismexplicitnoncandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-admissioncandidates",
+      "canonical": "plan implementation surface for admissioncandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`admissioncandidates` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `admissioncandidates` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "admissioncandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-admitcandidate",
+      "canonical": "plan implementation surface for admitcandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`admitcandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `admitcandidate` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "admitcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-candidatematrix",
+      "canonical": "plan implementation surface for candidatematrix",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidatematrix` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `candidatematrix` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "candidatematrix",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-candidatens",
+      "canonical": "plan implementation surface for candidatens",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidatens` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `candidatens` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "candidatens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-candidatestepbudget",
+      "canonical": "plan implementation surface for candidatestepbudget",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidatestepbudget` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `candidatestepbudget` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "candidatestepbudget",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-candidatevalue",
+      "canonical": "plan implementation surface for candidatevalue",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`candidatevalue` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `candidatevalue` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "candidatevalue",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-dispatchwavecandidatecollector",
+      "canonical": "plan implementation surface for dispatchwavecandidatecollector",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`dispatchwavecandidatecollector` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `dispatchwavecandidatecollector` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "dispatchwavecandidatecollector",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-dispatchwaveplanrequest",
+      "canonical": "plan implementation surface for dispatchwaveplanrequest",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`dispatchwaveplanrequest` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `dispatchwaveplanrequest` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "dispatchwaveplanrequest",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-dispatchwavereadyexecutionplan",
+      "canonical": "plan implementation surface for dispatchwavereadyexecutionplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`dispatchwavereadyexecutionplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `dispatchwavereadyexecutionplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "dispatchwavereadyexecutionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-executedispatchwaveplan",
+      "canonical": "plan implementation surface for executedispatchwaveplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`executedispatchwaveplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `executedispatchwaveplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "executedispatchwaveplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-fastexecutionplan",
+      "canonical": "plan implementation surface for fastexecutionplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`fastexecutionplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `fastexecutionplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "fastexecutionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-forecastfloorplan",
+      "canonical": "plan implementation surface for forecastfloorplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`forecastfloorplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `forecastfloorplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "forecastfloorplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-matmulplan",
+      "canonical": "plan implementation surface for matmulplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`matmulplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `matmulplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "matmulplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-matmulplandescriptor",
+      "canonical": "plan implementation surface for matmulplandescriptor",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`matmulplandescriptor` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `matmulplandescriptor` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "matmulplandescriptor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-matmulplanrevision",
+      "canonical": "plan implementation surface for matmulplanrevision",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`matmulplanrevision` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `matmulplanrevision` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "matmulplanrevision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-maybestartguardchildharnessterminalrestorepulseforplan",
+      "canonical": "plan implementation surface for maybestartguardchildharnessterminalrestorepulseforplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`maybestartguardchildharnessterminalrestorepulseforplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `maybestartguardchildharnessterminalrestorepulseforplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "maybestartguardchildharnessterminalrestorepulseforplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-modelcanarycandidateconfig",
+      "canonical": "plan implementation surface for modelcanarycandidateconfig",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`modelcanarycandidateconfig` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `modelcanarycandidateconfig` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "modelcanarycandidateconfig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-modelcanaryphasecandidateterminated",
+      "canonical": "plan implementation surface for modelcanaryphasecandidateterminated",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`modelcanaryphasecandidateterminated` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `modelcanaryphasecandidateterminated` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "modelcanaryphasecandidateterminated",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-modelcanaryreasoncandidateidentitymismatch",
+      "canonical": "plan implementation surface for modelcanaryreasoncandidateidentitymismatch",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`modelcanaryreasoncandidateidentitymismatch` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `modelcanaryreasoncandidateidentitymismatch` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "modelcanaryreasoncandidateidentitymismatch",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-plandevice",
+      "canonical": "plan implementation surface for plandevice",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`plandevice` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `plandevice` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "plandevice",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-plandispatchwave",
+      "canonical": "plan implementation surface for plandispatchwave",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`plandispatchwave` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `plandispatchwave` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "plandispatchwave",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-planfp",
+      "canonical": "plan implementation surface for planfp",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`planfp` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `planfp` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planfp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-plannedlocality",
+      "canonical": "plan implementation surface for plannedlocality",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`plannedlocality` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `plannedlocality` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "plannedlocality",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-planqwen38mtp",
+      "canonical": "plan implementation surface for planqwen38mtp",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`planqwen38mtp` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `planqwen38mtp` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "planqwen38mtp",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-printaccountslaunchplan",
+      "canonical": "plan implementation surface for printaccountslaunchplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`printaccountslaunchplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `printaccountslaunchplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "printaccountslaunchplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-queuecandidateids",
+      "canonical": "plan implementation surface for queuecandidateids",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`queuecandidateids` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `queuecandidateids` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "queuecandidateids",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-readyexecutionplan",
+      "canonical": "plan implementation surface for readyexecutionplan",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`readyexecutionplan` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `readyexecutionplan` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "readyexecutionplan",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-reservedplannerreplica",
+      "canonical": "plan implementation surface for reservedplannerreplica",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`reservedplannerreplica` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `reservedplannerreplica` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "reservedplannerreplica",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-routefromcandidate",
+      "canonical": "plan implementation surface for routefromcandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`routefromcandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `routefromcandidate` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "routefromcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-sortcandidates",
+      "canonical": "plan implementation surface for sortcandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`sortcandidates` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sortcandidates` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "sortcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-startcandidate",
+      "canonical": "plan implementation surface for startcandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`startcandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `startcandidate` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "startcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-sweepcwdcandidates",
+      "canonical": "plan implementation surface for sweepcwdcandidates",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`sweepcwdcandidates` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sweepcwdcandidates` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "sweepcwdcandidates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-termcandidate",
+      "canonical": "plan implementation surface for termcandidate",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`termcandidate` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `termcandidate` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "termcandidate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-waitcandidateready",
+      "canonical": "plan implementation surface for waitcandidateready",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`waitcandidateready` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `waitcandidateready` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "waitcandidateready",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-plan-wavecandidateid",
+      "canonical": "plan implementation surface for wavecandidateid",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "`wavecandidateid` is a concrete tree symbol classified in the `plan` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `wavecandidateid` for this exact implementation surface. Unlike `x-ci-coverage-plan-blockplan`, it names this distinct symbol; unlike `plan`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-ci-coverage-plan-blockplan"
+      ],
+      "aliases": [],
+      "grounding": "wavecandidateid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-plan.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-policycanaryturns",
+      "canonical": "policy-capability implementation surface for policycanaryturns",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`policycanaryturns` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `policycanaryturns` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policycanaryturns",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-hedgepolicy",
+      "canonical": "policy-capability implementation surface for hedgepolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`hedgepolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `hedgepolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "hedgepolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-observepolicy",
+      "canonical": "policy-capability implementation surface for observepolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`observepolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `observepolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "observepolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-policygeneration",
+      "canonical": "policy-capability implementation surface for policygeneration",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`policygeneration` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `policygeneration` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policygeneration",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-relationshippolicy",
+      "canonical": "policy-capability implementation surface for relationshippolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`relationshippolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `relationshippolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "relationshippolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-witnesspolicy",
+      "canonical": "policy-capability implementation surface for witnesspolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`witnesspolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `witnesspolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture",
+        "coverage-9678-witness-proof-witnesspolicy"
+      ],
+      "aliases": [],
+      "grounding": "witnesspolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-decodefootprintpickpolicy",
+      "canonical": "policy-capability implementation surface for decodefootprintpickpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`decodefootprintpickpolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `decodefootprintpickpolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "decodefootprintpickpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-diffpolicywidening",
+      "canonical": "policy-capability implementation surface for diffpolicywidening",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`diffpolicywidening` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `diffpolicywidening` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "diffpolicywidening",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-frompolicy",
+      "canonical": "policy-capability implementation surface for frompolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`frompolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `frompolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "frompolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-gardenwalkpolicy",
+      "canonical": "policy-capability implementation surface for gardenwalkpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`gardenwalkpolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `gardenwalkpolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "gardenwalkpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-interactionpolicy",
+      "canonical": "policy-capability implementation surface for interactionpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`interactionpolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `interactionpolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "interactionpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-modelcanarypreflight",
+      "canonical": "policy-capability implementation surface for modelcanarypreflight",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`modelcanarypreflight` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `modelcanarypreflight` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "modelcanarypreflight",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-nonatomicdeltapolicy",
+      "canonical": "policy-capability implementation surface for nonatomicdeltapolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`nonatomicdeltapolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `nonatomicdeltapolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "nonatomicdeltapolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-nonatomicdeltapolicymetric",
+      "canonical": "policy-capability implementation surface for nonatomicdeltapolicymetric",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`nonatomicdeltapolicymetric` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `nonatomicdeltapolicymetric` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "nonatomicdeltapolicymetric",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-nonatomicdeltapolicymetricendpointcardinalitydelta",
+      "canonical": "policy-capability implementation surface for nonatomicdeltapolicymetricendpointcardinalitydelta",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`nonatomicdeltapolicymetricendpointcardinalitydelta` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `nonatomicdeltapolicymetricendpointcardinalitydelta` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "nonatomicdeltapolicymetricendpointcardinalitydelta",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-nonatomicdeltapolicymetricexactidentitysymmetricdifference",
+      "canonical": "policy-capability implementation surface for nonatomicdeltapolicymetricexactidentitysymmetricdifference",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`nonatomicdeltapolicymetricexactidentitysymmetricdifference` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `nonatomicdeltapolicymetricexactidentitysymmetricdifference` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "nonatomicdeltapolicymetricexactidentitysymmetricdifference",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-nonatomicdeltapolicytype",
+      "canonical": "policy-capability implementation surface for nonatomicdeltapolicytype",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`nonatomicdeltapolicytype` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `nonatomicdeltapolicytype` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "nonatomicdeltapolicytype",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-pickpolicy",
+      "canonical": "policy-capability implementation surface for pickpolicy",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`pickpolicy` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `pickpolicy` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "pickpolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-policycanaryrollbacks",
+      "canonical": "policy-capability implementation surface for policycanaryrollbacks",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`policycanaryrollbacks` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `policycanaryrollbacks` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policycanaryrollbacks",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-policycanaryrolledback",
+      "canonical": "policy-capability implementation surface for policycanaryrolledback",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`policycanaryrolledback` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `policycanaryrolledback` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policycanaryrolledback",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-policydeny",
+      "canonical": "policy-capability implementation surface for policydeny",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`policydeny` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `policydeny` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policydeny",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-policyreloadresponse",
+      "canonical": "policy-capability implementation surface for policyreloadresponse",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`policyreloadresponse` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `policyreloadresponse` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "policyreloadresponse",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-policy-capability-posturereason",
+      "canonical": "policy-capability implementation surface for posturereason",
+      "family": "policy-capability",
+      "kind": "symbol",
+      "definition": "`posturereason` is a concrete tree symbol classified in the `policy-capability` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `posturereason` for this exact implementation surface. Unlike `egressposture`, it names this distinct symbol; unlike `policy-capability`, it is not the umbrella domain.",
+      "distinct_from": [
+        "egressposture"
+      ],
+      "aliases": [],
+      "grounding": "posturereason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-policy-capability.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-debugcacheattributionvars",
+      "canonical": "cache implementation surface for debugcacheattributionvars",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`debugcacheattributionvars` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `debugcacheattributionvars` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "debugcacheattributionvars",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-debugmanagedcachevars",
+      "canonical": "cache implementation surface for debugmanagedcachevars",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`debugmanagedcachevars` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `debugmanagedcachevars` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "debugmanagedcachevars",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-repeatedworkflowcache",
+      "canonical": "cache implementation surface for repeatedworkflowcache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`repeatedworkflowcache` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `repeatedworkflowcache` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "repeatedworkflowcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-admitactivecache",
+      "canonical": "cache implementation surface for admitactivecache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`admitactivecache` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `admitactivecache` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "admitactivecache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-cacheabs",
+      "canonical": "cache implementation surface for cacheabs",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cacheabs` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `cacheabs` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cacheabs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-cachegeometrymu",
+      "canonical": "cache implementation surface for cachegeometrymu",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cachegeometrymu` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `cachegeometrymu` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachegeometrymu",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-cachehintresult",
+      "canonical": "cache implementation surface for cachehintresult",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cachehintresult` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `cachehintresult` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachehintresult",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-cacheintent",
+      "canonical": "cache implementation surface for cacheintent",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cacheintent` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `cacheintent` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cacheintent",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-cachevisibilityaction",
+      "canonical": "cache implementation surface for cachevisibilityaction",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cachevisibilityaction` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `cachevisibilityaction` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "cachevisibilityaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-guardcacheargs",
+      "canonical": "cache implementation surface for guardcacheargs",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`guardcacheargs` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `guardcacheargs` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey",
+        "coverage-9678-guard-gate-guardcacheargs"
+      ],
+      "aliases": [],
+      "grounding": "guardcacheargs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-pytestcache",
+      "canonical": "cache implementation surface for pytestcache",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`pytestcache` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `pytestcache` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "pytestcache",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-vcacherecentobservation",
+      "canonical": "cache implementation surface for vcacherecentobservation",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`vcacherecentobservation` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `vcacherecentobservation` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "vcacherecentobservation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-vcachevarsfromsnapshot",
+      "canonical": "cache implementation surface for vcachevarsfromsnapshot",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`vcachevarsfromsnapshot` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `vcachevarsfromsnapshot` for this exact implementation surface. Unlike `promptcachekey`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "promptcachekey"
+      ],
+      "aliases": [],
+      "grounding": "vcachevarsfromsnapshot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-codexsession",
+      "canonical": "session-runtime implementation surface for codexsession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`codexsession` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `codexsession` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "codexsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-sessionaction",
+      "canonical": "session-runtime implementation surface for sessionaction",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessionaction` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sessionaction` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-awssessiontoken",
+      "canonical": "session-runtime implementation surface for awssessiontoken",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`awssessiontoken` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `awssessiontoken` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "awssessiontoken",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-debugsessions",
+      "canonical": "session-runtime implementation surface for debugsessions",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`debugsessions` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `debugsessions` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "debugsessions",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-kindsession",
+      "canonical": "session-runtime implementation surface for kindsession",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`kindsession` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `kindsession` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "kindsession",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-mediansessionminutes",
+      "canonical": "session-runtime implementation surface for mediansessionminutes",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`mediansessionminutes` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `mediansessionminutes` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "mediansessionminutes",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-resolvecrontimeandslot",
+      "canonical": "session-runtime implementation surface for resolvecrontimeandslot",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`resolvecrontimeandslot` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `resolvecrontimeandslot` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "resolvecrontimeandslot",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-sessionage",
+      "canonical": "session-runtime implementation surface for sessionage",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessionage` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sessionage` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs",
+        "cov-debt250-session-runtime-sessiontag"
+      ],
+      "aliases": [],
+      "grounding": "sessionage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-sessiondebitfunc",
+      "canonical": "session-runtime implementation surface for sessiondebitfunc",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessiondebitfunc` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sessiondebitfunc` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessiondebitfunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-sessiondecidefunc",
+      "canonical": "session-runtime implementation surface for sessiondecidefunc",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessiondecidefunc` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sessiondecidefunc` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessiondecidefunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-sessiondescriptorid",
+      "canonical": "session-runtime implementation surface for sessiondescriptorid",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessiondescriptorid` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sessiondescriptorid` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessiondescriptorid",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-sessionharnessobservation",
+      "canonical": "session-runtime implementation surface for sessionharnessobservation",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessionharnessobservation` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sessionharnessobservation` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionharnessobservation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-session-runtime-sessionlistfunc",
+      "canonical": "session-runtime implementation surface for sessionlistfunc",
+      "family": "session-runtime",
+      "kind": "symbol",
+      "definition": "`sessionlistfunc` is a concrete tree symbol classified in the `session-runtime` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `sessionlistfunc` for this exact implementation surface. Unlike `x2-session-runtime-sessionobs`, it names this distinct symbol; unlike `session-runtime`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-session-runtime-sessionobs"
+      ],
+      "aliases": [],
+      "grounding": "sessionlistfunc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-session-runtime.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-ctxexpensegate",
+      "canonical": "guard-gate implementation surface for ctxexpensegate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`ctxexpensegate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `ctxexpensegate` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "coverage-9678-context-ctx-ctxexpensegate"
+      ],
+      "aliases": [],
+      "grounding": "ctxexpensegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-dispatchwaveprelaunchgatefromaudit",
+      "canonical": "guard-gate implementation surface for dispatchwaveprelaunchgatefromaudit",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`dispatchwaveprelaunchgatefromaudit` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `dispatchwaveprelaunchgatefromaudit` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "dispatchwaveprelaunchgatefromaudit",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-gatecartbeforehorse",
+      "canonical": "guard-gate implementation surface for gatecartbeforehorse",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`gatecartbeforehorse` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `gatecartbeforehorse` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "gatecartbeforehorse",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-guardcacheargs",
+      "canonical": "guard-gate implementation surface for guardcacheargs",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guardcacheargs` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `guardcacheargs` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "coverage-9678-cache-guardcacheargs"
+      ],
+      "aliases": [],
+      "grounding": "guardcacheargs",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-guardrows",
+      "canonical": "guard-gate implementation surface for guardrows",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`guardrows` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `guardrows` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "guardrows",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-hardgate",
+      "canonical": "guard-gate implementation surface for hardgate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`hardgate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `hardgate` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "coverage-9678-guard-gate-hardgates"
+      ],
+      "aliases": [],
+      "grounding": "hardgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-hardgates",
+      "canonical": "guard-gate implementation surface for hardgates",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`hardgates` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `hardgates` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm",
+        "coverage-9678-guard-gate-hardgate"
+      ],
+      "aliases": [],
+      "grounding": "hardgates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-requiredgates",
+      "canonical": "guard-gate implementation surface for requiredgates",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`requiredgates` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `requiredgates` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "requiredgates",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-breathgate",
+      "canonical": "guard-gate implementation surface for breathgate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`breathgate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `breathgate` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "breathgate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-guard-gate-qwen38gate",
+      "canonical": "guard-gate implementation surface for qwen38gate",
+      "family": "guard-gate",
+      "kind": "symbol",
+      "definition": "`qwen38gate` is a concrete tree symbol classified in the `guard-gate` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `qwen38gate` for this exact implementation surface. Unlike `insufficientaggregatehbm`, it names this distinct symbol; unlike `guard-gate`, it is not the umbrella domain.",
+      "distinct_from": [
+        "insufficientaggregatehbm"
+      ],
+      "aliases": [],
+      "grounding": "qwen38gate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-guard-gate.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-turncontext",
+      "canonical": "context-ctx implementation surface for turncontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`turncontext` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `turncontext` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "turncontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-contextaction",
+      "canonical": "context-ctx implementation surface for contextaction",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`contextaction` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `contextaction` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "contextaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-ctxexpensegate",
+      "canonical": "context-ctx implementation surface for ctxexpensegate",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`ctxexpensegate` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `ctxexpensegate` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext",
+        "coverage-9678-guard-gate-ctxexpensegate"
+      ],
+      "aliases": [],
+      "grounding": "ctxexpensegate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-contextreason",
+      "canonical": "context-ctx implementation surface for contextreason",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`contextreason` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `contextreason` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "contextreason",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-contextstate",
+      "canonical": "context-ctx implementation surface for contextstate",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`contextstate` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `contextstate` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "contextstate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-contextstatussignals",
+      "canonical": "context-ctx implementation surface for contextstatussignals",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`contextstatussignals` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `contextstatussignals` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "contextstatussignals",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-ctxexpensethresholdor",
+      "canonical": "context-ctx implementation surface for ctxexpensethresholdor",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`ctxexpensethresholdor` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `ctxexpensethresholdor` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "ctxexpensethresholdor",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-longcontextretrieval",
+      "canonical": "context-ctx implementation surface for longcontextretrieval",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`longcontextretrieval` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `longcontextretrieval` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "longcontextretrieval",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-context-ctx-releasecontext",
+      "canonical": "context-ctx implementation surface for releasecontext",
+      "family": "context-ctx",
+      "kind": "symbol",
+      "definition": "`releasecontext` is a concrete tree symbol classified in the `context-ctx` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `releasecontext` for this exact implementation surface. Unlike `x2-context-ctx-commandcontext`, it names this distinct symbol; unlike `context-ctx`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-context-ctx-commandcontext"
+      ],
+      "aliases": [],
+      "grounding": "releasecontext",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-context-ctx.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-emitjsonorrender",
+      "canonical": "render-materialize implementation surface for emitjsonorrender",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`emitjsonorrender` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `emitjsonorrender` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "emitjsonorrender",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-emitjsonorrenderprefixed",
+      "canonical": "render-materialize implementation surface for emitjsonorrenderprefixed",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`emitjsonorrenderprefixed` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `emitjsonorrenderprefixed` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "emitjsonorrenderprefixed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-renderjsonorhuman",
+      "canonical": "render-materialize implementation surface for renderjsonorhuman",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderjsonorhuman` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `renderjsonorhuman` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderjsonorhuman",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-renderarchitecturereport",
+      "canonical": "render-materialize implementation surface for renderarchitecturereport",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderarchitecturereport` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `renderarchitecturereport` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderarchitecturereport",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-rendercurrentmarkdown",
+      "canonical": "render-materialize implementation surface for rendercurrentmarkdown",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`rendercurrentmarkdown` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `rendercurrentmarkdown` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "rendercurrentmarkdown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-rendergardentick",
+      "canonical": "render-materialize implementation surface for rendergardentick",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`rendergardentick` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `rendergardentick` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "rendergardentick",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-renderinventoryhuman",
+      "canonical": "render-materialize implementation surface for renderinventoryhuman",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderinventoryhuman` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `renderinventoryhuman` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderinventoryhuman",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-renderinventorymapmarkdown",
+      "canonical": "render-materialize implementation surface for renderinventorymapmarkdown",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderinventorymapmarkdown` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `renderinventorymapmarkdown` for this exact implementation surface. Unlike `x2-render-materialize-renderer`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "renderinventorymapmarkdown",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-kernelerr",
+      "canonical": "gateway-engine implementation surface for kernelerr",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`kernelerr` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `kernelerr` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "kernelerr",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-enginekind",
+      "canonical": "gateway-engine implementation surface for enginekind",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`enginekind` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `enginekind` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "enginekind",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-enginenative",
+      "canonical": "gateway-engine implementation surface for enginenative",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`enginenative` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `enginenative` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "enginenative",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-fakinkernelqwenq4kprefillchunktokens",
+      "canonical": "gateway-engine implementation surface for fakinkernelqwenq4kprefillchunktokens",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`fakinkernelqwenq4kprefillchunktokens` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `fakinkernelqwenq4kprefillchunktokens` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "fakinkernelqwenq4kprefillchunktokens",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-inkernelmodelbutchatismock",
+      "canonical": "gateway-engine implementation surface for inkernelmodelbutchatismock",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`inkernelmodelbutchatismock` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `inkernelmodelbutchatismock` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "inkernelmodelbutchatismock",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-kernelscompilation",
+      "canonical": "gateway-engine implementation surface for kernelscompilation",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`kernelscompilation` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `kernelscompilation` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "kernelscompilation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-turningressengine",
+      "canonical": "gateway-engine implementation surface for turningressengine",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`turningressengine` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `turningressengine` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "turningressengine",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-witness-proof-witnesspolicy",
+      "canonical": "witness-proof implementation surface for witnesspolicy",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`witnesspolicy` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `witnesspolicy` for this exact implementation surface. Unlike `x2-witness-proof-witnessstatus`, it names this distinct symbol; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus",
+        "coverage-9678-policy-capability-witnesspolicy"
+      ],
+      "aliases": [],
+      "grounding": "witnesspolicy",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-witness-proof-witnessstate",
+      "canonical": "witness-proof implementation surface for witnessstate",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`witnessstate` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `witnessstate` for this exact implementation surface. Unlike `x2-witness-proof-witnessstatus`, it names this distinct symbol; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "witnessstate",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-witness-proof-twitnessed",
+      "canonical": "witness-proof implementation surface for twitnessed",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`twitnessed` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `twitnessed` for this exact implementation surface. Unlike `x2-witness-proof-witnessstatus`, it names this distinct symbol; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus",
+        "cov-debt250-witness-proof-twitness"
+      ],
+      "aliases": [],
+      "grounding": "twitnessed",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-witness-proof-usefulwitnesses",
+      "canonical": "witness-proof implementation surface for usefulwitnesses",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`usefulwitnesses` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `usefulwitnesses` for this exact implementation surface. Unlike `x2-witness-proof-witnessstatus`, it names this distinct symbol; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "usefulwitnesses",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-witness-proof-witnessprocess",
+      "canonical": "witness-proof implementation surface for witnessprocess",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`witnessprocess` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `witnessprocess` for this exact implementation surface. Unlike `x2-witness-proof-witnessstatus`, it names this distinct symbol; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "witnessprocess",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-witness-proof-witnessrecords",
+      "canonical": "witness-proof implementation surface for witnessrecords",
+      "family": "witness-proof",
+      "kind": "symbol",
+      "definition": "`witnessrecords` is a concrete tree symbol classified in the `witness-proof` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `witnessrecords` for this exact implementation surface. Unlike `x2-witness-proof-witnessstatus`, it names this distinct symbol; unlike `witness-proof`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-witness-proof-witnessstatus"
+      ],
+      "aliases": [],
+      "grounding": "witnessrecords",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-witness-proof.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-loop-codexloophookhardenedenv",
+      "canonical": "loop implementation surface for codexloophookhardenedenv",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`codexloophookhardenedenv` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `codexloophookhardenedenv` for this exact implementation surface. Unlike `loop-agent-goal-loop-seam`, it names this distinct symbol; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "codexloophookhardenedenv",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-loop-codexloophookoverrideenabled",
+      "canonical": "loop implementation surface for codexloophookoverrideenabled",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`codexloophookoverrideenabled` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `codexloophookoverrideenabled` for this exact implementation surface. Unlike `loop-agent-goal-loop-seam`, it names this distinct symbol; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "codexloophookoverrideenabled",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-loop-fakqwen35prefilltokenloop",
+      "canonical": "loop implementation surface for fakqwen35prefilltokenloop",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`fakqwen35prefilltokenloop` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `fakqwen35prefilltokenloop` for this exact implementation surface. Unlike `loop-agent-goal-loop-seam`, it names this distinct symbol; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "fakqwen35prefilltokenloop",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-loop-loopcheckneedsaction",
+      "canonical": "loop implementation surface for loopcheckneedsaction",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`loopcheckneedsaction` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `loopcheckneedsaction` for this exact implementation surface. Unlike `loop-agent-goal-loop-seam`, it names this distinct symbol; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "loopcheckneedsaction",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-loop-loopspec",
+      "canonical": "loop implementation surface for loopspec",
+      "family": "loop",
+      "kind": "symbol",
+      "definition": "`loopspec` is a concrete tree symbol classified in the `loop` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `loopspec` for this exact implementation surface. Unlike `loop-agent-goal-loop-seam`, it names this distinct symbol; unlike `loop`, it is not the umbrella domain.",
+      "distinct_from": [
+        "loop-agent-goal-loop-seam"
+      ],
+      "aliases": [],
+      "grounding": "loopspec",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-loop.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-support-maturity-upstreamunsupported",
+      "canonical": "support-maturity implementation surface for upstreamunsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`upstreamunsupported` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `upstreamunsupported` for this exact implementation surface. Unlike `kvprefixreusesupported`, it names this distinct symbol; unlike `support-maturity`, it is not the umbrella domain.",
+      "distinct_from": [
+        "kvprefixreusesupported"
+      ],
+      "aliases": [],
+      "grounding": "upstreamunsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-support-maturity-coverageincomplete",
+      "canonical": "support-maturity implementation surface for coverageincomplete",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`coverageincomplete` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `coverageincomplete` for this exact implementation surface. Unlike `kvprefixreusesupported`, it names this distinct symbol; unlike `support-maturity`, it is not the umbrella domain.",
+      "distinct_from": [
+        "kvprefixreusesupported"
+      ],
+      "aliases": [],
+      "grounding": "coverageincomplete",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-support-maturity-bailupstreamunsupported",
+      "canonical": "support-maturity implementation surface for bailupstreamunsupported",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`bailupstreamunsupported` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `bailupstreamunsupported` for this exact implementation surface. Unlike `kvprefixreusesupported`, it names this distinct symbol; unlike `support-maturity`, it is not the umbrella domain.",
+      "distinct_from": [
+        "kvprefixreusesupported"
+      ],
+      "aliases": [],
+      "grounding": "bailupstreamunsupported",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-support-maturity-scopecoveragepct",
+      "canonical": "support-maturity implementation surface for scopecoveragepct",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`scopecoveragepct` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `scopecoveragepct` for this exact implementation surface. Unlike `kvprefixreusesupported`, it names this distinct symbol; unlike `support-maturity`, it is not the umbrella domain.",
+      "distinct_from": [
+        "kvprefixreusesupported"
+      ],
+      "aliases": [],
+      "grounding": "scopecoveragepct",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-support-maturity-unsupportederror",
+      "canonical": "support-maturity implementation surface for unsupportederror",
+      "family": "support-maturity",
+      "kind": "symbol",
+      "definition": "`unsupportederror` is a concrete tree symbol classified in the `support-maturity` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `unsupportederror` for this exact implementation surface. Unlike `kvprefixreusesupported`, it names this distinct symbol; unlike `support-maturity`, it is not the umbrella domain.",
+      "distinct_from": [
+        "kvprefixreusesupported"
+      ],
+      "aliases": [],
+      "grounding": "unsupportederror",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-support-maturity.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-attention-accumulateattentiongroup",
+      "canonical": "attention implementation surface for accumulateattentiongroup",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "`accumulateattentiongroup` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `accumulateattentiongroup` for this exact implementation surface. Unlike `x-attention-attentionneeded-taskgraph`, it names this distinct symbol; unlike `attention`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-attention-attentionneeded-taskgraph"
+      ],
+      "aliases": [],
+      "grounding": "accumulateattentiongroup",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-attention-accumulatepackedattentionvalues3",
+      "canonical": "attention implementation surface for accumulatepackedattentionvalues3",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "`accumulatepackedattentionvalues3` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `accumulatepackedattentionvalues3` for this exact implementation surface. Unlike `x-attention-attentionneeded-taskgraph`, it names this distinct symbol; unlike `attention`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-attention-attentionneeded-taskgraph"
+      ],
+      "aliases": [],
+      "grounding": "accumulatepackedattentionvalues3",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-attention-fakprefillnoattn",
+      "canonical": "attention implementation surface for fakprefillnoattn",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "`fakprefillnoattn` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `fakprefillnoattn` for this exact implementation surface. Unlike `x-attention-attentionneeded-taskgraph`, it names this distinct symbol; unlike `attention`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-attention-attentionneeded-taskgraph"
+      ],
+      "aliases": [],
+      "grounding": "fakprefillnoattn",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-attention-fakqattngqa",
+      "canonical": "attention implementation surface for fakqattngqa",
+      "family": "attention",
+      "kind": "symbol",
+      "definition": "`fakqattngqa` is a concrete tree symbol classified in the `attention` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `fakqattngqa` for this exact implementation surface. Unlike `x-attention-attentionneeded-taskgraph`, it names this distinct symbol; unlike `attention`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x-attention-attentionneeded-taskgraph"
+      ],
+      "aliases": [],
+      "grounding": "fakqattngqa",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-attention.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-score-debt-emitscorecardcomparison",
+      "canonical": "score-debt implementation surface for emitscorecardcomparison",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "`emitscorecardcomparison` is a concrete tree symbol classified in the `score-debt` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `emitscorecardcomparison` for this exact implementation surface. Unlike `x2-score-debt-debtintegers`, it names this distinct symbol; unlike `score-debt`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "emitscorecardcomparison",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-score-debt-collecttokendefaultsscorecard",
+      "canonical": "score-debt implementation surface for collecttokendefaultsscorecard",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "`collecttokendefaultsscorecard` is a concrete tree symbol classified in the `score-debt` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `collecttokendefaultsscorecard` for this exact implementation surface. Unlike `x2-score-debt-debtintegers`, it names this distinct symbol; unlike `score-debt`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "collecttokendefaultsscorecard",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-score-debt-harddebt",
+      "canonical": "score-debt implementation surface for harddebt",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "`harddebt` is a concrete tree symbol classified in the `score-debt` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `harddebt` for this exact implementation surface. Unlike `x2-score-debt-debtintegers`, it names this distinct symbol; unlike `score-debt`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "harddebt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-score-debt-standardscorecarddoc",
+      "canonical": "score-debt implementation surface for standardscorecarddoc",
+      "family": "score-debt",
+      "kind": "symbol",
+      "definition": "`standardscorecarddoc` is a concrete tree symbol classified in the `score-debt` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `standardscorecarddoc` for this exact implementation surface. Unlike `x2-score-debt-debtintegers`, it names this distinct symbol; unlike `score-debt`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-score-debt-debtintegers"
+      ],
+      "aliases": [],
+      "grounding": "standardscorecarddoc",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-score-debt.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-decision-decisionrelation",
+      "canonical": "decision implementation surface for decisionrelation",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "`decisionrelation` is a concrete tree symbol classified in the `decision` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `decisionrelation` for this exact implementation surface. Unlike `x2-decision-decisionjournal`, it names this distinct symbol; unlike `decision`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-decision-decisionjournal"
+      ],
+      "aliases": [],
+      "grounding": "decisionrelation",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-decision.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-decision-observeroutedecision",
+      "canonical": "decision implementation surface for observeroutedecision",
+      "family": "decision",
+      "kind": "symbol",
+      "definition": "`observeroutedecision` is a concrete tree symbol classified in the `decision` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `observeroutedecision` for this exact implementation surface. Unlike `x2-decision-decisionjournal`, it names this distinct symbol; unlike `decision`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-decision-decisionjournal"
+      ],
+      "aliases": [],
+      "grounding": "observeroutedecision",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-decision.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-layout-inputlayout",
+      "canonical": "layout implementation surface for inputlayout",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "`inputlayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `inputlayout` for this exact implementation surface. Unlike `c729-gguf-arch-stores-hf-rotary-layout`, it names this distinct symbol; unlike `layout`, it is not the umbrella domain.",
+      "distinct_from": [
+        "c729-gguf-arch-stores-hf-rotary-layout"
+      ],
+      "aliases": [],
+      "grounding": "inputlayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-layout-refusalunknownnativelayout",
+      "canonical": "layout implementation surface for refusalunknownnativelayout",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "`refusalunknownnativelayout` is a concrete tree symbol classified in the `layout` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `refusalunknownnativelayout` for this exact implementation surface. Unlike `c729-gguf-arch-stores-hf-rotary-layout`, it names this distinct symbol; unlike `layout`, it is not the umbrella domain.",
+      "distinct_from": [
+        "c729-gguf-arch-stores-hf-rotary-layout"
+      ],
+      "aliases": [],
+      "grounding": "refusalunknownnativelayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-layout.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-pool-certpool",
+      "canonical": "pool implementation surface for certpool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "`certpool` is a concrete tree symbol classified in the `pool` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `certpool` for this exact implementation surface. Unlike `x2-pool-pagedkvpool`, it names this distinct symbol; unlike `pool`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [],
+      "grounding": "certpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-pool-systemcertpool",
+      "canonical": "pool implementation surface for systemcertpool",
+      "family": "pool",
+      "kind": "symbol",
+      "definition": "`systemcertpool` is a concrete tree symbol classified in the `pool` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `systemcertpool` for this exact implementation surface. Unlike `x2-pool-pagedkvpool`, it names this distinct symbol; unlike `pool`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-pool-pagedkvpool"
+      ],
+      "aliases": [],
+      "grounding": "systemcertpool",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "",
+      "parent": "",
+      "verdict": "defined",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-gateway-engine-inkernelbatchreceipt",
+      "canonical": "gateway-engine implementation surface for inkernelbatchreceipt",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "`inkernelbatchreceipt` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `inkernelbatchreceipt` for this exact implementation surface. Unlike `x2-gateway-engine-enginecallsavoided`, it names this distinct symbol; unlike `gateway-engine`, it is not the umbrella domain.",
+      "distinct_from": [
+        "x2-gateway-engine-enginecallsavoided"
+      ],
+      "aliases": [],
+      "grounding": "inkernelbatchreceipt",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-gateway-engine.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-cache-cacheidentity",
+      "canonical": "cache implementation surface for cacheidentity",
+      "family": "cache",
+      "kind": "symbol",
+      "definition": "`cacheidentity` is a concrete tree symbol classified in the `cache` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `cacheidentity` for this exact implementation surface. Unlike `coverage-9678-cache-cacheintent`, it names this distinct symbol; unlike `cache`, it is not the umbrella domain.",
+      "distinct_from": [
+        "coverage-9678-cache-cacheintent"
+      ],
+      "aliases": [],
+      "grounding": "cacheidentity",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-cache.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    },
+    {
+      "id": "coverage-9678-render-materialize-renderlocked",
+      "canonical": "render-materialize implementation surface for renderlocked",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "`renderlocked` is a concrete tree symbol classified in the `render-materialize` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella.",
+      "distinction": "Use `renderlocked` for this exact implementation surface. Unlike `coverage-9678-render-materialize-renderjsonorhuman`, it names this distinct symbol; unlike `render-materialize`, it is not the umbrella domain.",
+      "distinct_from": [
+        "coverage-9678-render-materialize-renderjsonorhuman"
+      ],
+      "aliases": [],
+      "grounding": "renderlocked",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/concepts/disambiguation-render-materialize.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}
