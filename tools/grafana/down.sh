@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# down.sh — tear down everything up.sh started: the Docker stack + the host-side
-# metrics sources (fak serve, fleet_bottleneck.py).
+# down.sh — tear down the Docker stack or owned native processes, plus host-side
+# metrics sources started by up.sh. Adopted processes are never stopped.
 #
 # Usage:
 #   tools/grafana/down.sh          # stop containers + host processes (keep data volumes)
-#   tools/grafana/down.sh --purge  # also remove Prometheus/Grafana data volumes
+#   tools/grafana/down.sh --purge  # also remove Docker Prometheus/Grafana data volumes
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -18,12 +18,15 @@ find_docker() {
   for c in /Applications/Docker.app/Contents/Resources/bin/docker "$HOME/.docker/bin/docker"; do
     [ -x "$c" ] && { echo "$c"; return; }
   done
-  echo docker
+  return 1
 }
-DOCKER="$(find_docker)"
+DOCKER="$(find_docker || true)"
+STACK_MODE="$(cat "$RUN_DIR/stack.mode" 2>/dev/null || true)"
 
 # Docker stack
-if "$DOCKER" info >/dev/null 2>&1; then
+if [ "$STACK_MODE" = native ]; then
+  log "native Homebrew stack recorded — skipping container teardown."
+elif [ -n "$DOCKER" ] && "$DOCKER" info >/dev/null 2>&1; then
   if [ "${1:-}" = "--purge" ]; then
     log "docker compose down -v (removing data volumes)…"
     ( cd "$GRAFANA_DIR" && "$DOCKER" compose down -v )
@@ -39,11 +42,17 @@ fi
 if [ -d "$RUN_DIR" ]; then
   for pf in "$RUN_DIR"/*.pid; do
     [ -e "$pf" ] || continue
-    pid="$(cat "$pf" 2>/dev/null || true)"
+    pid="$(sed -n 's/^pid=//p' "$pf" 2>/dev/null | head -1)"
+    owner="$(sed -n 's/^owner=//p' "$pf" 2>/dev/null | head -1)"
     name="$(basename "$pf" .pid)"
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      log "stopping $name (pid $pid)…"
-      kill "$pid" 2>/dev/null || true
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+      if [ -n "$owner" ] && [[ "$command_line" == *"fak-grafana-owner=$owner"* ]]; then
+        log "stopping $name (owned pid $pid)…"
+        kill "$pid" 2>/dev/null || true
+      else
+        log "leaving $name (pid $pid) running — ownership was not verified."
+      fi
     fi
     rm -f "$pf"
   done
