@@ -87,8 +87,15 @@ func cmdModelObserve(args []string) {
 }
 
 func runModelObserveBandwidth(args []string) error {
-	if len(args) > 0 && args[0] == "collect" {
-		return runModelObserveBandwidthCollect(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "collect":
+			return runModelObserveBandwidthCollect(args[1:])
+		case "numa-import":
+			return runModelObserveNUMAImport(args[1:])
+		case "numa-topology":
+			return runModelObserveNUMATopology(args[1:])
+		}
 	}
 	fs := flag.NewFlagSet("model-observe bandwidth", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -131,6 +138,63 @@ func runModelObserveBandwidth(args []string) error {
 		enc.SetIndent("", "  ")
 	}
 	return enc.Encode(report)
+}
+func runModelObserveNUMAImport(args []string) error {
+	fs := flag.NewFlagSet("model-observe bandwidth numa-import", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	input := fs.String("input", "", "read a fak-numa-roofline-capture/1 artifact")
+	output := fs.String("output", "", "write the normalized matrix JSON (default: stdout)")
+	pretty := fs.Bool("pretty", true, "indent JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *input == "" {
+		return fmt.Errorf("--input is required")
+	}
+	in, err := os.Open(*input)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	matrix, err := modelperfobs.ImportNUMARooflineCapture(in)
+	if err != nil {
+		return err
+	}
+	return writeModelObserveJSON(*output, *pretty, matrix)
+}
+
+func runModelObserveNUMATopology(args []string) error {
+	fs := flag.NewFlagSet("model-observe bandwidth numa-topology", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	output := fs.String("output", "", "write discovered Linux NUMA topology JSON (default: stdout)")
+	pretty := fs.Bool("pretty", true, "indent JSON output")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	topology, err := modelperfobs.DiscoverNUMATopology()
+	if err != nil {
+		return err
+	}
+	return writeModelObserveJSON(*output, *pretty, topology)
+}
+
+func writeModelObserveJSON(output string, pretty bool, value any) error {
+	var w io.Writer = os.Stdout
+	var out *os.File
+	if output != "" {
+		var err error
+		out, err = os.Create(output)
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		w = out
+	}
+	enc := json.NewEncoder(w)
+	if pretty {
+		enc.SetIndent("", "  ")
+	}
+	return enc.Encode(value)
 }
 func runModelObserveBandwidthCollect(args []string) error {
 	fs := flag.NewFlagSet("model-observe bandwidth collect", flag.ContinueOnError)
@@ -510,6 +574,8 @@ func modelObserveUsage() string {
 		"       fak model-observe report --input FILE [--format md|json]\n" +
 		"       fak model-observe bandwidth --input FILE [--output FILE --pretty=true]\n" +
 		"       fak model-observe bandwidth collect --measure-host-roofline [--roofline-sweep --roofline-threads N --roofline-knee-threshold 0.9]\n" +
+		"       fak model-observe bandwidth numa-topology [--output FILE --pretty=true]\n" +
+		"       fak model-observe bandwidth numa-import --input FILE [--output FILE --pretty=true]\n" +
 		"       fak model-observe bandwidth collect --nvidia-ncu-csv FILE --device DEVICE --capture-start RFC3339 --capture-end RFC3339 --phase PHASE --shape SHAPE [--device-roofline-gb-s N]\n" +
 		"       fak model-observe bandwidth collect --host-counter-import FILE --host-counter-provider PROVIDER --host-counter-scope system|socket|controller [--host-counter-scope-id ID --host-counter-format FORMAT --capture-start RFC3339 --capture-end RFC3339]\n" +
 		"       fak model-observe bandwidth collect --apple-memory-import FILE --apple-memory-provider PROVIDER --apple-memory-provider-version VERSION --apple-memory-scope system|package [--apple-memory-format generic-json --apple-memory-interval DURATION --capture-start RFC3339 --capture-end RFC3339]\n" +
