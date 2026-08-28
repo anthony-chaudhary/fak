@@ -11,7 +11,26 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/internal/abi"
+	"github.com/anthony-chaudhary/fak/internal/engine"
 )
+
+func TestRichDashboardServerSurvivesPriorABIReset(t *testing.T) {
+	abi.ResetForTest()
+	abi.RegisterRegionBackend(inlineBackend{})
+	abi.RegisterEngine("test", echoEngine{})
+	t.Cleanup(func() { abi.RegisterEngine("mock", engine.MockEngine) })
+
+	m := newRichDashboardManager(RichDashboardConfig{})
+	defer m.close()
+	s := testServerWithRichDashboards(t, m)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("dashboard after ABI reset = %d, want 200", rec.Code)
+	}
+}
 
 func TestRichDashboardDormantUntilFirstClickThenRedirects(t *testing.T) {
 	m := newRichDashboardManager(RichDashboardConfig{})
@@ -198,6 +217,10 @@ func TestRichDashboardCloseStopsOnlyOwnedStack(t *testing.T) {
 
 func testServerWithRichDashboards(t *testing.T, m *richDashboardManager) *Server {
 	t.Helper()
+	// Tests in this package assemble isolated ABI registries with ResetForTest.
+	// Re-register the dashboard fixture's dependency at its construction seam so
+	// test-file and execution order cannot decide whether "mock" is available.
+	abi.RegisterEngine("mock", engine.MockEngine)
 	s, err := New(Config{EngineID: "mock", Model: "m", Provider: "openai"})
 	if err != nil {
 		t.Fatal(err)
