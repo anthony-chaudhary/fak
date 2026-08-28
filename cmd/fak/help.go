@@ -45,7 +45,6 @@ var overviewGroups = []struct {
 	entries []overviewEntry
 }{
 	{"start here", []overviewEntry{
-		{"up", "boot the unified agent runtime, gateway, policy, metrics, and session API"},
 		{"manage", "wrap an agent harness: manage every tool call in-process ('fak m'; legacy: guard)"},
 		{"serve", "the OpenAI-compatible gateway in front of a local or remote model"},
 		{"agent", "the offline proof: run one managed-agent task end to end ('fak agent --offline')"},
@@ -113,10 +112,6 @@ func cmdHelp(args []string) {
 	case "--full", "full":
 		usageWall(os.Stdout)
 	default:
-		if strings.EqualFold(args[0], "up") {
-			usageUp(os.Stdout)
-			return
-		}
 		if strings.EqualFold(args[0], "serve") {
 			topic := ""
 			if len(args) > 1 {
@@ -345,18 +340,4 @@ func suggestVerbSpelling(tok string) string {
 		return "dev " + s
 	}
 	return s
-}
-
-func usageUp(w io.Writer) {
-	fmt.Fprintln(w, `Usage: fak up [serve flags]
-
-Boot the all-in-one fak deployable runtime. This is a semantic product entry
-point over fak serve: every serve flag and behavior is preserved, including
-offline mock, --gguf, upstream/proxy placement, --policy, --require-key-env,
-metrics, and journal/session-state configuration.
-
-Readiness: GET /readyz (503 until startup plus the existing health gates pass).
-Agent sessions: POST /v1/fak/agent/sessions (NDJSON through session.end).
-
-Use fak serve --help for the complete shared flag reference.`)
 }

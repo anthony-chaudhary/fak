@@ -357,8 +357,6 @@ func dispatchCoreVerbB(name string, args []string) bool {
 		cmdMicroBench(args)
 	case "token-profile":
 		cmdTokenProfile(args)
-	case "up":
-		cmdUp(args)
 	case "serve":
 		cmdServe(args)
 	case "serve-wiring":
