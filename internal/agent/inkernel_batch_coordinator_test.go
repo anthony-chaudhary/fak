@@ -10,6 +10,22 @@ import (
 )
 
 func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
+	restoreProbe := installQwenSharedReceiptProbeForTest(func(bs *model.BatchSession, ids []int, active []bool) ([][]float32, int, int64, bool) {
+		out := make([][]float32, len(ids))
+		lanes := 0
+		for i, on := range active {
+			if !on {
+				continue
+			}
+			out[i] = bs.Seqs[i].Step(ids[i])
+			lanes++
+		}
+		if lanes < 2 {
+			return out, 0, 0, true
+		}
+		return out, 1, int64(lanes), true
+	})
+	defer restoreProbe()
 	cfg := tinyConcurrencyConfig()
 	cfg.EOSTokenID = -1
 	cfg.LayerTypes = []string{"linear_attention"}
@@ -24,6 +40,8 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 		p := NewInKernelPlanner(m, loadProbeTok(t), "synthetic-qwen-coalesce", true, nil, false)
 		p.maxNew = 6
 		p.batchDecode = enabled
+		// Synthetic tests install a shared-panel hook; production additionally gates on Metal.
+		p.metal = enabled
 		return p
 	}
 	messages := [][]Message{
@@ -47,6 +65,14 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	var mu sync.Mutex
 	var batches []int
 	p.coalesceBatchHook = func(n int) { mu.Lock(); batches = append(batches, n); mu.Unlock() }
+	var sharedPanels int
+	var sharedMACs int64
+	p.coalesceSharedHook = func(panels int, macs int64) {
+		mu.Lock()
+		sharedPanels += panels
+		sharedMACs += macs
+		mu.Unlock()
+	}
 	type answer struct {
 		c   *Completion
 		err error
@@ -83,6 +109,9 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	mu.Unlock()
 	if len(observed) == 0 || observed[0] < 2 {
 		t.Fatalf("observed batches %v, want a forward with B>=2", observed)
+	}
+	if sharedPanels == 0 || sharedMACs == 0 {
+		t.Fatalf("B>=2 was admitted but no shared model work executed: panels=%d macs=%d", sharedPanels, sharedMACs)
 	}
 
 	// Cancellation is request-scoped: a canceled ready lane retires while its peer

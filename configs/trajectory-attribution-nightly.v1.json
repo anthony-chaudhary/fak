@@ -1,0 +1,50 @@
+{
+  "schema": "fak-trajectory-attribution-budget/1",
+  "version": "2026-08-27.3",
+  "window": "24h",
+  "max_files_per_source": 1024,
+  "max_walk_entries_per_source": 200000,
+  "max_subtypes_per_source": 512,
+  "max_bytes_per_file": 67108864,
+  "max_bytes_per_source": 536870912,
+  "max_sample_coordinates": 20,
+  "max_unknown_share": 0.05,
+  "max_duplicate_events": 50,
+  "max_malformed_rows": 0,
+  "max_unmatched_tool_events": 25,
+  "max_schema_drift_signals": 0,
+  "max_bounded_files_omitted": 0,
+  "max_bounded_subtypes_omitted": 0,
+  "known_source_record_types": {
+    "claude": [
+      "assistant",
+      "attachment",
+      "file-history-snapshot",
+      "progress",
+      "queue-operation",
+      "summary",
+      "system",
+      "user"
+    ],
+    "codex": [
+      "compacted",
+      "event_msg:agent_message",
+      "event_msg:item_completed",
+      "event_msg:item_started",
+      "event_msg:task_complete",
+      "event_msg:task_started",
+      "event_msg:token_count",
+      "event_msg:turn_aborted",
+      "event_msg:user_message",
+      "response_item:custom_tool_call",
+      "response_item:custom_tool_call_output",
+      "response_item:function_call",
+      "response_item:function_call_output",
+      "response_item:message",
+      "response_item:reasoning",
+      "response_item:web_search_call",
+      "session_meta",
+      "turn_context"
+    ]
+  }
+}

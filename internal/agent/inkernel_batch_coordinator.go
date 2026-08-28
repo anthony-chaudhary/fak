@@ -3,10 +3,40 @@ package agent
 import (
 	"context"
 	"runtime"
+	"sync"
 	"sync/atomic"
+
+	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
 const inKernelDecodeCohortMax = 8
+
+var qwenSharedReceiptProbe struct {
+	sync.Mutex
+	fn func(*model.BatchSession, []int, []bool) ([][]float32, int, int64, bool)
+}
+
+func installQwenSharedReceiptProbeForTest(fn func(*model.BatchSession, []int, []bool) ([][]float32, int, int64, bool)) func() {
+	qwenSharedReceiptProbe.Lock()
+	old := qwenSharedReceiptProbe.fn
+	qwenSharedReceiptProbe.fn = fn
+	qwenSharedReceiptProbe.Unlock()
+	return func() {
+		qwenSharedReceiptProbe.Lock()
+		qwenSharedReceiptProbe.fn = old
+		qwenSharedReceiptProbe.Unlock()
+	}
+}
+
+func runQwenSharedReceiptProbe(bs *model.BatchSession, ids []int, active []bool) ([][]float32, int, int64, bool) {
+	qwenSharedReceiptProbe.Lock()
+	fn := qwenSharedReceiptProbe.fn
+	qwenSharedReceiptProbe.Unlock()
+	if fn == nil {
+		return nil, 0, 0, false
+	}
+	return fn(bs, ids, active)
+}
 
 type inKernelCoalesceResult struct {
 	result inKernelGenerateResult
@@ -26,7 +56,7 @@ type inKernelCoalesceRequest struct {
 type inKernelCoalesceContextKey struct{}
 
 func (p *InKernelPlanner) coalescesQwenDecode() bool {
-	return p != nil && p.batchDecode && p.q4k && p.m != nil && p.m.Cfg.IsQwen35Hybrid()
+	return p != nil && p.batchDecode && p.q4k && p.metal && p.m != nil && p.m.Cfg.IsQwen35Hybrid()
 }
 
 func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(context.Context) (inKernelGenerateResult, error)) (inKernelGenerateResult, error) {
@@ -116,7 +146,10 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
 		if p.coalesceBatchHook != nil {
 			p.coalesceBatchHook(len(lanes))
 		}
-		inKernelDecodeLanesBatched(context.Background(), lanes, p.m, p.quant)
+		panels, macs := inKernelDecodeLanesBatched(context.Background(), lanes, p.m, p.quant)
+		if p.coalesceSharedHook != nil {
+			p.coalesceSharedHook(panels, macs)
+		}
 	}()
 	for _, req := range prepared {
 		req.proceed <- decodeErr
@@ -134,7 +167,7 @@ func coalescedDecode(ctx context.Context, lane *decodeLane) (bool, error) {
 	if req.decodePass.Add(1) > 1 {
 		// OOM retry stays under the coordinator's device lock, but retries this
 		// request alone after the failed cohort forward has returned.
-		inKernelDecodeLanesBatched(ctx, []*decodeLane{lane}, lane.s.M, lane.s.Quant)
+		_, _ = inKernelDecodeLanesBatched(ctx, []*decodeLane{lane}, lane.s.M, lane.s.Quant)
 		return true, lane.err
 	}
 	req.prepared <- lane

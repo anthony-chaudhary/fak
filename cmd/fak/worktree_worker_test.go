@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -325,21 +326,226 @@ func TestGCJSONShape(t *testing.T) {
 	}
 }
 
-// TestListJSONShape proves `fak worktree worker list` preserves count/paths and
-// includes the lifecycle inventory added by #5994. Empty collections render as []
-// (never null), so JSON consumers can always range both fields.
+// TestListJSONShape pins both list contracts: the no-flag legacy object remains
+// byte-for-byte compatible, while --json adds the versioned typed lifecycle
+// inventory. Empty collections are [] (never null) in both forms.
 func TestListJSONShape(t *testing.T) {
-	empty := worktreeWorkerListOut{Count: 0, Paths: []string{}, Inventory: []workerworktree.InventoryRow{}}
-	b, err := json.Marshal(empty)
+	legacy := worktreeWorkerListOut{Count: 0, Paths: []string{}, Inventory: []workerworktree.InventoryRow{}}
+	b, err := json.Marshal(legacy)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	if string(b) != `{"count":0,"paths":[],"inventory":[]}` {
-		t.Fatalf("empty list json = %s, want empty paths and inventory arrays", b)
+		t.Fatalf("legacy list json = %s, want unchanged empty paths/inventory arrays", b)
 	}
 	got := mustKeys(t, worktreeWorkerListOut{Count: 2, Paths: []string{"/a", "/b"}, Inventory: []workerworktree.InventoryRow{}}, "count", "paths", "inventory")
 	if got["count"].(float64) != 2 {
 		t.Fatalf("count = %v, want 2", got["count"])
+	}
+
+	typed := worktreeWorkerLifecycleOut{
+		Schema:    worktreeWorkerLifecycleSchema,
+		Count:     0,
+		Paths:     []string{},
+		Inventory: []worktreeWorkerLifecycleRow{},
+	}
+	b, err = json.Marshal(typed)
+	if err != nil {
+		t.Fatalf("marshal typed: %v", err)
+	}
+	if string(b) != `{"schema":"fak-worker-worktree-lifecycle/1","count":0,"paths":[],"inventory":[]}` {
+		t.Fatalf("typed list json = %s", b)
+	}
+}
+
+func TestWorktreeWorkerListJSONCommandUsesRegisteredEvidence(t *testing.T) {
+	repo, worktree, base := newSingleReapFixture(t)
+	read, write, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = write
+	worktreeWorkerList([]string{"--root", repo, "--json"})
+	os.Stdout = oldStdout
+	if err := write.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := read.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var got worktreeWorkerLifecycleOut
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &got); err != nil {
+		t.Fatalf("decode list --json: %v; output=%q", err, raw)
+	}
+	if got.Schema != worktreeWorkerLifecycleSchema || got.Count != 1 ||
+		!reflect.DeepEqual(got.Paths, []string{worktree}) || len(got.Inventory) != 1 {
+		t.Fatalf("list --json header = %+v", got)
+	}
+	row := got.Inventory[0]
+	if row.Path != worktree || row.HeadSHA != base || row.BaseSHA != base {
+		t.Fatalf("revision association = %+v, want path=%q head/base=%q", row, worktree, base)
+	}
+	if row.Association.State != worktreeEvidenceAssociated ||
+		row.Association.OwnerPID != os.Getpid() ||
+		row.Association.LeaseID != "resolve-cmd" ||
+		row.Association.Lane != "cmd" {
+		t.Fatalf("owner association = %+v", row.Association)
+	}
+	if row.Liveness.Owner != worktreeEvidenceLive ||
+		row.Liveness.Lease != worktreeEvidenceReleased ||
+		row.Cleanliness.State != worktreeEvidenceClean ||
+		row.Lifecycle != worktreeLifecycleReady ||
+		row.ReapReadiness.Reapable ||
+		row.ReapReadiness.Reason != "OWNER_LIVE" {
+		t.Fatalf("live clean worktree lifecycle = %+v", row)
+	}
+}
+
+func TestWorktreeWorkerLifecycleInventoryDistinguishesSafeStates(t *testing.T) {
+	now := time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	path := func(lane, suffix string) string {
+		return filepath.Join(root, "fak-worker-wt-"+lane+"-"+suffix)
+	}
+	ready := path("ready", "aaaaaaaaaaaa")
+	retained := path("retained", "bbbbbbbbbbbb")
+	cold := path("cold", "cccccccccccc")
+	dirty := path("dirty", "dddddddddddd")
+	malformed := path("malformed", "eeeeeeeeeeee")
+
+	stamps := map[string]workerworktree.OwnerStamp{
+		ready:    {Schema: worktreeOwnerStampSchema, PID: 101, LeaseID: "resolve-ready", CreatedAt: now},
+		retained: {Schema: worktreeOwnerStampSchema, PID: 202, LeaseID: "resolve-retained", CreatedAt: now},
+		cold:     {Schema: worktreeOwnerStampSchema, PID: 303, LeaseID: "resolve-cold", CreatedAt: now},
+		dirty:    {Schema: worktreeOwnerStampSchema, PID: 404, LeaseID: "resolve-dirty", CreatedAt: now},
+	}
+	ownerLive := map[int]bool{101: true}
+	leaseLive := map[string]bool{"resolve-ready": true, "resolve-retained": true}
+	inspections := map[string]worktreeWorkerRevisionEvidence{
+		ready:    {HeadSHA: "head-ready", BaseSHA: "base-ready", Cleanliness: worktreeEvidenceClean, DirtyPaths: []string{}},
+		retained: {HeadSHA: "head-retained", BaseSHA: "base-retained", Cleanliness: worktreeEvidenceClean, DirtyPaths: []string{}},
+		cold:     {HeadSHA: "head-cold", BaseSHA: "base-cold", Cleanliness: worktreeEvidenceClean, DirtyPaths: []string{}},
+		dirty:    {HeadSHA: "head-dirty", BaseSHA: "base-dirty", Cleanliness: worktreeEvidenceDirty, DirtyPaths: []string{"z.go", "a.go"}},
+		malformed: {
+			HeadSHA: "head-malformed", BaseSHA: "base-malformed",
+			Cleanliness: worktreeEvidenceClean, DirtyPaths: []string{},
+		},
+	}
+	rows := worktreeWorkerLifecycleInventory(root,
+		[]string{malformed, dirty, cold, retained, ready},
+		worktreeWorkerLifecycleProbes{
+			ReadOwner: func(path string) (workerworktree.OwnerStamp, error) {
+				if path == malformed {
+					return workerworktree.OwnerStamp{}, os.ErrInvalid
+				}
+				return stamps[path], nil
+			},
+			ProcessAlive: func(pid int) (bool, error) { return ownerLive[pid], nil },
+			LeaseLive:    func(id string) (bool, error) { return leaseLive[id], nil },
+			Inspect: func(_, path string) (worktreeWorkerRevisionEvidence, error) {
+				return inspections[path], nil
+			},
+		})
+	if len(rows) != 5 {
+		t.Fatalf("rows = %d, want 5: %+v", len(rows), rows)
+	}
+	byPath := map[string]worktreeWorkerLifecycleRow{}
+	for _, row := range rows {
+		byPath[row.Path] = row
+	}
+	assert := func(path string, lifecycle worktreeWorkerLifecycleState, reapable bool, reason string) {
+		t.Helper()
+		row := byPath[path]
+		if row.Lifecycle != lifecycle || row.ReapReadiness.Reapable != reapable ||
+			row.ReapReadiness.Reason != reason {
+			t.Fatalf("%s row = %+v, want lifecycle=%s reapable=%v reason=%s",
+				filepath.Base(path), row, lifecycle, reapable, reason)
+		}
+	}
+	assert(ready, worktreeLifecycleReady, false, "OWNER_LIVE")
+	assert(retained, worktreeLifecycleRetained, false, "LEASE_LIVE")
+	assert(cold, worktreeLifecycleCold, true, "COLD_CLEAN")
+	assert(dirty, worktreeLifecycleDirty, false, "WORKTREE_DIRTY")
+	assert(malformed, worktreeLifecycleUnknown, false, "ASSOCIATION_UNKNOWN")
+
+	if got := byPath[ready].Association; got.State != worktreeEvidenceAssociated ||
+		got.OwnerPID != 101 || got.LeaseID != "resolve-ready" || got.Lane != "ready" {
+		t.Fatalf("ready association = %+v", got)
+	}
+	if got := byPath[ready].Liveness; got.Owner != worktreeEvidenceLive || got.Lease != worktreeEvidenceLive {
+		t.Fatalf("ready liveness = %+v", got)
+	}
+	if got := byPath[retained].Liveness; got.Owner != worktreeEvidenceDead || got.Lease != worktreeEvidenceLive {
+		t.Fatalf("retained liveness = %+v", got)
+	}
+	if got := byPath[cold].Liveness; got.Owner != worktreeEvidenceDead || got.Lease != worktreeEvidenceReleased {
+		t.Fatalf("cold liveness = %+v", got)
+	}
+	if got := byPath[dirty].Cleanliness; got.State != worktreeEvidenceDirty ||
+		!reflect.DeepEqual(got.DirtyPaths, []string{"a.go", "z.go"}) {
+		t.Fatalf("dirty cleanliness = %+v", got)
+	}
+	if got := byPath[malformed]; got.Association.State != worktreeEvidenceUnknown ||
+		got.ReapReadiness.Verdict != worktreeKeep {
+		t.Fatalf("malformed evidence overclaimed: %+v", got)
+	}
+	for i := 1; i < len(rows); i++ {
+		if strings.ToLower(filepath.ToSlash(rows[i-1].Path)) > strings.ToLower(filepath.ToSlash(rows[i].Path)) {
+			t.Fatalf("rows are not deterministically sorted: %q before %q", rows[i-1].Path, rows[i].Path)
+		}
+	}
+}
+
+func TestWorktreeWorkerLifecycleUnknownProbeIsNeverReapable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fak-worker-wt-cmd-ffffffffffff")
+	rows := worktreeWorkerLifecycleInventory("repo", []string{path}, worktreeWorkerLifecycleProbes{
+		ReadOwner: func(string) (workerworktree.OwnerStamp, error) {
+			return workerworktree.OwnerStamp{
+				Schema: worktreeOwnerStampSchema, PID: 42, LeaseID: "resolve-cmd",
+				CreatedAt: time.Date(2026, 8, 27, 12, 0, 0, 0, time.UTC),
+			}, nil
+		},
+		ProcessAlive: func(int) (bool, error) { return false, nil },
+		LeaseLive:    func(string) (bool, error) { return false, os.ErrPermission },
+		Inspect: func(_, _ string) (worktreeWorkerRevisionEvidence, error) {
+			return worktreeWorkerRevisionEvidence{
+				HeadSHA: "head", BaseSHA: "base", Cleanliness: worktreeEvidenceClean, DirtyPaths: []string{},
+			}, nil
+		},
+	})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v", rows)
+	}
+	row := rows[0]
+	if row.Lifecycle != worktreeLifecycleUnknown || row.ReapReadiness.Reapable ||
+		row.ReapReadiness.Reason != "LEASE_LIVENESS_UNKNOWN" {
+		t.Fatalf("unknown lease evidence must be kept: %+v", row)
+	}
+}
+
+func TestReadWorktreeWorkerOwnerRejectsMalformedEvidence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fak-worker-wt-cmd-123456789abc")
+	stampPath := workerworktree.OwnerStampPath(path)
+	if err := os.MkdirAll(filepath.Dir(stampPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		`{`,
+		`{"schema":"unknown","pid":1,"lease_id":"resolve-cmd","created_at":"2026-08-27T12:00:00Z"}`,
+		`{"schema":"fak-worker-worktree-owner/1","pid":1,"lease_id":"","created_at":"2026-08-27T12:00:00Z"}`,
+	} {
+		if err := os.WriteFile(stampPath, []byte(raw), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if stamp, err := readWorktreeWorkerOwner(path); err == nil {
+			t.Fatalf("malformed owner stamp accepted: %+v from %s", stamp, raw)
+		}
 	}
 }
 
