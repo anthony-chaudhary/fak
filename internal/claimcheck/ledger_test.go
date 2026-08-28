@@ -1,6 +1,7 @@
 package claimcheck
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -216,5 +217,135 @@ func TestLedgerEmptyIsNotAPass(t *testing.T) {
 	}
 	if rep.Violations[0].Rule != RuleEmpty {
 		t.Errorf("rule = %q, want %q", rep.Violations[0].Rule, RuleEmpty)
+	}
+}
+
+func TestDocumentSetLedgerUsesChildPagesAsAuthority(t *testing.T) {
+	root := t.TempDir()
+	writeLedgerFixture(t, root, "CLAIMS.md", strings.Join([]string{
+		"# Claims",
+		"",
+		"<!-- fak:document-set -->",
+		"",
+		"- [Alpha](docs/claims/alpha.md)",
+		"- [Beta](docs/claims/beta.md)",
+	}, "\n"))
+	writeLedgerFixture(t, root, "docs/claims/alpha.md", "# Alpha\n\n- [SHIPPED] Alpha is real.\n")
+	writeLedgerFixture(t, root, "docs/claims/beta.md", "# Beta\n\n- [STUB] Beta is parked.\n")
+
+	rep, err := LintLedgerFile(filepath.Join(root, "CLAIMS.md"))
+	if err != nil {
+		t.Fatalf("LintLedgerFile: %v", err)
+	}
+	if !rep.OK() {
+		t.Fatalf("tagged document set should lint clean:\n%s", rep.String())
+	}
+	if rep.Capability != 2 || rep.Shipped != 1 || rep.Stub != 1 {
+		t.Fatalf("document-set counts = %+v, want 2 capability lines split 1 shipped/1 stub", rep)
+	}
+	gotPaths := map[string]bool{}
+	for _, line := range rep.Lines {
+		gotPaths[line.Path] = true
+	}
+	for _, want := range []string{"docs/claims/alpha.md", "docs/claims/beta.md"} {
+		if !gotPaths[want] {
+			t.Errorf("parsed paths = %v, missing %s", gotPaths, want)
+		}
+	}
+}
+
+func TestDocumentSetLedgerRejectsBrokenAddressingAndPages(t *testing.T) {
+	cases := []struct {
+		name     string
+		index    string
+		pages    map[string]string
+		wantRule string
+		wantPath string
+		wantLine int
+	}{
+		{
+			name:     "malformed index link",
+			index:    "- [Alpha] docs/claims/alpha.md",
+			wantRule: RuleDocumentSetLinkMalformed,
+			wantPath: "CLAIMS.md",
+			wantLine: 5,
+		},
+		{
+			name:     "missing child page",
+			index:    "- [Alpha](docs/claims/missing.md)",
+			wantRule: RuleDocumentSetLinkMissing,
+			wantPath: "CLAIMS.md",
+			wantLine: 5,
+		},
+		{
+			name:  "duplicate child page",
+			index: "- [Alpha](docs/claims/alpha.md)\n- [Again](docs/claims/alpha.md)",
+			pages: map[string]string{
+				"docs/claims/alpha.md": "- [SHIPPED] Alpha.\n",
+			},
+			wantRule: RuleDocumentSetLinkDuplicate,
+			wantPath: "CLAIMS.md",
+			wantLine: 6,
+		},
+		{
+			name:     "escaping child path",
+			index:    "- [Outside](../outside.md)",
+			wantRule: RuleDocumentSetLinkEscape,
+			wantPath: "CLAIMS.md",
+			wantLine: 5,
+		},
+		{
+			name:  "child page has no claim",
+			index: "- [Alpha](docs/claims/alpha.md)",
+			pages: map[string]string{
+				"docs/claims/alpha.md": "# Alpha\n\nNo claim rows.\n",
+			},
+			wantRule: RuleEmpty,
+			wantPath: "docs/claims/alpha.md",
+			wantLine: 1,
+		},
+		{
+			name:  "child claim has multiple maturity tags",
+			index: "- [Alpha](docs/claims/alpha.md)",
+			pages: map[string]string{
+				"docs/claims/alpha.md": "# Alpha\n\n- [SHIPPED] [STUB] conflicting state.\n",
+			},
+			wantRule: RuleTag,
+			wantPath: "docs/claims/alpha.md",
+			wantLine: 3,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			index := "# Claims\n\n<!-- fak:document-set -->\n\n" + tc.index + "\n"
+			writeLedgerFixture(t, root, "CLAIMS.md", index)
+			for path, body := range tc.pages {
+				writeLedgerFixture(t, root, path, body)
+			}
+
+			rep, err := LintLedgerFile(filepath.Join(root, "CLAIMS.md"))
+			if err != nil {
+				t.Fatalf("LintLedgerFile: %v", err)
+			}
+			for _, violation := range rep.Violations {
+				if violation.Rule == tc.wantRule && violation.Path == tc.wantPath && violation.N == tc.wantLine {
+					return
+				}
+			}
+			t.Fatalf("violations = %+v, want %s at %s:%d", rep.Violations, tc.wantRule, tc.wantPath, tc.wantLine)
+		})
+	}
+}
+
+func writeLedgerFixture(t *testing.T, root, rel, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", rel, err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", rel, err)
 	}
 }

@@ -1,11 +1,13 @@
 package agentreadinessscore
 
 import (
+	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/claimcheck"
 	"github.com/anthony-chaudhary/fak/internal/mathx"
 )
 
@@ -40,11 +42,7 @@ func gather(root string) ([]KPI, map[string]int) {
 	fcFound, fcWhere := findFirstCommand(texts)
 	instFound, instWhere := findInstallOneliner(texts)
 	claimsPresent := present(claimsFile)
-	claimsText := ""
-	if claimsPresent {
-		claimsText = safeRead(root, claimsFile)
-	}
-	untagged := untaggedClaims(claimsText, claimsPresent)
+	claimRecords, claimViolations := readHonestyLedger(root, claimsPresent)
 	recipePresent := map[string]bool{}
 	for _, r := range requiredRecipes {
 		recipePresent[r.label] = anyPresent(present, r.paths)
@@ -149,7 +147,7 @@ func gather(root string) ([]KPI, map[string]int) {
 		kpiFirstCommand(fcFound, fcWhere),
 		kpiFirstCommandRuns(fcrFound, fcrPolicyOK, fcrPolicyRef, fcrNeedsKey),
 		kpiInstallOneliner(instFound, instWhere),
-		kpiHonestyLedger(claimsPresent, untagged),
+		kpiHonestyLedger(claimsPresent, claimRecords, claimViolations),
 		kpiIntegrationRecipes(missingRecipes(recipePresent)),
 		kpiCodexRecipeCurrent(codexRecipeGaps(codexText, codexPresent)),
 		kpiFencedPathsResolve(badPaths),
@@ -193,6 +191,25 @@ func gather(root string) ([]KPI, map[string]int) {
 		"machine_consumable":  jsonTools,
 	}
 	return kpis, facts
+}
+
+func readHonestyLedger(root string, present bool) (int, []string) {
+	if !present {
+		return 0, nil
+	}
+	rep, err := claimcheck.LintLedgerFile(filepath.Join(root, claimsFile))
+	if err != nil {
+		return 0, []string{claimsFile + ": cannot read honesty ledger: " + err.Error()}
+	}
+	defects := make([]string, 0, len(rep.Violations))
+	for _, violation := range rep.Violations {
+		path := violation.Path
+		if path == "" {
+			path = claimsFile
+		}
+		defects = append(defects, fmt.Sprintf("%s:%d: %s: %s", path, violation.N, violation.Rule, violation.Detail))
+	}
+	return rep.Capability, defects
 }
 
 type gatherInputs struct {
