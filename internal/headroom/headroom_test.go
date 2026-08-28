@@ -52,6 +52,17 @@ func TestSelectUnknownRefused(t *testing.T) {
 	}
 }
 
+func TestHeadroomPromotionDecisionKeepsRuntimeNoop(t *testing.T) {
+	withSelected(t, NoopName)
+	fixtures := []LiveComparisonEvidence{validPromotionEvidence(), {Schema: "fak-headroom-live-evidence/1"}}
+	for _, evidence := range fixtures {
+		_ = DecideNativePromotion(evidence)
+		if got := Selected().Name(); got != NoopName {
+			t.Fatalf("runtime selection changed to %q", got)
+		}
+	}
+}
+
 func TestDetect(t *testing.T) {
 	cases := []struct {
 		in   string

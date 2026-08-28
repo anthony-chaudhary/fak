@@ -73,9 +73,11 @@ func (o Output) SavedRatio() float64 {
 // ---------------------------------------------------------------------------
 
 var (
-	mu       sync.RWMutex
-	plugins  = map[string]Compressor{}
-	selected = NoopName // identity default: the build compresses NOTHING until asked
+	mu      sync.RWMutex
+	plugins = map[string]Compressor{}
+	// Promotion evidence is advisory: only explicit Select/FAK_COMPRESSOR authority may move this
+	// identity default. DecideNativePromotion never mutates runtime selection.
+	selected = NoopName
 	selOnce  sync.Once
 )
 
