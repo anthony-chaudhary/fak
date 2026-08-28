@@ -279,6 +279,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [Path-portable Go verification builds: 589 of 590 recompiles removed, 10× not yet (2026-08-27)](docs/notes/CONCEPT-GO-BUILD-PATH-CACHE-2026-08-27.md) — issue #9661's 2+2 alternating fresh-root falsifier: verification-only `-trimpath` made the second root 2.58× faster (23.59s → 9.14s) and cut executed compile actions from 590 to 1 while preserving the policy-deny smoke output; honestly leaves the 5+5 matched Windows target, cgo/Metal compile, and link residual open.
+
 - [Apple unified-memory counter provenance (2026-08-27)](docs/notes/APPLE-UNIFIED-MEMORY-COUNTER-PROVENANCE-2026-08-27.md) — generic normalized package/system import contract for direct byte rates or monotonic byte deltas, plus historical powermetrics `DCS RD`/`DCS WR` field evidence and its removal boundary; the fixtures are synthetic and no live capture is claimed.
 - [NUMA memory roofline capture (2026-08-27)](docs/notes/NUMA-MEMORY-ROOFLINE-2026-08-27.md) — Linux sysfs topology plus an import-first local/remote host copy-roofline matrix that requires independent CPU and resident-page placement evidence.
 

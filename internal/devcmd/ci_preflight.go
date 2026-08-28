@@ -189,7 +189,7 @@ func checkDisambiguationGenerated(dir string) (detail string, checked, ok bool) 
 	} else if err != nil {
 		return err.Error(), true, false
 	}
-	cmd := windowgate.Command("go", "run", "./cmd/fak", "disambiguation", "generate", "--check", "--json")
+	cmd := windowgate.Command("go", ciPreflightDisambiguationArgs()...)
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
@@ -202,7 +202,7 @@ func checkDisambiguationGenerated(dir string) (detail string, checked, ok bool) 
 // goBuildAll runs `go build ./...` in dir. Returns (detail, ok); on failure detail is the trimmed
 // compiler output so an agent sees the exact `undefined: X` without re-running anything.
 func goBuildAll(dir string) (string, bool) {
-	cmd := windowgate.Command("go", "build", "./...")
+	cmd := windowgate.Command("go", ciPreflightBuildArgs()...)
 	cmd.Dir = dir
 	windowgate.ConfigureBackgroundCommand(cmd)
 	out, err := cmd.CombinedOutput()
@@ -210,6 +210,14 @@ func goBuildAll(dir string) (string, bool) {
 		return strings.TrimSpace(string(out)), false
 	}
 	return "", true
+}
+
+func ciPreflightDisambiguationArgs() []string {
+	return []string{"run", "-trimpath", "./cmd/fak", "disambiguation", "generate", "--check", "--json"}
+}
+
+func ciPreflightBuildArgs() []string {
+	return []string{"build", "-trimpath", "./..."}
 }
 
 func renderCIPreflight(w io.Writer, res ciPreflightResult) {
