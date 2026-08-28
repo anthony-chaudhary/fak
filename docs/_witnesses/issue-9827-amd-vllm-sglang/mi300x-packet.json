@@ -1,0 +1,71 @@
+{
+  "schema": "fak.mi300x_operator_packet.v1",
+  "issue": "#9859",
+  "status": "operator_ready_not_executed",
+  "hardware_admission": {
+    "required_product": "AMD Instinct MI300X",
+    "required_gfx": "gfx942",
+    "required_devices": ["/dev/kfd", "/dev/dri"],
+    "evidence": ["rocminfo.txt", "amd-smi-static.txt", "ENGINE-container-rocminfo.txt"]
+  },
+  "model": {
+    "id": "Qwen/Qwen2.5-0.5B-Instruct",
+    "revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+    "access": "public_ungated"
+  },
+  "engines": [
+    {
+      "name": "vllm",
+      "version": "0.28.0",
+      "source_tag": "v0.28.0",
+      "source_commit": "17da48596c98946d3e3e6896e2ebd341e809f3bd",
+      "image": "vllm/vllm-openai-rocm:v0.28.0",
+      "runtime_image_policy": "pull tag, record ID and RepoDigest, then run immutable local ID"
+    },
+    {
+      "name": "sglang",
+      "version": "0.5.18",
+      "source_tag": "v0.5.18",
+      "source_commit": "5263568bcbf9da7b463e25c136f6aa92eedc3c08",
+      "image": "lmsysorg/sglang:v0.5.18-rocm",
+      "runtime_image_policy": "pull tag, record ID and RepoDigest, then run immutable local ID"
+    }
+  ],
+  "geometry": {
+    "endpoint": "/v1/chat/completions",
+    "tensor_parallel": 1,
+    "dtype": "float16",
+    "context_length": 2048,
+    "concurrency": [16],
+    "requests_per_point": 64,
+    "max_output_tokens": 128,
+    "prompt": "Explain in one sentence why matched benchmark geometry matters.",
+    "max_error_rate": 0
+  },
+  "ordering": ["vllm:cold", "vllm:warm", "sglang:cold", "sglang:warm"],
+  "load_generator": "go run ./cmd/loadgen",
+  "captures": {
+    "images": "images.jsonl",
+    "engine_versions": ["vllm-version.txt", "sglang-version.txt"],
+    "server_logs": "ENGINE-server.log",
+    "telemetry": "ENGINE-amd-smi.log",
+    "loadgen": "ENGINE-PHASE-loadgen.json",
+    "errors": ["errors.log", "ENGINE-errors.log", "ENGINE-PHASE-loadgen.stderr"]
+  },
+  "fail_closed": [
+    "reject absent device nodes, failed ROCm tools, non-gfx942, or non-MI300X product",
+    "reject images without a resolved repository digest or with an engine version mismatch",
+    "reject a server that exits or fails readiness",
+    "reject missing exact model revision in server log",
+    "reject CPU, CUDA, NVIDIA, unavailable-GPU, or fallback markers",
+    "reject failed in-container ROCm admission",
+    "reject any loadgen request error"
+  ],
+  "cloud": {
+    "mode": "documentation_only",
+    "provisioning_requires_operator_confirmation": true,
+    "teardown_requires_operator_confirmation": true,
+    "spend_cap_required": true,
+    "credentials_or_private_coordinates_allowed": false
+  }
+}
