@@ -135,6 +135,12 @@ func runGuardSessionStartHook(stdout, stderr io.Writer, stdin io.Reader, argv []
 	if provider == "codex" && bindCodexSession && (boundarySource != "clear" || boundaryRecorded) {
 		if err := writeGuardCodexSessionBinding(*stateFlag, sessionID, effectiveTrace); err != nil {
 			fmt.Fprintf(stderr, "fak: Codex session binding was not recorded: %v\n", err)
+		} else if err := writeCodexGuardWitness("", sessionID); err != nil {
+			// The launch-scoped SessionStart hook is installed by the host-side guard
+			// before Codex starts. Persist the same durable witness consumed by
+			// sessions codex-loop here, before the first model/tool turn; do not wait
+			// for the optional UserPromptSubmit hook.
+			fmt.Fprintf(stderr, "fak: Codex guard witness was not recorded: %v\n", err)
 		}
 	}
 	// Record the uuid<->trace join first (best-effort, fail-open), so it is written on EVERY
