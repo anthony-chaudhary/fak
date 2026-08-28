@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -874,7 +875,8 @@ func TestWorktreeColdReapProcessActiveAtPlanningIsExcluded(t *testing.T) {
 		floor,
 		now,
 		false,
-		func(string) (bool, error) { return true, nil },
+		func(paths []string) (map[string]bool, error) { return map[string]bool{paths[0]: true}, nil },
+		func(string) (bool, error) { return false, nil },
 		func(_, path string) workerworktree.Result {
 			reapCalls = append(reapCalls, path)
 			return workerworktree.Result{OK: true, Path: path, Removed: true}
@@ -906,9 +908,13 @@ func TestWorktreeColdReapProcessBecomesLiveAtApply(t *testing.T) {
 		floor,
 		now,
 		false,
+		func([]string) (map[string]bool, error) {
+			probeCalls++
+			return map[string]bool{}, nil
+		},
 		func(string) (bool, error) {
 			probeCalls++
-			return probeCalls >= 2, nil
+			return true, nil
 		},
 		func(_, path string) workerworktree.Result {
 			reapCalls = append(reapCalls, path)
@@ -937,6 +943,7 @@ func TestWorktreeColdReapRemovedClaimRequiresAbsentDirectory(t *testing.T) {
 		floor,
 		now,
 		false,
+		func([]string) (map[string]bool, error) { return map[string]bool{}, nil },
 		func(string) (bool, error) { return false, nil },
 		func(_, path string) workerworktree.Result {
 			reapCalls++
@@ -964,6 +971,7 @@ func TestWorktreeColdReapCountsVerifiedRemoval(t *testing.T) {
 		floor,
 		now,
 		false,
+		func([]string) (map[string]bool, error) { return map[string]bool{}, nil },
 		func(string) (bool, error) { return false, nil },
 		func(root, path string) workerworktree.Result {
 			return workerworktree.ForceReap(root, path, nil)
@@ -982,6 +990,41 @@ func TestWorktreeColdReapCountsVerifiedRemoval(t *testing.T) {
 // the --verify go-build witness: it never blocks a land merely because a probe
 // could not run. (When `go` IS present, as in CI, it actually builds; this asserts
 // the no-toolchain branch is a clean pass, not a crash.)
+
+func TestWorktreeColdReapSnapshotsProcessesOnceForLargePlan(t *testing.T) {
+	const worktreeCount = 200
+	plan := make([]workerworktree.ColdWorktree, 0, worktreeCount)
+	for i := 0; i < worktreeCount; i++ {
+		plan = append(plan, workerworktree.ColdWorktree{Path: fmt.Sprintf("worker-%03d", i), Eligible: true})
+	}
+	calls := 0
+	got, err := batchColdProcessRefs(plan, false, func(paths []string) (map[string]bool, error) {
+		calls++
+		if len(paths) != worktreeCount {
+			t.Fatalf("snapshot paths=%d want=%d", len(paths), worktreeCount)
+		}
+		return map[string]bool{}, nil
+	})
+	if err != nil || calls != 1 || len(got) != 0 {
+		t.Fatalf("snapshot calls=%d result=%v err=%v", calls, got, err)
+	}
+}
+
+func TestWorktreeColdReapSkipsProcessSnapshotWithoutCandidates(t *testing.T) {
+	calls := 0
+	got, err := batchColdProcessRefs(
+		[]workerworktree.ColdWorktree{{Path: "dirty", Eligible: false, Reason: "kept: dirty"}},
+		false,
+		func([]string) (map[string]bool, error) {
+			calls++
+			return nil, nil
+		},
+	)
+	if err != nil || calls != 0 || len(got) != 0 {
+		t.Fatalf("snapshot calls=%d result=%v err=%v", calls, got, err)
+	}
+}
+
 func TestLandVerifyFlagParsesGoBuild(t *testing.T) {
 	// The hook selector is exercised via the internal Land test with a fake hook;
 	// here we only assert the CLI's go-build hook is a valid VerifyHook value.
