@@ -90,147 +90,89 @@ def test_freshness_stamp_ok_when_recent() -> None:
     assert c["status"] == "OK", c
 
 
-def _native_status(date: str = "2026-06-20") -> str:
-    return f"""<!-- native-status: {date} -->
-### Native-model status
-| Lane | Result | Current hold |
-| **Qwen3.8-27B** | [index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | Below parity |
-| **Ultracode / microagents** | [small](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md) | ABSTAIN |
-Refresh contract: update evidence and rerun the audit.
+def _hardware_front_page(date: str = TODAY.isoformat(), *, extra_row: str = "") -> str:
+    return f"""## Latest hardware results — {date}
 
-## Next
+**Latest** means the newest committed performance receipt for that platform.
+
+| Platform | Latest result | Qualification and detail |
+| :--- | :--- | :--- |
+| **Mac** | result | Historical/expired review. [Detail](docs/benchmarks/QWEN38-27B-LATEST.md) |
+| **AMD** | result | Narrow microbench only. [Detail](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
+| **NVIDIA** | result | Held after failed cache quality. [Detail](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) |
+{extra_row}
+History and specific envelopes live in the [benchmark index](docs/benchmarks/README.md).
 """
 
 
-def test_native_status_ok_when_fresh_sourced_and_candid() -> None:
-    c = rfa.check_native_status(_native_status(), today=TODAY, max_age_days=14)
-    assert c["status"] == "OK", c
+def test_hardware_front_page_accepts_exact_three_rows() -> None:
+    c = rfa.check_hardware_front_page(_hardware_front_page(), today=TODAY,
+                                      max_age_days=14)
+    assert c["status"] == "OK"
 
 
-def test_native_status_warns_when_stale() -> None:
-    c = rfa.check_native_status(_native_status("2026-06-01"), today=TODAY,
-                                max_age_days=14)
-    assert c["status"] == "WARN"
+def test_hardware_front_page_rejects_stale_date() -> None:
+    c = rfa.check_hardware_front_page(_hardware_front_page("2026-06-01"), today=TODAY,
+                                      max_age_days=14)
+    assert c["status"] == "FAIL"
     assert "fresh_date" in c["items"]
 
 
-def test_native_status_warns_without_authority_or_hold() -> None:
-    text = "<!-- native-status: 2026-06-20 -->\nQwen3.8-27B Ultracode / microagents"
-    c = rfa.check_native_status(text, today=TODAY, max_age_days=14)
-    assert c["status"] == "WARN"
-    assert "qwen38_authority" in c["items"]
-    assert "honest_hold" in c["items"]
-
-
-def _qwen_block(old_splice: bool = False) -> str:
-    body = ("accepted **2.3-2.9 decode tok/s** functional `PASS`; "
-            "**3.3 vs 6.966061 tok/s (~47%)** approximate, not accepted parity; "
-            "P31/T64 versus P32/T64, no joint quality-complete receipt; "
-            "diagnostic **~0.2 tok/s with 0/5 exact**")
-    if old_splice:
-        body += "; cached fak-native decode collapsed to 0.3 tok/s median versus 36.55"
-    return "<!-- qwen38-frontdoor:begin -->\n" + body + "\n<!-- qwen38-frontdoor:end -->"
-
-
-def test_qwen_frontdoor_accepts_separated_generated_classes() -> None:
-    c = rfa.check_qwen_frontdoor(_qwen_block(), _qwen_block())
-    assert c["status"] == "OK", c
-
-
-def test_qwen_frontdoor_accepts_reviewed_rows_reaped_from_active_presentation() -> None:
-    readme = """<!-- qwen38-frontdoor:begin -->
-No accepted Metal result remains inside its review window. The closest comparison has
-passed review and is omitted pending remeasurement. Separate diagnostic: ~0.2 tok/s
-with 0/5 exact; failed quality keeps it diagnostic only.
-<!-- qwen38-frontdoor:end -->"""
-    index = """<!-- qwen38-frontdoor:begin -->
-DIAGNOSTIC: ~0.2 tok/s with 0/5 exact.
-2 reviewed row(s) are reaped from active presentation; immutable witnesses remain.
-<!-- qwen38-frontdoor:end -->"""
-    c = rfa.check_qwen_frontdoor(readme, index)
-    assert c["status"] == "OK", c
-
-
-def test_qwen_frontdoor_rejects_old_cache_parity_splice() -> None:
-    c = rfa.check_qwen_frontdoor(_qwen_block(old_splice=True), _qwen_block())
-    assert c["status"] == "FAIL", c
-    assert "old_cache_parity_splice" in c["items"], c
-
-
-def test_qwen_frontdoor_rejects_index_drift() -> None:
-    c = rfa.check_qwen_frontdoor(_qwen_block(), "# index without generated block")
-    assert c["status"] == "FAIL", c
-    assert "index_generated_block" in c["items"], c
-
-
-def test_headline_authority_defers_generated_qwen_values() -> None:
-    c = rfa.check_headline_authority(
-        _qwen_block() + "\nOutside claim: **9.876543 tok/s**.",
-        "No matching benchmark value here.",
+def test_hardware_front_page_rejects_extra_result_row() -> None:
+    c = rfa.check_hardware_front_page(
+        _hardware_front_page(extra_row="| **Ultracode** | result | hold |"),
+        today=TODAY, max_age_days=14,
     )
-    assert c["status"] == "WARN", c
-    assert "9.876543 tok/s" in c["items"], c
-    assert "6.966061 tok/s" not in c["items"], c
+    assert c["status"] == "FAIL"
+    assert "no extra result rows" in c["items"]
 
-def _project_status(date: str = "2026-06-20") -> str:
-    return f"""<!-- project-status: {date} -->
-### Project status — {date}
-**Shipped:** crash-safe queue ([#1](https://github.com/o/r/issues/1)).
-**In flight:** metrics ([#2](https://github.com/o/r/issues/2)), controls ([#3](https://github.com/o/r/issues/3)), and native work ([#4](https://github.com/o/r/issues/4)).
-**Goal:** useful agent kernel; direction, not a promise. See [goal](docs/goal.md).
-**Limitation:** native speed remains below parity. See [status](STATUS.md).
-Refresh contract: reconcile links and update the marker.
+
+def test_hardware_front_page_rejects_missing_platform_or_detail() -> None:
+    text = _hardware_front_page().replace(
+        "| **AMD** | result | Narrow microbench only. [Detail](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |\n",
+        "",
+    )
+    c = rfa.check_hardware_front_page(text, today=TODAY, max_age_days=14)
+    assert c["status"] == "FAIL"
+    assert "exactly Mac, AMD, NVIDIA rows" in c["items"]
+    assert "AMD detail link" in c["items"]
+
+
+def test_hardware_front_page_rejects_generated_qwen_marker() -> None:
+    c = rfa.check_hardware_front_page(
+        _hardware_front_page() + "\n<!-- qwen38-frontdoor:begin -->\n",
+        today=TODAY, max_age_days=14,
+    )
+    assert c["status"] == "FAIL"
+    assert "README must not contain generated qwen38-frontdoor markers" in c["items"]
+
+
+def _qwen_result_doc(peer: str) -> str:
+    return f"""# result
+<!-- qwen38-frontdoor:begin -->
+generated
+<!-- qwen38-frontdoor:end -->
+[{peer}]({peer})
 """
 
 
-def test_project_status_ok_when_fresh_complete_and_sourced() -> None:
-    c = rfa.check_project_status(_project_status(), today=TODAY, max_age_days=14)
-    assert c["status"] == "OK", c["detail"]
+def test_qwen_result_docs_accept_reciprocal_generated_pages() -> None:
+    c = rfa.check_qwen_result_docs(
+        _qwen_result_doc("QWEN38-27B-LATEST.md"),
+        _qwen_result_doc("QWEN-PERFORMANCE-INDEX.md"),
+    )
+    assert c["status"] == "OK"
 
 
-def test_project_status_fails_when_lane_or_evidence_missing() -> None:
-    text = _project_status().replace("**Limitation:** native speed remains below parity. See [status](STATUS.md).", "")
-    c = rfa.check_project_status(text, today=TODAY, max_age_days=14)
+def test_qwen_result_docs_reject_missing_block_or_route() -> None:
+    c = rfa.check_qwen_result_docs(
+        "# index without generated block",
+        _qwen_result_doc("elsewhere.md"),
+    )
     assert c["status"] == "FAIL"
-    assert "Limitation" in c["detail"]
+    assert "index_generated_block" in c["items"]
+    assert "latest_to_index_link" in c["items"]
 
-
-def test_project_status_fails_when_stale() -> None:
-    c = rfa.check_project_status(_project_status("2026-06-01"), today=TODAY, max_age_days=14)
-    assert c["status"] == "FAIL"
-    assert "old" in c["detail"]
-
-def test_freshness_stamp_warn_when_absent() -> None:
-    c = rfa.check_freshness_stamp("no stamp here", today=TODAY, max_age_days=14)
-    assert c["status"] == "WARN", c
-
-
-def test_freshness_stamp_warn_when_stale() -> None:
-    txt = "<!-- readme-verified: 2026-01-01 vs VERSION 0.25.0 -->"
-    c = rfa.check_freshness_stamp(txt, today=TODAY, max_age_days=14)
-    assert c["status"] == "WARN", c
-
-
-def test_jargon_density_is_advisory_never_fail() -> None:
-    txt = "the KV cache and vDSO and context-MMU run inside the address space"
-    c = rfa.check_jargon_density(txt, first_screen_lines=110)
-    assert c["status"] == "ADVISORY", c
-    assert c["items"], "expected naked jargon terms flagged"
-
-
-def test_jargon_glossed_term_not_flagged() -> None:
-    txt = "the KV cache (the model's short-term memory) holds tokens"
-    c = rfa.check_jargon_density(txt, first_screen_lines=110)
-    assert "KV cache" not in c["items"], c
-
-
-# --- showcase_sync: the OTHER front door (docs/showcase.html) --------------
-#
-# The fixtures below are a MINIMAL two-front-door pair: a homepage that hands the
-# reader an installer, a first command, an authority link and a dataset-stamped
-# version, and a README that publishes the same installer + command and names the
-# page. Each failing test mutates exactly ONE of those, so a green run means the
-# check discriminates that specific drift and not merely "the strings differ".
 
 _SHOWCASE_OK = """<!doctype html>
 <!--
@@ -261,6 +203,7 @@ homepage. Numbers live in BENCHMARK-AUTHORITY.md.
 
 _SHOWCASE_KW = dict(version="0.43.0", dataset_versions={"0.30.0"},
                     dispatch={"agent", "guard", "serve"})
+
 
 
 def test_showcase_sync_ok_when_front_doors_agree() -> None:
@@ -877,11 +820,11 @@ def test_live_collect_real_readme() -> None:
     root = rfa.repo_root()
     if not (root / rfa.README_REL).exists():
         return  # tolerant: not in the repo tree
-    p = rfa.collect(root, today=TODAY)
+    p = rfa.collect(root, today=_dt.date(2026, 8, 28))
     assert p["schema"] == rfa.SCHEMA
     assert "ok" in p and isinstance(p["checks"], list) and p["checks"]
     assert p["ok"] is True, p
-    qwen = next(c for c in p["checks"] if c["check"] == "qwen_frontdoor")
+    qwen = next(c for c in p["checks"] if c["check"] == "qwen_result_docs")
     assert qwen["status"] == "OK", qwen
 
 

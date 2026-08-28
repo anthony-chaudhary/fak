@@ -119,6 +119,7 @@ README_REL = "README.md"
 VERSION_REL = "VERSION"
 AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 QWEN_INDEX_REL = "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md"
+QWEN_LATEST_REL = "docs/benchmarks/QWEN38-27B-LATEST.md"
 # The binary's real dispatch table — the source of truth for which `fak <verb>`
 # commands actually exist. Parsed live (never a hand-list) so the lcd_onramp
 # anti-gaming cross-check stays correct as verbs are added/renamed.
@@ -493,129 +494,92 @@ def check_freshness_stamp(readme: str, *, today: _dt.date,
             "detail": f"verified {age}d ago (<= {max_age_days}d window)"}
 
 
-def check_native_status(readme: str, *, today: _dt.date,
-                        max_age_days: int) -> dict[str, Any]:
-    """Keep the frequently refreshed native-model status sourced and candid."""
-    marker = re.search(r"<!--\s*native-status:\s*(\d{4}-\d{2}-\d{2})\s*-->", readme)
-    section = re.search(
-        r"<!--\s*native-status:.*?-->\s*(.*?)(?=\n##\s|\Z)", readme,
-        flags=re.IGNORECASE | re.DOTALL,
+def check_hardware_front_page(readme: str, *, today: _dt.date,
+                              max_age_days: int) -> dict[str, Any]:
+    """Keep the README's first result view limited to the latest hardware rows."""
+    match = re.search(
+        r"^## Latest hardware results — (\d{4}-\d{2}-\d{2})\s*$"
+        r"(.*?)(?=^##\s|\Z)",
+        readme,
+        flags=re.MULTILINE | re.DOTALL,
     )
+    if match is None:
+        return {"check": "hardware_front_page", "status": "FAIL",
+                "detail": "missing dated 'Latest hardware results' section"}
+
     missing: list[str] = []
-    if marker is None or section is None:
-        return {"check": "native_status", "status": "WARN",
-                "detail": "missing dated <!-- native-status: YYYY-MM-DD --> section"}
     try:
-        stamped = _dt.date.fromisoformat(marker.group(1))
+        stamped = _dt.date.fromisoformat(match.group(1))
     except ValueError:
-        return {"check": "native_status", "status": "WARN",
-                "detail": "native-status marker has an invalid date"}
+        return {"check": "hardware_front_page", "status": "FAIL",
+                "detail": "latest hardware results heading has an invalid date"}
     age = (today - stamped).days
     if age < 0 or age > max_age_days:
         missing.append("fresh_date")
-    body = section.group(1).lower()
-    requirements = {
-        "qwen38_lane": "qwen3.8-27b" in body,
-        "ultracode_lane": "ultracode / microagents" in body,
-        "qwen38_authority": QWEN_INDEX_REL.lower() in body,
-        "microagent_authority": "docs/_witnesses/issue-8624-ultracode-smallmodel/" in body,
-        "honest_hold": ("below parity" in body or "not accepted parity" in body
-                        or "no accepted metal result remains" in body) and "abstain" in body,
-        "refresh_contract": "refresh contract:" in body,
-    }
-    missing.extend(name for name, present in requirements.items() if not present)
-    status = "OK" if not missing else "WARN"
-    detail = (f"status dated {marker.group(1)} ({age}d old) with both sourced lanes and holds"
-              if not missing else "native status needs: " + ", ".join(missing))
-    return {"check": "native_status", "status": status, "detail": detail,
-            "items": missing}
 
+    body = match.group(2)
+    rows: dict[str, str] = {}
+    extra_rows: list[str] = []
+    for line in body.splitlines():
+        if not line.startswith("|") or re.match(r"^\|\s*:?-+", line):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if not cells or cells[0].lower() == "platform":
+            continue
+        platform = re.sub(r"[*_`]", "", cells[0]).strip()
+        if platform in {"Mac", "AMD", "NVIDIA"}:
+            rows[platform] = line
+        else:
+            extra_rows.append(platform or line)
 
-def check_qwen_frontdoor(readme: str, qwen_index: str) -> dict[str, Any]:
-    """Fail when Qwen's generated front-door classes drift or get spliced.
+    if set(rows) != {"Mac", "AMD", "NVIDIA"}:
+        missing.append("exactly Mac, AMD, NVIDIA rows")
+    if extra_rows:
+        missing.append("no extra result rows")
+    if not re.search(r"newest\s+committed performance receipt", body, re.IGNORECASE):
+        missing.append("visible latest definition")
+    if "docs/benchmarks/README.md" not in body:
+        missing.append("benchmark/history index")
+    if "qwen38-frontdoor" in readme.lower():
+        missing.append("README must not contain generated qwen38-frontdoor markers")
 
-    This is intentionally semantic as well as marker-based: the old README
-    combined a failed-quality cache diagnostic with an unrelated llama.cpp
-    number and presented the splice as the product's parity state.
-    """
-    readme_match = _QWEN_FRONTDOOR_RE.search(readme or "")
-    index_match = _QWEN_FRONTDOOR_RE.search(qwen_index or "")
-    missing: list[str] = []
-    if readme_match is None:
-        missing.append("readme_generated_block")
-    if index_match is None:
-        missing.append("index_generated_block")
-    readme_block = readme_match.group(1).lower() if readme_match else ""
-    index_block = index_match.group(1).lower() if index_match else ""
-    active_required = {
-        "accepted_metal": ("2.3-2.9 decode tok/s", "functional `pass`"),
-        "approximate_pair": ("3.3", "6.966061", "~47%", "approximate", "not accepted parity"),
-        "diagnostic_cache": ("~0.2 tok/s", "0/5 exact", "diagnostic"),
-        "p31_p32_caveat": ("p31/t64", "p32/t64", "no joint quality-complete receipt"),
+    row_requirements = {
+        "Mac": ("docs/benchmarks/QWEN38-27B-LATEST.md", ("historical", "expired", "hold", "no accepted")),
+        "AMD": ("docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md", ("microbench", "narrow", "hold", "no accepted")),
+        "NVIDIA": ("docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md", ("held", "failed", "diagnostic", "no accepted")),
     }
-    reaped_required = {
-        "readme": ("no accepted metal result remains", "passed review", "omitted pending remeasurement",
-                   "~0.2 tok/s", "0/5 exact", "diagnostic"),
-        "index": ("reviewed row(s) are reaped", "immutable witnesses remain",
-                  "~0.2 tok/s", "0/5 exact", "diagnostic"),
-    }
-    active_ok = all(needle in readme_block for needles in active_required.values() for needle in needles) \
-        and all(needle in index_block for needles in active_required.values() for needle in needles)
-    reaped_ok = all(needle in readme_block for needle in reaped_required["readme"]) \
-        and all(needle in index_block for needle in reaped_required["index"])
-    if not active_ok and not reaped_ok:
-        for name, needles in active_required.items():
-            if any(needle not in readme_block for needle in needles):
-                missing.append("readme_" + name)
-            if any(needle not in index_block for needle in needles):
-                missing.append("index_" + name)
-        if not all(needle in readme_block for needle in reaped_required["readme"]):
-            missing.append("readme_reaped_state")
-        if not all(needle in index_block for needle in reaped_required["index"]):
-            missing.append("index_reaped_state")
-    old_splice = ("cached fak-native decode collapsed", "0.3 tok/s median versus 36.55")
-    if any(needle in readme_block for needle in old_splice):
-        missing.append("old_cache_parity_splice")
+    for platform, (detail, qualifiers) in row_requirements.items():
+        row = rows.get(platform, "").lower()
+        if detail.lower() not in row:
+            missing.append(f"{platform} detail link")
+        if row and not any(word in row for word in qualifiers):
+            missing.append(f"{platform} qualification/hold")
+
     status = "OK" if not missing else "FAIL"
-    detail = ("generated Qwen front-door blocks agree on active or reaped result classes"
-              if not missing else "Qwen front-door drift: " + ", ".join(missing))
-    return {"check": "qwen_frontdoor", "status": status, "detail": detail,
-            "items": missing}
+    detail = (f"latest hardware view dated {match.group(1)} ({age}d old) has only Mac, AMD, NVIDIA"
+              if not missing else "hardware front page needs: " + ", ".join(missing))
+    return {"check": "hardware_front_page", "status": status,
+            "detail": detail, "items": missing + extra_rows}
 
-def check_project_status(readme: str, *, today: _dt.date,
-                         max_age_days: int) -> dict[str, Any]:
-    """Require fresh shipped, in-flight, goal, and limitation lanes."""
-    marker = re.search(r"<!--\s*project-status:\s*(\d{4}-\d{2}-\d{2})\s*-->", readme)
-    heading = re.search(r"^### Project status(?:\s+[—-]\s+\d{4}-\d{2}-\d{2})?\s*$", readme, re.MULTILINE)
-    if not marker or not heading:
-        return {"check": "project_status", "status": "FAIL", "detail": "missing dated Project status section"}
-    start = heading.end()
-    following = re.search(r"^##{1,3}\s+", readme[start:], re.MULTILINE)
-    section = readme[start:start + following.start()] if following else readme[start:]
-    required = ("Shipped", "In flight", "Goal", "Limitation", "Refresh contract")
-    missing = [x for x in required if not re.search(rf"\b{re.escape(x)}\b", section, re.IGNORECASE)]
-    links = re.findall(r"\[[^]\n]+\]\(([^)]+)\)", section)
-    issues = [x for x in links if "/issues/" in x]
-    authorities = [x for x in links if x.startswith(("docs/", "STATUS.md", "CLAIMS.md"))]
-    try:
-        stamped = _dt.date.fromisoformat(marker.group(1))
-    except ValueError:
-        return {"check": "project_status", "status": "FAIL", "detail": "invalid project-status date"}
-    age = (today - stamped).days
-    defects: list[str] = []
-    if age > max_age_days:
-        defects.append(f"status is {age}d old (> {max_age_days}d)")
-    if missing:
-        defects.append("missing " + ", ".join(missing))
-    if len(issues) < 4:
-        defects.append("needs evidence links for shipped and in-flight tickets")
-    if not authorities:
-        defects.append("needs a durable goal or limitation authority")
-    if "not a promise" not in section.lower():
-        defects.append("must say goals are not promises")
-    if defects:
-        return {"check": "project_status", "status": "FAIL", "detail": "; ".join(defects)}
-    return {"check": "project_status", "status": "OK", "detail": f"status dated {stamped.isoformat()} ({age}d old) with all four evidence lanes"}
+
+def check_qwen_result_docs(qwen_index: str, qwen_latest: str) -> dict[str, Any]:
+    """Keep generated Qwen detail surfaces linked without owning the README."""
+    missing: list[str] = []
+    for label, body in (("index", qwen_index), ("latest", qwen_latest)):
+        if not body:
+            missing.append(f"{label}_document")
+            continue
+        if "<!-- qwen38-frontdoor:begin -->" not in body or "<!-- qwen38-frontdoor:end -->" not in body:
+            missing.append(f"{label}_generated_block")
+    if qwen_index and "QWEN38-27B-LATEST.md" not in qwen_index:
+        missing.append("index_to_latest_link")
+    if qwen_latest and "QWEN-PERFORMANCE-INDEX.md" not in qwen_latest:
+        missing.append("latest_to_index_link")
+    status = "OK" if not missing else "FAIL"
+    detail = ("Qwen index and latest detail keep generated blocks and reciprocal routing"
+              if not missing else "Qwen result docs need: " + ", ".join(missing))
+    return {"check": "qwen_result_docs", "status": status,
+            "detail": detail, "items": missing}
 
 def check_showcase_sync(readme: str, showcase: str | None, *,
                         version: str = "",
@@ -1459,7 +1423,7 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
                dispatch: set[str] | None = None,
                showcase: str | None = None,
                dataset_versions: set[str] | None = None,
-               qwen_index: str = "") -> list[dict[str, Any]]:
+               qwen_index: str = "", qwen_latest: str = "") -> list[dict[str, Any]]:
     """All checks over already-read text. The pure core; tests call this."""
     return [
         # hygiene — is the page correct?
@@ -1468,9 +1432,8 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_naive_baseline(readme),
         check_headline_authority(readme, authority),
         check_freshness_stamp(readme, today=today, max_age_days=max_age_days),
-        check_native_status(readme, today=today, max_age_days=max_age_days),
-        check_qwen_frontdoor(readme, qwen_index),
-        check_project_status(readme, today=today, max_age_days=max_age_days),
+        check_hardware_front_page(readme, today=today, max_age_days=max_age_days),
+        check_qwen_result_docs(qwen_index, qwen_latest),
         check_showcase_sync(readme, showcase, version=version,
                             dataset_versions=dataset_versions, dispatch=dispatch),
         check_jargon_density(readme, first_screen_lines=FIRST_SCREEN_LINES),
@@ -1501,6 +1464,7 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
     version = _safe_read(root / VERSION_REL)
     authority = _safe_read(root / AUTHORITY_REL)
     qwen_index = _safe_read(root / QWEN_INDEX_REL)
+    qwen_latest = _safe_read(root / QWEN_LATEST_REL)
     dispatch = fak_dispatch_verbs(root)
     # None (not "") when the second front door is absent, so check_showcase_sync can
     # tell "no page to read" (abstain) apart from "an empty page" (a real defect).
@@ -1509,7 +1473,7 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
                         today=today, max_age_days=max_age_days, dispatch=dispatch,
                         showcase=showcase,
                         dataset_versions=bench_dataset_versions(root),
-                        qwen_index=qwen_index)
+                        qwen_index=qwen_index, qwen_latest=qwen_latest)
     return build_payload(workspace=str(root), checks=checks)
 
 
