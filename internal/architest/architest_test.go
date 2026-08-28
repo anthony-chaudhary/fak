@@ -587,6 +587,7 @@ var tier = map[string]int{
 	"docrender":             2,
 	"pagespublish":          2, // Pure stdlib pre/post-build audit for source UTF-8, artifact breadth, SEO metadata, sitemap, and exact deploy manifests; off the hot path.
 	"learningobservation":   2, // #5982 (parent #2908): content-addressed observation/candidate/witness/verdict records plus the seven closed-enum lineage relations. Pure stdlib durable substrate; admission policy remains outside this leaf. Off the hot path.
+	"learningmesh":          2, // #9839: deterministic cross-envelope transfer candidates; orchestration and execution remain outside this leaf.
 	"streamrules":           0, // #5920 (epic #5917): pure stdlib-only streaming rule matcher; per-call buffers, scopes, regex/glob matching, diagnostics, and turn reset. No decision-path wiring and imports no sibling leaf.
 	"testenv":               2, // credential-free test process boundary (#5914); imports envconfiglint(1), off the hot path.
 	"estimatecal":           2, // #5899 (epic #3229): pure in-memory estimate-vs-billed correction ratio fold keyed by provider/model; stdlib-only, imports nothing internal, off the hot path.
