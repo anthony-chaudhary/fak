@@ -466,6 +466,7 @@ func worktreeColdReapReport(repoRoot string, apply bool, ageFloor time.Duration,
 		ageFloor,
 		now,
 		evenIfUnlanded,
+		worktreeColdProcessSnapshot,
 		worktreeColdProcessLive,
 		func(root, path string) workerworktree.Result {
 			return workerworktree.ForceReap(root, path, nil)
@@ -482,11 +483,17 @@ func worktreeColdReapReportWithProbes(
 	ageFloor time.Duration,
 	now time.Time,
 	evenIfUnlanded bool,
+	processSnapshot func(paths []string) (map[string]bool, error),
 	processLive func(path string) (bool, error),
 	reap func(root, path string) workerworktree.Result,
 ) worktreeColdReapOut {
 	if ageFloor <= 0 {
 		ageFloor = workerworktree.DefaultColdAgeFloor
+	}
+	if processSnapshot == nil {
+		processSnapshot = func([]string) (map[string]bool, error) {
+			return nil, fmt.Errorf("process liveness snapshot is unavailable")
+		}
 	}
 	if processLive == nil {
 		processLive = func(string) (bool, error) {
@@ -510,6 +517,7 @@ func worktreeColdReapReportWithProbes(
 	if apply {
 		out.Mode = "apply"
 	}
+	processesByPath, processSnapshotErr := batchColdProcessRefs(plan, evenIfUnlanded, processSnapshot)
 	for _, c := range plan {
 		item := worktreeColdReapItem{ColdWorktree: c, Bytes: worktreeDirBytes(c.Path)}
 		// The override promotes ONLY the unlanded-work keeps. A live lease or a
@@ -520,16 +528,17 @@ func worktreeColdReapReportWithProbes(
 			out.HeldByWork++
 			out.HeldByWorkBytes += item.Bytes
 		}
-		liveProcess, processErr := processLive(c.Path)
-		switch {
-		case processErr != nil:
-			shouldReap = false
-			item.Eligible = false
-			item.Reason = "kept: process liveness probe failed: " + processErr.Error()
-		case liveProcess:
-			shouldReap = false
-			item.Eligible = false
-			item.Reason = "kept: an active process still references this worktree"
+		if shouldReap {
+			switch {
+			case processSnapshotErr != nil:
+				shouldReap = false
+				item.Eligible = false
+				item.Reason = "kept: process liveness probe failed: " + processSnapshotErr.Error()
+			case processesByPath[c.Path]:
+				shouldReap = false
+				item.Eligible = false
+				item.Reason = "kept: an active process still references this worktree"
+			}
 		}
 		var beforeModTime time.Time
 		if shouldReap {
@@ -590,6 +599,50 @@ func worktreeColdReapReportWithProbes(
 		out.Worktrees = append(out.Worktrees, item)
 	}
 	return out
+}
+
+func batchColdProcessRefs(plan []workerworktree.ColdWorktree, evenIfUnlanded bool, snapshot func([]string) (map[string]bool, error)) (map[string]bool, error) {
+	paths := make([]string, 0, len(plan))
+	for _, c := range plan {
+		if c.Eligible || (evenIfUnlanded && c.HeldByWork) {
+			paths = append(paths, c.Path)
+		}
+	}
+	if len(paths) == 0 {
+		return map[string]bool{}, nil
+	}
+	return snapshot(paths)
+}
+
+// worktreeColdProcessSnapshot performs the expensive OS process census once for
+// the entire planning set. Destructive apply still calls worktreeColdProcessLive
+// per path immediately before removal so a process that starts after planning is
+// preserved.
+func worktreeColdProcessSnapshot(paths []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(paths))
+	if len(paths) == 0 {
+		return result, nil
+	}
+	procs, collectErr := procguard.CollectRelations()
+	if collectErr != "" {
+		return nil, fmt.Errorf("process census: %s", collectErr)
+	}
+	cleanPaths := make(map[string]string, len(paths))
+	for _, path := range paths {
+		cleanPaths[path] = filepath.Clean(path)
+	}
+	self := os.Getpid()
+	for _, proc := range procs {
+		if proc.PID == self {
+			continue
+		}
+		for path, cleanPath := range cleanPaths {
+			if !result[path] && strings.Contains(proc.Cmdline, cleanPath) {
+				result[path] = true
+			}
+		}
+	}
+	return result, nil
 }
 
 // worktreeColdProcessLive is the production process-liveness gate for a worker
