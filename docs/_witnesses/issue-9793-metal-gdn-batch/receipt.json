@@ -1,0 +1,85 @@
+{
+  "schema": "fak.issue-9793-metal-gdn-batch-receipt/1",
+  "issue": 9793,
+  "parent_issue": 9626,
+  "verdict": "PASS",
+  "source": {
+    "commit": "5e0db65c50288ec16d9f4f6b5a50bf7174f709c9",
+    "tree": "06c7665224d214e391633154d96af08d01d32b13",
+    "origin_main_equal_at_capture": true,
+    "module_revision": "internal/metalgemm@r70+ga70d7891e",
+    "required_ancestry": [
+      {
+        "commit": "2f0fcd0f5353d1d23d5078b22a76421752496b40",
+        "is_ancestor": true
+      },
+      {
+        "commit": "d89e5ae081f8162d3cdf6cd5f414dd732f9346da",
+        "is_ancestor": true
+      }
+    ]
+  },
+  "isolation": {
+    "method": "git archive of the exact committed tip into a unique temporary directory",
+    "command": "git archive 5e0db65c50288ec16d9f4f6b5a50bf7174f709c9 | tar -x -C <unique-temp>/src",
+    "peer_worktree_files_visible": false
+  },
+  "machine": {
+    "class": "Apple Silicon laptop",
+    "os": "darwin",
+    "os_version": "26.6.2",
+    "arch": "arm64",
+    "cgo_enabled": "1",
+    "cpu": "Apple M3 Pro",
+    "graphics": "Apple M3 Pro",
+    "metal_support": "Metal 4",
+    "go_version": "go1.26.6"
+  },
+  "environment_probe": {
+    "command": "go env GOOS GOARCH CGO_ENABLED",
+    "result": [
+      "darwin",
+      "arm64",
+      "1"
+    ],
+    "metal_probe_command": "system_profiler SPDisplaysDataType (public-safe Chipset Model and Metal Support fields only)"
+  },
+  "test_run": {
+    "command": "CGO_ENABLED=1 go test -json ./internal/metalgemm -run '^(TestQwen35DecodeBatchIndependentStateSingleFence|TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence)$' -count=1",
+    "started_utc": "2026-08-28T14:57:14Z",
+    "ended_utc": "2026-08-28T14:57:19Z",
+    "wall_seconds": 5,
+    "exit_code": 0,
+    "package": "github.com/anthony-chaudhary/fak/internal/metalgemm",
+    "package_result": "PASS",
+    "package_elapsed_seconds": 3.073,
+    "skip_count": 0,
+    "tests": [
+      {
+        "name": "TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence",
+        "enumerated": true,
+        "result": "PASS",
+        "elapsed_seconds": 0.3
+      },
+      {
+        "name": "TestQwen35DecodeBatchIndependentStateSingleFence",
+        "enumerated": true,
+        "result": "PASS",
+        "elapsed_seconds": 2.49
+      }
+    ],
+    "raw_log": {
+      "format": "go test -json JSONL stdout",
+      "bytes": 46906,
+      "lines": 151,
+      "sha256": "158676fced1e1b6b79fa74ea69fc819fc8dce5e366a92fa637c167d75e5a8b44",
+      "stderr_bytes": 0
+    }
+  },
+  "replay": {
+    "checkout": "git archive 5e0db65c50288ec16d9f4f6b5a50bf7174f709c9 | tar -x -C <unique-temp>/src",
+    "command": "cd <unique-temp>/src && test \"$(go env GOOS)/$(go env GOARCH)/$(go env CGO_ENABLED)\" = darwin/arm64/1 && CGO_ENABLED=1 go test -json ./internal/metalgemm -run '^(TestQwen35DecodeBatchIndependentStateSingleFence|TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence)$' -count=1 > go-test.jsonl",
+    "verify": "require run and pass events for both exact test names, zero skip events, package pass, exit code 0; then run shasum -a 256 go-test.jsonl for that replay log"
+  },
+  "boundary": "Native Metal correctness witness only; no throughput, artifact, selector, fallback, or parent-issue closure claim."
+}
