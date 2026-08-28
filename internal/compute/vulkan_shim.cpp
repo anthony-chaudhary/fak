@@ -92,7 +92,7 @@ struct Kernel {
     uint32_t              pcsize = 0;
 };
 
-enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_COUNT };
+enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_COUNT };
 Kernel g_kern[K_COUNT];
 
 // Q8 fast-path availability (set in fvk_init from the device's 8-bit-storage + int8 features).
@@ -795,8 +795,6 @@ int fvk_init(char* name, int namelen, int* is_discrete, const char* spirv_dir) {
     ok &= buildKernel(g_kern[K_ATTENTION], P("attention.spv"), 5, 4 * sizeof(int) + sizeof(float));
     ok &= buildKernel(g_kern[K_ARGMAX],    P("argmax.spv"),    2, sizeof(int));
     ok &= buildKernel(g_kern[K_ARGMAX_PAIRS], P("argmax_pairs.spv"), 3, sizeof(int));
-    ok &= buildKernel(g_kern[K_QWEN35_GDN_CONV], P("qwen35_gdn_conv.spv"), 4, 3 * sizeof(int));
-    ok &= buildKernel(g_kern[K_QWEN35_GDN_RECURRENT], P("qwen35_gdn_recurrent.spv"), 9, 6 * sizeof(int) + sizeof(float));
     if (!ok) return 8;
     // Q8 kernel is built only when the device advertised the int8/8-bit-storage features; its
     // SPIR-V uses them, so loading it without the enabled device feature would be invalid. If
@@ -1250,25 +1248,3 @@ int fvk_argmax_f32(const void* dLogits, int n) {
 }
 
 } // extern "C"
-
-extern "C" int fvk_qwen35_gdn_preprojected_f32(
-    const void* mixed, const void* z, const void* beta, const void* alpha,
-    const void* conv1d, const void* a_log, const void* dt_bias, const void* norm,
-    void* conv_state, void* recurrent_state, void* core,
-    int tokens, int conv_dim, int n_k, int n_v, int k_hd, int v_hd, int kernel, float eps) {
-    if (!g_ready || !mixed || !z || !beta || !alpha || !conv1d || !a_log || !dt_bias || !norm || !conv_state || !recurrent_state || !core)
-        return 1;
-    if (tokens <= 0 || conv_dim <= 0 || n_k <= 0 || n_v <= 0 || k_hd <= 0 || v_hd <= 0 || kernel <= 0 || n_v % n_k != 0 || v_hd > 1024)
-        return 2;
-    Buffer* conv_out = (Buffer*)fvk_malloc((size_t)tokens * conv_dim * sizeof(float));
-    if (!conv_out) return 3;
-    struct ConvPC { int tokens, conv_dim, kernel; } cpc{tokens, conv_dim, kernel};
-    Buffer* cbufs[4] = {B((void*)mixed), B((void*)conv1d), B(conv_state), conv_out};
-    dispatch(g_kern[K_QWEN35_GDN_CONV], cbufs, &cpc, sizeof(cpc), (uint32_t)((conv_dim + 63) / 64));
-    struct RecPC { int tokens, conv_dim, n_k, n_v, k_hd, v_hd; float eps; } rpc{tokens, conv_dim, n_k, n_v, k_hd, v_hd, eps};
-    Buffer* rbufs[9] = {conv_out, B((void*)z), B((void*)beta), B((void*)alpha), B((void*)a_log), B((void*)dt_bias), B((void*)norm), B(recurrent_state), B(core)};
-    dispatch(g_kern[K_QWEN35_GDN_RECURRENT], rbufs, &rpc, sizeof(rpc), (uint32_t)n_v);
-    if (g_batching) batchFlush();
-    fvk_free(conv_out);
-    return 0;
-}
