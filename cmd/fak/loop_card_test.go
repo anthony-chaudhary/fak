@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/dispatchpost"
+	"github.com/anthony-chaudhary/fak/internal/loopmgr"
+	"github.com/anthony-chaudhary/fak/internal/perfrsiscore"
 )
 
 // loopCardSlack is a minimal httptest Slack Web API for the `fak loop run`
@@ -20,6 +23,85 @@ type loopCardSlack struct {
 	mu     sync.Mutex
 	nextTS int
 	msgs   []loopCardMsg
+}
+
+func TestLoopRunAutomaticallyScoresPerformanceRSIOnceAtCompletion(t *testing.T) {
+	oldNewCommand := loopNewCommand
+	defer func() { loopNewCommand = oldNewCommand }()
+	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+		return &fakeLoopCommand{pid: 9777}
+	}
+	t.Setenv(perfrsiscore.LoopTurnInputEnv, filepath.Join("..", "..", "internal", "perfrsiscore", "testdata", "complete.json"))
+
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{
+		"run",
+		"--ledger", filepath.Join(t.TempDir(), "loops.jsonl"),
+		"--loop", "dispatch/issues",
+		"--run", "issue-9777-scored",
+		"--no-guard",
+		"--",
+		"worker",
+	})
+	if code != 0 {
+		t.Fatalf("runLoop code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	const marker = "fak loop run: performance-rsi loop-turn "
+	if got := strings.Count(stderr.String(), marker); got != 1 {
+		t.Fatalf("performance RSI invocation count=%d, want exactly 1:\n%s", got, stderr.String())
+	}
+	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"SCORE_COMPLETE"`} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("loop-turn receipt missing %q:\n%s", want, stderr.String())
+		}
+	}
+}
+
+func TestLoopRunPreservesDispatchWhenPerformanceRSIInputUnavailable(t *testing.T) {
+	oldNewCommand := loopNewCommand
+	defer func() { loopNewCommand = oldNewCommand }()
+	loopNewCommand = func(argv []string, stdout, stderr io.Writer) loopCommand {
+		return &fakeLoopCommand{pid: 9777}
+	}
+	t.Setenv(perfrsiscore.LoopTurnInputEnv, "")
+
+	ledger := filepath.Join(t.TempDir(), "loops.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := runLoop(&stdout, &stderr, []string{
+		"run",
+		"--ledger", ledger,
+		"--loop", "dispatch/issues",
+		"--run", "issue-9777-unavailable",
+		"--json",
+		"--no-guard",
+		"--",
+		"worker",
+	})
+	var report struct {
+		ExitCode int `json:"exit_code"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("unavailable score input corrupted loop JSON: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
+	}
+	if code != 0 || report.ExitCode != 0 {
+		t.Fatalf("unavailable score input changed dispatch result: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	events, err := loopmgr.Load(ledger)
+	if err != nil {
+		t.Fatalf("load loop ledger: %v", err)
+	}
+	if got := gotKinds(events); got != "fire,admit,start,end" {
+		t.Fatalf("unavailable score input changed loop events: got %s", got)
+	}
+	const marker = "fak loop run: performance-rsi loop-turn "
+	if got := strings.Count(stderr.String(), marker); got != 1 {
+		t.Fatalf("performance RSI invocation count=%d, want exactly 1:\n%s", got, stderr.String())
+	}
+	for _, want := range []string{`"status":"unavailable"`, `"reason":"SCORE_INPUT_UNAVAILABLE"`, `"unavailable_diagnostic":"FAK_PERFORMANCE_RSI_INPUT is not set"`} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("explicit unavailable receipt missing %q:\n%s", want, stderr.String())
+		}
+	}
 }
 
 type loopCardMsg struct {

@@ -10,6 +10,37 @@ import (
 	"testing"
 )
 
+func TestScoreLoopTurnScoresConfiguredInput(t *testing.T) {
+	receipt := ScoreLoopTurn("testdata/complete.json")
+	if receipt.Schema != LoopTurnSchema || receipt.Status != LoopTurnScored || receipt.Reason != "SCORE_COMPLETE" {
+		t.Fatalf("receipt header=%+v", receipt)
+	}
+	if receipt.Snapshot == "" || receipt.LoopHealth == nil || receipt.PerformanceRSIDebt == nil || receipt.DominantBottleneck == "" {
+		t.Fatalf("scored receipt is missing bounded score evidence: %+v", receipt)
+	}
+	rendered := FormatLoopTurnReceipt(receipt)
+	for _, want := range []string{`"schema":"fak-performance-rsi-loop-turn/1"`, `"status":"scored"`, `"reason":"SCORE_COMPLETE"`} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("rendered receipt missing %q: %s", want, rendered)
+		}
+	}
+}
+
+func TestScoreLoopTurnMakesUnavailableInputExplicitAndNonfatal(t *testing.T) {
+	for _, input := range []string{"", filepath.Join(t.TempDir(), "missing.json")} {
+		receipt := ScoreLoopTurn(input)
+		if receipt.Schema != LoopTurnSchema || receipt.Status != LoopTurnUnavailable || receipt.Reason != "SCORE_INPUT_UNAVAILABLE" {
+			t.Fatalf("input %q receipt header=%+v", input, receipt)
+		}
+		if strings.TrimSpace(receipt.UnavailableDiagnostic) == "" {
+			t.Fatalf("input %q silently lost the unavailable diagnostic: %+v", input, receipt)
+		}
+		if receipt.LoopHealth != nil || receipt.PerformanceRSIDebt != nil {
+			t.Fatalf("input %q invented score data: %+v", input, receipt)
+		}
+	}
+}
+
 func fixture(t *testing.T) Evidence {
 	t.Helper()
 	e, err := Load("testdata/complete.json")
