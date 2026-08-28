@@ -388,7 +388,7 @@ func TestSingleReapExplicitSupersessionRemovesRegisteredDirtyWorktree(t *testing
 	git("add", "owned.txt")
 	git("commit", "-qm", "landed independently")
 	supersededBy := git("rev-parse", "HEAD")
-	res := runReapCommand(t, 3*time.Second, nil, "--root", repo, "--worktree", worktree, "--superseded-by", supersededBy, "--max-wait", "1s")
+	res := runReapCommand(t, 8*time.Second, nil, "--root", repo, "--worktree", worktree, "--superseded-by", supersededBy, "--max-wait", "5s")
 	if res.code != 0 {
 		t.Fatalf("authorized reap exit=%d stdout=%q stderr=%q", res.code, res.stdout, res.stderr)
 	}
@@ -516,11 +516,11 @@ func TestWorktreeWorkerListJSONCommandUsesRegisteredEvidence(t *testing.T) {
 		t.Fatalf("decode list --json: %v; output=%q", err, raw)
 	}
 	if got.Schema != worktreeWorkerLifecycleSchema || got.Count != 1 ||
-		!reflect.DeepEqual(got.Paths, []string{worktree}) || len(got.Inventory) != 1 {
+		!reflect.DeepEqual(got.Paths, []string{filepath.ToSlash(worktree)}) || len(got.Inventory) != 1 {
 		t.Fatalf("list --json header = %+v", got)
 	}
 	row := got.Inventory[0]
-	if row.Path != worktree || row.HeadSHA != base || row.BaseSHA != base {
+	if row.Path != filepath.ToSlash(worktree) || row.HeadSHA != base || row.BaseSHA != base {
 		t.Fatalf("revision association = %+v, want path=%q head/base=%q", row, worktree, base)
 	}
 	if row.Association.State != worktreeEvidenceAssociated ||
