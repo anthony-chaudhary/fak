@@ -8733,6 +8733,26 @@
           "category": "incidental",
           "reason": "Benchmark receipt label freezes a comparator placement setting; it does not define or enforce a capability policy.",
           "token": "HostSpillPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 exact-backend guard constant for the explicit CPU fallback posture; implementation symbol for an already documented runtime-capabilities policy seam, not a separate policy-capability concept.",
+          "token": "FallbackPolicyPinOrRefuse"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 exact constant for the explicit local_cpu_degraded fallback mode; implementation symbol of the documented fallback policy, not a separate policy-capability concept.",
+          "token": "FallbackPolicyLocalCPUDegrade"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 runtimecap option/report field carrying the explicit CPU fallback policy choice; a transport symbol for the documented fallback seam, not a new policy-capability concept.",
+          "token": "CPUFallbackPolicy"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 local parser and normalizer for the explicit fallback-policy option; implementation helper, not a standalone policy-capability concept.",
+          "token": "normalizeFallbackPolicy"
         }
       ],
       "exclude": [
@@ -8749,6 +8769,7 @@
         "ArmFakCapability",
         "AssistancePolicy",
         "CAPABILITY_NOT_ADVERTISED",
+        "CPUFallbackPolicy",
         "CapabilityAdded",
         "CapabilityDocument",
         "CapabilityExpiresMS",
@@ -8771,6 +8792,8 @@
         "FAK_ORG_POLICY_URL",
         "FAK_PREFLIGHT_ALLOW_BIN_SKEW",
         "FailurePolicy",
+        "FallbackPolicyLocalCPUDegrade",
+        "FallbackPolicyPinOrRefuse",
         "GoCandidateCapability",
         "HeldSchedulePolicy",
         "HostSpillPolicy",
@@ -8870,6 +8893,7 @@
         "naturalTrafficAdjudicator",
         "naturalTrafficPolicyRow",
         "normalizeDecodePolicyLabel",
+        "normalizeFallbackPolicy",
         "numareplicapolicyunsupported",
         "orgPostureGloss",
         "phasePolicy",
@@ -10854,6 +10878,21 @@
           "category": "incidental",
           "reason": "Generated handoff metadata repeats the existing dev handler symbol; it is not a distinct support-maturity concept.",
           "token": "runtoolcoverageaudit"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 JSON report field naming the supported fallback envelope catalog exposed by runtime-capabilities; a disclosure/wire label for admitted rows, not a distinct support-maturity concept.",
+          "token": "supported_cpu_envelopes"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 runtimecap local status constant for the pre-load compatibility verdict; implementation-only label within the existing support report, not a separate support-maturity concept.",
+          "token": "payloadCompatibilitySupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 refusal code string for an exact CPU-envelope mismatch; a specific runtime-capabilities refusal label inside the supported-envelope report, not a distinct support-maturity concept.",
+          "token": "unsupported_cpu_envelope"
         }
       ],
       "exclude": [
@@ -11043,6 +11082,7 @@
         "parityreport",
         "parseCoverageLine",
         "partial_provider_coverage",
+        "payloadCompatibilitySupported",
         "provenance_correctness",
         "recurrentevictunsupportederror",
         "registrationCoverage",
@@ -11064,6 +11104,7 @@
         "streamingsupported",
         "supported",
         "supportedFleetClass",
+        "supported_cpu_envelopes",
         "supportgraph",
         "supportgraphdemo",
         "supporting",
@@ -11076,6 +11117,7 @@
         "unsupported",
         "unsupportedFaultDomain",
         "unsupported_activation",
+        "unsupported_cpu_envelope",
         "unsupported_encoding",
         "unsupported_event_kinds",
         "unsupported_extension",
@@ -13032,6 +13074,11 @@
           "category": "false-positive",
           "reason": "Scoreboard ratio field names numerator over denominator; it is not a project planning concept.",
           "token": "ReferenceOverCandidate"
+        },
+        {
+          "category": "incidental",
+          "reason": "Issue #9842 exported compute adapter over the existing host-memory fit refusal logic so runtimecap can reuse it before payload load; not a new plan concept.",
+          "token": "RefuseMemoryPlanIfTooBigForReportedHost"
         }
       ],
       "exclude": [
@@ -13116,6 +13163,7 @@
         "RecoveryReplan",
         "RefusalPlanContract",
         "RefusalPlanSchema",
+        "RefuseMemoryPlanIfTooBigForReportedHost",
         "RemoteDrainCandidate",
         "RoleCandidate",
         "RunCodeToolsSelfcheck",

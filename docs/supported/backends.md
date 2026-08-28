@@ -20,17 +20,19 @@ and use that row's wiring route.
 Run `fak runtime-capabilities` to get the stable `fak-runtime-capabilities/1` JSON report for the current executable and host. The probe does not open or load a model payload. It reports:
 
 - whether the binary and governed control plane are runnable;
-- `goos`, `goarch`, build tags, and every backend that actually registered;
+- `goos`, `goarch`, build tags, host memory, and every backend that actually registered;
 - the always-portable fak-native `cpu-ref` reference tier when present;
-- whether an exact `--backend` request is available, unavailable, or unsupported; and
+- whether an exact `--backend` request is available, unavailable, or unsupported;
+- the explicit `supported_cpu_envelopes` catalog for policy-controlled local CPU degradation; and
 - the selected engine/backend identity (`fak-native`) without silently substituting another backend.
 
 ```console
 fak runtime-capabilities
 fak runtime-capabilities --backend cuda
+fak runtime-capabilities --prefer-backend vulkan --fallback-policy local_cpu_degraded --cpu-envelope qwen25-1p5b-q8-windows-amd64
 ```
 
-A default build normally reports only `cpu-ref`. CUDA and Vulkan require their build tags and vendor/runtime prerequisites; Metal requires a cgo-enabled Darwin/arm64 build and a reachable Metal device. A missing requested accelerator is a diagnostic result, not permission to switch engines. Model-format and workload-fit checks remain `not_checked` until a later payload-aware admission step; resource-fit policy stays with issue #8163.
+A default build normally reports only `cpu-ref`. CUDA and Vulkan require their build tags and vendor/runtime prerequisites; Metal requires a cgo-enabled Darwin/arm64 build and a reachable Metal device. A missing exact backend request is a diagnostic result, not permission to switch engines. The only built-in degraded path is the explicit `--prefer-backend ... --fallback-policy local_cpu_degraded --cpu-envelope ...` flow: it keeps the requested accelerator reason, selects `cpu-ref` only for a supported envelope, and refuses unsupported or over-budget envelopes before payload load. The command never substitutes `llama.cpp` or another engine.
 ## Choose by operating envelope
 
 | Choose | When it fits | Current support boundary | Continue with |

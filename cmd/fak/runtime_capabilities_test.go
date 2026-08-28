@@ -41,3 +41,40 @@ func TestRunRuntimeCapabilitiesRequestedBackendRefusesSilentFallback(t *testing.
 		t.Fatalf("silent fallback: %+v", report)
 	}
 }
+
+func TestRunRuntimeCapabilitiesPreferredBackendCanEmitLocalCPUDegradedReceipt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	args := []string{
+		"--prefer-backend", "vulkan",
+		"--fallback-policy", runtimecap.FallbackPolicyLocalCPUDegrade,
+		"--cpu-envelope", "qwen25-1p5b-q8-windows-amd64",
+		"--goos", "windows",
+		"--goarch", "amd64",
+		"--host-total-ram-bytes", "17179869184",
+		"--host-free-ram-bytes", "12884901888",
+	}
+	if code := runRuntimeCapabilities(&stdout, &stderr, args); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var report runtimecap.Report
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout.String())
+	}
+	if report.PreferredBackend == nil || report.PreferredBackend.Selected != "cpu-ref" {
+		t.Fatalf("preferred backend = %+v", report.PreferredBackend)
+	}
+	if !report.ModelExecution.Runnable || report.ModelExecution.Mode != runtimecap.FallbackPolicyLocalCPUDegrade {
+		t.Fatalf("execution = %+v", report.ModelExecution)
+	}
+	if report.ModelExecution.LocalCPUDegraded == nil || report.ModelExecution.LocalCPUDegraded.RequestedBackend != "vulkan" {
+		t.Fatalf("receipt = %+v", report.ModelExecution.LocalCPUDegraded)
+	}
+}
+
+func TestRunRuntimeCapabilitiesRejectsConflictingBackendFlags(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := runRuntimeCapabilities(&stdout, &stderr, []string{"--backend", "cpu-ref", "--prefer-backend", "vulkan"})
+	if code != 2 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}
