@@ -15,6 +15,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 )
@@ -1027,4 +1028,8 @@ type Server struct {
 	// split prefill/decode pool is on the serving path.
 	nativePDMu      sync.RWMutex
 	nativePDMetrics NativePDMetricsProvider
+
+	// nativeReceiptMetrics projects authoritative per-request fak-native receipts
+	// into the shared /metrics surface. It never admits fallback-active receipts.
+	nativeReceiptMetrics *nativeperf.ReceiptMetrics
 }

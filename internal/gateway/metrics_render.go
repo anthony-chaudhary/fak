@@ -256,6 +256,9 @@ func (s *Server) renderMetrics() string {
 	m.writeHarnessMetrics(&b)  // fak_harness_* — the guard harness's own CPU/mem/IO (epic #2044)
 	m.writeLogvaultMetrics(&b) // fak_logvault_* — vault last-capture age/footprint/verify mismatches (#2455)
 	s.writeNativePDMetrics(&b) // #28: native prefill/decode role-split telemetry, when a cluster is wired
+	if s.nativeReceiptMetrics != nil {
+		b.WriteString(s.nativeReceiptMetrics.Prometheus(time.Now()))
+	}
 	m.writeVCacheMetrics(&b)
 	m.writeVCacheWarmthMetrics(&b)
 	m.writeVCacheWarmthDemotionMetrics(&b)

@@ -78,6 +78,17 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	if receipt.Model != "synthetic-live" || receipt.Engine != "inkernel" || receipt.Backend != "cpu-ref" || receipt.ForwardPath != "cpu/reference" || receipt.Q4K || receipt.FallbackActive {
 		t.Fatalf("execution identity = %+v, want exact synthetic inkernel cpu/reference without Q4K or fallback", receipt)
 	}
+	metrics := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_native_receipt_requests_total{engine="inkernel",backend="other",forward_path="other"} 1`,
+		`fak_native_receipt_signal_supported{signal="prefill"} 1`,
+		`fak_native_receipt_signal_supported{signal="decode"} 1`,
+		`fak_native_receipt_latest_stale 0`,
+	} {
+		if !strings.Contains(metrics, want) {
+			t.Fatalf("production request did not reach /metrics: missing %q", want)
+		}
+	}
 	if receipt.Qwen35MetalForwardSequence != nil || bytes.Contains(rr.Body.Bytes(), []byte(`"qwen35_metal_forward_sequence"`)) {
 		t.Fatalf("CPU receipt acquired Metal sequence evidence: %+v", receipt.Qwen35MetalForwardSequence)
 	}
