@@ -2,7 +2,7 @@
   "schema": "fak.new-model-native-obligation-graph/1",
   "manifest_digest": "9a1bc496035995cdba58a0e970b89031fdc2bc1eb16707989691bb1933999f8d",
   "descriptor_digest": "080f23988518d7317eda384fa300eabead5195d82e95a2e7df69ac5e4a1def84",
-  "envelope_digest": "41e282fd2d42c9e54d180109622bafe531e2d731e211f816697c6edc99d126fa",
+  "envelope_digest": "90f25ae071e11824959fee6a9f67c42970e797eba8225e268e11380068e3d911",
   "engine": "fak-native",
   "external_runtime_fallback": false,
   "nodes": [
@@ -361,6 +361,16 @@
         "kind": "promotion-test",
         "reason": "This prospective witness must pass before the obligation can be promoted."
       },
+      "launch_admission": {
+        "decision": "admitted",
+        "reason_code": "launch-admitted",
+        "reason": "the bounded launch shape fits the admitted backend/platform limits before allocation",
+        "operation": "fusion.attention-hybrid",
+        "shape_elements": 262144,
+        "grid_blocks": 1024,
+        "block_threads": 256,
+        "peak_workspace_bytes": 262144
+      },
       "eligible": true,
       "blockers": []
     },
@@ -401,9 +411,19 @@
         "kind": "promotion-test",
         "reason": "This prospective witness must pass before the obligation can be promoted."
       },
+      "launch_admission": {
+        "decision": "native-correctness-path",
+        "reason_code": "fusion-ineligible",
+        "reason": "the optional fusion has no witnessed implementation for this fak-native backend",
+        "operation": "fusion.ffn-swiglu",
+        "shape_elements": 0,
+        "grid_blocks": 0,
+        "block_threads": 0,
+        "peak_workspace_bytes": 0
+      },
       "eligible": false,
       "blockers": [
-        "backend:cuda:checkpoint-specific-fusion-not-witnessed"
+        "fusion-ineligible"
       ]
     },
     {
@@ -443,9 +463,19 @@
         "kind": "promotion-test",
         "reason": "This prospective witness must pass before the obligation can be promoted."
       },
+      "launch_admission": {
+        "decision": "native-correctness-path",
+        "reason_code": "fusion-ineligible",
+        "reason": "the optional fusion has no witnessed implementation for this fak-native backend",
+        "operation": "fusion.routing-moe-topk",
+        "shape_elements": 0,
+        "grid_blocks": 0,
+        "block_threads": 0,
+        "peak_workspace_bytes": 0
+      },
       "eligible": false,
       "blockers": [
-        "backend:cuda:checkpoint-specific-fusion-not-witnessed"
+        "fusion-ineligible"
       ]
     },
     {
@@ -485,8 +515,20 @@
         "kind": "promotion-test",
         "reason": "This prospective witness must pass before the obligation can be promoted."
       },
-      "eligible": true,
-      "blockers": []
+      "launch_admission": {
+        "decision": "native-correctness-path",
+        "reason_code": "launch-domain-missing",
+        "reason": "the optional fusion has no bounded launch domain",
+        "operation": "fusion.state-hybrid-update",
+        "shape_elements": 0,
+        "grid_blocks": 0,
+        "block_threads": 0,
+        "peak_workspace_bytes": 0
+      },
+      "eligible": false,
+      "blockers": [
+        "launch-domain-missing"
+      ]
     }
   ]
 }

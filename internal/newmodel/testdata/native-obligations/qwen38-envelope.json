@@ -11,5 +11,46 @@
   "state_layout": "contiguous",
   "state_residency": "device",
   "memory_budget_bytes": 1048576,
+  "launch_limits": {
+    "platform": "linux/amd64+nvidia-a100",
+    "backend": "cuda",
+    "max_dimension_value": 4096,
+    "max_grid_blocks": 1024,
+    "max_block_threads": 256,
+    "max_workspace_bytes": 262144
+  },
+  "fusion_launch_domains": [
+    {
+      "operation": "fusion.attention-hybrid",
+      "empty_batch_policy": "native-correctness-path",
+      "dimensions": [
+        {
+          "name": "batch",
+          "value": 1,
+          "min": 1,
+          "max": 1,
+          "divisible_by": 1
+        },
+        {
+          "name": "tokens",
+          "value": 64,
+          "min": 1,
+          "max": 64,
+          "divisible_by": 8
+        },
+        {
+          "name": "channels",
+          "value": 4096,
+          "min": 128,
+          "max": 4096,
+          "divisible_by": 128
+        }
+      ],
+      "grid_blocks": 1024,
+      "block_threads": 256,
+      "workspace_bounded": true,
+      "peak_workspace_bytes": 262144
+    }
+  ],
   "external_runtime_fallback": false
 }

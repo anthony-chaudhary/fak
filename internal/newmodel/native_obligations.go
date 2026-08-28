@@ -25,19 +25,21 @@ const (
 // NativeHardwareEnvelope is one checkpoint-bound planning envelope. It is not
 // an execution or performance receipt and cannot select a foreign runtime.
 type NativeHardwareEnvelope struct {
-	Schema                  string `json:"schema"`
-	ID                      string `json:"id"`
-	Engine                  string `json:"engine"`
-	Platform                string `json:"platform"`
-	Backend                 string `json:"backend"`
-	Quantization            string `json:"quantization"`
-	QuantizationAuthority   string `json:"quantization_authority"`
-	ArtifactSHA256          string `json:"artifact_sha256"`
-	WeightLayout            string `json:"weight_layout"`
-	StateLayout             string `json:"state_layout"`
-	StateResidency          string `json:"state_residency"`
-	MemoryBudgetBytes       uint64 `json:"memory_budget_bytes"`
-	ExternalRuntimeFallback bool   `json:"external_runtime_fallback"`
+	Schema                  string                     `json:"schema"`
+	ID                      string                     `json:"id"`
+	Engine                  string                     `json:"engine"`
+	Platform                string                     `json:"platform"`
+	Backend                 string                     `json:"backend"`
+	Quantization            string                     `json:"quantization"`
+	QuantizationAuthority   string                     `json:"quantization_authority"`
+	ArtifactSHA256          string                     `json:"artifact_sha256"`
+	WeightLayout            string                     `json:"weight_layout"`
+	StateLayout             string                     `json:"state_layout"`
+	StateResidency          string                     `json:"state_residency"`
+	MemoryBudgetBytes       uint64                     `json:"memory_budget_bytes"`
+	LaunchLimits            NativeLaunchLimits         `json:"launch_limits"`
+	FusionLaunchDomains     []NativeFusionLaunchDomain `json:"fusion_launch_domains"`
+	ExternalRuntimeFallback bool                       `json:"external_runtime_fallback"`
 }
 
 type NativeObligationGraph struct {
@@ -60,6 +62,7 @@ type NativeObligation struct {
 	Backend          NativeBackendObligation      `json:"backend"`
 	MemoryLayout     NativeMemoryLayoutObligation `json:"memory_layout"`
 	PromotionWitness NativePromotionWitness       `json:"promotion_witness"`
+	LaunchAdmission  *NativeLaunchAdmission       `json:"launch_admission,omitempty"`
 	Eligible         bool                         `json:"eligible"`
 	Blockers         []string                     `json:"blockers"`
 }
@@ -135,6 +138,7 @@ func CompileNativeObligationGraph(packet Packet, envelope NativeHardwareEnvelope
 	if packet.Engine != "fak-native" || packet.Descriptor.Engine != "fak-native" || packet.ExternalRuntimeFallback {
 		return NativeObligationGraph{}, refuse(RefusalNativeEngineMismatch, "engine", "packet must remain fak-native with external runtime fallback disabled")
 	}
+	envelope = normalizeNativeLaunchEnvelope(envelope)
 	descriptor := packet.Descriptor.ModelDescriptor()
 	if err := modeldescriptor.Validate(descriptor); err != nil {
 		return NativeObligationGraph{}, refuse(RefusalDescriptorInvalid, "descriptor", err.Error())
@@ -178,9 +182,10 @@ func CompileNativeObligationGraph(packet Packet, envelope NativeHardwareEnvelope
 		nodes = append(nodes, required)
 		if rule.CandidateID != "" {
 			candidate := nativeNode(rule.CandidateID, NativeObligationFusion, rule.CandidateOp, []string{rule.RequiredID}, oracleID, envelope, constraint, "promotion-test", "promote-"+strings.ReplaceAll(rule.CandidateOp, ".", "-"), "Fusion is optional and may be promoted only after its unfused correctness dependency passes.")
-			candidate.Eligible = contains(rule.CandidateBackends, envelope.Backend)
+			candidate.LaunchAdmission = admitNativeFusionLaunch(rule.CandidateOp, contains(rule.CandidateBackends, envelope.Backend), envelope)
+			candidate.Eligible = candidate.LaunchAdmission.Decision == NativeLaunchDecisionAdmitted
 			if !candidate.Eligible {
-				candidate.Blockers = []string{"backend:" + envelope.Backend + ":checkpoint-specific-fusion-not-witnessed"}
+				candidate.Blockers = []string{string(candidate.LaunchAdmission.ReasonCode)}
 			}
 			nodes = append(nodes, candidate)
 		}
@@ -309,6 +314,12 @@ func orderNativeObligations(nodes []NativeObligation) ([]NativeObligation, error
 		}
 		if node.Reason == "" || node.Operation == "" || node.Oracle.ID == "" || node.Oracle.Reason == "" || node.Backend.Engine != "fak-native" || node.Backend.Platform == "" || node.Backend.Backend == "" || node.Backend.Reason == "" || node.MemoryLayout.Reason == "" || node.PromotionWitness.ID == "" || node.PromotionWitness.Kind == "" || node.PromotionWitness.Reason == "" {
 			return nil, refuse(RefusalUnsupportedNativeCombination, "obligation_graph", fmt.Sprintf("node %q has an incomplete reason-bearing obligation", node.ID))
+		}
+		if node.Class == NativeObligationRequired && node.LaunchAdmission != nil {
+			return nil, refuse(RefusalUnsupportedNativeCombination, "obligation_graph", fmt.Sprintf("required node %q unexpectedly carries fusion admission", node.ID))
+		}
+		if node.Class == NativeObligationFusion && (node.LaunchAdmission == nil || node.LaunchAdmission.Decision == "" || node.LaunchAdmission.ReasonCode == "" || node.LaunchAdmission.Reason == "") {
+			return nil, refuse(RefusalUnsupportedNativeCombination, "obligation_graph", fmt.Sprintf("fusion node %q lacks launch-domain admission", node.ID))
 		}
 		byID[node.ID] = node
 	}

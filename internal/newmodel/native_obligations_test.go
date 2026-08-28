@@ -34,6 +34,17 @@ func TestCompileNativeObligationGraphQwen38DeterministicWitness(t *testing.T) {
 	if !bytes.Equal(firstJSON, secondJSON) {
 		t.Fatal("same packet/envelope produced different graph bytes")
 	}
+	var readback NativeObligationGraph
+	if err := json.Unmarshal(firstJSON, &readback); err != nil {
+		t.Fatal(err)
+	}
+	readbackJSON, err := MarshalNativeObligationGraph(readback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstJSON, readbackJSON) {
+		t.Fatal("graph readback changed deterministic bytes")
+	}
 	want, err := os.ReadFile(filepath.Join("testdata", "native-obligations", "qwen38-graph.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -48,13 +59,23 @@ func TestCompileNativeObligationGraphQwen38DeterministicWitness(t *testing.T) {
 	}
 	seenFusion := false
 	seenRejectedCandidate := false
+	seenAdmittedLaunch := false
 	for _, node := range first.Nodes {
 		seenFusion = seenFusion || node.Class == NativeObligationFusion
 		if seenFusion && node.Class == NativeObligationRequired {
 			t.Fatalf("required correctness node %q follows optional fusion", node.ID)
 		}
+		if node.Class == NativeObligationRequired && node.LaunchAdmission != nil {
+			t.Fatalf("required correctness node %q carries fusion admission", node.ID)
+		}
 		if node.Class == NativeObligationFusion && (node.Reason == "" || node.Oracle.ID == "" || node.Oracle.Reason == "" || node.Backend.Engine != "fak-native" || node.Backend.Platform == "" || node.Backend.Backend == "" || node.Backend.Reason == "" || node.MemoryLayout.Reason == "" || node.PromotionWitness.ID == "" || node.PromotionWitness.Reason == "") {
 			t.Fatalf("candidate lacks reason-bearing obligations: %+v", node)
+		}
+		if node.Class == NativeObligationFusion && (node.LaunchAdmission == nil || node.LaunchAdmission.ReasonCode == "" || node.LaunchAdmission.Reason == "") {
+			t.Fatalf("candidate lacks launch-domain admission: %+v", node)
+		}
+		if node.Class == NativeObligationFusion && node.LaunchAdmission.Decision == NativeLaunchDecisionAdmitted {
+			seenAdmittedLaunch = true
 		}
 		if node.Class == NativeObligationFusion && !node.Eligible {
 			seenRejectedCandidate = true
@@ -65,6 +86,9 @@ func TestCompileNativeObligationGraphQwen38DeterministicWitness(t *testing.T) {
 	}
 	if !seenRejectedCandidate {
 		t.Fatal("fixture did not witness a reason-bearing rejected fusion candidate")
+	}
+	if !seenAdmittedLaunch {
+		t.Fatal("fixture did not witness an admitted optional-fusion launch boundary")
 	}
 }
 
