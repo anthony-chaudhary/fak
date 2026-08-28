@@ -56,6 +56,7 @@ func init() {
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
 		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
 		q4kProfile:              os.Getenv("FAK_VULKAN_Q4K_PROFILE") == "1",
+		q4kStage:                os.Getenv("FAK_VULKAN_STAGE_Q4K") == "1",
 	}
 	Register(vulkanDev)
 }
@@ -192,6 +193,12 @@ type vulkanBackend struct {
 	q4kDevicePackedBytes      int64
 	q4kHostVisibleCalls       int64
 	q4kHostVisiblePackedBytes int64
+	q4kStage                  bool
+	q4kStagePtr               unsafe.Pointer
+	q4kStageBytes             int64
+	q4kStagedCalls            int64
+	q4kStagedBytes            int64
+	q4kStageFallbacks         int64
 }
 
 var _ TensorCloner = (*vulkanBackend)(nil)
@@ -296,6 +303,12 @@ func (v *vulkanBackend) TeardownResources() error {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
 	C.fvk_batch_flush()
+	if v.q4kStagePtr != nil {
+		C.fvk_free(v.q4kStagePtr)
+		v.dlUsed -= v.q4kStageBytes
+		v.q4kStagePtr = nil
+		v.q4kStageBytes = 0
+	}
 	C.fvk_trim_pool()
 	return nil
 }
@@ -780,12 +793,63 @@ func (v *vulkanBackend) profileQ4KMatMulLocked(packedBytes int, hostVisibleWeigh
 	}
 }
 
+func (v *vulkanBackend) VulkanDebugQ4KStageSnapshot() (enabled bool, capacity, calls, bytes, fallbacks int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.q4kStage, v.q4kStageBytes, v.q4kStagedCalls, v.q4kStagedBytes, v.q4kStageFallbacks
+}
+
+func (v *vulkanBackend) ensureQ4KStageLocked(bytes int) unsafe.Pointer {
+	need := int64(bytes)
+	if v.q4kStagePtr != nil && v.q4kStageBytes >= need {
+		return v.q4kStagePtr
+	}
+	old := v.q4kStageBytes
+	if v.budgetBytes > 0 && v.dlUsed-old+need > v.budgetBytes {
+		v.q4kStageFallbacks++
+		return nil
+	}
+	// Growth is rare and must not release storage referenced by pending commands.
+	C.fvk_batch_flush()
+	if v.q4kStagePtr != nil {
+		C.fvk_free(v.q4kStagePtr)
+		v.dlUsed -= old
+		v.q4kStagePtr = nil
+		v.q4kStageBytes = 0
+	}
+	v.checkResourceCap(bytes, "Q4_K staging buffer")
+	p := C.fvk_malloc(C.size_t(bytes))
+	if p == nil {
+		v.q4kStageFallbacks++
+		return nil
+	}
+	stage := &vulkanBuf{ptr: unsafe.Pointer(p), n: bytes}
+	if !v.debugBufferDeviceLocal(stage) {
+		C.fvk_free(p)
+		v.q4kStageFallbacks++
+		return nil
+	}
+	v.q4kStagePtr = unsafe.Pointer(p)
+	v.q4kStageBytes = need
+	v.dlUsed += need
+	return v.q4kStagePtr
+}
+
 func (v *vulkanBackend) q4kMatMulLocked(w, x, y Tensor, out, in, P int) {
 	wb := w.buf.(*vulkanBuf)
 	if v.q4kProfile {
 		v.profileQ4KMatMulLocked(wb.n, wb.hostVisibleWeight, v.debugBufferDeviceLocal(wb))
 	}
-	C.fvk_q4k_matmul_f32(wb.ptr, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
+	weight := wb.ptr
+	if v.q4kStage && wb.hostVisibleWeight {
+		if stage := v.ensureQ4KStageLocked(wb.n); stage != nil {
+			C.fvk_d2d(stage, wb.ptr, C.size_t(wb.n))
+			weight = stage
+			v.q4kStagedCalls++
+			v.q4kStagedBytes += int64(wb.n)
+		}
+	}
+	C.fvk_q4k_matmul_f32(weight, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
 }
 
 func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
