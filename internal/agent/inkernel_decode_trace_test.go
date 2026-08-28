@@ -10,6 +10,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/compute"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/radixkv"
 )
 
 func decodeTraceClock(offsets ...time.Duration) func() time.Time {
@@ -136,10 +137,12 @@ func TestInKernelDecodeTraceIndicesTimingAndBatchParity(t *testing.T) {
 }
 
 func TestInKernelDecodeTraceExactCachedLogitsBindsOnlyRealSteps(t *testing.T) {
-	cfg := tinyCfg()
-	cfg.EOSTokenID = -1
-	p := reusePlanner(true, false, cfg)
-	ids := synthIDs(cfg.VocabSize, 24, 9754)
+	t.Setenv("FAK_INKERNEL_RADIX", "on")
+	cfg := tinyGLMDsaCfg()
+	backend := &countingBackend{Backend: compute.Default(), deviceMemory: true}
+	p := NewInKernelPlanner(model.NewSyntheticGLMDsa(cfg), nil, "glm-dsa-device-trace", false, backend, false)
+	p.quant = false
+	ids := synthIDs(cfg.VocabSize, 9, 9754)
 	decode(p, ids, 0) // prime exact prompt-final logits without a decode step.
 
 	measurement := &nativeInferenceMeasurement{
@@ -151,14 +154,14 @@ func TestInKernelDecodeTraceExactCachedLogitsBindsOnlyRealSteps(t *testing.T) {
 			60*time.Nanosecond,
 		),
 	}
-	gen, _, _, matched, _, _, _, _, err := p.generateReusedContextWithBias(
+	gen, _, _, matched, tier, _, _, _, err := p.generateReusedContextWithBias(
 		context.Background(), ids, 3, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil, measurement,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gen != 3 || matched != len(ids) {
-		t.Fatalf("exact replay generated/matched = %d/%d, want 3/%d", gen, matched, len(ids))
+	if gen != 3 || matched != len(ids) || tier != radixkv.SnapshotTierDeviceL1 {
+		t.Fatalf("exact replay generated/matched/tier = %d/%d/%s, want 3/%d/device_l1", gen, matched, tier, len(ids))
 	}
 	if len(measurement.traceEvents) != 3 {
 		t.Fatalf("exact replay trace length = %d, want 3", len(measurement.traceEvents))

@@ -470,8 +470,8 @@ func (c *cudaBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, site st
 	out, buf := c.dev(t.Shape, F32)
 	if len(f) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&f[0]), C.size_t(len(f)*4))
+		c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
 		if hp != 0 {
-			c.accountImmutableWeightUpload(hp, len(f)*F32.Bytes(), buf)
 			buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F32, t.Layout
 			uploadCache[ucKey{hp, F32, t.Layout}] = out
 		}
@@ -524,7 +524,7 @@ func (c *cudaBackend) uploadQ8(t Tensor, hb HostBuffer, f []float32, hp uintptr)
 	}
 	res, buf := c.devQ8(t.Shape, blk, len(scales))
 	cudaUploadQuantPayload(buf, codes, scales)
-	c.accountImmutableWeightUpload(hp, len(codes)+len(scales)*F32.Bytes(), buf)
+	c.accountImmutableWeightUpload(len(codes)+len(scales)*F32.Bytes(), buf)
 	buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q8_0, t.Layout
 	uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	return res
@@ -567,7 +567,7 @@ func (c *cudaBackend) uploadQ8Resident(t Tensor, hb HostBuffer) Tensor {
 	res, buf := c.devQ8(t.Shape, blk, len(scales))
 	if len(codes) > 0 {
 		cudaUploadQuantPayload(buf, codes, scales)
-		c.accountImmutableWeightUpload(hp, len(codes)+len(scales)*F32.Bytes(), buf)
+		c.accountImmutableWeightUpload(len(codes)+len(scales)*F32.Bytes(), buf)
 		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q8_0, t.Layout
 		uploadCache[ucKey{hp, Q8_0, t.Layout}] = res
 	}
@@ -614,8 +614,8 @@ func (c *cudaBackend) uploadQ2Resident(t Tensor, hb HostBuffer) Tensor {
 	res, buf := c.devQ2(t.Shape, blk, len(scales))
 	if len(codes) > 0 {
 		cudaUploadQuantPayload(buf, codes, scales)
-		c.accountImmutableWeightUpload(hp, len(codes)+len(scales)*F32.Bytes(), buf)
-		buf.host, buf.hostDt, buf.hostLo = hp, Q2_0, t.Layout
+		c.accountImmutableWeightUpload(len(codes)+len(scales)*F32.Bytes(), buf)
+		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, Q2_0, t.Layout
 		uploadCache[ucKey{hp, Q2_0, t.Layout}] = res
 	}
 	return res
@@ -652,7 +652,7 @@ func (c *cudaBackend) uploadRawKQuant(t Tensor, hb HostBuffer) Tensor {
 	res, buf := c.devRawKQuant(t.Dtype, t.Shape, len(raw))
 	if len(raw) > 0 {
 		C.fcuda_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
-		c.accountImmutableWeightUpload(hp, len(raw), buf)
+		c.accountImmutableWeightUpload(len(raw), buf)
 		buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, t.Dtype, t.Layout
 		uploadCache[ucKey{hp, t.Dtype, t.Layout}] = res
 	}
@@ -700,7 +700,7 @@ func (c *cudaBackend) uploadF16(t Tensor, hb HostBuffer, f []float32, hp uintptr
 		C.fcuda_f32_to_f16(buf.ptr, (*C.float)(stage.ptr), C.int(len(f)))
 	}
 	C.fcuda_free(stage.ptr)
-	c.accountImmutableWeightUpload(hp, len(f)*F32.Bytes(), buf)
+	c.accountImmutableWeightUpload(len(f)*F32.Bytes(), buf)
 	buf.host, buf.hostKeep, buf.hostDt, buf.hostLo = hp, hb, F16, t.Layout
 	uploadCache[ucKey{hp, F16, t.Layout}] = out
 	return out
