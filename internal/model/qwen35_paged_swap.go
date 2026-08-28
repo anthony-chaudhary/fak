@@ -12,10 +12,18 @@ import (
 
 const qwenHybridPagedSwapMagic = "FAKQHPS1"
 
+const (
+	qwenHybridSwapEncodeRecovery = "rebuild an intact Qwen hybrid KV cache, then retry with a positive block size and smaller token window"
+	qwenHybridSwapDecodeRecovery = "re-serialize the cache with the matching Qwen hybrid config, then retry"
+)
+
 // QwenHybridKVCacheToHost serializes a Qwen hybrid host cache for scheduler swap.
 // Only full-attention layers occupy token-indexed page rows; linear-attention
 // convolution and recurrent matrices are carried exactly in a fixed-state sidecar.
-func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) ([]byte, error) {
+func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) (_ []byte, err error) {
+	defer func() {
+		err = qwenHybridSwapErrorWithRecovery(err, qwenHybridSwapEncodeRecovery)
+	}()
 	if c == nil || !c.cfg.IsQwen35Hybrid() {
 		return nil, errors.New("model: Qwen hybrid swap requires a Qwen hybrid KV cache")
 	}
@@ -90,7 +98,10 @@ func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) ([]byte, error) {
 // QwenHybridKVCacheFromHost validates and restores a Qwen swap blob into a fresh cache.
 // The destination remains private until every validation passes, so refusal cannot
 // partially mutate or publish a live cache.
-func QwenHybridKVCacheFromHost(cfg Config, data []byte) (*KVCache, error) {
+func QwenHybridKVCacheFromHost(cfg Config, data []byte) (_ *KVCache, err error) {
+	defer func() {
+		err = qwenHybridSwapErrorWithRecovery(err, qwenHybridSwapDecodeRecovery)
+	}()
 	if !cfg.IsQwen35Hybrid() {
 		return nil, errors.New("model: Qwen hybrid restore requires a Qwen hybrid config")
 	}
@@ -188,6 +199,13 @@ func QwenHybridKVCacheFromHost(cfg Config, data []byte) (*KVCache, error) {
 		return nil, errors.New("model: trailing Qwen hybrid swap bytes")
 	}
 	return out, nil
+}
+
+func qwenHybridSwapErrorWithRecovery(err error, recovery string) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w; recovery: %s", err, recovery)
 }
 
 func newQwenHybridSwapCache(cfg Config) *KVCache {

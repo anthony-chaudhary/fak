@@ -139,6 +139,91 @@ func TestQwenHybridPagedSwapAdversarialMalformedCacheRefusesWithoutPanic(t *test
 	}
 }
 
+func TestQwenHybridPagedSwapErrorsNameRecovery(t *testing.T) {
+	cfg := qwen35HybridTestCfg()
+	session := NewSynthetic(cfg).NewSession()
+	session.Prefill([]int{3, 7, 11})
+	validBlob := mustQwenSwap(t, session.Cache, 4)
+
+	tests := []struct {
+		name         string
+		invoke       func() error
+		wantProblem  string
+		wantRecovery string
+	}{
+		{
+			name: "encoder requires Qwen cache",
+			invoke: func() error {
+				_, err := QwenHybridKVCacheToHost(nil, 4)
+				return err
+			},
+			wantProblem:  "requires a Qwen hybrid KV cache",
+			wantRecovery: "rebuild an intact Qwen hybrid KV cache",
+		},
+		{
+			name: "encoder requires positive block size",
+			invoke: func() error {
+				_, err := QwenHybridKVCacheToHost(session.Cache, 0)
+				return err
+			},
+			wantProblem:  "block size must be positive",
+			wantRecovery: "positive block size",
+		},
+		{
+			name: "encoder refuses malformed inventory",
+			invoke: func() error {
+				cache := NewSynthetic(cfg).NewSession().Cache
+				cache.K = nil
+				_, err := QwenHybridKVCacheToHost(cache, 4)
+				return err
+			},
+			wantProblem:  "plane inventory mismatch",
+			wantRecovery: "rebuild an intact Qwen hybrid KV cache",
+		},
+		{
+			name: "decoder requires Qwen config",
+			invoke: func() error {
+				_, err := QwenHybridKVCacheFromHost(Config{}, validBlob)
+				return err
+			},
+			wantProblem:  "requires a Qwen hybrid config",
+			wantRecovery: "matching Qwen hybrid config",
+		},
+		{
+			name: "decoder refuses truncation",
+			invoke: func() error {
+				_, err := QwenHybridKVCacheFromHost(cfg, validBlob[:sha256.Size-1])
+				return err
+			},
+			wantProblem:  "truncated",
+			wantRecovery: "re-serialize the cache",
+		},
+		{
+			name: "decoder refuses corruption",
+			invoke: func() error {
+				corrupt := append([]byte(nil), validBlob...)
+				corrupt[len(corrupt)/2] ^= 1
+				_, err := QwenHybridKVCacheFromHost(cfg, corrupt)
+				return err
+			},
+			wantProblem:  "checksum mismatch",
+			wantRecovery: "re-serialize the cache",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.invoke()
+			if err == nil || !strings.Contains(err.Error(), tc.wantProblem) {
+				t.Fatalf("error=%v, want refusal naming problem %q", err, tc.wantProblem)
+			}
+			if !strings.Contains(err.Error(), "recovery:") || !strings.Contains(err.Error(), tc.wantRecovery) {
+				t.Fatalf("error=%q does not name recovery %q", err, tc.wantRecovery)
+			}
+		})
+	}
+}
+
 func TestQwenHybridPagedSwapV1WireCompatibility(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	session := NewSynthetic(cfg).NewSession()
