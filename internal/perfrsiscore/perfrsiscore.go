@@ -10,7 +10,6 @@ import (
 	"os"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -21,7 +20,6 @@ const (
 	ImprovementSchema = "fak-performance-rsi-improvement/1"
 	ProvenanceSchema  = "fak-performance-rsi-provenance/1"
 	LearningSchema    = "fak-performance-rsi-learning/1"
-	HardwareSchema    = "fak-performance-rsi-hardware/1"
 	ReportSchema      = "fak-performance-rsi-scorecard/1"
 	TargetMultiple    = 100.0
 )
@@ -42,82 +40,6 @@ type Evidence struct {
 	Improvement      *Improvement `json:"improvement,omitempty"`
 	Provenance       *Provenance  `json:"provenance,omitempty"`
 	Learning         *Learning    `json:"learning,omitempty"`
-	Hardware         *Hardware    `json:"hardware,omitempty"`
-}
-
-// Hardware is a strict ledger of directly measured accelerator utilization.
-// Queue timing is retained as metadata only and never substitutes for a
-// utilization measurement.
-type Hardware struct {
-	Schema string        `json:"schema"`
-	Runs   []HardwareRun `json:"runs"`
-}
-
-type HardwareRun struct {
-	EnqueuedAt           string                    `json:"enqueued_at"`
-	StartedAt            string                    `json:"started_at"`
-	EndedAt              string                    `json:"ended_at"`
-	RequestedDeviceClass string                    `json:"requested_device_class"`
-	ActiveUtilization    float64                   `json:"active_utilization"`
-	UtilizationUnit      string                    `json:"utilization_unit"`
-	WorkloadID           string                    `json:"workload_id"`
-	TerminalEvidence     *HardwareTerminalEvidence `json:"terminal_evidence,omitempty"`
-}
-
-// HardwareTerminalEvidence is an explicitly typed terminal blocker. Hardware
-// measurement receipts decode it strictly so validation can reject the blocker
-// without inferring terminal state from unrelated measurement fields.
-type HardwareTerminalEvidence struct {
-	Type string `json:"type"`
-}
-
-func (e *HardwareTerminalEvidence) UnmarshalJSON(b []byte) error {
-	type terminalEvidenceJSON HardwareTerminalEvidence
-	var decoded terminalEvidenceJSON
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&decoded); err != nil {
-		return err
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return errors.New("hardware terminal_evidence: trailing JSON value")
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(b, &fields); err != nil {
-		return err
-	}
-	if _, ok := fields["type"]; !ok {
-		return errors.New("hardware terminal_evidence type is required")
-	}
-	*e = HardwareTerminalEvidence(decoded)
-	return nil
-}
-
-func (r *HardwareRun) UnmarshalJSON(b []byte) error {
-	type hardwareRunJSON HardwareRun
-	var decoded hardwareRunJSON
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&decoded); err != nil {
-		return err
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return errors.New("hardware run: trailing JSON value")
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(b, &fields); err != nil {
-		return err
-	}
-	for _, name := range []string{
-		"enqueued_at", "started_at", "ended_at", "requested_device_class",
-		"active_utilization", "utilization_unit", "workload_id",
-	} {
-		if _, ok := fields[name]; !ok {
-			return fmt.Errorf("hardware run %s is required", name)
-		}
-	}
-	*r = HardwareRun(decoded)
-	return nil
 }
 
 // Learning is an ordered history of predictions, outcomes, and explicit
@@ -397,115 +319,7 @@ func validate(e *Evidence) error {
 			return err
 		}
 	}
-	if e.Hardware != nil {
-		if err := applyHardware(e); err != nil {
-			return err
-		}
-	}
 	return nil
-}
-
-func applyHardware(e *Evidence) error {
-	h := e.Hardware
-	if h.Schema != HardwareSchema {
-		return fmt.Errorf("hardware schema %q, want %q", h.Schema, HardwareSchema)
-	}
-	if len(h.Runs) == 0 {
-		return errors.New("hardware requires at least one measured run")
-	}
-
-	type validatedRun struct {
-		durationSeconds float64
-		queueSeconds    float64
-		utilization     float64
-	}
-	validated := make([]validatedRun, len(h.Runs))
-	totalDuration, weightedUtilization, totalQueue := 0.0, 0.0, 0.0
-	for i, run := range h.Runs {
-		if strings.TrimSpace(run.RequestedDeviceClass) == "" {
-			return fmt.Errorf("hardware run %d requested_device_class is required", i)
-		}
-		if run.TerminalEvidence != nil {
-			switch run.TerminalEvidence.Type {
-			case "local-no-gpu":
-				return fmt.Errorf("hardware run %d terminal_evidence type %q: local-no-GPU is a terminal blocker, not a hardware utilization measurement", i, run.TerminalEvidence.Type)
-			default:
-				return fmt.Errorf("hardware run %d terminal_evidence type %q is unsupported; measurement receipts require measured runs, not terminal blockers", i, run.TerminalEvidence.Type)
-			}
-		}
-		if strings.TrimSpace(run.WorkloadID) == "" {
-			return fmt.Errorf("hardware run %d workload_id is required", i)
-		}
-		if run.UtilizationUnit != "percent" {
-			return fmt.Errorf("hardware run %d utilization_unit must be exactly percent", i)
-		}
-		if !finite(run.ActiveUtilization) || run.ActiveUtilization < 0 || run.ActiveUtilization > 100 {
-			return fmt.Errorf("hardware run %d active_utilization must be directly measured, finite, and in [0,100]", i)
-		}
-
-		names := []string{"enqueued_at", "started_at", "ended_at"}
-		values := []string{run.EnqueuedAt, run.StartedAt, run.EndedAt}
-		times := make([]time.Time, len(values))
-		for j, value := range values {
-			if strings.TrimSpace(value) == "" {
-				return fmt.Errorf("hardware run %d %s is required", i, names[j])
-			}
-			parsed, err := time.Parse(time.RFC3339Nano, value)
-			if err != nil {
-				return fmt.Errorf("hardware run %d %s: malformed RFC3339 timestamp: %w", i, names[j], err)
-			}
-			_, offset := parsed.Zone()
-			if offset != 0 {
-				return fmt.Errorf("hardware run %d %s must be UTC", i, names[j])
-			}
-			times[j] = parsed
-		}
-		if times[0].After(times[1]) || !times[2].After(times[1]) {
-			return fmt.Errorf("hardware run %d timeline must satisfy enqueued_at <= started_at < ended_at", i)
-		}
-		validated[i] = validatedRun{
-			durationSeconds: times[2].Sub(times[1]).Seconds(),
-			queueSeconds:    times[1].Sub(times[0]).Seconds(),
-			utilization:     run.ActiveUtilization,
-		}
-	}
-
-	var hardwareIndex = -1
-	for i := range e.Dimensions {
-		if e.Dimensions[i].ID != "hardware_utilization" {
-			continue
-		}
-		if e.Dimensions[i].Direction != Higher || e.Dimensions[i].Unit != "percent" {
-			return errors.New(`dimension "hardware_utilization" must use canonical direction higher and unit percent`)
-		}
-		hardwareIndex = i
-		break
-	}
-	if hardwareIndex < 0 {
-		return errors.New(`missing dimension "hardware_utilization"`)
-	}
-
-	for _, run := range validated {
-		totalDuration += run.durationSeconds
-		weightedUtilization += run.utilization * run.durationSeconds
-		totalQueue += run.queueSeconds
-	}
-	current := weightedUtilization / totalDuration
-	d := &e.Dimensions[hardwareIndex]
-	d.Current = &current
-	d.Source = fmt.Sprintf(
-		"hardware:%s;queue_delay_seconds_total=%s;queue_delay_seconds_mean=%s",
-		h.Schema,
-		formatFact(totalQueue),
-		formatFact(totalQueue/float64(len(validated))),
-	)
-	d.EvidenceKind = "hardware_utilization_receipt"
-	d.Engine = ""
-	return nil
-}
-
-func formatFact(v float64) string {
-	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 func applyLearning(e *Evidence) error {
