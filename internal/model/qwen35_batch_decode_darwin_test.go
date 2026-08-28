@@ -187,3 +187,18 @@ func qwen35BatchCompareSession(t *testing.T, lane int, want, got *Session) {
 		assertMaxAbsAtMost(t, "recurrent", wr, r, 2e-4)
 	}
 }
+
+// NewQwen35HybridQ4KMetalFixture exposes the already-bounded real Metal fixture
+// to cross-package integration tests. It uses the same mixed Q4_K/Q8 weights and
+// topology as TestQwen35HybridQ4KStepBatchActiveMatchesSerial.
+func NewQwen35HybridQ4KMetalFixture(t *testing.T) *Model {
+	t.Helper()
+	cfg := qwen35HybridQ4KTestCfg()
+	cfg.ModelType = "qwen3_5_text"
+	cfg.QKNorm = true
+	cfg.QKNormEps = 3e-5
+	m := NewSynthetic(cfg)
+	m.Quantize()
+	fillQ4KMajority(t, m, cfg)
+	return m
+}
