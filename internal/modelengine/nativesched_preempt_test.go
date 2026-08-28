@@ -2,7 +2,9 @@ package modelengine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelperfobs"
 )
 
 // TestNativeSchedulerPreemptionSwapAndRecomputePreserveOutput is the issue-#31
@@ -536,10 +539,12 @@ func TestNativeSchedulerQwenSwapPreemptionResumes(t *testing.T) {
 	m := nativeSchedulerQwenSwapModel()
 	calls := issue31Calls()
 	want := drainIssue31Scheduler(t, m, calls, NativePreemptionPolicy{})
+	ledger := t.TempDir() + "/qwen-swap.jsonl"
 	got, stats := drainIssue31SchedulerWithStats(t, m, calls, NativePreemptionPolicy{
-		MaxBlocks:   1,
-		BlockTokens: 16,
-		Mode:        NativePreemptSwap,
+		MaxBlocks:       1,
+		BlockTokens:     16,
+		Mode:            NativePreemptSwap,
+		UsageLedgerPath: ledger,
 	})
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Qwen swap output = %v, want %v", got, want)
@@ -547,6 +552,23 @@ func TestNativeSchedulerQwenSwapPreemptionResumes(t *testing.T) {
 	if stats.SwapPreemptions == 0 || stats.Readmitted == 0 || stats.SwapBytes == 0 || stats.SwapRestoredBytes == 0 {
 		t.Fatalf("Qwen swap stats = %+v, want nonzero swap/readmission counters", stats)
 	}
+	rows := readQwenSwapUsageRows(t, ledger)
+	if len(rows) != 2 || rows[0].Direction != modelperfobs.QwenSwapDirectionOut || rows[1].Direction != modelperfobs.QwenSwapDirectionIn {
+		t.Fatalf("Qwen swap production rows = %+v, want swap-out then restore-in", rows)
+	}
+	for i, row := range rows {
+		if row.Version != modelperfobs.QwenSwapCodecVersion || row.Outcome != modelperfobs.QwenSwapOutcomeSuccess || row.Result != modelperfobs.QwenSwapResultCommitted || row.Bytes <= 0 {
+			t.Fatalf("Qwen swap production row %d = %+v, want byte-bearing v1 committed success", i, row)
+		}
+	}
+	fold, err := modelperfobs.FoldQwenSwapUsage(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fold) != 1 || fold[0].Invocations != 2 || fold[0].SwapOut != 1 || fold[0].RestoreIn != 1 || fold[0].Succeeded != 2 || fold[0].Refused != 0 || fold[0].Errors != 0 {
+		t.Fatalf("Qwen swap production fold = %+v, want two committed invocations", fold)
+	}
+	t.Logf("Qwen swap production rows=%+v fold=%+v", rows, fold)
 }
 
 func TestNativeSchedulerQwenSwapReadmitRestoresTokenLineageAndContinuation(t *testing.T) {
@@ -605,8 +627,10 @@ func TestNativeSchedulerQwenSwapReadmitRestoresTokenLineageAndContinuation(t *te
 func TestNativeSchedulerQwenSwapReadmitLineageMismatchDoesNotPublishSession(t *testing.T) {
 	m := nativeSchedulerQwenSwapModel()
 	s := NewNativeScheduler(m)
-	s.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptSwap, MaxBlocks: 8, BlockTokens: 4})
+	ledger := t.TempDir() + "/qwen-swap.jsonl"
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptSwap, MaxBlocks: 8, BlockTokens: 4, UsageLedgerPath: ledger})
 	ln := nativeSchedulerQwenReadmitLane(t, s, []int{3, 7, 11, 5}, 2)
+	defer ln.cancel()
 	if err := s.preemptLaneLocked(ln); err != nil {
 		t.Fatalf("swap preempt: %v", err)
 	}
@@ -624,6 +648,31 @@ func TestNativeSchedulerQwenSwapReadmitLineageMismatchDoesNotPublishSession(t *t
 	}
 	if ln.hostKV != nil || ln.savedLogits != nil {
 		t.Fatalf("refused readmit retained host state: host_bytes=%d saved_logits=%d", len(ln.hostKV), len(ln.savedLogits))
+	}
+	rows := readQwenSwapUsageRows(t, ledger)
+	if len(rows) != 2 || rows[1].Outcome != modelperfobs.QwenSwapOutcomeSuccess || rows[1].Result != modelperfobs.QwenSwapResultRefused {
+		t.Fatalf("lineage-refused usage rows = %+v, want successful decode with refused publication", rows)
+	}
+}
+
+func TestNativeSchedulerQwenSwapDecodeFailureDoesNotClaimSuccess(t *testing.T) {
+	m := nativeSchedulerQwenSwapModel()
+	s := NewNativeScheduler(m)
+	ledger := t.TempDir() + "/qwen-swap.jsonl"
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptSwap, MaxBlocks: 8, BlockTokens: 4, UsageLedgerPath: ledger})
+	ln := nativeSchedulerQwenReadmitLane(t, s, []int{3, 7, 11, 5}, 2)
+	defer ln.cancel()
+	if err := s.preemptLaneLocked(ln); err != nil {
+		t.Fatalf("swap preempt: %v", err)
+	}
+	ln.hostKV[0] ^= 0xff
+	s.readmitPreemptedLocked()
+	if !ln.terminal || ln.sess != nil {
+		t.Fatalf("failed decode terminal=%t session=%p, want terminal/nil", ln.terminal, ln.sess)
+	}
+	rows := readQwenSwapUsageRows(t, ledger)
+	if len(rows) != 2 || rows[1].Outcome != modelperfobs.QwenSwapOutcomeError || rows[1].Result != modelperfobs.QwenSwapResultRefused || rows[1].Bytes == 0 {
+		t.Fatalf("failed decode usage rows = %+v, want byte-bearing error/refused row", rows)
 	}
 }
 
@@ -684,4 +733,21 @@ func nativeSchedulerQwenReadmitLane(t *testing.T, s *NativeScheduler, prompt []i
 		prompt: append([]int(nil), prompt...), promptLen: len(prompt), gen: gen, emitted: len(gen),
 		tokens: make(chan abi.EngineToken, 1), done: make(chan struct{}),
 	}
+}
+
+func readQwenSwapUsageRows(t *testing.T, path string) []modelperfobs.QwenSwapUsageRow {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []modelperfobs.QwenSwapUsageRow
+	for i, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var row modelperfobs.QwenSwapUsageRow
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("usage row %d: %v", i+1, err)
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
