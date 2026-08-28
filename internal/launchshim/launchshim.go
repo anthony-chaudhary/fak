@@ -21,10 +21,13 @@ type Provider struct {
 const ConfigSchema = "fak.launch.v2"
 
 type Config struct {
-	Schema    string              `json:"schema,omitempty"`
-	Default   string              `json:"default,omitempty"`
-	Disabled  bool                `json:"disabled,omitempty"`
-	Providers map[string]Provider `json:"providers,omitempty"`
+	Schema             string              `json:"schema,omitempty"`
+	Default            string              `json:"default,omitempty"`
+	Disabled           bool                `json:"disabled,omitempty"`
+	Executable         string              `json:"executable,omitempty"`
+	UpdateLaunchPolicy string              `json:"update_launch_policy,omitempty"`
+	UpdateLaunchWaitMS int                 `json:"update_launch_wait_ms,omitempty"`
+	Providers          map[string]Provider `json:"providers,omitempty"`
 }
 
 var saveMu sync.Mutex

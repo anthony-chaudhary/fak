@@ -16,6 +16,9 @@ import (
 )
 
 func cmdLaunch(argv []string) { os.Exit(runLaunch(os.Stdout, os.Stderr, argv)) }
+
+var osExecutableForLaunch = os.Executable
+
 func maybeLaunchDefault() bool {
 	c, err := launchshim.Load()
 	if err != nil || strings.TrimSpace(c.Default) == "" {
@@ -26,6 +29,9 @@ func maybeLaunchDefault() bool {
 }
 
 func runLaunch(stdout, stderr io.Writer, argv []string) int {
+	if delegated, code := delegateStableLaunch(stdout, stderr, argv); delegated {
+		return code
+	}
 	if len(argv) > 0 {
 		switch argv[0] {
 		case "install":
@@ -131,6 +137,49 @@ func runLaunch(stdout, stderr io.Writer, argv []string) int {
 	return code
 }
 
+// delegateStableLaunch keeps provider shims pinned to an executable that is
+// never itself replaced. It selects the deployed/prior binary at the last
+// possible moment, so ordinary launches participate in the update transaction.
+func delegateStableLaunch(stdout, stderr io.Writer, argv []string) (bool, int) {
+	exe, err := osExecutableForLaunch()
+	if err != nil || !strings.HasPrefix(strings.ToLower(filepath.Base(exe)), "fak-launch") {
+		return false, 0
+	}
+	c, err := launchshim.Load()
+	if err != nil || strings.TrimSpace(c.Executable) == "" || samePath(exe, c.Executable) {
+		return false, 0
+	}
+	policyFlag := ""
+	forward := make([]string, 0, len(argv)+1)
+	for i := 0; i < len(argv); i++ {
+		if argv[i] == "--update-launch-policy" {
+			if i+1 >= len(argv) {
+				fmt.Fprintln(stderr, "fak launch: --update-launch-policy requires prior, wait, or fail")
+				return true, 2
+			}
+			policyFlag, i = argv[i+1], i+1
+			continue
+		}
+		if strings.HasPrefix(argv[i], "--update-launch-policy=") {
+			policyFlag = strings.TrimPrefix(argv[i], "--update-launch-policy=")
+			continue
+		}
+		forward = append(forward, argv[i])
+	}
+	policy, wait, err := launchshim.UpdatePolicy(c, policyFlag)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak launch:", err)
+		return true, 2
+	}
+	selected, err := launchshim.ResolveExecutable(c.Executable, policy, wait)
+	if err != nil {
+		fmt.Fprintln(stderr, "fak launch:", err)
+		return true, 75
+	}
+	forward = append([]string{"launch"}, forward...)
+	return true, launchChildRunner(stdout, stderr, selected, forward)
+}
+
 var launchChildRunner = runLaunchChild
 
 func runLaunchChild(stdout, stderr io.Writer, command string, args []string) int {
@@ -194,6 +243,12 @@ func runLaunchInstall(stdout, stderr io.Writer, argv []string) int {
 	stable, err := installStableLaunchTarget(dir, fak)
 	if err != nil {
 		fmt.Fprintln(stderr, "fak launch install:", err)
+		return 1
+	}
+	if !samePath(stable, fak) {
+		c.Executable = fak
+	} else if strings.TrimSpace(c.Executable) == "" {
+		fmt.Fprintln(stderr, "fak launch install: stable launcher has no deployed fak target; run install from the deployed fak executable")
 		return 1
 	}
 	for _, p := range providers {

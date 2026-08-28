@@ -1311,6 +1311,15 @@ License: Apache-2.0 (matches the Microsoft Agent Governance Toolkit dep).
 installs managed shims and, unless `--no-path` is set, an idempotent fak-owned PATH block
 for supported PowerShell/POSIX startup files. Uninstall removes only that block.
 
+The managed `fak-launch` target remains runnable while `fak self-update` replaces the
+deployed binary. During that bounded transaction it defaults to `prior`, immediately
+running the last known-good executable. Set `FAK_UPDATE_LAUNCH_POLICY=wait` to wait (at
+most 10 seconds by default) and then run the new executable, or set it to `fail` for a
+strict, actionable failure. `FAK_UPDATE_LAUNCH_WAIT=30s` changes the bounded wait (capped
+at five minutes). A managed launcher also accepts
+`--update-launch-policy=prior|wait|fail`. These paths are non-interactive and preserve
+the provider argv, standard streams, and exit status.
+
 `fak launch add NAME --command PATH [--arg ARG ...] [--default] [--shim]` persists a
 custom provider as an argv template. `fak launch remove NAME` removes the binding and
 owned shim; `fak launch list [--json]` lists bindings without exposing local command paths

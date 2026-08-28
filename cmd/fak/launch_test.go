@@ -358,3 +358,44 @@ func TestLaunchStatusEmptyConfigIsInactiveAndRejectsProviderArg(t *testing.T) {
 		t.Fatalf("provider arg code=%d stdout=%s stderr=%s", code, out.String(), errb.String())
 	}
 }
+
+func TestStableLaunchDelegatesPolicyAndPreservesArgv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("FAK_LAUNCH_CONFIG", filepath.Join(dir, "launch.json"))
+	target := filepath.Join(dir, "fak.exe")
+	prior := target + ".prior"
+	if err := os.WriteFile(target, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prior, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launchshim.UpdateStatePath(target), []byte(`{"schema":"fak.self-update.launch.v1","target":"`+strings.ReplaceAll(target, `\`, `\\`)+`","prior":"`+strings.ReplaceAll(prior, `\`, `\\`)+`","started_at":"2026-01-01T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := launchshim.Save(launchshim.Config{Schema: launchshim.ConfigSchema, Executable: target, Providers: map[string]launchshim.Provider{}}); err != nil {
+		t.Fatal(err)
+	}
+	oldExe, oldRunner := osExecutableForLaunch, launchChildRunner
+	defer func() { osExecutableForLaunch = oldExe; launchChildRunner = oldRunner }()
+	osExecutableForLaunch = func() (string, error) { return filepath.Join(dir, "fak-launch.exe"), nil }
+	var gotCommand string
+	var gotArgs []string
+	launchChildRunner = func(_ io.Writer, _ io.Writer, command string, args []string) int {
+		gotCommand = command
+		gotArgs = append([]string(nil), args...)
+		return 23
+	}
+	var stdout, stderr bytes.Buffer
+	code := runLaunch(&stdout, &stderr, []string{"--update-launch-policy=prior", "codex", "--", "space value"})
+	if code != 23 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if gotCommand != prior {
+		t.Fatalf("command=%q want %q", gotCommand, prior)
+	}
+	want := []string{"launch", "codex", "--", "space value"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Fatalf("args=%q want %q", gotArgs, want)
+	}
+}
