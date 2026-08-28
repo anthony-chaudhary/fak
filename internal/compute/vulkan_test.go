@@ -38,6 +38,63 @@ func maxAbs(a, b []float32) float64 {
 	return m
 }
 
+func TestVulkanQ4KProfileClassification(t *testing.T) {
+	tests := []struct {
+		name              string
+		hostVisibleWeight bool
+		deviceLocal       bool
+		wantHostVisible   bool
+	}{
+		{name: "device-local", deviceLocal: true},
+		{name: "explicit host-visible", hostVisibleWeight: true, deviceLocal: true, wantHostVisible: true},
+		{name: "non-device-local fallback", wantHostVisible: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := vulkanQ4KProfileHostVisible(tt.hostVisibleWeight, tt.deviceLocal); got != tt.wantHostVisible {
+				t.Fatalf("vulkanQ4KProfileHostVisible(%v, %v) = %v, want %v",
+					tt.hostVisibleWeight, tt.deviceLocal, got, tt.wantHostVisible)
+			}
+		})
+	}
+}
+
+func TestVulkanQ4KProfileCountsAndReset(t *testing.T) {
+	disabled := &vulkanBackend{}
+	disabled.profileQ4KMatMulLocked(144, false, true)
+	_, deviceCalls, deviceBytes, hostCalls, hostBytes := disabled.VulkanDebugQ4KProfileSnapshot()
+	if deviceCalls != 0 || deviceBytes != 0 || hostCalls != 0 || hostBytes != 0 {
+		t.Fatalf("disabled counters = device calls=%d bytes=%d host-visible calls=%d bytes=%d, want all zero",
+			deviceCalls, deviceBytes, hostCalls, hostBytes)
+	}
+
+	v := &vulkanBackend{q4kProfile: true}
+	v.profileQ4KMatMulLocked(144, false, true)
+	v.profileQ4KMatMulLocked(288, true, false)
+	v.profileQ4KMatMulLocked(432, false, false)
+
+	enabled, deviceCalls, deviceBytes, hostCalls, hostBytes := v.VulkanDebugQ4KProfileSnapshot()
+	if !enabled {
+		t.Fatal("Q4_K profile snapshot reported disabled")
+	}
+	if deviceCalls != 1 || deviceBytes != 144 {
+		t.Fatalf("device counters = calls=%d bytes=%d, want calls=1 bytes=144", deviceCalls, deviceBytes)
+	}
+	if hostCalls != 2 || hostBytes != 720 {
+		t.Fatalf("host-visible counters = calls=%d bytes=%d, want calls=2 bytes=720", hostCalls, hostBytes)
+	}
+
+	v.VulkanDebugResetQ4KProfile()
+	enabled, deviceCalls, deviceBytes, hostCalls, hostBytes = v.VulkanDebugQ4KProfileSnapshot()
+	if !enabled {
+		t.Fatal("Q4_K profile reset changed enabled state")
+	}
+	if deviceCalls != 0 || deviceBytes != 0 || hostCalls != 0 || hostBytes != 0 {
+		t.Fatalf("counters after reset = device calls=%d bytes=%d host-visible calls=%d bytes=%d, want all zero",
+			deviceCalls, deviceBytes, hostCalls, hostBytes)
+	}
+}
+
 func TestVulkanResourceCapCheckNamesOffendingBuffer(t *testing.T) {
 	v := &vulkanBackend{
 		maxBufferBytes:          64,

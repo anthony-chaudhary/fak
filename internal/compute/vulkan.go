@@ -17,6 +17,7 @@ import "C"
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -54,6 +55,7 @@ func init() {
 		maxBufferBytes:          vulkanCapInt64(C.fvk_max_buffer_bytes()),
 		maxStorageBufferRange:   vulkanCapInt64(C.fvk_max_storage_buffer_range()),
 		maxMemoryAllocationSize: vulkanCapInt64(C.fvk_max_memory_allocation_size()),
+		q4kProfile:              os.Getenv("FAK_VULKAN_Q4K_PROFILE") == "1",
 	}
 	Register(vulkanDev)
 }
@@ -146,6 +148,21 @@ func (v *vulkanBackend) VulkanDebugMemoryBudgetAvailable() bool {
 	return v.haveMemoryBudget
 }
 
+func (v *vulkanBackend) VulkanDebugQ4KProfileSnapshot() (enabled bool, deviceCalls, devicePackedBytes, hostVisibleCalls, hostVisiblePackedBytes int64) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	return v.q4kProfile, v.q4kDeviceCalls, v.q4kDevicePackedBytes, v.q4kHostVisibleCalls, v.q4kHostVisiblePackedBytes
+}
+
+func (v *vulkanBackend) VulkanDebugResetQ4KProfile() {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	v.q4kDeviceCalls = 0
+	v.q4kDevicePackedBytes = 0
+	v.q4kHostVisibleCalls = 0
+	v.q4kHostVisiblePackedBytes = 0
+}
+
 type vulkanBackend struct {
 	name          string
 	tier          string
@@ -165,11 +182,16 @@ type vulkanBackend struct {
 	// effective STORAGE buffer ceiling: min(maxStorageBufferRange, maxMemoryAllocationSize)
 	// when both are known. It does not solve chunking, but it turns a raw driver allocation
 	// failure into a deterministic refusal that names the over-cap buffer (#362).
-	haveMemoryBudget        bool
-	totalMem                int64
-	maxBufferBytes          int64
-	maxStorageBufferRange   int64
-	maxMemoryAllocationSize int64
+	haveMemoryBudget          bool
+	totalMem                  int64
+	maxBufferBytes            int64
+	maxStorageBufferRange     int64
+	maxMemoryAllocationSize   int64
+	q4kProfile                bool
+	q4kDeviceCalls            int64
+	q4kDevicePackedBytes      int64
+	q4kHostVisibleCalls       int64
+	q4kHostVisiblePackedBytes int64
 }
 
 var _ TensorCloner = (*vulkanBackend)(nil)
@@ -726,6 +748,35 @@ func (v *vulkanBackend) Free(t Tensor) {
 
 func (v *vulkanBackend) vp(t Tensor) unsafe.Pointer { return t.buf.(*vulkanBuf).ptr }
 
+func vulkanQ4KProfileHostVisible(hostVisibleWeight, deviceLocal bool) bool {
+	return hostVisibleWeight || !deviceLocal
+}
+
+func (v *vulkanBackend) profileQ4KMatMulLocked(packedBytes int, hostVisibleWeight, deviceLocal bool) {
+	if !v.q4kProfile {
+		return
+	}
+	if vulkanQ4KProfileHostVisible(hostVisibleWeight, deviceLocal) {
+		v.q4kHostVisibleCalls++
+		v.q4kHostVisiblePackedBytes += int64(packedBytes)
+	} else {
+		v.q4kDeviceCalls++
+		v.q4kDevicePackedBytes += int64(packedBytes)
+	}
+	if (v.q4kDeviceCalls+v.q4kHostVisibleCalls)%256 == 0 {
+		log.Printf("compute: vulkan Q4_K profile device_calls=%d device_packed_bytes=%d host_visible_calls=%d host_visible_packed_bytes=%d",
+			v.q4kDeviceCalls, v.q4kDevicePackedBytes, v.q4kHostVisibleCalls, v.q4kHostVisiblePackedBytes)
+	}
+}
+
+func (v *vulkanBackend) q4kMatMulLocked(w, x, y Tensor, out, in, P int) {
+	wb := w.buf.(*vulkanBuf)
+	if v.q4kProfile {
+		v.profileQ4KMatMulLocked(wb.n, wb.hostVisibleWeight, v.debugBufferDeviceLocal(wb))
+	}
+	C.fvk_q4k_matmul_f32(wb.ptr, v.vp(x), v.vp(y), C.int(out), C.int(in), C.int(P))
+}
+
 func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
@@ -737,7 +788,7 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 	case Q8_0:
 		v.q8MatMulLocked(w, x, y, out, in, 1)
 	case Q4_K:
-		C.fvk_q4k_matmul_f32(v.vp(w), v.vp(x), v.vp(y), C.int(out), C.int(in), 1)
+		v.q4kMatMulLocked(w, x, y, out, in, 1)
 	default:
 		panic("compute: vulkan MatMul unsupported weight dtype " + w.Dtype.String())
 	}
@@ -1015,8 +1066,8 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 		}
 		xn, _ := v.devTr([]int{in}, F32)
 		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
-		C.fvk_q4k_matmul_f32(v.vp(w0), v.vp(xn), v.vp(y0), C.int(out0), C.int(in), C.int(P))
-		C.fvk_q4k_matmul_f32(v.vp(w1), v.vp(xn), v.vp(y1), C.int(out1), C.int(in), C.int(P))
+		v.q4kMatMulLocked(w0, xn, y0, out0, in, P)
+		v.q4kMatMulLocked(w1, xn, y1, out1, in, P)
 		return y0, y1
 	}
 	if w0.Dtype == Q8_0 || w1.Dtype == Q8_0 {
@@ -1153,7 +1204,7 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 			projShape = []int{out}
 		}
 		proj, _ := v.devTr(projShape, F32)
-		C.fvk_q4k_matmul_f32(v.vp(w), v.vp(sw), v.vp(proj), C.int(out), C.int(in), C.int(P))
+		v.q4kMatMulLocked(w, sw, proj, out, in, P)
 		C.fvk_add_f32(v.vp(dst), v.vp(proj), C.int(dst.Numel()))
 	case Q8_0:
 		wb := v.q8WeightBufLocked(w, in, "Q8 SwiGLUMatMulAddInPlace")
