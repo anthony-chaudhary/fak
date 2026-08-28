@@ -31,6 +31,130 @@ func TestAll16ExactlyOnceAndDeterministic(t *testing.T) {
 		t.Fatal("nondeterministic output")
 	}
 }
+
+func learningEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e := fixture(t)
+	e.Learning = &Learning{Schema: LearningSchema, Rows: []LearningRow{
+		{CycleID: "c1", HypothesisID: "h1", RecurrenceKey: "parser", PredictedImprovementPercent: 20, ConfidencePercent: 50, ObservedImprovementPercent: 10, LearningID: "l1", LearningRecorded: true, CycleTimeHours: 10, Engine: "fak-native", Artifact: "artifact-c1"},
+		{CycleID: "c2", HypothesisID: "h2", RecurrenceKey: "parser", PredictedImprovementPercent: 12, ConfidencePercent: 30, ObservedImprovementPercent: 0, LearningReused: true, PriorLearningID: "l1", CycleTimeHours: 8, Engine: "fak-native", Artifact: "artifact-c2"},
+		{CycleID: "c3", HypothesisID: "h3", RecurrenceKey: "parser", PredictedImprovementPercent: 8, ConfidencePercent: 20, ObservedImprovementPercent: 0, LearningReused: true, PriorLearningID: "l1", RepeatedFailure: true, CycleTimeHours: 6, Engine: "fak-native", Artifact: "artifact-c3"},
+	}}
+	for i := range e.Dimensions {
+		switch e.Dimensions[i].ID {
+		case "hypothesis_calibration", "learning_retention", "compounding_rate":
+			e.Dimensions[i].Direction = Higher
+			e.Dimensions[i].Unit = "percent"
+		}
+	}
+	return e
+}
+
+func TestPerformanceRSILearningAcceptance(t *testing.T) {
+	e := learningEvidence(t)
+	before := make(map[string]*float64)
+	for _, d := range e.Dimensions {
+		before[d.ID] = d.Current
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"hypothesis_calibration": 89.8, "learning_retention": 100, "compounding_rate": 40}
+	for _, d := range got.Dimensions {
+		value, derived := want[d.ID]
+		if derived {
+			if d.Current == nil || math.Abs(*d.Current-value) > 1e-9 || d.EvidenceKind != "performance_rsi_learning_receipt" || d.Engine != "fak-native" {
+				t.Errorf("%s=%+v want %.1f and strict receipt provenance", d.ID, d, value)
+			}
+		} else if d.Current != before[d.ID] && (d.Current == nil || before[d.ID] == nil || *d.Current != *before[d.ID]) {
+			t.Errorf("unrelated dimension %s mutated", d.ID)
+		}
+	}
+}
+
+func TestPerformanceRSILearningCompoundingUsesChronologicalKeyAndLatestReuse(t *testing.T) {
+	e := learningEvidence(t)
+	e.Learning.Rows = []LearningRow{
+		{CycleID: "first-1", HypothesisID: "first-h1", RecurrenceKey: "first", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningID: "first-learning", LearningRecorded: true, CycleTimeHours: 20, Engine: "fak-native", Artifact: "first-original"},
+		{CycleID: "second-1", HypothesisID: "second-h1", RecurrenceKey: "second", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningID: "second-learning", LearningRecorded: true, CycleTimeHours: 10, Engine: "fak-native", Artifact: "second-original"},
+		{CycleID: "first-2", HypothesisID: "first-h2", RecurrenceKey: "first", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningReused: true, PriorLearningID: "first-learning", CycleTimeHours: 15, Engine: "fak-native", Artifact: "first-reuse-1"},
+		{CycleID: "second-2", HypothesisID: "second-h2", RecurrenceKey: "second", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningReused: true, PriorLearningID: "second-learning", CycleTimeHours: 5, Engine: "fak-native", Artifact: "second-reuse"},
+		{CycleID: "first-3", HypothesisID: "first-h3", RecurrenceKey: "first", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningReused: true, PriorLearningID: "first-learning", CycleTimeHours: 12, Engine: "fak-native", Artifact: "first-reuse-2"},
+	}
+
+	got, err := decodeCycleEvidence(t, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range got.Dimensions {
+		if d.ID == "compounding_rate" && (d.Current == nil || *d.Current != 40) {
+			t.Fatalf("compounding_rate=%v, want 40 from first original (20h) and its latest reuse (12h)", d.Current)
+		}
+	}
+}
+
+func TestPerformanceRSILearningRefusals(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Evidence)
+	}{
+		{"insufficient history", func(e *Evidence) { e.Learning.Rows = e.Learning.Rows[:1] }},
+		{"no recurrence", func(e *Evidence) {
+			e.Learning.Rows[1].RecurrenceKey, e.Learning.Rows[2].RecurrenceKey = "other", "third"
+		}},
+		{"no valid reuse", func(e *Evidence) {
+			e.Learning.Rows[1].LearningReused = false
+			e.Learning.Rows[1].PriorLearningID = ""
+			e.Learning.Rows[2].LearningReused = false
+			e.Learning.Rows[2].PriorLearningID = ""
+		}},
+		{"false compounding", func(e *Evidence) { e.Learning.Rows[2].CycleTimeHours = 10 }},
+		{"negative compounding", func(e *Evidence) { e.Learning.Rows[2].CycleTimeHours = 11 }},
+		{"duplicate cycle", func(e *Evidence) { e.Learning.Rows[1].CycleID = "c1" }},
+		{"range", func(e *Evidence) { e.Learning.Rows[1].ConfidencePercent = 101 }},
+		{"engine", func(e *Evidence) { e.Learning.Rows[1].Engine = "fak-native/qwen" }},
+		{"forward reference", func(e *Evidence) {
+			e.Learning.Rows[1].PriorLearningID = "later"
+			e.Learning.Rows[2].LearningID = "later"
+			e.Learning.Rows[2].LearningRecorded = true
+		}},
+		{"false repeated failure", func(e *Evidence) { e.Learning.Rows[2].RepeatedFailure = false }},
+		{"canonical dimension", func(e *Evidence) {
+			for i := range e.Dimensions {
+				if e.Dimensions[i].ID == "learning_retention" {
+					e.Dimensions[i].Unit = "ratio"
+				}
+			}
+		}},
+		{"later key cannot rescue false compounding for chronological key", func(e *Evidence) {
+			e.Learning.Rows = append([]LearningRow{
+				{CycleID: "earliest", HypothesisID: "earliest-h", RecurrenceKey: "earliest", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningID: "earliest-learning", LearningRecorded: true, CycleTimeHours: 5, Engine: "fak-native", Artifact: "earliest-original"},
+				{CycleID: "later", HypothesisID: "later-h", RecurrenceKey: "later", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningID: "later-learning", LearningRecorded: true, CycleTimeHours: 10, Engine: "fak-native", Artifact: "later-original"},
+				{CycleID: "earliest-reuse", HypothesisID: "earliest-reuse-h", RecurrenceKey: "earliest", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningReused: true, PriorLearningID: "earliest-learning", CycleTimeHours: 5, Engine: "fak-native", Artifact: "earliest-reuse"},
+				{CycleID: "later-reuse", HypothesisID: "later-reuse-h", RecurrenceKey: "later", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningReused: true, PriorLearningID: "later-learning", CycleTimeHours: 5, Engine: "fak-native", Artifact: "later-reuse"},
+			}, e.Learning.Rows...)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := learningEvidence(t)
+			tc.edit(&e)
+			before, _ := json.Marshal(e)
+			if err := validate(&e); err == nil {
+				t.Fatal("accepted invalid learning receipt")
+			}
+			after, _ := json.Marshal(e)
+			if !bytes.Equal(before, after) {
+				t.Fatal("validation mutated evidence before refusing")
+			}
+		})
+	}
+}
 func TestUnknownDebtAndDominantBottleneck(t *testing.T) {
 	e := fixture(t)
 	e.Dimensions[0].Current = nil

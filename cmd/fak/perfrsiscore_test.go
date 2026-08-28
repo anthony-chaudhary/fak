@@ -20,6 +20,119 @@ func fixturePath() string {
 	return filepath.Join("..", "..", "internal", "perfrsiscore", "testdata", "complete.json")
 }
 
+func performanceRSILearningTestReceipt(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(fixturePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["learning"] = map[string]any{
+		"schema": "fak-performance-rsi-learning/1",
+		"rows": []any{
+			map[string]any{"cycle_id": "c1", "hypothesis_id": "h1", "recurrence_key": "parser", "predicted_improvement_percent": 20.0, "confidence_percent": 50.0, "observed_improvement_percent": 10.0, "learning_id": "l1", "learning_recorded": true, "learning_reused": false, "prior_learning_id": "", "repeated_failure": false, "cycle_time_hours": 10.0, "engine": "fak-native", "artifact": "synthetic-test-c1"},
+			map[string]any{"cycle_id": "c2", "hypothesis_id": "h2", "recurrence_key": "parser", "predicted_improvement_percent": 12.0, "confidence_percent": 30.0, "observed_improvement_percent": 0.0, "learning_id": "", "learning_recorded": false, "learning_reused": true, "prior_learning_id": "l1", "repeated_failure": false, "cycle_time_hours": 8.0, "engine": "fak-native", "artifact": "synthetic-test-c2"},
+			map[string]any{"cycle_id": "c3", "hypothesis_id": "h3", "recurrence_key": "parser", "predicted_improvement_percent": 8.0, "confidence_percent": 20.0, "observed_improvement_percent": 0.0, "learning_id": "", "learning_recorded": false, "learning_reused": true, "prior_learning_id": "l1", "repeated_failure": true, "cycle_time_hours": 6.0, "engine": "fak-native", "artifact": "synthetic-test-c3"},
+		},
+	}
+	for _, raw := range doc["dimensions"].([]any) {
+		d := raw.(map[string]any)
+		switch d["id"] {
+		case "hypothesis_calibration", "learning_retention", "compounding_rate":
+			d["direction"] = "higher"
+			d["unit"] = "percent"
+		}
+	}
+	b, err = json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func writePerformanceRSILearningTestReceipt(t *testing.T, b []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "receipt.json")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPerformanceRSILearningAcceptance(t *testing.T) {
+	path := writePerformanceRSILearningTestReceipt(t, performanceRSILearningTestReceipt(t))
+	code, out, errText := runPerfRSI(t, "--input", path, "--json")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errText)
+	}
+	var report struct {
+		Dimensions []struct {
+			ID      string   `json:"id"`
+			Current *float64 `json:"current"`
+		} `json:"dimensions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"hypothesis_calibration": 89.8, "learning_retention": 100, "compounding_rate": 40}
+	for _, d := range report.Dimensions {
+		if value, ok := want[d.ID]; ok {
+			if d.Current == nil || math.Abs(*d.Current-value) > 1e-9 {
+				t.Errorf("%s=%v want %.1f", d.ID, d.Current, value)
+			}
+			delete(want, d.ID)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing derived dimensions: %v", want)
+	}
+}
+
+func TestPerformanceRSILearningRefusals(t *testing.T) {
+	original := performanceRSILearningTestReceipt(t)
+	var base map[string]any
+	if err := json.Unmarshal(original, &base); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"insufficient history", func(doc map[string]any) { l := doc["learning"].(map[string]any); l["rows"] = l["rows"].([]any)[:1] }},
+		{"false compounding", func(doc map[string]any) {
+			doc["learning"].(map[string]any)["rows"].([]any)[2].(map[string]any)["cycle_time_hours"] = float64(10)
+		}},
+		{"negative compounding", func(doc map[string]any) {
+			doc["learning"].(map[string]any)["rows"].([]any)[2].(map[string]any)["cycle_time_hours"] = float64(11)
+		}},
+		{"strict", func(doc map[string]any) { doc["learning"].(map[string]any)["unexpected"] = true }},
+		{"strict top level", func(doc map[string]any) { doc["unexpected_receipt_field"] = true }},
+		{"engine", func(doc map[string]any) {
+			doc["learning"].(map[string]any)["rows"].([]any)[1].(map[string]any)["engine"] = "fak-native/qwen"
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, _ := json.Marshal(base)
+			var doc map[string]any
+			_ = json.Unmarshal(b, &doc)
+			tc.edit(doc)
+			b, _ = json.Marshal(doc)
+			path := filepath.Join(t.TempDir(), "receipt.json")
+			if err := os.WriteFile(path, b, 0600); err != nil {
+				t.Fatal(err)
+			}
+			code, _, errText := runPerfRSI(t, "--input", path, "--json")
+			if code == 0 || strings.TrimSpace(errText) == "" {
+				t.Fatalf("expected refusal: code=%d err=%q", code, errText)
+			}
+		})
+	}
+}
+
 func TestPerformanceRSIRenderers(t *testing.T) {
 	for _, tc := range [][]string{{"--input", fixturePath()}, {"--input", fixturePath(), "--json"}, {"--input", fixturePath(), "--markdown"}} {
 		code, out, err := runPerfRSI(t, tc...)

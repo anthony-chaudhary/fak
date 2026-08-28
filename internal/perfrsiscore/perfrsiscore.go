@@ -19,6 +19,7 @@ const (
 	CycleSchema       = "fak-performance-rsi-cycle/1"
 	ImprovementSchema = "fak-performance-rsi-improvement/1"
 	ProvenanceSchema  = "fak-performance-rsi-provenance/1"
+	LearningSchema    = "fak-performance-rsi-learning/1"
 	ReportSchema      = "fak-performance-rsi-scorecard/1"
 	TargetMultiple    = 100.0
 )
@@ -38,6 +39,47 @@ type Evidence struct {
 	Cycle            *Cycle       `json:"cycle,omitempty"`
 	Improvement      *Improvement `json:"improvement,omitempty"`
 	Provenance       *Provenance  `json:"provenance,omitempty"`
+	Learning         *Learning    `json:"learning,omitempty"`
+}
+
+// Learning is an ordered history of predictions, outcomes, and explicit
+// learning reuse. Array position, rather than caller-supplied timestamps,
+// defines chronology.
+type Learning struct {
+	Schema string        `json:"schema"`
+	Rows   []LearningRow `json:"rows"`
+}
+
+type LearningRow struct {
+	CycleID                     string  `json:"cycle_id"`
+	HypothesisID                string  `json:"hypothesis_id"`
+	RecurrenceKey               string  `json:"recurrence_key"`
+	PredictedImprovementPercent float64 `json:"predicted_improvement_percent"`
+	ConfidencePercent           float64 `json:"confidence_percent"`
+	ObservedImprovementPercent  float64 `json:"observed_improvement_percent"`
+	LearningID                  string  `json:"learning_id"`
+	LearningRecorded            bool    `json:"learning_recorded"`
+	LearningReused              bool    `json:"learning_reused"`
+	PriorLearningID             string  `json:"prior_learning_id"`
+	RepeatedFailure             bool    `json:"repeated_failure"`
+	CycleTimeHours              float64 `json:"cycle_time_hours"`
+	Engine                      string  `json:"engine"`
+	Artifact                    string  `json:"artifact"`
+}
+
+func (l *Learning) UnmarshalJSON(b []byte) error {
+	type learningJSON Learning
+	var decoded learningJSON
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("learning: trailing JSON value")
+	}
+	*l = Learning(decoded)
+	return nil
 }
 
 // Cycle is one independently versioned, end-to-end performance improvement
@@ -271,6 +313,153 @@ func validate(e *Evidence) error {
 		if err := applyProvenance(e); err != nil {
 			return err
 		}
+	}
+	if e.Learning != nil {
+		if err := applyLearning(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyLearning(e *Evidence) error {
+	l := e.Learning
+	if l.Schema != LearningSchema {
+		return fmt.Errorf("learning schema %q, want %q", l.Schema, LearningSchema)
+	}
+	if len(l.Rows) < 2 {
+		return errors.New("learning requires at least two rows of history")
+	}
+	cycleIDs := make(map[string]bool, len(l.Rows))
+	hypothesisIDs := make(map[string]bool, len(l.Rows))
+	type recorded struct {
+		key string
+	}
+	learnings := make(map[string]recorded)
+	seenKeys := make(map[string]bool)
+	failedKeys := make(map[string]bool)
+	originalTime := make(map[string]float64)
+	originalOrder := make([]string, 0)
+	eligible, validReuses := 0, 0
+	confidenceTotal, weightedError := 0.0, 0.0
+	latestReuseTime := make(map[string]float64)
+	for i, row := range l.Rows {
+		if strings.TrimSpace(row.CycleID) == "" || cycleIDs[row.CycleID] {
+			return fmt.Errorf("learning row %d has empty or duplicate cycle_id", i)
+		}
+		if strings.TrimSpace(row.HypothesisID) == "" || hypothesisIDs[row.HypothesisID] {
+			return fmt.Errorf("learning row %d has empty or duplicate hypothesis_id", i)
+		}
+		cycleIDs[row.CycleID], hypothesisIDs[row.HypothesisID] = true, true
+		if strings.TrimSpace(row.RecurrenceKey) == "" {
+			return fmt.Errorf("learning row %d recurrence_key is required", i)
+		}
+		for name, value := range map[string]float64{"prediction": row.PredictedImprovementPercent, "confidence": row.ConfidencePercent, "outcome": row.ObservedImprovementPercent} {
+			if !finite(value) || value < 0 || value > 100 {
+				return fmt.Errorf("learning row %d %s must be finite in [0,100]", i, name)
+			}
+		}
+		if !finite(row.CycleTimeHours) || row.CycleTimeHours <= 0 {
+			return fmt.Errorf("learning row %d cycle_time_hours must be positive and finite", i)
+		}
+		if row.Engine != "fak-native" || strings.TrimSpace(row.Artifact) == "" {
+			return fmt.Errorf("learning row %d requires engine fak-native and artifact", i)
+		}
+		if row.LearningRecorded != (strings.TrimSpace(row.LearningID) != "") {
+			return fmt.Errorf("learning row %d learning_id must be present iff learning_recorded", i)
+		}
+		if row.LearningID != "" {
+			if _, exists := learnings[row.LearningID]; exists {
+				return fmt.Errorf("learning row %d has duplicate learning_id", i)
+			}
+		}
+		if row.LearningReused != (strings.TrimSpace(row.PriorLearningID) != "") {
+			return fmt.Errorf("learning row %d prior_learning_id must be present iff learning_reused", i)
+		}
+		wasSeen := seenKeys[row.RecurrenceKey]
+		if wasSeen {
+			eligible++
+		}
+		if row.LearningReused {
+			if row.PriorLearningID == row.LearningID {
+				return fmt.Errorf("learning row %d cannot reference its own learning_id", i)
+			}
+			prior, exists := learnings[row.PriorLearningID]
+			if !exists || prior.key != row.RecurrenceKey {
+				return fmt.Errorf("learning row %d prior_learning_id must reference earlier learning with same recurrence_key", i)
+			}
+			if !wasSeen {
+				return fmt.Errorf("learning row %d cannot reuse learning without an earlier recurrence", i)
+			}
+			validReuses++
+			latestReuseTime[row.RecurrenceKey] = row.CycleTimeHours
+		}
+		if row.LearningID != "" {
+			learnings[row.LearningID] = recorded{key: row.RecurrenceKey}
+		}
+		failed := row.ObservedImprovementPercent <= 0
+		actualRepeated := failed && failedKeys[row.RecurrenceKey]
+		if row.RepeatedFailure != actualRepeated {
+			return fmt.Errorf("learning row %d repeated_failure does not match ordered failure history", i)
+		}
+		if failed {
+			failedKeys[row.RecurrenceKey] = true
+		}
+		if !wasSeen {
+			originalTime[row.RecurrenceKey] = row.CycleTimeHours
+			originalOrder = append(originalOrder, row.RecurrenceKey)
+		}
+		seenKeys[row.RecurrenceKey] = true
+		confidenceTotal += row.ConfidencePercent
+		weightedError += row.ConfidencePercent * math.Abs(row.PredictedImprovementPercent-row.ObservedImprovementPercent)
+	}
+	if confidenceTotal <= 0 {
+		return errors.New("learning requires positive total confidence")
+	}
+	if eligible == 0 {
+		return errors.New("learning requires a recurrence")
+	}
+	if validReuses == 0 {
+		return errors.New("learning requires a valid explicit prior-learning reuse")
+	}
+	earliestOriginal, latestReused := 0.0, 0.0
+	for _, key := range originalOrder {
+		reusedTime, ok := latestReuseTime[key]
+		if !ok {
+			continue
+		}
+		earliestOriginal = originalTime[key]
+		latestReused = reusedTime
+		break
+	}
+	compounding := 100 * (earliestOriginal - latestReused) / earliestOriginal
+	if !finite(compounding) || compounding <= 0 {
+		return errors.New("learning compounding must be positive; false or negative compounding is rejected")
+	}
+	values := map[string]float64{
+		"hypothesis_calibration": math.Max(0, 100-weightedError/confidenceTotal),
+		"learning_retention":     100 * float64(validReuses) / float64(eligible),
+		"compounding_rate":       compounding,
+	}
+	derivedIndexes := make([]int, 0, len(values))
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		_, derived := values[d.ID]
+		if !derived {
+			continue
+		}
+		if d.Direction != Higher || d.Unit != "percent" {
+			return fmt.Errorf("dimension %q must use canonical direction higher and unit percent", d.ID)
+		}
+		derivedIndexes = append(derivedIndexes, i)
+	}
+	for _, i := range derivedIndexes {
+		d := &e.Dimensions[i]
+		value := values[d.ID]
+		v := value
+		d.Current = &v
+		d.EvidenceKind = "performance_rsi_learning_receipt"
+		d.Engine = "fak-native"
 	}
 	return nil
 }

@@ -1,0 +1,60 @@
+{
+  "schema": "fak-performance-rsi-evidence/1",
+  "snapshot": "issue-9783-performance-rsi-learning",
+  "target_multiplier": 100,
+  "dimensions": [
+    {"id":"cycle_time","source":"fixture/cycles","direction":"lower","current":10,"target":5,"unit":"hours/cycle","next_action":"shorten cycle"},
+    {"id":"improvement_yield","source":"fixture/yield","direction":"higher","current":100,"target":100,"unit":"percent","next_action":"raise yield"},
+    {"id":"evaluation_latency","source":"fixture/eval","direction":"lower","current":20,"target":5,"unit":"minutes","next_action":"reduce evaluation latency","evidence_kind":"native_benchmark","engine":"fak-native/qwen3.8"},
+    {"id":"receipt_coverage","source":"fixture/receipts","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"capture receipts"},
+    {"id":"quality_gate_coverage","source":"fixture/quality","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"add quality gates"},
+    {"id":"experiment_throughput","source":"fixture/throughput","direction":"higher","current":8,"target":10,"unit":"experiments/day","next_action":"increase safe throughput"},
+    {"id":"hypothesis_calibration","source":"fixture/calibration","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"calibrate ranking"},
+    {"id":"discovery_freshness","source":"fixture/discovery","direction":"lower","current":2,"target":1,"unit":"days","next_action":"refresh discovery"},
+    {"id":"adaptation_speed","source":"fixture/adaptation","direction":"lower","current":2,"target":1,"unit":"days","next_action":"adapt faster"},
+    {"id":"reuse_ratio","source":"fixture/reuse","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"reuse mechanisms"},
+    {"id":"learning_retention","source":"fixture/learning","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"retain learning"},
+    {"id":"production_transfer","source":"fixture/transfer","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"transfer experiments"},
+    {"id":"hardware_utilization","source":"fixture/hardware","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"use hardware"},
+    {"id":"attribution_quality","source":"fixture/attribution","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"improve attribution"},
+    {"id":"automation_coverage","source":"fixture/automation","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"automate loop"},
+    {"id":"compounding_rate","source":"fixture/compounding","direction":"higher","current":80,"target":100,"unit":"percent","next_action":"compound learning"}
+  ],
+  "learning": {
+    "schema": "fak-performance-rsi-learning/1",
+    "rows": [
+      {
+        "cycle_id": "issue-9783-review-correction",
+        "hypothesis_id": "issue-9783-review-correction",
+        "recurrence_key": "perfrsiscore-optional-receipt-extension",
+        "predicted_improvement_percent": 100,
+        "confidence_percent": 90,
+        "observed_improvement_percent": 100,
+        "learning_id": "issue-9783-chronological-validation",
+        "learning_recorded": true,
+        "learning_reused": false,
+        "prior_learning_id": "",
+        "repeated_failure": false,
+        "cycle_time_hours": 0.1413888888888889,
+        "engine": "fak-native",
+        "artifact": "issue-9783 prior correction: perfrsiscore package and focused CLI learning checks passed"
+      },
+      {
+        "cycle_id": "issue-9783-witness-validation-cycle-2",
+        "hypothesis_id": "issue-9783-witness-validation-cycle-2-hypothesis",
+        "recurrence_key": "perfrsiscore-optional-receipt-extension",
+        "predicted_improvement_percent": 100,
+        "confidence_percent": 95,
+        "observed_improvement_percent": 100,
+        "learning_id": "",
+        "learning_recorded": false,
+        "learning_reused": true,
+        "prior_learning_id": "issue-9783-chronological-validation",
+        "repeated_failure": false,
+        "cycle_time_hours": 0.001798996388888889,
+        "engine": "fak-native",
+        "artifact": "issue-9783 validation cycle: perfrsiscore package and focused CLI learning checks passed"
+      }
+    ]
+  }
+}
