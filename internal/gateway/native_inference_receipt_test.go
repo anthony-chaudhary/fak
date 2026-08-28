@@ -76,7 +76,7 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	if receipt.Model != "synthetic-live" || receipt.Engine != "inkernel" || receipt.Backend != "cpu-ref" || receipt.ForwardPath != "cpu/reference" || receipt.Q4K || receipt.FallbackActive {
 		t.Fatalf("execution identity = %+v, want exact synthetic inkernel cpu/reference without Q4K or fallback", receipt)
 	}
-	if receipt.Qwen35MetalForwardSequence != nil {
+	if receipt.Qwen35MetalForwardSequence != nil || bytes.Contains(rr.Body.Bytes(), []byte(`"qwen35_metal_forward_sequence"`)) {
 		t.Fatalf("CPU receipt acquired Metal sequence evidence: %+v", receipt.Qwen35MetalForwardSequence)
 	}
 	if receipt.CUDAImmutableWeightUploads != nil {
@@ -141,6 +141,8 @@ func TestNativeInferenceReceiptJSONShapeUsesChosenTokenArrays(t *testing.T) {
 			Encoders:          7,
 			TerminalWaits:     1,
 			TerminalReadbacks: 1,
+			HostUploadBytes:   65536,
+			HostReadbackBytes: 16384,
 			Committed:         true,
 			CompletedWait:     true,
 			TimingAvailable:   true,
@@ -156,7 +158,7 @@ func TestNativeInferenceReceiptJSONShapeUsesChosenTokenArrays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`, `"qwen35_metal_forward_sequence"`, `"path":"metal/qwen35-gdn-preprojected-sequence-v1"`, `"tokens":32`, `"command_buffers":1`, `"encoders":7`, `"terminal_waits":1`, `"terminal_readbacks":1`, `"committed":true`, `"completed_wait":true`, `"timing_available":true`, `"gpu_milliseconds":2.5`, `"wait_milliseconds":3.5`, `"cuda_immutable_weight_uploads"`, `"before":{"calls":4,"transfer_bytes":1024,"resident_bytes":512}`, `"after":{"calls":5,"transfer_bytes":5120,"resident_bytes":2560}`, `"delta":{"calls":1,"transfer_bytes":4096,"resident_bytes":2048}`} {
+	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`, `"qwen35_metal_forward_sequence"`, `"path":"metal/qwen35-gdn-preprojected-sequence-v1"`, `"tokens":32`, `"command_buffers":1`, `"encoders":7`, `"terminal_waits":1`, `"terminal_readbacks":1`, `"host_upload_bytes":65536`, `"host_readback_bytes":16384`, `"committed":true`, `"completed_wait":true`, `"timing_available":true`, `"gpu_milliseconds":2.5`, `"wait_milliseconds":3.5`, `"cuda_immutable_weight_uploads"`, `"before":{"calls":4,"transfer_bytes":1024,"resident_bytes":512}`, `"after":{"calls":5,"transfer_bytes":5120,"resident_bytes":2560}`, `"delta":{"calls":1,"transfer_bytes":4096,"resident_bytes":2048}`} {
 		if !bytes.Contains(raw, []byte(field)) {
 			t.Fatalf("receipt JSON %s missing %s", raw, field)
 		}

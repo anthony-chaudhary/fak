@@ -134,12 +134,15 @@ func TestNativeInferenceReceiptCarriesRequestLocalQwen35MetalForwardSequence(t *
 	type result struct {
 		index   int
 		receipt *NativeInferenceReceipt
+		reset   model.Qwen35MetalForwardSequenceReceipt
 	}
 	results := make(chan result, requests)
 	start := make(chan struct{})
 	for i := 0; i < requests; i++ {
 		go func(index int) {
 			measurement := &nativeInferenceMeasurement{}
+			uploadBytes := uint64(64<<10) + uint64(index)
+			readbackBytes := uint64(16<<10) + uint64(3*index)
 			if index%2 == 0 {
 				measurement.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{
 					Path:              model.Qwen35MetalGDNSequenceForwardPath,
@@ -149,22 +152,34 @@ func TestNativeInferenceReceiptCarriesRequestLocalQwen35MetalForwardSequence(t *
 					Encoders:          7,
 					TerminalWaits:     1,
 					TerminalReadbacks: 1,
+					HostUploadBytes:   uploadBytes,
+					HostReadbackBytes: readbackBytes,
 					Committed:         true,
 					CompletedWait:     true,
 					TimingAvailable:   true,
 					GPUMilliseconds:   2.5,
 					WaitMilliseconds:  3.5,
 				}
+			} else {
+				// Poison the unavailable value so omission proves the Available gate,
+				// rather than passing because its transfer counters happened to be zero.
+				measurement.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{
+					HostUploadBytes:   uploadBytes,
+					HostReadbackBytes: readbackBytes,
+				}
 			}
 			<-start
 			got := p.buildNativeInferenceReceipt(measurement, 0, 0)
 			measurement.reset()
-			results <- result{index: index, receipt: got}
+			results <- result{index: index, receipt: got, reset: measurement.qwen35MetalForwardSequence}
 		}(i)
 	}
 	close(start)
 	for range requests {
 		got := <-results
+		if got.reset != (model.Qwen35MetalForwardSequenceReceipt{}) {
+			t.Fatalf("request %d reset retained Metal sequence evidence: %+v", got.index, got.reset)
+		}
 		sequence := got.receipt.Qwen35MetalForwardSequence
 		if got.index%2 != 0 {
 			if sequence != nil {
@@ -174,6 +189,11 @@ func TestNativeInferenceReceiptCarriesRequestLocalQwen35MetalForwardSequence(t *
 		}
 		if sequence == nil || !sequence.Available || sequence.Tokens != got.index+1 {
 			t.Fatalf("request %d sequence receipt = %+v, want available request-local T%d receipt", got.index, sequence, got.index+1)
+		}
+		wantUpload := uint64(64<<10) + uint64(got.index)
+		wantReadback := uint64(16<<10) + uint64(3*got.index)
+		if sequence.HostUploadBytes != wantUpload || sequence.HostReadbackBytes != wantReadback {
+			t.Fatalf("request %d transfer bytes = %d/%d, want request-local %d/%d", got.index, sequence.HostUploadBytes, sequence.HostReadbackBytes, wantUpload, wantReadback)
 		}
 		if sequence.Path != model.Qwen35MetalGDNSequenceForwardPath || sequence.CommandBuffers != 1 || sequence.Encoders != 7 || sequence.TerminalWaits != 1 || sequence.TerminalReadbacks != 1 || !sequence.Committed || !sequence.CompletedWait || !sequence.TimingAvailable || sequence.GPUMilliseconds != 2.5 || sequence.WaitMilliseconds != 3.5 {
 			t.Fatalf("request %d sequence receipt lost typed model witnesses: %+v", got.index, sequence)
