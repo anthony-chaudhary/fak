@@ -278,6 +278,7 @@ FIXTURE_DIRS = {"testdata"}
 # Where a dated/issue-numbered doc is legitimately at home: the notes journal itself,
 # the per-release archives, the blog, and the experiments run-ledger.
 PLACEMENT_HOME_PREFIXES = (NOTES_DIR + "/", "docs/releases/", "docs/stable-releases/",
+                           "docs/_witnesses/", "docs/claims/", "docs/research/",
                            "blog/", "experiments/")
 _FENCE_RE = re.compile(r"^(```|~~~)")
 _ACRONYM_RE = re.compile(r"\b([A-Z]{2,5})s?\b")
@@ -918,8 +919,12 @@ def gather(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     texts: dict[str, str] = {f: _safe_read(root / f) for f in reader}
 
     # verbosity: redundancy + bloat (reader-facing only)
+    # Concept-disambiguation pages are intentionally addressable identity ledgers.
+    # Their repeated boundary sentence is schema, not redundant reader prose; merging
+    # them would erase the exact per-family lookup surface the scorecard exists to keep.
+    dup_reader = [f for f in reader if not f.startswith("docs/concepts/disambiguation-")]
     dup_docs = [{"path": f, "shingles": shingles(texts[f]),
-                 "words": _wordcount(_prose_only(texts[f]))} for f in reader]
+                 "words": _wordcount(_prose_only(texts[f]))} for f in dup_reader]
     bloat_docs = [{"path": f, "n_lines": texts[f].count("\n") + 1} for f in reader]
 
     # organization: root hygiene + placement + dir discipline
