@@ -26,6 +26,13 @@ const (
 	guardArbitrateTTL         = 30 * time.Second
 )
 
+var (
+	guardArbitrateShadowLimit = 2 * time.Second
+	guardArbitrateLive        = func(store *leaseref.Store, ctx context.Context, now time.Time) ([]leaseref.Record, []string, error) {
+		return store.Live(ctx, now)
+	}
+)
+
 type guardArbitrateConfig struct {
 	Mode  string
 	Lane  string
@@ -128,6 +135,20 @@ func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbit
 	if mode == guardArbitrateModeOff {
 		return nil, nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if mode == guardArbitrateModeShadow {
+		// The startup report was only the trigger that made #9656 look like a Codex
+		// hang. The root was the default shadow admission walking 117 non-session
+		// refs with one `git cat-file blob` process per ref (10.4s while otherwise
+		// quiet, about 97s under host load). Shadow advice cannot sit indefinitely
+		// between that report and exec, so bound the complete admission operation.
+		// Enforce deliberately retains the caller's context and fails closed below.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, guardArbitrateShadowLimit)
+		defer cancel()
+	}
 	root := strings.TrimSpace(cfg.Root)
 	if root == "" {
 		wd, wdErr := os.Getwd()
@@ -173,8 +194,15 @@ func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbit
 			unlock()
 		}
 	}()
-	live, _, err := store.Live(ctx, time.Now())
+	live, _, err := guardArbitrateLive(store, ctx, time.Now())
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if mode == guardArbitrateModeEnforce {
+				return nil, fmt.Errorf("COLLISION_RISK: guard lease admission could not read the live ledger: %w", ctxErr)
+			}
+			fmt.Fprintf(stderr, "fak guard: lease admission timed out after %s; shadow mode continuing without a lease\n", guardArbitrateShadowLimit)
+			return nil, nil
+		}
 		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; live lease ledger unavailable: %v\n", err)
 		return nil, nil
 	}
@@ -207,8 +235,11 @@ func guardArbitrateAcquire(ctx context.Context, stderr io.Writer, cfg guardArbit
 	// Re-read immediately before publishing. This narrows the decision/write window and,
 	// after publication, the read-back below makes a same-window contender converge on one
 	// deterministic winner instead of allowing two overlapping guard leases to survive.
-	live, _, err = store.Live(ctx, time.Now())
+	live, _, err = guardArbitrateLive(store, ctx, time.Now())
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("COLLISION_RISK: guard lease admission could not re-read the live ledger: %w", ctxErr)
+		}
 		fmt.Fprintf(stderr, "fak guard: arbitrate fail-open; live lease ledger unavailable before acquire: %v\n", err)
 		return nil, nil
 	}

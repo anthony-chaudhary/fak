@@ -9,15 +9,17 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/toolprocgate"
 )
 
-// TestLaunchGuardChildHiddenConsoleScope pins both sides of the launch gate:
-// headless harnesses keep #3597's no-window posture, attended Codex receives the
-// #8853 hidden inherited-console posture, and unrelated attended commands remain
-// untouched.
+// TestLaunchGuardChildConsoleUsabilityScope pins both sides of the launch gate:
+// every headless harness keeps #3597's no-window posture, while every attended
+// harness retains a console capable of initializing a TUI. Before #9656 this test
+// expected the hidden-console seam for attended Codex and checked only os.File
+// pointer identity; the live child kept those pointers but emitted no terminal-ready
+// byte for 40s because CREATE_NO_WINDOW had removed the usable console semantics.
 //
 // The seam is asserted through the injectable configureManagedHiddenConsole var rather
 // than the platform SysProcAttr fields, so the gate is observable on the Linux CI host
 // where the underlying ConfigureBackgroundCommand is a no-op.
-func TestLaunchGuardChildHiddenConsoleScope(t *testing.T) {
+func TestLaunchGuardChildConsoleUsabilityScope(t *testing.T) {
 	orig := configureManagedHiddenConsole
 	t.Cleanup(func() { configureManagedHiddenConsole = orig })
 
@@ -35,16 +37,16 @@ func TestLaunchGuardChildHiddenConsoleScope(t *testing.T) {
 	}
 
 	cases := []struct {
-		name           string
-		command        []string
-		want           int // times the hidden-console seam is applied
-		wantTerminalIO bool
+		name    string
+		command []string
+		want    int // times the hidden-console seam is applied
 	}{
-		{"headless one-shot", []string{"claude", "-p", "resolve #1"}, 1, false},
-		{"headless print-eq", []string{"claude", "--print=resolve #1"}, 1, false},
-		{"attended managed Codex", []string{"codex"}, 1, true},
-		{"attended Claude unchanged", []string{"claude"}, 0, false},
-		{"attended git unchanged", []string{"git", "status"}, 0, false},
+		{"headless Claude one-shot", []string{"claude", "-p", "resolve #1"}, 1},
+		{"headless Claude print-eq", []string{"claude", "--print=resolve #1"}, 1},
+		{"headless Codex one-shot", []string{"codex", "-p", "resolve #1"}, 1},
+		{"attended Codex keeps usable console", []string{"codex"}, 0},
+		{"attended Claude keeps usable console", []string{"claude"}, 0},
+		{"attended git keeps usable console", []string{"git", "status"}, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -63,11 +65,6 @@ func TestLaunchGuardChildHiddenConsoleScope(t *testing.T) {
 			}
 			if applied != tc.want {
 				t.Fatalf("hidden-console seam applied %d time(s), want %d for %v", applied, tc.want, tc.command)
-			}
-			if tc.wantTerminalIO &&
-				(child.Stdin != os.Stdin || child.Stdout != os.Stdout || child.Stderr != os.Stderr) {
-				t.Fatalf("attended Codex terminal handles changed: stdin=%v stdout=%v stderr=%v",
-					child.Stdin, child.Stdout, child.Stderr)
 			}
 		})
 	}
