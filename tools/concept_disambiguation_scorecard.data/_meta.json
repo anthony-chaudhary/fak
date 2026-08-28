@@ -10835,6 +10835,11 @@
           "category": "false-positive",
           "reason": "AuditConclusionStatus.BroadEfficiencySupported is a receipt boolean derived from parser refusals; reuse by the nightly audit does not introduce a support-maturity rung or lifecycle concept.",
           "token": "broadefficiencysupported"
+        },
+        {
+          "category": "incidental",
+          "reason": "Generated handoff metadata repeats the existing dev handler symbol; it is not a distinct support-maturity concept.",
+          "token": "runtoolcoverageaudit"
         }
       ],
       "exclude": [
@@ -11035,6 +11040,7 @@
         "runMaturityBaseline",
         "runMaturityBaselinePromote",
         "runtime_delegation_required",
+        "runtoolcoverageaudit",
         "scoreparity",
         "seenSupport",
         "setup_parity_clean",
