@@ -366,6 +366,21 @@ type TensorCloner interface {
 	CloneTensor(Tensor) (Tensor, error)
 }
 
+// BackendResourceTeardown is implemented by backends that retain resources
+// beyond a single operation. Teardown must be safe to call more than once.
+type BackendResourceTeardown interface {
+	TeardownResources() error
+}
+
+// TeardownBackendResources releases resources owned by backend when it exposes
+// the optional lifecycle contract. Stateless backends require no teardown.
+func TeardownBackendResources(backend Backend) error {
+	if teardown, ok := backend.(BackendResourceTeardown); ok {
+		return teardown.TeardownResources()
+	}
+	return nil
+}
+
 type Backend interface {
 	Name() string            // stable id, e.g. "cpu-ref"
 	Tier() string            // private capability probe result, e.g. "scalar","avx512","sm90"

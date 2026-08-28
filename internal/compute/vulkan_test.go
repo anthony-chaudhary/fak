@@ -1162,3 +1162,34 @@ func TestVulkanAttentionApprox(t *testing.T) {
 		t.Fatalf("attention max|Δ| %.4g > 1e-2", d)
 	}
 }
+
+func TestVulkanTeardownResourcesIsIdempotent(t *testing.T) {
+	v := vk(t)
+	a := v.Upload(NewF32(Default(), []int{4}, []float32{1, 2, 3, 4}), F32)
+	b := v.Upload(NewF32(Default(), []int{4}, []float32{4, 3, 2, 1}), F32)
+	defer v.Free(a)
+	defer v.Free(b)
+	v.BeginBatch()
+	v.AddInPlace(a, b)
+	if err := v.TeardownResources(); err != nil {
+		t.Fatalf("first teardown: %v", err)
+	}
+	if err := v.TeardownResources(); err != nil {
+		t.Fatalf("second teardown: %v", err)
+	}
+	got := v.Read(a)
+	for i, x := range got {
+		if x != 5 {
+			t.Fatalf("result[%d] = %v, want 5", i, x)
+		}
+	}
+	// Resource teardown is not device destruction: later operations remain valid.
+	v.AddInPlace(a, b)
+	got = v.Read(a)
+	want := []float32{9, 8, 7, 6}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("continued result[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+}

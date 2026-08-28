@@ -289,6 +289,17 @@ func (v *vulkanBackend) FlushBatch() {
 	C.fvk_batch_flush()
 }
 
+// TeardownResources flushes in-flight work before releasing backend-owned
+// reusable resources. Repeated calls are valid; staging buffers can join this
+// lifecycle without adding per-operation queue fences.
+func (v *vulkanBackend) TeardownResources() error {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	C.fvk_batch_flush()
+	C.fvk_trim_pool()
+	return nil
+}
+
 func (v *vulkanBackend) checkResourceCap(nbytes int, what string) {
 	if what == "" {
 		what = "storage buffer"

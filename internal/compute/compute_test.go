@@ -1,6 +1,7 @@
 package compute
 
 import (
+	"errors"
 	"math"
 	"testing"
 
@@ -320,6 +321,38 @@ func (fakeDevice) Attention(_ Tensor, _ KVStore, _ int, _ bool, _ int, _ float32
 	return Tensor{}
 }
 func (fakeDevice) Argmax(Tensor) int { return 0 }
+
+type teardownFakeDevice struct {
+	fakeDevice
+	calls int
+	err   error
+}
+
+func (d *teardownFakeDevice) TeardownResources() error {
+	d.calls++
+	return d.err
+}
+
+func TestTeardownBackendResources(t *testing.T) {
+	if err := TeardownBackendResources(fakeDevice{}); err != nil {
+		t.Fatalf("stateless backend teardown: %v", err)
+	}
+	dev := &teardownFakeDevice{}
+	if err := TeardownBackendResources(dev); err != nil {
+		t.Fatalf("first teardown: %v", err)
+	}
+	if err := TeardownBackendResources(dev); err != nil {
+		t.Fatalf("second teardown: %v", err)
+	}
+	if dev.calls != 2 {
+		t.Fatalf("teardown calls = %d, want 2", dev.calls)
+	}
+	want := errors.New("teardown failed")
+	dev.err = want
+	if err := TeardownBackendResources(dev); !errors.Is(err, want) {
+		t.Fatalf("teardown error = %v, want %v", err, want)
+	}
+}
 
 func TestDeviceTensorHasNoHostPointer(t *testing.T) {
 	dev := fakeDevice{}
