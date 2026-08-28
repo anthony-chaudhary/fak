@@ -35,9 +35,22 @@ func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
 		volume := filepath.VolumeName(scriptPath)
 		bashScriptPath = "/mnt/" + strings.ToLower(strings.TrimSuffix(volume, ":")) + filepath.ToSlash(strings.TrimPrefix(scriptPath, volume))
 	}
+	goBin := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(goBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goBin, "go"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bashGoBin := filepath.ToSlash(goBin)
+	if runtime.GOOS == "windows" && strings.Contains(strings.ToLower(bash), `\windows\system32\bash.exe`) {
+		volume := filepath.VolumeName(goBin)
+		bashGoBin = "/mnt/" + strings.ToLower(strings.TrimSuffix(volume, ":")) + filepath.ToSlash(strings.TrimPrefix(goBin, volume))
+	}
+	quotedGoBin := "'" + strings.ReplaceAll(bashGoBin, "'", `'"'"'`) + "'"
 	quotedScriptPath := "'" + strings.ReplaceAll(bashScriptPath, "'", `'"'"'`) + "'"
 	run := func(arch string) (string, error) {
-		command := "FAK_CUDA_ARCH=" + arch + " PYTHON=/bin/true CC=/bin/true bash " + quotedScriptPath + " check"
+		command := "PATH=" + quotedGoBin + ":/usr/bin:/bin FAK_CUDA_ARCH=" + arch + " PYTHON=/bin/true CC=/bin/true bash " + quotedScriptPath + " check"
 		cmd := exec.Command(bash, "-c", command)
 		out, err := cmd.CombinedOutput()
 		return string(out), err
