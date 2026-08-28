@@ -163,17 +163,8 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 		selfUpdateReceiptTargets = append(selfUpdateReceiptTargets, selfUpdateReceiptTarget{Role: role, Path: filepath.Clean(copy.Target)})
 	}
 	selfUpdateReceiptAttempted = len(copies)
-	startSelfUpdatePhase(selfUpdatePhaseInstall)
 	stopHeartbeat = startSelfUpdateHeartbeat(82, "installing verified binaries")
-	finishLaunchTransaction, launchStateErr := selfinstall.BeginLaunchTransaction(installTarget)
-	if launchStateErr != nil {
-		emitSelfUpdateOutcome(outcomeGateFailed, installTarget, "publish launch transaction: "+launchStateErr.Error())
-		cleanup()
-		os.Exit(1)
-	}
-	defer finishLaunchTransaction()
-	transaction := selfinstall.RunTransaction(copies, selfinstall.OSSwap)
-	finishLaunchTransaction()
+	transaction := selfinstall.RunLaunchTransaction(copies, installTarget, selfinstall.OSSwap)
 	stopHeartbeat()
 	switch result := transaction.(type) {
 	case selfinstall.Updated:

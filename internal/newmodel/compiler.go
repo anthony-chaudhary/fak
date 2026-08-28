@@ -25,12 +25,18 @@ const (
 type RefusalReason string
 
 const (
-	RefusalManifestInvalid       RefusalReason = "MANIFEST_INVALID"
-	RefusalPinInvalid            RefusalReason = "PIN_INVALID"
-	RefusalUnknownSemanticDelta  RefusalReason = "UNKNOWN_SEMANTIC_DELTA"
-	RefusalContradictorySemantic RefusalReason = "CONTRADICTORY_SEMANTIC_DELTA"
-	RefusalDescriptorInvalid     RefusalReason = "DESCRIPTOR_INVALID"
-	RefusalObligationsIncomplete RefusalReason = "OBLIGATIONS_INCOMPLETE"
+	RefusalManifestInvalid              RefusalReason = "MANIFEST_INVALID"
+	RefusalPinInvalid                   RefusalReason = "PIN_INVALID"
+	RefusalUnknownSemanticDelta         RefusalReason = "UNKNOWN_SEMANTIC_DELTA"
+	RefusalContradictorySemantic        RefusalReason = "CONTRADICTORY_SEMANTIC_DELTA"
+	RefusalDescriptorInvalid            RefusalReason = "DESCRIPTOR_INVALID"
+	RefusalObligationsIncomplete        RefusalReason = "OBLIGATIONS_INCOMPLETE"
+	RefusalUnknownNativeOperation       RefusalReason = "UNKNOWN_NATIVE_OPERATION"
+	RefusalUnknownNativeLayout          RefusalReason = "UNKNOWN_NATIVE_LAYOUT"
+	RefusalUnknownNativeQuantization    RefusalReason = "UNKNOWN_NATIVE_QUANTIZATION"
+	RefusalUnsupportedNativeCombination RefusalReason = "UNSUPPORTED_NATIVE_COMBINATION"
+	RefusalHardwareEnvelopeInvalid      RefusalReason = "HARDWARE_ENVELOPE_INVALID"
+	RefusalNativeEngineMismatch         RefusalReason = "NATIVE_ENGINE_MISMATCH"
 )
 
 // Refusal is a machine-readable fail-closed result from manifest compilation.

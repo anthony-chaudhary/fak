@@ -1,0 +1,46 @@
+{
+  "rows": [
+    {
+      "id": "newmodel-native-weight-layout",
+      "canonical": "WeightLayout (newmodel native envelope)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "newmodel.NativeHardwareEnvelope.WeightLayout names the checkpoint weight packing/storage contract that native obligation compilation must match before allocation, such as gguf-q4-k.",
+      "distinction": "This is the checkpoint artifact packing admitted by the new-model compiler, not compute.Layout tensor element ordering and not a runtime KV-cache implementation.",
+      "distinct_from": [
+        "layout-tensor",
+        "kvlayout-interface",
+        "newmodel-native-state-layout"
+      ],
+      "aliases": [],
+      "grounding": "WeightLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "newmodel-native-state-layout",
+      "canonical": "StateLayout (newmodel native envelope)",
+      "family": "layout",
+      "kind": "symbol",
+      "definition": "newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of recurrent/KV state admitted by obligation compilation, such as contiguous, independent of state kind and residency.",
+      "distinction": "It is native planning state-buffer organization, not checkpoint weight packing, not the model KV-cache algorithm/interface, and not ctxplan context layout.",
+      "distinct_from": [
+        "layout-tensor",
+        "kvlayout-interface",
+        "newmodel-native-weight-layout",
+        "x-layout-datelayout"
+      ],
+      "aliases": [],
+      "grounding": "StateLayout",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ]
+}

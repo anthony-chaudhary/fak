@@ -1316,9 +1316,12 @@ deployed binary. During that bounded transaction it defaults to `prior`, immedia
 running the last known-good executable. Set `FAK_UPDATE_LAUNCH_POLICY=wait` to wait (at
 most 10 seconds by default) and then run the new executable, or set it to `fail` for a
 strict, actionable failure. `FAK_UPDATE_LAUNCH_WAIT=30s` changes the bounded wait (capped
-at five minutes). A managed launcher also accepts
-`--update-launch-policy=prior|wait|fail`. These paths are non-interactive and preserve
-the provider argv, standard streams, and exit status.
+at five minutes). The equivalent launch-config keys are
+`"update_launch_policy": "prior|wait|fail"` and `"update_launch_wait_ms": N`.
+A managed launcher also accepts leading
+`--update-launch-policy=prior|wait|fail` and `--update-launch-wait=DURATION` flags.
+Flags after the provider or `--` remain provider arguments. These paths are
+non-interactive and preserve argv boundaries, stdin, stdout, stderr, and exit status.
 
 `fak launch add NAME --command PATH [--arg ARG ...] [--default] [--shim]` persists a
 custom provider as an argv template. `fak launch remove NAME` removes the binding and

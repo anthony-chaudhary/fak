@@ -1,0 +1,15 @@
+{
+  "schema": "fak.new-model-native-hardware-envelope/1",
+  "id": "a100-p1-decode",
+  "engine": "fak-native",
+  "platform": "linux/amd64+nvidia-a100",
+  "backend": "cuda",
+  "quantization": "q4-k-m",
+  "quantization_authority": "checkpoint",
+  "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "weight_layout": "gguf-q4-k",
+  "state_layout": "contiguous",
+  "state_residency": "device",
+  "memory_budget_bytes": 1048576,
+  "external_runtime_fallback": false
+}

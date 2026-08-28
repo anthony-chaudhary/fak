@@ -2431,3 +2431,17 @@ The modeldescriptor field that pins an onboarding descriptor to fak-native execu
 internal/benchmarkdown RenderAdapterReport renders the shared headings, metadata order, summary table, task table, promotion section, and spacing for an already-projected benchmark adapter report.
 
 **Distinct from:** Owns only the cross-benchmark adapter-report LAYOUT after callers preformat domain rows - NOT the package-specific RenderMarkdown functions that project measured domain reports, and NOT pre-run contract renderers.
+
+
+### WeightLayout (newmodel native envelope)
+
+newmodel.NativeHardwareEnvelope.WeightLayout names the checkpoint weight packing/storage contract that native obligation compilation must match before allocation, such as gguf-q4-k.
+
+**Distinct from:** This is the checkpoint artifact packing admitted by the new-model compiler, not compute.Layout tensor element ordering and not a runtime KV-cache implementation.
+
+
+### StateLayout (newmodel native envelope)
+
+newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of recurrent/KV state admitted by obligation compilation, such as contiguous, independent of state kind and residency.
+
+**Distinct from:** It is native planning state-buffer organization, not checkpoint weight packing, not the model KV-cache algorithm/interface, and not ctxplan context layout.

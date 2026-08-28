@@ -91,6 +91,19 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("invalid default provider %q", c.Default)
 		}
 	}
+	c.UpdateLaunchPolicy = strings.ToLower(strings.TrimSpace(c.UpdateLaunchPolicy))
+	if !validUpdatePolicy(c.UpdateLaunchPolicy) {
+		return Config{}, fmt.Errorf("invalid update launch policy %q", c.UpdateLaunchPolicy)
+	}
+	if c.UpdateLaunchWaitMS < 0 {
+		return Config{}, errors.New("update_launch_wait_ms must not be negative")
+	}
+	if executable := strings.TrimSpace(c.Executable); executable != "" {
+		if !filepath.IsAbs(executable) {
+			return Config{}, errors.New("launch executable must be an absolute path")
+		}
+		c.Executable = filepath.Clean(executable)
+	}
 	return c, nil
 }
 

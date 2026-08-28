@@ -1,0 +1,492 @@
+{
+  "schema": "fak.new-model-native-obligation-graph/1",
+  "manifest_digest": "9a1bc496035995cdba58a0e970b89031fdc2bc1eb16707989691bb1933999f8d",
+  "descriptor_digest": "080f23988518d7317eda384fa300eabead5195d82e95a2e7df69ac5e4a1def84",
+  "envelope_digest": "41e282fd2d42c9e54d180109622bafe531e2d731e211f816697c6edc99d126fa",
+  "engine": "fak-native",
+  "external_runtime_fallback": false,
+  "nodes": [
+    {
+      "id": "correctness.semantic-verification",
+      "class": "required-correctness",
+      "reason": "The upstream semantic contract must be witnessed before any native binding.",
+      "operation": "verify.semantic-contract",
+      "dependency_ids": [],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "verify.semantic-contract",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "verify-upstream-semantics",
+        "kind": "oracle-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "correctness.tensor-weight-reachability",
+      "class": "required-correctness",
+      "reason": "Every required tensor and checkpoint-authoritative quantized weight must reach its native consumer.",
+      "operation": "checkpoint.tensor-weight-reachability",
+      "dependency_ids": [
+        "correctness.semantic-verification"
+      ],
+      "oracle": {
+        "id": "checkpoint-tensor-index",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "checkpoint.tensor-weight-reachability",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "prove-tensor-weight-reachability",
+        "kind": "conformance-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "correctness.attention-hybrid",
+      "class": "required-correctness",
+      "reason": "Correctness for the admitted semantic operation must precede fusion.",
+      "operation": "attention.hybrid-dispatch",
+      "dependency_ids": [
+        "correctness.tensor-weight-reachability"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "attention.hybrid-dispatch",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "prove-attention-hybrid-dispatch",
+        "kind": "parity-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "correctness.ffn-swiglu",
+      "class": "required-correctness",
+      "reason": "Correctness for the admitted semantic operation must precede fusion.",
+      "operation": "ffn.swiglu",
+      "dependency_ids": [
+        "correctness.tensor-weight-reachability"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "ffn.swiglu",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "prove-ffn-swiglu",
+        "kind": "parity-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "correctness.normalization-rmsnorm",
+      "class": "required-correctness",
+      "reason": "Correctness for the admitted semantic operation must precede fusion.",
+      "operation": "normalization.rmsnorm",
+      "dependency_ids": [
+        "correctness.tensor-weight-reachability"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "normalization.rmsnorm",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "prove-normalization-rmsnorm",
+        "kind": "parity-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "correctness.position-rope",
+      "class": "required-correctness",
+      "reason": "Correctness for the admitted semantic operation must precede fusion.",
+      "operation": "position.rope",
+      "dependency_ids": [
+        "correctness.tensor-weight-reachability"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "position.rope",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "prove-position-rope",
+        "kind": "parity-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "correctness.routing-moe-topk",
+      "class": "required-correctness",
+      "reason": "Correctness for the admitted semantic operation must precede fusion.",
+      "operation": "routing.moe-topk",
+      "dependency_ids": [
+        "correctness.tensor-weight-reachability"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "routing.moe-topk",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "prove-routing-moe-topk",
+        "kind": "parity-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "correctness.state-hybrid",
+      "class": "required-correctness",
+      "reason": "Correctness for the admitted semantic operation must precede fusion.",
+      "operation": "state.hybrid-lifecycle",
+      "dependency_ids": [
+        "correctness.tensor-weight-reachability"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "state.hybrid-lifecycle",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "prove-state-hybrid-lifecycle",
+        "kind": "parity-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "fusion.attention-hybrid",
+      "class": "optional-fusion",
+      "reason": "Fusion is optional and may be promoted only after its unfused correctness dependency passes.",
+      "operation": "fusion.attention-hybrid",
+      "dependency_ids": [
+        "correctness.attention-hybrid"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "fusion.attention-hybrid",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "promote-fusion-attention-hybrid",
+        "kind": "promotion-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    },
+    {
+      "id": "fusion.ffn-swiglu",
+      "class": "optional-fusion",
+      "reason": "Fusion is optional and may be promoted only after its unfused correctness dependency passes.",
+      "operation": "fusion.ffn-swiglu",
+      "dependency_ids": [
+        "correctness.ffn-swiglu"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "fusion.ffn-swiglu",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "promote-fusion-ffn-swiglu",
+        "kind": "promotion-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": false,
+      "blockers": [
+        "backend:cuda:checkpoint-specific-fusion-not-witnessed"
+      ]
+    },
+    {
+      "id": "fusion.routing-moe-topk",
+      "class": "optional-fusion",
+      "reason": "Fusion is optional and may be promoted only after its unfused correctness dependency passes.",
+      "operation": "fusion.routing-moe-topk",
+      "dependency_ids": [
+        "correctness.routing-moe-topk"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "fusion.routing-moe-topk",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "promote-fusion-routing-moe-topk",
+        "kind": "promotion-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": false,
+      "blockers": [
+        "backend:cuda:checkpoint-specific-fusion-not-witnessed"
+      ]
+    },
+    {
+      "id": "fusion.state-hybrid",
+      "class": "optional-fusion",
+      "reason": "Fusion is optional and may be promoted only after its unfused correctness dependency passes.",
+      "operation": "fusion.state-hybrid-update",
+      "dependency_ids": [
+        "correctness.state-hybrid"
+      ],
+      "oracle": {
+        "id": "semantic-answer-quality-v2",
+        "reason": "The named oracle must witness this operation without turning planning into a support claim."
+      },
+      "backend": {
+        "engine": "fak-native",
+        "platform": "linux/amd64+nvidia-a100",
+        "backend": "cuda",
+        "operation": "fusion.state-hybrid-update",
+        "reason": "The operation remains owned by the selected fak-native platform/backend; no foreign fallback is permitted."
+      },
+      "memory_layout": {
+        "quantization": "q4-k-m",
+        "quantization_authority": "checkpoint",
+        "weight_layout": "gguf-q4-k",
+        "state_layout": "contiguous",
+        "state_residency": "device",
+        "required_state_kinds": [
+          "gdn",
+          "kv"
+        ],
+        "max_bytes": 1048576,
+        "reason": "The checkpoint-authoritative quantization and tensor/state layout must remain reachable within the declared memory budget."
+      },
+      "promotion_witness": {
+        "id": "promote-fusion-state-hybrid-update",
+        "kind": "promotion-test",
+        "reason": "This prospective witness must pass before the obligation can be promoted."
+      },
+      "eligible": true,
+      "blockers": []
+    }
+  ]
+}

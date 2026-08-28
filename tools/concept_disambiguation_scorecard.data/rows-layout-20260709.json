@@ -9,7 +9,8 @@
       "distinction": "It is a Go stdlib TIME-FORMAT layout string (how a date is spelled as text) for the livecodebench package only, not a tensor/KV-cache memory layout (Layout tensor, mlaKVLayout, standardKVLayout) despite sharing the word 'layout'.",
       "distinct_from": [
         "Layout (tensor)",
-        "mlaKVLayout (model)"
+        "mlaKVLayout (model)",
+        "newmodel-native-state-layout"
       ],
       "aliases": [
         "dateLayout"
