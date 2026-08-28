@@ -440,6 +440,17 @@ happens on the next supervisor tick, not inside the worker. An unattended
 always-on opencode loop is therefore the **supervisor cadence × the single-shot
 worker**, not a worker running its own `/dos-dispatch-loop`.
 
+## Dispatch-status rate semantics
+
+The dispatch-status `closure_rate` is an honesty ratio, not fleet throughput:
+`TRUE_RESOLVED / (TRUE_RESOLVED + CLAIMED_CLOSED)`. A low value means claimed
+closes are outrunning independently witnessed resolutions.
+
+The displayed `completed /h` rate counts resolved closes from any actor (excluding
+wontfix and duplicate closes). It is not the dispatcher's own productivity: when
+that GitHub-derived rate is far above the loop rate, humans/peers are draining
+the backlog, not the dispatcher.
+
 ## Extending it / adopting it elsewhere
 
 The loop reads its repo shape — lane names, file-trees, ship-stamp grammar — entirely
@@ -450,3 +461,4 @@ companion to [`dos-kernel`](https://github.com/anthony-chaudhary/dos-kernel); th
 copy under `tools/` is the reference implementation it was generalized from. The
 witness rung, the cap bound, the `#N` binding, and the dry-run discipline carry over
 unchanged — the loop is the harness, your issue backlog is the payload.
+
