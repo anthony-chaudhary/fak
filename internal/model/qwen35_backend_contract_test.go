@@ -180,10 +180,39 @@ func (b *recordingQwen35Backend) Qwen35GDNDecode(
 	return compute.NewF32(b.Backend, []int{b.model.Cfg.HiddenSize}, out), convState, recurrentState, nil
 }
 
+type pathQwen35Backend struct {
+	*recordingQwen35Backend
+	path string
+}
+
+func (b *pathQwen35Backend) Qwen35GDNPath() string { return b.path }
+
 type wrongPathQwen35Backend struct{ *recordingQwen35Backend }
 
 func (*wrongPathQwen35Backend) Qwen35GDNPath() string { return "cuda/qwen35-gdn-wrong-v0" }
 
+func TestValidateBackendForwardConfigAcceptsExplicitVulkanContract(t *testing.T) {
+	cfg := Config{ModelType: "qwen3_5", LayerTypes: []string{"linear_attention"}}
+	be := &pathQwen35Backend{recordingQwen35Backend: &recordingQwen35Backend{}, path: Qwen35GDNVulkanPath}
+	if err := ValidateBackendForwardConfig(cfg, be); err != nil {
+		t.Fatalf("explicit Vulkan structural backend refused: %v", err)
+	}
+}
+
+func TestValidateBackendForwardConfigRefusesUnknownStructuralPath(t *testing.T) {
+	cfg := Config{ModelType: "qwen3_5", LayerTypes: []string{"linear_attention"}}
+	be := &pathQwen35Backend{recordingQwen35Backend: &recordingQwen35Backend{}, path: "vulkan/qwen35-gdn-unknown-v0"}
+	err := ValidateBackendForwardConfig(cfg, be)
+	var unsupported *UnsupportedBackendForwardError
+	if !errors.As(err, &unsupported) {
+		t.Fatalf("error=%T %v, want typed refusal", err, err)
+	}
+	for _, want := range []string{Qwen35GDNCUDAPath, Qwen35GDNVulkanPath, be.path} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal missing %q: %v", want, err)
+		}
+	}
+}
 func TestValidateBackendForwardConfigQwen35ExactPathAdmission(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	m := NewSynthetic(cfg)
@@ -199,10 +228,10 @@ func TestValidateBackendForwardConfigQwen35ExactPathAdmission(t *testing.T) {
 			if !errors.As(err, &unsupported) {
 				t.Fatalf("error=%T %v, want *UnsupportedBackendForwardError", err, err)
 			}
-			if unsupported.Forward != ForwardQwen35GDN || unsupported.IntendedPath != Qwen35GDNCUDAPath {
+			if unsupported.Forward != ForwardQwen35GDN || unsupported.IntendedPath != Qwen35GDNCUDAPath+" or "+Qwen35GDNVulkanPath {
 				t.Fatalf("wrong refusal identity: %#v", unsupported)
 			}
-			for _, text := range []string{Qwen35GDNCUDAPath, "generic QKV/CPU fallback", "0.999"} {
+			for _, text := range []string{Qwen35GDNCUDAPath, Qwen35GDNVulkanPath, "generic QKV/CPU fallback", "0.999"} {
 				if !strings.Contains(err.Error(), text) {
 					t.Errorf("refusal missing %q: %v", text, err)
 				}
