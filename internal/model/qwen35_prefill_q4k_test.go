@@ -38,6 +38,14 @@ func qwen35HybridQ4KTestCfg() Config {
 	}
 }
 
+func TestQwen35MetalForwardSequenceReceiptDefaultTransferBytesAreZero(t *testing.T) {
+	s := NewSynthetic(qwen35HybridQ4KTestCfg()).NewSession()
+	receipt := s.Qwen35MetalForwardSequenceReceipt()
+	if receipt.Available || receipt.HostUploadBytes != 0 || receipt.HostReadbackBytes != 0 {
+		t.Fatalf("default Metal sequence receipt = %+v, want unavailable with zero transfer bytes", receipt)
+	}
+}
+
 // fillQ4KMajority populates m.q4kw for exactly the projections ResidentQ4KEligible holds raw
 // (the identity-normalized matmul weights: self_attn v_proj/o_proj on full-attn layers, and
 // mlp gate/up/down on every layer). The q/k projections and the whole linear_attn.* family

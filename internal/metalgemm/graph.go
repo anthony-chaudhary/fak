@@ -63,6 +63,7 @@ func (e *GraphPostSubmitError) Error() string {
 type GraphReceipt struct {
 	Committed, CompletedWait, TimingAvailable bool
 	Encoders, HostReadbacks                   int
+	HostUploadBytes, HostReadbackBytes        uint64
 	GPUMilliseconds, WaitMilliseconds         float64
 }
 
@@ -92,6 +93,7 @@ type ProjectionGraph struct {
 	finished                bool
 	freed                   bool
 	readbacks               int
+	hostUploadBytes         uint64
 	injectPostSubmitFailure bool
 	gdnLeases               []gdnGraphLease
 }
@@ -132,7 +134,10 @@ func BeginProjectionGraph(xf []float32, xq []int8, xd []float32, P, in int) (*Pr
 	if p == nil {
 		return nil, errors.New("metalgemm: graph begin failed")
 	}
-	return &ProjectionGraph{ptr: p, p: P}, nil
+	return &ProjectionGraph{
+		ptr: p, p: P,
+		hostUploadBytes: uint64(len(xf))*4 + uint64(len(xq)) + uint64(len(xd))*4,
+	}, nil
 }
 
 func (g *ProjectionGraph) open() error {
@@ -263,7 +268,11 @@ func (g *ProjectionGraph) RMSNorm(input *GraphResult, weight []float32, eps floa
 		gain = 1
 	}
 	ptr := C.mg_qwen35_graph_norm(g.ptr, input.ptr, (*C.float)(unsafe.Pointer(&weight[0])), C.int(g.p), C.int(len(weight)), C.float(eps), gain, 0)
-	return g.add(ptr, len(weight))
+	result, err := g.add(ptr, len(weight))
+	if err == nil {
+		g.hostUploadBytes += uint64(len(weight)) * 4
+	}
+	return result, err
 }
 
 func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps float32, gain1p bool) (*GraphResult, error) {
@@ -282,6 +291,7 @@ func (g *ProjectionGraph) LastRMSNorm(input *GraphResult, weight []float32, eps 
 		return nil, errors.New("metalgemm: Qwen final RMSNorm encode failed")
 	}
 	g.encoders++
+	g.hostUploadBytes += uint64(len(weight)) * 4
 	return &GraphResult{ptr: ptr, out: len(weight), p: 1, graph: g}, nil
 }
 
@@ -358,6 +368,7 @@ func (g *ProjectionGraph) FullAttention(q, k, v, gate *GraphResult, qnorm, knorm
 	// Native full attention owns Q/K normalization, current-K/V append, and
 	// attention as three encoders.
 	g.encoders += 3
+	g.hostUploadBytes += uint64(len(qnorm)+len(knorm)+len(cosv)+len(sinv)+len(prefixK)+len(prefixV)) * 4
 	return Qwen35GraphAttentionResult{
 		Output: &GraphResult{ptr: outp, out: qwidth, p: 32, graph: g},
 		KRaw:   &GraphResult{ptr: krawp, out: kvwidth, p: 32, graph: g},
@@ -419,6 +430,7 @@ func (g *ProjectionGraph) GDN(state *GDNState, mixed, z, b, a *GraphResult, pane
 	}
 	g.gdnLeases = append(g.gdnLeases, gdnGraphLease{state: state, done: done})
 	g.encoders++
+	g.hostUploadBytes += uint64(len(panel.Conv1D)+len(panel.ALog)+len(panel.DTBias)+len(panel.Norm)) * 4
 	return &GraphResult{ptr: ptr, out: geometry.valueDim(), p: 32, graph: g}, nil
 }
 
@@ -446,7 +458,7 @@ func (g *ProjectionGraph) Finish() (GraphReceipt, error) {
 		inject = 1
 	}
 	ok := C.mg_graph_finish(g.ptr, &r, inject) != 0
-	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
+	receipt := GraphReceipt{Committed: r.committed != 0, CompletedWait: r.completed_wait != 0, TimingAvailable: r.timing_available != 0, Encoders: int(r.encoders), HostReadbacks: int(r.host_readbacks), HostUploadBytes: g.hostUploadBytes, GPUMilliseconds: float64(r.gpu_milliseconds), WaitMilliseconds: float64(r.wait_milliseconds)}
 	if !ok {
 		if receipt.Committed {
 			return receipt, &GraphPostSubmitError{Reason: "injected or device completion failure"}
@@ -515,6 +527,7 @@ func (g *ProjectionGraph) FinishRead(results ...*GraphResult) ([][]float32, Grap
 	}
 	g.readbacks++
 	receipt.HostReadbacks = 1
+	receipt.HostReadbackBytes = uint64(total) * 4
 	out := make([][]float32, len(results))
 	off := 0
 	for i, r := range results {

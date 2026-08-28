@@ -108,6 +108,8 @@ type Qwen35MetalForwardSequenceReceipt struct {
 	Encoders          int     `json:"encoders"`
 	TerminalWaits     int     `json:"terminal_waits"`
 	TerminalReadbacks int     `json:"terminal_readbacks"`
+	HostUploadBytes   uint64  `json:"host_upload_bytes"`
+	HostReadbackBytes uint64  `json:"host_readback_bytes"`
 	Committed         bool    `json:"committed"`
 	CompletedWait     bool    `json:"completed_wait"`
 	TimingAvailable   bool    `json:"timing_available"`

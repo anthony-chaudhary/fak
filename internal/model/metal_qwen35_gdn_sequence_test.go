@@ -9,6 +9,33 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/metalgemm"
 )
 
+func qwen35P32ExpectedTransferBytes(m *Model, base int) (upload, readback uint64) {
+	const tokens = 32
+	cfg := m.Cfg
+	elements := tokens * cfg.HiddenSize
+	fullLayers := 0
+	for l := 0; l < cfg.NumLayers; l++ {
+		p := func(suffix string) string { return layerName(l, suffix) }
+		elements += len(m.tensor(p("input_layernorm.weight"))) + len(m.tensor(p("post_attention_layernorm.weight")))
+		if cfg.isLinearAttnLayer(l) {
+			elements += len(m.tensor(p("linear_attn.conv1d.weight"))) + len(m.tensor(p("linear_attn.A_log"))) + len(m.tensor(p("linear_attn.dt_bias"))) + len(m.tensor(p("linear_attn.norm.weight")))
+			continue
+		}
+		fullLayers++
+		qnorm, knorm := cfg.HeadDim, cfg.HeadDim
+		if cfg.QKNorm {
+			qnorm = len(m.tensor(p("self_attn.q_norm.weight")))
+			knorm = len(m.tensor(p("self_attn.k_norm.weight")))
+		}
+		rotary := cfg.rotaryDim()
+		elements += qnorm + knorm + 2*tokens*(rotary/2) + 2*base*(cfg.NumKVHeads*cfg.HeadDim)
+	}
+	elements += len(m.tensor("model.norm.weight"))
+	upload = uint64(elements) * 4
+	readbackElements := cfg.HiddenSize + fullLayers*3*tokens*(cfg.NumKVHeads*cfg.HeadDim)
+	return upload, uint64(readbackElements) * 4
+}
+
 func TestMetalQwen35BackendNilP32WholeSequenceSingleFenceAndDecodeOwner(t *testing.T) {
 	setQ4KSDOTForTest(false)
 	t.Cleanup(func() { setQ4KSDOTForTest(true) })
@@ -47,6 +74,10 @@ func TestMetalQwen35BackendNilP32WholeSequenceSingleFenceAndDecodeOwner(t *testi
 	}
 	if receipt.Path != Qwen35MetalGDNSequenceForwardPath || receipt.Tokens != 32 || receipt.CommandBuffers != 1 || receipt.TerminalWaits != 1 || receipt.TerminalReadbacks != 1 || !receipt.Committed || !receipt.CompletedWait || receipt.Encoders <= 1 || !receipt.TimingAvailable || receipt.GPUMilliseconds <= 0 || receipt.WaitMilliseconds <= 0 {
 		t.Fatalf("whole-sequence receipt=%+v", receipt)
+	}
+	wantUpload, wantReadback := qwen35P32ExpectedTransferBytes(m, 0)
+	if receipt.HostUploadBytes != wantUpload || receipt.HostReadbackBytes != wantReadback {
+		t.Fatalf("whole-sequence transfer bytes = upload %d readback %d, want %d/%d", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload, wantReadback)
 	}
 	receipt.Tokens = 0
 	if got.Qwen35MetalForwardSequenceReceipt().Tokens != 32 {
@@ -140,10 +171,18 @@ func TestMetalQwen35BackendNilP32AppendUsesResidentPrefixAndOwners(t *testing.T)
 	if !firstReceipt.Available || firstReceipt.CommandBuffers != 1 || firstReceipt.TerminalWaits != 1 || firstReceipt.TerminalReadbacks != 1 {
 		t.Fatalf("first P32 receipt=%+v", firstReceipt)
 	}
+	firstUpload, wantReadback := qwen35P32ExpectedTransferBytes(m, 0)
+	if firstReceipt.HostUploadBytes != firstUpload || firstReceipt.HostReadbackBytes != wantReadback {
+		t.Fatalf("first P32 transfer bytes = upload %d readback %d, want %d/%d", firstReceipt.HostUploadBytes, firstReceipt.HostReadbackBytes, firstUpload, wantReadback)
+	}
 	actual := got.Prefill(prompt[32:])
 	secondReceipt := got.Qwen35MetalForwardSequenceReceipt()
 	if !secondReceipt.Available || secondReceipt.Tokens != 32 || secondReceipt.CommandBuffers != 1 || secondReceipt.TerminalWaits != 1 || secondReceipt.TerminalReadbacks != 1 || !secondReceipt.Committed || !secondReceipt.CompletedWait {
 		t.Fatalf("appended P32 receipt=%+v", secondReceipt)
+	}
+	secondUpload, secondReadback := qwen35P32ExpectedTransferBytes(m, 32)
+	if secondReceipt.HostUploadBytes != secondUpload || secondReceipt.HostReadbackBytes != secondReadback || secondUpload <= firstUpload {
+		t.Fatalf("appended P32 transfer bytes = upload %d readback %d, want %d/%d (fresh upload %d)", secondReceipt.HostUploadBytes, secondReceipt.HostReadbackBytes, secondUpload, secondReadback, firstUpload)
 	}
 	if got.Cache.Len() != 64 || got.q4kHybridPrefillChunks != 2 || got.q4kHybridPrefillLastBase != 32 {
 		t.Fatalf("appended state cache=%d chunks=%d base=%d", got.Cache.Len(), got.q4kHybridPrefillChunks, got.q4kHybridPrefillLastBase)
@@ -206,6 +245,10 @@ func TestMetalQwen35BackendNilP32PostSubmitFailureIsTerminal(t *testing.T) {
 	receipt := s.Qwen35MetalForwardSequenceReceipt()
 	if !receipt.Available || receipt.Path != Qwen35MetalGDNSequenceForwardPath || receipt.Tokens != 32 || !receipt.Committed || !receipt.CompletedWait || receipt.CommandBuffers != 1 || receipt.TerminalWaits != 1 || receipt.TerminalReadbacks != 0 || receipt.Encoders <= 1 || !receipt.TimingAvailable || receipt.GPUMilliseconds <= 0 || receipt.WaitMilliseconds <= 0 {
 		t.Fatalf("post-submit receipt=%+v", receipt)
+	}
+	wantUpload, _ := qwen35P32ExpectedTransferBytes(m, 0)
+	if receipt.HostUploadBytes != wantUpload || receipt.HostReadbackBytes != 0 {
+		t.Fatalf("post-submit transfer bytes = upload %d readback %d, want %d/0", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload)
 	}
 	if s.Cache.Len() != 0 || s.q4kHybridPrefillChunks != 0 {
 		t.Fatalf("post-submit failure replayed/mutated host path: cache=%d chunks=%d", s.Cache.Len(), s.q4kHybridPrefillChunks)
