@@ -177,3 +177,27 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 		t.Fatalf("default-off=%#v err=%v", got, err)
 	}
 }
+
+func TestCoalescedDecodeDoesNotReplayAfterAcceptedPass(t *testing.T) {
+	var calls int
+	restoreProbe := installQwenSharedReceiptProbeForTest(func(*model.BatchSession, []int, []bool) ([][]float32, int, int64, bool) {
+		calls++
+		return nil, 0, 0, true
+	})
+	defer restoreProbe()
+
+	req := &inKernelCoalesceRequest{}
+	req.decodePass.Store(1) // one cohort pass was already accepted and may have mutated state
+	ln := &decodeLane{s: model.NewSynthetic(tinyConcurrencyConfig()).NewSession()}
+	ctx := context.WithValue(context.Background(), inKernelCoalesceContextKey{}, req)
+	coordinated, err := coalescedDecode(ctx, ln)
+	if !coordinated || err != nil {
+		t.Fatalf("coordinated=%v err=%v", coordinated, err)
+	}
+	if calls != 0 {
+		t.Fatalf("accepted coordinated pass replayed %d model forwards", calls)
+	}
+	if got := req.decodePass.Load(); got != 2 {
+		t.Fatalf("decode pass count=%d, want 2 attempts with only the first executed", got)
+	}
+}
