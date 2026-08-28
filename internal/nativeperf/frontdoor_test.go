@@ -63,3 +63,69 @@ func TestFrontDoorBlockRoundTrip(t *testing.T) {
 		t.Fatalf("round trip failed:\n%s", next)
 	}
 }
+
+func TestFrontDoorEdgeAdversarialInputsFailClosed(t *testing.T) {
+	valid := FrontDoorBegin + "\ncurrent\n" + FrontDoorEnd
+	tests := []struct {
+		name      string
+		doc       string
+		wantOK    bool
+		wantBlock string
+	}{
+		{name: "empty"},
+		{name: "begin only", doc: FrontDoorBegin},
+		{name: "end only", doc: FrontDoorEnd},
+		{name: "reversed markers", doc: FrontDoorEnd + "\n" + FrontDoorBegin},
+		{name: "duplicate begin", doc: FrontDoorBegin + "\n" + valid},
+		{name: "duplicate end", doc: valid + "\n" + FrontDoorEnd},
+		{name: "oversized surroundings", doc: strings.Repeat("x", 1<<20) + valid + strings.Repeat("y", 1<<20), wantOK: true, wantBlock: valid},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, ok := ExtractFrontDoorBlock(test.doc)
+			if ok != test.wantOK || got != test.wantBlock {
+				t.Fatalf("ExtractFrontDoorBlock() = (%q, %t), want (%q, %t)", got, ok, test.wantBlock, test.wantOK)
+			}
+		})
+	}
+
+	snapshot, err := BuildFrontDoorSnapshot(ActiveGraph(), time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, surface := range []string{FrontDoorSurfaceREADME, FrontDoorSurfaceIndex, FrontDoorSurfaceLatest} {
+		block, err := FrontDoorBlock(snapshot, surface)
+		if err != nil {
+			t.Fatalf("FrontDoorBlock(%q): %v", surface, err)
+		}
+		if strings.Count(block, FrontDoorBegin) != 1 || strings.Count(block, FrontDoorEnd) != 1 {
+			t.Fatalf("FrontDoorBlock(%q) emitted ambiguous markers:\n%s", surface, block)
+		}
+	}
+	if _, err := FrontDoorBlock(snapshot, "../../hostile"); err == nil {
+		t.Fatal("unknown front-door surface accepted")
+	}
+	if _, err := SpliceFrontDoorBlock("no markers", valid); err == nil {
+		t.Fatal("marker-free document accepted for splicing")
+	}
+
+	graphTests := []struct {
+		name   string
+		mutate func(*Graph)
+		want   string
+	}{
+		{name: "invalid graph", mutate: func(g *Graph) { g.Schema = "hostile" }, want: "invalid native performance graph"},
+		{name: "missing baseline pair", mutate: func(g *Graph) { g.Rungs, g.Features = nil, nil }, want: "lacks the witnessed Metal baseline/comparison pair"},
+		{name: "mismatched provenance", mutate: func(g *Graph) { g.Comparison.Provenance = "different" }, want: "provenance or observation date differs"},
+		{name: "mismatched observation date", mutate: func(g *Graph) { g.Comparison.ObservedOn = "2026-08-24" }, want: "provenance or observation date differs"},
+	}
+	for _, test := range graphTests {
+		t.Run(test.name, func(t *testing.T) {
+			graph := ActiveGraph()
+			test.mutate(&graph)
+			if _, err := BuildFrontDoorSnapshot(graph, time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("BuildFrontDoorSnapshot() error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}

@@ -190,6 +190,11 @@ func renderLatestFrontDoor(s FrontDoorSnapshot) string {
 }
 
 func ExtractFrontDoorBlock(doc string) (string, bool) {
+	// Generated surfaces own exactly one block. Reject ambiguity instead of
+	// updating one marker pair while leaving a second active-looking block.
+	if strings.Count(doc, FrontDoorBegin) != 1 || strings.Count(doc, FrontDoorEnd) != 1 {
+		return "", false
+	}
 	start := strings.Index(doc, FrontDoorBegin)
 	end := strings.Index(doc, FrontDoorEnd)
 	if start < 0 || end < start {
