@@ -1,0 +1,117 @@
+{
+  "schema": "fak-build-exact-archive-matrix/1",
+  "issue": 9713,
+  "parent_issue": 9661,
+  "implementation_issue": 9672,
+  "observed_at_utc": "2026-08-28T06:28:35Z",
+  "verdict": "PASS_WARM_10X_ONLY",
+  "comparison": {
+    "pre_revision": "233b8f73f307fdbb077d6d79aba17ec194c115eb",
+    "pre_tree_oid": "9c9b5705d590076aebd6717e99a33b1b6759216f",
+    "pre_archive_sha256": "53ccc8ff400dfd8c4a2d9b698bf82b6930039eb2b4fdb128a4e0aa67f875e676",
+    "pre_extracted_manifest_sha256": "598c96b806481aa2b4a901f6102d507326518ec17d4e506a4b2edde968a3d43c",
+    "post_revision": "92bab7dc989eebc3c1cf176086a8cd07e9802dea",
+    "post_tree_oid": "1c221101eb6b91d05daad92e546d37ceb518f575",
+    "post_archive_sha256": "b2a2d11e237374e7336d1f87be45af9554e52c8a7a969a1acf1e206858cb08a9",
+    "post_extracted_manifest_sha256": "213ef7cb6dce19f298e413d21dd7818500e61cec102677ad64986e5b6f820b80"
+  },
+  "environment": {
+    "go_version": "go1.26.6",
+    "goos": "darwin",
+    "goarch": "arm64",
+    "cgo_enabled": true,
+    "gotoolchain": "auto",
+    "cpu": "Apple M3 Pro",
+    "logical_cpus": 12,
+    "memory_bytes": 38654705664,
+    "make": "GNU Make 3.81",
+    "source_isolation": "git archive extracted below a system temporary root with no parent .git; GOWORK=off; MAKEFLAGS unset",
+    "cache_setup": "unique initially empty GOCACHE and GOTMPDIR per run/side; cold then immediate warm; named outputs retained",
+    "trace": "GOFLAGS=-x on timed make build; actions counted from actual compile, cgo, and link tool command lines",
+    "order": "odd runs pre then post; even runs post then pre"
+  },
+  "command": [
+    "git -C <repo> archive <revision> > <source.tar>",
+    "tar -xf <source.tar> -C <external-tree-with-no-parent-git>",
+    "/usr/bin/time -p env -u MAKEFLAGS GOCACHE=<unique-empty-cache> GOTMPDIR=<unique-tmp> GOWORK=off GOTOOLCHAIN=auto GOFLAGS=-x make build"
+  ],
+  "samples": [
+    {"run":1,"order":1,"side":"pre","cold_seconds":59.33,"warm_seconds":15.39,"cold_actions":{"compile":1330,"cgo":14,"link":151},"warm_actions":{"compile":0,"cgo":0,"link":147}},
+    {"run":1,"order":2,"side":"post","cold_seconds":28.32,"warm_seconds":0.83,"cold_actions":{"compile":947,"cgo":14,"link":4},"warm_actions":{"compile":0,"cgo":0,"link":0}},
+    {"run":2,"order":1,"side":"post","cold_seconds":42.40,"warm_seconds":0.79,"cold_actions":{"compile":947,"cgo":14,"link":4},"warm_actions":{"compile":0,"cgo":0,"link":0}},
+    {"run":2,"order":2,"side":"pre","cold_seconds":54.93,"warm_seconds":16.85,"cold_actions":{"compile":1330,"cgo":14,"link":151},"warm_actions":{"compile":0,"cgo":0,"link":147}},
+    {"run":3,"order":1,"side":"pre","cold_seconds":57.71,"warm_seconds":17.21,"cold_actions":{"compile":1330,"cgo":14,"link":151},"warm_actions":{"compile":0,"cgo":0,"link":147}},
+    {"run":3,"order":2,"side":"post","cold_seconds":36.12,"warm_seconds":0.79,"cold_actions":{"compile":947,"cgo":14,"link":4},"warm_actions":{"compile":0,"cgo":0,"link":0}},
+    {"run":4,"order":1,"side":"post","cold_seconds":28.12,"warm_seconds":0.81,"cold_actions":{"compile":947,"cgo":14,"link":4},"warm_actions":{"compile":0,"cgo":0,"link":0}},
+    {"run":4,"order":2,"side":"pre","cold_seconds":66.59,"warm_seconds":19.73,"cold_actions":{"compile":1330,"cgo":14,"link":151},"warm_actions":{"compile":0,"cgo":0,"link":147}},
+    {"run":5,"order":1,"side":"pre","cold_seconds":65.65,"warm_seconds":24.55,"cold_actions":{"compile":1330,"cgo":14,"link":151},"warm_actions":{"compile":0,"cgo":0,"link":147}},
+    {"run":5,"order":2,"side":"post","cold_seconds":38.58,"warm_seconds":0.85,"cold_actions":{"compile":947,"cgo":14,"link":4},"warm_actions":{"compile":0,"cgo":0,"link":0}}
+  ],
+  "statistics": {
+    "warm_pre_seconds": [15.39,16.85,17.21,19.73,24.55],
+    "warm_post_seconds": [0.83,0.79,0.79,0.81,0.85],
+    "warm_pre_median_seconds": 17.21,
+    "warm_post_median_seconds": 0.81,
+    "warm_speedup": 21.24691,
+    "warm_one_tenth_threshold_seconds": 1.721,
+    "paired_warm_speedups": [18.54217,21.32911,21.78481,24.35802,28.88235],
+    "cold_pre_seconds": [59.33,54.93,57.71,66.59,65.65],
+    "cold_post_seconds": [28.32,42.40,36.12,28.12,38.58],
+    "cold_pre_median_seconds": 59.33,
+    "cold_post_median_seconds": 36.12,
+    "cold_speedup": 1.64258
+  },
+  "mechanism": {
+    "warm_link_actions_pre": 147,
+    "warm_link_actions_post": 0,
+    "cold_compile_actions_pre": 1330,
+    "cold_compile_actions_post": 947,
+    "cold_link_actions_pre": 151,
+    "cold_link_actions_post": 4,
+    "whole_tree_step_pre_median_seconds": 17.56,
+    "whole_tree_step_post": "absent from make build; retained in build-all and ci",
+    "post_warm_step_medians_seconds": {"make_parse":0.01,"fak":0.57,"repoguard_native":0.06,"repoguard_windows":0.06,"dispatchworker":0.12}
+  },
+  "artifacts": {
+    "sizes_bytes": {"fak":85487810,"tools/.bin/repoguard":4031426,"tools/.bin/repoguard.exe":4301312,"tools/.bin/dispatchworker":7052898},
+    "size_parity_all_arms": true,
+    "go_version_checks_passed": 40,
+    "vcs_lines_total": 0,
+    "digest_note": "Untrimmed developer artifacts intentionally embed each absolute source path, so digests vary by arm; every arm was hashed and size/type/version validated.",
+    "fak_sha256_by_arm": {
+      "run1-pre":"d8451f7ccc0330bae6a194da180d31ed962e9a76f197afbf1849d6a964de51c3",
+      "run1-post":"68cffa800c7ae9647ed0305a0eddc1813e3c6ac21930f7053d287f345f60474b",
+      "run2-post":"cd8c0a5b825c40d1c3ae8107bd59ca8f7f88d4ea6c60328e37fed02a119ba58c",
+      "run2-pre":"ad2e9669e0085942278fcaf7ad083de2dede630766c76e7dfa5704150ecea6c0",
+      "run3-pre":"78168f70800e258a50ea2f95de01b0e66bb4726fe96608487d8f09f23b849147",
+      "run3-post":"b022ee26dd76708b1452e4ae9b40db6c98ebc1bdafdfd6373aeeaf9d1c3affe9",
+      "run4-post":"07923cac472467b7fa6b02f4c45f7115533e86c80f2daf679ab1022d9a6e73b0",
+      "run4-pre":"3912079713a622fa677eda877c41b865438d8a481929116593cadb164fcc7794",
+      "run5-pre":"3c31fe275ebfacbc4bb76332c81d334660edafaaa9f4ebc2fb6f048538358af4",
+      "run5-post":"8cea656fd6f04050271107d40474fbe22a13bc1d34eeb6b54ca07a44b26b2226"
+    }
+  },
+  "smokes": {
+    "arms_passed": 10,
+    "checks_per_arm": ["fak version exit 0","policy preflight exit 0 with DENY","repoguard selftest exit 0","dispatchworker guarded dry-run exit 0","Windows artifact is PE32+ x86-64"]
+  },
+  "provenance": {
+    "parent_git_detected": false,
+    "stable_archive_tree_manifest_digests_within_side": true,
+    "compact_evidence_inventory_sha256": "2bd8b6c71bb2a43d708696acc95a999d15b09484926a064d39b08296b3eb5498",
+    "contaminated_matrix_excluded": "Earlier nested exports inherited the live checkout VCS stamp and crossed changing HEADs; every timing/hash from that run is REFUTED and its 316720 scratch entries were reaped."
+  },
+  "limitations": [
+    "The 21.24691x claim applies only to no-change warm make build on Darwin/arm64 Go 1.26.6.",
+    "Cold make build improved 1.64258x, not 10x.",
+    "This does not prove issue #9661's native Windows/amd64 clean median <= 6.555 seconds.",
+    "Native Windows completion remains gated on restored authorized private-control access under issue #9673."
+  ],
+  "cleanup": {
+    "external_matrix_root_kib": 12910644,
+    "external_files": 259325,
+    "external_directories": 22991,
+    "original_path_absent": true,
+    "disposition": "moved recoverably to Trash after compact evidence extraction"
+  }
+}
