@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ const (
 	EvidenceSchema    = "fak-performance-rsi-evidence/1"
 	CycleSchema       = "fak-performance-rsi-cycle/1"
 	ImprovementSchema = "fak-performance-rsi-improvement/1"
+	ProvenanceSchema  = "fak-performance-rsi-provenance/1"
 	ReportSchema      = "fak-performance-rsi-scorecard/1"
 	TargetMultiple    = 100.0
 )
@@ -35,6 +37,7 @@ type Evidence struct {
 	Dimensions       []Dimension  `json:"dimensions"`
 	Cycle            *Cycle       `json:"cycle,omitempty"`
 	Improvement      *Improvement `json:"improvement,omitempty"`
+	Provenance       *Provenance  `json:"provenance,omitempty"`
 }
 
 // Cycle is one independently versioned, end-to-end performance improvement
@@ -264,6 +267,11 @@ func validate(e *Evidence) error {
 			return err
 		}
 	}
+	if e.Provenance != nil {
+		if err := applyProvenance(e); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -390,6 +398,106 @@ func applyImprovement(e *Evidence) error {
 		d.Source = "improvement:" + r.Schema
 		d.EvidenceKind = "improvement_receipt"
 		d.Engine = r.Engine
+	}
+	return nil
+}
+
+var (
+	lowerHex40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	moduleRev  = regexp.MustCompile(`^.+@r[1-9][0-9]*\+g([0-9a-f]{7,40})$`)
+)
+
+func applyProvenance(e *Evidence) error {
+	r := e.Provenance
+	if r.Schema != ProvenanceSchema {
+		return fmt.Errorf("provenance schema %q, want %q", r.Schema, ProvenanceSchema)
+	}
+	if strings.TrimSpace(r.Source.Repository) == "" {
+		return errors.New("provenance source repository is required")
+	}
+	if !lowerHex40.MatchString(r.Source.Revision) {
+		return errors.New("provenance source revision must be an immutable 40-character lowercase hex revision")
+	}
+	if r.Unit != "hours" {
+		return errors.New("provenance unit must be hours")
+	}
+	if !r.AdaptationStartExplicit {
+		return errors.New("provenance adaptation start must be explicit")
+	}
+	if !r.Experiment.Linked || strings.TrimSpace(r.Experiment.Artifact) == "" {
+		return errors.New("provenance experiment must be linked and name a nonempty artifact")
+	}
+	if r.Reuse.Classification != "adapted_known_art" {
+		return errors.New("provenance reuse classification must be adapted_known_art")
+	}
+	if r.Reuse.ReusedMechanisms < 0 || r.Reuse.ReinventedMechanisms < 0 {
+		return errors.New("provenance mechanism counts must be nonnegative")
+	}
+	totalMechanisms := r.Reuse.ReusedMechanisms + r.Reuse.ReinventedMechanisms
+	if totalMechanisms <= 0 {
+		return errors.New("provenance mechanism count total must be positive")
+	}
+	if !lowerHex40.MatchString(r.Production.CommitSHA) {
+		return errors.New("provenance production commit_sha must be 40-character lowercase hex")
+	}
+	match := moduleRev.FindStringSubmatch(r.Production.ModuleAtRev)
+	if match == nil || !strings.HasPrefix(r.Production.CommitSHA, match[1]) {
+		return errors.New("provenance production module_at_rev must be module@rN+g<sha-prefix> matching commit_sha")
+	}
+	if r.Production.Engine != "fak-native" {
+		return errors.New("provenance production engine must be fak-native")
+	}
+	if strings.TrimSpace(r.Production.Artifact) == "" {
+		return errors.New("provenance production artifact is required")
+	}
+
+	names := []string{"source.published_at", "discovery_at", "adaptation_started_at", "production.landed_at"}
+	values := []string{r.Source.PublishedAt, r.DiscoveryAt, r.AdaptationStartedAt, r.Production.LandedAt}
+	times := make([]time.Time, len(values))
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("provenance %s is required", names[i])
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return fmt.Errorf("provenance %s: malformed RFC3339 timestamp: %w", names[i], err)
+		}
+		times[i] = parsed
+		if i > 0 && times[i].Before(times[i-1]) {
+			return fmt.Errorf("provenance timeline must satisfy source <= discovery <= adaptation <= landing")
+		}
+	}
+
+	valuesByID := map[string]float64{
+		"discovery_freshness": times[1].Sub(times[0]).Hours(),
+		"adaptation_speed":    times[3].Sub(times[2]).Hours(),
+		"reuse_ratio":         float64(r.Reuse.ReusedMechanisms) / float64(totalMechanisms) * 100,
+		"production_transfer": times[3].Sub(times[1]).Hours(),
+	}
+	for _, d := range e.Dimensions {
+		_, owned := valuesByID[d.ID]
+		if !owned {
+			continue
+		}
+		wantUnit := "hours"
+		if d.ID == "reuse_ratio" {
+			wantUnit = "percent"
+		}
+		if strings.ToLower(strings.TrimSpace(d.Unit)) != wantUnit {
+			return fmt.Errorf("provenance derivation for %s requires unit %q", d.ID, wantUnit)
+		}
+	}
+
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		value, owned := valuesByID[d.ID]
+		if !owned {
+			continue
+		}
+		d.Current = &value
+		d.Source = "provenance:" + r.Schema
+		d.EvidenceKind = "research_transfer_receipt"
+		d.Engine = r.Production.Engine
 	}
 	return nil
 }
@@ -547,4 +655,43 @@ func MarshalJSON(r Report) ([]byte, error) { return json.MarshalIndent(r, "", " 
 
 func SortResultsForTest(rs []Result) {
 	sort.Slice(rs, func(i, j int) bool { return rs[i].ID < rs[j].ID })
+}
+
+// Provenance is one independently versioned strict receipt connecting an
+// immutable research source to a fak-native production landing.
+type Provenance struct {
+	Schema                  string               `json:"schema"`
+	Source                  ProvenanceSource     `json:"source"`
+	DiscoveryAt             string               `json:"discovery_at"`
+	AdaptationStartedAt     string               `json:"adaptation_started_at"`
+	AdaptationStartExplicit bool                 `json:"adaptation_start_explicit"`
+	Experiment              ProvenanceExperiment `json:"experiment"`
+	Reuse                   ProvenanceReuse      `json:"reuse"`
+	Production              ProvenanceProduction `json:"production"`
+	Unit                    string               `json:"unit"`
+}
+
+type ProvenanceSource struct {
+	Repository  string `json:"repository"`
+	Revision    string `json:"revision"`
+	PublishedAt string `json:"published_at"`
+}
+
+type ProvenanceExperiment struct {
+	Artifact string `json:"artifact"`
+	Linked   bool   `json:"linked"`
+}
+
+type ProvenanceReuse struct {
+	ReusedMechanisms     int    `json:"reused_mechanisms"`
+	ReinventedMechanisms int    `json:"reinvented_mechanisms"`
+	Classification       string `json:"classification"`
+}
+
+type ProvenanceProduction struct {
+	ModuleAtRev string `json:"module_at_rev"`
+	CommitSHA   string `json:"commit_sha"`
+	LandedAt    string `json:"landed_at"`
+	Engine      string `json:"engine"`
+	Artifact    string `json:"artifact"`
 }

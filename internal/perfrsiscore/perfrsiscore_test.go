@@ -296,3 +296,115 @@ func TestImprovementReceiptStrictJSON(t *testing.T) {
 		t.Fatalf("expected strict JSON refusal, got %v", err)
 	}
 }
+
+func provenanceEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e, err := Load("../../docs/_witnesses/issue-9782-performance-rsi-provenance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func TestProvenanceAcceptanceAndFormula(t *testing.T) {
+	e := provenanceEvidence(t)
+	want := map[string]float64{
+		"discovery_freshness": 16.051666666666666,
+		"adaptation_speed":    0.8580555555555556,
+		"reuse_ratio":         100,
+		"production_transfer": 82.59222222222222,
+	}
+	for _, d := range e.Dimensions {
+		value, ok := want[d.ID]
+		if !ok {
+			continue
+		}
+		if d.Current == nil || math.Abs(*d.Current-value) > 1e-9 {
+			t.Errorf("%s current=%v want %.12g", d.ID, d.Current, value)
+		}
+		if d.Source != "provenance:"+ProvenanceSchema || d.EvidenceKind != "research_transfer_receipt" || d.Engine != "fak-native" {
+			t.Errorf("%s provenance metadata=%+v", d.ID, d)
+		}
+	}
+}
+
+func TestProvenancePreservesUnrelatedDimensions(t *testing.T) {
+	baseline, err := Load("testdata/complete.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := provenanceEvidence(t)
+	owned := map[string]bool{"discovery_freshness": true, "adaptation_speed": true, "reuse_ratio": true, "production_transfer": true}
+	prior := make(map[string]Dimension, len(baseline.Dimensions))
+	for _, d := range baseline.Dimensions {
+		prior[d.ID] = d
+	}
+	for _, d := range got.Dimensions {
+		if owned[d.ID] {
+			continue
+		}
+		p := prior[d.ID]
+		if (d.Current == nil) != (p.Current == nil) || (d.Current != nil && *d.Current != *p.Current) ||
+			d.Source != p.Source || d.EvidenceKind != p.EvidenceKind || d.Engine != p.Engine || d.Unit != p.Unit {
+			t.Errorf("unrelated dimension %s changed: got %+v want %+v", d.ID, d, p)
+		}
+	}
+}
+
+func TestProvenanceRefusesInvalidReceiptsWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Provenance)
+	}{
+		{"schema", func(r *Provenance) { r.Schema = "fak-performance-rsi-provenance/2" }},
+		{"repository", func(r *Provenance) { r.Source.Repository = "" }},
+		{"revision", func(r *Provenance) { r.Source.Revision = "main" }},
+		{"timeline", func(r *Provenance) { r.DiscoveryAt = "2026-08-24T00:00:00Z" }},
+		{"explicit start", func(r *Provenance) { r.AdaptationStartExplicit = false }},
+		{"experiment", func(r *Provenance) { r.Experiment.Linked = false }},
+		{"classification", func(r *Provenance) { r.Reuse.Classification = "invented_here" }},
+		{"negative reused", func(r *Provenance) { r.Reuse.ReusedMechanisms = -1 }},
+		{"empty total", func(r *Provenance) { r.Reuse.ReusedMechanisms = 0 }},
+		{"commit", func(r *Provenance) { r.Production.CommitSHA = "5e0db65c5" }},
+		{"module prefix", func(r *Provenance) { r.Production.ModuleAtRev = "internal/qwen38quantrun@r17+gdeadbee" }},
+		{"engine", func(r *Provenance) { r.Production.Engine = "llama.cpp" }},
+		{"unit", func(r *Provenance) { r.Unit = "days" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := provenanceEvidence(t)
+			for i := range e.Dimensions {
+				if e.Dimensions[i].ID == "discovery_freshness" {
+					v := 777.0
+					e.Dimensions[i].Current = &v
+					e.Dimensions[i].Source = "sentinel"
+				}
+			}
+			tc.edit(e.Provenance)
+			if err := applyProvenance(&e); err == nil {
+				t.Fatal("expected refusal")
+			}
+			for _, d := range e.Dimensions {
+				if d.ID == "discovery_freshness" && (d.Current == nil || *d.Current != 777 || d.Source != "sentinel") {
+					t.Fatalf("invalid receipt partially mutated dimension: %+v", d)
+				}
+			}
+		})
+	}
+}
+
+func TestProvenanceStrictJSON(t *testing.T) {
+	b, err := os.ReadFile("../../docs/_witnesses/issue-9782-performance-rsi-provenance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["provenance"].(map[string]any)["unexpected"] = true
+	b, _ = json.Marshal(raw)
+	if _, err := Decode(bytes.NewReader(b)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected strict JSON refusal, got %v", err)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -137,6 +138,95 @@ func TestPerformanceRSIImprovementReceiptRefusals(t *testing.T) {
 			b, _ := json.Marshal(base)
 			_ = json.Unmarshal(b, &doc)
 			tc.edit(doc["improvement"].(map[string]any))
+			b, _ = json.Marshal(doc)
+			path := filepath.Join(t.TempDir(), "receipt.json")
+			if err := os.WriteFile(path, b, 0600); err != nil {
+				t.Fatal(err)
+			}
+			code, _, errText := runPerfRSI(t, "--input", path, "--json")
+			if code == 0 || strings.TrimSpace(errText) == "" {
+				t.Fatalf("expected refusal: code=%d err=%q", code, errText)
+			}
+		})
+	}
+}
+
+func TestPerformanceRSIProvenanceAcceptance(t *testing.T) {
+	witness := filepath.Join("..", "..", "docs", "_witnesses", "issue-9782-performance-rsi-provenance.json")
+	code, out, errText := runPerfRSI(t, "--input", witness, "--json")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errText)
+	}
+	var report struct {
+		Dimensions []struct {
+			ID           string   `json:"id"`
+			Current      *float64 `json:"current"`
+			EvidenceKind string   `json:"evidence_kind"`
+		} `json:"dimensions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{
+		"discovery_freshness": 16.051666666666666,
+		"adaptation_speed":    0.8580555555555556,
+		"reuse_ratio":         100,
+		"production_transfer": 82.59222222222222,
+	}
+	found := 0
+	for _, d := range report.Dimensions {
+		wantCurrent, ok := want[d.ID]
+		if !ok {
+			continue
+		}
+		found++
+		if d.Current == nil || math.Abs(*d.Current-wantCurrent) > 1e-9 {
+			t.Errorf("%s current=%v want %.12g", d.ID, d.Current, wantCurrent)
+		}
+		if d.EvidenceKind != "research_transfer_receipt" {
+			t.Errorf("%s evidence_kind=%q", d.ID, d.EvidenceKind)
+		}
+	}
+	if found != len(want) {
+		t.Fatalf("found %d provenance-derived dimensions, want %d: %s", found, len(want), out)
+	}
+}
+
+func TestPerformanceRSIProvenanceRefusals(t *testing.T) {
+	witness := filepath.Join("..", "..", "docs", "_witnesses", "issue-9782-performance-rsi-provenance.json")
+	original, err := os.ReadFile(witness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base map[string]any
+	if err := json.Unmarshal(original, &base); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"schema", func(r map[string]any) { r["schema"] = "unsupported" }},
+		{"revision", func(r map[string]any) { r["source"].(map[string]any)["revision"] = "main" }},
+		{"timeline", func(r map[string]any) { r["discovery_at"] = "2026-08-24T00:00:00Z" }},
+		{"explicit", func(r map[string]any) { r["adaptation_start_explicit"] = false }},
+		{"experiment", func(r map[string]any) { r["experiment"].(map[string]any)["linked"] = false }},
+		{"classification", func(r map[string]any) { r["reuse"].(map[string]any)["classification"] = "invented_here" }},
+		{"counts", func(r map[string]any) { r["reuse"].(map[string]any)["reused_mechanisms"] = -1 }},
+		{"commit", func(r map[string]any) { r["production"].(map[string]any)["commit_sha"] = "5e0db65c5" }},
+		{"module", func(r map[string]any) {
+			r["production"].(map[string]any)["module_at_rev"] = "internal/qwen38quantrun@r17+gdeadbee"
+		}},
+		{"engine", func(r map[string]any) { r["production"].(map[string]any)["engine"] = "llama.cpp" }},
+		{"unit", func(r map[string]any) { r["unit"] = "days" }},
+		{"strict", func(r map[string]any) { r["unexpected"] = true }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc map[string]any
+			b, _ := json.Marshal(base)
+			_ = json.Unmarshal(b, &doc)
+			tc.edit(doc["provenance"].(map[string]any))
 			b, _ = json.Marshal(doc)
 			path := filepath.Join(t.TempDir(), "receipt.json")
 			if err := os.WriteFile(path, b, 0600); err != nil {
