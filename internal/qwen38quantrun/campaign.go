@@ -69,7 +69,7 @@ type Campaign struct {
 }
 
 func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen38quant.Corpus) (campaign Campaign, err error) {
-	if cfg.ExecutionEngine != qwen38quant.EngineFakNative && cfg.ExecutionEngine != qwen38quant.EngineLlamaCpp {
+	if cfg.ExecutionEngine != qwen38quant.EngineFakNative && cfg.ExecutionEngine != qwen38quant.EngineLlamaCpp && cfg.ExecutionEngine != qwen38quant.EngineVLLM {
 		return Campaign{}, fmt.Errorf("execution engine %q is unknown", cfg.ExecutionEngine)
 	}
 	if cfg.Probe == nil || cfg.Lifecycle == nil {
@@ -160,7 +160,7 @@ func (r Runner) RunCampaign(ctx context.Context, cfg CampaignConfig, corpus qwen
 			verdict = "HOLD"
 		}
 	}
-	if cfg.ExecutionEngine == qwen38quant.EngineLlamaCpp {
+	if cfg.ExecutionEngine != qwen38quant.EngineFakNative {
 		verdict = "HOLD"
 	}
 	report := qwen38quant.Report{

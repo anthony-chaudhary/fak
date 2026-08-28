@@ -69,6 +69,7 @@ type Trial struct {
 const (
 	EngineFakNative = "fak-native"
 	EngineLlamaCpp  = "llama.cpp"
+	EngineVLLM      = "vllm"
 )
 
 type Report struct {
@@ -153,7 +154,7 @@ func Validate(r Report, c Corpus) error {
 	if r.ExecutionEngine == "" {
 		return errors.New("execution_engine is required")
 	}
-	if r.ExecutionEngine != EngineFakNative && r.ExecutionEngine != EngineLlamaCpp {
+	if r.ExecutionEngine != EngineFakNative && r.ExecutionEngine != EngineLlamaCpp && r.ExecutionEngine != EngineVLLM {
 		return fmt.Errorf("execution_engine %q is unknown", r.ExecutionEngine)
 	}
 	if r.ExecutionEngine != EngineFakNative && r.Verdict == "PROMOTE" {

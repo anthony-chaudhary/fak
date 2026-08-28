@@ -5,10 +5,81 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
 )
+
+func TestCheckedInAdapterExamplesSelfcheck(t *testing.T) {
+	tests := []struct {
+		name   string
+		engine string
+		arms   []string
+	}{
+		{"llama.cpp.json", qwen38quant.EngineLlamaCpp, []string{"q8_0", "q6_k", "q5_k_m", "q4_k_m", "iq4_xs"}},
+		{"vllm.json", qwen38quant.EngineVLLM, []string{"bf16", "fp8", "awq_int4", "gptq_int4"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join("..", "..", "examples", "qwen38quantrun", test.name)
+			cfg, err := SelfcheckAdapterConfig(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ExecutionEngine != test.engine || !slices.Equal(cfg.SupportedArms, test.arms) {
+				t.Fatalf("engine/arms = %q/%v", cfg.ExecutionEngine, cfg.SupportedArms)
+			}
+		})
+	}
+}
+
+func TestAdapterExampleSelfcheckRejectsDrift(t *testing.T) {
+	path := filepath.Join("..", "..", "examples", "qwen38quantrun", "vllm.json")
+	good, err := SelfcheckAdapterConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*AdapterConfig)
+	}{
+		{"arm matrix", func(cfg *AdapterConfig) { cfg.SupportedArms = cfg.SupportedArms[:3] }},
+		{"inline secret", func(cfg *AdapterConfig) { cfg.Endpoint.APIKey = "secret" }},
+		{"runtime pin", func(cfg *AdapterConfig) { cfg.ReadyCommand[5] = "X-Fak-Runtime-Revision: drift" }},
+		{"shell lifecycle", func(cfg *AdapterConfig) {
+			cfg.CleanupCommand = []string{"sh", "-c", "docker stop " + cfg.Expected.RuntimeRevision}
+		}},
+		{"implementation fallback", func(cfg *AdapterConfig) {
+			for i := range cfg.Command {
+				if cfg.Command[i] == "vllm" && i > 0 && cfg.Command[i-1] == "--model-impl" {
+					cfg.Command[i] = "auto"
+				}
+			}
+		}},
+		{"residency witness", func(cfg *AdapterConfig) {
+			for i := range cfg.ObservationCommand {
+				cfg.ObservationCommand[i] = strings.ReplaceAll(cfg.ObservationCommand[i], ".State.Running", "true")
+			}
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := good
+			cfg.SupportedArms = slices.Clone(good.SupportedArms)
+			cfg.Command = slices.Clone(good.Command)
+			cfg.ObservationCommand = slices.Clone(good.ObservationCommand)
+			cfg.RestartCommand = slices.Clone(good.RestartCommand)
+			cfg.ReadyCommand = slices.Clone(good.ReadyCommand)
+			cfg.CleanupCommand = slices.Clone(good.CleanupCommand)
+			test.mutate(&cfg)
+			if err := validateMaintainedAdapter(cfg); err == nil {
+				t.Fatal("accepted drifted adapter")
+			}
+		})
+	}
+}
 
 func TestRunAdapterRequiresRealLifecycleCommands(t *testing.T) {
 	dir := t.TempDir()
@@ -19,6 +90,22 @@ func TestRunAdapterRequiresRealLifecycleCommands(t *testing.T) {
 	writeJSONTest(t, corpusPath, qwen38quant.DefaultCorpus())
 	err := RunAdapter(context.Background(), configPath, corpusPath, filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json"))
 	if err == nil || !contains(err.Error(), "restart_command") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestRunAdapterRejectsInlineAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	cfg := AdapterConfig{
+		Endpoint: EndpointConfig{APIKey: "secret"}, ObservationCommand: []string{"probe"},
+		RestartCommand: []string{"restart"}, ReadyCommand: []string{"ready"}, CleanupCommand: []string{"cleanup"},
+	}
+	configPath := filepath.Join(dir, "config.json")
+	writeJSONTest(t, configPath, cfg)
+	corpusPath := filepath.Join(dir, "corpus.json")
+	writeJSONTest(t, corpusPath, qwen38quant.DefaultCorpus())
+	err := RunAdapter(context.Background(), configPath, corpusPath, filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json"))
+	if err == nil || !contains(err.Error(), "inline api_key") {
 		t.Fatalf("err=%v", err)
 	}
 }

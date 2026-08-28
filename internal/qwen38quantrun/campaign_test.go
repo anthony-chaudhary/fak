@@ -68,21 +68,28 @@ func TestCampaignBuildsValidatorCleanReportAndArchive(t *testing.T) {
 	}
 
 	calls = 0
-	comparisonProbe, comparisonLifecycle := &staticProbe{observation: observation}, &lifecycleSpy{}
-	comparison, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, ExecutionEngine: qwen38quant.EngineLlamaCpp, Arm: "q4_k_m", Expected: id, Command: []string{"llama-server", "--model", "exact.gguf"}, RequireDevice: "A100", StaleAfter: "2026-09-20", RollbackThreshold: "quality pass rate below 100%", Probe: comparisonProbe, Lifecycle: comparisonLifecycle}, corpus)
-	if err != nil {
-		t.Fatal(err)
+	comparisons := []struct{ engine, arm string }{
+		{qwen38quant.EngineLlamaCpp, "q4_k_m"},
+		{qwen38quant.EngineVLLM, "fp8"},
 	}
-	if comparison.Report.ExecutionEngine != qwen38quant.EngineLlamaCpp || comparison.Report.Verdict != "HOLD" {
-		t.Fatalf("comparison engine/verdict = %q/%q, want llama.cpp/HOLD", comparison.Report.ExecutionEngine, comparison.Report.Verdict)
-	}
-	if err := qwen38quant.Validate(comparison.Report, corpus); err != nil {
-		t.Fatal(err)
+	for _, comparisonCase := range comparisons {
+		calls = 0
+		comparisonProbe, comparisonLifecycle := &staticProbe{observation: observation}, &lifecycleSpy{}
+		comparison, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{Endpoint: Config{Endpoint: s.URL, APIKey: "secret", Model: "exact"}, ExecutionEngine: comparisonCase.engine, Arm: comparisonCase.arm, Expected: id, Command: []string{comparisonCase.engine, "serve"}, RequireDevice: "A100", StaleAfter: "2026-09-20", RollbackThreshold: "quality pass rate below 100%", Probe: comparisonProbe, Lifecycle: comparisonLifecycle}, corpus)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if comparison.Report.ExecutionEngine != comparisonCase.engine || comparison.Report.Verdict != "HOLD" {
+			t.Fatalf("comparison engine/verdict = %q/%q, want %s/HOLD", comparison.Report.ExecutionEngine, comparison.Report.Verdict, comparisonCase.engine)
+		}
+		if err := qwen38quant.Validate(comparison.Report, corpus); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
 func TestCampaignRejectsMissingOrUnknownEngineBeforeRequests(t *testing.T) {
-	for _, engine := range []string{"", "vllm"} {
+	for _, engine := range []string{"", "other"} {
 		t.Run(engine, func(t *testing.T) {
 			probe, lifecycle := &staticProbe{}, &lifecycleSpy{}
 			_, err := (Runner{}).RunCampaign(context.Background(), CampaignConfig{ExecutionEngine: engine, Probe: probe, Lifecycle: lifecycle}, qwen38quant.DefaultCorpus())

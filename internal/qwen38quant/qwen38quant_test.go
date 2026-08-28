@@ -111,14 +111,16 @@ func TestValidateRequiresNativeExecutionEngineForPromotion(t *testing.T) {
 		t.Fatalf("missing engine err=%v", err)
 	}
 	r = validFixture(c)
-	r.ExecutionEngine = "vllm"
+	r.ExecutionEngine = "other"
 	if err := Validate(r, c); err == nil || !strings.Contains(err.Error(), "unknown") {
 		t.Fatalf("unknown engine err=%v", err)
 	}
-	r = validFixture(c)
-	r.ExecutionEngine = EngineLlamaCpp
-	if err := Validate(r, c); err == nil || !strings.Contains(err.Error(), "comparison-only") {
-		t.Fatalf("external promote err=%v", err)
+	for _, engine := range []string{EngineLlamaCpp, EngineVLLM} {
+		r = validFixture(c)
+		r.ExecutionEngine = engine
+		if err := Validate(r, c); err == nil || !strings.Contains(err.Error(), "comparison-only") {
+			t.Fatalf("%s promote err=%v", engine, err)
+		}
 	}
 	r = validFixture(c)
 	r.Environment.DenyFallback = false
@@ -127,12 +129,16 @@ func TestValidateRequiresNativeExecutionEngineForPromotion(t *testing.T) {
 	}
 }
 
-func TestValidateAllowsExplicitLlamaCppComparisonHold(t *testing.T) {
+func TestValidateAllowsExplicitExternalComparisonHold(t *testing.T) {
 	c := testCorpus()
-	r := validFixture(c)
-	r.ExecutionEngine = EngineLlamaCpp
-	r.Verdict = "HOLD"
-	if err := Validate(r, c); err != nil {
-		t.Fatal(err)
+	for _, engine := range []string{EngineLlamaCpp, EngineVLLM} {
+		t.Run(engine, func(t *testing.T) {
+			r := validFixture(c)
+			r.ExecutionEngine = engine
+			r.Verdict = "HOLD"
+			if err := Validate(r, c); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
