@@ -4,6 +4,35 @@
 
 # fak — configure your agents for the task at hand
 
+## fak in one line
+
+fak turns a tool-using agent into a managed agent: one Go binary owns the
+operational boundary for context, models, tools, policy, and witnessed receipts.
+
+The current tuned path does **4.1× less work** in its matched published envelope;
+this is not a universal quality or speed claim. Roles stay separate: the native
+engine owns execution, the policy floor owns tool admission, and the claims
+ledger names what is shipped, gated, or diagnostic without claiming live-model quality.
+
+## First offline proof
+
+No key, model, or GPU is needed:
+
+```bash
+go build -o fak ./cmd/fak
+./fak agent --offline
+```
+
+Expected result: `task completed (booked)` while the poisoned result is blocked
+and the destructive op is prevented.
+
+## Going deeper
+
+Documentation home by audience: [start here](START-HERE.md) ·
+[concept course](LEARNING-PATH.md) · [integrations](docs/integrations/) ·
+[CLI reference](docs/cli-reference.md) · [architecture](ARCHITECTURE.md) ·
+[status](STATUS.md) · [tagged claims and boundaries](CLAIMS.md#claim-document-set).
+
 > Try the [native inference goal](docs/native-inference-goal.md): fak-native is the product and performance path.
 > It is intended to beat llama.cpp in matched, quality-constrained envelopes. llama.cpp remains
 > an explicit reference for benchmarks and diagnosis. It also supports interoperability and
