@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/adjudicator"
+	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
 type guardDOSLease struct {
@@ -28,7 +29,9 @@ type guardWorktreeOwner struct {
 }
 
 var guardDevLeaseLive = func(ctx context.Context, workspace string) ([]byte, error) {
-	return exec.CommandContext(ctx, "dos", "lease-lane", "--workspace", workspace, "live").Output()
+	cmd := exec.CommandContext(ctx, "dos", "lease-lane", "--workspace", workspace, "live")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	return cmd.Output()
 }
 
 // installGuardDevAttestation shifts SELF_MODIFY authorization to guard startup.
@@ -136,7 +139,9 @@ func sanitizeGuardLane(lane string) string {
 	return strings.Trim(b.String(), "-")
 }
 func guardCommonWorkspace(wt string) string {
-	out, err := exec.Command("git", "-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
+	cmd := exec.Command("git", "-C", wt, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	windowgate.ConfigureBackgroundCommand(cmd)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
