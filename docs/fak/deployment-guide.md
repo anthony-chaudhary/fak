@@ -699,3 +699,47 @@ cross-machine commit atomicity remains the collective-commit barrier's separate 
   authoring the capability floor and the refusal vocabulary
 - [`Dockerfile`](https://github.com/anthony-chaudhary/fak/blob/main/Dockerfile) and [`install.sh`](https://github.com/anthony-chaudhary/fak/blob/main/install.sh) — the
   build and install sources this guide describes
+
+## All-in-one runtime (`fak up`)
+
+`fak up` is the product entry point for the existing unified serve lifecycle. It
+starts one process that owns the gateway, governed agent-session route, policy
+adjudication, quarantine, hash-chained audit, and metrics:
+
+```sh
+fak up --engine mock --native
+curl http://127.0.0.1:8080/readyz
+curl -N -H "Content-Type: application/json" \
+  -d '{"goal":"book the requested task"}' \
+  http://127.0.0.1:8080/v1/fak/agent/sessions
+```
+
+`/readyz` reuses the gateway's existing startup and health gates. It returns
+HTTP 503 until the listener has reached `MarkReady`, and it also reflects the
+same model warmup, degenerate-decode, recent served-failure, and deep provider
+checks as `/healthz`. `fak up` accepts the complete `fak serve` flag surface;
+it does not add a second agent loop or a process supervisor.
+
+One artifact does not remove host prerequisites. Native accelerator execution
+still requires compatible hardware, OS/vendor drivers, supported ISA and enough
+RAM; local execution also requires the selected model files. Remote engines and
+future hosted fak placement require explicit endpoints, network reachability,
+and credentials. Unsupported local compute must fail as an explicit placement
+or capability result. The runtime never silently changes fak-native or
+performance work to llama.cpp, Ollama, or a cloud provider.
+
+Examples keep placement visible:
+
+```sh
+# CPU-safe deterministic/reference placement
+fak up --engine mock --native
+
+# Optional in-kernel model; load is part of measured startup readiness
+fak up --gguf model.gguf --native
+
+# Hardened network deployment; external placement remains explicit in serve flags
+fak up --addr 0.0.0.0:8080 --policy floor.json --require-key-env KEY
+```
+
+Restart-on-crash, a `fak down` command, and durable in-flight checkpoint drain
+are separate lifecycle features; `fak up` does not claim them.
