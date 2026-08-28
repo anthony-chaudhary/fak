@@ -223,6 +223,18 @@ func TestLedgerEmptyIsNotAPass(t *testing.T) {
 	}
 }
 
+func TestAttributedDocumentSetMarkerUsesChildPages(t *testing.T) {
+	root := t.TempDir()
+	index := filepath.Join(root, "CLAIMS.md")
+	writeLedgerFixture(t, root, "claims/one.md", "# One\n\n- [SHIPPED] One is real.\n")
+	if err := os.WriteFile(index, []byte("<!-- fak:document-set root=claims -->\n\n- [one](claims/one.md)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := LintLedgerFile(index); err != nil || !rep.OK() || rep.Capability != 1 {
+		t.Fatalf("attributed marker should lint its child page: err=%v report=%s", err, rep.String())
+	}
+}
+
 func TestDocumentSetLedgerUsesChildPagesAsAuthority(t *testing.T) {
 	root := t.TempDir()
 	writeLedgerFixture(t, root, "CLAIMS.md", strings.Join([]string{
