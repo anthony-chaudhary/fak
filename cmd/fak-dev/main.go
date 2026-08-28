@@ -90,6 +90,28 @@ func run(stdout, stderr io.Writer, argv []string) int {
 		}
 		fmt.Fprintln(stderr, "usage: fak-dev project completion [flags]")
 		return 2
+	case "study-monitor":
+		return devcmd.RunStudyMonitor(stdout, stderr, argv[1:])
+	case "study-inventory":
+		return devcmd.RunStudyInventory(stdout, stderr, argv[1:])
+	case "study-forge":
+		return devcmd.RunStudyForge(stdout, stderr, argv[1:])
+	case "study-classify":
+		return devcmd.RunStudyClassify(stdout, stderr, argv[1:])
+	case "study-link":
+		return devcmd.RunStudyLink(stdout, stderr, argv[1:])
+	case "study-priority":
+		return devcmd.RunStudyPriority(stdout, stderr, argv[1:])
+	case "study-tickets":
+		return devcmd.RunStudyTickets(stdout, stderr, argv[1:])
+	case "study-adjacency":
+		return devcmd.RunStudyAdjacency(stdout, stderr, argv[1:])
+	case "idea-scout":
+		return devcmd.RunIdeaScout(stdout, stderr, argv[1:])
+	case "borrow-provenance":
+		return devcmd.RunBorrowProvenance(stdout, stderr, argv[1:])
+	case "customization-index":
+		return devcmd.RunCustomizationIndex(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "fak-dev: unknown command %q\n", argv[0])
 		fmt.Fprintln(stderr, "run 'fak-dev help' for repository-development commands")
@@ -103,7 +125,7 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "commands:")
 	fmt.Fprintln(w, "  index [docs] <query> [--json]         search the curated documentation map (docs is the default)")
-	fmt.Fprintln(w, "  index ownership [--json] [--root PATH]  audit runtime/dev command ownership and dependency leaks")
+	fmt.Fprintln(w, "  index ownership [--json|--write-manifest] [--root PATH]  audit or generate runtime/dev ownership")
 	fmt.Fprintln(w, "  index policy [--json] [--root PATH]     enforce dev ownership at the repository boundary")
 	fmt.Fprintln(w, "  wiki <structure|verify|fresh|score>    audit the repository documentation wiki")
 	fmt.Fprintln(w, "  orient [env] --paths GLOB             show repository conventions and live ownership")
@@ -132,6 +154,17 @@ func writeHelp(w io.Writer) {
 	fmt.Fprintln(w, "  issue <subcommand> [flags]             manage repository issue contracts and filing")
 	fmt.Fprintln(w, "  issue-contract-repair [flags]          repair issue candidates into contract shape")
 	fmt.Fprintln(w, "  project completion [flags]             audit project completion from issue evidence")
+	fmt.Fprintln(w, "  study-monitor [flags]                  inspect the recurring study source registry")
+	fmt.Fprintln(w, "  study-inventory [flags]                map local checkouts for deep study passes")
+	fmt.Fprintln(w, "  study-forge <capture|validate> [flags] capture forge-history evidence")
+	fmt.Fprintln(w, "  study-classify <command> [flags]       classify and validate study mechanisms")
+	fmt.Fprintln(w, "  study-link <build|validate> [flags]    join study evidence to witnessed fak work")
+	fmt.Fprintln(w, "  study-priority <build|validate> [flags] prioritize uncovered study joins")
+	fmt.Fprintln(w, "  study-tickets <build|validate> [flags] construct audited study ticket closure")
+	fmt.Fprintln(w, "  study-adjacency <validate|render> [flags] audit related-runtime adjacency")
+	fmt.Fprintln(w, "  idea-scout [flags]                     plan deduplicated research issues")
+	fmt.Fprintln(w, "  borrow-provenance <pin|verify> [flags] bind borrowed code to upstream evidence")
+	fmt.Fprintln(w, "  customization-index [flags]            inspect agent customization research")
 	fmt.Fprintln(w, "  version                               print fak-dev build identity")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "The serving/guard product surface is the separately buildable 'fak' artifact.")

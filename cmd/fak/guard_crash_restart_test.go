@@ -734,6 +734,7 @@ func TestGuardParentSurvivesHarnessCrash(t *testing.T) {
 		"FAK_GUARD_CRASH_WITNESS_KEY=test-only",
 		"FAK_GUARD_CRASH_WITNESS_STATE="+statePath,
 		"FAK_GUARD_CRASH_WITNESS_OBSERVED="+observedPath,
+		"FAK_FLEET_BUS="+filepath.Join(dir, "fleet-bus"),
 	)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

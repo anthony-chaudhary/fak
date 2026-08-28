@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anthony-chaudhary/fak/internal/docsearch"
 	"github.com/anthony-chaudhary/fak/internal/windowgate"
 )
 
@@ -108,12 +109,11 @@ func (c *Catalog) CheckFreshnessAgainstHEAD() ([]Drift, error) {
 	if idx, err := gitHEADOut(c.Root, "show", "HEAD:INDEX.md"); err == nil {
 		seen := map[string]bool{}
 		for _, raw := range strings.Split(string(idx), "\n") {
-			m := docLineRE.FindStringSubmatch(raw)
-			if m == nil {
+			title, target, _, ok := docsearch.ParseBullet(raw)
+			if !ok {
 				continue
 			}
-			title := strings.TrimSpace(strings.ReplaceAll(m[1], "`", ""))
-			clean, ok := cleanLocalLinkTarget(m[2])
+			clean, ok := cleanLocalLinkTarget(target)
 			if !ok || seen[clean] {
 				continue
 			}

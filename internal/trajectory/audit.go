@@ -518,11 +518,46 @@ func auditUserText(record map[string]any) string {
 		payload, _ := record["payload"].(map[string]any)
 		if itemType, _ := payload["type"].(string); itemType == "message" {
 			if role, _ := payload["role"].(string); role == "user" {
-				return auditText(payload["content"])
+				return auditCodexUserText(payload["content"])
 			}
 		}
 	}
 	return ""
+}
+
+func auditCodexUserText(content any) string {
+	parts, ok := content.([]any)
+	if !ok {
+		text := auditText(content)
+		if auditCodexInjectedUserEnvelope(text) {
+			return ""
+		}
+		return text
+	}
+	var builder strings.Builder
+	for _, part := range parts {
+		text := auditText(part)
+		if auditCodexInjectedUserEnvelope(text) {
+			continue
+		}
+		builder.WriteString(text)
+		builder.WriteByte(' ')
+	}
+	return builder.String()
+}
+
+// Codex records repository instructions and launch environment as content
+// parts in a role=user message even though the harness supplied both. Each has
+// a complete tagged envelope, unlike operator task text in the same record.
+func auditCodexInjectedUserEnvelope(text string) bool {
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(text, "<environment_context>") && strings.HasSuffix(text, "</environment_context>") {
+		return true
+	}
+	if !strings.HasPrefix(text, "# AGENTS.md instructions for ") || !strings.HasSuffix(text, "</INSTRUCTIONS>") {
+		return false
+	}
+	return strings.Contains(text, "\n<INSTRUCTIONS>")
 }
 
 func summarizeAudit(denominators []AuditDenominatorRow, transcripts []AuditTranscriptRow, hookDurations []int64) AuditSummaryRow {

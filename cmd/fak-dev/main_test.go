@@ -3,13 +3,73 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/devcmd"
 	"github.com/anthony-chaudhary/fak/internal/devindex"
 )
+
+func TestStudyOperationsDispatcherMatchesHandlers(t *testing.T) {
+	type handler func(io.Writer, io.Writer, []string) int
+	commands := map[string]handler{
+		"study-monitor":       devcmd.RunStudyMonitor,
+		"study-inventory":     devcmd.RunStudyInventory,
+		"study-forge":         devcmd.RunStudyForge,
+		"study-classify":      devcmd.RunStudyClassify,
+		"study-link":          devcmd.RunStudyLink,
+		"study-priority":      devcmd.RunStudyPriority,
+		"study-tickets":       devcmd.RunStudyTickets,
+		"study-adjacency":     devcmd.RunStudyAdjacency,
+		"idea-scout":          devcmd.RunIdeaScout,
+		"borrow-provenance":   devcmd.RunBorrowProvenance,
+		"customization-index": devcmd.RunCustomizationIndex,
+	}
+	for name, direct := range commands {
+		t.Run(name, func(t *testing.T) {
+			args := []string{"--definitely-invalid"}
+			var wantOut, wantErr bytes.Buffer
+			wantCode := direct(&wantOut, &wantErr, args)
+			var gotOut, gotErr bytes.Buffer
+			gotCode := run(&gotOut, &gotErr, append([]string{name}, args...))
+			if gotCode != wantCode || gotOut.String() != wantOut.String() || gotErr.String() != wantErr.String() {
+				t.Fatalf("dispatcher parity mismatch\ncode: got %d want %d\nstdout: got %q want %q\nstderr: got %q want %q", gotCode, wantCode, gotOut.String(), wantOut.String(), gotErr.String(), wantErr.String())
+			}
+		})
+	}
+}
+
+func TestRuntimeSourceExcludesStudyOperations(t *testing.T) {
+	root := devindex.FindRoot(".")
+	mainBody, err := os.ReadFile(filepath.Join(root, "cmd", "fak", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"study-monitor", "study-inventory", "study-forge", "study-classify",
+		"study-link", "study-priority", "study-tickets", "study-adjacency",
+		"idea-scout", "borrow-provenance", "customization-index",
+	} {
+		if strings.Contains(string(mainBody), `case "`+name+`"`) {
+			t.Errorf("runtime dispatch still contains %s", name)
+		}
+	}
+	for _, base := range []string{
+		"study_monitor.go", "study_inventory.go", "study_forge.go", "study_classify.go",
+		"study_link.go", "study_priority.go", "study_tickets.go", "study_adjacency.go",
+		"study_import.go", "ideascout.go", "borrow_provenance.go", "customization_index.go",
+	} {
+		if _, err := os.Stat(filepath.Join(root, "cmd", "fak", base)); !os.IsNotExist(err) {
+			t.Errorf("runtime source %s still exists (err=%v)", base, err)
+		}
+	}
+	if !strings.Contains(string(mainBody), `case "study":`) {
+		t.Fatal("product study command was removed with the dev-only study operations")
+	}
+}
 
 func TestHelpIdentifiesIndependentDevelopmentArtifact(t *testing.T) {
 	var out, errOut bytes.Buffer

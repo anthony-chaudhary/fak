@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -12,7 +12,7 @@ import (
 
 const defaultStudyAdjacencyManifest = "docs/research/inventory/vllm-related-system-adjacency-v1.json"
 
-func runStudyAdjacency(stdout, stderr io.Writer, args []string) int {
+func RunStudyAdjacency(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
 		studyAdjacencyUsage(stderr)
 		return 2

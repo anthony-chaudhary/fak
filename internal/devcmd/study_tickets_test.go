@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -42,7 +42,7 @@ func TestRunStudyTicketsValidateError(t *testing.T) {
 
 func TestRunStudyTicketsRejectsMissingInput(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := runStudyTickets(&stdout, &stderr, []string{"build"}); code != 2 || !strings.Contains(stderr.String(), "--classification") {
+	if code := RunStudyTickets(&stdout, &stderr, []string{"build"}); code != 2 || !strings.Contains(stderr.String(), "--classification") {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"encoding/json"
@@ -11,11 +11,12 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/borrowprovenance"
 )
 
-func cmdBorrowProvenance(args []string) {
-	if err := runBorrowProvenance(args, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "fak borrow-provenance: %v\n", err)
-		os.Exit(1)
+func RunBorrowProvenance(stdout, stderr io.Writer, args []string) int {
+	if err := runBorrowProvenance(args, stdout); err != nil {
+		fmt.Fprintf(stderr, "fak-dev borrow-provenance: %v\n", err)
+		return 1
 	}
+	return 0
 }
 func runBorrowProvenance(args []string, stdout io.Writer) error {
 	if len(args) == 0 {

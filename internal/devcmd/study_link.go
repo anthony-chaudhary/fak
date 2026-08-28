@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -22,7 +22,7 @@ var defaultStudyLinkOperations = studyLinkOperations{
 	validate:     studylink.ValidateFiles,
 }
 
-func runStudyLink(stdout, stderr io.Writer, args []string) int {
+func RunStudyLink(stdout, stderr io.Writer, args []string) int {
 	return runStudyLinkWithOperations(stdout, stderr, args, defaultStudyLinkOperations)
 }
 

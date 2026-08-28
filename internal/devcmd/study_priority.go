@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -26,7 +26,7 @@ var defaultStudyPriorityOperations = studyPriorityOperations{
 	validate:       studyprio.ValidateFiles,
 }
 
-func runStudyPriority(stdout, stderr io.Writer, args []string) int {
+func RunStudyPriority(stdout, stderr io.Writer, args []string) int {
 	return runStudyPriorityWithOperations(stdout, stderr, args, defaultStudyPriorityOperations)
 }
 

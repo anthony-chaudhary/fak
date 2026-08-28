@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"flag"
@@ -24,7 +24,7 @@ var defaultStudyTicketsOperations = studyTicketsOperations{
 	validate:      studytickets.ValidateFiles,
 }
 
-func runStudyTickets(stdout, stderr io.Writer, args []string) int {
+func RunStudyTickets(stdout, stderr io.Writer, args []string) int {
 	return runStudyTicketsWithOperations(stdout, stderr, args, defaultStudyTicketsOperations)
 }
 

@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 func TestStudyAdjacencyValidateAndRender(t *testing.T) {
 	manifestPath := writeStudyAdjacencyFixture(t)
 	var stdout, stderr bytes.Buffer
-	if code := runStudyAdjacency(&stdout, &stderr, []string{"validate", "--manifest", manifestPath}); code != 0 {
+	if code := RunStudyAdjacency(&stdout, &stderr, []string{"validate", "--manifest", manifestPath}); code != 0 {
 		t.Fatalf("validate code=%d stderr=%s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "members=6 candidates=6") {
@@ -21,7 +21,7 @@ func TestStudyAdjacencyValidateAndRender(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	outPath := filepath.Join(t.TempDir(), "adjacency.md")
-	if code := runStudyAdjacency(&stdout, &stderr, []string{"render", "--manifest", manifestPath, "--out", outPath}); code != 0 {
+	if code := RunStudyAdjacency(&stdout, &stderr, []string{"render", "--manifest", manifestPath, "--out", outPath}); code != 0 {
 		t.Fatalf("render code=%d stderr=%s", code, stderr.String())
 	}
 	rendered, err := os.ReadFile(outPath)
@@ -44,7 +44,7 @@ func TestStudyAdjacencyRejectsInvalidManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runStudyAdjacency(&stdout, &stderr, []string{"validate", "--manifest", manifestPath}); code != 1 {
+	if code := RunStudyAdjacency(&stdout, &stderr, []string{"validate", "--manifest", manifestPath}); code != 1 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "revision must be a full 40-hex commit") {

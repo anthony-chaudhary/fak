@@ -25,7 +25,7 @@ var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "commitsubject", Owner: OwnerDev, Rationale: "audits repository commit-subject grammar coverage"},
 	{Path: moduleInternalPrefix + "codexmemory", Owner: OwnerDev, Rationale: "diagnoses development-agent Codex memory posture"},
 	{Path: moduleInternalPrefix + "devcmd", Owner: OwnerDev, Rationale: "hosts repository-development command implementations for fak-dev"},
-	{Path: moduleInternalPrefix + "devindex", Owner: OwnerDev, Rationale: "indexes and audits the fak repository command surface"},
+	{Path: moduleInternalPrefix + "devindex", Owner: OwnerDev, Rationale: "indexes repository development metadata for fak-dev"},
 	{Path: moduleInternalPrefix + "readmevisualaudit", Owner: OwnerDev, Rationale: "audits repository README visual and asset health"},
 	{Path: moduleInternalPrefix + "refactorverify", Owner: OwnerDev, Rationale: "verifies repository code-motion refactors preserve declarations"},
 	{Path: moduleInternalPrefix + "toolcoverage", Owner: OwnerDev, Rationale: "audits repository tool test coverage and load-bearing references"},
@@ -35,6 +35,16 @@ var DevOnlyPackages = []PackageOwnership{
 	{Path: moduleInternalPrefix + "wiki", Owner: OwnerDev, Rationale: "audits repository documentation structure, citations, freshness, and coverage"},
 	{Path: moduleInternalPrefix + "sweep", Owner: OwnerDev, Rationale: "groups and commits shared-checkout development work"},
 	{Path: moduleInternalPrefix + "worktreeworker", Owner: OwnerDev, Rationale: "manages isolated repository worker worktrees"},
+	{Path: moduleInternalPrefix + "borrowprovenance", Owner: OwnerShared, Rationale: "shares provenance records with runtime SWE-bench SOTA verification while fak-dev owns the CLI"},
+	{Path: moduleInternalPrefix + "customizationindex", Owner: OwnerDev, Rationale: "indexes agent-customization research for maintainers"},
+	{Path: moduleInternalPrefix + "ideascout", Owner: OwnerDev, Rationale: "plans research-derived repository issue intake"},
+	{Path: moduleInternalPrefix + "studyadjacency", Owner: OwnerDev, Rationale: "audits related-runtime research adjacency"},
+	{Path: moduleInternalPrefix + "studyclass", Owner: OwnerDev, Rationale: "classifies repository study evidence"},
+	{Path: moduleInternalPrefix + "studyforge", Owner: OwnerDev, Rationale: "captures forge-history research evidence"},
+	{Path: moduleInternalPrefix + "studylink", Owner: OwnerDev, Rationale: "joins study evidence to witnessed repository work"},
+	{Path: moduleInternalPrefix + "studymonitor", Owner: OwnerDev, Rationale: "tracks recurring repository study sources"},
+	{Path: moduleInternalPrefix + "studyprio", Owner: OwnerDev, Rationale: "prioritizes uncovered repository study joins"},
+	{Path: moduleInternalPrefix + "studytickets", Owner: OwnerDev, Rationale: "constructs repository ticket closure from study evidence"},
 }
 
 // ImportNode is the stable subset of `go list -deps -json` used by the boundary

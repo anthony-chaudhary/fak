@@ -1,15 +1,45 @@
-package main
+package devcmd
 
 import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/studymonitor"
 )
+
+func TestStudyImportCommandDryRun(t *testing.T) {
+	repo := t.TempDir()
+	path := filepath.Join(repo, "docs", "research", "study.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# Study\nsource: https://example.test/repo\nsource-revision: abc\nobserved-at: 2026-08-20\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"add", "--", "."}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	var stdout, stderr bytes.Buffer
+	if code := RunStudyMonitor(&stdout, &stderr, []string{"import", "--repo", repo, "--dry-run"}); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	var ledger studymonitor.ImportLedger
+	if err := json.Unmarshal(stdout.Bytes(), &ledger); err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Attempted != 1 || ledger.Eligible != 1 {
+		t.Fatalf("unexpected ledger: %+v", ledger)
+	}
+}
 
 func TestStudyMonitorReadsRegistry(t *testing.T) {
 	dir := t.TempDir()
@@ -19,7 +49,7 @@ func TestStudyMonitorReadsRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := runStudyMonitor(&stdout, &stderr, []string{"--registry", path, "--as-of", "2026-08-14", "--due-days", "7"})
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--registry", path, "--as-of", "2026-08-14", "--due-days", "7"})
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
@@ -34,7 +64,7 @@ func TestStudyMonitorRejectsMalformedRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runStudyMonitor(&stdout, &stderr, []string{"--registry", path}); code != 1 {
+	if code := RunStudyMonitor(&stdout, &stderr, []string{"--registry", path}); code != 1 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "schema must be") {
@@ -50,7 +80,7 @@ func TestStudyMonitorInventoryCheckBlocksShallowCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := runStudyMonitor(&stdout, &stderr, []string{"--registry", path, "--inventory-check"})
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--registry", path, "--inventory-check"})
 	if code != 1 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -131,7 +161,7 @@ func TestStudyMonitorInventoryCheckAcceptsMachineMap(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := runStudyMonitor(&stdout, &stderr, []string{"--registry", registryPath, "--inventory-check", "--json"})
+	code := RunStudyMonitor(&stdout, &stderr, []string{"--registry", registryPath, "--inventory-check", "--json"})
 	if code != 0 {
 		t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}

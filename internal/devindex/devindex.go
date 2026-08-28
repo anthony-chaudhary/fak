@@ -30,6 +30,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/anthony-chaudhary/fak/internal/docsearch"
 	"github.com/anthony-chaudhary/fak/internal/trigram"
 )
 
@@ -89,17 +90,9 @@ type Claim struct {
 	Approx bool `json:"approx,omitempty"`
 }
 
-// Doc is one entry of the curated doc map (INDEX.md): a human title, the path or
-// URL it points at, and the one-line blurb that follows it.
-type Doc struct {
-	Title   string   `json:"title"`
-	Path    string   `json:"path"`
-	Blurb   string   `json:"blurb,omitempty"`
-	Sources []string `json:"sources,omitempty"`
-	// Approx marks a doc returned by the trigram fuzzy fallback (#3925) — a near-miss
-	// on the title/path/blurb rather than an exact substring hit. Omitted on exact hits.
-	Approx bool `json:"approx,omitempty"`
-}
+// Doc remains the development index's public documentation row while the shared
+// loader/search authority lives in docsearch, outside the runtime-forbidden package.
+type Doc = docsearch.Doc
 
 // Catalog is the loaded self-index: the leaf taxonomy and the doc map, plus the
 // path-prefix maps the lane resolver needs. Build it with Load.
@@ -163,11 +156,7 @@ func Load(root string) (*Catalog, error) {
 		c.parseTiers(string(tiers))
 	}
 
-	for _, source := range []string{"INDEX.md", "llms.txt", "README.md", "AGENTS.md"} {
-		if idx, err := os.ReadFile(filepath.Join(root, source)); err == nil {
-			c.parseDocsFrom(source, string(idx))
-		}
-	}
+	c.Docs = docsearch.LoadDocs(root).Docs
 	if gen, err := os.ReadFile(filepath.Join(root, "docs", "generation.md")); err == nil {
 		c.Generations = parseGenerations(string(gen))
 	} else {
@@ -403,100 +392,10 @@ func (c *Catalog) parseLanes(text string) {
 	sort.Slice(c.Leaves, func(i, j int) bool { return c.Leaves[i].Name < c.Leaves[j].Name })
 }
 
-// docLineRE matches a curated doc-map bullet: `- [Title](path) — blurb`. The blurb
-// is optional and may follow an em dash or a hyphen.
-var docLineRE = regexp.MustCompile(`^\s*[-*]\s*\[(.+?)\]\(([^)]+)\)\s*(?:[—–-]\s*(.*))?$`)
-
-// parseDocs extracts the curated doc map out of INDEX.md. Only markdown link
-// bullets are taken; prose lines are skipped. Titles keep their text minus
-// surrounding backticks.
-
-func (c *Catalog) parseDocsFrom(source, text string) {
-	seen := map[string]bool{}
-	for _, raw := range strings.Split(text, "\n") {
-		m := docLineRE.FindStringSubmatch(raw)
-		if m == nil {
-			for _, linked := range markdownLinkedDocs(raw, source) {
-				c.mergeDoc(linked)
-			}
-			continue
-		}
-		// Titles carry markdown backticks (often around one word, e.g. "`fleet`
-		// console"); strip them all so the title is clean for display AND search.
-		title := strings.TrimSpace(strings.ReplaceAll(m[1], "`", ""))
-		path := strings.TrimSpace(m[2])
-		if path == "" || seen[title+"\x00"+path] {
-			continue
-		}
-		seen[title+"\x00"+path] = true
-		blurb := strings.TrimSpace(m[3])
-		merged := false
-		for i := range c.Docs {
-			if normPath(c.Docs[i].Path) != normPath(path) {
-				continue
-			}
-			if !containsString(c.Docs[i].Sources, source) {
-				c.Docs[i].Sources = append(c.Docs[i].Sources, source)
-			}
-			if c.Docs[i].Blurb == "" && blurb != "" {
-				c.Docs[i].Blurb = blurb
-			}
-			merged = true
-			break
-		}
-		if !merged {
-			c.Docs = append(c.Docs, Doc{Title: title, Path: path, Blurb: blurb, Sources: []string{source}})
-		}
-		for _, extraPath := range markdownInlinePaths(raw) {
-			c.mergeDoc(Doc{Title: pathTitle(extraPath), Path: extraPath, Blurb: blurb, Sources: []string{source}})
-		}
-	}
-}
-
-var inlineCodePathRE = regexp.MustCompile("`((?:docs/|[A-Za-z0-9_.-]+/)[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\\.(?:md|txt))`")
-var anyMarkdownLinkRE = regexp.MustCompile(`\[[^]]+\]\(([^)]+\.(?:md|txt))(?:#[^)]+)?\)`)
-
-func markdownLinkedDocs(line, source string) []Doc {
-	var docs []Doc
-	for _, match := range anyMarkdownLinkRE.FindAllStringSubmatch(line, -1) {
-		path := match[1]
-		if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
-			continue
-		}
-		docs = append(docs, Doc{Title: pathTitle(path), Path: path, Blurb: strings.TrimSpace(strings.ReplaceAll(line, "`", "")), Sources: []string{source}})
-	}
-	return docs
-}
-
+// markdownInlinePaths is retained for the devindex package's historical parser
+// tests; docsearch owns the implementation used by both artifacts.
 func markdownInlinePaths(line string) []string {
-	var paths []string
-	for _, match := range inlineCodePathRE.FindAllStringSubmatch(line, -1) {
-		paths = append(paths, match[1])
-	}
-	for _, match := range anyMarkdownLinkRE.FindAllStringSubmatch(line, -1) {
-		paths = append(paths, match[1])
-	}
-	return paths
-}
-
-func pathTitle(path string) string {
-	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	return strings.ReplaceAll(strings.ReplaceAll(base, "-", " "), "_", " ")
-}
-
-func (c *Catalog) mergeDoc(candidate Doc) {
-	for i := range c.Docs {
-		if normPath(c.Docs[i].Path) != normPath(candidate.Path) {
-			continue
-		}
-		for _, source := range candidate.Sources {
-			if !containsString(c.Docs[i].Sources, source) {
-				c.Docs[i].Sources = append(c.Docs[i].Sources, source)
-			}
-		}
-		return
-	}
-	c.Docs = append(c.Docs, candidate)
+	return docsearch.InlinePaths(line)
 }
 
 // claimTagRE matches a real ledger claim line: `- [TAG] prose`. The legend lines
@@ -870,120 +769,7 @@ func (c *Catalog) fuzzyLeaves(toks []string) []Leaf {
 // fuzzy pass over the same fields (#3925), returning the best near-misses flagged
 // Approx rather than an empty result.
 func (c *Catalog) SearchDocs(query string) []Doc {
-	toks := tokens(query)
-	if len(toks) == 0 {
-		return nil
-	}
-	type scored struct {
-		d        Doc
-		s        int
-		coverage int
-	}
-	var hits []scored
-	for _, d := range c.Docs {
-		title, path, blurb := strings.ToLower(d.Title), strings.ToLower(d.Path), strings.ToLower(d.Blurb)
-		score := 0
-		coverage := 0
-		for _, tk := range toks {
-			matched := false
-			if strings.Contains(title, tk) {
-				score += 3
-				matched = true
-			}
-			if strings.Contains(path, tk) {
-				score += 2
-				matched = true
-			}
-			if strings.Contains(blurb, tk) {
-				score++
-				matched = true
-			}
-			if matched {
-				coverage++
-			}
-		}
-		if score > 0 {
-			// Multi-term intent can use canonicality to break close ties. Preserve
-			// the established single-term title/path weights exactly.
-			if len(toks) > 1 {
-				score += canonicalDocBonus(d)
-			}
-			hits = append(hits, scored{d: d, s: score, coverage: coverage})
-		}
-	}
-	if len(hits) == 0 {
-		return c.fuzzyDocs(toks)
-	}
-	sort.SliceStable(hits, func(i, j int) bool {
-		if len(toks) > 1 {
-			if hits[i].coverage != hits[j].coverage {
-				return hits[i].coverage > hits[j].coverage
-			}
-			iNote := strings.HasPrefix(strings.ToLower(normPath(hits[i].d.Path)), "docs/notes/")
-			jNote := strings.HasPrefix(strings.ToLower(normPath(hits[j].d.Path)), "docs/notes/")
-			if iNote != jNote {
-				return !iNote
-			}
-		}
-		if hits[i].s != hits[j].s {
-			return hits[i].s > hits[j].s
-		}
-		if len(toks) > 1 {
-			iTitle, jTitle := strings.ToLower(hits[i].d.Title), strings.ToLower(hits[j].d.Title)
-			if iTitle != jTitle {
-				return iTitle < jTitle
-			}
-		}
-		return hits[i].d.Title < hits[j].d.Title
-	})
-	out := make([]Doc, len(hits))
-	for i, h := range hits {
-		out[i] = h.d
-	}
-	return out
-}
-
-func canonicalDocBonus(d Doc) int {
-	bonus := 2 * len(d.Sources)
-	p := strings.ToLower(normPath(d.Path))
-	switch {
-	case strings.HasPrefix(p, "docs/notes/"), strings.HasPrefix(p, "docs/_witnesses/"), strings.HasPrefix(p, "docs/generated/"):
-		bonus -= 3
-	case !strings.Contains(p, "/"):
-		bonus += 3
-	case strings.Count(p, "/") == 1:
-		bonus += 2
-	}
-	return bonus
-}
-
-// fuzzyDocs is SearchDocs' near-miss fallback: trigram similarity over each doc's
-// title/path/blurb (same weighting as the exact scorer), best-first, flagged Approx.
-// Empty when nothing clears fuzzyThreshold.
-func (c *Catalog) fuzzyDocs(toks []string) []Doc {
-	type fscored struct {
-		d Doc
-		s float64
-	}
-	var hits []fscored
-	for _, d := range c.Docs {
-		title, path, blurb := strings.ToLower(d.Title), strings.ToLower(d.Path), strings.ToLower(d.Blurb)
-		if s := fuzzyScore(toks, wfield{title, 3}, wfield{path, 2}, wfield{blurb, 1}); s > 0 {
-			d.Approx = true
-			hits = append(hits, fscored{d, s})
-		}
-	}
-	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].s != hits[j].s {
-			return hits[i].s > hits[j].s
-		}
-		return hits[i].d.Title < hits[j].d.Title
-	})
-	out := make([]Doc, len(hits))
-	for i, h := range hits {
-		out[i] = h.d
-	}
-	return out
+	return (&docsearch.Catalog{Root: c.Root, Docs: c.Docs}).SearchDocs(query)
 }
 
 // tokens lowercases and splits a query on whitespace, dropping empties.

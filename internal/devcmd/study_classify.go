@@ -1,4 +1,4 @@
-package main
+package devcmd
 
 import (
 	"crypto/sha256"
@@ -16,7 +16,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/studyforge"
 )
 
-func runStudyClassify(stdout, stderr io.Writer, args []string) int {
+func RunStudyClassify(stdout, stderr io.Writer, args []string) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: fak study-classify classify|validate|validate-index|schema [flags]")
 		return 2

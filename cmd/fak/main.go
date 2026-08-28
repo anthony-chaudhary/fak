@@ -423,8 +423,6 @@ func dispatchExtendedVerbA(name string, args []string) bool {
 		cmdValueChain(args)
 	case "usage":
 		cmdUsage(args)
-	case "borrow-provenance":
-		cmdBorrowProvenance(args)
 	case "provider-cost":
 		cmdProviderCost(args)
 	case "goal":
@@ -677,43 +675,6 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 	case "study":
 		// Local content-addressed source-to-decision receipts.
 		os.Exit(runStudy(os.Stdout, os.Stderr, args))
-	case "study-monitor":
-		// Durable source registry for recurring study/scout passes.
-		os.Exit(runStudyMonitor(os.Stdout, os.Stderr, args))
-	case "study-inventory":
-		// Deterministic local checkout map for deep study-repo passes.
-		os.Exit(runStudyInventory(os.Stdout, os.Stderr, args))
-	case "study-forge":
-		// Deterministic REST census for forge-history evidence.
-		os.Exit(runStudyForge(os.Stdout, os.Stderr, args))
-	case "study-classify":
-		// Deterministic dispositions and mechanism clusters over a forge corpus.
-		os.Exit(runStudyClassify(os.Stdout, os.Stderr, args))
-	case "study-link":
-		// Deterministic evidence joins from study clusters to witnessed FAK work.
-		os.Exit(runStudyLink(os.Stdout, os.Stderr, args))
-	case "study-priority":
-		// Bounded, dependency-respecting prioritization of uncovered study joins.
-		os.Exit(runStudyPriority(os.Stdout, os.Stderr, args))
-	case "study-tickets":
-		// Audited ticket construction and zero-leftover closure over the selected study queue.
-		os.Exit(runStudyTickets(os.Stdout, os.Stderr, args))
-	case "study-adjacency":
-		// Bounded cross-runtime adjacency manifest validation and rendering.
-		os.Exit(runStudyAdjacency(os.Stdout, os.Stderr, args))
-	case "customization-index":
-		os.Exit(runCustomizationIndex(os.Stdout, os.Stderr, args))
-	case "idea-scout":
-		// The research-to-issue feeder as a verb (cmd/fak/ideascout.go over
-		// internal/ideascout). It shipped with a full Go port of tools/idea_scout.py, a
-		// doc page (docs/idea-scout.md) naming `fak idea-scout` as the AGENT-facing half
-		// of the two-implementation contract, and two .claude/skills/question-loop lines
-		// pointing agents at it -- but never a dispatch arm, so the advertised verb
-		// answered "unknown verb" and the Go port was exercised only by its own unit test
-		// (#5546). The `cmdIdeaScout` wrapper it was authored with was later swept as dead
-		// code (#1419): the caller it was missing was THIS arm, not the wrapper.
-		// Dry-run is the default; --live is what files real issues (see ideaScoutUsage).
-		os.Exit(runIdeaScout(os.Stdout, os.Stderr, args))
 	case "complain":
 		cmdComplain(args)
 	case "learning-debt-dispatch":

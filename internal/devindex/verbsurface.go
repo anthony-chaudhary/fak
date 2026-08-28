@@ -86,7 +86,15 @@ type vsPkg struct {
 
 // vsLoadCmd parses every non-test .go file under <root>/cmd/fak.
 func vsLoadCmd(root string) (*vsPkg, error) {
-	dir := filepath.Join(root, filepath.FromSlash(vsCmdDir))
+	return vsLoadPackage(root, vsCmdDir, vsFileFloor)
+}
+
+// vsLoadPackage is the shared AST reader for executable source ownership. The
+// verb-surface reader and the dev-artifact manifest generator deliberately use
+// one parser/index so source motion cannot make two subtly different models of a
+// Go package.
+func vsLoadPackage(root, relDir string, fileFloor int) (*vsPkg, error) {
+	dir := filepath.Join(root, filepath.FromSlash(relDir))
 	entries, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		return nil, err
@@ -115,10 +123,10 @@ func vsLoadCmd(root string) (*vsPkg, error) {
 			// One unparseable file must not silently shrink the surface: a partial
 			// tree renders as a smaller tool, which is the failure this generator is
 			// supposed to make impossible.
-			return nil, fmt.Errorf("%s/%s: %w", vsCmdDir, base, err)
+			return nil, fmt.Errorf("%s/%s: %w", relDir, base, err)
 		}
 		p.files = append(p.files, f)
-		p.pathOf[f] = vsCmdDir + "/" + base
+		p.pathOf[f] = relDir + "/" + base
 		p.imports[f] = vsImportMap(f)
 		for _, d := range f.Decls {
 			fd, ok := d.(*ast.FuncDecl)
@@ -128,14 +136,14 @@ func vsLoadCmd(root string) (*vsPkg, error) {
 			p.funcs[fd.Name.Name] = fd
 			p.fileOf[fd.Name.Name] = f
 		}
-		if vsIsHelpSource(base) {
+		if relDir == vsCmdDir && vsIsHelpSource(base) {
 			help = append(help, vsStringLiterals(f)...)
 		}
 	}
-	if len(p.files) < vsFileFloor {
+	if len(p.files) < fileFloor {
 		return nil, fmt.Errorf("parsed only %d non-test file(s) under %s: the package is far bigger "+
 			"than that, so the reader is pointed at the wrong tree and would report an EMPTY command "+
-			"surface as a complete one", len(p.files), vsCmdDir)
+			"surface as a complete one", len(p.files), relDir)
 	}
 	p.names = make([]string, 0, len(p.funcs))
 	for name := range p.funcs {
