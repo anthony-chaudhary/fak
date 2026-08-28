@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,11 @@ import (
 )
 
 const (
+	// DisambiguationTimeoutEnv is the explicit bootstrap-only recovery knob for a
+	// cold whole-tree oracle. It changes only the shared deadline around the same
+	// three witnesses; it never skips, retries, or weakens one.
+	DisambiguationTimeoutEnv = "FAK_WORKTREE_DISAMBIGUATION_TIMEOUT_MS"
+
 	// DisambiguationTimeoutCode is the stable machine-readable diagnosis for a
 	// whole-tree witness that exceeded the single pre-CAS deadline.
 	DisambiguationTimeoutCode = "DISAMBIGUATION_TIMEOUT"
@@ -30,6 +36,13 @@ const (
 	// intentionally bounded well below the 20+ minute stalls seen in #9579 while
 	// leaving ample room for the normal full-corpus scan on a busy workstation.
 	defaultDisambiguationTimeout = 2 * time.Minute
+	maxDisambiguationTimeout     = 15 * time.Minute
+)
+
+const (
+	disambiguationRecoveryDefault  = "default"
+	disambiguationRecoveryExplicit = "explicit_bounded_override"
+	disambiguationRecoveryInvalid  = "invalid_explicit_override"
 )
 
 // DisambiguationDiagnostic identifies the exact witness and expensive subphase
@@ -40,6 +53,16 @@ type DisambiguationDiagnostic struct {
 	Witness   string `json:"witness"`
 	Subphase  string `json:"subphase"`
 	TimeoutMS int64  `json:"timeout_ms,omitempty"`
+}
+
+// DisambiguationTimeoutReceipt makes the deadline authority explicit on every
+// whole-tree witness result. RequestedTimeoutMS is null on the ordinary path
+// and when a malformed request cannot be safely represented as an integer.
+type DisambiguationTimeoutReceipt struct {
+	DefaultTimeoutMS   int64  `json:"default_timeout_ms"`
+	RequestedTimeoutMS *int64 `json:"requested_timeout_ms"`
+	EffectiveTimeoutMS int64  `json:"effective_timeout_ms"`
+	RecoveryMode       string `json:"recovery_mode"`
 }
 
 // DisambiguationWitness is one independently materialized view used by land.
@@ -56,9 +79,10 @@ type DisambiguationWitness struct {
 	Diagnostic     *DisambiguationDiagnostic `json:"diagnostic,omitempty"`
 }
 type DisambiguationWitnesses struct {
-	Before    DisambiguationWitness `json:"before"`
-	Worktree  DisambiguationWitness `json:"worktree"`
-	PostApply DisambiguationWitness `json:"post_apply"`
+	Timeout   DisambiguationTimeoutReceipt `json:"timeout"`
+	Before    DisambiguationWitness        `json:"before"`
+	Worktree  DisambiguationWitness        `json:"worktree"`
+	PostApply DisambiguationWitness        `json:"post_apply"`
 }
 
 func disambiguationRelevant(paths []string) bool {
@@ -80,8 +104,7 @@ type boundedReader func(context.Context, string, string, func(string)) Disambigu
 var (
 	readDisambiguation = boundedReader(readDisambiguationWitness)
 
-	disambiguationTimeout = defaultDisambiguationTimeout
-	newDeadline           = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+	newDeadline = func(timeout time.Duration) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(context.Background(), timeout)
 	}
 
@@ -112,9 +135,52 @@ var (
 )
 
 func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
-	ctx, cancel := newDeadline(disambiguationTimeout)
+	timeoutReceipt, timeout, err := resolveDisambiguationTimeout(os.LookupEnv)
+	if err != nil {
+		all := newDisambiguationWitnesses(treeSHA, timeoutReceipt)
+		all.Before.Diagnostic = &DisambiguationDiagnostic{
+			Code: DisambiguationTimeoutCode, Witness: "configuration", Subphase: "timeout-config",
+		}
+		all.Before.Detail = fmt.Sprintf("%s: witness=configuration subphase=timeout-config: %v", DisambiguationTimeoutCode, err)
+		return all, false
+	}
+	ctx, cancel := newDeadline(timeout)
 	defer cancel()
-	return verifyWithinDeadline(ctx, root, wtPath, treeSHA)
+	return verifyWithinDeadline(ctx, root, wtPath, treeSHA, timeoutReceipt)
+}
+
+func resolveDisambiguationTimeout(lookup func(string) (string, bool)) (DisambiguationTimeoutReceipt, time.Duration, error) {
+	receipt := DisambiguationTimeoutReceipt{
+		DefaultTimeoutMS:   defaultDisambiguationTimeout.Milliseconds(),
+		EffectiveTimeoutMS: defaultDisambiguationTimeout.Milliseconds(),
+		RecoveryMode:       disambiguationRecoveryDefault,
+	}
+	raw, present := lookup(DisambiguationTimeoutEnv)
+	raw = strings.TrimSpace(raw)
+	if !present {
+		return receipt, defaultDisambiguationTimeout, nil
+	}
+	requestedMS, err := strconv.ParseInt(raw, 10, 64)
+	if err == nil {
+		receipt.RequestedTimeoutMS = &requestedMS
+	}
+	if err != nil || requestedMS < 1 || requestedMS > maxDisambiguationTimeout.Milliseconds() {
+		receipt.EffectiveTimeoutMS = 0
+		receipt.RecoveryMode = disambiguationRecoveryInvalid
+		return receipt, 0, fmt.Errorf("%s must be an integer in [1,%d]", DisambiguationTimeoutEnv, maxDisambiguationTimeout.Milliseconds())
+	}
+	receipt.EffectiveTimeoutMS = requestedMS
+	receipt.RecoveryMode = disambiguationRecoveryExplicit
+	return receipt, time.Duration(requestedMS) * time.Millisecond, nil
+}
+
+func newDisambiguationWitnesses(treeSHA string, timeout DisambiguationTimeoutReceipt) *DisambiguationWitnesses {
+	return &DisambiguationWitnesses{
+		Timeout:   timeout,
+		Before:    DisambiguationWitness{Tree: "HEAD"},
+		Worktree:  DisambiguationWitness{Tree: "HEAD"},
+		PostApply: DisambiguationWitness{Tree: treeSHA},
+	}
 }
 
 // verifyWithinDeadline keeps the entire three-witness sweep under
@@ -122,22 +188,19 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 // throwaway GIT_INDEX_FILE and before commit-tree, recovery publication, or the
 // trunk CAS, so a timeout cannot move HEAD or touch the shared index by
 // construction.
-func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
-	all := &DisambiguationWitnesses{
-		Before:    DisambiguationWitness{Tree: "HEAD"},
-		Worktree:  DisambiguationWitness{Tree: "HEAD"},
-		PostApply: DisambiguationWitness{Tree: treeSHA},
-	}
+func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string, timeoutReceipt DisambiguationTimeoutReceipt) (*DisambiguationWitnesses, bool) {
+	all := newDisambiguationWitnesses(treeSHA, timeoutReceipt)
+	timeout := time.Duration(timeoutReceipt.EffectiveTimeoutMS) * time.Millisecond
 	var complete bool
-	all.Before, complete = readOneBounded(ctx, "before", root, "HEAD")
+	all.Before, complete = readOneBounded(ctx, "before", root, "HEAD", timeout)
 	if !complete {
 		return all, false
 	}
-	all.Worktree, complete = readOneBounded(ctx, "worktree", wtPath, "HEAD")
+	all.Worktree, complete = readOneBounded(ctx, "worktree", wtPath, "HEAD", timeout)
 	if !complete {
 		return all, false
 	}
-	all.PostApply, complete = readOneBounded(ctx, "post_apply", root, treeSHA)
+	all.PostApply, complete = readOneBounded(ctx, "post_apply", root, treeSHA, timeout)
 	if !complete {
 		return all, false
 	}
@@ -163,7 +226,7 @@ func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string) (*D
 // the whole-corpus invariant scan. The worker owns its scratch directory until
 // it eventually returns; the land caller may stop waiting immediately at the
 // deadline without racing cleanup or touching trunk state.
-func readOneBounded(ctx context.Context, witness, repo, tree string) (DisambiguationWitness, bool) {
+func readOneBounded(ctx context.Context, witness, repo, tree string, timeout time.Duration) (DisambiguationWitness, bool) {
 	type result struct {
 		witness DisambiguationWitness
 	}
@@ -188,16 +251,16 @@ func readOneBounded(ctx context.Context, witness, repo, tree string) (Disambigua
 	select {
 	case got := <-resultCh:
 		if err := ctx.Err(); err != nil {
-			return timeoutResult(tree, witness, currentSubphase(), err), false
+			return timeoutResult(tree, witness, currentSubphase(), timeout, err), false
 		}
 		return got.witness, true
 	case <-ctx.Done():
-		return timeoutResult(tree, witness, currentSubphase(), ctx.Err()), false
+		return timeoutResult(tree, witness, currentSubphase(), timeout, ctx.Err()), false
 	}
 }
 
-func timeoutResult(tree, witness, subphase string, err error) DisambiguationWitness {
-	timeoutMS := disambiguationTimeout.Milliseconds()
+func timeoutResult(tree, witness, subphase string, timeout time.Duration, err error) DisambiguationWitness {
+	timeoutMS := timeout.Milliseconds()
 	detail := fmt.Sprintf("%s: witness=%s subphase=%s timeout_ms=%d", DisambiguationTimeoutCode, witness, subphase, timeoutMS)
 	if err != nil {
 		detail += ": " + err.Error()
