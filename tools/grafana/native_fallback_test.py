@@ -16,6 +16,19 @@ HERE = Path(__file__).resolve().parent
 
 
 class NativeFallbackTest(unittest.TestCase):
+    def run_shell_function(
+        self, name: str, setup: str, result: str
+    ) -> subprocess.CompletedProcess[str]:
+        script = (HERE / "up.sh").read_text(encoding="utf-8")
+        start = script.index(f"{name}() {{")
+        end = script.index("\n}\n", start) + 3
+        return subprocess.run(
+            ["bash", "-c", f"{script[start:end]}\n{setup}\n{name}\n{result}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
     def make_fixture(self) -> Path:
         root = Path(tempfile.mkdtemp(prefix="fak-grafana-native-"))
         self.addCleanup(shutil.rmtree, root, True)
@@ -66,6 +79,45 @@ class NativeFallbackTest(unittest.TestCase):
             (root / "tools" / "grafana" / "dashboards"
              / "fak-native-kernel-performance.json").is_file()
         )
+
+    def test_native_gateway_serve_is_loopback_only(self) -> None:
+        result = self.run_shell_function(
+            "configure_gateway_addr",
+            "STACK_MODE=native; unset FAK_GATEWAY_ADDR",
+            'printf "%s\\n" "$GATEWAY_ADDR"',
+        )
+
+        self.assertEqual(result.stdout, "127.0.0.1:8080\n")
+
+    def test_missing_docker_cli_skips_daemon_startup(self) -> None:
+        result = self.run_shell_function(
+            "select_stack_mode",
+            (
+                "command() { return 1; }; "
+                "uname() { printf 'Darwin\\n'; }; "
+                "ensure_docker_daemon() { printf 'called\\n' >&2; return 0; }; "
+                "die() { printf 'died\\n' >&2; return 1; }; "
+                "STACK_MODE=unset"
+            ),
+            'printf "%s\\n" "$STACK_MODE"',
+        )
+
+        self.assertEqual(result.stdout, "native\n")
+        self.assertEqual(result.stderr, "")
+
+    def test_present_docker_cli_preserves_daemon_path(self) -> None:
+        result = self.run_shell_function(
+            "select_stack_mode",
+            (
+                "command() { return 0; }; "
+                "ensure_docker_daemon() { printf 'called\\n' >&2; return 0; }; "
+                "STACK_MODE=unset"
+            ),
+            'printf "%s\\n" "$STACK_MODE"',
+        )
+
+        self.assertEqual(result.stdout, "docker\n")
+        self.assertEqual(result.stderr, "called\n")
 
     def test_down_stops_only_process_with_matching_owner(self) -> None:
         root = self.make_fixture()

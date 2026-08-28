@@ -26,7 +26,6 @@ RUN_DIR="$GRAFANA_DIR/.run"
 mkdir -p "$RUN_DIR"
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$-${RANDOM:-0}"
 
-GATEWAY_ADDR="${FAK_GATEWAY_ADDR:-0.0.0.0:8080}"   # 0.0.0.0 so Docker's host.docker.internal can scrape it
 GATEWAY_HOSTPORT="127.0.0.1:8080"                  # where WE health-check it
 BOTTLENECK_PORT="${FLEET_BOTTLENECK_PORT:-9095}"
 CACHEVALUE_PORT="${FAK_CACHEVALUE_PORT:-9097}"
@@ -60,6 +59,32 @@ ensure_docker_daemon() {
     warn "Docker daemon did not come up within 90s."
   fi
   return 1
+}
+
+select_stack_mode() {
+  STACK_MODE=native
+  if ! command -v docker >/dev/null 2>&1; then
+    [ "$(uname)" = "Darwin" ] \
+      || die "Docker CLI is unavailable. Install Docker engine, or use the macOS/Homebrew fallback on a Mac."
+    return
+  fi
+  if ensure_docker_daemon; then
+    STACK_MODE=docker
+    return
+  fi
+  [ "$(uname)" = "Darwin" ] \
+    || die "Docker daemon is unavailable. Install Docker engine, or use the macOS/Homebrew fallback on a Mac."
+}
+
+configure_gateway_addr() {
+  if [ -n "${FAK_GATEWAY_ADDR:-}" ]; then
+    GATEWAY_ADDR="$FAK_GATEWAY_ADDR"
+  elif [ "$STACK_MODE" = native ]; then
+    GATEWAY_ADDR="127.0.0.1:8080"
+  else
+    # Docker Prometheus reaches host services through host.docker.internal.
+    GATEWAY_ADDR="0.0.0.0:8080"
+  fi
 }
 
 # ---- a host process is already serving this port? ----
@@ -233,6 +258,11 @@ if [ ! -x "$FAK_BIN" ] || [ "${FAK_REBUILD:-0}" = "1" ]; then
   ( cd "$ROOT" && go build -o "$FAK_BIN" ./cmd/fak ) || die "go build failed."
 fi
 
+# Decide before starting the gateway: the native stack keeps it loopback-only,
+# while the Docker stack retains its host.docker.internal scrape path.
+select_stack_mode
+configure_gateway_addr
+
 # ===== 3. metrics sources on the host =====
 start_bg fleet_bottleneck "$BOTTLENECK_PORT /metrics" \
   python3 "$ROOT/tools/fleet_bottleneck.py" serve --port "$BOTTLENECK_PORT"
@@ -258,14 +288,10 @@ else
 fi
 
 # ===== 4. Prometheus + Grafana =====
-STACK_MODE=docker
-if ensure_docker_daemon; then
+if [ "$STACK_MODE" = docker ]; then
   log "docker compose up -d (Prometheus :9091, Grafana :3000)…"
   ( cd "$GRAFANA_DIR" && "$DOCKER" compose up -d ) || die "docker compose up failed."
 else
-  [ "$(uname)" = "Darwin" ] \
-    || die "Docker daemon is unavailable. Install Docker engine, or use the macOS/Homebrew fallback on a Mac."
-  STACK_MODE=native
   start_native_stack
 fi
 printf '%s\n' "$STACK_MODE" >"$RUN_DIR/stack.mode"
