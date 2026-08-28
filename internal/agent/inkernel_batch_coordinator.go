@@ -192,9 +192,9 @@ func coalescedDecode(ctx context.Context, lane *decodeLane) (bool, error) {
 		return false, nil
 	}
 	if req.decodePass.Add(1) > 1 {
-		// OOM retry stays under the coordinator's device lock, but retries this
-		// request alone after the failed cohort forward has returned.
-		_, _ = inKernelDecodeLanesBatched(ctx, []*decodeLane{lane}, lane.s.M, lane.s.Quant)
+		// The first coordinated pass may already have advanced this lane's KV/GDN
+		// state before a later operation failed. Replaying Session.Step would apply
+		// the accepted token twice, so cohort failures are terminal and fail closed.
 		return true, lane.err
 	}
 	req.prepared <- lane
