@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/ctxplan"
+	"github.com/anthony-chaudhary/fak/internal/headroom"
 	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
@@ -36,12 +37,16 @@ type lever struct {
 	on, witnessed        bool
 	blocker, flag        string
 	gated, noted, locked bool
+	selected             string
+	variants             []string
+	provenance           map[string]string
 }
 
 type tokenDefaultSources struct {
 	root                       string
 	serve, guard, gateway, tui string
 	messages, agentSeam        string
+	overrides                  map[string]string
 }
 
 func loadTokenDefaultSources(root string) tokenDefaultSources {
@@ -63,11 +68,24 @@ func loadTokenDefaultSources(root string) tokenDefaultSources {
 }
 
 func (s tokenDefaultSources) read(rel string) string {
+	if text, ok := s.overrides[rel]; ok {
+		return text
+	}
 	b, err := os.ReadFile(filepath.Join(s.root, filepath.FromSlash(rel)))
 	if err != nil {
 		return ""
 	}
 	return string(b)
+}
+
+func (s tokenDefaultSources) withOverride(rel, text string) tokenDefaultSources {
+	copy := make(map[string]string, len(s.overrides)+1)
+	for path, contents := range s.overrides {
+		copy[path] = contents
+	}
+	copy[rel] = text
+	s.overrides = copy
+	return s
 }
 
 func (s tokenDefaultSources) exists(rel string) bool {
@@ -173,7 +191,16 @@ func anyIntTokenDefaults(v any) int {
 }
 
 func collectTokenDefaultsScorecard(root string) map[string]any {
-	sources := loadTokenDefaultSources(root)
+	return collectTokenDefaultsScorecardWithInputs(root, loadTokenDefaultSources(root), headroom.Names(), headroom.Selected().Name())
+}
+
+var headroomVariantEvidence = map[string]string{
+	"distill": "internal/headroom/distill.go", "headroom": "internal/headroom/bridge.go",
+	"lingua": "internal/headroom/lingua.go", "native": "internal/headroom/native.go",
+	"none": "internal/headroom/compare.go", "noop": "internal/headroom/noop.go",
+}
+
+func collectTokenDefaultsScorecardWithInputs(root string, sources tokenDefaultSources, registered []string, selected string) map[string]any {
 	serve, guard, gateway, tui := sources.serve, sources.guard, sources.gateway, sources.tui
 	messages, agentSeam := sources.messages, sources.agentSeam
 	read, exists, bothWire := sources.read, sources.exists, sources.bothWire
@@ -222,6 +249,15 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 		}
 	}
 	require(rawWindowTargetDebt == 0, fmt.Sprintf("%d default context envelope(s) derive the resident target from the raw provider window with no same-task witness (see docs/long-context-defaults.md)", rawWindowTargetDebt))
+
+	unboundVariants := []string{}
+	for _, name := range registered {
+		path, ok := headroomVariantEvidence[name]
+		if !ok || !sources.registeredCompressorProof(path, name) {
+			unboundVariants = append(unboundVariants, name)
+			require(false, fmt.Sprintf("registered headroom compressor %q has no source-bound token-defaults evidence binding", name))
+		}
+	}
 
 	// ---- derive each lever's REAL default + state from the entrypoint source ----
 	elideWitnessed := exists("experiments/agent-live/elide-oversized-prevalence-2026-06-26.json")
@@ -272,6 +308,58 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 			class: "bounded", on: strings.Contains(agentSeam, "const DefaultCtxViewBudget = 8000") && bothWire(`fs.Int("ctx-view-budget", agent.DefaultCtxViewBudget`),
 			witnessed: true, blocker: "", flag: "--ctx-view-budget", gated: false, noted: true, locked: true,
 		},
+		{
+			key: "headroomcompressor", label: "headroomcompressor - registered result-compressor family",
+			class: "optin", on: selected != "" && selected != "noop" && selected != "none",
+			blocker: "matched-quality live-wire witness missing", flag: "--compress / FAK_COMPRESSOR", gated: true,
+			selected: selected, variants: append([]string(nil), registered...),
+		},
+	}
+
+	for i := range levers {
+		l := &levers[i]
+		binding, mapped := tokenProofCatalog[l.key]
+		l.provenance = map[string]string{}
+		if !mapped {
+			l.witnessed, l.locked, l.noted = false, false, false
+			l.blocker = "no typed evidence binding"
+			continue
+		}
+		l.witnessed = sources.executableProof(binding.Effect)
+		l.locked = sources.executableProof(binding.Lock)
+		l.noted = l.class == "lossless" || sources.literalProof(binding.Note)
+		if binding.Effect.Path != "" {
+			l.provenance["witness"] = binding.Effect.Path + "#" + binding.Effect.Function
+		}
+		if binding.Lock.Path != "" {
+			l.provenance["lock"] = binding.Lock.Path + "#" + binding.Lock.Function
+		}
+		if binding.Note.Path != "" {
+			l.provenance["note"] = binding.Note.Path + "#" + binding.Note.Function
+		}
+		if gateBlocker := tokenGateBlocker(sources, binding.Gate); gateBlocker != "" {
+			l.witnessed = false
+			l.blocker = gateBlocker
+			l.provenance["gate"] = binding.Gate.Schema + ":" + binding.Gate.ID
+			l.provenance["pass"] = binding.Gate.PassArtifact
+		} else if l.key != "headroomcompressor" {
+			l.blocker = blockerIf(!l.witnessed, "executable effect/control sentinel missing or vacuous")
+		}
+	}
+
+	for _, l := range levers {
+		if l.on && !l.locked {
+			require(false, l.key+": default-on state has no executable regression sentinel")
+		}
+		if l.on && l.class == "bounded" && !l.noted {
+			require(false, l.key+": default-on bounded saver has no executable operator loss note")
+		}
+		if l.on && (!l.witnessed || l.blocker != "") {
+			require(false, l.key+": default-on saver is not witnessed-safe: "+l.blocker)
+		}
+		if !l.on && !l.gated {
+			require(false, l.key+": default-off saver has no explicit gate")
+		}
 	}
 
 	// ---- roll the derived levers into the headline counters + KPIs ----
@@ -345,28 +433,31 @@ func collectTokenDefaultsScorecard(root string) map[string]any {
 		leverStatus = append(leverStatus, map[string]any{
 			"key": l.key, "label": l.label, "class": l.class, "on": l.on, "witnessed": l.witnessed,
 			"blocker": l.blocker, "flag": l.flag, "gated": l.gated, "noted": l.noted, "locked": l.locked,
+			"selected": l.selected, "registered_variants": l.variants, "provenance": l.provenance,
 		})
 	}
 
 	return map[string]any{
-		"schema":      "fak-token-defaults-scorecard/2",
+		"schema":      "fak-token-defaults-scorecard/3",
 		"ok":          ok,
 		"verdict":     verdict,
 		"finding":     finding,
 		"reason":      reason,
 		"next_action": next,
 		"corpus": map[string]any{
-			"token_defaults_debt":    debt,
-			"score":                  round1(composite),
-			"grade":                  grade,
-			"levers_total":           leversTotal,
-			"stacked_on":             stackedOn,
-			"soft_signals":           off,
-			"defects":                defects,
-			"kpis":                   kpis,
-			"lever_status":           leverStatus,
-			"context_envelope":       envelopes,
-			"raw_window_target_debt": rawWindowTargetDebt,
+			"detector_schema":           "fak-token-defaults-scorecard/3",
+			"token_defaults_debt":       debt,
+			"score":                     round1(composite),
+			"grade":                     grade,
+			"levers_total":              leversTotal,
+			"stacked_on":                stackedOn,
+			"soft_signals":              off,
+			"defects":                   defects,
+			"kpis":                      kpis,
+			"lever_status":              leverStatus,
+			"context_envelope":          envelopes,
+			"raw_window_target_debt":    rawWindowTargetDebt,
+			"unbound_registered_savers": unboundVariants,
 		},
 	}
 }
@@ -508,6 +599,7 @@ Budget size is governed separately by the [long-context defaults doctrine](../lo
 |---|---|
 `)
 	fmt.Fprintf(&b, "| **Token-defaults-debt (total HARD defects)** | **%d** |\n", debt)
+	fmt.Fprintf(&b, "| Detector schema (same corpus as `--json`) | `%s` |\n", c["detector_schema"])
 	fmt.Fprintf(&b, "| Composite score | %.1f/100 (grade %s) |\n", composite, grade)
 	fmt.Fprintf(&b, "| Savers stacked on by default | %d/%d |\n", stackedOn, leversTotal)
 	fmt.Fprintf(&b, "| Groups | stack %d · honesty %d · regression %d · parity %d |\n",

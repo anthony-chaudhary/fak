@@ -27,6 +27,7 @@ import (
 
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/gateway"
+	"github.com/anthony-chaudhary/fak/internal/headroom"
 )
 
 // readEntrypoint reads a cmd/fak source file from the package directory (go test runs with
@@ -116,12 +117,18 @@ func TestTokenDefault_CtxViewDefaultsOn(t *testing.T) {
 // regenerate command. EOL is normalized so a CRLF checkout (autocrlf=true) is not a false failure.
 func TestTokenDefaultsSnapshotFresh(t *testing.T) {
 	const root = "../.."
+	payload := collectTokenDefaultsScorecard(root)
+	if payload["schema"] != "fak-token-defaults-scorecard/3" {
+		t.Fatalf("detector schema = %v, want fak-token-defaults-scorecard/3", payload["schema"])
+	}
 	raw, err := os.ReadFile(root + "/docs/serving/token-defaults-scorecard.md")
 	if err != nil {
 		t.Fatalf("read committed snapshot: %v", err)
 	}
 	want := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	got := renderTokenDefaultsMarkdown(collectTokenDefaultsScorecard(root)["corpus"].(map[string]any))
+	// JSON and Markdown receive this exact corpus object; freshness therefore
+	// proves identical detector inputs rather than two independently authored views.
+	got := renderTokenDefaultsMarkdown(payload["corpus"].(map[string]any))
 	if want != got {
 		t.Errorf("docs/serving/token-defaults-scorecard.md is STALE vs the source-derived defaults — regenerate it:\n"+
 			"  go run ./cmd/fak token-defaults-scorecard --markdown > docs/serving/token-defaults-scorecard.md\n"+
@@ -135,12 +142,16 @@ func TestTokenDefaultsSnapshotFresh(t *testing.T) {
 // longer gated, and the headline counters match (all 7 stacked), so the scorecard cannot report a
 // default that contradicts the binary.
 func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
-	c := collectTokenDefaultsScorecard("../..")["corpus"].(map[string]any)
+	c := collectTokenDefaultsScorecardWithInputs("../..", loadTokenDefaultSources("../.."), headroom.Names(), "noop")["corpus"].(map[string]any)
 	if got := c["stacked_on"].(int); got != 9 {
 		t.Errorf("stacked_on derived = %d, want 9 (9/9 safe savers on by default)", got)
 	}
-	if got := c["levers_total"].(int); got != 9 {
-		t.Errorf("levers_total = %d, want 9", got)
+	if got := c["levers_total"].(int); got != 10 {
+		t.Errorf("levers_total = %d, want 10 including the registered headroom family", got)
+	}
+	defects := c["defects"].([]string)
+	if len(defects) != 1 || !strings.Contains(defects[0], "#3536 OPEN") {
+		t.Fatalf("detector debt = %v, want only the committed #3536 OPEN gate", defects)
 	}
 	on := map[string]bool{}
 	gated := map[string]bool{}
@@ -162,5 +173,31 @@ func TestTokenDefaultsLeversDerivedFromSource(t *testing.T) {
 	}
 	if gated["ctxview"] {
 		t.Errorf("ctxview must no longer be gated once it is on by default")
+	}
+	if on["headroomcompressor"] || !gated["headroomcompressor"] {
+		t.Errorf("headroom family must report selected noop/default-off behind an explicit gate")
+	}
+}
+
+func TestTokenDefaultsRegisteredCompressorCoverageIsExhaustive(t *testing.T) {
+	root := "../.."
+	registered := append(headroom.Names(), "fixture-unbound-compressor")
+	c := collectTokenDefaultsScorecardWithInputs(root, loadTokenDefaultSources(root), registered, "noop")["corpus"].(map[string]any)
+	if got := strings.Join(c["defects"].([]string), "\n"); !strings.Contains(got, `registered headroom compressor "fixture-unbound-compressor"`) {
+		t.Fatalf("unbound registered compressor escaped HARD debt:\n%s", got)
+	}
+}
+
+func TestTokenDefaultsMissingExecutableLockCreatesDebt(t *testing.T) {
+	root := "../.."
+	sources := loadTokenDefaultSources(root)
+	path := "cmd/fak/token_defaults_test.go"
+	// The expected words survive in a comment, but the executable assertion is
+	// removed. Parsed syntax must reject this decoy.
+	mutated := strings.Replace(sources.read(path), `if !strings.Contains(readEntrypoint(t, "serve.go"), `+"`"+`fs.Bool("vdso", true`+"`"+`) {`, `// if !strings.Contains(readEntrypoint(t, "serve.go"), `+"`"+`fs.Bool("vdso", true`+"`"+`) {
+	if false {`, 1)
+	c := collectTokenDefaultsScorecardWithInputs(root, sources.withOverride(path, mutated), headroom.Names(), "noop")["corpus"].(map[string]any)
+	if got := strings.Join(c["defects"].([]string), "\n"); !strings.Contains(got, "vdso: default-on state has no executable regression sentinel") {
+		t.Fatalf("dead/comment-only lock escaped HARD debt:\n%s", got)
 	}
 }
