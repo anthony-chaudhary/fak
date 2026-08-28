@@ -15,6 +15,7 @@ func TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence(t *testing.T) {
 	}
 	for _, batch := range []int{2, 4, 8} {
 		t.Run(fmt.Sprintf("B%d", batch), func(t *testing.T) {
+			baseOwners, baseBuffers := qwen35AttentionBatchGraphLiveCounts()
 			const hidden = 256
 			const nH = 4
 			const nKV = 2
@@ -45,6 +46,9 @@ func TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence(t *testing.T) {
 			if receipt.CommandBuffers != 1 || receipt.Commits != 1 || receipt.CompletionWaits != 1 || receipt.ProjectionDispatches != 3 || receipt.InputUploads != 1 || receipt.IntermediateReadbacks != 0 || receipt.FinalReadbacks != 1 {
 				t.Fatalf("receipt=%+v", receipt)
 			}
+			if owners, buffers := qwen35AttentionBatchGraphLiveCounts(); owners != baseOwners || buffers != baseBuffers {
+				t.Fatalf("B=%d success retained graph owners/buffers=%d/%d, baseline=%d/%d", batch, owners, buffers, baseOwners, baseBuffers)
+			}
 			for row := 0; row < batch; row++ {
 				one := req
 				one.Input = append([]float32(nil), input[row*hidden:(row+1)*hidden]...)
@@ -62,6 +66,9 @@ func TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence(t *testing.T) {
 			alt, _, ok, err := RunQwen35FullAttentionDecodeBatch(changed)
 			if err != nil || !ok {
 				t.Fatal(err)
+			}
+			if owners, buffers := qwen35AttentionBatchGraphLiveCounts(); owners != baseOwners || buffers != baseBuffers {
+				t.Fatalf("B=%d lane-isolation run retained graph owners/buffers=%d/%d, baseline=%d/%d", batch, owners, buffers, baseOwners, baseBuffers)
 			}
 			if attentionBatchSame(alt.Output[0], got.Output[0]) {
 				t.Fatal("changed lane did not change")
@@ -90,24 +97,31 @@ func TestQwen35FullAttentionDecodeBatchIndependentKVSingleFence(t *testing.T) {
 			Scale: 1 / float32(math.Sqrt(hd)), QKNormEpsilon: 1e-6, QKNorm: true,
 			InjectPostSubmitFailureForTest: true,
 		}
-		_, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
-		var post *GraphPostSubmitError
-		if !accepted || !errors.As(err, &post) || !receipt.Committed || receipt.Commits != 1 || receipt.CompletionWaits != 1 || receipt.FinalReadbacks != 0 {
-			t.Fatalf("accepted=%v receipt=%+v err=%v", accepted, receipt, err)
+		baseOwners, baseBuffers := qwen35AttentionBatchGraphLiveCounts()
+		for attempt := 0; attempt < 3; attempt++ {
+			_, receipt, accepted, err := RunQwen35FullAttentionDecodeBatch(req)
+			var post *GraphPostSubmitError
+			if !accepted || !errors.As(err, &post) || !receipt.Committed || receipt.Commits != 1 || receipt.CompletionWaits != 1 || receipt.FinalReadbacks != 0 {
+				t.Fatalf("attempt=%d accepted=%v receipt=%+v err=%v", attempt, accepted, receipt, err)
+			}
+			if owners, buffers := qwen35AttentionBatchGraphLiveCounts(); owners != baseOwners || buffers != baseBuffers {
+				t.Fatalf("attempt=%d failure retained graph owners/buffers=%d/%d, baseline=%d/%d", attempt, owners, buffers, baseOwners, baseBuffers)
+			}
 		}
 	})
 }
 
-// The serial oracle deliberately uses the established P=32 graph operation,
-// placing the independent row at t=31 with its own prefix/base. This compares
-// the new lane-indexed kernels against the shipped attention implementation.
+// The serial oracle deliberately uses row zero of the established P=32 graph
+// operation. At t=0 that graph attends exactly prefix+1 tokens; placing the
+// decode row at t=31 would silently add 31 zero-panel keys to the softmax and
+// would not be an independent single-token decode oracle.
 func attentionBatchSerialOracle(t *testing.T, req Qwen35FullAttentionBatchRequest) Qwen35FullAttentionBatchResult {
 	t.Helper()
 	l := req.Lanes[0]
 	hidden := req.NumHeads * req.HeadDim
 	kvw := req.NumKVHeads * req.HeadDim
 	panel := make([]float32, 32*hidden)
-	copy(panel[31*hidden:], req.Input)
+	copy(panel, req.Input)
 	g, err := BeginProjectionGraph(panel, nil, nil, 32, hidden)
 	if err != nil {
 		t.Fatal(err)
@@ -122,9 +136,12 @@ func attentionBatchSerialOracle(t *testing.T, req Qwen35FullAttentionBatchReques
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The established P=32 operation requires a 32-row rotary table even
-	// though this oracle consumes only row 31 at the lane's base position.
+	// The established operation requires 32 rows, but row zero must carry the
+	// lane's absolute rotary position for this decode comparison.
 	cosv, sinv := attentionBatchRope(32, req.RotaryDim)
+	halfRotary := req.RotaryDim / 2
+	copy(cosv[:halfRotary], req.Cos[l.Position*halfRotary:(l.Position+1)*halfRotary])
+	copy(sinv[:halfRotary], req.Sin[l.Position*halfRotary:(l.Position+1)*halfRotary])
 	attn, err := g.FullAttention(q, k, v, gate, req.QNorm, req.KNorm, cosv, sinv, l.PrefixK, l.PrefixV, l.Position, req.NumHeads, req.NumKVHeads, req.HeadDim, req.RotaryDim, req.Scale, req.QKNormEpsilon, req.Gain1p, req.QKNorm)
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +150,7 @@ func attentionBatchSerialOracle(t *testing.T, req Qwen35FullAttentionBatchReques
 	if e != nil || !r.Committed {
 		t.Fatal(e)
 	}
-	return Qwen35FullAttentionBatchResult{Output: [][]float32{o[0][31*hidden:]}, KRaw: [][]float32{o[1][31*kvw:]}, KPost: [][]float32{o[2][31*kvw:]}, V: [][]float32{o[3][31*kvw:]}}
+	return Qwen35FullAttentionBatchResult{Output: [][]float32{o[0][:hidden]}, KRaw: [][]float32{o[1][:kvw]}, KPost: [][]float32{o[2][:kvw]}, V: [][]float32{o[3][:kvw]}}
 }
 func attentionBatchQ8(t *testing.T, out, in, seed int) *Q8Weight {
 	t.Helper()

@@ -10,7 +10,7 @@ extern void *mg_graph_alloc_buffer(void *graph, int n);
 extern void mg_graph_note_encoder(void *graph);
 
 static id<MTLComputePipelineState> qgNorm, qgAdd, qgSwiGLU, qgSplit, qgQK, qgAttn, qgLaneSplit, qgLaneQK, qgLaneAttn;
-static BOOL qgAttempted;
+static BOOL qgAttempted, qgReady;
 
 static NSString *qgSource = @R"MSL(
 #include <metal_stdlib>
@@ -84,7 +84,45 @@ kernel void qg_lane_attn(device const float*q [[buffer(0)]],device const float*k
 }
 )MSL";
 
-static int qg_init(void){@synchronized(gDev){if(qgNorm)return 1;if(qgAttempted)return 0;qgAttempted=YES;NSError*e=nil;id<MTLLibrary>l=[gDev newLibraryWithSource:qgSource options:nil error:&e];if(!l){NSLog(@"qwen35 graph compile: %@",e);return 0;}qgNorm=[gDev newComputePipelineStateWithFunction:[l newFunctionWithName:@"qg_norm"] error:&e];qgAdd=[gDev newComputePipelineStateWithFunction:[l newFunctionWithName:@"qg_add"] error:&e];qgSwiGLU=[gDev newComputePipelineStateWithFunction:[l newFunctionWithName:@"qg_swiglu"] error:&e];qgSplit=[gDev newComputePipelineStateWithFunction:[l newFunctionWithName:@"qg_split"] error:&e];qgQK=[gDev newComputePipelineStateWithFunction:[l newFunctionWithName:@"qg_qk"] error:&e];qgAttn=[gDev newComputePipelineStateWithFunction:[l newFunctionWithName:@"qg_attn"] error:&e];return qgNorm&&qgAdd&&qgSwiGLU&&qgSplit&&qgQK&&qgAttn&&qgLaneSplit&&qgLaneQK&&qgLaneAttn;}}
+static id<MTLComputePipelineState> qg_pipeline(id<MTLLibrary> library, NSString *name, NSError **error) {
+    id<MTLFunction> function=[library newFunctionWithName:name];
+    if(!function)return nil;
+    return[gDev newComputePipelineStateWithFunction:function error:error];
+}
+
+static int qg_init(void) {
+    @synchronized(gDev) {
+        if(qgReady)return 1;
+        if(qgAttempted)return 0;
+        qgAttempted=YES;
+        NSError *error=nil;
+        id<MTLLibrary> library=[gDev newLibraryWithSource:qgSource options:nil error:&error];
+        if(!library){NSLog(@"qwen35 graph compile: %@",error);return 0;}
+
+        // Keep initialization transactional. Publishing even one pipeline before
+        // all lane and P32 functions exist lets a partial set masquerade as a
+        // ready graph and turns a clean admission decline into a nil-PSO signal.
+        id<MTLComputePipelineState> norm=qg_pipeline(library,@"qg_norm",&error);
+        id<MTLComputePipelineState> add=qg_pipeline(library,@"qg_add",&error);
+        id<MTLComputePipelineState> swiglu=qg_pipeline(library,@"qg_swiglu",&error);
+        id<MTLComputePipelineState> split=qg_pipeline(library,@"qg_split",&error);
+        id<MTLComputePipelineState> qk=qg_pipeline(library,@"qg_qk",&error);
+        id<MTLComputePipelineState> attn=qg_pipeline(library,@"qg_attn",&error);
+        id<MTLComputePipelineState> laneSplit=qg_pipeline(library,@"qg_lane_split",&error);
+        id<MTLComputePipelineState> laneQK=qg_pipeline(library,@"qg_lane_qk",&error);
+        id<MTLComputePipelineState> laneAttn=qg_pipeline(library,@"qg_lane_attn",&error);
+        if(!norm||!add||!swiglu||!split||!qk||!attn||!laneSplit||!laneQK||!laneAttn){
+            NSLog(@"qwen35 graph pipeline initialization failed: %@",error);
+            return 0;
+        }
+        qgNorm=norm;qgAdd=add;qgSwiGLU=swiglu;qgSplit=split;qgQK=qk;qgAttn=attn;
+        qgLaneSplit=laneSplit;qgLaneQK=laneQK;qgLaneAttn=laneAttn;
+        qgReady=YES;
+        return 1;
+    }
+}
+
+int mg_qwen35_graph_ready(void){return qg_init();}
 static id<MTLBuffer> qg_host(const float*p,int n){return[gDev newBufferWithBytes:p length:(NSUInteger)n*sizeof(float) options:MTLResourceStorageModeShared];}
 static void qg_dispatch(id<MTLComputeCommandEncoder>e,id<MTLComputePipelineState>p,int n){int t=(int)p.maxTotalThreadsPerThreadgroup;if(t>n)t=n;if(t<1)t=1;[e dispatchThreads:MTLSizeMake((NSUInteger)n,1,1) threadsPerThreadgroup:MTLSizeMake((NSUInteger)t,1,1)];}
 

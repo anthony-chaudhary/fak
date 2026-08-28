@@ -4,7 +4,10 @@ package metalgemm
 
 /*
 #include <stdint.h>
+int mg_qwen35_graph_ready(void);
 int mg_qwen35_graph_attention_batch(void*,void*,void*,void*,const float*,const float*,const float*,const float*,const int*,const int*,const int*,const float*,const float*,int,int,int,int,int,int,float,float,int,int,int,int,void**,void**,void**,void**);
+int mg_graph_live_owners(void);
+int mg_graph_live_buffers(void);
 */
 import "C"
 
@@ -47,6 +50,12 @@ func RunQwen35FullAttentionDecodeBatch(req Qwen35FullAttentionBatchRequest) (res
 	batch, hidden, kvWidth, totalKV, offsets, lengths, packedK, packedV, err := validateQwen35FullAttentionBatch(req)
 	if err != nil {
 		return result, receipt, false, err
+	}
+	// Pipeline compilation is an admission prerequisite, not part of command
+	// encoding. This keeps a partial native graph fail-closed before a graph owner,
+	// projection encoder, or command buffer can be created or committed.
+	if C.mg_qwen35_graph_ready() == 0 {
+		return result, receipt, false, &MixedQKVError{Stage: MixedQKVDeclined, Detail: "Qwen full-attention graph pipelines unavailable"}
 	}
 	g, err := BeginProjectionGraph(req.Input, nil, nil, batch, hidden)
 	if err != nil {
@@ -97,6 +106,10 @@ func RunQwen35FullAttentionDecodeBatch(req Qwen35FullAttentionBatchRequest) (res
 	result.KPost = splitAttentionRows(outs[2], batch, kvWidth)
 	result.V = splitAttentionRows(outs[3], batch, kvWidth)
 	return result, receipt, true, nil
+}
+
+func qwen35AttentionBatchGraphLiveCounts() (owners, buffers int) {
+	return int(C.mg_graph_live_owners()), int(C.mg_graph_live_buffers())
 }
 
 func validateQwen35FullAttentionBatch(req Qwen35FullAttentionBatchRequest) (batch, hidden, kvWidth, totalKV int, offsets, lengths []int, packedK, packedV []float32, err error) {
