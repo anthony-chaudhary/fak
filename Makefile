@@ -1,6 +1,6 @@
 # Makefile — portable build/test entrypoints (unit 12). On Windows without make,
 # use scripts/ci.ps1, which this mirrors.
-.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
+.PHONY: ci build build-all cross-build-harnessres clean vet architest-gate test test-fast smoke-build test-fast-build-regression test-affected test-durations test-race bench status status-check release-staleness release-staleness-check release-readiness garden garden-check dogfood-recent performance-rsi-health vcache-gate cache-default-readiness gitdaily-score claims-lint cache-headline-lint cachedoc-numbers-lint salience dos-lint index-sync model logvault-drill gofmt-check hygiene demo-audit demo-tool-tests demo-scorecards scorecard-ratchet demo-smoke demo-headless-smoke demo-live-status demo-https-status demo-published-status demo-published-check demo-readiness-status gated-tests cuda-check cuda-build cuda-test cuda-accept cuda-occupancy
 
 VERIFY_LOOP_BUDGET ?= 30s
 SMOKE_BUILD_BUDGET ?= 2m
@@ -231,6 +231,12 @@ garden-check:
 
 dogfood-recent:
 	@python3 tools/recent_feature_dogfood.py
+
+# performance-rsi-health: deterministic live-repository loop-health grade and
+# named debt evidence from the issue-9768 dogfood receipt. This grades the
+# measurement/improvement loop; it does not claim the parent 100x target.
+performance-rsi-health:
+	@go run ./cmd/fak performance-rsi-scorecard --input docs/_witnesses/issue-9768-performance-rsi-dogfood/input.json --json
 
 # vcache-gate: the repeatable vCache scorecard dogfood gate (#791). The recent-feature
 # dogfood packet RUNS the score for daily visibility; this is the dedicated, fast,

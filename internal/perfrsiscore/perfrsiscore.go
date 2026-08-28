@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthony-chaudhary/fak/pkg/scorecard"
 )
 
 const (
@@ -297,14 +299,52 @@ type Comparison struct {
 	Deltas        []Delta `json:"deltas"`
 }
 
+// HealthSummary is the bounded presentation signal for loop health. It is
+// deliberately scoped away from target achievement: a healthy measurement loop
+// can still be far from the explicit performance multiplier, and a high ratio in
+// one dimension cannot compensate for missing or behind evidence elsewhere.
+type HealthSummary struct {
+	Score          float64 `json:"score"`
+	Grade          string  `json:"grade"`
+	Clean          bool    `json:"clean"`
+	Interpretation string  `json:"interpretation"`
+}
+
+// DebtEvidence names one dimension that keeps the loop-health report non-clean.
+// Source and receipt metadata make the debt re-checkable without treating a
+// prose summary as evidence.
+type DebtEvidence struct {
+	Dimension       string   `json:"dimension"`
+	Status          string   `json:"status"`
+	NormalizedRatio *float64 `json:"normalized_ratio"`
+	Source          string   `json:"source"`
+	EvidenceKind    string   `json:"evidence_kind,omitempty"`
+	Engine          string   `json:"engine,omitempty"`
+	NextAction      string   `json:"next_action"`
+}
+
+// DebtSummary is the exhaustive work list for the current metric version.
+// performance_rsi_debt counts every BEHIND or UNKNOWN canonical dimension.
+type DebtSummary struct {
+	PerformanceRSIDebt int            `json:"performance_rsi_debt"`
+	Total              int            `json:"total"`
+	DimensionsMeasured int            `json:"dimensions_measured"`
+	DimensionsTotal    int            `json:"dimensions_total"`
+	Behind             int            `json:"behind"`
+	Unknown            int            `json:"unknown"`
+	Evidence           []DebtEvidence `json:"evidence"`
+}
+
 type Report struct {
-	Schema             string      `json:"schema"`
-	Snapshot           string      `json:"snapshot"`
-	TargetMultiplier   float64     `json:"target_multiplier"`
-	Dimensions         []Result    `json:"dimensions"`
-	DominantBottleneck string      `json:"dominant_bottleneck"`
-	UnknownDebt        int         `json:"unknown_debt"`
-	Comparison         *Comparison `json:"comparison,omitempty"`
+	Schema             string         `json:"schema"`
+	Snapshot           string         `json:"snapshot"`
+	TargetMultiplier   float64        `json:"target_multiplier"`
+	Dimensions         []Result       `json:"dimensions"`
+	DominantBottleneck string         `json:"dominant_bottleneck"`
+	UnknownDebt        int            `json:"unknown_debt"`
+	LoopHealth         *HealthSummary `json:"loop_health,omitempty"`
+	DebtSummary        *DebtSummary   `json:"debt_summary,omitempty"`
+	Comparison         *Comparison    `json:"comparison,omitempty"`
 }
 
 var dimensionIDs = []string{
@@ -1161,7 +1201,63 @@ func Score(e Evidence) Report {
 			worst, r.DominantBottleneck = debt, d.ID
 		}
 	}
+	health, debt := summarizeHealth(r.Dimensions)
+	r.LoopHealth = &health
+	r.DebtSummary = &debt
 	return r
+}
+
+func summarizeHealth(dimensions []Result) (HealthSummary, DebtSummary) {
+	debt := DebtSummary{
+		DimensionsTotal: len(dimensions),
+		Evidence:        make([]DebtEvidence, 0),
+	}
+	var healthRatio float64
+	for _, d := range dimensions {
+		if d.NormalizedRatio != nil {
+			debt.DimensionsMeasured++
+			// Cap credit at the target. Over-performing one dimension must not
+			// erase debt in another, while UNKNOWN contributes an honest zero.
+			healthRatio += math.Min(*d.NormalizedRatio, 1)
+		}
+		switch d.Status {
+		case "BEHIND":
+			debt.Behind++
+		case "UNKNOWN":
+			debt.Unknown++
+		default:
+			continue
+		}
+		debt.Evidence = append(debt.Evidence, DebtEvidence{
+			Dimension:       d.ID,
+			Status:          d.Status,
+			NormalizedRatio: d.NormalizedRatio,
+			Source:          d.Source,
+			EvidenceKind:    d.EvidenceKind,
+			Engine:          d.Engine,
+			NextAction:      d.NextAction,
+		})
+	}
+	debt.PerformanceRSIDebt = debt.Behind + debt.Unknown
+	debt.Total = debt.PerformanceRSIDebt
+
+	score := 0.0
+	if debt.DimensionsTotal > 0 {
+		score = scorecard.Round1(100 * healthRatio / float64(debt.DimensionsTotal))
+	}
+	return HealthSummary{
+		Score:          score,
+		Grade:          scorecard.GradeStd(score),
+		Clean:          debt.PerformanceRSIDebt == 0,
+		Interpretation: "grade describes performance-RSI loop health; it does not prove the explicit target multiplier was achieved",
+	}, debt
+}
+
+func reportHealth(r Report) (HealthSummary, DebtSummary) {
+	if r.LoopHealth != nil && r.DebtSummary != nil {
+		return *r.LoopHealth, *r.DebtSummary
+	}
+	return summarizeHealth(r.Dimensions)
 }
 
 func Compare(current *Report, prior Report) error {
@@ -1196,7 +1292,10 @@ func DecodeReport(r io.Reader) (Report, error) {
 
 func RenderHuman(r Report) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "performance RSI: %s | target %.0fx | UNKNOWN debt %d\n", r.Snapshot, r.TargetMultiplier, r.UnknownDebt)
+	health, debt := reportHealth(r)
+	fmt.Fprintf(&b, "performance RSI: %s | target %.0fx | health %s %.1f/100 | performance RSI debt %d\n", r.Snapshot, r.TargetMultiplier, health.Grade, health.Score, debt.PerformanceRSIDebt)
+	fmt.Fprintf(&b, "loop health: clean=%t | measured %d/%d | BEHIND %d | UNKNOWN %d\n", health.Clean, debt.DimensionsMeasured, debt.DimensionsTotal, debt.Behind, debt.Unknown)
+	fmt.Fprintf(&b, "grade scope: %s\n", health.Interpretation)
 	fmt.Fprintf(&b, "dominant bottleneck: %s\n", r.DominantBottleneck)
 	for _, d := range r.Dimensions {
 		fmt.Fprintf(&b, "%-25s %-7s current=%s target=%s ratio=%s source=%s next=%s\n", d.ID, d.Status, number(d.Current), number(d.Target), number(d.NormalizedRatio), d.Source, d.NextAction)
@@ -1209,7 +1308,8 @@ func RenderHuman(r Report) string {
 
 func RenderMarkdown(r Report) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Performance RSI — %s\n\n- Explicit target: **%.0fx** (unsaturated)\n- Dominant bottleneck: `%s`\n- UNKNOWN debt: **%d**\n\n", r.Snapshot, r.TargetMultiplier, r.DominantBottleneck, r.UnknownDebt)
+	health, debt := reportHealth(r)
+	fmt.Fprintf(&b, "# Performance RSI — %s\n\n- Explicit target: **%.0fx** (unsaturated)\n- Loop-health grade: **%s** (%.1f/100; clean: **%t**)\n- Performance RSI debt: **%d** (%d BEHIND, %d UNKNOWN; %d/%d measured)\n- Grade scope: %s\n- Dominant bottleneck: `%s`\n\n", r.Snapshot, r.TargetMultiplier, health.Grade, health.Score, health.Clean, debt.PerformanceRSIDebt, debt.Behind, debt.Unknown, debt.DimensionsMeasured, debt.DimensionsTotal, health.Interpretation, r.DominantBottleneck)
 	b.WriteString("| Dimension | Status | Current | Target | Normalized ratio | Source | Next action |\n|---|---:|---:|---:|---:|---|---|\n")
 	for _, d := range r.Dimensions {
 		fmt.Fprintf(&b, "| %s | %s | %s %s | %s %s | %s | %s | %s |\n", d.ID, d.Status, number(d.Current), d.Unit, number(d.Target), d.Unit, number(d.NormalizedRatio), d.Source, d.NextAction)

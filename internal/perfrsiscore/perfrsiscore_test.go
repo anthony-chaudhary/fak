@@ -33,6 +33,98 @@ func TestAll16ExactlyOnceAndDeterministic(t *testing.T) {
 	}
 }
 
+func TestIssue9768DogfoodGetsPoorNamedLoopHealthDebt(t *testing.T) {
+	e, err := Load("../../docs/_witnesses/issue-9768-performance-rsi-dogfood/input.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := Score(e)
+	if r.LoopHealth == nil || r.DebtSummary == nil {
+		t.Fatalf("missing loop-health summaries: %+v", r)
+	}
+	if r.LoopHealth.Score != 62.6 || r.LoopHealth.Grade != "D" || r.LoopHealth.Clean {
+		t.Fatalf("loop health=%+v, want D 62.6 and non-clean", r.LoopHealth)
+	}
+	if r.DebtSummary.DimensionsMeasured != 15 || r.DebtSummary.DimensionsTotal != 16 ||
+		r.DebtSummary.Behind != 8 || r.DebtSummary.Unknown != 1 ||
+		r.DebtSummary.Total != 9 || r.DebtSummary.PerformanceRSIDebt != 9 {
+		t.Fatalf("debt summary=%+v, want 15/16 measured, 8 BEHIND, 1 UNKNOWN, debt 9", r.DebtSummary)
+	}
+	wantEvidence := []string{
+		"cycle_time", "improvement_yield", "evaluation_latency", "experiment_throughput",
+		"discovery_freshness", "production_transfer", "hardware_utilization",
+		"automation_coverage", "compounding_rate",
+	}
+	if len(r.DebtSummary.Evidence) != len(wantEvidence) {
+		t.Fatalf("named evidence=%d, want %d: %+v", len(r.DebtSummary.Evidence), len(wantEvidence), r.DebtSummary.Evidence)
+	}
+	for i, want := range wantEvidence {
+		got := r.DebtSummary.Evidence[i]
+		if got.Dimension != want || got.Source == "" || got.NextAction == "" {
+			t.Errorf("evidence[%d]=%+v, want named dimension %q with source and action", i, got, want)
+		}
+	}
+	for _, index := range []int{0, 3} {
+		got := r.DebtSummary.Evidence[index]
+		if got.NormalizedRatio == nil || *got.NormalizedRatio != 0.01 {
+			t.Errorf("%s ratio=%v, want 0.01", got.Dimension, got.NormalizedRatio)
+		}
+	}
+	unknown := r.DebtSummary.Evidence[6]
+	if unknown.Dimension != "hardware_utilization" || unknown.Status != "UNKNOWN" ||
+		unknown.NormalizedRatio != nil || unknown.Source != "fixture/hardware" {
+		t.Errorf("UNKNOWN evidence=%+v", unknown)
+	}
+}
+
+func TestLoopHealthCapsOverTargetCreditAndSeparatesGradeFromClean(t *testing.T) {
+	e := fixture(t)
+	for i := range e.Dimensions {
+		target := *e.Dimensions[i].Target
+		e.Dimensions[i].Current = &target
+	}
+	r := Score(e)
+	if r.LoopHealth == nil || r.DebtSummary == nil ||
+		r.LoopHealth.Score != 100 || r.LoopHealth.Grade != "A" || !r.LoopHealth.Clean ||
+		r.DebtSummary.Total != 0 || len(r.DebtSummary.Evidence) != 0 {
+		t.Fatalf("clean health=%+v debt=%+v", r.LoopHealth, r.DebtSummary)
+	}
+
+	overTarget := *e.Dimensions[1].Target * 1000
+	e.Dimensions[1].Current = &overTarget
+	e.Dimensions[0].Current = nil
+	r = Score(e)
+	if r.LoopHealth.Score != 93.8 || r.LoopHealth.Grade != "A" || r.LoopHealth.Clean {
+		t.Fatalf("capped/unknown health=%+v, want A 93.8 but non-clean", r.LoopHealth)
+	}
+	if r.DebtSummary.Total != 1 || r.DebtSummary.Unknown != 1 ||
+		len(r.DebtSummary.Evidence) != 1 || r.DebtSummary.Evidence[0].Dimension != e.Dimensions[0].ID {
+		t.Fatalf("capped/unknown debt=%+v", r.DebtSummary)
+	}
+}
+
+func TestLegacyReportDecodesAndComparesWithoutHealthFields(t *testing.T) {
+	f, err := os.Open("../../docs/_witnesses/issue-9752-performance-rsi-snapshot.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := DecodeReport(f)
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prior.LoopHealth != nil || prior.DebtSummary != nil {
+		t.Fatalf("legacy report synthesized serialized health fields: %+v %+v", prior.LoopHealth, prior.DebtSummary)
+	}
+	current := Score(fixture(t))
+	if err := Compare(&current, prior); err != nil {
+		t.Fatalf("legacy comparison compatibility: %v", err)
+	}
+	if current.Comparison == nil || current.Comparison.PriorSnapshot != prior.Snapshot {
+		t.Fatalf("comparison=%+v", current.Comparison)
+	}
+}
+
 func committedCompositionInputs(t *testing.T) []ComposeInput {
 	t.Helper()
 	names := []string{

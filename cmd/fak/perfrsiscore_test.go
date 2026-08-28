@@ -20,6 +20,10 @@ func fixturePath() string {
 	return filepath.Join("..", "..", "internal", "perfrsiscore", "testdata", "complete.json")
 }
 
+func performanceRSIDogfoodPath() string {
+	return filepath.Join("..", "..", "docs", "_witnesses", "issue-9768-performance-rsi-dogfood", "input.json")
+}
+
 func performanceRSICommittedReceiptPaths() []string {
 	base := filepath.Join("..", "..", "docs", "_witnesses")
 	return []string{
@@ -192,6 +196,60 @@ func TestPerformanceRSIRenderers(t *testing.T) {
 		if !strings.Contains(out, "cycle_time") {
 			t.Fatalf("%v missing dimension", tc)
 		}
+		if !strings.Contains(out, "loop health") && !strings.Contains(out, "loop_health") && !strings.Contains(out, "Loop-health grade") {
+			t.Fatalf("%v missing loop-health grade", tc)
+		}
+	}
+}
+
+func TestPerformanceRSIDogfoodJSONReportsPoorNamedLoopHealthDebt(t *testing.T) {
+	code, out, errText := runPerfRSI(t, "--input", performanceRSIDogfoodPath(), "--json")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errText)
+	}
+	var report struct {
+		LoopHealth struct {
+			Score          float64 `json:"score"`
+			Grade          string  `json:"grade"`
+			Clean          bool    `json:"clean"`
+			Interpretation string  `json:"interpretation"`
+		} `json:"loop_health"`
+		DebtSummary struct {
+			PerformanceRSIDebt int `json:"performance_rsi_debt"`
+			Total              int `json:"total"`
+			DimensionsMeasured int `json:"dimensions_measured"`
+			DimensionsTotal    int `json:"dimensions_total"`
+			Behind             int `json:"behind"`
+			Unknown            int `json:"unknown"`
+			Evidence           []struct {
+				Dimension       string   `json:"dimension"`
+				Status          string   `json:"status"`
+				NormalizedRatio *float64 `json:"normalized_ratio"`
+				Source          string   `json:"source"`
+			} `json:"evidence"`
+		} `json:"debt_summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.LoopHealth.Score != 62.6 || report.LoopHealth.Grade != "D" || report.LoopHealth.Clean ||
+		!strings.Contains(report.LoopHealth.Interpretation, "does not prove") {
+		t.Fatalf("loop health=%+v", report.LoopHealth)
+	}
+	if report.DebtSummary.PerformanceRSIDebt != 9 || report.DebtSummary.Total != 9 ||
+		report.DebtSummary.DimensionsMeasured != 15 || report.DebtSummary.DimensionsTotal != 16 ||
+		report.DebtSummary.Behind != 8 || report.DebtSummary.Unknown != 1 ||
+		len(report.DebtSummary.Evidence) != 9 {
+		t.Fatalf("debt summary=%+v", report.DebtSummary)
+	}
+	if got := report.DebtSummary.Evidence[0]; got.Dimension != "cycle_time" ||
+		got.Status != "BEHIND" || got.NormalizedRatio == nil || *got.NormalizedRatio != 0.01 ||
+		got.Source != "cycle:fak-performance-rsi-cycle/1" {
+		t.Fatalf("first named evidence=%+v", got)
+	}
+	if got := report.DebtSummary.Evidence[6]; got.Dimension != "hardware_utilization" ||
+		got.Status != "UNKNOWN" || got.NormalizedRatio != nil || got.Source != "fixture/hardware" {
+		t.Fatalf("UNKNOWN named evidence=%+v", got)
 	}
 }
 
