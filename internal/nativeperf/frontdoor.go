@@ -79,10 +79,10 @@ func BuildFrontDoorSnapshot(graph Graph, asOf time.Time) (FrontDoorSnapshot, err
 		}
 	}
 	if witnessed == nil || witnessed.Classification != ClassWitnessed || graph.Comparison.Classification != ClassComparison {
-		return FrontDoorSnapshot{}, fmt.Errorf("native performance graph lacks the witnessed Metal baseline/comparison pair")
+		return FrontDoorSnapshot{}, fmt.Errorf("native performance graph lacks the witnessed Metal baseline/comparison pair; restore the resident-q4k-baseline witnessed row and comparison classification")
 	}
 	if witnessed.Provenance != graph.Comparison.Provenance || witnessed.ObservedOn != graph.Comparison.ObservedOn {
-		return FrontDoorSnapshot{}, fmt.Errorf("Metal baseline/comparison provenance or observation date differs")
+		return FrontDoorSnapshot{}, fmt.Errorf("Metal baseline/comparison provenance or observation date differs; use one shared provenance and observed_on value for both rows")
 	}
 	approx := FrontDoorResult{
 		Class: "approximate", EnvelopeID: graph.Envelope.ID,
@@ -134,7 +134,7 @@ func FrontDoorBlock(snapshot FrontDoorSnapshot, surface string) (string, error) 
 	case FrontDoorSurfaceLatest:
 		body = renderLatestFrontDoor(snapshot)
 	default:
-		return "", fmt.Errorf("unknown Qwen front-door surface %q", surface)
+		return "", fmt.Errorf("unknown Qwen front-door surface %q; choose %q, %q, or %q", surface, FrontDoorSurfaceREADME, FrontDoorSurfaceIndex, FrontDoorSurfaceLatest)
 	}
 	return FrontDoorBegin + "\n" + body + "\n" + FrontDoorEnd, nil
 }
@@ -207,7 +207,7 @@ func ExtractFrontDoorBlock(doc string) (string, bool) {
 func SpliceFrontDoorBlock(doc, block string) (string, error) {
 	current, ok := ExtractFrontDoorBlock(doc)
 	if !ok {
-		return "", fmt.Errorf("Qwen front-door markers not found")
+		return "", fmt.Errorf("Qwen front-door markers not found or ambiguous; restore exactly one Qwen front-door marker pair before running fak native-performance --write-doc")
 	}
 	return strings.Replace(doc, current, block, 1), nil
 }

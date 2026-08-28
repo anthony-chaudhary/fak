@@ -129,3 +129,50 @@ func TestFrontDoorEdgeAdversarialInputsFailClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestFrontDoorErrorsRequireRecovery(t *testing.T) {
+	snapshot, err := BuildFrontDoorSnapshot(ActiveGraph(), time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		run      func() error
+		recovery string
+	}{
+		{name: "invalid graph", run: func() error {
+			graph := ActiveGraph()
+			graph.Schema = "invalid"
+			_, err := BuildFrontDoorSnapshot(graph, time.Time{})
+			return err
+		}, recovery: "must be"},
+		{name: "missing baseline pair", run: func() error {
+			graph := ActiveGraph()
+			graph.Rungs, graph.Features = nil, nil
+			_, err := BuildFrontDoorSnapshot(graph, time.Time{})
+			return err
+		}, recovery: "restore the resident-q4k-baseline witnessed row"},
+		{name: "mismatched evidence", run: func() error {
+			graph := ActiveGraph()
+			graph.Comparison.Provenance = "different"
+			_, err := BuildFrontDoorSnapshot(graph, time.Time{})
+			return err
+		}, recovery: "use one shared provenance and observed_on value"},
+		{name: "unknown surface", run: func() error {
+			_, err := FrontDoorBlock(snapshot, "hostile")
+			return err
+		}, recovery: `choose "readme", "index", or "latest"`},
+		{name: "missing markers", run: func() error {
+			_, err := SpliceFrontDoorBlock("no markers", "unused")
+			return err
+		}, recovery: "restore exactly one Qwen front-door marker pair"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.run()
+			if err == nil || !strings.Contains(err.Error(), test.recovery) {
+				t.Fatalf("error = %v, want recovery containing %q", err, test.recovery)
+			}
+		})
+	}
+}
