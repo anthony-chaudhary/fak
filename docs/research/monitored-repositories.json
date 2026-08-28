@@ -1,6 +1,6 @@
 {
   "schema": "fak-monitored-repositories/1",
-  "updated_at": "2026-08-28T13:48:46Z",
+  "updated_at": "2026-08-28T14:34:48Z",
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
@@ -2079,6 +2079,74 @@
       "checked_revision": "161705a68f64df329c88a6da5f20300a89aa7542",
       "stars_at_check": 1191,
       "last_push_at_check": "2026-08-18T10:31:20Z"
+    },
+    {
+      "repository": "nokia-applied-research/SPECTRA",
+      "url": "https://github.com/nokia-applied-research/SPECTRA",
+      "status": "studied",
+      "priority": 28,
+      "why": "MIT research artifact for activation-weighted low-rank KV transforms, reverse-water-filling mixed rates, and output-projection healing. The deep study separates its demonstrated memory/quality frontier from its unproven serving-throughput path and binds the surviving borrow to a fak-native Qwen3.8 oracle.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "272032275106dc5944fbfa7091a1ceb403fa7e28",
+      "stars_at_check": 1,
+      "last_push_at_check": "2026-08-12T00:53:48Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md",
+      "inventory": {
+        "mode": "exhaustive",
+        "indexed_revision": "272032275106dc5944fbfa7091a1ceb403fa7e28",
+        "source_classes": [
+          "paper_source",
+          "readme_demos",
+          "runtime_source",
+          "evaluation_benchmarks_assets",
+          "history_releases",
+          "open_closed_issues_prs_discussions",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 8,
+        "candidate_count": 8,
+        "filed_issue_count": 1,
+        "source_evidence": [
+          {
+            "class": "paper_source",
+            "evidence": ["https://arxiv.org/abs/2608.07915v1"],
+            "note": "Version 1 source and PDF read; method, tables, appendices, calibration/evaluation envelope, and claim boundaries reconciled."
+          },
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "GitHub API read-back: 0 issues, 0 pull requests, 0 releases, 0 tags, 0 workflows; discussions disabled"
+            ],
+            "note": "Projects v2 was not enumerable with the available token and is explicitly excluded from the absence claim."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities queries for spectral latent KV, reverse water-filling, W_O healing, fused latent attention, and effective-byte accounting",
+              "raw inspection of internal/model/kvquant.go, coldkv.go, kvlayout.go, mla_latent_kv_test.go, internal/compute/kvprecision.go, and internal/engine/kv_quantization.go"
+            ],
+            "note": "Queries returned no exact card; raw code proves existing Q4+recovery and MLA strengths plus the absent transform/rate-allocation seam."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": ["docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md#candidate-matrix"]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9785",
+              "https://github.com/anthony-chaudhary/fak/issues/9789",
+              "study_13eb7b60b128c49c8575e840bcf36ef0ae625c4a314fb5d36551794c9046c8c4"
+            ]
+          }
+        ],
+        "issue_refs": ["#9785", "#9789", "#9141", "#9161", "#2236"],
+        "completeness_critic": "Paper source/PDF, all load-bearing code, README/demos/eval/bench/plot surfaces, all assets, exact tree, both commits, GitHub metadata and collaboration surfaces, license, FAK self-query, candidate dispositions, dedupe, and issue contract were covered; Projects v2 token scope, dependency repos, and the noncanonical fork are the declared exclusions."
+      }
     },
     {
       "repository": "novitalabs/pegaflow",

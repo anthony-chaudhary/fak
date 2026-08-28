@@ -327,6 +327,25 @@ var matrix = []Op{
 		Note:        "Differentiator is exact eviction/reuse on an owned f32 cache, not paged throughput.",
 	},
 	{
+		Slug:  "kv-cache-transform-compression",
+		Title: "KV cache transform coding / mixed-rate compression",
+		FileGlobs: []string{
+			"internal/model/kvquant.go", "internal/model/coldkv.go",
+			"internal/engine/kv_quantization.go", "internal/compute/kvprecision.go",
+		},
+		FakPath:     "internal/model/kvquant.go + coldkv.go; internal/engine/kv_quantization.go; internal/compute/kvprecision.go",
+		SOTA:        "SPECTRA@272032275106dc5944fbfa7091a1ceb403fa7e28 activation-weighted latent transform + reverse water-filling; KIVI; KVQuant; TurboQuant; PolarQuant; Palu",
+		PrimaryLink: "https://github.com/nokia-applied-research/SPECTRA/tree/272032275106dc5944fbfa7091a1ceb403fa7e28",
+		Route:       RouteBorrow,
+		Oracle:      "matched fak-native Qwen3.8 dense-KV and current Q4-cold-KV controls; predeclared LongBench, RULER, and agent-code quality floors; actual payload+metadata resident bytes and peak transient bytes; calibration/encode/setup cost plus end-to-end latency and throughput; exact pre-RoPE eviction/reuse compatibility; engine=fak-native and zero fallback",
+		Papers: []string{
+			"SPECTRA: Pushing the KV Cache Beyond the 2-Bit Cliff via Spectral Transform Coding (Zhang et al., 2026) arXiv:2608.07915v1",
+			"Palu: Compressing KV-Cache with Low-Rank Projection (Chang et al., 2024) arXiv:2407.21118",
+			"KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache (Liu et al., 2024) arXiv:2402.02750",
+		},
+		Note: "Borrow the transform and allocation math only after the existing Q4+recovery baseline is measured; analytical capacity, filler allocation, or a disconnected kernel microbenchmark is not a throughput witness, and no runtime/backend fallback is permitted.",
+	},
+	{
 		Slug:        "metal-quant-gemm",
 		Title:       "Metal Q4_K / Q6_K GEMM",
 		FileGlobs:   []string{"internal/metalgemm/*", "internal/model/metal_q*k*.go", "internal/model/metal_prefill.go", "internal/model/*.metal", "internal/compute/metal.go"},
