@@ -110,6 +110,7 @@ type InKernelPlanner struct {
 	coalesceReadyHook  func()
 	coalesceBatchHook  func(int)
 	coalesceSharedHook func(panels int, macs int64)
+	coalesceCohortID   atomic.Uint64
 
 	reqMemMu      sync.Mutex
 	lastReqMemory RequestMemoryStats
@@ -672,6 +673,7 @@ type inKernelGenerateResult struct {
 	sourceTier        radixkv.SnapshotTier
 	prefillS, decodeS float64
 	stopped           bool
+	batchReceipt      InKernelBatchReceipt
 }
 
 func (p *InKernelPlanner) generateReusedRecovering(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (res inKernelGenerateResult, err error) {
@@ -1011,6 +1013,10 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 	}
 	if sp.NativeInferenceReceipt {
 		comp.NativeInference = p.buildNativeInferenceReceipt(measurement, prefillS, decodeS)
+	}
+	if genRes.batchReceipt.CohortID != 0 {
+		receipt := genRes.batchReceipt
+		comp.InKernelBatch = &receipt
 	}
 	if sp.DecodeTrace {
 		events := make([]NativeDecodeTraceEvent, len(measurement.traceEvents))

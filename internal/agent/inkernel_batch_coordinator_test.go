@@ -96,6 +96,21 @@ func TestInKernelPlannerCoalescesConcurrentQwenTurns(t *testing.T) {
 	}
 	readyOnce.Do(func() { close(ready) })
 	wg.Wait()
+	var cohortID uint64
+	for i := range answers {
+		if answers[i].c == nil || answers[i].c.InKernelBatch == nil {
+			t.Fatalf("coalesced[%d] missing batch receipt", i)
+		}
+		r := answers[i].c.InKernelBatch
+		if r.CohortSize != len(messages) || r.SharedPanels == 0 || r.SharedMACs == 0 {
+			t.Fatalf("coalesced[%d] receipt=%+v", i, r)
+		}
+		if cohortID == 0 {
+			cohortID = r.CohortID
+		} else if r.CohortID != cohortID {
+			t.Fatalf("coalesced receipts identify different cohorts: %d != %d", r.CohortID, cohortID)
+		}
+	}
 	for i := range answers {
 		if answers[i].err != nil {
 			t.Fatalf("coalesced[%d]: %v", i, answers[i].err)
