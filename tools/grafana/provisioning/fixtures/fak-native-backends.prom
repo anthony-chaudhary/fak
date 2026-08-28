@@ -1,0 +1,79 @@
+# Synthetic deterministic Grafana render fixture for issue #9814.
+# It proves contract/query/render behavior only and is not live performance evidence.
+# Live model-specific evidence must name Qwen3.8 and fak-native.
+# HELP fak_native_backend_info Synthetic deterministic fixture for fak_native_backend_info.
+# TYPE fak_native_backend_info gauge
+# HELP fak_native_backend_available Synthetic deterministic fixture for fak_native_backend_available.
+# TYPE fak_native_backend_available gauge
+# HELP fak_native_backend_device_utilization_ratio Synthetic deterministic fixture for fak_native_backend_device_utilization_ratio.
+# TYPE fak_native_backend_device_utilization_ratio gauge
+# HELP fak_native_backend_memory_bytes Synthetic deterministic fixture for fak_native_backend_memory_bytes.
+# TYPE fak_native_backend_memory_bytes gauge
+# HELP fak_native_backend_memory_pressure_ratio Synthetic deterministic fixture for fak_native_backend_memory_pressure_ratio.
+# TYPE fak_native_backend_memory_pressure_ratio gauge
+# HELP fak_native_backend_delay_seconds Synthetic deterministic fixture for fak_native_backend_delay_seconds.
+# TYPE fak_native_backend_delay_seconds gauge
+# HELP fak_native_backend_transfer_bytes_total Synthetic deterministic fixture for fak_native_backend_transfer_bytes_total.
+# TYPE fak_native_backend_transfer_bytes_total counter
+# HELP fak_native_backend_transfer_seconds_total Synthetic deterministic fixture for fak_native_backend_transfer_seconds_total.
+# TYPE fak_native_backend_transfer_seconds_total counter
+# HELP fak_native_backend_kernel_calls_total Synthetic deterministic fixture for fak_native_backend_kernel_calls_total.
+# TYPE fak_native_backend_kernel_calls_total counter
+# HELP fak_native_backend_kernel_seconds_total Synthetic deterministic fixture for fak_native_backend_kernel_seconds_total.
+# TYPE fak_native_backend_kernel_seconds_total counter
+# HELP fak_native_backend_sync_events_total Synthetic deterministic fixture for fak_native_backend_sync_events_total.
+# TYPE fak_native_backend_sync_events_total counter
+# HELP fak_native_backend_sync_seconds_total Synthetic deterministic fixture for fak_native_backend_sync_seconds_total.
+# TYPE fak_native_backend_sync_seconds_total counter
+# HELP fak_native_backend_graph_state Synthetic deterministic fixture for fak_native_backend_graph_state.
+# TYPE fak_native_backend_graph_state gauge
+fak_native_backend_info{backend="metal",engine="fak-native",model_family="Qwen3.8",schema="v1"} 1
+fak_native_backend_info{backend="cuda",engine="fak-native",model_family="Qwen3.8",schema="v1"} 1
+fak_native_backend_available{backend="metal",reason="none"} 1
+fak_native_backend_available{backend="cuda",reason="none"} 1
+fak_native_backend_device_utilization_ratio{backend="metal"} 0.78
+fak_native_backend_device_utilization_ratio{backend="cuda"} 0.91
+fak_native_backend_memory_bytes{backend="metal",kind="allocated"} 12884901888
+fak_native_backend_memory_bytes{backend="metal",kind="resident"} 11811160064
+fak_native_backend_memory_bytes{backend="cuda",kind="allocated"} 21474836480
+fak_native_backend_memory_bytes{backend="cuda",kind="resident"} 20401094656
+fak_native_backend_memory_pressure_ratio{backend="metal"} 0.72
+fak_native_backend_memory_pressure_ratio{backend="cuda"} 0.64
+fak_native_backend_delay_seconds{backend="metal",kind="queue"} 0.0042
+fak_native_backend_delay_seconds{backend="metal",kind="command_buffer"} 0.0017
+fak_native_backend_delay_seconds{backend="cuda",kind="queue"} 0.0028
+fak_native_backend_delay_seconds{backend="cuda",kind="stream"} 0.0011
+fak_native_backend_transfer_bytes_total{backend="metal",direction="upload"} 524288000
+fak_native_backend_transfer_bytes_total{backend="metal",direction="download"} 104857600
+fak_native_backend_transfer_bytes_total{backend="cuda",direction="upload"} 838860800
+fak_native_backend_transfer_bytes_total{backend="cuda",direction="download"} 157286400
+fak_native_backend_transfer_seconds_total{backend="metal",direction="upload"} 1.8
+fak_native_backend_transfer_seconds_total{backend="metal",direction="download"} 0.6
+fak_native_backend_transfer_seconds_total{backend="cuda",direction="upload"} 1.3
+fak_native_backend_transfer_seconds_total{backend="cuda",direction="download"} 0.4
+fak_native_backend_kernel_calls_total{backend="metal",family="matmul"} 8200
+fak_native_backend_kernel_calls_total{backend="metal",family="attention"} 4100
+fak_native_backend_kernel_calls_total{backend="metal",family="normalization"} 2050
+fak_native_backend_kernel_calls_total{backend="metal",family="sampling"} 520
+fak_native_backend_kernel_calls_total{backend="cuda",family="matmul"} 9400
+fak_native_backend_kernel_calls_total{backend="cuda",family="attention"} 4700
+fak_native_backend_kernel_calls_total{backend="cuda",family="normalization"} 2350
+fak_native_backend_kernel_calls_total{backend="cuda",family="sampling"} 590
+fak_native_backend_kernel_seconds_total{backend="metal",family="matmul"} 58
+fak_native_backend_kernel_seconds_total{backend="metal",family="attention"} 39
+fak_native_backend_kernel_seconds_total{backend="metal",family="normalization"} 8
+fak_native_backend_kernel_seconds_total{backend="metal",family="sampling"} 3
+fak_native_backend_kernel_seconds_total{backend="cuda",family="matmul"} 44
+fak_native_backend_kernel_seconds_total{backend="cuda",family="attention"} 31
+fak_native_backend_kernel_seconds_total{backend="cuda",family="normalization"} 6
+fak_native_backend_kernel_seconds_total{backend="cuda",family="sampling"} 2
+fak_native_backend_sync_events_total{backend="metal",kind="fence"} 930
+fak_native_backend_sync_events_total{backend="metal",kind="device_wait"} 86
+fak_native_backend_sync_events_total{backend="cuda",kind="event"} 1100
+fak_native_backend_sync_events_total{backend="cuda",kind="barrier"} 120
+fak_native_backend_sync_seconds_total{backend="metal",kind="fence"} 4.2
+fak_native_backend_sync_seconds_total{backend="metal",kind="device_wait"} 1.1
+fak_native_backend_sync_seconds_total{backend="cuda",kind="event"} 3.4
+fak_native_backend_sync_seconds_total{backend="cuda",kind="barrier"} 0.8
+fak_native_backend_graph_state{backend="metal",state="unsupported"} 1
+fak_native_backend_graph_state{backend="cuda",state="replaying"} 1

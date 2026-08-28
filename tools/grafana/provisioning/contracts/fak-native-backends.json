@@ -1,0 +1,54 @@
+{
+  "schema": "fak-grafana-native-backends-contract/v1",
+  "dashboard": "../../../dashboards/fak-native-backends.json",
+  "dashboard_uid": "fak-native-backends",
+  "telemetry_schema": "fak-native-backend-telemetry/1",
+  "engine_policy": {
+    "required": "fak-native",
+    "forbidden_fallbacks": ["llama.cpp", "llamacpp", "auto"],
+    "live_evidence_model": "Qwen3.8"
+  },
+  "bounded_dimensions": {
+    "backend": ["metal", "cuda"],
+    "model_family": ["Qwen3.8", "other"],
+    "reason": ["none", "backend_not_built", "device_not_found", "permission_denied", "driver_unavailable", "telemetry_unsupported", "collection_failed"],
+    "memory_kind": ["allocated", "resident"],
+    "delay_kind": ["queue", "stream", "command_buffer"],
+    "direction": ["upload", "download"],
+    "kernel_family": ["matmul", "attention", "normalization", "embedding", "sampling", "transfer", "other"],
+    "sync_kind": ["fence", "event", "barrier", "device_wait", "other"],
+    "graph_state": ["unsupported", "disabled", "capturing", "ready", "replaying", "failed"]
+  },
+  "semantics": {
+    "available": "Exactly one fak_native_backend_available series per backend is 1. reason=none means available; a non-none reason means unavailable.",
+    "unavailable": "Unavailable backends omit measurements. Dashboard queries gate measurements on reason=none and render the explicit reason instead of zero or another engine.",
+    "optional": "Graph/capture state and backend-specific delay kinds are absent when unavailable from the native API; absence is not zero."
+  },
+  "metric_families": [
+    "fak_native_backend_info",
+    "fak_native_backend_available",
+    "fak_native_backend_device_utilization_ratio",
+    "fak_native_backend_memory_bytes",
+    "fak_native_backend_memory_pressure_ratio",
+    "fak_native_backend_delay_seconds",
+    "fak_native_backend_transfer_bytes_total",
+    "fak_native_backend_transfer_seconds_total",
+    "fak_native_backend_kernel_calls_total",
+    "fak_native_backend_kernel_seconds_total",
+    "fak_native_backend_sync_events_total",
+    "fak_native_backend_sync_seconds_total",
+    "fak_native_backend_graph_state"
+  ],
+  "required_coverage": [
+    "fak_native_identity", "backend_availability_reason", "device_utilization",
+    "memory_allocated_resident_pressure", "queue_stream_command_buffer_delay",
+    "upload_download", "kernel_families", "synchronization", "graph_capture_state"
+  ],
+  "visual_witness": {
+    "fixture": "../fixtures/fak-native-backends.prom",
+    "fixture_is_live_evidence": false,
+    "notice": "Synthetic deterministic fixture; not a live performance claim.",
+    "populated_screenshot": "../witnesses/fak-native-backends-populated.png",
+    "unavailable_screenshot": "../witnesses/fak-native-backends-unavailable.png"
+  }
+}
