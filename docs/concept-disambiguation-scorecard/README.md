@@ -15,23 +15,23 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **3** (clarity 2 + coverage 1) |
-| **Crystal-clear concepts (and climbing)** | **959** crystal of 2673 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2794 / 2795** (100.0% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **10** (clarity 2 + coverage 8) |
+| **Crystal-clear concepts (and climbing)** | **960** crystal of 2674 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2794 / 2802** (99.7% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **77** of 3792 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **77** of 3794 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 98.7/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2673 concepts - score 98.9/100 (grade A) - disambiguation-debt 3
+concept-disambiguation chart - 2674 concepts - score 98.7/100 (grade A) - disambiguation-debt 10
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 959
+  * crystal       ################............ 960
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (80 concept(s); 15 crystal)
   cache            *****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (253 concept(s); 77 crystal)
-  context-ctx      ******************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (223 concept(s); 66 crystal)
+  context-ctx      *******************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (224 concept(s); 67 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         *********************************ooooooooooooooooooooo (54 concept(s); 33 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -62,11 +62,13 @@ clarity mix by family (each cell = one concept):
   witness-proof    ***************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (155 concept(s); 75 crystal)
 
 coverage by family (positioned / discovered):
-  guard-gate       ############################ 497/498
-  session-runtime  ############################ 268/269
+  guard-gate       ############################ 497/500
+  policy-capability ############################ 209/211
+  session-runtime  ############################ 268/270
+  context-ctx      ############################ 237/238
+  witness-proof    ############################ 162/163
   attention        ############################ 85/85
   cache            ############################ 298/298
-  context-ctx      ############################ 237/237
   cross-cluster    ............................ 0/0
   decision         ############################ 60/60
   dev-tier         ............................ 0/0
@@ -75,16 +77,14 @@ coverage by family (positioned / discovered):
   layout           ############################ 19/19
   loop             ############################ 93/93
   plan             ############################ 404/404
-  policy-capability ############################ 209/209
   pool             ############################ 40/40
   render-materialize ############################ 209/209
   score-debt       ############################ 92/92
   support-maturity ############################ 62/62
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
-  witness-proof    ############################ 162/162
 
-namespace coverage  [################################] 100.0%  (2794/2795 confusable tokens positioned)
+namespace coverage  [################################] 99.7%  (2794/2802 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 207/207
 
-name index: 3792 lookup name(s) -> 2673 concept(s), 77 ambiguous
+name index: 3794 lookup name(s) -> 2674 concept(s), 77 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **207 / 207** (207 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1742 / 4733 |
+| Boundaries drawn (mutual / total) | 1748 / 4739 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3792 over 2673 concepts |
+| Lookup names indexed | 3794 over 2674 concepts |
 | Lookup names landing on several concepts | 77 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2673 |
+| Concepts carrying a contrast set | 2674 |
 
 ## The concepts (best verdict first)
 
@@ -231,6 +231,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **CompactionJoinKey** - The event-join coordinate a compaction fire shares with the provider usage record for the turn it rewrote, so the fire's provider-side re-warm counters can be PROVEN against one usage row instead of pasted in by caller convention. The zero value is UNSTAMPED: a sample assembled without turn context, which the join passes through verbatim rather than counting as a failed join. |
 | * | crystal | symbol | context-ctx | **CompactionJoinResult** - The outcome of attempting to bind one compaction fire to the provider usage record sharing its CompactionJoinKey: the joined sample plus whether the binding was PROVEN, left unstamped, or withdrawn because no single usage row matched. It reports the provenance of the provider counters, so an unproven join withdraws them rather than letting an unmatched number stand as evidence. |
 | * | crystal | symbol | context-ctx | **full_context_tokens** - Token count in the unscoped full-context counterfactual used as the conservation baseline. |
+| * | crystal | subsystem | context-ctx | **OpenViking REST adapter** - The optional typed HTTP client that lets fak operators call an external OpenViking service through its public REST contract. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextual** - `contextual` is the context-ctx symbol declared or used at `cmd/fak/harness_preview.go:21` as `currentDomain := fs.String("current-domain", "", "last admitted contextual domain")`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextid** - `ContextID` is the context-ctx symbol declared or used at `cmd/microcontextdemo/effect_batch.go:22` as `ContextID string `json:"context_id"``. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for additionalcontext** - `additionalContext` is the context-ctx symbol declared or used at `cmd/fak/guard_sessionstart.go:31` as `// context as additionalContext (a one-time cost, NOT a per-prompt-prefix tax — so it does`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2946,8 +2947,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 23 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2991/4733 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2673 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2991/4739 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2674 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2955,18 +2956,20 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3792 lookup name(s) resolves - 77 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3794 lookup name(s) resolves - 77 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
 
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
-| guard-gate | 497 | 498 | 1 |
-| session-runtime | 268 | 269 | 1 |
+| guard-gate | 497 | 500 | 3 |
+| policy-capability | 209 | 211 | 2 |
+| session-runtime | 268 | 270 | 2 |
+| context-ctx | 237 | 238 | 1 |
+| witness-proof | 162 | 163 | 1 |
 | attention | 85 | 85 | 0 |
 | cache | 298 | 298 | 0 |
-| context-ctx | 237 | 237 | 0 |
 | cross-cluster | 0 | 0 | 0 |
 | decision | 60 | 60 | 0 |
 | dev-tier | 0 | 0 | 0 |
@@ -2975,12 +2978,10 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | layout | 19 | 19 | 0 |
 | loop | 93 | 93 | 0 |
 | plan | 404 | 404 | 0 |
-| policy-capability | 209 | 209 | 0 |
 | pool | 40 | 40 | 0 |
 | render-materialize | 209 | 209 | 0 |
 | score-debt | 92 | 92 | 0 |
 | support-maturity | 62 | 62 | 0 |
 | trajectory-control | 0 | 0 | 0 |
 | vfs | 0 | 0 | 0 |
-| witness-proof | 162 | 162 | 0 |
 

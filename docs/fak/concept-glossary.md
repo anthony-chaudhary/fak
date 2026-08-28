@@ -2445,3 +2445,10 @@ newmodel.NativeHardwareEnvelope.WeightLayout names the checkpoint weight packing
 newmodel.NativeHardwareEnvelope.StateLayout names the physical organization of recurrent/KV state admitted by obligation compilation, such as contiguous, independent of state kind and residency.
 
 **Distinct from:** It is native planning state-buffer organization, not checkpoint weight packing, not the model KV-cache algorithm/interface, and not ctxplan context layout.
+
+
+### OpenViking REST adapter
+
+The optional typed HTTP client that lets fak operators call an external OpenViking service through its public REST contract.
+
+**Distinct from:** An interoperability boundary only: it transports health, retrieval, session capture, and commit calls; it is not fak-native context storage, contextq materialization, ctxplan optimization, or recall persistence.
