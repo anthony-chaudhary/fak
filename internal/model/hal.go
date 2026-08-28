@@ -92,7 +92,6 @@ func (s *Session) Close() {
 		// The grouped-Q4_K readback slab is session-owned even on the legacy (Backend=nil) path.
 		s.q4kMLPOutputSlab = nil
 		s.mixedQKV = mixedQKVSession{}
-		s.closeQwen35GDNSequence()
 		// Sequence auxiliary state can be owned by a native capability even when
 		// Backend is nil, so its teardown is outside the compute-HAL branch.
 		s.closeQwen35HALState()
