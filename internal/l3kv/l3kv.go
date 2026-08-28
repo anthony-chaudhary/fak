@@ -24,9 +24,9 @@
 // backend's CanEvict). The in-process model backend gains that capability in a
 // paired change; until a wrapped backend exposes it, StageSpan returns a typed
 // FAULT — honest, and fail-safe (the capacity executor retains the live span on a
-// FAULT), never the in-process default's silent OK-that-drops. Restoring a span
-// back INTO the live decode cache (re-RoPE at a new position) is the reverse
-// direction owned by #1469; this leaf proves the durable round-trip of the bytes.
+// FAULT), never the in-process default's silent OK-that-drops. RestoreSpan completes
+// only after the wrapped backend's additive SpanRestorer validates and installs the
+// recovered image; absent that capability it reports a typed FAULT.
 package l3kv
 
 import (
@@ -82,12 +82,21 @@ type SpanStager interface {
 	StageSpanBytes(from, n int) ([]byte, error)
 }
 
+// SpanRestorer is the additive inverse of SpanStager. It parses and installs an
+// opaque span image into the wrapped live cache, returning the number of
+// positions actually installed. A durable read is not a restore success until
+// this capability commits the bytes.
+type SpanRestorer interface {
+	RestoreSpanBytes(payload []byte) (positions int, err error)
+}
+
 // backend wraps an inner abi.KVBackend with the durable L3 residency tier. The four
 // local ops delegate to inner; the residency pair moves bytes through store.
 type backend struct {
-	inner  abi.KVBackend
-	stager SpanStager // nil when inner exposes no span byte-source
-	store  Store
+	inner    abi.KVBackend
+	stager   SpanStager   // nil when inner exposes no span byte-source
+	restorer SpanRestorer // nil when inner cannot install recovered bytes
+	store    Store
 }
 
 // New wraps inner with the durable L3 residency tier at store. If inner also
@@ -98,6 +107,9 @@ func New(inner abi.KVBackend, store Store) abi.KVBackend {
 	b := &backend{inner: inner, store: store}
 	if st, ok := inner.(SpanStager); ok {
 		b.stager = st
+	}
+	if restore, ok := inner.(SpanRestorer); ok {
+		b.restorer = restore
 	}
 	return b
 }
@@ -158,7 +170,17 @@ func (b *backend) RestoreSpan(ctx context.Context, digest string) (abi.KVResiden
 	if !found {
 		return abi.KVResidency{Outcome: abi.KVResidencyMiss, Digest: digest, Reason: "l3kv: span not resident in L3 tier"}, nil
 	}
-	return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest, BytesMoved: int64(len(payload))}, nil
+	if b.restorer == nil {
+		return fault(digest, "l3kv: wrapped backend exposes no span installer (SpanRestorer)"), nil
+	}
+	positions, err := b.restorer.RestoreSpanBytes(payload)
+	if err != nil {
+		return fault(digest, "l3kv: install restored span: "+err.Error()), nil
+	}
+	if positions <= 0 {
+		return fault(digest, "l3kv: span installer committed no positions"), nil
+	}
+	return abi.KVResidency{Outcome: abi.KVResidencyOK, Digest: digest, Positions: positions, BytesMoved: int64(len(payload))}, nil
 }
 
 func fault(digest, reason string) abi.KVResidency {

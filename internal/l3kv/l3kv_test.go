@@ -19,8 +19,11 @@ import (
 // the no-op default shape (OK with no bytes / MISS) so a test can prove that
 // wrapping it with l3kv is what adds real durable movement — the refute guard.
 type stagerKV struct {
-	spans map[[2]int][]byte
-	n     int
+	spans            map[[2]int][]byte
+	n                int
+	restorePositions int
+	restoreErr       error
+	installed        []byte
 }
 
 func (m *stagerKV) Len() int                    { return m.n }
@@ -39,6 +42,16 @@ func (m *stagerKV) StageSpanBytes(from, n int) ([]byte, error) {
 		return nil, fmt.Errorf("no span [%d,%d)", from, n)
 	}
 	return b, nil
+}
+func (m *stagerKV) RestoreSpanBytes(payload []byte) (int, error) {
+	if m.restoreErr != nil {
+		return 0, m.restoreErr
+	}
+	m.installed = append([]byte(nil), payload...)
+	if m.restorePositions > 0 {
+		return m.restorePositions, nil
+	}
+	return 1, nil
 }
 
 // bareKV is a test abi.KVBackend that does NOT implement SpanStager — the honest-fence
@@ -73,7 +86,7 @@ func spanBytes(n int) []byte {
 func TestStageThenRestoreRoundTripsBitExact(t *testing.T) {
 	ctx := context.Background()
 	payload := spanBytes(4096)
-	mock := &stagerKV{spans: map[[2]int][]byte{{10, 20}: payload}, n: 100}
+	mock := &stagerKV{spans: map[[2]int][]byte{{10, 20}: payload}, n: 100, restorePositions: 20}
 	store := newMemStore()
 	b := New(mock, store)
 
@@ -108,6 +121,26 @@ func TestStageThenRestoreRoundTripsBitExact(t *testing.T) {
 	}
 	if rr.BytesMoved != int64(len(payload)) {
 		t.Fatalf("RestoreSpan BytesMoved = %d, want %d", rr.BytesMoved, len(payload))
+	}
+	if rr.Positions != 20 || !bytes.Equal(mock.installed, payload) {
+		t.Fatalf("RestoreSpan positions=%d installed=%d, want 20/%d", rr.Positions, len(mock.installed), len(payload))
+	}
+}
+
+func TestRestoreRequiresSuccessfulLiveInstall(t *testing.T) {
+	ctx := context.Background()
+	payload := spanBytes(64)
+	store := newMemStore()
+	if err := store.Put(ctx, digestA, payload); err != nil {
+		t.Fatal(err)
+	}
+	without := New(bareKV{}, store)
+	if got, _ := without.RestoreSpan(ctx, digestA); got.Outcome != abi.KVResidencyFault {
+		t.Fatalf("no installer outcome=%v, want FAULT", got.Outcome)
+	}
+	failing := New(&stagerKV{restoreErr: errors.New("invalid span image")}, store)
+	if got, _ := failing.RestoreSpan(ctx, digestA); got.Outcome != abi.KVResidencyFault || got.BytesMoved != 0 {
+		t.Fatalf("failed install=%+v, want zero-byte FAULT", got)
 	}
 }
 
