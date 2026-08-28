@@ -908,6 +908,20 @@ def _kpi(name: str, defects: list[str], soft: list[str] | None = None) -> dict:
             "detail": "", "defects": defects, "soft": soft or []}
 
 
+def test_payload_uses_actionable_duplication_debt_and_keeps_raw_count():
+    kpis = [
+        {"kpi": "duplication", "defects": ["a", "b", "c"], "soft": [],
+         "score": 0, "detail": "raw", "weighted_debt": 1.5,
+         "subcategories": {"extractable": 1, "local": 1, "pair": 1},
+         "subcategory_weights": {"extractable": 1.0, "local": 0.5, "pair": 0.5}},
+        {"kpi": "dead_code", "defects": ["dead"], "soft": [], "score": 0, "detail": "dead"},
+    ]
+    payload = cs.build_payload(workspace="/repo", kpis=kpis)
+    assert payload["corpus"]["debt_by_kpi"]["duplication"] == 2
+    assert payload["corpus"]["dup_raw_groups"] == 3
+    assert payload["corpus"]["slop_debt"] == 3
+
+
 def test_payload_clean_is_ok_zero_debt():
     kpis = [_kpi(n, []) for n in cs.KPI_WEIGHTS]
     p = cs.build_payload(workspace="/x", kpis=kpis)

@@ -1605,11 +1605,15 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     score = sum(KPI_WEIGHTS[name] * by_name[name]["score"]
                 for name in KPI_WEIGHTS if name in by_name)
     score = round(score, 1)
-    slop_debt = sum(len(k["defects"]) for k in kpis)
+    raw_debt_by = {k["kpi"]: len(k["defects"]) for k in kpis}
+    dup_kpi = by_name.get("duplication") or {}
+    debt_by = dict(raw_debt_by)
+    debt_by["duplication"] = round(float(dup_kpi.get("weighted_debt", debt_by.get("duplication", 0))))
+    slop_debt = sum(debt_by.values())
     n_soft = sum(len(k["soft"]) for k in kpis)
     grade = grade_letter(score)
     breakdown = sorted(
-        ({"kpi": k["kpi"], "score": k["score"], "debt": len(k["defects"]),
+        ({"kpi": k["kpi"], "score": k["score"], "debt": debt_by[k["kpi"]],
           "detail": k["detail"]} for k in kpis),
         key=lambda x: (-x["debt"], x["score"]))
 
@@ -1619,7 +1623,8 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
         "slop_debt": slop_debt,
         "soft_signals": n_soft,
         "kpi_scores": {k["kpi"]: k["score"] for k in kpis},
-        "debt_by_kpi": {k["kpi"]: len(k["defects"]) for k in kpis},
+        "debt_by_kpi": debt_by,
+        "raw_debt_by_kpi": raw_debt_by,
         "breakdown": breakdown,
     }
     # Lift the stub_masquerade SOFT->HARD promotion readiness (#781) to the corpus
@@ -1633,10 +1638,10 @@ def build_payload(*, workspace: str, kpis: list[dict[str, Any]],
     # Surface the duplication payoff histogram as its own control-pane-reachable line
     # so the worst-first loop can target `dup_extractable` (the real missing-helpers)
     # directly rather than the flat count. Absent on fixtures without the split.
-    dup_kpi = by_name.get("duplication") or {}
     dup_sub = dup_kpi.get("subcategories")
     if dup_sub:
         corpus["dup_subcategories"] = dup_sub
+        corpus["dup_raw_groups"] = raw_debt_by.get("duplication", 0)
         # The payoff-weighted duplication debt (the note's keystone #1, #3140): the number
         # a worst-first loop should drive down, distinct from the flat `slop_debt`. Additive
         # — the headline slop_debt/score are unchanged. Also surface the per-subcategory
