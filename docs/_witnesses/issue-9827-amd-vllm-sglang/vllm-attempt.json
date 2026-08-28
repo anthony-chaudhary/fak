@@ -1,0 +1,92 @@
+{
+  "schema": "issue-9827-amd-vllm-sglang-attempt/2",
+  "engine": "vllm",
+  "typed_outcome": "non_comparable_runtime_gpu_not_admitted",
+  "captured_at": "2026-08-28T00:00:00Z",
+  "engine_pin": {
+    "pypi_latest_probe": "0.28.0",
+    "tag": "v0.11.0",
+    "commit": "b8b302cde434df8c9289a2b465406b47ebab1c2d"
+  },
+  "upstream_source": {
+    "url": "https://docs.vllm.ai/en/stable/getting_started/installation/gpu/",
+    "accessed": "2026-08-28",
+    "relevant_requirements": [
+      "AMD requires Linux",
+      "AMD requires ROCm >= 6.3",
+      "Listed AMD GPU families include MI200/MI300/MI350, RX 7900 gfx1100/1101, RX 9000 gfx1200/1201, and Ryzen AI MAX/AI 300",
+      "RX 7600 gfx1102 is not listed"
+    ]
+  },
+  "prerequisite_runtime_probe": {
+    "admitted": false,
+    "blocking_evidence": {
+      "rocminfo": {
+        "exit_code": 1,
+        "messages": [
+          "No WDDM adapters found",
+          "WSL environment detected",
+          "hsa_init Failed, possibly no supported GPU devices"
+        ]
+      },
+      "amd-smi": {
+        "exit_code": 255,
+        "messages": [
+          "drivers not loaded"
+        ]
+      }
+    }
+  },
+  "engine_execution": {
+    "status": "not_attempted",
+    "reason": "Server start was deferred because ROCm could not enumerate/admit the GPU in WSL.",
+    "server_started": false,
+    "throughput_measured": false,
+    "cpu_fallback_used": false,
+    "fak_native_substitution_used": false
+  },
+  "rerun_commands": {
+    "environment_probes": [
+      "uname -a",
+      "lsb_release -a",
+      "python3 --version",
+      "test -e /dev/dxg && echo /dev/dxg=true || echo /dev/dxg=false",
+      "test -e /dev/kfd && echo /dev/kfd=true || echo /dev/kfd=false",
+      "test -e /dev/dri && echo /dev/dri=true || echo /dev/dri=false",
+      "which rocminfo || true",
+      "which rocm-smi || true",
+      "which hipcc || true",
+      "dpkg -l | grep -E 'rocm-core|rocm-hip-runtime|hip-runtime-amd' || true"
+    ],
+    "user_scoped_rocm_install": [
+      "python3 -m venv ~/.cache/fak/issue-9827/rocm-10-gfx1102/venv",
+      "source ~/.cache/fak/issue-9827/rocm-10-gfx1102/venv/bin/activate",
+      "python -m pip install --upgrade pip",
+      "python -m pip install --extra-index-url https://stable.repo.amd.com/rocm/whl-next/ 'rocm[device-gfx1102,libraries]==10.0.0'",
+      "rocm-sdk targets",
+      "hipconfig"
+    ],
+    "wsl_bridge_install": [
+      "sudo dpkg -i ./librocdxg_1.2.2_amd64.deb",
+      "sha256sum ./librocdxg_1.2.2_amd64.deb"
+    ],
+    "wsl_bridge_install_notes": {
+      "mutates_system": true,
+      "requires_root": true,
+      "asset": "librocdxg_1.2.2_amd64.deb",
+      "sha256": "28ded1254811192ebace1f76c0227580184af7b27ab2475fb9728295a702d541"
+    },
+    "runtime_probes": [
+      "rocminfo",
+      "echo $?",
+      "amd-smi",
+      "echo $?"
+    ],
+    "deferred_engine_commands": [
+      "Only after rocminfo enumerates gfx1102: launch vLLM pinned to tag v0.11.0 commit b8b302cde434df8c9289a2b465406b47ebab1c2d",
+      "Run intended OpenAI-compatible loadgen with placeholder geometry: concurrency=<N>, prompt_tokens=<P>, output_tokens=<O>, duration_or_requests=<D>"
+    ]
+  },
+  "next_gate": "Do not attempt vLLM server startup until rocminfo enumerates gfx1102.",
+  "support_position": "unsupported_or_experimental_in_this_envelope"
+}
