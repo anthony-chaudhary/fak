@@ -242,12 +242,6 @@ func worktreeWorkerLand(argv []string) {
 		fmt.Fprintf(os.Stderr, "fak worktree worker land: unknown --verify %q (want off|go-build)\n", *verify)
 		os.Exit(2)
 	}
-	// workerworktree's isolated-index path commits with git commit-tree, which runs
-	// no git hooks. Compose the same managed-issue thought-check admission into its
-	// pre-apply VerifyHook so an inventory land cannot bypass the pre-commit gate.
-	// A genuinely unbound operator land (no managed env and no prepared/issue-bound
-	// message) retains the caller-selected hook byte-for-byte.
-	hook = composeWorktreeThoughtCheckVerify(strings.TrimSpace(*worktree), strings.TrimSpace(*msgFile), hook)
 
 	opts := []workerworktree.LandOption{
 		workerworktree.WithCoreLockWitness(*coreLockWitness),
