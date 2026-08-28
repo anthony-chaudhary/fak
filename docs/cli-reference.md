@@ -1620,6 +1620,24 @@ nonzero with `TRAJECTORY_SNAPSHOT_REFUSED`. Snapshots contain raw transcript byt
 keep them outside Git and public witness paths, never sync them as audit output, and
 delete the explicit directory when retention ends.
 
+Pass `--snapshot-usage-ledger FILE` on capture or replay to append a deliberately
+content-free adoption row to an explicit operator-owned JSONL target. The command
+declares `OUT_OF_TREE_WRITE` before the append; without this option it creates no
+usage ledger. Rows contain only schema, UTC observation time, `capture`/`replay`,
+`success`/`refused`/`error`, and a closed uppercase reason code. They contain no
+snapshot or root paths, hostnames, transcript identifiers or content, or
+correlatable hashes. Appends are concurrent-safe and restrict the ledger to 0600.
+
+```bash
+fak trajectory audit --snapshot /private/path/qwen-corpus \
+  --snapshot-usage-ledger /private/ops/snapshot-usage.jsonl
+fak trajectory audit \
+  --snapshot-usage-fold /private/ops/snapshot-usage.jsonl
+```
+
+The fold is read-only and emits deterministic counts by ascending ISO week,
+operation, and outcome.
+
 ## `fak new-model`: refusal-safe native model intake
 
 Compile a pinned model-release manifest into a deterministic fak-native onboarding packet:

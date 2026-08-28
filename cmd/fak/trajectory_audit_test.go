@@ -331,6 +331,102 @@ func TestRunTrajectoryAuditSnapshotFlagAndTamperRefusals(t *testing.T) {
 	}
 }
 
+func TestRunTrajectoryAuditSnapshotUsageLedgerAndFold(t *testing.T) {
+	base := t.TempDir()
+	claudeRoot, codexRoot := writeTrajectoryAuditSnapshotRoots(t, base)
+	snapshot := filepath.Join(base, "snapshot")
+	ledger := filepath.Join(base, "usage.jsonl")
+	var stdout, stderr bytes.Buffer
+	args := []string{"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--snapshot-out", snapshot, "--snapshot-usage-ledger", ledger}
+	if rc := runTrajectory(&stdout, &stderr, args); rc != 0 {
+		t.Fatalf("capture rc=%d stderr=%s", rc, stderr.String())
+	}
+	usageDeclaration := strings.Index(stderr.String(), "OUT_OF_TREE_WRITE operation=trajectory-audit-snapshot-usage")
+	snapshotDeclaration := strings.Index(stderr.String(), "OUT_OF_TREE_WRITE operation=trajectory-audit-snapshot target=")
+	if usageDeclaration < 0 || snapshotDeclaration < 0 || usageDeclaration > snapshotDeclaration {
+		t.Fatalf("write declarations out of order: %s", stderr.String())
+	}
+	withoutLedger := filepath.Join(base, "without-ledger.md")
+	withLedger := filepath.Join(base, "with-ledger.md")
+	stdout.Reset()
+	stderr.Reset()
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--snapshot", snapshot, "--md", withoutLedger}); rc != 0 {
+		t.Fatalf("plain replay rc=%d stderr=%s", rc, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "snapshot-usage") {
+		t.Fatalf("absent option changed stderr: %s", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--snapshot", snapshot, "--md", withLedger, "--snapshot-usage-ledger", ledger}); rc != 0 {
+		t.Fatalf("ledger replay rc=%d stderr=%s", rc, stderr.String())
+	}
+	plain, err := os.ReadFile(withoutLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracked, err := os.ReadFile(withLedger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(plain, tracked) {
+		t.Fatal("usage option changed replay output")
+	}
+	payload, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{base, claudeRoot, codexRoot, snapshot, "claude-snapshot", "codex-snapshot", "cli-private-prompt", strings.Repeat("a", 64)} {
+		if bytes.Contains(payload, []byte(forbidden)) {
+			t.Fatalf("usage ledger leaked %q: %s", forbidden, payload)
+		}
+	}
+	if info, err := os.Stat(ledger); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("ledger mode=%v err=%v", info.Mode().Perm(), err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--snapshot-usage-fold", ledger}); rc != 0 {
+		t.Fatalf("fold rc=%d stderr=%s", rc, stderr.String())
+	}
+	for _, want := range []string{`"schema":"fak-trajectory-audit-snapshot-usage-fold/1"`, `"total":2`, `"capture":1`, `"replay":1`, `"success":2`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("fold missing %q: %s", want, stdout.String())
+		}
+	}
+}
+
+func TestRunTrajectoryAuditSnapshotUsageRecordsRefusalAndError(t *testing.T) {
+	base := t.TempDir()
+	claudeRoot, codexRoot := writeTrajectoryAuditSnapshotRoots(t, base)
+	snapshot := filepath.Join(base, "snapshot")
+	ledger := filepath.Join(base, "usage.jsonl")
+	var stdout, stderr bytes.Buffer
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--snapshot-out", snapshot}); rc != 0 {
+		t.Fatalf("setup rc=%d stderr=%s", rc, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--snapshot-out", snapshot, "--snapshot-usage-ledger", ledger}); rc != 1 {
+		t.Fatalf("refusal rc=%d stderr=%s", rc, stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	missingOutput := filepath.Join(base, "missing", "audit.jsonl")
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--snapshot", snapshot, "--jsonl", missingOutput, "--snapshot-usage-ledger", ledger}); rc != 1 {
+		t.Fatalf("error rc=%d stderr=%s", rc, stderr.String())
+	}
+	payload, err := os.ReadFile(ledger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"outcome":"refused"`, `"reason":"SNAPSHOT_TARGET_EXISTS"`, `"outcome":"error"`, `"reason":"OUTPUT_WRITE_FAILED"`} {
+		if !bytes.Contains(payload, []byte(want)) {
+			t.Fatalf("ledger missing %q: %s", want, payload)
+		}
+	}
+}
+
 func writeTrajectoryAuditSnapshotRoots(t *testing.T, base string) (string, string) {
 	t.Helper()
 	claudeRoot := filepath.Join(base, "claude-live", "projects")
