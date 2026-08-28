@@ -1,12 +1,12 @@
-# Path-portable Go verification builds: 589 of 590 recompiles removed, 10× not yet
+# Path-portable Go verification builds: zero cross-root compiles experimentally, link remains
 
-Observed at `2026-08-28T04:02:09Z` for [#9661](https://github.com/anthony-chaudhary/fak/issues/9661). The source event is detached worker commit `ee6f393f419042c130a1b4b08a69883a962bc3f8`; the runtime is Go 1.26.6 on Darwin/arm64 with cgo enabled. Refresh this note when the Go toolchain changes, an isolated verification seam changes its build flags, or the matched Windows/amd64 benchmark is rerun.
+Observed at `2026-08-28T04:02:09Z` for [#9661](https://github.com/anthony-chaudhary/fak/issues/9661), with the cgo follow-up observed at `2026-08-28T04:40:23Z` for [#9671](https://github.com/anthony-chaudhary/fak/issues/9671). The first source event is detached worker commit `ee6f393f419042c130a1b4b08a69883a962bc3f8`; the follow-up is an experimental diff over `0f36db3068126dc8c70d4a6956fc71639e82d912` and still needs committed-tip verification. The runtime is Go 1.26.6 on Darwin/arm64 with cgo enabled. Refresh this note when the Go toolchain changes, an isolated verification seam changes its build flags, or the matched Windows/amd64 benchmark is rerun.
 
 ## Verdict
 
 FAK's isolated verification commands materialize identical source under a different absolute directory on each run. Without `-trimpath`, Go 1.26.6 hashes that package directory into the compile action ID. A shared `GOCACHE` therefore cannot reuse most repository packages across those roots. Adding `-trimpath` at the verification-only `buildcheck`, `ci-preflight`, and `validate` build/run/vet/test seams made the second fresh-root build **2.58× faster** (`23.59s` → `9.14s`) and reduced executed compile actions from **590 to 1**. That is 589 of 590 recompiles avoided.
 
-This is a useful measured improvement, not the requested 10× result. The one surviving compile is `internal/compute`'s cgo/Metal package and every sample still links the 85 MB runtime. Those are the next measured bottlenecks. The 2+2 falsifier also does not satisfy #9661's required 5+5 matched Windows/amd64 completion matrix.
+This is a useful measured improvement, not the requested 10× result. The original one surviving compile was `internal/compute`'s cgo/Metal package. The #9671 experiment below removes that action without disabling Metal; every sample still links the 85 MB runtime. The 2+2 falsifiers also do not satisfy #9661's required 5+5 matched Windows/amd64 completion matrix.
 
 The implementation deliberately does not change `scripts/build.sh`, the debuggable `make build` profile, CI `GOFLAGS`, or released artifacts. Debuggable builds retain host paths; only disposable verification roots opt into path normalization.
 
@@ -32,12 +32,39 @@ verdict=DENY reason=POLICY_BLOCK by=monitor
 
 The behavior outputs were byte-identical. Binary hashes were intentionally different because `-trimpath` changes debug/build metadata; the receipt records both sizes and SHA-256 digests rather than pretending byte identity is the behavior contract.
 
+## Cgo follow-up: the last compile action
+
+The machine-readable #9671 receipt is [`docs/_witnesses/build10x/cgo-path-cache-cross-root-2026-08-28.json`](../_witnesses/build10x/cgo-path-cache-cross-root-2026-08-28.json). It compares committed `0f36db306` with the same tree plus one production-line deletion: the redundant `#cgo CFLAGS: -I${SRCDIR}` in `internal/compute/metal.go`. Go's cgo documentation guarantees that the source directory is already on the compiler include path. The explicit directive changed no header lookup, but `${SRCDIR}` expanded to each checkout's absolute path and entered the build-action hash.
+
+The action-key trace made the cause direct:
+
+| Arm | Root A compute action | Root B compute action | Source-declared CFLAGS |
+|---|---|---|---|
+| committed baseline | `d2886bd3…` | `8bc74e1f…` | `-O2 -g -I<absolute-root>/internal/compute` |
+| #9671 treatment | `cc8fc799…` | `cc8fc799…` | `-O2 -g` |
+
+With separate initially empty caches for baseline and treatment, each second root reused only its own first root:
+
+| Sample | Cache state | Real | Compile | Link |
+|---|---|---:|---:|---:|
+| baseline root A | empty | 27.34s | 840 | 1 |
+| baseline root B | populated across roots | 12.15s | 1 | 1 |
+| treatment root A | empty | 25.17s | 840 | 1 |
+| treatment root B | populated across roots | 6.43s | 0 | 1 |
+
+The treatment removed the last cross-root compile and cut this second-root sample by **1.89×** (`12.15s` → `6.43s`). A third treatment root changed one comment in `internal/compute/metal_shim.m`; its compute action changed to `44b330b1…` and 11 package compiles executed, proving native-source changes still invalidate `internal/compute` and its dependent chain.
+
+Both treatment roots produced byte-identical 85,260,210-byte artifacts (`sha256:2dc0d6fb…`). `go tool nm` retained `_fmetal_init` and `_mg_init`, and both artifacts returned `verdict=DENY reason=POLICY_BLOCK by=monitor` for the policy smoke. The Darwin/arm64/cgo tags, Objective-C source, Metal frameworks, shared `metalgemm` device seam, and runtime selection remain unchanged.
+
+This follow-up is still **experimental evidence**, not a landed claim: the receipt was captured from an uncommitted diff over `0f36db306`. The focused compute, architecture, and serve-selection tests passed, but the landed commit must be re-tested and witnessed before #9671 is closed.
+
 ## Official source ledger
 
 ### Go 1.26.6 — shipped mechanism
 
 - **Source state:** released as `go1.26.6`, commit [`1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e`](https://github.com/golang/go/tree/1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e), source event `2026-08-13T17:25:07Z`; observed `2026-08-28T04:02:09Z`.
 - **Action identity:** [`src/cmd/go/internal/work/exec.go:260-310@1ea5a71`](https://github.com/golang/go/blob/1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e/src/cmd/go/internal/work/exec.go#L260-L310) hashes `dir <absolute package directory>` when `-trimpath` is absent and records the stable `trimpath` mode when it is present. This is the exact cause exercised here.
+- **Cgo source directory:** [`src/cmd/cgo/doc.go:87-116@1ea5a71`](https://github.com/golang/go/blob/1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e/src/cmd/cgo/doc.go#L87-L116) defines `${SRCDIR}` as the absolute source directory and separately guarantees that the C compiler already receives that directory as an implied include path. This makes `#cgo CFLAGS: -I${SRCDIR}` redundant for the colocated `metal_backend.h` while explaining its path-bearing action input.
 - **Compiler rewrite:** [`src/cmd/go/internal/work/gc.go:136-176@1ea5a71`](https://github.com/golang/go/blob/1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e/src/cmd/go/internal/work/gc.go#L136-L176) passes the computed rewrite to the compiler while compiling absolute file inputs.
 - **Cache semantics:** [`src/cmd/go/internal/work/buildid.go:26-65@1ea5a71`](https://github.com/golang/go/blob/1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e/src/cmd/go/internal/work/buildid.go#L26-L65) defines action ID as a hash of inputs and content ID as a hash of output; [`buildid.go:424-482`](https://github.com/golang/go/blob/1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e/src/cmd/go/internal/work/buildid.go#L424-L482) uses that action ID to query the artifact cache.
 - **License:** Go 1.26.6's exact-revision [`LICENSE`](https://github.com/golang/go/blob/1ea5a71ad8ceb7b9f16b4b6f8ea4739a4327dd6e/LICENSE) is BSD-3-Clause. Disposition: **ADAPT** — fak invokes the shipped flag and adapts its path-stability contract at existing command seams; no Go source or comments were copied.
@@ -67,6 +94,6 @@ Portfolio disposition: **DEFAULT** for these disposable verification seams; **EX
 
 ## Next falsifier
 
-Keep #9661 open. Run its five-cold/five-warm matched Windows/amd64 matrix after this slice lands. If cross-root compile actions remain near zero but elapsed time stays above 6,555 ms, `internal/compute` cgo/Metal compilation and the runtime link are the evidenced next targets. If compile actions return, diff the action inputs before changing more code.
+Keep #9661 open. First verify #9671 at its landed commit; then remove redundant whole-tree links under #9672 and run #9673's five-cold/five-warm matched Windows/amd64 matrix. If cross-root compile actions remain zero but elapsed time stays above 6,555 ms, the executable link is the evidenced next target. If compile actions return, diff the action inputs before changing more code.
 
-Companions: [#9661](https://github.com/anthony-chaudhary/fak/issues/9661) · [runtime/dev split #6019](https://github.com/anthony-chaudhary/fak/issues/6019) · [`docs/dev-tooling.md`](../dev-tooling.md)
+Companions: [#9661](https://github.com/anthony-chaudhary/fak/issues/9661) · [#9671](https://github.com/anthony-chaudhary/fak/issues/9671) · [runtime/dev split #6019](https://github.com/anthony-chaudhary/fak/issues/6019) · [`docs/dev-tooling.md`](../dev-tooling.md)
