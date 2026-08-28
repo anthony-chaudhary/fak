@@ -115,6 +115,13 @@ var registry = []Bench{
 		Doc:     "docs/benchmarks/ABLATE-RESULTS.md",
 	},
 	{
+		Name: "armbench", Kind: KindVerb, Need: NeedWeights, Level: LevelServing,
+		Summary: "Arm-native inference benchmark: measures native kernels in their declared execution envelope.",
+		Run:     "fak armbench",
+		Flags:   []string{"--out  -  write the benchmark receipt"},
+		Doc:     "docs/benchmarks/README.md",
+	},
+	{
 		Name: "agentbenchdemo", Kind: KindCmd, Need: NeedNone,
 		Summary: "Agentic-spine self-tax micro-benchmark: fixed offline plan over the kernel guard path, reporting allowed/denied tool-call counts and mean cost per call.",
 		Run:     "go run ./cmd/agentbenchdemo -selfcheck",
@@ -133,6 +140,13 @@ var registry = []Bench{
 		Summary: "A/B ablation of the vDSO over a frozen tau2 trace  -  the per-turn adjudication work fak eliminates vs a spawned-hook baseline.",
 		Run:     "fak bench --suite tau2-smoke --out report.json",
 		Flags:   []string{"--suite  -  trace suite under testdata/tau2", "--out  -  report path", "--baseline-n  -  spawned-hook samples"},
+		Doc:     "BENCHMARK-AUTHORITY.md",
+	},
+	{
+		Name: "bench-ingest", Kind: KindVerb, Need: NeedNone,
+		Summary: "Benchmark receipt ingestion: normalizes measured results into the authority ledger for reproducible comparison.",
+		Run:     "fak bench-ingest --help",
+		Flags:   []string{"--out  -  write the normalized receipt"},
 		Doc:     "BENCHMARK-AUTHORITY.md",
 	},
 	{
@@ -170,6 +184,20 @@ var registry = []Bench{
 		Doc:     "",
 	},
 	{
+		Name: "coalescebench", Kind: KindCmd, Need: NeedNone,
+		Summary: "Request-coalescing benchmark: measures deterministic coalescing behavior under an offline workload.",
+		Run:     "go run ./cmd/coalescebench -out /tmp/coalescebench.json",
+		Flags:   []string{"-out  -  write the measured JSON receipt"},
+		Doc:     "cmd/coalescebench/README.md",
+	},
+	{
+		Name: "conceptbench", Kind: KindCmd, Need: NeedNone,
+		Summary: "Concept-routing benchmark: measures concept selection against committed offline cases.",
+		Run:     "go run ./cmd/conceptbench -out /tmp/conceptbench.json",
+		Flags:   []string{"-out  -  write the measured JSON receipt"},
+		Doc:     "cmd/conceptbench/README.md",
+	},
+	{
 		Name: "ctxbench", Kind: KindCmd, Need: NeedNone,
 		Summary: "Runs the fak security gates over a corpus of tool calls/results; default is the committed synthetic poison fixture.",
 		Run:     "go run ./cmd/ctxbench",
@@ -184,6 +212,13 @@ var registry = []Bench{
 		// so it failed every unattended run. -selfcheck is the offline smoke that exits 0.
 		Run: "go run ./cmd/ctxplanbench -selfcheck",
 		Doc: "",
+	},
+	{
+		Name: "deepseekbench", Kind: KindVerb, Need: NeedWeights, Level: LevelServing,
+		Summary: "DeepSeek benchmark: measures the native execution path in its declared model envelope.",
+		Run:     "fak deepseekbench",
+		Flags:   []string{"--out  -  write the benchmark receipt"},
+		Doc:     "docs/benchmarks/README.md",
 	},
 	{
 		Name: "fanbench", Kind: KindCmd, Need: NeedNone,
@@ -229,11 +264,25 @@ var registry = []Bench{
 		Doc:     "docs/nightrun/README.md",
 	},
 	{
+		Name: "microbench", Kind: KindVerb, Need: NeedNone,
+		Summary: "Native-kernel microbenchmark: records focused timing measurements in a machine-readable receipt.",
+		Run:     "fak microbench",
+		Flags:   []string{"--out  -  write the benchmark receipt"},
+		Doc:     "docs/benchmarks/README.md",
+	},
+	{
 		Name: "modelbench", Kind: KindCmd, Need: NeedWeights, Level: LevelServing,
 		Summary: "In-kernel pure-Go forward-pass latency / tok-per-sec, so the kernel's model numbers are self-measured not borrowed.",
 		Run:     "go run ./cmd/modelbench -dir internal/model/.cache/smollm2-135m",
 		Flags:   []string{"-dir  -  fak export dir", "-hf  -  HuggingFace snapshot", "-gguf  -  GGUF checkpoint", "-quant/-lean  -  Q8_0", "-out  -  JSON out"},
 		Doc:     "docs/model-engine-env.md",
+	},
+	{
+		Name: "native-benchmarks", Kind: KindVerb, Need: NeedWeights, Level: LevelServing,
+		Summary: "Native benchmark cohort: runs canonical fak-native measurements without changing inference engines.",
+		Run:     "fak native-benchmarks",
+		Flags:   []string{"--out  -  write the cohort receipt"},
+		Doc:     "docs/native-inference-goal.md",
 	},
 	{
 		Name: "paritybench", Kind: KindCmd, Need: NeedNone,
@@ -253,6 +302,13 @@ var registry = []Bench{
 		Run:     "go run ./cmd/q8bench -dir internal/model/.cache/smollm2-135m",
 		Flags:   []string{"-dir  -  model export dir"},
 		Doc:     "",
+	},
+	{
+		Name: "quantbench", Kind: KindVerb, Need: NeedWeights, Level: LevelServing,
+		Summary: "Quantization benchmark: measures native quantized kernels with quality and operating-envelope receipts.",
+		Run:     "fak quantbench",
+		Flags:   []string{"--out  -  write the benchmark receipt"},
+		Doc:     "docs/benchmarks/README.md",
 	},
 	{
 		Name: "radixbench", Kind: KindCmd, Need: NeedNone, Level: LevelSmoke,
