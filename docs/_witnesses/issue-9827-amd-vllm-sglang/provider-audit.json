@@ -1,0 +1,84 @@
+{
+  "schema": "coordinator_witness.v1",
+  "captured_at": "2026-08-28",
+  "issue": "#9827",
+  "typed_outcome": "no_accessible_supported_amd_accelerator",
+  "evidence": [
+    {
+      "fact": "Public or sanctioned fleet roster contains no AMD MI accelerator.",
+      "details": {
+        "roster": [
+          "local RX 7600 agent host",
+          "Apple M3 Pro",
+          "RTX 4070 Laptop",
+          "GCP L4",
+          "A100/DGX"
+        ],
+        "amd_mi_present": false
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "Authenticated GCP accelerator catalog returned entries but none matching AMD or MI terms.",
+      "details": {
+        "catalog_entries": 637,
+        "amd_or_mi_matches": 0
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "Cloud and provider credential audit did not reveal accessible AMD accelerator access.",
+      "details": {
+        "aws_cli_installed": true,
+        "aws_sts_result": "NoCredentials",
+        "azure_cli_present": false,
+        "azure_profile_present": false,
+        "runpod_credentials_found": false,
+        "runcrate_credentials_found": false,
+        "tensorwave_credentials_found": false,
+        "vast_credentials_found": false
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "SSH configuration contains sanctioned NVIDIA/GCP and local workstation hosts, with no AMD accelerator host.",
+      "details": {
+        "amd_accelerator_host_present": false
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "Existing issue #9666 independently records the same no-server-AMD availability result and remains open.",
+      "details": {
+        "related_issue": "#9666",
+        "status": "open"
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "This outcome is availability evidence, not a performance result.",
+      "details": {
+        "performance_claim_made": false
+      },
+      "provenance": "coordinator-witnessed fact"
+    }
+  ],
+  "prohibited_substitutions": [
+    "Do not infer AMD access from non-AMD fleet entries.",
+    "Do not treat missing credentials or absent provider configuration as benchmark evidence.",
+    "Do not convert this availability result into a performance conclusion.",
+    "Do not include secrets, private coordinates, or unsanctioned host details."
+  ],
+  "operator_handoff": {
+    "required_input": "Provide an SSH-accessible supported AMD Linux node (MI2xx/MI3xx/MI35x or current supported Radeon) with ROCm and enough storage, or authorize/provide credentials and spend cap for a named AMD GPU cloud.",
+    "once_present": [
+      "prove rocminfo",
+      "pin vLLM 0.28.0 and SGLang 0.5.18 or explain version change",
+      "use one matched model/workload",
+      "capture direct OpenAI-compatible rows with cmd/loadgen",
+      "capture engine logs",
+      "capture GPU telemetry",
+      "ensure no fallback"
+    ]
+  }
+}
