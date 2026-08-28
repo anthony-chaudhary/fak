@@ -1,8 +1,3 @@
----
-title: "capability maturity rung"
-description: "Canonical fak documentation for capability maturity rung, including its scope, nearest contrasts, and operational use."
----
-
 # capability maturity rung
 
 **Meaning:** A capability-readiness level in the ordered proposed, prototyped, tested, dogfooded, default ladder; measurement remains an orthogonal badge rather than another rung.

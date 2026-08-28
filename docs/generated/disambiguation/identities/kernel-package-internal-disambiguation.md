@@ -1,8 +1,3 @@
----
-title: "internal package kernel identity"
-description: "Meaning: The internal/disambiguation Go package that validates and queries public terminology records."
----
-
 # kernel
 
 **Meaning:** The internal/disambiguation Go package that validates and queries public terminology records.

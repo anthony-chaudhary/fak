@@ -1,8 +1,3 @@
----
-title: "net-true claim"
-description: "Canonical fak documentation for net-true claim, including its scope, nearest contrasts, and operational use."
----
-
 # net-true claim
 
 **Meaning:** A scoped value statement graded against the real tuned alternative and stated net of introduced costs, with provenance, reproduction witness, and realization status.

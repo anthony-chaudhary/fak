@@ -1,8 +1,3 @@
----
-title: "disambiguation package"
-description: "Canonical fak documentation for disambiguation package, including its scope, nearest contrasts, and operational use."
----
-
 # disambiguation package
 
 **Meaning:** The internal/disambiguation package, named as a contrast target for the CLI-scoped kernel entry.

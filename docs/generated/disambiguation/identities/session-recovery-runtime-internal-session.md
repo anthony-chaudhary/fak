@@ -1,8 +1,3 @@
----
-title: "session recovery"
-description: "Canonical fak documentation for session recovery, including its scope, nearest contrasts, and operational use."
----
-
 # session recovery
 
 **Meaning:** A bounded repair or reroute response when persisted or cumulative session state cannot safely continue unchanged.

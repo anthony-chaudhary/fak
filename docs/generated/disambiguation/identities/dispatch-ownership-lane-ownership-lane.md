@@ -1,8 +1,3 @@
----
-title: "dispatch ownership lane"
-description: "Canonical fak documentation for dispatch ownership lane, including its scope, nearest contrasts, and operational use."
----
-
 # dispatch ownership lane
 
 **Meaning:** A declared file-tree region used to arbitrate concurrent work; it may own several leaves and must not be inferred from a similar name.

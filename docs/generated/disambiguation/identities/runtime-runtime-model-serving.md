@@ -1,8 +1,3 @@
----
-title: "model serving runtime identity"
-description: "Meaning: The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn."
----
-
 # runtime
 
 **Meaning:** The model-completion implementation behind an engine driver, such as an on-device llama.cpp or Ollama adapter that generates text for one turn.

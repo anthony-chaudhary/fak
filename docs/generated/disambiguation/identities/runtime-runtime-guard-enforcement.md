@@ -1,8 +1,3 @@
----
-title: "guard enforcement runtime identity"
-description: "Meaning: The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement."
----
-
 # runtime
 
 **Meaning:** The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement.

@@ -1,8 +1,3 @@
----
-title: "DOS decision kind"
-description: "Canonical fak documentation for DOS decision kind, including its scope, nearest contrasts, and operational use."
----
-
 # DOS decision kind
 
 **Meaning:** A persistent DOS row category identifying arbitration refusal work whose resolution depends on the current lane-lease state.
