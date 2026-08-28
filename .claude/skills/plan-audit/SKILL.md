@@ -9,7 +9,7 @@ argument-hint: "(no args)"
 
 # /plan-audit — Plan-Completion Audit (project-agnostic)
 
-> Wraps `tools/plan_audit.py` + the `plan_docs_glob` declared in
+> Wraps the native `fak dev plan-audit` reconciler + the `plan_docs_glob` declared in
 > `.claude/project.yaml`. If a project keeps a *single* plan-state surface (the
 > plan docs themselves — no typed registry, no live-percent YAML), then `drift`
 > is structurally empty and the helper's `percent_complete` is a **coarse
@@ -28,7 +28,7 @@ This skill does not re-implement any per-surface scan. The project's `helpers.pl
 This skill reads `.claude/project.yaml` at the repo root. Required keys:
 
 - `python` — interpreter path (default: `python`).
-- `helpers.plan_audit` — script that emits the reconciled JSON (shape below).
+- `helpers.plan_audit` — native command that emits the reconciled JSON (shape below).
 - `plan_docs_glob` — glob for the project's plan documents (default: `docs/*-plan.md`).
 - `audits_dir` — where to write `plan-completion-<YYYY-MM-DD>.md` (default: `docs/_audits/`).
 
@@ -38,7 +38,7 @@ If `.claude/project.yaml` is missing or `helpers.plan_audit` is absent, print on
 
 ### Expected JSON shape from `helpers.plan_audit`
 
-The helper is invoked as `<python> <helpers.plan_audit> --json` and must emit a single JSON object to stdout with these keys:
+The native command is invoked as `<helpers.plan_audit> --json` and must emit a single JSON object to stdout with these keys:
 
 | Key | Type | Purpose |
 |---|---|---|
@@ -58,7 +58,7 @@ If a project's helper does not yet emit `work_units` (a phased-plan portfolio wi
 ## Step 1: Run the reconciler
 
 ```bash
-<python> <helpers.plan_audit> --json
+<helpers.plan_audit> --json
 ```
 
 Read the JSON inline from the Bash tool result. If the helper exits 2, print its stderr and stop.
@@ -68,7 +68,7 @@ If the helper exits 0 with `{"counts": {"total_plans": 0}}` (or equivalent — s
 ## Step 2: Render the operator snapshot
 
 ```bash
-<python> <helpers.plan_audit> --markdown --out <audits_dir>/plan-completion-<YYYY-MM-DD>.md
+<helpers.plan_audit> --markdown --out <audits_dir>/plan-completion-<YYYY-MM-DD>.md
 ```
 
 Use today's date in UTC. Use `--out` (not a shell `>` redirect) — PowerShell redirects re-encode to UTF-16 and mangle non-ASCII glyphs like `·` / `—`; `--out` writes UTF-8 directly. If a report for today already exists, overwrite it (one audit per day).
@@ -107,7 +107,7 @@ The helper decides what counts as drift — the skill renders what it reports. A
 
 ## Post-ship hook (project decides)
 
-A common pattern: wire `<python> <helpers.plan_audit> --check` to run quietly after each phase ships, so drift is caught at the cause rather than a week later. `--check` exits 1 + one-line stderr on drift, silent otherwise — it does not block the ship, only surfaces a warning.
+A common pattern: wire `<helpers.plan_audit> --check` to run quietly after each phase ships, so drift is caught at the cause rather than a week later. `--check` exits 1 + one-line stderr on drift, silent otherwise — it does not block the ship, only surfaces a warning.
 
 Wiring is per-project (a git `post-commit` hook, a `phased-plan` ceremony step, a CI gate, etc.). Use the `update-config` skill to register it in `.claude/settings.json` if you want it on the Claude Code event surface. Don't bake the hook wiring into this universal skill.
 
