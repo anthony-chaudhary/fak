@@ -180,6 +180,20 @@ int fvk_qwen35_gdn_preprojected_f32(
     void* conv_state, void* recurrent_state, void* core,
     int tokens, int conv_dim, int n_k, int n_v, int k_hd, int v_hd, int kernel, float eps);
 void fvk_q4k_matmul_f32(const void *dQ4K, const void *dX, void *dY, int out, int in, int P);
+typedef struct fvk_dispatch_profile {
+    uint64_t compute_dispatches;
+    uint64_t q4k_matmul_dispatches;
+    uint64_t other_compute_dispatches;
+    uint64_t compute_barriers;
+    uint64_t d2d_copies;
+    uint64_t batch_submits;
+    uint64_t batch_flushes;
+    uint64_t one_shot_submits;
+} fvk_dispatch_profile;
+
+void fvk_dispatch_profile_snapshot(fvk_dispatch_profile *out);
+void fvk_dispatch_profile_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -155,6 +155,18 @@ func (v *vulkanBackend) VulkanDebugQ4KProfileSnapshot() (enabled bool, deviceCal
 	return v.q4kProfile, v.q4kDeviceCalls, v.q4kDevicePackedBytes, v.q4kHostVisibleCalls, v.q4kHostVisiblePackedBytes
 }
 
+type VulkanDispatchProfile struct {
+	ComputeDispatches, Q4KMatmulDispatches, OtherComputeDispatches         uint64
+	ComputeBarriers, D2DCopies, BatchSubmits, BatchFlushes, OneShotSubmits uint64
+}
+
+func (v *vulkanBackend) VulkanDebugDispatchProfileSnapshot() VulkanDispatchProfile {
+	var p C.fvk_dispatch_profile
+	C.fvk_dispatch_profile_snapshot(&p)
+	return VulkanDispatchProfile{uint64(p.compute_dispatches), uint64(p.q4k_matmul_dispatches), uint64(p.other_compute_dispatches), uint64(p.compute_barriers), uint64(p.d2d_copies), uint64(p.batch_submits), uint64(p.batch_flushes), uint64(p.one_shot_submits)}
+}
+func (v *vulkanBackend) VulkanDebugResetDispatchProfile() { C.fvk_dispatch_profile_reset() }
+
 func (v *vulkanBackend) VulkanDebugResetQ4KProfile() {
 	vulkanMu.Lock()
 	defer vulkanMu.Unlock()
