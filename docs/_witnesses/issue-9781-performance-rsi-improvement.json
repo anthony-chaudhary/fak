@@ -1,0 +1,199 @@
+{
+  "schema": "fak-performance-rsi-evidence/1",
+  "snapshot": "2026-08-28T18:00:00Z",
+  "target_multiplier": 100,
+  "dimensions": [
+    {
+      "id": "cycle_time",
+      "source": "fixture/cycles",
+      "direction": "lower",
+      "current": 10,
+      "target": 5,
+      "unit": "hours/cycle",
+      "next_action": "shorten cycle"
+    },
+    {
+      "id": "improvement_yield",
+      "source": "fixture/yield",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "raise yield"
+    },
+    {
+      "id": "evaluation_latency",
+      "source": "fixture/eval",
+      "direction": "lower",
+      "current": 20,
+      "target": 5,
+      "unit": "minutes",
+      "next_action": "reduce evaluation latency",
+      "evidence_kind": "native_benchmark",
+      "engine": "fak-native/qwen3.8"
+    },
+    {
+      "id": "receipt_coverage",
+      "source": "fixture/receipts",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "capture receipts"
+    },
+    {
+      "id": "quality_gate_coverage",
+      "source": "fixture/quality",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "add quality gates"
+    },
+    {
+      "id": "experiment_throughput",
+      "source": "fixture/throughput",
+      "direction": "higher",
+      "current": 8,
+      "target": 10,
+      "unit": "experiments/day",
+      "next_action": "increase safe throughput"
+    },
+    {
+      "id": "hypothesis_calibration",
+      "source": "fixture/calibration",
+      "direction": "higher",
+      "current": 80,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "calibrate ranking"
+    },
+    {
+      "id": "discovery_freshness",
+      "source": "fixture/discovery",
+      "direction": "lower",
+      "current": 2,
+      "target": 1,
+      "unit": "days",
+      "next_action": "refresh discovery"
+    },
+    {
+      "id": "adaptation_speed",
+      "source": "fixture/adaptation",
+      "direction": "lower",
+      "current": 2,
+      "target": 1,
+      "unit": "days",
+      "next_action": "adapt faster"
+    },
+    {
+      "id": "reuse_ratio",
+      "source": "fixture/reuse",
+      "direction": "higher",
+      "current": 80,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "reuse mechanisms"
+    },
+    {
+      "id": "learning_retention",
+      "source": "fixture/learning",
+      "direction": "higher",
+      "current": 80,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "retain learning"
+    },
+    {
+      "id": "production_transfer",
+      "source": "fixture/transfer",
+      "direction": "higher",
+      "current": 80,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "transfer experiments"
+    },
+    {
+      "id": "hardware_utilization",
+      "source": "fixture/hardware",
+      "direction": "higher",
+      "current": 80,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "use hardware"
+    },
+    {
+      "id": "attribution_quality",
+      "source": "fixture/attribution",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "improve attribution"
+    },
+    {
+      "id": "automation_coverage",
+      "source": "fixture/automation",
+      "direction": "higher",
+      "current": 80,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "automate loop"
+    },
+    {
+      "id": "compounding_rate",
+      "source": "fixture/compounding",
+      "direction": "higher",
+      "current": 80,
+      "target": 100,
+      "unit": "percent",
+      "next_action": "compound learning"
+    }
+  ],
+  "improvement": {
+    "schema": "fak-performance-rsi-improvement/1",
+    "engine": "fak-native/qwen3.8",
+    "hypothesis": "Fusing dispatch metadata preparation reduces matched end-to-end latency without changing output quality.",
+    "changed_module": "internal/engine@r71+g8effa9524",
+    "baseline": {
+      "value": 125.0,
+      "unit": "milliseconds"
+    },
+    "candidate": {
+      "value": 96.0,
+      "unit": "milliseconds"
+    },
+    "quality": {
+      "gate": "exact-output-parity",
+      "baseline_passed": true,
+      "candidate_passed": true,
+      "parity": true
+    },
+    "net_true_gain": {
+      "value": 20.0,
+      "unit": "percent",
+      "overhead_value": 4.0,
+      "overhead_unit": "milliseconds",
+      "includes_overhead": true
+    },
+    "baseline_envelope": {
+      "model": "Qwen3.8",
+      "quantization": "Q4_K_M",
+      "hardware": "scrubbed CUDA accelerator",
+      "workload": "128-token deterministic decode",
+      "context_tokens": 4096,
+      "batch_size": 1
+    },
+    "candidate_envelope": {
+      "model": "Qwen3.8",
+      "quantization": "Q4_K_M",
+      "hardware": "scrubbed CUDA accelerator",
+      "workload": "128-token deterministic decode",
+      "context_tokens": 4096,
+      "batch_size": 1
+    },
+    "causal": {
+      "ablation": "disable fused dispatch metadata preparation only",
+      "control_value": 124.0,
+      "treatment_value": 96.0,
+      "unit": "milliseconds",
+      "isolates_change": true
+    }
+  }
+}

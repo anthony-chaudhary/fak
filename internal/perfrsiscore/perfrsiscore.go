@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	EvidenceSchema = "fak-performance-rsi-evidence/1"
-	CycleSchema    = "fak-performance-rsi-cycle/1"
-	ReportSchema   = "fak-performance-rsi-scorecard/1"
-	TargetMultiple = 100.0
+	EvidenceSchema    = "fak-performance-rsi-evidence/1"
+	CycleSchema       = "fak-performance-rsi-cycle/1"
+	ImprovementSchema = "fak-performance-rsi-improvement/1"
+	ReportSchema      = "fak-performance-rsi-scorecard/1"
+	TargetMultiple    = 100.0
 )
 
 type Direction string
@@ -28,11 +29,12 @@ const (
 )
 
 type Evidence struct {
-	Schema           string      `json:"schema"`
-	Snapshot         string      `json:"snapshot"`
-	TargetMultiplier float64     `json:"target_multiplier"`
-	Dimensions       []Dimension `json:"dimensions"`
-	Cycle            *Cycle      `json:"cycle,omitempty"`
+	Schema           string       `json:"schema"`
+	Snapshot         string       `json:"snapshot"`
+	TargetMultiplier float64      `json:"target_multiplier"`
+	Dimensions       []Dimension  `json:"dimensions"`
+	Cycle            *Cycle       `json:"cycle,omitempty"`
+	Improvement      *Improvement `json:"improvement,omitempty"`
 }
 
 // Cycle is one independently versioned, end-to-end performance improvement
@@ -70,6 +72,59 @@ func (c *Cycle) UnmarshalJSON(b []byte) error {
 	}
 	*c = Cycle(decoded)
 	return nil
+}
+
+// Improvement is one independently versioned strict receipt for a measured,
+// quality-preserving fak-native performance change.
+type Improvement struct {
+	Schema            string             `json:"schema"`
+	Engine            string             `json:"engine"`
+	Hypothesis        string             `json:"hypothesis"`
+	ChangedModule     string             `json:"changed_module"`
+	Baseline          ImprovementMeasure `json:"baseline"`
+	Candidate         ImprovementMeasure `json:"candidate"`
+	Quality           ImprovementQuality `json:"quality"`
+	NetTrueGain       ImprovementGain    `json:"net_true_gain"`
+	BaselineEnvelope  OperatingEnvelope  `json:"baseline_envelope"`
+	CandidateEnvelope OperatingEnvelope  `json:"candidate_envelope"`
+	Causal            ImprovementCausal  `json:"causal"`
+}
+
+type ImprovementMeasure struct {
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+}
+
+type ImprovementQuality struct {
+	Gate            string `json:"gate"`
+	BaselinePassed  *bool  `json:"baseline_passed"`
+	CandidatePassed *bool  `json:"candidate_passed"`
+	Parity          *bool  `json:"parity"`
+}
+
+type ImprovementGain struct {
+	Value            float64 `json:"value"`
+	Unit             string  `json:"unit"`
+	OverheadValue    float64 `json:"overhead_value"`
+	OverheadUnit     string  `json:"overhead_unit"`
+	IncludesOverhead *bool   `json:"includes_overhead"`
+}
+
+type OperatingEnvelope struct {
+	Model         string `json:"model"`
+	Quantization  string `json:"quantization"`
+	Hardware      string `json:"hardware"`
+	Workload      string `json:"workload"`
+	ContextTokens int    `json:"context_tokens"`
+	BatchSize     int    `json:"batch_size"`
+}
+
+type ImprovementCausal struct {
+	Ablation       string  `json:"ablation"`
+	ControlValue   float64 `json:"control_value"`
+	TreatmentValue float64 `json:"treatment_value"`
+	Unit           string  `json:"unit"`
+	IsolatesChange *bool   `json:"isolates_change"`
 }
 
 type Dimension struct {
@@ -204,6 +259,11 @@ func validate(e *Evidence) error {
 			return err
 		}
 	}
+	if e.Improvement != nil {
+		if err := applyImprovement(e); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -268,6 +328,76 @@ func applyCycle(e *Evidence) error {
 		d.Engine = c.Engine
 	}
 	return nil
+}
+
+func applyImprovement(e *Evidence) error {
+	r := e.Improvement
+	if r.Schema != ImprovementSchema {
+		return fmt.Errorf("improvement schema %q, want %q", r.Schema, ImprovementSchema)
+	}
+	engine := strings.ToLower(strings.TrimSpace(r.Engine))
+	if strings.Contains(engine, "llama") || !strings.HasPrefix(engine, "fak-native") {
+		return errors.New("improvement engine must name explicit fak-native provenance without llama.cpp fallback")
+	}
+	if strings.TrimSpace(r.Hypothesis) == "" {
+		return errors.New("improvement hypothesis is required")
+	}
+	module := strings.TrimSpace(r.ChangedModule)
+	if !strings.Contains(module, "@r") || !strings.Contains(module, "+g") {
+		return errors.New("improvement changed_module must name module@rev")
+	}
+	if r.Baseline.Unit != "milliseconds" || r.Candidate.Unit != "milliseconds" ||
+		!finite(r.Baseline.Value) || !finite(r.Candidate.Value) || r.Baseline.Value <= 0 || r.Candidate.Value <= 0 {
+		return errors.New("improvement baseline and candidate require positive finite milliseconds")
+	}
+	if strings.TrimSpace(r.Quality.Gate) == "" || r.Quality.BaselinePassed == nil || r.Quality.CandidatePassed == nil || r.Quality.Parity == nil ||
+		!*r.Quality.BaselinePassed || !*r.Quality.CandidatePassed || !*r.Quality.Parity {
+		return errors.New("improvement quality gate requires passing baseline/candidate parity")
+	}
+	if r.BaselineEnvelope != r.CandidateEnvelope || !validEnvelope(r.BaselineEnvelope) {
+		return errors.New("improvement baseline and candidate operating envelopes must be complete and matched")
+	}
+	if r.NetTrueGain.Unit != "percent" || r.NetTrueGain.OverheadUnit != "milliseconds" ||
+		r.NetTrueGain.IncludesOverhead == nil || !*r.NetTrueGain.IncludesOverhead ||
+		!finite(r.NetTrueGain.OverheadValue) || r.NetTrueGain.OverheadValue < 0 || !finite(r.NetTrueGain.Value) {
+		return errors.New("improvement net_true_gain must be percent and explicitly include nonnegative millisecond overhead")
+	}
+	wantGain := (r.Baseline.Value - (r.Candidate.Value + r.NetTrueGain.OverheadValue)) / r.Baseline.Value * 100
+	if wantGain <= 0 || math.Abs(wantGain-r.NetTrueGain.Value) > 1e-9 {
+		return errors.New("improvement net_true_gain does not equal baseline minus candidate and overhead")
+	}
+	if strings.TrimSpace(r.Causal.Ablation) == "" || r.Causal.Unit != "milliseconds" || r.Causal.IsolatesChange == nil || !*r.Causal.IsolatesChange ||
+		!finite(r.Causal.ControlValue) || !finite(r.Causal.TreatmentValue) || r.Causal.ControlValue <= r.Causal.TreatmentValue {
+		return errors.New("improvement causal binding requires an isolating, positive ablation in milliseconds")
+	}
+
+	values := map[string]float64{
+		"improvement_yield":     r.NetTrueGain.Value,
+		"receipt_coverage":      100,
+		"quality_gate_coverage": 100,
+		"attribution_quality":   100,
+	}
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		value, ok := values[d.ID]
+		if !ok {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(d.Unit)) != "percent" {
+			return fmt.Errorf("improvement derivation for %s: unsupported unit %q", d.ID, d.Unit)
+		}
+		d.Current = &value
+		d.Source = "improvement:" + r.Schema
+		d.EvidenceKind = "improvement_receipt"
+		d.Engine = r.Engine
+	}
+	return nil
+}
+
+func validEnvelope(e OperatingEnvelope) bool {
+	return strings.TrimSpace(e.Model) != "" && strings.TrimSpace(e.Quantization) != "" &&
+		strings.TrimSpace(e.Hardware) != "" && strings.TrimSpace(e.Workload) != "" &&
+		e.ContextTokens > 0 && e.BatchSize > 0
 }
 
 func durationInUnit(seconds float64, unit string) (float64, error) {

@@ -91,3 +91,61 @@ func TestPerformanceRSICycleWitness(t *testing.T) {
 		}
 	}
 }
+
+func TestPerformanceRSIImprovementReceiptAcceptance(t *testing.T) {
+	witness := filepath.Join("..", "..", "docs", "_witnesses", "issue-9781-performance-rsi-improvement.json")
+	code, out, errText := runPerfRSI(t, "--input", witness, "--json")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errText)
+	}
+	for _, id := range []string{"improvement_yield", "receipt_coverage", "quality_gate_coverage", "attribution_quality"} {
+		if !strings.Contains(out, `"id": "`+id+`"`) {
+			t.Errorf("missing %s", id)
+		}
+	}
+	if strings.Count(out, `"status": "UNKNOWN"`) > 8 {
+		t.Fatalf("receipt dimensions remained unknown: %s", out)
+	}
+}
+
+func TestPerformanceRSIImprovementReceiptRefusals(t *testing.T) {
+	witness := filepath.Join("..", "..", "docs", "_witnesses", "issue-9781-performance-rsi-improvement.json")
+	original, err := os.ReadFile(witness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base map[string]any
+	if err := json.Unmarshal(original, &base); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"schema", func(r map[string]any) { r["schema"] = "unsupported" }},
+		{"units", func(r map[string]any) { r["baseline"].(map[string]any)["unit"] = "seconds" }},
+		{"quality", func(r map[string]any) { delete(r["quality"].(map[string]any), "parity") }},
+		{"envelope", func(r map[string]any) { r["candidate_envelope"].(map[string]any)["batch_size"] = 2 }},
+		{"overhead", func(r map[string]any) { r["net_true_gain"].(map[string]any)["includes_overhead"] = false }},
+		{"causal", func(r map[string]any) { delete(r["causal"].(map[string]any), "isolates_change") }},
+		{"engine", func(r map[string]any) { r["engine"] = "llama.cpp" }},
+		{"strict", func(r map[string]any) { r["unexpected"] = true }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc map[string]any
+			b, _ := json.Marshal(base)
+			_ = json.Unmarshal(b, &doc)
+			tc.edit(doc["improvement"].(map[string]any))
+			b, _ = json.Marshal(doc)
+			path := filepath.Join(t.TempDir(), "receipt.json")
+			if err := os.WriteFile(path, b, 0600); err != nil {
+				t.Fatal(err)
+			}
+			code, _, errText := runPerfRSI(t, "--input", path, "--json")
+			if code == 0 || strings.TrimSpace(errText) == "" {
+				t.Fatalf("expected refusal: code=%d err=%q", code, errText)
+			}
+		})
+	}
+}

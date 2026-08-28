@@ -208,3 +208,91 @@ func TestCycleRejectsMissingOperatorDuration(t *testing.T) {
 		t.Fatal("accepted missing operator_active_seconds")
 	}
 }
+
+func improvementEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e, err := Load("../../docs/_witnesses/issue-9781-performance-rsi-improvement.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func TestImprovementDerivesReceiptDimensionsOnly(t *testing.T) {
+	e := improvementEvidence(t)
+	baseline, err := Load("testdata/complete.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := make(map[string]Dimension, len(baseline.Dimensions))
+	for _, d := range baseline.Dimensions {
+		prior[d.ID] = d
+	}
+	want := map[string]float64{
+		"improvement_yield": 20, "receipt_coverage": 100,
+		"quality_gate_coverage": 100, "attribution_quality": 100,
+	}
+	for _, d := range e.Dimensions {
+		value, derived := want[d.ID]
+		if derived {
+			if d.Current == nil || *d.Current != value || d.EvidenceKind != "improvement_receipt" || d.Engine != "fak-native/qwen3.8" {
+				t.Errorf("%s not deterministically derived: %+v", d.ID, d)
+			}
+			continue
+		}
+		p := prior[d.ID]
+		if (d.Current == nil) != (p.Current == nil) || (d.Current != nil && *d.Current != *p.Current) ||
+			d.Source != p.Source || d.EvidenceKind != p.EvidenceKind || d.Engine != p.Engine {
+			t.Errorf("unrelated dimension %s changed: got %+v want %+v", d.ID, d, p)
+		}
+	}
+}
+
+func TestImprovementRejectsInvalidReceipts(t *testing.T) {
+	boolp := func(v bool) *bool { return &v }
+	tests := []struct {
+		name string
+		edit func(*Improvement)
+		want string
+	}{
+		{"schema", func(r *Improvement) { r.Schema = "fak-performance-rsi-improvement/2" }, "schema"},
+		{"units", func(r *Improvement) { r.Baseline.Unit = "seconds" }, "milliseconds"},
+		{"quality parity", func(r *Improvement) { r.Quality.Parity = boolp(false) }, "quality"},
+		{"missing quality parity", func(r *Improvement) { r.Quality.Parity = nil }, "quality"},
+		{"envelope", func(r *Improvement) { r.CandidateEnvelope.BatchSize = 2 }, "matched"},
+		{"overhead excluded", func(r *Improvement) { r.NetTrueGain.IncludesOverhead = boolp(false) }, "include"},
+		{"causal binding", func(r *Improvement) { r.Causal.IsolatesChange = nil }, "causal"},
+		{"engine", func(r *Improvement) { r.Engine = "llama.cpp" }, "fak-native"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := improvementEvidence(t)
+			tc.edit(e.Improvement)
+			b, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = Decode(bytes.NewReader(b))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestImprovementReceiptStrictJSON(t *testing.T) {
+	e := improvementEvidence(t)
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["improvement"].(map[string]any)["unexpected"] = true
+	b, _ = json.Marshal(raw)
+	if _, err := Decode(bytes.NewReader(b)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected strict JSON refusal, got %v", err)
+	}
+}
