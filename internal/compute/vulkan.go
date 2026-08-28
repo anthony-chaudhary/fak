@@ -83,6 +83,8 @@ type vulkanBuf struct {
 	n                   int
 	scalePtr            unsafe.Pointer
 	scaleN              int
+	scaleBudgetedBytes  int64
+	scaleHostVisible    bool
 	q8Chunks            []vulkanQ8Chunk
 	budgetedWeightBytes int64
 	hostVisibleWeight   bool
@@ -456,6 +458,9 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 	if !ok {
 		panic("compute: vulkan Upload expects host data")
 	}
+	if t.Dtype == Q4_K {
+		return v.uploadQ4KLocked(t)
+	}
 	if t.Dtype == Q8_0 {
 		if t.Quant == nil {
 			panic("compute: vulkan Upload Q8 tensor missing QuantSpec")
@@ -488,6 +493,23 @@ func (v *vulkanBackend) uploadClass(t Tensor, as Dtype, class MemoryClass, what 
 	})
 }
 
+func (v *vulkanBackend) uploadQ4KLocked(t Tensor) Tensor {
+	hb, ok := t.buf.(HostBuffer)
+	if !ok || len(t.Shape) != 2 || t.Shape[1]%256 != 0 {
+		panic("compute: vulkan Q4_K upload requires host raw bytes and [out,in] with in divisible by 256")
+	}
+	codes := hb.I8()
+	raw := i8AsBytes(codes)
+	want := t.Shape[0] * (t.Shape[1] / 256) * 144
+	if len(raw) != want {
+		panic("compute: vulkan Q4_K raw byte length does not match shape")
+	}
+	buf := v.dallocWeightFor(len(raw), "Q4_K weight buffer "+shapeText(t.Shape))
+	if len(raw) > 0 {
+		C.fvk_h2d(buf.ptr, unsafe.Pointer(&raw[0]), C.size_t(len(raw)))
+	}
+	return makeTensor(v, Q4_K, RowMajor, append([]int(nil), t.Shape...), nil, buf)
+}
 func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float32, block int) Tensor {
 	if !v.haveQ8 {
 		panic("compute: vulkan Q8 upload requested but device lacks int8/8-bit-storage support")
@@ -536,6 +558,8 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 		scaleN:              scaleBuf.n,
 		budgetedWeightBytes: codeBuf.budgetedWeightBytes,
 		hostVisibleWeight:   codeBuf.hostVisibleWeight,
+		scaleBudgetedBytes:  scaleBuf.budgetedWeightBytes,
+		scaleHostVisible:    scaleBuf.hostVisibleWeight,
 	}
 	return makeTensor(v, Q8_0, RowMajor, append([]int(nil), shape...), q, buf)
 }
@@ -635,6 +659,16 @@ func (v *vulkanBackend) Free(t Tensor) {
 		}
 		if db.scalePtr != nil {
 			C.fvk_free(db.scalePtr)
+			if db.scaleBudgetedBytes > 0 {
+				v.dlUsed -= db.scaleBudgetedBytes
+				db.scaleBudgetedBytes = 0
+			}
+			if db.scaleHostVisible {
+				if v.hostvisN > 0 {
+					v.hostvisN--
+				}
+				db.scaleHostVisible = false
+			}
 			db.scalePtr = nil
 			db.scaleN = 0
 		}
@@ -668,6 +702,8 @@ func (v *vulkanBackend) MatMul(w, x Tensor) Tensor {
 		C.fvk_matmul_f32(v.vp(w), v.vp(x), v.vp(y), C.int(out), C.int(in), 1)
 	case Q8_0:
 		v.q8MatMulLocked(w, x, y, out, in, 1)
+	case Q4_K:
+		C.fvk_q4k_matmul_f32(v.vp(w), v.vp(x), v.vp(y), C.int(out), C.int(in), 1)
 	default:
 		panic("compute: vulkan MatMul unsupported weight dtype " + w.Dtype.String())
 	}
@@ -842,6 +878,7 @@ func (v *vulkanBackend) MatMul2(w0, w1, x Tensor) (Tensor, Tensor) {
 	}
 	y0, _ := v.devTr([]int{out0}, F32)
 	y1, _ := v.devTr([]int{out1}, F32)
+
 	if w0.Dtype == Q8_0 || w1.Dtype == Q8_0 {
 		if w0.Dtype != Q8_0 || w1.Dtype != Q8_0 {
 			panic("compute: vulkan MatMul2 requires either all F32 or all Q8_0 weights")
@@ -938,6 +975,16 @@ func (v *vulkanBackend) RMSNormMatMul2(w0, w1, x, normWeight Tensor, eps float32
 	}
 	y0, _ := v.devTr([]int{out0}, F32)
 	y1, _ := v.devTr([]int{out1}, F32)
+	if w0.Dtype == Q4_K || w1.Dtype == Q4_K {
+		if w0.Dtype != Q4_K || w1.Dtype != Q4_K {
+			panic("compute: vulkan RMSNormMatMul2 requires either all F32, all Q8_0, or all Q4_K weights")
+		}
+		xn, _ := v.devTr([]int{in}, F32)
+		C.fvk_rmsnorm_f32(v.vp(x), v.vp(normWeight), v.vp(xn), C.int(P), C.int(in), C.float(eps))
+		C.fvk_q4k_matmul_f32(v.vp(w0), v.vp(xn), v.vp(y0), C.int(out0), C.int(in), C.int(P))
+		C.fvk_q4k_matmul_f32(v.vp(w1), v.vp(xn), v.vp(y1), C.int(out1), C.int(in), C.int(P))
+		return y0, y1
+	}
 	if w0.Dtype == Q8_0 || w1.Dtype == Q8_0 {
 		if w0.Dtype != Q8_0 || w1.Dtype != Q8_0 {
 			panic("compute: vulkan RMSNormMatMul2 requires either all F32 or all Q8_0 weights")
@@ -1064,6 +1111,16 @@ func (v *vulkanBackend) SwiGLUMatMulAddInPlace(dst, w, gate, up Tensor) {
 	switch w.Dtype {
 	case F32:
 		C.fvk_swiglu_matmul_add_f32(v.vp(w), v.vp(gate), v.vp(up), v.vp(dst), C.int(out), C.int(in), C.int(P))
+	case Q4_K:
+		sw, _ := v.devTr(append([]int(nil), gate.Shape...), F32)
+		C.fvk_swiglu_f32(v.vp(gate), v.vp(up), v.vp(sw), C.int(gate.Numel()))
+		projShape := []int{P, out}
+		if P == 1 {
+			projShape = []int{out}
+		}
+		proj, _ := v.devTr(projShape, F32)
+		C.fvk_q4k_matmul_f32(v.vp(w), v.vp(sw), v.vp(proj), C.int(out), C.int(in), C.int(P))
+		C.fvk_add_f32(v.vp(dst), v.vp(proj), C.int(dst.Numel()))
 	case Q8_0:
 		wb := v.q8WeightBufLocked(w, in, "Q8 SwiGLUMatMulAddInPlace")
 		if len(wb.q8Chunks) > 0 {

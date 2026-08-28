@@ -422,7 +422,7 @@ func TestVulkanBudgetedWeightFreeReleasesDeviceLocalBytes(t *testing.T) {
 		v.budgetBytes, v.dlUsed, v.hostvisN = oldBudget, oldUsed, oldHostvis
 		v.Trim()
 	}()
-	v.budgetBytes, v.dlUsed, v.hostvisN = 64, 0, 0
+	v.budgetBytes, v.dlUsed, v.hostvisN = 72, 0, 0
 
 	c := cpu()
 	var s lcg = 365
@@ -433,8 +433,8 @@ func TestVulkanBudgetedWeightFreeReleasesDeviceLocalBytes(t *testing.T) {
 	if db.budgetedWeightBytes != 64 {
 		t.Fatalf("budget charge=%d want 64", db.budgetedWeightBytes)
 	}
-	if v.dlUsed != 64 {
-		t.Fatalf("dlUsed after first upload=%d want 64", v.dlUsed)
+	if v.dlUsed != 72 {
+		t.Fatalf("dlUsed after first upload=%d want 72", v.dlUsed)
 	}
 	if v.hostvisN != 0 {
 		t.Fatalf("first weight unexpectedly spilled host-visible; hostvisN=%d", v.hostvisN)
@@ -461,7 +461,7 @@ func TestVulkanBudgetAccountingUsesActualResidency(t *testing.T) {
 		v.budgetBytes, v.dlUsed, v.hostvisN = oldBudget, oldUsed, oldHostvis
 		v.Trim()
 	}()
-	v.budgetBytes, v.dlUsed, v.hostvisN = 64, 0, 0
+	v.budgetBytes, v.dlUsed, v.hostvisN = 72, 0, 0
 
 	host := v.dallocHostVis(64)
 	v.accountWeightPlacement(host, 64)

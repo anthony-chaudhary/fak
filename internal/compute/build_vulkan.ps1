@@ -124,7 +124,7 @@ function Use-GoCgoToolchain {
 
 function Build-Shaders {
     New-Item -ItemType Directory -Force -Path $spvOut | Out-Null
-    $shaders = @("matmul","matmul_add","matmul_argmax","matmul_argmax_blocks","matmul2","matmul3","rmsnorm","rmsnorm_matmul","rmsnorm_matmul2","rmsnorm_matmul3","rmsnorm_matmul_argmax_blocks","rope","swiglu","swiglu_matmul_add","add","add_bias","attention","argmax","argmax_pairs","q8_matmul","q8_matmul2","q8_matmul3","rmsnorm_q8_matmul2","rmsnorm_q8_matmul3","swiglu_q8_matmul_add","qwen35_gdn_conv","qwen35_gdn_recurrent")
+    $shaders = @("matmul","matmul_add","matmul_argmax","matmul_argmax_blocks","matmul2","matmul3","rmsnorm","rmsnorm_matmul","rmsnorm_matmul2","rmsnorm_matmul3","rmsnorm_matmul_argmax_blocks","rope","swiglu","swiglu_matmul_add","add","add_bias","attention","argmax","argmax_pairs","q8_matmul","q8_matmul2","q8_matmul3","rmsnorm_q8_matmul2","rmsnorm_q8_matmul3","swiglu_q8_matmul_add","qwen35_gdn_conv","qwen35_gdn_recurrent","q4k_matmul")
     foreach ($s in $shaders) {
         $src = Join-Path $shaderSrc "$s.comp"
         $dst = Join-Path $spvOut "$s.spv"
