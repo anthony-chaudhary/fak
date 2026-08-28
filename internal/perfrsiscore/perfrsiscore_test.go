@@ -194,7 +194,9 @@ func TestPerformanceRSILearningAcceptance(t *testing.T) {
 	for _, d := range got.Dimensions {
 		value, derived := want[d.ID]
 		if derived {
-			if d.Current == nil || math.Abs(*d.Current-value) > 1e-9 || d.EvidenceKind != "performance_rsi_learning_receipt" || d.Engine != "fak-native" {
+			if d.Current == nil || math.Abs(*d.Current-value) > 1e-9 ||
+				d.Source != "learning:"+LearningSchema ||
+				d.EvidenceKind != "performance_rsi_learning_receipt" || d.Engine != "fak-native" {
 				t.Errorf("%s=%+v want %.1f and strict receipt provenance", d.ID, d, value)
 			}
 		} else if d.Current != before[d.ID] && (d.Current == nil || before[d.ID] == nil || *d.Current != *before[d.ID]) {
@@ -485,7 +487,9 @@ func TestImprovementDerivesReceiptDimensionsOnly(t *testing.T) {
 	for _, d := range e.Dimensions {
 		value, derived := want[d.ID]
 		if derived {
-			if d.Current == nil || *d.Current != value || d.EvidenceKind != "improvement_receipt" || d.Engine != "fak-native/qwen3.8" {
+			if d.Current == nil || *d.Current != value ||
+				d.Source != "improvement:"+ImprovementSchema ||
+				d.EvidenceKind != "improvement_receipt" || d.Engine != "fak-native/qwen3.8" {
 				t.Errorf("%s not deterministically derived: %+v", d.ID, d)
 			}
 			continue

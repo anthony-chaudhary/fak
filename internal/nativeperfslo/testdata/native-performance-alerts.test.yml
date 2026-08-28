@@ -1,0 +1,89 @@
+rule_files:
+  - ../../../tools/grafana/native-performance-alerts.yml
+evaluation_interval: 30s
+tests:
+  - name: known-good-never-alerts
+    interval: 30s
+    input_series:
+      - series: 'fak_native_slo_state{engine="fak-native",module_rev="internal/nativeperf@r41+ggood",benchmark_envelope="qwen38-b1",model="Qwen3.8-4B",backend="cuda",state="good"}'
+        values: '1x8'
+      - series: 'fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+ggood",benchmark_envelope="qwen38-b1",model="Qwen3.8-4B",backend="cuda",objective="receipt_coverage"}'
+        values: '1x8'
+      - series: 'fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+ggood",benchmark_envelope="qwen38-b1",model="Qwen3.8-4B",backend="cuda",objective="evidence_freshness"}'
+        values: '20x8'
+    alert_rule_test:
+      - eval_time: 3m30s
+        alertname: FakNativePerformanceRegression
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: FakNativePerformanceEvidenceMissing
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: FakNativeReceiptCoverageLow
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: FakNativeEvidenceStale
+        exp_alerts: []
+  - name: regression-debounces-and-recovers-without-flapping
+    interval: 30s
+    input_series:
+      - series: 'fak_native_slo_state{engine="fak-native",module_rev="internal/nativeperf@r42+gbad",benchmark_envelope="qwen38-b1",model="Qwen3.8-4B",backend="cuda",state="regression"}'
+        values: '0x2 1x5 0x8'
+    alert_rule_test:
+      - eval_time: 2m30s
+        alertname: FakNativePerformanceRegression
+        exp_alerts: []
+      - eval_time: 3m30s
+        alertname: FakNativePerformanceRegression
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              service: fak-native
+              module_rev: internal/nativeperf@r42+gbad
+              benchmark_envelope: qwen38-b1
+              model: Qwen3.8-4B
+              backend: cuda
+            exp_annotations:
+              summary: fak-native regression in matched envelope qwen38-b1
+              description: Qwen3.8-4B on cuda at internal/nativeperf@r42+gbad has remained regressed for two minutes. Hold promotion and inspect violating objectives.
+              action: Compare only this benchmark_envelope; revert the promoted module@rev if the regression remains quality-valid.
+      - eval_time: 5m
+        alertname: FakNativePerformanceRegression
+        exp_alerts:
+          - exp_labels:
+              severity: page
+              service: fak-native
+              module_rev: internal/nativeperf@r42+gbad
+              benchmark_envelope: qwen38-b1
+              model: Qwen3.8-4B
+              backend: cuda
+            exp_annotations:
+              summary: fak-native regression in matched envelope qwen38-b1
+              description: Qwen3.8-4B on cuda at internal/nativeperf@r42+gbad has remained regressed for two minutes. Hold promotion and inspect violating objectives.
+              action: Compare only this benchmark_envelope; revert the promoted module@rev if the regression remains quality-valid.
+      - eval_time: 6m30s
+        alertname: FakNativePerformanceRegression
+        exp_alerts: []
+  - name: missing-evidence-is-not-zero-or-healthy
+    interval: 30s
+    input_series:
+      - series: 'fak_native_slo_state{engine="fak-native",module_rev="internal/nativeperf@r42+gmissing",benchmark_envelope="qwen38-b1",model="Qwen3.8-4B",backend="metal",state="missing_evidence"}'
+        values: '1x8'
+    alert_rule_test:
+      - eval_time: 30s
+        alertname: FakNativePerformanceEvidenceMissing
+        exp_alerts: []
+      - eval_time: 1m30s
+        alertname: FakNativePerformanceEvidenceMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: fak-native
+              module_rev: internal/nativeperf@r42+gmissing
+              benchmark_envelope: qwen38-b1
+              model: Qwen3.8-4B
+              backend: metal
+            exp_annotations:
+              summary: fak-native performance evidence is unavailable
+              description: The SLO cannot be evaluated for Qwen3.8-4B on metal at internal/nativeperf@r42+gmissing. Missing data is not treated as zero or healthy.
+              action: Restore fresh native receipts and complete phase evidence before promotion.

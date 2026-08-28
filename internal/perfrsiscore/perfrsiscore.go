@@ -843,6 +843,7 @@ func applyLearning(e *Evidence) error {
 		value := values[d.ID]
 		v := value
 		d.Current = &v
+		d.Source = "learning:" + l.Schema
 		d.EvidenceKind = "performance_rsi_learning_receipt"
 		d.Engine = "fak-native"
 	}

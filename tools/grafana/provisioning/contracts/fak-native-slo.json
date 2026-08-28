@@ -1,0 +1,77 @@
+{
+  "schema": "fak-grafana-native-slo-contract/v1",
+  "dashboard": "../../dashboards/fak-native-slo.json",
+  "dashboard_uid": "fak-native-slo",
+  "alerts": "../../native-performance-alerts.yml",
+  "engine": "fak-native",
+  "model_default": "Qwen3.8",
+  "comparison_identity": [
+    "module_rev",
+    "benchmark_envelope",
+    "model",
+    "backend"
+  ],
+  "comparison_rule": "all comparison identity labels must match exactly; unmatched envelopes are refused before time-series projection",
+  "states": [
+    "good",
+    "regression",
+    "missing_evidence"
+  ],
+  "objectives": [
+    "ttft",
+    "tpot",
+    "throughput",
+    "queue_delay",
+    "cache_efficiency",
+    "transfer_share",
+    "kernel_share",
+    "memory_pressure",
+    "evidence_freshness",
+    "receipt_coverage"
+  ],
+  "metrics": [
+    "fak_native_slo_state",
+    "fak_native_slo_value",
+    "fak_native_slo_ratio",
+    "fak_native_slo_violation",
+    "fak_native_lifecycle_event_info"
+  ],
+  "semantics": {
+    "missing_value": "absent series",
+    "dashboard_no_value": "UNAVAILABLE",
+    "zero_coercion_forbidden": true,
+    "regression_consecutive_observations": 2,
+    "recovery_consecutive_observations": 2,
+    "alert_for": "2m",
+    "alert_keep_firing_for": "2m"
+  },
+  "annotations": {
+    "metric": "fak_native_lifecycle_event_info",
+    "events": [
+      "promotion",
+      "revert",
+      "release"
+    ],
+    "labels": [
+      "module_rev",
+      "benchmark_envelope",
+      "model",
+      "backend",
+      "event",
+      "release"
+    ]
+  },
+  "fixture": "../fixtures/fak-native-slo.prom",
+  "fixture_scenarios": [
+    "good",
+    "regression",
+    "missing_evidence",
+    "recovery"
+  ],
+  "visual_witnesses": [
+    "../witnesses/fak-native-slo-regression.png",
+    "../witnesses/fak-native-slo-missing-evidence.png"
+  ],
+  "notice": "Synthetic fixtures and screenshots prove rendering and transition semantics only; they are not live native performance evidence.",
+  "visual_render": "captured from locally provisioned Grafana 12.4.2 with Prometheus fixture data and headless Chrome at 1920x1500"
+}

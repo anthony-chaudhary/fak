@@ -1,0 +1,59 @@
+groups:
+  - name: fak-native-performance-slo
+    interval: 30s
+    rules:
+      - alert: FakNativePerformanceRegression
+        expr: max by (module_rev, benchmark_envelope, model, backend) (fak_native_slo_state{engine="fak-native",state="regression"}) == 1
+        for: 2m
+        keep_firing_for: 2m
+        labels:
+          severity: page
+          service: fak-native
+        annotations:
+          summary: "fak-native regression in matched envelope {{ $labels.benchmark_envelope }}"
+          description: "{{ $labels.model }} on {{ $labels.backend }} at {{ $labels.module_rev }} has remained regressed for two minutes. Hold promotion and inspect violating objectives."
+          action: "Compare only this benchmark_envelope; revert the promoted module@rev if the regression remains quality-valid."
+      - alert: FakNativeObjectiveViolation
+        expr: max by (module_rev, benchmark_envelope, model, backend, objective) (fak_native_slo_violation{engine="fak-native"}) == 1
+        for: 2m
+        keep_firing_for: 2m
+        labels:
+          severity: warning
+          service: fak-native
+        annotations:
+          summary: "fak-native {{ $labels.objective }} SLO violation"
+          description: "{{ $labels.model }} on {{ $labels.backend }} at {{ $labels.module_rev }} violates {{ $labels.objective }} inside matched envelope {{ $labels.benchmark_envelope }}."
+          action: "Inspect the objective panel and phase accounting; do not compare a different envelope."
+      - alert: FakNativePerformanceEvidenceMissing
+        expr: max by (module_rev, benchmark_envelope, model, backend) (fak_native_slo_state{engine="fak-native",state="missing_evidence"}) == 1
+        for: 1m
+        keep_firing_for: 2m
+        labels:
+          severity: warning
+          service: fak-native
+        annotations:
+          summary: "fak-native performance evidence is unavailable"
+          description: "The SLO cannot be evaluated for {{ $labels.model }} on {{ $labels.backend }} at {{ $labels.module_rev }}. Missing data is not treated as zero or healthy."
+          action: "Restore fresh native receipts and complete phase evidence before promotion."
+      - alert: FakNativeReceiptCoverageLow
+        expr: max by (module_rev, benchmark_envelope, model, backend) (fak_native_slo_value{engine="fak-native",objective="receipt_coverage"}) < 0.95
+        for: 2m
+        keep_firing_for: 2m
+        labels:
+          severity: warning
+          service: fak-native
+        annotations:
+          summary: "fak-native receipt coverage below 95%"
+          description: "Receipt coverage is {{ $value | humanizePercentage }} for {{ $labels.benchmark_envelope }}."
+          action: "Repair receipt ingestion; block promotion until coverage recovers."
+      - alert: FakNativeEvidenceStale
+        expr: max by (module_rev, benchmark_envelope, model, backend) (fak_native_slo_value{engine="fak-native",objective="evidence_freshness"}) > 300
+        for: 1m
+        keep_firing_for: 2m
+        labels:
+          severity: warning
+          service: fak-native
+        annotations:
+          summary: "fak-native evidence is older than five minutes"
+          description: "Latest matched-envelope evidence is {{ $value | humanizeDuration }} old for {{ $labels.module_rev }}."
+          action: "Run a fresh quality-constrained benchmark before promotion or release."
