@@ -168,6 +168,12 @@ func expertHALQ6KTensor(out, in int, seed int64) *kQuantTensor {
 }
 
 func TestExpertSwiGLUHALParity(t *testing.T) {
+	// Compare the backend against the exact f32 Q4_K oracle. On arm64 the
+	// production resident path defaults to activation-quantized int8 SDOT,
+	// which has its own quality contract and is not a 1e-5 f32 reference.
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
 	const H = 256
 	for _, tc := range []struct {
 		name string

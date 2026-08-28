@@ -171,6 +171,11 @@ func routedExpertParity(t *testing.T, label string, got, want []float32) {
 // so it fell through, and backendKernel.mul returned kQuantMatRows for the kqw
 // down_proj, keeping it and the activation on the host.
 func TestGLMDsaMatKernelRoutedExpertRunsOnDevice(t *testing.T) {
+	// residentKernel is the host oracle below. Keep it on the exact f32 Q4_K
+	// path rather than arm64's approximate activation-quantized SDOT path.
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
 	m, names := q4kmRoutedExpertModel(t)
 	H := m.Cfg.HiddenSize
 	x := make([]float32, H)
@@ -277,6 +282,11 @@ func (routedIncapableBackend) SupportsRoutedExpertKQuant() bool { return false }
 // cpu-ref and Metal do not advertise the routed k-quant capability, so their routed
 // expert must still run the host k-quant GEMV, byte-for-byte as before the seam.
 func TestGLMDsaMatKernelRoutedExpertStaysHostWithoutCapability(t *testing.T) {
+	// This is an exact path-parity witness, so select the same f32 Q4_K
+	// numerical contract as the backend under comparison.
+	setQ4KSDOTForTest(false)
+	t.Cleanup(func() { setQ4KSDOTForTest(true) })
+
 	m, _ := q4kmRoutedExpertModel(t)
 	H := m.Cfg.HiddenSize
 	x := make([]float32, H)
