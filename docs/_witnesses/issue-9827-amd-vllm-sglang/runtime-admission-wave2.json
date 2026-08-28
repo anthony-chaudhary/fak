@@ -1,0 +1,84 @@
+{
+  "schema": "coordinator_witness.v1",
+  "captured_at": "2026-08-28",
+  "issue": "#9827",
+  "typed_outcome": "runtime_gpu_not_admitted_after_userland_and_bridge_setup",
+  "evidence": [
+    {
+      "fact": "Existing RX 7600 WSL setup from prior receipt remained in place.",
+      "details": {
+        "windows_driver": "32.0.31041.1004",
+        "wsl_version": "2.7.12.0",
+        "kernel": "6.18.33.2",
+        "rocm_sdk": "10.0.0",
+        "python_env": "user venv with gfx1102 package",
+        "librocdxg": "1.2.2"
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "/opt/rocm/share/rocdxg/dids.conf contains only commented example lines for PCI device 0x7480 gfx1102.",
+      "details": {
+        "active_override_added": false
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "WSL dmesg shows dxg query failures during adapter discovery.",
+      "details": {
+        "messages": [
+          "dxgkio_is_feature_enabled: Ioctl failed: -22",
+          "dxgkio_query_adapter_info: Ioctl failed: -22",
+          "dxgkio_query_adapter_info: Ioctl failed: -2"
+        ]
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "Post-librocdxg rocminfo still exits 1 without admitting a WDDM adapter.",
+      "details": {
+        "exit_code": 1,
+        "messages": [
+          "No WDDM adapters found",
+          "WSL environment detected",
+          "hsa_init Failed, possibly no supported GPU devices"
+        ]
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "AMD ROCm Python index currently offers ROCm PyTorch builds but no vllm or sglang distribution.",
+      "details": {
+        "torch_versions": [
+          "2.13.0+rocm10.0.0",
+          "2.12.0+rocm10.0.0",
+          "2.11.0+rocm10.0.0"
+        ],
+        "vllm_present": false,
+        "sglang_present": false
+      },
+      "provenance": "coordinator-witnessed fact"
+    },
+    {
+      "fact": "Installing PyTorch or building vLLM/SGLang is not the next valid gate because GPU enumeration has not passed.",
+      "details": {
+        "enumeration_gate_passed": false
+      },
+      "provenance": "coordinator-witnessed fact"
+    }
+  ],
+  "prohibited_substitutions": [
+    "Do not treat a commented dids.conf example as an active override.",
+    "Do not claim a dids.conf override, driver replacement, reboot, kernel patch, or CPU fallback occurred.",
+    "Do not present PyTorch install or vLLM/SGLang build as the next gate before GPU enumeration passes.",
+    "Do not imply that changing the Windows driver would make RX 7600 officially supported in AMD WSL ROCm."
+  ],
+  "next_gate": {
+    "summary": "GPU enumeration must succeed before framework installation or engine build is considered valid.",
+    "operator_approved_options": [
+      "supported AMD WSL Windows driver on supported hardware",
+      "native Linux ROCm on RX 7600 as experimental",
+      "supported AMD Linux accelerator node"
+    ]
+  }
+}

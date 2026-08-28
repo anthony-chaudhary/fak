@@ -894,6 +894,10 @@ type Server struct {
 	// the full registry regardless.
 	deferMCPTools bool
 
+	// capabilitiesReuse is the bounded, success-only reuse entry for the MCP
+	// fak_capabilities discovery operation. Its zero value is ready for use.
+	capabilitiesReuse capabilitiesReuseCache
+
 	// deferColdTools mirrors Config.DeferColdTools: true means the outbound Anthropic
 	// body defers its cold tool tail via defer_loading + an injected tool_search_tool
 	// (#3232). Read only by maybeDeferColdTools; fail-safe identity when off.

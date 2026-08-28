@@ -22,16 +22,21 @@ func run(stdout, stderr io.Writer, args []string) int {
 	archive := fs.String("archive", "", "secret-scrubbed raw archive output")
 	soak := fs.Bool("soak", false, "run the three-finalist production soak")
 	oracle := fs.Bool("oracle", false, "compare pinned llama.cpp and fak evidence")
+	scoreboard := fs.Bool("amd-scoreboard", false, "build a matched AMD fak-native versus llama.cpp scoreboard")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *config == "" || *report == "" || *archive == "" || fs.NArg() != 0 || *soak && *oracle {
-		fmt.Fprintln(stderr, "usage: qwen38campaign [--soak | --oracle] --config CONFIG.json --report REPORT.json --archive ARCHIVE.json [--corpus CORPUS.json]")
+	if *config == "" || *report == "" || fs.NArg() != 0 || boolCount(*soak, *oracle, *scoreboard) > 1 || (!*scoreboard && *archive == "") {
+		fmt.Fprintln(stderr, "usage: qwen38campaign [--soak | --oracle | --amd-scoreboard] --config CONFIG.json --report REPORT.json [--archive ARCHIVE.json] [--corpus CORPUS.json]")
 		return 2
 	}
 	var err error
 	verdict := "PASS"
-	if *oracle {
+	if *scoreboard {
+		var scoreboardReport qwen38quantrun.AMDScoreboardReport
+		scoreboardReport, err = qwen38quantrun.BuildAMDScoreboardFile(*config, *report)
+		verdict = scoreboardReport.Verdict
+	} else if *oracle {
 		var oracleReport qwen38quantrun.OracleReport
 		oracleReport, err = qwen38quantrun.RunOracle(context.Background(), *config, *corpus, *report, *archive)
 		verdict = oracleReport.Verdict
@@ -46,4 +51,14 @@ func run(stdout, stderr io.Writer, args []string) int {
 	}
 	fmt.Fprintf(stdout, "%s report=%s archive=%s\n", verdict, *report, *archive)
 	return 0
+}
+
+func boolCount(values ...bool) int {
+	count := 0
+	for _, value := range values {
+		if value {
+			count++
+		}
+	}
+	return count
 }

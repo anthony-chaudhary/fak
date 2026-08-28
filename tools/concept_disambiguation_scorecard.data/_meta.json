@@ -8728,6 +8728,11 @@
           "category": "incidental",
           "reason": "Private launcher-selected environment key for one helper bearer secret; it is not a new capability-policy concept",
           "token": "FAK_APP_CAPABILITY"
+        },
+        {
+          "category": "incidental",
+          "reason": "Benchmark receipt label freezes a comparator placement setting; it does not define or enforce a capability policy.",
+          "token": "HostSpillPolicy"
         }
       ],
       "exclude": [
@@ -8768,6 +8773,7 @@
         "FailurePolicy",
         "GoCandidateCapability",
         "HeldSchedulePolicy",
+        "HostSpillPolicy",
         "LocalPolicy",
         "MaxPostures",
         "MisfirePolicy",
@@ -9438,7 +9444,15 @@
           "category": "test-only",
           "reason": "demo captured-selfcheck fixture count, not a context subsystem concept",
           "token": "capturedSelfcheckContexts"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Benchmark receipt field records an input byte limit; it does not introduce a context-management concept.",
+          "token": "ContextBudgetBytes"
         }
+      ],
+      "exclude": [
+        "ContextBudgetBytes"
       ],
       "id": "context-ctx",
       "ignore": [
@@ -13013,9 +13027,15 @@
           "category": "incidental",
           "reason": "Selector constant scoped to the issue #8833 Metal experiment, not a planning concept.",
           "token": "MixedQKVCandidate"
+        },
+        {
+          "category": "false-positive",
+          "reason": "Scoreboard ratio field names numerator over denominator; it is not a project planning concept.",
+          "token": "ReferenceOverCandidate"
         }
       ],
       "exclude": [
+        "ReferenceOverCandidate",
         "candidate_fak_share_gross",
         "candidate_fak_share_net",
         "explanat",
