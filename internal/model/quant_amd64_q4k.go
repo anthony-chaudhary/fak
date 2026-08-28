@@ -48,7 +48,11 @@ func detectAVX512VNNI() bool {
 }
 
 func q4kExtractOnceGemmEnabled() bool {
-	return false
+	// q4kGemmInto consults this only after q4kSDOTEnabled, so amd64 keeps the existing
+	// FAK_KQ_INT8/test gate and the f32 control unchanged. The arch hook below deliberately
+	// declines: the shared implementation already extracts each Q4_K row once per GEMM and
+	// feeds the resolved amd64 Q8 tile without adding another architecture-specific kernel.
+	return true
 }
 
 func q4kGemmExtractOnceInt8IntoArch(qt *q4kTensor, qp *q8Panel, Y []float32) bool {

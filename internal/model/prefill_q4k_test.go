@@ -1,8 +1,12 @@
 package model
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"math"
 	"math/rand"
+	"runtime"
 	"testing"
 )
 
@@ -157,6 +161,140 @@ func TestQ4KGemmInt8ExtractOnceMatchesMatRowsInt8(t *testing.T) {
 		t.Fatalf("q4kGemm extract-once int8 max-abs/RMS %.3e > 1e-4 (abs=%.3e rms=%.3e)", maxRel/rms, maxRel, rms)
 	}
 	t.Logf("q4kGemm extract-once int8 max-abs/RMS = %.3e", maxRel/rms)
+}
+
+// TestQ4KGemmExtractOnceSelectAMD64 proves the production prefill dispatcher reaches the
+// extract-once implementation when the existing approximate-int8 gate is active on amd64. The
+// direct extract-once result is an execution fingerprint: the legacy per-token reduction has a
+// different floating-point reduction order, so the test also requires this fixture to distinguish
+// the two routes. This test deliberately forces only the existing test gate; production remains
+// opt-in through FAK_KQ_INT8.
+func TestQ4KGemmExtractOnceSelectAMD64(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("amd64 production selector witness")
+	}
+	priorForce := q4kSDOTForce
+	setQ4KSDOTForTest(true)
+	t.Cleanup(func() { q4kSDOTForce = priorForce })
+
+	const out, in, P = 32, 768, 8
+	nblk := in / qkK
+	rng := rand.New(rand.NewSource(9743))
+	raw := make([]byte, out*nblk*q4kBlockBytes)
+	blk := make([]byte, q4kBlockBytes)
+	for i := 0; i < out*nblk; i++ {
+		randQ4KBlock(rng, blk)
+		copy(raw[i*q4kBlockBytes:(i+1)*q4kBlockBytes], blk)
+	}
+	qt := quantizeQ4KFromRaw(raw, out, in)
+	X := make([]float32, P*in)
+	for i := range X {
+		X[i] = float32(rng.NormFloat64())
+	}
+
+	got := make([]float32, P*out)
+	q4kGemmInto(qt, X, P, got)
+	qp := quantizeBatchPanel(X, P, in)
+	want := make([]float32, P*out)
+	q4kGemmExtractOnceInt8Into(qt, qp, want)
+	for i := range got {
+		if math.Float32bits(got[i]) != math.Float32bits(want[i]) {
+			t.Fatalf("production output[%d]=%v, direct extract-once=%v", i, got[i], want[i])
+		}
+	}
+
+	qvs := make([]q8Vec, P)
+	for token := 0; token < P; token++ {
+		qvs[token] = quantizeVecQ8(X[token*in : (token+1)*in])
+	}
+	legacy := make([]float32, P*out)
+	q4kGemmRangeInt8(qt, qvs, P, legacy, 0, out)
+	distinguished := false
+	for i := range got {
+		if math.Float32bits(got[i]) != math.Float32bits(legacy[i]) {
+			distinguished = true
+			break
+		}
+	}
+	if !distinguished {
+		t.Fatal("fixture does not distinguish extract-once from legacy per-token reduction")
+	}
+}
+
+// TestQ4KGemmExtractOnceSelectAMD64Source is the architecture-independent source witness for
+// this amd64-only selector. It runs on arm64 coordinators and fails if amd64 stops admitting the
+// portable extract-once path, if an amd64 arch hook silently replaces it, or if the production
+// selector/extractor grows a second invocation site that can repeat work per token.
+func TestQ4KGemmExtractOnceSelectAMD64Source(t *testing.T) {
+	amd64File := parseModelTestFile(t, "quant_amd64_q4k.go")
+	selector := findModelTestFunc(t, amd64File, "q4kExtractOnceGemmEnabled")
+	if !returnsModelTestBool(selector, true) {
+		t.Fatal("amd64 q4kExtractOnceGemmEnabled must return true inside the existing int8 gate")
+	}
+	archHook := findModelTestFunc(t, amd64File, "q4kGemmExtractOnceInt8IntoArch")
+	if !returnsModelTestBool(archHook, false) {
+		t.Fatal("amd64 arch hook must decline so the existing portable extract-once path remains authoritative")
+	}
+
+	sharedFile := parseModelTestFile(t, "quant_q4k.go")
+	dispatch := findModelTestFunc(t, sharedFile, "q4kGemmInto")
+	if got := countModelTestCalls(dispatch, "q4kGemmExtractOnceInt8Into"); got != 1 {
+		t.Fatalf("q4kGemmInto extract-once call sites=%d, want exactly 1", got)
+	}
+	extract := findModelTestFunc(t, sharedFile, "q4kExtractGemmWeights")
+	if got := countModelTestCalls(extract, "q4kExtractGemmRow"); got != 1 {
+		t.Fatalf("q4kExtractGemmWeights row-extraction call sites=%d, want exactly 1 inside the output-row loop", got)
+	}
+}
+
+func parseModelTestFile(t *testing.T, path string) *ast.File {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return f
+}
+
+func findModelTestFunc(t *testing.T, f *ast.File, name string) *ast.FuncDecl {
+	t.Helper()
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == name {
+			return fn
+		}
+	}
+	t.Fatalf("function %s not found", name)
+	return nil
+}
+
+func returnsModelTestBool(fn *ast.FuncDecl, want bool) bool {
+	if fn.Body == nil || len(fn.Body.List) != 1 {
+		return false
+	}
+	ret, ok := fn.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) != 1 {
+		return false
+	}
+	ident, ok := ret.Results[0].(*ast.Ident)
+	if !ok {
+		return false
+	}
+	return ident.Name == map[bool]string{true: "true", false: "false"}[want]
+}
+
+func countModelTestCalls(node ast.Node, name string) int {
+	count := 0
+	ast.Inspect(node, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == name {
+			count++
+		}
+		return true
+	})
+	return count
 }
 
 // TestPrefillBatchedQ4KMatchesSerial proves the resident-Q4_K batched prefill
