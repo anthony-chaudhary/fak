@@ -21,12 +21,12 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "## fak-native backend drilldowns\nThis dashboard accepts only bounded **fak-native** Metal/CUDA telemetry. The committed fixture is **synthetic deterministic render evidence, not live performance evidence**. Live model-specific witnesses must name **Qwen3.8**. Missing backends render an explicit reason; measurements are omitted rather than shown as zero or replaced by another engine."
+        "content": "### Live receipt telemetry\nThese panels query the gateway's emitted native receipt families. The separate backend contract fixture is synthetic and is not treated as live utilization, memory-pressure, synchronization, or graph evidence."
       }
     },
     {
       "id": 2,
-      "title": "Backend identity",
+      "title": "Native requests / second",
       "type": "table",
       "gridPos": {
         "x": 0,
@@ -36,18 +36,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "Bounded engine/model-family identity. llama.cpp and auto fallback identities are outside the contract.",
+      "description": "Supported non-fallback native receipts by bounded backend and forward path.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "fak_native_backend_info{backend=~\"$backend\",engine=\"fak-native\"} == 1",
-          "legendFormat": "{{backend}} \u00b7 {{engine}} \u00b7 {{model_family}}",
+          "expr": "sum by (backend, forward_path) (rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}[5m]))",
+          "legendFormat": "{{backend}} · {{forward_path}}",
           "range": false,
           "instant": true,
           "refId": "A"
@@ -55,8 +55,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "short",
+          "unit": "reqps",
           "color": {
             "mode": "palette-classic"
           },
@@ -74,7 +73,7 @@
     },
     {
       "id": 3,
-      "title": "Explicit backend-unavailable reason",
+      "title": "Unsupported native receipts / second",
       "type": "table",
       "gridPos": {
         "x": 12,
@@ -84,18 +83,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "Empty only when all selected backends are available. Never interpret absence of measurements as zero.",
+      "description": "Global rate of fallback-active, invalid, or unrecognized native receipt observations excluded from native totals.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "fak_native_backend_available{backend=~\"$backend\",reason!=\"none\"} == 1",
-          "legendFormat": "{{backend}} unavailable: {{reason}}",
+          "expr": "rate(fak_native_receipt_unsupported_total[5m])",
+          "legendFormat": "excluded receipt observations",
           "range": false,
           "instant": true,
           "refId": "A"
@@ -103,8 +102,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "short",
+          "unit": "ops",
           "color": {
             "mode": "palette-classic"
           },
@@ -122,7 +120,7 @@
     },
     {
       "id": 4,
-      "title": "Device utilization",
+      "title": "Queue time / native request",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
@@ -132,18 +130,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "Active accelerator utilization from the native backend; aligned with #9784 hardware-utilization semantics.",
+      "description": "Cumulative receipt phase=queue seconds normalized by supported native request rate.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "100 * fak_native_backend_device_utilization_ratio{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}}",
+          "expr": "sum by (backend, forward_path) (rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",phase=\"queue\"}[5m])) / clamp_min(sum by (backend, forward_path) (rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}[5m])), 0.000001)",
+          "legendFormat": "{{backend}} · {{forward_path}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -151,8 +149,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "percent",
+          "unit": "s",
           "color": {
             "mode": "palette-classic"
           },
@@ -192,7 +189,7 @@
     },
     {
       "id": 5,
-      "title": "Memory allocated / resident",
+      "title": "Prefill time / native request",
       "type": "timeseries",
       "gridPos": {
         "x": 8,
@@ -202,18 +199,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "",
+      "description": "Cumulative receipt phase=prefill seconds normalized by supported native request rate.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "fak_native_backend_memory_bytes{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{kind}}",
+          "expr": "sum by (backend, forward_path) (rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",phase=\"prefill\"}[5m])) / clamp_min(sum by (backend, forward_path) (rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}[5m])), 0.000001)",
+          "legendFormat": "{{backend}} · {{forward_path}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -221,8 +218,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "bytes",
+          "unit": "s",
           "color": {
             "mode": "palette-classic"
           },
@@ -262,7 +258,7 @@
     },
     {
       "id": 6,
-      "title": "Memory pressure",
+      "title": "Decode time / native request",
       "type": "timeseries",
       "gridPos": {
         "x": 16,
@@ -272,18 +268,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "",
+      "description": "Cumulative receipt phase=decode seconds normalized by supported native request rate.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "100 * fak_native_backend_memory_pressure_ratio{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}}",
+          "expr": "sum by (backend, forward_path) (rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",phase=\"decode\"}[5m])) / clamp_min(sum by (backend, forward_path) (rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}[5m])), 0.000001)",
+          "legendFormat": "{{backend}} · {{forward_path}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -291,8 +287,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "percent",
+          "unit": "s",
           "color": {
             "mode": "palette-classic"
           },
@@ -332,7 +327,7 @@
     },
     {
       "id": 7,
-      "title": "Queue / stream / command-buffer delay",
+      "title": "Kernel time / native request",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
@@ -342,18 +337,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "Backend queue delay reuses #9784 queue semantics; stream and command-buffer dimensions are emitted only by supporting native APIs.",
+      "description": "Cumulative receipt phase=kernel seconds normalized by supported native request rate.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "1000 * fak_native_backend_delay_seconds{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{kind}}",
+          "expr": "sum by (backend, forward_path) (rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",phase=\"kernel\"}[5m])) / clamp_min(sum by (backend, forward_path) (rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}[5m])), 0.000001)",
+          "legendFormat": "{{backend}} · {{forward_path}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -361,8 +356,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "ms",
+          "unit": "s",
           "color": {
             "mode": "palette-classic"
           },
@@ -402,7 +396,7 @@
     },
     {
       "id": 8,
-      "title": "Upload / download bandwidth",
+      "title": "Observed bytes / native request",
       "type": "timeseries",
       "gridPos": {
         "x": 12,
@@ -412,18 +406,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "",
+      "description": "Receipt-observed KV and transfer bytes per supported native request; unavailable byte signals remain absent rather than inferred.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(fak_native_backend_transfer_bytes_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{direction}}",
+          "expr": "sum by (backend, forward_path, kind) (rate(fak_native_receipt_bytes_total{engine=\"inkernel\",backend=~\"$backend\"}[5m])) / on (backend, forward_path) group_left clamp_min(sum by (backend, forward_path) (rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}[5m])), 0.000001)",
+          "legendFormat": "{{backend}} · {{forward_path}} · {{kind}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -431,8 +425,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "Bps",
+          "unit": "bytes",
           "color": {
             "mode": "palette-classic"
           },
@@ -472,7 +465,7 @@
     },
     {
       "id": 9,
-      "title": "Transfer time",
+      "title": "Receipt evidence age (all backends)",
       "type": "timeseries",
       "gridPos": {
         "x": 0,
@@ -482,18 +475,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "",
+      "description": "Age in seconds of the latest native receipt observation across all backends.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(fak_native_backend_transfer_seconds_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{direction}}",
+          "expr": "fak_native_receipt_latest_age_seconds",
+          "legendFormat": "latest receipt",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -501,7 +494,6 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
           "unit": "s",
           "color": {
             "mode": "palette-classic"
@@ -542,7 +534,7 @@
     },
     {
       "id": 10,
-      "title": "Kernel families \u00b7 calls/s",
+      "title": "Receipt evidence stale (all backends)",
       "type": "timeseries",
       "gridPos": {
         "x": 8,
@@ -552,18 +544,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "",
+      "description": "1 when the latest native receipt across all backends is absent or older than its freshness bound; 0 when fresh.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(fak_native_backend_kernel_calls_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{family}}",
+          "expr": "fak_native_receipt_latest_stale",
+          "legendFormat": "stale",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -571,8 +563,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "ops",
+          "unit": "short",
           "color": {
             "mode": "palette-classic"
           },
@@ -612,7 +603,7 @@
     },
     {
       "id": 11,
-      "title": "Kernel families \u00b7 time share",
+      "title": "Latest receipt signal support (all backends)",
       "type": "timeseries",
       "gridPos": {
         "x": 16,
@@ -622,18 +613,18 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
-      "description": "",
+      "description": "Global authoritative support flags from the latest receipt across all backends. A zero is unsupported, not a measured zero for that signal.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "rate(fak_native_backend_kernel_seconds_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{family}}",
+          "expr": "fak_native_receipt_signal_supported",
+          "legendFormat": "{{signal}}",
           "range": true,
           "instant": false,
           "refId": "A"
@@ -641,230 +632,41 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "s",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "axisPlacement": "auto",
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 12,
-      "title": "Synchronization events/s",
-      "type": "timeseries",
-      "gridPos": {
-        "x": 0,
-        "y": 29,
-        "w": 8,
-        "h": 7
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "description": "",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "rate(fak_native_backend_sync_events_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{kind}}",
-          "range": true,
-          "instant": false,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "ops",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "axisPlacement": "auto",
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 13,
-      "title": "Synchronization time",
-      "type": "timeseries",
-      "gridPos": {
-        "x": 8,
-        "y": 29,
-        "w": 8,
-        "h": 7
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "description": "",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "rate(fak_native_backend_sync_seconds_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} {{kind}}",
-          "range": true,
-          "instant": false,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "UNAVAILABLE",
-          "unit": "s",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "fillOpacity": 12,
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "mode": "none",
-              "group": "A"
-            },
-            "axisPlacement": "auto",
-            "scaleDistribution": {
-              "type": "linear"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "table",
-          "placement": "bottom",
-          "calcs": [
-            "lastNotNull",
-            "mean"
-          ]
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
-      }
-    },
-    {
-      "id": 14,
-      "title": "Graph / capture state",
-      "type": "table",
-      "gridPos": {
-        "x": 16,
-        "y": 29,
-        "w": 8,
-        "h": 7
-      },
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "description": "Optional bounded native graph/capture state. unsupported is explicit; absent means the collector cannot report this surface.",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "editorMode": "code",
-          "expr": "fak_native_backend_graph_state{backend=~\"$backend\"} == 1 and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
-          "legendFormat": "{{backend}} \u00b7 {{state}}",
-          "range": false,
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "noValue": "UNAVAILABLE",
           "unit": "short",
           "color": {
             "mode": "palette-classic"
           },
-          "custom": {}
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 12,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "axisPlacement": "auto",
+            "scaleDistribution": {
+              "type": "linear"
+            }
+          }
         },
         "overrides": []
       },
       "options": {
-        "showHeader": true,
-        "cellHeight": "sm",
-        "footer": {
-          "show": false
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "mean"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     }
@@ -921,8 +723,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "fak native backends \u00b7 Metal / CUDA",
+  "title": "fak native backends — receipt evidence",
   "uid": "fak-native-backends",
   "version": 1,
-  "description": "Bounded fak-native Metal/CUDA drilldowns with explicit unavailable reasons and no fallback engine."
+  "description": "Bounded fak-native Metal/CUDA receipt drilldowns from the live gateway metrics surface. Unsupported and stale evidence remain explicit; fallback receipts never enter these totals."
 }

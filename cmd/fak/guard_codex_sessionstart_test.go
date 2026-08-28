@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"os"
@@ -190,5 +191,49 @@ func TestGuardCodexResourceResumeCommandRefusesMissingOrMalformedBinding(t *test
 				t.Fatalf("unsafe binding produced command=%v err=%v", got, err)
 			}
 		})
+	}
+}
+
+func TestGuardCodexSessionStartPersistsGuardWitnessBeforeFirstTurn(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	statePath := filepath.Join(t.TempDir(), "codex-sessionstart-state")
+	const sessionID = "0198f76a-67c2-7d11-a8f5-8f3d82149734"
+	payload := strings.NewReader(`{"session_id":"` + sessionID + `","source":"startup"}`)
+
+	var stdout, stderr bytes.Buffer
+	if code := runGuardSessionStartHook(&stdout, &stderr, payload, []string{
+		"--provider", "codex",
+		"--trace", "guard-trace-9849",
+		"--state", statePath,
+	}); code != 0 {
+		t.Fatalf("runGuardSessionStartHook code=%d stderr=%s", code, stderr.String())
+	}
+	if !codexGuardWitnessExists(codexHome, sessionID) {
+		t.Fatalf("guard witness was not persisted at SessionStart; stderr=%s", stderr.String())
+	}
+	binding, err := readGuardCodexSessionBinding(statePath, "guard-trace-9849")
+	if err != nil {
+		t.Fatalf("read launch binding: %v", err)
+	}
+	if binding.ProviderSessionID != sessionID {
+		t.Fatalf("binding session=%q want %q", binding.ProviderSessionID, sessionID)
+	}
+}
+
+func TestGuardCodexSessionStartDoesNotWitnessUnboundOrForgedSession(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	const sessionID = "0198f76a-67c2-7d11-a8f5-8f3d82149734"
+
+	var stdout, stderr bytes.Buffer
+	if code := runGuardSessionStartHook(&stdout, &stderr, strings.NewReader(`{"session_id":"`+sessionID+`","source":"startup"}`), []string{
+		"--provider", "codex",
+		"--trace", "model-controlled-trace",
+	}); code != 0 {
+		t.Fatalf("runGuardSessionStartHook code=%d stderr=%s", code, stderr.String())
+	}
+	if codexGuardWitnessExists(codexHome, sessionID) {
+		t.Fatal("session without the host-installed state binding created a guard witness")
 	}
 }

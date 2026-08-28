@@ -107,36 +107,46 @@ func TestGrafanaContractMatchesGoContract(t *testing.T) {
 	}
 }
 
-func TestDashboardQueriesGateMeasurementsAndShowUnavailableReason(t *testing.T) {
+func TestDashboardUsesLiveReceiptMetricsWithoutSyntheticBackendClaims(t *testing.T) {
 	var got dashboardArtifact
 	decodeArtifact(t, repoPath(t, "tools", "grafana", "dashboards", "fak-native-backends.json"), &got)
-	if got.UID != "fak-native-backends" || !strings.Contains(got.Description, "no fallback") {
+	if got.UID != "fak-native-backends" || !strings.Contains(got.Description, "live gateway metrics surface") {
 		t.Fatalf("dashboard identity = %#v", got)
 	}
 	var allQueries string
-	var unavailablePanel bool
 	for _, panel := range got.Panels {
-		if strings.Contains(strings.ToLower(panel.Title), "unavailable") {
-			unavailablePanel = true
-		}
 		for _, target := range panel.Targets {
 			allQueries += "\n" + target.Expr
 		}
 	}
-	if !unavailablePanel || !strings.Contains(allQueries, `reason!="none"`) {
-		t.Fatal("dashboard does not render explicit backend-unavailable reasons")
-	}
-	for _, metric := range Metrics()[2:] {
-		needle := metric.Name
-		if !strings.Contains(allQueries, needle) {
-			t.Fatalf("dashboard has no query for %s", needle)
+	for _, family := range []string{
+		"fak_native_receipt_requests_total",
+		"fak_native_receipt_unsupported_total",
+		"fak_native_receipt_phase_seconds_total",
+		"fak_native_receipt_bytes_total",
+		"fak_native_receipt_latest_age_seconds",
+		"fak_native_receipt_latest_stale",
+		"fak_native_receipt_signal_supported",
+	} {
+		if !strings.Contains(allQueries, family) {
+			t.Fatalf("dashboard has no query for live family %s", family)
 		}
 	}
-	if strings.Contains(allQueries, "llama") || strings.Contains(allQueries, `engine=~`) {
+	for _, metric := range Metrics() {
+		if strings.Contains(allQueries, metric.Name) {
+			t.Fatalf("dashboard still queries fixture-only backend family %s", metric.Name)
+		}
+	}
+	if strings.Contains(allQueries, "llama") || strings.Contains(allQueries, `engine=~`) || !strings.Contains(allQueries, `engine="inkernel"`) {
 		t.Fatalf("dashboard query admits fallback engine: %s", allQueries)
 	}
-	if strings.Count(allQueries, `reason="none"`) < 10 {
-		t.Fatalf("measurement queries are not consistently availability-gated: %s", allQueries)
+	for _, phase := range []string{`phase="queue"`, `phase="prefill"`, `phase="decode"`, `phase="kernel"`} {
+		if !strings.Contains(allQueries, phase) {
+			t.Fatalf("dashboard omits live receipt phase %s: %s", phase, allQueries)
+		}
+	}
+	if !strings.Contains(allQueries, "group_left clamp_min") {
+		t.Fatalf("per-kind byte normalization is not many-to-one safe: %s", allQueries)
 	}
 }
 

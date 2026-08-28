@@ -209,25 +209,21 @@ func (m *ReceiptMetrics) Prometheus(now time.Time) string {
 	})
 
 	var b strings.Builder
-	b.WriteString("# HELP fak_native_receipt_requests_total Completed supported fak-native execution receipts.\n")
-	b.WriteString("# TYPE fak_native_receipt_requests_total counter\n")
+	writeReceiptHelpType(&b, "fak_native_receipt_requests_total", "Completed supported fak-native execution receipts.", "counter")
 	for _, k := range keys {
 		t := totals[k]
 		fmt.Fprintf(&b, "fak_native_receipt_requests_total%s %d\n", receiptLabels(k), t.requests)
 	}
-	b.WriteString("# HELP fak_native_receipt_unsupported_total Native receipt observations excluded from native totals.\n")
-	b.WriteString("# TYPE fak_native_receipt_unsupported_total counter\n")
+	writeReceiptHelpType(&b, "fak_native_receipt_unsupported_total", "Native receipt observations excluded from native totals.", "counter")
 	fmt.Fprintf(&b, "fak_native_receipt_unsupported_total %d\n", unsupported)
-	b.WriteString("# HELP fak_native_receipt_phase_seconds_total Cumulative duration projected from native execution receipts.\n")
-	b.WriteString("# TYPE fak_native_receipt_phase_seconds_total counter\n")
+	writeReceiptHelpType(&b, "fak_native_receipt_phase_seconds_total", "Cumulative duration projected from native execution receipts.", "counter")
 	for _, k := range keys {
 		t := totals[k]
 		for i, phase := range receiptMetricPhases {
 			fmt.Fprintf(&b, "fak_native_receipt_phase_seconds_total%s,phase=%q} %s\n", strings.TrimSuffix(receiptLabels(k), "}"), phase, formatMetricFloat(t.phases[i]))
 		}
 	}
-	b.WriteString("# HELP fak_native_phase_seconds_total Reconciled exclusive fak-native phase time by bounded phase and wall/active/wait kind.\n")
-	b.WriteString("# TYPE fak_native_phase_seconds_total counter\n")
+	writeReceiptHelpType(&b, "fak_native_phase_seconds_total", "Reconciled exclusive fak-native phase time by bounded phase and wall/active/wait kind.", "counter")
 	for _, k := range keys {
 		t := totals[k]
 		for i, phase := range phaseOrder {
@@ -237,16 +233,14 @@ func (m *ReceiptMetrics) Prometheus(now time.Time) string {
 			fmt.Fprintf(&b, "fak_native_phase_seconds_total%s,phase=%q,kind=%q} %s\n", labels, phase, "wait", formatMetricFloat(t.phaseWait[i]))
 		}
 	}
-	b.WriteString("# HELP fak_native_receipt_bytes_total Cumulative bytes projected from native execution receipts.\n")
-	b.WriteString("# TYPE fak_native_receipt_bytes_total counter\n")
+	writeReceiptHelpType(&b, "fak_native_receipt_bytes_total", "Cumulative bytes projected from native execution receipts.", "counter")
 	for _, k := range keys {
 		t := totals[k]
 		for i, kind := range receiptMetricByteKinds {
 			fmt.Fprintf(&b, "fak_native_receipt_bytes_total%s,kind=%q} %d\n", strings.TrimSuffix(receiptLabels(k), "}"), kind, t.bytes[i])
 		}
 	}
-	b.WriteString("# HELP fak_native_receipt_signal_supported Whether the latest receipt carried authoritative support for a signal.\n")
-	b.WriteString("# TYPE fak_native_receipt_signal_supported gauge\n")
+	writeReceiptHelpType(&b, "fak_native_receipt_signal_supported", "Whether the latest receipt carried authoritative support for a signal.", "gauge")
 	for i, signal := range receiptMetricSignals {
 		value := 0
 		if latest.supported[i] {
@@ -261,13 +255,15 @@ func (m *ReceiptMetrics) Prometheus(now time.Time) string {
 			stale = 0
 		}
 	}
-	b.WriteString("# HELP fak_native_receipt_latest_age_seconds Age of the latest native receipt observation.\n")
-	b.WriteString("# TYPE fak_native_receipt_latest_age_seconds gauge\n")
+	writeReceiptHelpType(&b, "fak_native_receipt_latest_age_seconds", "Age of the latest native receipt observation.", "gauge")
 	fmt.Fprintf(&b, "fak_native_receipt_latest_age_seconds %s\n", formatMetricFloat(age))
-	b.WriteString("# HELP fak_native_receipt_latest_stale Whether native receipt data is absent or older than its freshness bound.\n")
-	b.WriteString("# TYPE fak_native_receipt_latest_stale gauge\n")
+	writeReceiptHelpType(&b, "fak_native_receipt_latest_stale", "Whether native receipt data is absent or older than its freshness bound.", "gauge")
 	fmt.Fprintf(&b, "fak_native_receipt_latest_stale %d\n", stale)
 	return b.String()
+}
+
+func writeReceiptHelpType(b *strings.Builder, name, help, metricType string) {
+	fmt.Fprintf(b, "# HELP %s %s\n# TYPE %s %s\n", name, help, name, metricType)
 }
 
 func receiptLabels(k receiptMetricKey) string {

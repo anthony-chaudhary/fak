@@ -163,6 +163,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdScheduleHeld(args)
 	case "learning-observation":
 		cmdLearningObservation(args)
+	case "learning-mesh":
+		os.Exit(runLearningMesh(os.Stdout, os.Stderr, args))
 	case "host-crash":
 		cmdHostCrash(args)
 	case "hostdiag":

@@ -75,6 +75,24 @@ contract.
 For the broader deploy, observe, recover, and upgrade sequence, return to the
 [operator route](../operator/README.md).
 
+## Native-performance evidence
+
+Use these pages for fak-native performance evidence. They keep the metric,
+correlation, artifact, and dashboard boundaries separate:
+
+- [Native-performance signal contract](native-performance-contract.md) defines
+  the bounded metric inventory, label rules, provenance, freshness, and explicit
+  exclusions.
+- [Evidence correlation](native-performance-correlation.md) defines the opaque
+  lookup key that joins a dashboard point to scrubbed run evidence without
+  putting high-cardinality identities in metric labels.
+- [Artifact index](native-performance-artifacts.md) defines the bounded artifact
+  kinds, locator validation, digest requirements, and unavailable-evidence
+  states.
+- [Grafana operations runbook](native-performance-grafana-runbook.md) separates
+  the currently shipped local stack from planned native panels and names the
+  receipt/profile checks required before a performance claim.
+
 ## Trajectory interpretation and views
 
 - [Trajectory interpretation and presentation](trajectory-presentation.md) separates canonical evidence, derived semantics, audience projection, rendering, and live controls.
