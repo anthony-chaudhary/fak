@@ -1,0 +1,31 @@
+$ go test -count=1 ./internal/perfrsiscore -run 'Edge|Adversarial' -v
+=== RUN   TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs
+=== RUN   TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/empty
+=== RUN   TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/whitespace
+=== RUN   TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/truncated
+=== RUN   TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/wrong_top-level_type
+=== RUN   TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/trailing_value
+=== RUN   TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/unknown_hostile_field
+--- PASS: TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs (0.00s)
+    --- PASS: TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/empty (0.00s)
+    --- PASS: TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/whitespace (0.00s)
+    --- PASS: TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/truncated (0.00s)
+    --- PASS: TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/wrong_top-level_type (0.00s)
+    --- PASS: TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/trailing_value (0.00s)
+    --- PASS: TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs/unknown_hostile_field (0.00s)
+=== RUN   TestAdversarialDecodeRejectsOversizedDimensionSet
+--- PASS: TestAdversarialDecodeRejectsOversizedDimensionSet (0.02s)
+=== RUN   TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths
+--- PASS: TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths (0.00s)
+PASS
+ok  	github.com/anthony-chaudhary/fak/internal/perfrsiscore	0.283s
+
+$ go test -count=1 ./internal/perfrsiscore
+ok  	github.com/anthony-chaudhary/fak/internal/perfrsiscore	0.169s
+
+$ go vet ./internal/perfrsiscore
+
+$ make test-fast
+FAIL (pre-existing trunk architecture violation outside issue #9765 paths)
+TestNoUpwardImports: nativeperf -> agent; qwen38quantrun -> agent
+The build, test-fast timeout regression, and go vet ./... stages passed before architest-gate failed.

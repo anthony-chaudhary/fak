@@ -1013,3 +1013,68 @@ func TestHardwareStrictJSONAndRequiredMeasuredUtilization(t *testing.T) {
 		})
 	}
 }
+
+func TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: "decode evidence:"},
+		{name: "whitespace", input: " \n\t", want: "decode evidence:"},
+		{name: "truncated", input: `{"schema":"fak-performance-rsi-evidence/1"`, want: "decode evidence:"},
+		{name: "wrong top-level type", input: `[]`, want: "decode evidence:"},
+		{name: "trailing value", input: `{} {}`, want: "decode evidence: trailing JSON value"},
+		{name: "unknown hostile field", input: `{"private_token":"do-not-accept"}`, want: "decode evidence:"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Decode(strings.NewReader(tc.input))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Decode() error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAdversarialDecodeRejectsOversizedDimensionSet(t *testing.T) {
+	e := fixture(t)
+	const oversizedCount = 10_000
+	e.Dimensions = make([]Dimension, oversizedCount)
+	for i := range e.Dimensions {
+		e.Dimensions[i] = Dimension{
+			ID:         "cycle_time",
+			Direction:  Lower,
+			Unit:       "hours",
+			Source:     "adversarial generated input",
+			NextAction: "reject before scoring",
+		}
+	}
+	encoded, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(bytes.NewReader(encoded)); err == nil || !strings.Contains(err.Error(), "want exactly 16") {
+		t.Fatalf("Decode() error = %v, want oversized dimension rejection", err)
+	}
+}
+
+func TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths(t *testing.T) {
+	malformed := filepath.Join(t.TempDir(), "malformed.json")
+	if err := os.WriteFile(malformed, []byte(`{"schema":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, input := range []string{malformed, t.TempDir()} {
+		receipt := ScoreLoopTurn(input)
+		if receipt.Status != LoopTurnUnavailable || receipt.Reason != "SCORE_INPUT_UNAVAILABLE" {
+			t.Fatalf("input %q receipt header = %+v", input, receipt)
+		}
+		if strings.TrimSpace(receipt.UnavailableDiagnostic) == "" {
+			t.Fatalf("input %q omitted load diagnostic: %+v", input, receipt)
+		}
+		if receipt.LoopHealth != nil || receipt.PerformanceRSIDebt != nil || receipt.DominantBottleneck != "" {
+			t.Fatalf("input %q invented score data: %+v", input, receipt)
+		}
+	}
+}
