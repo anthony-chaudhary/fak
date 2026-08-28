@@ -677,6 +677,7 @@ func hardwareEvidence(t *testing.T) Evidence {
 				ActiveUtilization:    50,
 				UtilizationUnit:      "percent",
 				WorkloadID:           "workload-a",
+				Engine:               "fak-native",
 			},
 			{
 				EnqueuedAt:           "2026-08-28T12:00:00Z",
@@ -686,6 +687,7 @@ func hardwareEvidence(t *testing.T) Evidence {
 				ActiveUtilization:    90,
 				UtilizationUnit:      "percent",
 				WorkloadID:           "workload-b",
+				Engine:               "fak-native",
 			},
 		},
 	}
@@ -716,7 +718,7 @@ func TestHardwareAcceptanceUsesOnlyDurationWeightedMeasuredUtilization(t *testin
 			if d.Source != "hardware:"+HardwareSchema+";queue_delay_seconds_total=1800;queue_delay_seconds_mean=900" {
 				t.Errorf("source=%q", d.Source)
 			}
-			if d.EvidenceKind != "hardware_utilization_receipt" || d.Engine != "" {
+			if d.EvidenceKind != "hardware_utilization_receipt" || d.Engine != "fak-native" {
 				t.Errorf("hardware evidence metadata=%+v", d)
 			}
 			continue
@@ -751,6 +753,7 @@ func TestHardwareRejectsInvalidRunsBeforeMutation(t *testing.T) {
 		{"unsupported unit", func(e *Evidence) { e.Hardware.Runs[0].UtilizationUnit = "%" }},
 		{"empty device", func(e *Evidence) { e.Hardware.Runs[0].RequestedDeviceClass = " " }},
 		{"empty workload", func(e *Evidence) { e.Hardware.Runs[0].WorkloadID = " " }},
+		{"wrong engine", func(e *Evidence) { e.Hardware.Runs[0].Engine = "llama.cpp" }},
 		{"nonfinite utilization", func(e *Evidence) { e.Hardware.Runs[0].ActiveUtilization = math.NaN() }},
 		{"negative utilization", func(e *Evidence) { e.Hardware.Runs[0].ActiveUtilization = -1 }},
 		{"overrange utilization", func(e *Evidence) { e.Hardware.Runs[0].ActiveUtilization = 100.01 }},

@@ -492,11 +492,13 @@ func performanceRSIHardwareTestReceipt(t *testing.T) []byte {
 				"enqueued_at": "2026-08-28T10:00:00Z", "started_at": "2026-08-28T10:10:00Z",
 				"ended_at": "2026-08-28T11:10:00Z", "requested_device_class": "cuda-l4",
 				"active_utilization": 50.0, "utilization_unit": "percent", "workload_id": "workload-a",
+				"engine": "fak-native",
 			},
 			map[string]any{
 				"enqueued_at": "2026-08-28T12:00:00Z", "started_at": "2026-08-28T12:20:00Z",
 				"ended_at": "2026-08-28T15:20:00Z", "requested_device_class": "cuda-h100",
 				"active_utilization": 90.0, "utilization_unit": "percent", "workload_id": "workload-b",
+				"engine": "fak-native",
 			},
 		},
 	}
@@ -525,6 +527,7 @@ func TestPerformanceRSIHardwareAcceptance(t *testing.T) {
 			ID           string   `json:"id"`
 			Source       string   `json:"source"`
 			EvidenceKind string   `json:"evidence_kind"`
+			Engine       string   `json:"engine"`
 			Current      *float64 `json:"current"`
 		} `json:"dimensions"`
 	}
@@ -539,7 +542,7 @@ func TestPerformanceRSIHardwareAcceptance(t *testing.T) {
 			t.Fatalf("hardware_utilization=%v, want 80", d.Current)
 		}
 		if d.Source != "hardware:fak-performance-rsi-hardware/1;queue_delay_seconds_total=1800;queue_delay_seconds_mean=900" ||
-			d.EvidenceKind != "hardware_utilization_receipt" {
+			d.EvidenceKind != "hardware_utilization_receipt" || d.Engine != "fak-native" {
 			t.Fatalf("hardware metadata: %+v", d)
 		}
 		return
@@ -604,6 +607,7 @@ func TestPerformanceRSIHardwareRefusals(t *testing.T) {
 		{"unit", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["utilization_unit"] = "%" }},
 		{"device", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["requested_device_class"] = "" }},
 		{"workload", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["workload_id"] = "" }},
+		{"engine", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["engine"] = "llama.cpp" }},
 		{"range", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["active_utilization"] = 101.0 }},
 		{"invalid second run", func(r map[string]any) { r["runs"].([]any)[1].(map[string]any)["active_utilization"] = -1.0 }},
 		{"private host", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["host"] = "private-node" }},

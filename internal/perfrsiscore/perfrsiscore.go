@@ -69,6 +69,7 @@ type HardwareRun struct {
 	ActiveUtilization    float64                   `json:"active_utilization"`
 	UtilizationUnit      string                    `json:"utilization_unit"`
 	WorkloadID           string                    `json:"workload_id"`
+	Engine               string                    `json:"engine"`
 	TerminalEvidence     *HardwareTerminalEvidence `json:"terminal_evidence,omitempty"`
 }
 
@@ -118,7 +119,7 @@ func (r *HardwareRun) UnmarshalJSON(b []byte) error {
 	}
 	for _, name := range []string{
 		"enqueued_at", "started_at", "ended_at", "requested_device_class",
-		"active_utilization", "utilization_unit", "workload_id",
+		"active_utilization", "utilization_unit", "workload_id", "engine",
 	} {
 		if _, ok := fields[name]; !ok {
 			return fmt.Errorf("hardware run %s is required", name)
@@ -635,6 +636,9 @@ func applyHardware(e *Evidence) error {
 		if strings.TrimSpace(run.WorkloadID) == "" {
 			return fmt.Errorf("hardware run %d workload_id is required", i)
 		}
+		if run.Engine != "fak-native" {
+			return fmt.Errorf("hardware run %d engine must be exactly fak-native", i)
+		}
 		if run.UtilizationUnit != "percent" {
 			return fmt.Errorf("hardware run %d utilization_unit must be exactly percent", i)
 		}
@@ -699,7 +703,7 @@ func applyHardware(e *Evidence) error {
 		formatFact(totalQueue/float64(len(validated))),
 	)
 	d.EvidenceKind = "hardware_utilization_receipt"
-	d.Engine = ""
+	d.Engine = "fak-native"
 	return nil
 }
 
