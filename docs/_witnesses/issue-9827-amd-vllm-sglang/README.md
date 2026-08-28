@@ -22,8 +22,8 @@ operator-selected output directory and must not be committed without review.
 - fixed order: vLLM cold, vLLM warm, SGLang cold, SGLang warm.
 
 The source pins recorded by the packet are vLLM tag `v0.28.0` commit
-`17da48596c98946d3e3e6896e2ebd341e809f3bd` and SGLang tag `v0.5.18` commit
-`5263568bcbf9da7b463e25c136f6aa92eedc3c08`. The runner additionally verifies the
+`2cf0a6915ce544dc493a0990f2ea38d81601128a` and SGLang tag `v0.5.18` commit
+`71de97b264b04dcd514cf904003028aefe9775c8`. The runner additionally verifies the
 installed engine versions. It pulls the named ROCm image tags, records each local
 image ID and resolved repository digest, and launches the immutable local ID rather
 than reusing the mutable tag.

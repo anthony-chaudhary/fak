@@ -10,7 +10,7 @@ if (($#)); then echo "usage: $0 [--dry-run]" >&2; exit 2; fi
 readonly MODEL='Qwen/Qwen2.5-0.5B-Instruct'
 readonly MODEL_REVISION='7ae557604adf67be50417f59c2c2f167def9a775'
 readonly VLLM_IMAGE='vllm/vllm-openai-rocm:v0.28.0'
-readonly SGLANG_IMAGE='lmsysorg/sglang:v0.5.18-rocm'
+readonly SGLANG_IMAGE='lmsysorg/sglang:v0.5.18-rocm700-mi30x'
 readonly PROMPT='Explain in one sentence why matched benchmark geometry matters.'
 readonly CONCURRENCY='16'
 readonly REQUESTS_PER='64'
