@@ -3171,8 +3171,9 @@
           {
             "class": "open_closed_issues_prs_discussions",
             "evidence": [
-              "gh api -X GET search/issues -f q='repo:TencentCloud/TencentDB-Agent-Memory type:issue'",
-              "gh api -X GET search/issues -f q='repo:TencentCloud/TencentDB-Agent-Memory type:pr'",
+              "gh issue list --repo TencentCloud/TencentDB-Agent-Memory --state all --limit 1000 --json number",
+              "gh pr list --repo TencentCloud/TencentDB-Agent-Memory --state all --limit 1000 --json number",
+              "gh api graphql repository(owner:TencentCloud,name:TencentDB-Agent-Memory) discussions(first:100)",
               "gh api repos/TencentCloud/TencentDB-Agent-Memory/releases?per_page=100",
               "docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md#source-and-forge-coverage"
             ],
@@ -3193,7 +3194,7 @@
             "class": "candidate_matrix",
             "evidence": [
               "docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md#candidate-matrix",
-              "study_94cd1dad91c0ac9eccb06ae666e7ac0d161223e6161d9282ff1e433b8988fb04"
+              "fak study search --limit 20 TencentDB"
             ],
             "note": "Eleven candidates have on-axis status, disposition, and evidence; direct reuse and unproven headline numbers are excluded."
           },
