@@ -1,8 +1,3 @@
----
-title: "gateway serving runtime identity"
-description: "Meaning: The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability."
----
-
 # runtime
 
 **Meaning:** The configured gateway server that exposes HTTP or MCP transport, authentication, routing, kernel mediation, and observability.

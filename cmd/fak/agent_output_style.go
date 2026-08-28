@@ -136,6 +136,36 @@ func agentProfileSweepRows() []agentProfileSweepRow {
 	}
 }
 
+func agentResponseProfileValue(style syspromptmmu.StyleReadout) string {
+	switch style.Intensity {
+	case "low":
+		return "light response compression"
+	case "medium":
+		return "concise response shape with correctness carve-outs"
+	case "high":
+		return "strong response compression"
+	default:
+		return "no response-shape steering"
+	}
+}
+
+func agentWorkProfileValue(profile syspromptmmu.WorkProfileReadout) string {
+	switch profile.Intensity {
+	case "low":
+		return "brief simplicity check"
+	case "medium":
+		return "simplicity ladder with correctness carve-outs"
+	case "high":
+		return "actively resist avoidable complexity"
+	default:
+		return "no implementation-policy steering"
+	}
+}
+
+func printAgentProfileValue(w io.Writer, response agentOutputStylePreference, work agentWorkProfilePreference) {
+	fmt.Fprintf(w, "fak agent profile value: response=%s (source=%s; value=%s); work=%s (source=%s; value=%s); off means response=full adds no response-shape steering and work=standard adds no implementation-policy steering; inspect sweep: fak agent profiles --sweep\n", response.Style.Style, response.Source, agentResponseProfileValue(response.Style), work.Profile.Profile, work.Source, agentWorkProfileValue(work.Profile))
+}
+
 func printAgentProfileSweep(w io.Writer, jsonOut bool) error {
 	rows := agentProfileSweepRows()
 	if jsonOut {

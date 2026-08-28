@@ -1,8 +1,3 @@
----
-title: "fak commit stamp"
-description: "Canonical fak documentation for fak commit stamp, including its scope, nearest contrasts, and operational use."
----
-
 # fak commit stamp
 
 **Meaning:** The validated (fak <leaf>) commit-subject token binding one commit to its semantic leaf; it is not a lane lease or module version.

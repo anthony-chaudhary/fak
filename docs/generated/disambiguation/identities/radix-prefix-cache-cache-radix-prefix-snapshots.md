@@ -1,8 +1,3 @@
----
-title: "radix prefix cache"
-description: "Canonical fak documentation for radix prefix cache, including its scope, nearest contrasts, and operational use."
----
-
 # radix prefix cache
 
 **Meaning:** A fak-owned radix tree that longest-prefix-matches namespaced token sequences to reusable KV snapshots under token and byte budgets.

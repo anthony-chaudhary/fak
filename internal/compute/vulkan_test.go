@@ -4,6 +4,7 @@ package compute
 
 import (
 	"math"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -25,6 +26,49 @@ func vk(t *testing.T) *vulkanBackend {
 		t.Skip("vulkan backend not registered (no reachable Vulkan device)")
 	}
 	return b.(*vulkanBackend)
+}
+
+func TestVulkanDispatchProfileDisabledIsZero(t *testing.T) {
+	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") == "1" {
+		t.Skip("profiling enabled for this process")
+	}
+	v := vk(t)
+	v.VulkanDebugResetDispatchProfile()
+	c := cpu()
+	d := v.Upload(NewF32(c, []int{4}, []float32{1, 2, 3, 4}), F32)
+	_ = v.Read(v.RMSNorm(d, d, 1e-5))
+	if got := v.VulkanDebugDispatchProfileSnapshot(); got != (VulkanDispatchProfile{}) {
+		t.Fatalf("disabled profile = %+v, want zero", got)
+	}
+}
+
+func TestVulkanDispatchProfileCountsClassificationAndReset(t *testing.T) {
+	if os.Getenv("FAK_VULKAN_DISPATCH_PROFILE") != "1" {
+		t.Skip("set FAK_VULKAN_DISPATCH_PROFILE=1")
+	}
+	v := vk(t)
+	v.VulkanDebugResetDispatchProfile()
+	c := cpu()
+	w := v.Upload(NewF32(c, []int{4, 4}, []float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}), F32)
+	x := v.Upload(NewF32(c, []int{4}, []float32{1, 2, 3, 4}), F32)
+	_ = v.Read(v.MatMul(w, x))
+	v.BeginBatch()
+	_ = v.MatMul(w, x)
+	v.FlushBatch()
+	if _, err := v.CloneTensor(x); err != nil {
+		t.Fatal(err)
+	}
+	got := v.VulkanDebugDispatchProfileSnapshot()
+	if got.ComputeDispatches < 2 || got.OtherComputeDispatches < 2 || got.Q4KMatmulDispatches != 0 {
+		t.Fatalf("dispatch classification = %+v", got)
+	}
+	if got.D2DCopies == 0 || got.BatchSubmits == 0 || got.BatchFlushes == 0 || got.OneShotSubmits == 0 {
+		t.Fatalf("operation families = %+v", got)
+	}
+	v.VulkanDebugResetDispatchProfile()
+	if zero := v.VulkanDebugDispatchProfileSnapshot(); zero != (VulkanDispatchProfile{}) {
+		t.Fatalf("after reset = %+v", zero)
+	}
 }
 
 func maxAbs(a, b []float32) float64 {

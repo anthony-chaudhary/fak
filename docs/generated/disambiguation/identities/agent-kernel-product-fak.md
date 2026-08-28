@@ -1,8 +1,3 @@
----
-title: "agent kernel"
-description: "Canonical fak documentation for agent kernel, including its scope, nearest contrasts, and operational use."
----
-
 # agent kernel
 
 **Meaning:** The fak management boundary that governs model traffic, tool effects, context, and recovery.

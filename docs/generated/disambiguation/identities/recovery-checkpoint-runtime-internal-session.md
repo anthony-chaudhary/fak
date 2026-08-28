@@ -1,8 +1,3 @@
----
-title: "recovery checkpoint"
-description: "Canonical fak documentation for recovery checkpoint, including its scope, nearest contrasts, and operational use."
----
-
 # recovery checkpoint
 
 **Meaning:** A typed snapshot of goal, pending turn, continuation, generation, and state revision emitted when session recovery is requested.

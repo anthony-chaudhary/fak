@@ -1,8 +1,3 @@
----
-title: "fleet supervisor"
-description: "Canonical fak documentation for fleet supervisor, including its scope, nearest contrasts, and operational use."
----
-
 # fleet supervisor
 
 **Meaning:** A decision layer whose input is witnessed liveness, worker verdicts, escalations, and leases; missing witnesses cause escalation rather than inference.

@@ -1,8 +1,3 @@
----
-title: "capability floor"
-description: "Canonical fak documentation for capability floor, including its scope, nearest contrasts, and operational use."
----
-
 # capability floor
 
 **Meaning:** The minimum authority boundary represented by negotiated capability tokens and policy constraints; it limits what may proceed but does not describe the outcome of a particular call.

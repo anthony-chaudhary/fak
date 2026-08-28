@@ -1,8 +1,3 @@
----
-title: "context compaction"
-description: "Canonical fak documentation for context compaction, including its scope, nearest contrasts, and operational use."
----
-
 # context compaction
 
 **Meaning:** A context-window event that replaces prior history so resident input falls while cumulative usage and transcript bytes may continue rising.

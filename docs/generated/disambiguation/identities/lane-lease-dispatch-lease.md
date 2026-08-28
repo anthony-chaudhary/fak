@@ -1,8 +1,3 @@
----
-title: "lane lease"
-description: "Canonical fak documentation for lane lease, including its scope, nearest contrasts, and operational use."
----
-
 # lane lease
 
 **Meaning:** A live ownership claim carrying lease ID, lane or tree, holder identity, and read-only posture for collision admission.

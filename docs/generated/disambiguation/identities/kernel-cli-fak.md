@@ -1,8 +1,3 @@
----
-title: "fak CLI kernel identity"
-description: "Meaning: The fak command-line product surface for operating the agent kernel."
----
-
 # kernel
 
 **Meaning:** The fak command-line product surface for operating the agent kernel.

@@ -1,8 +1,3 @@
----
-title: "compute kernel"
-description: "Canonical fak documentation for compute kernel, including its scope, nearest contrasts, and operational use."
----
-
 # compute kernel
 
 **Meaning:** An arithmetic routine executed by a processor.

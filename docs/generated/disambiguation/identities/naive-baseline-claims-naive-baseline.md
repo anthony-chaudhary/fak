@@ -1,8 +1,3 @@
----
-title: "naive baseline"
-description: "Canonical fak documentation for naive baseline, including its scope, nearest contrasts, and operational use."
----
-
 # naive baseline
 
 **Meaning:** A comparison arm representing the untuned or resend-everything floor; useful context, but never the decision-grade headline alternative.
