@@ -90,7 +90,7 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 	if budget != 0 {
 		return nil, fmt.Errorf("native performance profile unavailable: -budget must be 0, got %g", budget)
 	}
-	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+7)
+	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+8)
 	for key, want := range nativeProfileRequiredEnvironment {
 		got, ok := lookup(key)
 		if !ok || got != want {
@@ -103,6 +103,14 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 		return nil, fmt.Errorf("native performance profile unavailable: %s must equal typed 0 or 1", nativeControlGGUFMMap)
 	}
 	controls[nativeControlGGUFMMap] = mmapControl
+	sequenceSelector, sequenceSelectorSet := lookup(nativeProfileSequenceSelector)
+	if sequenceSelectorSet && sequenceSelector != nativeProfileSelectorOff && sequenceSelector != nativeProfileSelectorOn {
+		return nil, fmt.Errorf("native performance profile unavailable: %s must equal typed %s or %s", nativeProfileSequenceSelector, nativeProfileSelectorOff, nativeProfileSelectorOn)
+	}
+	if !sequenceSelectorSet {
+		sequenceSelector = nativeProfileUnset
+	}
+	controls[nativeProfileSequenceSelector] = sequenceSelector
 	for _, key := range nativeProfileDeniedEnvironment {
 		if got, ok := lookup(key); ok {
 			return nil, fmt.Errorf("native performance profile unavailable: %s override is not allowed (got %q)", key, got)
@@ -122,6 +130,9 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 		if key == nativeControlGGUFMMap {
 			continue
 		}
+		if key == nativeProfileSequenceSelector {
+			continue
+		}
 		return nil, fmt.Errorf("native performance profile unavailable: unrecognized %s override is not allowed", key)
 	}
 	controls[nativeControlFlagBudget] = "0"
@@ -137,9 +148,12 @@ func nativeProfileControlEnvironment(lookup func(string) (string, bool), environ
 }
 
 func validateNativeProfileControls(controls map[string]string) error {
-	wantLen := len(nativeProfileRequiredEnvironment) + len(nativeProfileDeniedEnvironment) + 7
-	if len(controls) != wantLen {
-		return fmt.Errorf("native performance control receipt has %d fields, want %d", len(controls), wantLen)
+	legacyLen := len(nativeProfileRequiredEnvironment) + len(nativeProfileDeniedEnvironment) + 7
+	if len(controls) != legacyLen && len(controls) != legacyLen+1 {
+		return fmt.Errorf("native performance control receipt has %d fields, want %d or %d", len(controls), legacyLen, legacyLen+1)
+	}
+	if _, ok := controls[nativeProfileSequenceSelector]; len(controls) == legacyLen+1 && !ok {
+		return fmt.Errorf("extended native performance control receipt is missing %s", nativeProfileSequenceSelector)
 	}
 	for key, want := range nativeProfileRequiredEnvironment {
 		if controls[key] != want {
@@ -148,6 +162,9 @@ func validateNativeProfileControls(controls map[string]string) error {
 	}
 	if controls[nativeControlGGUFMMap] != "0" && controls[nativeControlGGUFMMap] != "1" {
 		return fmt.Errorf("required control %s was not captured as typed 0 or 1", nativeControlGGUFMMap)
+	}
+	if selector, ok := controls[nativeProfileSequenceSelector]; ok && selector != nativeProfileUnset && selector != nativeProfileSelectorOff && selector != nativeProfileSelectorOn {
+		return fmt.Errorf("selector control %s was not captured as typed %s or %s", nativeProfileSequenceSelector, nativeProfileSelectorOff, nativeProfileSelectorOn)
 	}
 	for _, key := range nativeProfileDeniedEnvironment {
 		if controls[key] != nativeProfileUnset {
@@ -364,11 +381,56 @@ func nativeReceiptBinding(receipt nativeProfileReceipt) (string, error) {
 	return sha256JSON(receipt)
 }
 
+func nativeProfileExpectedForwardPath(envelopePath, selector string) (string, error) {
+	switch selector {
+	case "", nativeProfileUnset, nativeProfileSelectorOff:
+		return envelopePath, nil
+	case nativeProfileSelectorOn:
+		return model.Qwen35MetalGDNSequenceForwardPath, nil
+	default:
+		return "", fmt.Errorf("selector control %s has untyped value %q", nativeProfileSequenceSelector, selector)
+	}
+}
+
+// nativeProfileExecutedForwardPath binds a capture label to observed session state. A selector
+// declaration alone is not evidence that the candidate route ran, and an OFF capture must prove
+// that the opt-in route was not selected.
+func nativeProfileExecutedForwardPath(envelopePath, selector string, sequenceExecuted bool) (string, error) {
+	expected, err := nativeProfileExpectedForwardPath(envelopePath, selector)
+	if err != nil {
+		return "", err
+	}
+	wantsSequence := selector == nativeProfileSelectorOn
+	if wantsSequence != sequenceExecuted {
+		return "", fmt.Errorf("selector %s=%q execution mismatch: sequence executed=%t", nativeProfileSequenceSelector, selector, sequenceExecuted)
+	}
+	return expected, nil
+}
+
+func validateNativeProfileForControls(profile nativeperf.ProfileBundle, controls map[string]string) error {
+	envelope, err := profileEnvelopeByID(nativeperf.ActiveGraph(), profile.EnvelopeID)
+	if err != nil {
+		return err
+	}
+	expected, err := nativeProfileExpectedForwardPath(envelope.ForwardPath, controls[nativeProfileSequenceSelector])
+	if err != nil {
+		return err
+	}
+	if profile.Execution.ForwardPath != expected {
+		return fmt.Errorf("profile forward path %q does not match selector route %q", profile.Execution.ForwardPath, expected)
+	}
+	// The shared v1 validator pins the historical envelope route. Validate a shallow canonical
+	// view after independently admitting exactly the one typed selector route delta above.
+	canonical := profile
+	canonical.Execution.ForwardPath = envelope.ForwardPath
+	return nativeperf.ValidateProfile(nativeperf.ActiveGraph(), canonical)
+}
+
 func validateNativeProfileReceipt(profileBytes []byte, profile nativeperf.ProfileBundle, receipt nativeProfileReceipt) error {
 	if receipt.Schema != nativeProfileReceiptSchema {
 		return fmt.Errorf("unexpected native profile receipt schema %q", receipt.Schema)
 	}
-	if err := nativeperf.ValidateProfile(nativeperf.ActiveGraph(), profile); err != nil {
+	if err := validateNativeProfileForControls(profile, receipt.Controls); err != nil {
 		return err
 	}
 	envelope, err := profileEnvelopeByID(nativeperf.ActiveGraph(), profile.EnvelopeID)

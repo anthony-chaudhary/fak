@@ -52,6 +52,7 @@ type benchFlags struct {
 	resume                *string
 	nativeProfileOut      *string
 	nativeProfileReadback *string
+	nativeProfileCompare  *string
 
 	processExit     func(int)
 	weightCloser    func() error
@@ -98,6 +99,7 @@ func parseFlags() *benchFlags {
 		resume:                flag.String("resume", "", "resume from an existing checkpoint (alias for -checkpoint on an existing file): reuse the recorded cells and measure only the missing ones; refuses if the file was built for a different model/precision/grid"),
 		nativeProfileOut:      flag.String("native-performance-profile", "", "write one fak-native Metal P=32/T=64 session capture in the existing native-performance v1 schema, then exit"),
 		nativeProfileReadback: flag.String("native-performance-readback", "", "validate a native-performance profile and its companion raw-event receipt without loading a model"),
+		nativeProfileCompare:  flag.String("native-performance-compare", "", "compare exactly six comma-separated canonical profile paths in order: 3 selector OFF controls, then 3 selector ON candidates; requires every candidate below the control median and at least 15% median improvement; companion .receipt.json paths are derived"),
 	}
 	flag.Parse()
 	*f.dir = pathutil.ExpandTilde(*f.dir)
@@ -194,8 +196,14 @@ func validateFlagCombinations(f *benchFlags) error {
 	if streamQ4KEnabled(f) && (*f.gguf == "" || !*f.q4k) {
 		return fmt.Errorf("-stream-q4k requires exact -gguf and -q4k")
 	}
-	if *f.nativeProfileReadback != "" && *f.nativeProfileOut != "" {
-		return fmt.Errorf("-native-performance-readback and -native-performance-profile are mutually exclusive")
+	nativeModes := 0
+	for _, selected := range []bool{*f.nativeProfileReadback != "", *f.nativeProfileOut != "", *f.nativeProfileCompare != ""} {
+		if selected {
+			nativeModes++
+		}
+	}
+	if nativeModes > 1 {
+		return fmt.Errorf("-native-performance-readback, -native-performance-profile, and -native-performance-compare are mutually exclusive")
 	}
 	if *f.nativeProfileOut != "" && (*f.gguf == "" || !*f.q4k || !*f.metal || *f.decodePrompt != 32 || *f.decodeSteps != 64) {
 		return fmt.Errorf("-native-performance-profile requires -gguf, -q4k, -metal, -decode-prompt=32, and -decode-steps=64")

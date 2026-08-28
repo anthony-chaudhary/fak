@@ -469,11 +469,27 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	s := newSession()
 	finishProfile := onceFinishNativeProfile(s.Close)
 	defer finishProfile()
+	sequenceSelector := controls[nativeProfileSequenceSelector]
+	if sequenceSelector == nativeProfileSelectorOn {
+		if err := s.EnableQwen35MetalGDNPreprojectedSequence(); err != nil {
+			return fmt.Errorf("native performance candidate route unavailable: %w", err)
+		}
+	}
 	profiler := model.NewPhaseProfiler()
 	s.PhaseProfiler = profiler
 	prompt := lcgIDs(32, vocab)
 	t := time.Now()
 	logits := s.Prefill(prompt)
+	sequenceExecuted := false
+	if sequenceSelector == nativeProfileSelectorOn {
+		var err error
+		sequenceExecuted, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
+		if err != nil {
+			return fmt.Errorf("native performance candidate route failed: %w", err)
+		}
+	} else {
+		_, sequenceExecuted = s.Qwen35GDNDecodePath()
+	}
 	d := time.Since(t)
 	phases = appendNativeProfilePhase(phases, "prefill", d)
 
@@ -537,6 +553,10 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	if envelope.PromptTokens != 32 || envelope.DecodeTokens != 64 || *f.decodePrompt != envelope.PromptTokens || *f.decodeSteps != envelope.DecodeTokens {
 		return fmt.Errorf("native performance P/T controls do not match envelope: got P=%d T=%d, want P=%d T=%d", *f.decodePrompt, *f.decodeSteps, envelope.PromptTokens, envelope.DecodeTokens)
 	}
+	forwardPath, err := nativeProfileExecutedForwardPath(envelope.ForwardPath, sequenceSelector, sequenceExecuted)
+	if err != nil {
+		return fmt.Errorf("native performance profile unavailable: %w", err)
+	}
 	if *f.name != "qwen38:27b" {
 		return fmt.Errorf("native performance model name %q is not the pinned qwen38:27b identity", *f.name)
 	}
@@ -580,12 +600,12 @@ func runNativePerformanceProfile(f *benchFlags, m *model.Model, loadNanos int64,
 	profile := nativeperf.ProfileBundle{
 		Schema:                 nativeperf.ProfileSchema,
 		EnvelopeID:             envelope.ID,
-		Execution:              nativeperf.ExecutionIdentity{Engine: envelope.Engine, ForwardPath: envelope.ForwardPath, FallbackCount: fallbackCount},
+		Execution:              nativeperf.ExecutionIdentity{Engine: envelope.Engine, ForwardPath: forwardPath, FallbackCount: fallbackCount},
 		Phases:                 phases,
 		Metal:                  &nativeperf.MetalCounters{CommandBuffers: counters.CommandBuffers, Encoders: counters.Encoders, DispatchMilliseconds: counters.DispatchMilliseconds, WaitMilliseconds: counters.WaitMilliseconds, ResidentBytes: uint64(resident), WorkingSetBytes: workingSet},
 		AttributionUnavailable: &nativeperf.AttributionUnavailable{Reason: nativeperf.AttributionUnavailableCapture, Detail: "fak-native session lifecycle capture does not export per-lever dispatch attribution"},
 	}
-	if err := nativeperf.ValidateProfile(nativeperf.ActiveGraph(), profile); err != nil {
+	if err := validateNativeProfileForControls(profile, controls); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(profile, "", "  ")
@@ -835,6 +855,14 @@ func openCheckpoint(f *benchFlags, modelName string) *benchckpt.Ledger {
 func main() {
 	f := parseFlags()
 	validateFlags(f)
+	if *f.nativeProfileCompare != "" {
+		comparison := compareNativeProfileCampaign(*f.nativeProfileCompare)
+		if err := writeProfileComparison(f, comparison); err != nil {
+			fmt.Fprintln(os.Stderr, "native performance comparison:", err)
+			f.exit(1)
+		}
+		return
+	}
 	var nativeControls map[string]string
 	if *f.nativeProfileOut != "" {
 		var err error

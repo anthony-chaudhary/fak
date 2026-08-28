@@ -50,6 +50,7 @@ func testCompleteBenchFlags() *benchFlags {
 		phaseProfile: testBool(false), budget: testFloat64(0), preflight: testBool(false), smoke: testBool(false),
 		smokeDeadline: testDuration(90 * time.Second), fitCheck: testBool(true), loadProgress: testBool(true),
 		checkpoint: testString(""), resume: testString(""), nativeProfileOut: testString(""), nativeProfileReadback: testString(""),
+		nativeProfileCompare: testString(""),
 	}
 }
 
@@ -630,7 +631,7 @@ func TestAllFinite(t *testing.T) {
 }
 
 func testNativeProfileControls() map[string]string {
-	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+7)
+	controls := make(map[string]string, len(nativeProfileRequiredEnvironment)+len(nativeProfileDeniedEnvironment)+8)
 	for key, value := range nativeProfileRequiredEnvironment {
 		controls[key] = value
 	}
@@ -638,6 +639,7 @@ func testNativeProfileControls() map[string]string {
 		controls[key] = nativeProfileUnset
 	}
 	controls[nativeControlGGUFMMap] = "1"
+	controls[nativeProfileSequenceSelector] = nativeProfileSelectorOff
 	controls[nativeControlFlagBudget] = "0"
 	controls[nativeControlLogicalCPUs] = strconv.Itoa(runtime.NumCPU())
 	controls[nativeControlGOMAXPROCS] = strconv.Itoa(runtime.GOMAXPROCS(0))
@@ -660,6 +662,18 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 	if _, err := nativeProfileControlEnvironment(lookup, declarations, 0); err != nil {
 		t.Fatalf("documented control envelope rejected: %v", err)
 	}
+	for _, selector := range []string{nativeProfileSelectorOff, nativeProfileSelectorOn} {
+		t.Run("typed selector "+selector, func(t *testing.T) {
+			env := mapsStringClone(required)
+			env[nativeProfileSequenceSelector] = selector
+			decls := append(append([]string(nil), declarations...), nativeProfileSequenceSelector+"="+selector)
+			lookup := func(key string) (string, bool) { value, ok := env[key]; return value, ok }
+			controls, err := nativeProfileControlEnvironment(lookup, decls, 0)
+			if err != nil || controls[nativeProfileSequenceSelector] != selector {
+				t.Fatalf("typed selector rejected or not captured: controls=%v err=%v", controls, err)
+			}
+		})
+	}
 
 	tests := []struct {
 		name        string
@@ -675,6 +689,7 @@ func TestNativeProfileControlsRefuseBeforeRun(t *testing.T) {
 		{name: "workers", key: "FAK_WORKERS", value: "4"},
 		{name: "budget env", key: "FAK_BUDGET", value: "0.5"},
 		{name: "mmap untyped", key: nativeControlGGUFMMap, value: "true"},
+		{name: "sequence selector untyped", key: nativeProfileSequenceSelector, value: "true"},
 		{name: "budget flag", budget: 0.5},
 		{name: "unknown fak control", declaration: "FAK_FUTURE_Q4K_SWITCH=1"},
 	}
