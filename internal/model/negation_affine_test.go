@@ -134,7 +134,33 @@ func TestNegationAffineLayerSweepWitness(t *testing.T) {
 	if err := json.Unmarshal(data, &want); err != nil {
 		t.Fatal(err)
 	}
-	if report.BestLayer != want.BestLayer || math.Abs(report.BestEffect-want.BestEffect) > 1e-12 || !reflect.DeepEqual(report.Layers, want.Layers) {
-		t.Fatalf("layer-sweep witness drift\ngot=%+v\nwant=%+v", report, want)
+	const numericalTolerance = 1e-12
+	closeFloat := func(got, want float64) bool {
+		return math.Abs(got-want) <= numericalTolerance
+	}
+	if report.BestLayer != want.BestLayer || !closeFloat(report.BestEffect, want.BestEffect) || len(report.Layers) != len(want.Layers) {
+		t.Fatalf("layer-sweep witness structure drift\ngot=%+v\nwant=%+v", report, want)
+	}
+	for i, got := range report.Layers {
+		want := want.Layers[i]
+		if got.Layer != want.Layer {
+			t.Fatalf("layer-sweep witness row %d changed layer: got=%d want=%d", i, got.Layer, want.Layer)
+		}
+		for _, field := range []struct {
+			name      string
+			got, want float64
+		}{
+			{name: "steering_rmse", got: got.SteeringRMSE, want: want.SteeringRMSE},
+			{name: "affine_rmse", got: got.AffineRMSE, want: want.AffineRMSE},
+			{name: "unpatched_target_score", got: got.UnpatchedTargetScore, want: want.UnpatchedTargetScore},
+			{name: "patched_target_score", got: got.PatchedTargetScore, want: want.PatchedTargetScore},
+			{name: "random_target_score", got: got.RandomTargetScore, want: want.RandomTargetScore},
+			{name: "patch_effect", got: got.PatchEffect, want: want.PatchEffect},
+			{name: "random_effect", got: got.RandomEffect, want: want.RandomEffect},
+		} {
+			if !closeFloat(field.got, field.want) {
+				t.Fatalf("layer-sweep witness L%d %s drift: got=%.17g want=%.17g tolerance=%g", got.Layer, field.name, field.got, field.want, numericalTolerance)
+			}
+		}
 	}
 }
