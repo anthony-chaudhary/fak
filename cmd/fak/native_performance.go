@@ -209,7 +209,6 @@ type nativePerformanceFrontDoorDoc struct {
 }
 
 var nativePerformanceFrontDoorDocs = []nativePerformanceFrontDoorDoc{
-	{path: "README.md", surface: nativeperf.FrontDoorSurfaceREADME},
 	{path: "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md", surface: nativeperf.FrontDoorSurfaceIndex},
 	{path: "docs/benchmarks/QWEN38-27B-LATEST.md", surface: nativeperf.FrontDoorSurfaceLatest},
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"unsafe"
 )
 
 const qwenHybridPagedSwapMagic = "FAKQHPS1"
@@ -390,6 +391,10 @@ func (e *qwenSwapEncoder) f32raw(v []float32) {
 	if b == nil {
 		return
 	}
+	if qwenSwapNativeLittleEndian() {
+		copy(b, unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(v))), len(b)))
+		return
+	}
 	for i, x := range v {
 		binary.LittleEndian.PutUint32(b[i*4:], math.Float32bits(x))
 	}
@@ -491,9 +496,18 @@ func (d *qwenSwapDecoder) f32rawInto(out []float32) {
 	if b == nil {
 		return
 	}
+	if qwenSwapNativeLittleEndian() {
+		copy(unsafe.Slice((*byte)(unsafe.Pointer(unsafe.SliceData(out))), len(b)), b)
+		return
+	}
 	for i := range out {
 		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(b[i*4:]))
 	}
+}
+
+func qwenSwapNativeLittleEndian() bool {
+	var one uint16 = 1
+	return *(*byte)(unsafe.Pointer(&one)) == 1
 }
 func (d *qwenSwapDecoder) skipF32(n int) {
 	if n < 0 || n > d.remaining()/4 {

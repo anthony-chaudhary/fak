@@ -49,8 +49,9 @@ func TestBuildCUDAScriptNormalizesCRLFArchitectureManifest(t *testing.T) {
 	}
 	quotedGoBin := "'" + strings.ReplaceAll(bashGoBin, "'", `'"'"'`) + "'"
 	quotedScriptPath := "'" + strings.ReplaceAll(bashScriptPath, "'", `'"'"'`) + "'"
+	quotedStubPath := "'" + strings.ReplaceAll(strings.TrimSuffix(bashGoBin, "/")+"/go", "'", `'"'"'`) + "'"
 	run := func(arch string) (string, error) {
-		command := "PATH=" + quotedGoBin + ":/usr/bin:/bin FAK_CUDA_ARCH=" + arch + " PYTHON=/bin/true CC=/bin/true bash " + quotedScriptPath + " check"
+		command := "PATH=" + quotedGoBin + ":/usr/bin:/bin FAK_CUDA_ARCH=" + arch + " PYTHON=" + quotedStubPath + " CC=" + quotedStubPath + " bash " + quotedScriptPath + " check"
 		cmd := exec.Command(bash, "-c", command)
 		out, err := cmd.CombinedOutput()
 		return string(out), err

@@ -16,6 +16,7 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cuda_fp16.h>  /* __half + __float2half — the fp16 compute path (#484) */
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -1671,11 +1672,23 @@ extern "C" void fcuda_add_bias_f32(float *dDst, const float *dBias, int rows, in
 // reused (it re-instantiated each token). A kernel with the offset as a scalar arg IS
 // ExecUpdate-patchable, so one captured graph now serves the whole growing cache.
 __global__ void k_copyrow(float *dstBase, const float *src, int offset, int n) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < n) dstBase[offset + i] = src[i];
+  size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < (size_t)n) dstBase[(size_t)offset + i] = src[i];
 }
 extern "C" void fcuda_kv_write(float *dstBase, const float *src, int offset, int n) {
-  k_copyrow<<<(n + 255) / 256, 256, 0, g_stream>>>(dstBase, src, offset, n);
+  if (n <= 0) return;
+  unsigned blocks = ((unsigned)n + 255u) / 256u;
+  k_copyrow<<<blocks, 256, 0, g_stream>>>(dstBase, src, offset, n);
+}
+extern "C" int fak_qwen35_kv_write_f32(
+    float *dstBase, const float *src, int offset, int n) {
+  if (!dstBase || !src || offset < 0 || n <= 0 || offset > INT_MAX - n) return -1;
+  cudaError_t prior = cudaGetLastError();
+  if (prior != cudaSuccess) return 51000 + (int)prior;
+  unsigned blocks = ((unsigned)n + 255u) / 256u;
+  k_copyrow<<<blocks, 256, 0, g_stream>>>(dstBase, src, offset, n);
+  cudaError_t launch = cudaGetLastError();
+  return launch == cudaSuccess ? 0 : 52000 + (int)launch;
 }
 
 // ---- Decode attention: NAIVE one-block-per-head (the #486 baseline) --------------
@@ -1834,39 +1847,81 @@ extern "C" void fcuda_flash_attention_f32(const float *dQ, const float *dK, cons
 
 // Prompt-panel counterpart of k_flash_attention. K/V already contain the
 // complete appended panel; query row t is restricted to prefix+t+1, preserving
-// causality without materializing a scores panel or replaying rows from Go.
+// causality without materializing a scores panel or replaying rows from Go. The
+// first visible value seeds (m,l,acc) exactly; later values use the online-softmax
+// recurrence, avoiding any finite sentinel assumption about the score range.
 __global__ void k_qwen35_causal_attention_panel(
     const float *Q, const float *K, const float *V, float *Out,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
   int flat = blockIdx.x;
   int h = flat % nH, token = flat / nH;
-  if (h >= nH || token >= tokens || hd > 32) return;
-  int lane = threadIdx.x, kvh = h / (nH / nKV), width = nKV * hd;
+  if (h >= nH || token >= tokens) return;
+  int tid = threadIdx.x, kvh = h / (nH / nKV), width = nKV * hd;
   int nPos = prefix + token + 1;
-  float q = lane < hd ? Q[(size_t)token * nH * hd + (size_t)h * hd + lane] : 0.f;
-  float m = -1e30f, l = 0.f, acc = 0.f;
+  const float *qh = Q + (size_t)token * nH * hd + (size_t)h * hd;
+  extern __shared__ float smem[];
+  float *qs = smem;
+  float *red = smem + hd;
+  for (int d = tid; d < hd; d += FLASH_THREADS) qs[d] = qh[d];
+  __syncthreads();
+  float m = 0.f, l = 0.f;
+  float acc[FLASH_ACC_MAX];
+#pragma unroll
+  for (int k = 0; k < FLASH_ACC_MAX; k++) acc[k] = 0.f;
   for (int j = 0; j < nPos; j++) {
     const float *kj = K + (size_t)j * width + (size_t)kvh * hd;
-    float dot = lane < hd ? q * kj[lane] : 0.f;
-#pragma unroll
-    for (int off = 16; off > 0; off >>= 1) dot += __shfl_down_sync(0xffffffff, dot, off);
-    dot = __shfl_sync(0xffffffff, dot, 0);
-    float nextM = fmaxf(m, dot * scale);
-    float correction = expf(m - nextM), probability = expf(dot * scale - nextM);
+    float partial = 0.f;
+    for (int d = tid; d < hd; d += FLASH_THREADS) partial += qs[d] * kj[d];
+    red[tid] = partial;
+    __syncthreads();
+    for (int s = FLASH_THREADS / 2; s > 0; s >>= 1) {
+      if (tid < s) red[tid] += red[tid + s];
+      __syncthreads();
+    }
+    float score = red[0] * scale;
+    __syncthreads();
+    const float *vj = V + (size_t)j * width + (size_t)kvh * hd;
+    if (j == 0) {
+      m = score;
+      l = 1.f;
+      int k = 0;
+      for (int d = tid; d < hd; d += FLASH_THREADS, k++) acc[k] = vj[d];
+      continue;
+    }
+    float nextM = fmaxf(m, score);
+    float correction = expf(m - nextM), probability = expf(score - nextM);
     l = l * correction + probability;
-    if (lane < hd) acc = acc * correction + probability * V[(size_t)j * width + (size_t)kvh * hd + lane];
+    int k = 0;
+    for (int d = tid; d < hd; d += FLASH_THREADS, k++) {
+      acc[k] = acc[k] * correction + probability * vj[d];
+    }
     m = nextM;
   }
-  if (lane < hd) Out[(size_t)token * nH * hd + (size_t)h * hd + lane] = acc / l;
+  float invL = l > 0.f ? 1.f / l : 0.f;
+  int k = 0;
+  for (int d = tid; d < hd; d += FLASH_THREADS, k++) {
+    Out[(size_t)token * nH * hd + (size_t)h * hd + d] = acc[k] * invL;
+  }
 }
 
 extern "C" int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale) {
   if (!dQ || !dK || !dV || !dOut || tokens <= 0 || prefix < 0 ||
-      nH <= 0 || nKV <= 0 || nH % nKV != 0 || hd <= 0 || hd > 1024) return -1;
+      nH <= 0 || nKV <= 0 || nH % nKV != 0 || hd <= 0 ||
+      hd > FLASH_THREADS * FLASH_ACC_MAX || tokens > INT_MAX / nH ||
+      prefix > INT_MAX - tokens || !isfinite(scale) || scale <= 0.f) return -1;
+  // width is an int inside the kernel and the Go sequence cache uses int-sized
+  // element offsets at its C ABI. Refuse every product that cannot be represented
+  // before launch, rather than allowing an overflowed address calculation to no-op
+  // or write an unrelated allocation.
+  if (nKV > INT_MAX / hd || nH > INT_MAX / hd) return -1;
+  int kvWidth = nKV * hd, qWidth = nH * hd;
+  int positions = prefix + tokens;
+  if (positions > INT_MAX / kvWidth || tokens > INT_MAX / qWidth) return -1;
   cudaGetLastError();
-  k_qwen35_causal_attention_panel<<<tokens * nH, 32, 0, g_stream>>>(
+  size_t shmem = ((size_t)hd + FLASH_THREADS) * sizeof(float);
+  k_qwen35_causal_attention_panel<<<tokens * nH, FLASH_THREADS, shmem, g_stream>>>(
       dQ, dK, dV, dOut, tokens, prefix, nH, nKV, hd, scale);
   cudaError_t launch = cudaGetLastError();
   return launch == cudaSuccess ? 0 : 50000 + (int)launch;

@@ -352,6 +352,38 @@ func TestQwenSwapDecoderDirectRowsAllocateNoPaddedBlock(t *testing.T) {
 	}
 }
 
+func TestQwenSwapBulkFloatCodecPreservesLittleEndianBits(t *testing.T) {
+	wantBits := []uint32{0, 1, 0x80000000, 0x3f800000, 0x7f800000, 0xff800000, 0x7fc12345}
+	want := make([]float32, len(wantBits))
+	for i, bits := range wantBits {
+		want[i] = math.Float32frombits(bits)
+	}
+
+	buf := make([]byte, len(want)*4)
+	e := qwenSwapEncoder{buf: buf}
+	e.f32raw(want)
+	if e.err != nil || e.off != len(buf) {
+		t.Fatalf("bulk encode err=%v bytes=%d, want %d", e.err, e.off, len(buf))
+	}
+	for i, bits := range wantBits {
+		if got := binary.LittleEndian.Uint32(buf[i*4:]); got != bits {
+			t.Fatalf("wire[%d] bits=%08x, want %08x", i, got, bits)
+		}
+	}
+
+	got := make([]float32, len(want))
+	d := qwenSwapDecoder{buf: buf}
+	d.f32rawInto(got)
+	if d.err != nil || d.remaining() != 0 {
+		t.Fatalf("bulk decode err=%v remaining=%d", d.err, d.remaining())
+	}
+	for i, bits := range wantBits {
+		if gotBits := math.Float32bits(got[i]); gotBits != bits {
+			t.Fatalf("decoded[%d] bits=%08x, want %08x", i, gotBits, bits)
+		}
+	}
+}
+
 func qwenSwapTestResign(body []byte) []byte {
 	out := make([]byte, len(body)+sha256.Size)
 	copy(out, body)

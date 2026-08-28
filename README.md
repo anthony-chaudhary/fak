@@ -4,106 +4,58 @@
 
 # fak — configure your agents for the task at hand
 
-## fak in one line
+fak is an agent kernel: one Go binary that manages context, models, tools, policy, and receipts.
 
-fak turns a tool-using agent into a managed agent: one Go binary owns the
-operational boundary for context, models, tools, policy, and witnessed receipts.
+> In short: see the latest Mac, AMD, and NVIDIA evidence first; open the indexes for history.
 
-The current tuned path does **4.1× less work** in its matched published envelope;
-this is not a universal quality or speed claim. Roles stay separate: the native
-engine owns execution, the policy floor owns tool admission, and the claims
-ledger names what is shipped, gated, or diagnostic without claiming live-model quality.
+[Try fak](#try-fak), or see the [interactive showcase](docs/showcase.html) for the guided tour.
 
-## First offline proof
+## Latest hardware results — 2026-08-28
 
-No key, model, or GPU is needed:
+The front page shows one row per supported hardware family. Latest means the newest
+committed performance receipt for that platform, not the newest code change. A row can be
+historical or held when no newer quality-complete measurement exists.
+
+| Platform | Latest witnessed result | Status | Details |
+|---|---|---|---|
+| Mac | Qwen3.8-27B Q4_K_M on an Apple M3 Pro: 2.3–2.9 decode tok/s and 3.2–8.4 full-prefill tok/s, observed 2026-08-20. | Historical; its review window ended without a comparable replacement, so this is not a current parity claim. | [Mac result](docs/benchmarks/QWEN38-27B-LATEST.md) |
+| AMD | Qwen3.6-27B on an RX 7600: the measured pure-fak microbench reached 1.15–1.24 decode tok/s versus 0.99 for the local llama.cpp Vulkan baseline, observed 2026-06-19. | Witnessed in that narrow microbench; not a broad quality or full-model parity claim. Qwen3.8 awaits a comparable AMD receipt. | [AMD result](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
+| NVIDIA | Native Qwen3.8-27B CUDA: the cold arm produced 5/5 exact outputs at 11.8–12.1 decode tok/s; confirmed cache hits produced 0/5 exact at about 0.2 tok/s, captured 2026-08-25. | Hold: failed cache-hit quality excludes this from parity or improvement claims. | [NVIDIA result](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) |
+
+Use the [benchmark index](docs/benchmarks/README.md) for hardware history and model-specific
+results. Use [BENCHMARK-AUTHORITY.md](BENCHMARK-AUTHORITY.md) for claim boundaries and canonical
+receipts.
+
+## Try fak
+
+Wrap the Codex session you already use. fak forwards the existing subscription credential and
+applies a capability allow-list, so tools outside the configured floor are blocked by default:
+
+```bash
+fak guard -- codex
+```
+
+Or run the offline proof with no key, model, or GPU:
 
 ```bash
 go build -o fak ./cmd/fak
 ./fak agent --offline
 ```
 
-Expected result: `task completed (booked)` while the poisoned result is blocked
-and the destructive op is prevented.
+Expected result: `task completed (booked)` while the poisoned result and destructive operation
+are blocked.
 
-## Going deeper
+## What fak manages
 
-Documentation home by audience: [start here](START-HERE.md) ·
-[concept course](LEARNING-PATH.md) · [integrations](docs/integrations/) ·
-[CLI reference](docs/cli-reference.md) · [architecture](ARCHITECTURE.md) ·
-[status](STATUS.md) · [tagged claims and boundaries](CLAIMS.md#claim-document-set).
+- **Context:** reuse shared setup, keep provider cache continuity, and shed old turns.
+- **Models:** route each task to the configured provider or fak-native engine without a silent fallback.
+- **Tools:** admit each call through a default-deny capability floor and record the verdict.
 
-> Try the [native inference goal](docs/native-inference-goal.md): fak-native is the product and performance path.
-> It is intended to beat llama.cpp in matched, quality-constrained envelopes. llama.cpp remains
-> an explicit reference for benchmarks and diagnosis. It also supports interoperability and
-> borrowing, but never acts as a silent fallback.
+The native engine is the product and performance path. llama.cpp remains an explicit benchmark,
+diagnostic, and interoperability reference; it is never a silent fallback. See the
+[native inference goal](docs/native-inference-goal.md) for the full contract.
 
-AI agents can do more work than one fixed set of prompts, tools, permissions, and model settings
-can handle well. fak gives each task a small configuration. One boundary then manages context,
-models, tools, and the record of what happened.
-
-## Start here
-
-Wrap the agent you already use with one command. fak forwards your existing subscription
-credential and applies a default-deny policy floor, with no separate API key:
-
-```bash
-fak guard -- codex  # -> launches Codex behind the policy floor
-```
-
-For the quickest proof, run the offline demo below. For security details, inspect the
-default-deny policy. For performance, follow the witnessed native-model results.
-Claims and limitations link to the evidence behind them.
-
-<!-- native-status: 2026-08-28 -->
-### Native-model status — 2026-08-28
-
-This compact readout is designed for frequent refreshes; every row links its authority and says what is *not* proven.
-
-| Lane | Latest witnessed result | Current hold |
-|---|---|---|
-<!-- qwen38-frontdoor:begin -->
-| [Qwen3.8-27B](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | No accepted Metal result remains inside its review window. The closest comparison has passed review and is omitted pending remeasurement. | Separate A100 cache-restore diagnostic: **~0.2 tok/s with 0/5 exact**. Failed quality makes it diagnostic only, never the parity headline. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md)) |
-<!-- qwen38-frontdoor:end -->
-| Ultracode / microagents | A `qwen2.5:0.5b` small-model scout/writer campaign preserved the accepted output through width 8 while reading 13,126 scoped tokens vs 32,760 in the full-context counterfactual. This is a context-access result, not a Qwen3.8 or billed-cost claim. ([access frontier](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md)) | ABSTAIN on the GPT-5.6 Ultracode pair: activation and billed-token/spend accounting were not independently verified, and the observed fleet run was slower (0.47× concurrency speedup). ([paired witness](docs/_witnesses/issue-8168-ultracode-live/README.md)) |
-
-Refresh contract: update the dated marker, both rows, linked committed witnesses, and each row's explicit hold; then run `python tools/readme_freshness_audit.py --json`.
-
-<!-- project-status: 2026-08-25 -->
-### Project status — 2026-08-25
-
-These labels are strict for outside readers. Shipped means merged and checkable. In flight
-links to open work. Goal describes direction, not a promise. Limitation names what the
-current evidence does not support.
-
-- Shipped: agent queues now have a crash-safe desired-state reconciliation spine
-  ([#8875](https://github.com/anthony-chaudhary/fak/issues/8875),
-  [#8876](https://github.com/anthony-chaudhary/fak/issues/8876)); self-update now avoids
-  partial in-place binary replacement ([#8865](https://github.com/anthony-chaudhary/fak/issues/8865));
-  and installed launch paths are visible through one command-front-door matrix
-  ([#5808](https://github.com/anthony-chaudhary/fak/issues/5808)).
-- In flight: the queue is being extended with guarded worker launch and landing
-  ([#8889](https://github.com/anthony-chaudhary/fak/issues/8889)), status and saturation
-  metrics ([#8890](https://github.com/anthony-chaudhary/fak/issues/8890)), and operator
-  controls ([#8899](https://github.com/anthony-chaudhary/fak/issues/8899)). Native Qwen3.8
-  performance work continues in [#8923](https://github.com/anthony-chaudhary/fak/issues/8923).
-- Goal: make fak the simplest boundary for long-lived agent work. Configure the job once.
-  Then let the kernel manage context, models, and tools. It also manages queues and evidence.
-  Improve fak-native inference toward matched quality and speed. See
-  [the problems fak solves](docs/problems-we-solve.md) and
-  [the native-inference goal](docs/native-inference-goal.md).
-- Limitation: the queue work above is not yet the complete operator product, and the
-  native Qwen3.8 and Ultracode results remain inside the holds in the table above. For a
-  subsystem-by-subsystem account of real, simulated, and planned behavior, use
-  [STATUS.md](STATUS.md) and [the feature matrix](docs/supported/features.md).
-
-Refresh contract: reconcile shipped entries with merged commits or closed issues. Confirm
-that in-flight links are still open, keep goals non-promissory, and state current limitations.
-Update the marker, then run `python tools/readme_freshness_audit.py --json`.
-
-## Run your agents
-
-Install fak, then keep using the Codex login and models you already have:
+## Install and configure
 
 ```bash
 # macOS / Linux
@@ -112,62 +64,33 @@ curl -fsSL https://raw.githubusercontent.com/anthony-chaudhary/fak/main/install.
 # Any host with Go 1.26+
 go install github.com/anthony-chaudhary/fak/cmd/fak@latest
 
-# See the shipped configuration levels (no key or model call required)
+# Inspect the shipped profiles
 fak agent profiles
 ```
 
-For a small coding change, ask Ponytail to push toward the smallest correct implementation and
-Caveman to keep the answer compact:
+Use Ponytail to control how strongly the agent resists avoidable machinery and Caveman to
+control how compactly it reports:
 
 ```bash
 fak manage --output-profile caveman:medium --work-profile ponytail:high -- codex \
   "Remove the duplicate cache without adding a dependency."
 ```
 
-For a risky investigation, use the same Codex harness with lighter simplicity pressure and room
-for a fuller explanation:
+Balanced defaults are `ponytail:medium` and `caveman:medium`. See
+[work profiles](docs/work-profiles.md), [response profiles](docs/response-profiles.md), or the
+[harness guide](docs/harness-init.md) to build a named agent around the same boundary.
 
-```bash
-fak manage --output-profile caveman:low --work-profile ponytail:low -- codex \
-  "Trace the intermittent checkout failure and explain the evidence."
-```
-
-That is the idea: your agent, configured for this task. Ponytail controls how strongly the
-agent resists avoidable code and machinery. Caveman controls how compactly it reports back. Neither profile removes explicit requirements or safety checks. Tests, diagnostics, and
-evidence also remain in place.
-
-`fak manage -- codex` uses the balanced `ponytail:medium` + `caveman:medium` defaults. Change
-either axis per run, or use `standard` / `full` to turn that axis off. `fak guard` remains the
-compatible name for `fak manage`.
-
-### Next, make the harness yours
-
-When a per-run configuration is not enough, generate a small harness whose identity,
-instructions, and tools you own:
-
-```bash
-fak harness init --dir ./my-agent --module example.com/my-agent
-cd ./my-agent
-go run ./cmd/microharnessdemo --selfcheck
-go run ./cmd/microharnessdemo
-```
-
-The generated product uses fak's managed boundary without making you assemble an agent loop from
-scratch. Start with the [harness guide](docs/harness-init.md) when you are ready to customize it.
-
-## More details
+## Documentation
 
 | If you want to… | Start here |
 |---|---|
-| Choose Ponytail and Caveman levels | [Work profiles](docs/work-profiles.md) · [response profiles](docs/response-profiles.md) |
-| Inspect or change console settings | [Settings quickstart](docs/cli-reference.md#console-settings) |
+| Check what is shipped, limited, or planned | [Status](STATUS.md) · [claims](CLAIMS.md) · [feature matrix](docs/supported/features.md) |
+| Browse performance evidence | [Mac](docs/benchmarks/QWEN38-27B-LATEST.md) · [AMD](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) · [NVIDIA](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) · [all benchmarks](docs/benchmarks/README.md) |
 | Connect another agent or model | [Codex](docs/integrations/openai-codex.md) · [Claude Code](docs/integrations/claude.md) · [all integrations](docs/integrations/) |
-| Understand what fak manages | [Architecture](docs/architecture.md) · [capability map](docs/CAPABILITIES.md) |
-| Improve or compare local inference | [Fak-native inference doctrine](docs/native-inference-goal.md) · [performance routes](docs/performance.md) |
-| Check the proof and limits | [Claims](CLAIMS.md) · [benchmark authority](BENCHMARK-AUTHORITY.md) · [security](SECURITY.md) |
+| Understand the kernel | [Architecture](ARCHITECTURE.md) · [capability map](docs/CAPABILITIES.md) · [CLI reference](docs/cli-reference.md) |
+| Learn in prerequisite order | [Start here](START-HERE.md) · [learning path](LEARNING-PATH.md) · [documentation index](docs/index.md) |
 | Build on fak | [Go API](pkg/) · [harness contract](docs/harness-kit-contract.md) · [contributing](CONTRIBUTING.md) |
-| Explore everything else | [Documentation index](docs/index.md) · [interactive showcase](docs/showcase.html) · [front-page archive](docs/README-legacy.md) |
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-08-28 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-26 99.2/100 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-08-28 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-28 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

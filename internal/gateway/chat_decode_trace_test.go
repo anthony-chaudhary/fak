@@ -45,6 +45,13 @@ func TestChatDecodeTraceProductionSchemaAndEngine(t *testing.T) {
 		if event.TokenIndex != i+1 || event.ElapsedNS < 0 || (i > 0 && event.ElapsedNS < trace.Events[i-1].ElapsedNS) {
 			t.Fatalf("event[%d] = %+v, want consecutive monotonic trace", i, event)
 		}
+		if i == len(trace.Events)-1 {
+			if event.Forward != nil {
+				t.Fatalf("final event has nonexistent forward timing: %+v", event.Forward)
+			}
+		} else if event.Forward == nil || event.Forward.Kind != agent.NativeForwardSessionStep || event.Forward.ActiveLanes != 1 || event.Forward.DurationNS < 0 {
+			t.Fatalf("event[%d] forward = %+v, want direct Session.Step wall time", i, event.Forward)
+		}
 	}
 }
 
@@ -91,7 +98,7 @@ func TestChatDecodeTraceDefaultOffDoesNotExposePlannerTrace(t *testing.T) {
 	planner := &chatDecodeTraceCountingPlanner{native: true}
 	srv.planner = planner
 	rr := postNativeReceipt(t, srv, `{"messages":[{"role":"user","content":"x"}]}`)
-	if rr.Code != http.StatusOK || planner.calls != 1 || bytes.Contains(rr.Body.Bytes(), []byte(`"decode_trace"`)) {
+	if rr.Code != http.StatusOK || planner.calls != 1 || bytes.Contains(rr.Body.Bytes(), []byte(`"decode_trace"`)) || bytes.Contains(rr.Body.Bytes(), []byte(`"forward"`)) {
 		t.Fatalf("status/calls/body = %d/%d/%s, want 200/1/no trace", rr.Code, planner.calls, rr.Body.String())
 	}
 }

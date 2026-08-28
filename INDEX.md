@@ -279,6 +279,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 ## Notes & research (`docs/notes/`)
 
+- [SPECTRA transform-coded KV compression deep study (2026-08-28)](docs/notes/CONCEPT-STUDY-SPECTRA-2026-08-28.md) — pinned paper/code analysis, FAK seam and candidate dispositions, durable study receipt, SOTA discovery guard, and Qwen3.8-native follow-on #9789.
 - [Path-portable Go verification builds: zero cross-root compiles and a named-artifact Make split (2026-08-27)](docs/notes/CONCEPT-GO-BUILD-PATH-CACHE-2026-08-27.md) — issues #9661/#9671/#9672's falsifiers: verification-only `-trimpath` cut cross-root compiles from 590 to 1; removing redundant `${SRCDIR}` experimentally cut 1 to 0 while retaining Metal; and separating `make build`'s four named artifacts from the explicit `build-all` command fleet cut the Darwin warm link census 147→0 and 15.83s→1.26s while `make ci` still depends directly on both. The matched 5+5 Windows target remains open. Receipt: [`fak.build10x.make_build_link_census.v1`](docs/_witnesses/build10x/make-build-link-census-2026-08-28.json).
 
 - [Apple unified-memory counter provenance (2026-08-27)](docs/notes/APPLE-UNIFIED-MEMORY-COUNTER-PROVENANCE-2026-08-27.md) — generic normalized package/system import contract for direct byte rates or monotonic byte deltas, plus historical powermetrics `DCS RD`/`DCS WR` field evidence and its removal boundary; the fixtures are synthetic and no live capture is claimed.

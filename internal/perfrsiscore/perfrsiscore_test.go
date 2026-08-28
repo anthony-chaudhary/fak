@@ -31,6 +31,130 @@ func TestAll16ExactlyOnceAndDeterministic(t *testing.T) {
 		t.Fatal("nondeterministic output")
 	}
 }
+
+func learningEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e := fixture(t)
+	e.Learning = &Learning{Schema: LearningSchema, Rows: []LearningRow{
+		{CycleID: "c1", HypothesisID: "h1", RecurrenceKey: "parser", PredictedImprovementPercent: 20, ConfidencePercent: 50, ObservedImprovementPercent: 10, LearningID: "l1", LearningRecorded: true, CycleTimeHours: 10, Engine: "fak-native", Artifact: "artifact-c1"},
+		{CycleID: "c2", HypothesisID: "h2", RecurrenceKey: "parser", PredictedImprovementPercent: 12, ConfidencePercent: 30, ObservedImprovementPercent: 0, LearningReused: true, PriorLearningID: "l1", CycleTimeHours: 8, Engine: "fak-native", Artifact: "artifact-c2"},
+		{CycleID: "c3", HypothesisID: "h3", RecurrenceKey: "parser", PredictedImprovementPercent: 8, ConfidencePercent: 20, ObservedImprovementPercent: 0, LearningReused: true, PriorLearningID: "l1", RepeatedFailure: true, CycleTimeHours: 6, Engine: "fak-native", Artifact: "artifact-c3"},
+	}}
+	for i := range e.Dimensions {
+		switch e.Dimensions[i].ID {
+		case "hypothesis_calibration", "learning_retention", "compounding_rate":
+			e.Dimensions[i].Direction = Higher
+			e.Dimensions[i].Unit = "percent"
+		}
+	}
+	return e
+}
+
+func TestPerformanceRSILearningAcceptance(t *testing.T) {
+	e := learningEvidence(t)
+	before := make(map[string]*float64)
+	for _, d := range e.Dimensions {
+		before[d.ID] = d.Current
+	}
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{"hypothesis_calibration": 89.8, "learning_retention": 100, "compounding_rate": 40}
+	for _, d := range got.Dimensions {
+		value, derived := want[d.ID]
+		if derived {
+			if d.Current == nil || math.Abs(*d.Current-value) > 1e-9 || d.EvidenceKind != "performance_rsi_learning_receipt" || d.Engine != "fak-native" {
+				t.Errorf("%s=%+v want %.1f and strict receipt provenance", d.ID, d, value)
+			}
+		} else if d.Current != before[d.ID] && (d.Current == nil || before[d.ID] == nil || *d.Current != *before[d.ID]) {
+			t.Errorf("unrelated dimension %s mutated", d.ID)
+		}
+	}
+}
+
+func TestPerformanceRSILearningCompoundingUsesChronologicalKeyAndLatestReuse(t *testing.T) {
+	e := learningEvidence(t)
+	e.Learning.Rows = []LearningRow{
+		{CycleID: "first-1", HypothesisID: "first-h1", RecurrenceKey: "first", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningID: "first-learning", LearningRecorded: true, CycleTimeHours: 20, Engine: "fak-native", Artifact: "first-original"},
+		{CycleID: "second-1", HypothesisID: "second-h1", RecurrenceKey: "second", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningID: "second-learning", LearningRecorded: true, CycleTimeHours: 10, Engine: "fak-native", Artifact: "second-original"},
+		{CycleID: "first-2", HypothesisID: "first-h2", RecurrenceKey: "first", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningReused: true, PriorLearningID: "first-learning", CycleTimeHours: 15, Engine: "fak-native", Artifact: "first-reuse-1"},
+		{CycleID: "second-2", HypothesisID: "second-h2", RecurrenceKey: "second", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningReused: true, PriorLearningID: "second-learning", CycleTimeHours: 5, Engine: "fak-native", Artifact: "second-reuse"},
+		{CycleID: "first-3", HypothesisID: "first-h3", RecurrenceKey: "first", PredictedImprovementPercent: 100, ConfidencePercent: 20, ObservedImprovementPercent: 100, LearningReused: true, PriorLearningID: "first-learning", CycleTimeHours: 12, Engine: "fak-native", Artifact: "first-reuse-2"},
+	}
+
+	got, err := decodeCycleEvidence(t, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range got.Dimensions {
+		if d.ID == "compounding_rate" && (d.Current == nil || *d.Current != 40) {
+			t.Fatalf("compounding_rate=%v, want 40 from first original (20h) and its latest reuse (12h)", d.Current)
+		}
+	}
+}
+
+func TestPerformanceRSILearningRefusals(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Evidence)
+	}{
+		{"insufficient history", func(e *Evidence) { e.Learning.Rows = e.Learning.Rows[:1] }},
+		{"no recurrence", func(e *Evidence) {
+			e.Learning.Rows[1].RecurrenceKey, e.Learning.Rows[2].RecurrenceKey = "other", "third"
+		}},
+		{"no valid reuse", func(e *Evidence) {
+			e.Learning.Rows[1].LearningReused = false
+			e.Learning.Rows[1].PriorLearningID = ""
+			e.Learning.Rows[2].LearningReused = false
+			e.Learning.Rows[2].PriorLearningID = ""
+		}},
+		{"false compounding", func(e *Evidence) { e.Learning.Rows[2].CycleTimeHours = 10 }},
+		{"negative compounding", func(e *Evidence) { e.Learning.Rows[2].CycleTimeHours = 11 }},
+		{"duplicate cycle", func(e *Evidence) { e.Learning.Rows[1].CycleID = "c1" }},
+		{"range", func(e *Evidence) { e.Learning.Rows[1].ConfidencePercent = 101 }},
+		{"engine", func(e *Evidence) { e.Learning.Rows[1].Engine = "fak-native/qwen" }},
+		{"forward reference", func(e *Evidence) {
+			e.Learning.Rows[1].PriorLearningID = "later"
+			e.Learning.Rows[2].LearningID = "later"
+			e.Learning.Rows[2].LearningRecorded = true
+		}},
+		{"false repeated failure", func(e *Evidence) { e.Learning.Rows[2].RepeatedFailure = false }},
+		{"canonical dimension", func(e *Evidence) {
+			for i := range e.Dimensions {
+				if e.Dimensions[i].ID == "learning_retention" {
+					e.Dimensions[i].Unit = "ratio"
+				}
+			}
+		}},
+		{"later key cannot rescue false compounding for chronological key", func(e *Evidence) {
+			e.Learning.Rows = append([]LearningRow{
+				{CycleID: "earliest", HypothesisID: "earliest-h", RecurrenceKey: "earliest", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningID: "earliest-learning", LearningRecorded: true, CycleTimeHours: 5, Engine: "fak-native", Artifact: "earliest-original"},
+				{CycleID: "later", HypothesisID: "later-h", RecurrenceKey: "later", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningID: "later-learning", LearningRecorded: true, CycleTimeHours: 10, Engine: "fak-native", Artifact: "later-original"},
+				{CycleID: "earliest-reuse", HypothesisID: "earliest-reuse-h", RecurrenceKey: "earliest", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningReused: true, PriorLearningID: "earliest-learning", CycleTimeHours: 5, Engine: "fak-native", Artifact: "earliest-reuse"},
+				{CycleID: "later-reuse", HypothesisID: "later-reuse-h", RecurrenceKey: "later", PredictedImprovementPercent: 10, ConfidencePercent: 10, ObservedImprovementPercent: 10, LearningReused: true, PriorLearningID: "later-learning", CycleTimeHours: 5, Engine: "fak-native", Artifact: "later-reuse"},
+			}, e.Learning.Rows...)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := learningEvidence(t)
+			tc.edit(&e)
+			before, _ := json.Marshal(e)
+			if err := validate(&e); err == nil {
+				t.Fatal("accepted invalid learning receipt")
+			}
+			after, _ := json.Marshal(e)
+			if !bytes.Equal(before, after) {
+				t.Fatal("validation mutated evidence before refusing")
+			}
+		})
+	}
+}
 func TestUnknownDebtAndDominantBottleneck(t *testing.T) {
 	e := fixture(t)
 	e.Dimensions[0].Current = nil
@@ -106,5 +230,530 @@ func TestFixtureIsVersioned(t *testing.T) {
 	b, err := os.ReadFile("testdata/complete.json")
 	if err != nil || !bytes.Contains(b, []byte(EvidenceSchema)) {
 		t.Fatal(err)
+	}
+}
+
+func cycleEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e := fixture(t)
+	e.Cycle = &Cycle{
+		Schema:                CycleSchema,
+		Engine:                "fak-native/qwen3.8",
+		IdeaAt:                "2026-08-28T10:00:00Z",
+		QueueAt:               "2026-08-28T10:10:00Z",
+		ExecutionAt:           "2026-08-28T10:30:00Z",
+		EvaluationAt:          "2026-08-28T11:00:00Z",
+		LandingAt:             "2026-08-28T11:30:00Z",
+		LearningAt:            "2026-08-28T12:00:00Z",
+		OperatorActiveSeconds: 1800,
+	}
+	for i := range e.Dimensions {
+		switch e.Dimensions[i].ID {
+		case "cycle_time", "evaluation_latency":
+			e.Dimensions[i].Unit = "hours"
+			e.Dimensions[i].Current = nil
+		case "experiment_throughput":
+			e.Dimensions[i].Unit = "experiments/day"
+			e.Dimensions[i].Current = nil
+		case "automation_coverage":
+			e.Dimensions[i].Unit = "percent"
+			e.Dimensions[i].Current = nil
+		}
+	}
+	return e
+}
+
+func decodeCycleEvidence(t *testing.T, e Evidence) (Evidence, error) {
+	t.Helper()
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Decode(bytes.NewReader(b))
+}
+
+func TestCycleDerivesFourDimensions(t *testing.T) {
+	e, err := decodeCycleEvidence(t, cycleEvidence(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{
+		"cycle_time":            2,
+		"evaluation_latency":    .5,
+		"experiment_throughput": 12,
+		"automation_coverage":   75,
+	}
+	r := Score(e)
+	for _, d := range r.Dimensions {
+		expected, ok := want[d.ID]
+		if !ok {
+			continue
+		}
+		if d.Status == "UNKNOWN" || d.Current == nil || *d.Current != expected {
+			t.Errorf("%s: status=%s current=%v, want %v", d.ID, d.Status, d.Current, expected)
+		}
+		if d.Source != "cycle:"+CycleSchema {
+			t.Errorf("%s source=%q", d.ID, d.Source)
+		}
+	}
+}
+
+func TestCycleRejectsInvalidRows(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Cycle)
+	}{
+		{"unsupported schema", func(c *Cycle) { c.Schema = "fak-performance-rsi-cycle/2" }},
+		{"missing stage", func(c *Cycle) { c.QueueAt = "" }},
+		{"malformed timestamp", func(c *Cycle) { c.ExecutionAt = "yesterday" }},
+		{"reordered stages", func(c *Cycle) { c.LandingAt = "2026-08-28T10:45:00Z" }},
+		{"negative operator duration", func(c *Cycle) { c.OperatorActiveSeconds = -1 }},
+		{"non-native engine", func(c *Cycle) { c.Engine = "llama.cpp" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := cycleEvidence(t)
+			tc.mutate(e.Cycle)
+			if _, err := decodeCycleEvidence(t, e); err == nil {
+				t.Fatal("accepted invalid cycle")
+			}
+		})
+	}
+}
+
+func TestCycleRejectsMissingOperatorDuration(t *testing.T) {
+	e := cycleEvidence(t)
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = bytes.Replace(b, []byte(`,"operator_active_seconds":1800`), nil, 1)
+	if _, err := Decode(bytes.NewReader(b)); err == nil {
+		t.Fatal("accepted missing operator_active_seconds")
+	}
+}
+
+func improvementEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e, err := Load("../../docs/_witnesses/issue-9781-performance-rsi-improvement.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func TestImprovementDerivesReceiptDimensionsOnly(t *testing.T) {
+	e := improvementEvidence(t)
+	baseline, err := Load("testdata/complete.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior := make(map[string]Dimension, len(baseline.Dimensions))
+	for _, d := range baseline.Dimensions {
+		prior[d.ID] = d
+	}
+	want := map[string]float64{
+		"improvement_yield": 20, "receipt_coverage": 100,
+		"quality_gate_coverage": 100, "attribution_quality": 100,
+	}
+	for _, d := range e.Dimensions {
+		value, derived := want[d.ID]
+		if derived {
+			if d.Current == nil || *d.Current != value || d.EvidenceKind != "improvement_receipt" || d.Engine != "fak-native/qwen3.8" {
+				t.Errorf("%s not deterministically derived: %+v", d.ID, d)
+			}
+			continue
+		}
+		p := prior[d.ID]
+		if (d.Current == nil) != (p.Current == nil) || (d.Current != nil && *d.Current != *p.Current) ||
+			d.Source != p.Source || d.EvidenceKind != p.EvidenceKind || d.Engine != p.Engine {
+			t.Errorf("unrelated dimension %s changed: got %+v want %+v", d.ID, d, p)
+		}
+	}
+}
+
+func TestImprovementRejectsInvalidReceipts(t *testing.T) {
+	boolp := func(v bool) *bool { return &v }
+	tests := []struct {
+		name string
+		edit func(*Improvement)
+		want string
+	}{
+		{"schema", func(r *Improvement) { r.Schema = "fak-performance-rsi-improvement/2" }, "schema"},
+		{"units", func(r *Improvement) { r.Baseline.Unit = "seconds" }, "milliseconds"},
+		{"quality parity", func(r *Improvement) { r.Quality.Parity = boolp(false) }, "quality"},
+		{"missing quality parity", func(r *Improvement) { r.Quality.Parity = nil }, "quality"},
+		{"envelope", func(r *Improvement) { r.CandidateEnvelope.BatchSize = 2 }, "matched"},
+		{"overhead excluded", func(r *Improvement) { r.NetTrueGain.IncludesOverhead = boolp(false) }, "include"},
+		{"causal binding", func(r *Improvement) { r.Causal.IsolatesChange = nil }, "causal"},
+		{"engine", func(r *Improvement) { r.Engine = "llama.cpp" }, "fak-native"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := improvementEvidence(t)
+			tc.edit(e.Improvement)
+			b, err := json.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = Decode(bytes.NewReader(b))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err=%v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestImprovementReceiptStrictJSON(t *testing.T) {
+	e := improvementEvidence(t)
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["improvement"].(map[string]any)["unexpected"] = true
+	b, _ = json.Marshal(raw)
+	if _, err := Decode(bytes.NewReader(b)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected strict JSON refusal, got %v", err)
+	}
+}
+
+func provenanceEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e, err := Load("../../docs/_witnesses/issue-9782-performance-rsi-provenance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e
+}
+
+func TestProvenanceAcceptanceAndFormula(t *testing.T) {
+	e := provenanceEvidence(t)
+	want := map[string]float64{
+		"discovery_freshness": 16.051666666666666,
+		"adaptation_speed":    0.8580555555555556,
+		"reuse_ratio":         100,
+		"production_transfer": 82.59222222222222,
+	}
+	for _, d := range e.Dimensions {
+		value, ok := want[d.ID]
+		if !ok {
+			continue
+		}
+		if d.Current == nil || math.Abs(*d.Current-value) > 1e-9 {
+			t.Errorf("%s current=%v want %.12g", d.ID, d.Current, value)
+		}
+		if d.Source != "provenance:"+ProvenanceSchema || d.EvidenceKind != "research_transfer_receipt" || d.Engine != "fak-native" {
+			t.Errorf("%s provenance metadata=%+v", d.ID, d)
+		}
+	}
+}
+
+func TestProvenancePreservesUnrelatedDimensions(t *testing.T) {
+	baseline, err := Load("testdata/complete.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := provenanceEvidence(t)
+	owned := map[string]bool{"discovery_freshness": true, "adaptation_speed": true, "reuse_ratio": true, "production_transfer": true}
+	prior := make(map[string]Dimension, len(baseline.Dimensions))
+	for _, d := range baseline.Dimensions {
+		prior[d.ID] = d
+	}
+	for _, d := range got.Dimensions {
+		if owned[d.ID] {
+			continue
+		}
+		p := prior[d.ID]
+		if (d.Current == nil) != (p.Current == nil) || (d.Current != nil && *d.Current != *p.Current) ||
+			d.Source != p.Source || d.EvidenceKind != p.EvidenceKind || d.Engine != p.Engine || d.Unit != p.Unit {
+			t.Errorf("unrelated dimension %s changed: got %+v want %+v", d.ID, d, p)
+		}
+	}
+}
+
+func TestProvenanceRefusesInvalidReceiptsWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Provenance)
+	}{
+		{"schema", func(r *Provenance) { r.Schema = "fak-performance-rsi-provenance/2" }},
+		{"repository", func(r *Provenance) { r.Source.Repository = "" }},
+		{"revision", func(r *Provenance) { r.Source.Revision = "main" }},
+		{"timeline", func(r *Provenance) { r.DiscoveryAt = "2026-08-24T00:00:00Z" }},
+		{"explicit start", func(r *Provenance) { r.AdaptationStartExplicit = false }},
+		{"experiment", func(r *Provenance) { r.Experiment.Linked = false }},
+		{"classification", func(r *Provenance) { r.Reuse.Classification = "invented_here" }},
+		{"negative reused", func(r *Provenance) { r.Reuse.ReusedMechanisms = -1 }},
+		{"empty total", func(r *Provenance) { r.Reuse.ReusedMechanisms = 0 }},
+		{"commit", func(r *Provenance) { r.Production.CommitSHA = "5e0db65c5" }},
+		{"module prefix", func(r *Provenance) { r.Production.ModuleAtRev = "internal/qwen38quantrun@r17+gdeadbee" }},
+		{"engine", func(r *Provenance) { r.Production.Engine = "llama.cpp" }},
+		{"unit", func(r *Provenance) { r.Unit = "days" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := provenanceEvidence(t)
+			for i := range e.Dimensions {
+				if e.Dimensions[i].ID == "discovery_freshness" {
+					v := 777.0
+					e.Dimensions[i].Current = &v
+					e.Dimensions[i].Source = "sentinel"
+				}
+			}
+			tc.edit(e.Provenance)
+			if err := applyProvenance(&e); err == nil {
+				t.Fatal("expected refusal")
+			}
+			for _, d := range e.Dimensions {
+				if d.ID == "discovery_freshness" && (d.Current == nil || *d.Current != 777 || d.Source != "sentinel") {
+					t.Fatalf("invalid receipt partially mutated dimension: %+v", d)
+				}
+			}
+		})
+	}
+}
+
+func TestProvenanceStrictJSON(t *testing.T) {
+	b, err := os.ReadFile("../../docs/_witnesses/issue-9782-performance-rsi-provenance.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatal(err)
+	}
+	raw["provenance"].(map[string]any)["unexpected"] = true
+	b, _ = json.Marshal(raw)
+	if _, err := Decode(bytes.NewReader(b)); err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected strict JSON refusal, got %v", err)
+	}
+}
+
+func hardwareEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e := fixture(t)
+	e.Hardware = &Hardware{
+		Schema: HardwareSchema,
+		Runs: []HardwareRun{
+			{
+				EnqueuedAt:           "2026-08-28T10:00:00Z",
+				StartedAt:            "2026-08-28T10:10:00Z",
+				EndedAt:              "2026-08-28T11:10:00Z",
+				RequestedDeviceClass: "cuda-l4",
+				ActiveUtilization:    50,
+				UtilizationUnit:      "percent",
+				WorkloadID:           "workload-a",
+			},
+			{
+				EnqueuedAt:           "2026-08-28T12:00:00Z",
+				StartedAt:            "2026-08-28T12:20:00Z",
+				EndedAt:              "2026-08-28T15:20:00Z",
+				RequestedDeviceClass: "cuda-h100",
+				ActiveUtilization:    90,
+				UtilizationUnit:      "percent",
+				WorkloadID:           "workload-b",
+			},
+		},
+	}
+	for i := range e.Dimensions {
+		if e.Dimensions[i].ID == "hardware_utilization" {
+			e.Dimensions[i].Direction = Higher
+			e.Dimensions[i].Unit = "percent"
+		}
+	}
+	return e
+}
+
+func TestHardwareAcceptanceUsesOnlyDurationWeightedMeasuredUtilization(t *testing.T) {
+	e := hardwareEvidence(t)
+	before := make(map[string]Dimension, len(e.Dimensions))
+	for _, d := range e.Dimensions {
+		before[d.ID] = d
+	}
+	got, err := decodeCycleEvidence(t, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range got.Dimensions {
+		if d.ID == "hardware_utilization" {
+			if d.Current == nil || *d.Current != 80 {
+				t.Fatalf("hardware_utilization=%v, want duration-weighted 80", d.Current)
+			}
+			if d.Source != "hardware:"+HardwareSchema+";queue_delay_seconds_total=1800;queue_delay_seconds_mean=900" {
+				t.Errorf("source=%q", d.Source)
+			}
+			if d.EvidenceKind != "hardware_utilization_receipt" || d.Engine != "" {
+				t.Errorf("hardware evidence metadata=%+v", d)
+			}
+			continue
+		}
+		want := before[d.ID]
+		if (d.Current == nil) != (want.Current == nil) ||
+			(d.Current != nil && *d.Current != *want.Current) ||
+			d.Source != want.Source || d.EvidenceKind != want.EvidenceKind ||
+			d.Engine != want.Engine || d.Direction != want.Direction ||
+			d.Unit != want.Unit || d.NextAction != want.NextAction ||
+			(d.Target == nil) != (want.Target == nil) ||
+			(d.Target != nil && *d.Target != *want.Target) {
+			t.Errorf("unrelated dimension %s changed: got %+v want %+v", d.ID, d, want)
+		}
+	}
+}
+
+func TestHardwareRejectsInvalidRunsBeforeMutation(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Evidence)
+	}{
+		{"schema", func(e *Evidence) { e.Hardware.Schema = "fak-performance-rsi-hardware/2" }},
+		{"empty runs", func(e *Evidence) { e.Hardware.Runs = nil }},
+		{"missing enqueued", func(e *Evidence) { e.Hardware.Runs[0].EnqueuedAt = "" }},
+		{"missing started", func(e *Evidence) { e.Hardware.Runs[0].StartedAt = "" }},
+		{"missing ended", func(e *Evidence) { e.Hardware.Runs[0].EndedAt = "" }},
+		{"invalid timestamp", func(e *Evidence) { e.Hardware.Runs[0].StartedAt = "now" }},
+		{"non UTC", func(e *Evidence) { e.Hardware.Runs[0].StartedAt = "2026-08-28T10:10:00-07:00" }},
+		{"enqueued after started", func(e *Evidence) { e.Hardware.Runs[0].EnqueuedAt = "2026-08-28T10:11:00Z" }},
+		{"ended equals started", func(e *Evidence) { e.Hardware.Runs[0].EndedAt = e.Hardware.Runs[0].StartedAt }},
+		{"unsupported unit", func(e *Evidence) { e.Hardware.Runs[0].UtilizationUnit = "%" }},
+		{"empty device", func(e *Evidence) { e.Hardware.Runs[0].RequestedDeviceClass = " " }},
+		{"empty workload", func(e *Evidence) { e.Hardware.Runs[0].WorkloadID = " " }},
+		{"nonfinite utilization", func(e *Evidence) { e.Hardware.Runs[0].ActiveUtilization = math.NaN() }},
+		{"negative utilization", func(e *Evidence) { e.Hardware.Runs[0].ActiveUtilization = -1 }},
+		{"overrange utilization", func(e *Evidence) { e.Hardware.Runs[0].ActiveUtilization = 100.01 }},
+		{"typed local no GPU", func(e *Evidence) {
+			e.Hardware.Runs[0].TerminalEvidence = &HardwareTerminalEvidence{Type: "local-no-gpu"}
+		}},
+		{"unsupported terminal evidence", func(e *Evidence) {
+			e.Hardware.Runs[0].TerminalEvidence = &HardwareTerminalEvidence{Type: "gpu-driver-missing"}
+		}},
+		{"canonical dimension", func(e *Evidence) {
+			for i := range e.Dimensions {
+				if e.Dimensions[i].ID == "hardware_utilization" {
+					e.Dimensions[i].Unit = "ratio"
+				}
+			}
+		}},
+		{"invalid second run", func(e *Evidence) { e.Hardware.Runs[1].ActiveUtilization = 101 }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := hardwareEvidence(t)
+			for i := range e.Dimensions {
+				if e.Dimensions[i].ID == "hardware_utilization" {
+					sentinel := 17.0
+					e.Dimensions[i].Current = &sentinel
+					e.Dimensions[i].Source = "sentinel"
+					e.Dimensions[i].EvidenceKind = "sentinel"
+					e.Dimensions[i].Engine = "sentinel"
+				}
+			}
+			tc.edit(&e)
+			if err := applyHardware(&e); err == nil {
+				t.Fatal("accepted invalid hardware receipt")
+			}
+			for _, d := range e.Dimensions {
+				if d.ID == "hardware_utilization" &&
+					(d.Current == nil || *d.Current != 17 || d.Source != "sentinel" ||
+						d.EvidenceKind != "sentinel" || d.Engine != "sentinel") {
+					t.Fatalf("invalid receipt partially mutated hardware dimension: %+v", d)
+				}
+			}
+		})
+	}
+}
+
+func TestHardwareAllowsBenignDeviceClassContainingLocalNoGPUText(t *testing.T) {
+	e := hardwareEvidence(t)
+	e.Hardware.Runs[0].RequestedDeviceClass = "simulator-local-no-gpu-compatible"
+	got, err := decodeCycleEvidence(t, e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Hardware.Runs[0].RequestedDeviceClass != "simulator-local-no-gpu-compatible" {
+		t.Fatalf("requested_device_class=%q", got.Hardware.Runs[0].RequestedDeviceClass)
+	}
+}
+
+func TestHardwareRejectsTypedTerminalEvidencePrecisely(t *testing.T) {
+	tests := []struct {
+		evidenceType string
+		want         string
+	}{
+		{
+			evidenceType: "local-no-gpu",
+			want:         `hardware run 0 terminal_evidence type "local-no-gpu": local-no-GPU is a terminal blocker, not a hardware utilization measurement`,
+		},
+		{
+			evidenceType: "gpu-driver-missing",
+			want:         `hardware run 0 terminal_evidence type "gpu-driver-missing" is unsupported; measurement receipts require measured runs, not terminal blockers`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.evidenceType, func(t *testing.T) {
+			e := hardwareEvidence(t)
+			e.Hardware.Runs[0].TerminalEvidence = &HardwareTerminalEvidence{Type: tc.evidenceType}
+			if err := applyHardware(&e); err == nil || err.Error() != tc.want {
+				t.Fatalf("error=%v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestHardwareStrictJSONAndRequiredMeasuredUtilization(t *testing.T) {
+	e := hardwareEvidence(t)
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var base map[string]any
+	if err := json.Unmarshal(b, &base); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"unknown receipt field", func(doc map[string]any) {
+			doc["hardware"].(map[string]any)["private_node"] = "secret-host"
+		}},
+		{"unknown run host", func(doc map[string]any) {
+			doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["host"] = "secret-host"
+		}},
+		{"unknown run path", func(doc map[string]any) {
+			doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["private_path"] = "/private/lab"
+		}},
+		{"typed terminal evidence", func(doc map[string]any) {
+			doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["terminal_evidence"] = map[string]any{"type": "local-no-gpu"}
+		}},
+		{"unsupported terminal evidence", func(doc map[string]any) {
+			doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["terminal_evidence"] = map[string]any{"type": "gpu-driver-missing"}
+		}},
+		{"unknown terminal evidence field", func(doc map[string]any) {
+			doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["terminal_evidence"] = map[string]any{
+				"type": "local-no-gpu", "host": "secret-host",
+			}
+		}},
+		{"missing terminal evidence type", func(doc map[string]any) {
+			doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["terminal_evidence"] = map[string]any{}
+		}},
+		{"missing measured utilization", func(doc map[string]any) {
+			delete(doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any), "active_utilization")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			copyJSON, _ := json.Marshal(base)
+			var doc map[string]any
+			_ = json.Unmarshal(copyJSON, &doc)
+			tc.edit(doc)
+			invalid, _ := json.Marshal(doc)
+			if _, err := Decode(bytes.NewReader(invalid)); err == nil {
+				t.Fatal("accepted non-strict or incomplete hardware receipt")
+			}
+		})
 	}
 }

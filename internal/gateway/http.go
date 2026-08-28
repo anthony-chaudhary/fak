@@ -756,6 +756,9 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		resp.Fak.InputTriggerRoute = inputTriggerRoute
 	}
 	if comp.NativeInference != nil {
+		if s.nativeReceiptMetrics != nil {
+			s.nativeReceiptMetrics.Observe(comp.NativeInference, time.Now())
+		}
 		if resp.Fak == nil {
 			resp.Fak = &FakExt{}
 		}

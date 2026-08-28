@@ -7,6 +7,7 @@ import "errors"
 type GraphReceipt struct {
 	Committed, CompletedWait, TimingAvailable bool
 	Encoders, HostReadbacks                   int
+	HostUploadBytes, HostReadbackBytes        uint64
 	GPUMilliseconds, WaitMilliseconds         float64
 }
 type GraphResult struct{}

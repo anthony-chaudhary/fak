@@ -913,6 +913,9 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 		if sp.NativeDecodeTokenIDs {
 			measurement.decodeTokenIDs = make([]int, 0, maxNew)
 		}
+		if sp.NativeInferenceReceipt {
+			measurement.cudaImmutableWeightUploadsBefore, measurement.cudaImmutableWeightUploadsAvailable = cudaImmutableWeightUploadSnapshot(p.backend)
+		}
 		if sp.DecodeTrace {
 			measurement.traceNow = p.decodeTraceNow
 			if measurement.traceNow == nil {
@@ -1061,20 +1064,65 @@ func (p *InKernelPlanner) Complete(ctx context.Context, messages []Message, tool
 
 func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferenceMeasurement, prefillS, decodeS float64) *NativeInferenceReceipt {
 	backend, forwardPath := p.executionIdentity()
-	return &NativeInferenceReceipt{
-		TokenIDs:           append([]int(nil), measurement.tokenIDs...),
-		TokenLogprobs:      append([]float64(nil), measurement.logprobs...),
-		PrefillSeconds:     prefillS,
-		TTFTSeconds:        measurement.ttftS,
-		DecodeSeconds:      decodeS,
-		Model:              p.modelID,
-		Engine:             "inkernel",
-		Backend:            backend,
-		ForwardPath:        forwardPath,
-		Q4K:                p.q4k,
-		FallbackActive:     false,
-		PrefillChunkTokens: p.nativeInferencePrefillChunkTokens(),
+	var qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt
+	if measurement.qwen35MetalForwardSequence.Available {
+		snapshot := measurement.qwen35MetalForwardSequence
+		qwen35MetalForwardSequence = &snapshot
 	}
+	var qwen35MetalStateIdentity *model.Qwen35MetalStateIdentityReceipt
+	if measurement.qwen35MetalStateIdentity != nil && measurement.qwen35MetalStateIdentity.Available {
+		qwen35MetalStateIdentity = cloneQwen35MetalStateIdentityReceipt(*measurement.qwen35MetalStateIdentity)
+	}
+	var cudaImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta
+	if after, ok := cudaImmutableWeightUploadSnapshot(p.backend); ok && measurement.cudaImmutableWeightUploadsAvailable {
+		before := measurement.cudaImmutableWeightUploadsBefore
+		if after.Calls >= before.Calls && after.TransferBytes >= before.TransferBytes && after.ResidentBytes >= before.ResidentBytes {
+			cudaImmutableWeightUploads = &NativeCUDAImmutableWeightUploadDelta{
+				Before: before,
+				After:  after,
+				Delta: NativeCUDAImmutableWeightUploadCounters{
+					Calls:         after.Calls - before.Calls,
+					TransferBytes: after.TransferBytes - before.TransferBytes,
+					ResidentBytes: after.ResidentBytes - before.ResidentBytes,
+				},
+			}
+		}
+	}
+	return &NativeInferenceReceipt{
+		TokenIDs:                   append([]int(nil), measurement.tokenIDs...),
+		TokenLogprobs:              append([]float64(nil), measurement.logprobs...),
+		PrefillSeconds:             prefillS,
+		TTFTSeconds:                measurement.ttftS,
+		DecodeSeconds:              decodeS,
+		Model:                      p.modelID,
+		Engine:                     "inkernel",
+		Backend:                    backend,
+		ForwardPath:                forwardPath,
+		Q4K:                        p.q4k,
+		FallbackActive:             false,
+		PrefillChunkTokens:         p.nativeInferencePrefillChunkTokens(),
+		Qwen35MetalForwardSequence: qwen35MetalForwardSequence,
+		Qwen35MetalStateIdentity:   qwen35MetalStateIdentity,
+		CUDAImmutableWeightUploads: cudaImmutableWeightUploads,
+	}
+}
+
+func cloneQwen35MetalStateIdentityReceipt(src model.Qwen35MetalStateIdentityReceipt) *model.Qwen35MetalStateIdentityReceipt {
+	src.States = append([]model.Qwen35MetalStateDigest(nil), src.States...)
+	return &src
+}
+
+type cudaImmutableWeightUploadSnapshotter interface {
+	CUDAImmutableWeightUploadSnapshot() (calls, transferBytes, residentBytes uint64)
+}
+
+func cudaImmutableWeightUploadSnapshot(be compute.Backend) (NativeCUDAImmutableWeightUploadCounters, bool) {
+	provider, ok := be.(cudaImmutableWeightUploadSnapshotter)
+	if !ok {
+		return NativeCUDAImmutableWeightUploadCounters{}, false
+	}
+	calls, transferBytes, residentBytes := provider.CUDAImmutableWeightUploadSnapshot()
+	return NativeCUDAImmutableWeightUploadCounters{Calls: calls, TransferBytes: transferBytes, ResidentBytes: residentBytes}, true
 }
 
 func (p *InKernelPlanner) requiresDeviceSerialization() bool {

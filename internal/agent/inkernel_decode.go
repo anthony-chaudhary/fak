@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -38,6 +39,10 @@ func (p *InKernelPlanner) generateReusedContext(ctx context.Context, ids []int, 
 // it is sized to the logits vocab on first use and never persists across turns.
 func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids []int, maxNew int, temp, topP float64, topK int, logitBias model.LogitBias, freqPenalty, presPenalty float64, stops map[int]bool, emit func(int) bool, measurementOpt ...*nativeInferenceMeasurement) (gen, promptTok, cacheable, matched int, sourceTier radixkv.SnapshotTier, prefillS, decodeS float64, stopped bool, err error) {
 	p.qwen35MetalGDNExecuted.Store(false)
+	var measurement *nativeInferenceMeasurement
+	if len(measurementOpt) > 0 {
+		measurement = measurementOpt[0]
+	}
 	promptTok = len(ids)
 	if len(ids) == 0 {
 		return
@@ -172,6 +177,19 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		s.Metal = true
 		s.MetalQ4K = p.q4k
 	}
+	qwen35MetalStateIdentityEnabled := false
+	if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {
+		if enableErr := s.EnableQwen35MetalStateIdentityReceipt(ids); enableErr != nil {
+			var unavailable *model.Qwen35MetalStateIdentityUnavailableError
+			if !errors.As(enableErr, &unavailable) {
+				err = enableErr
+				return
+			}
+		} else {
+			qwen35MetalStateIdentityEnabled = true
+			defer s.ResetQwen35MetalStateIdentityReceipt()
+		}
+	}
 	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() && cachedLogits == nil {
 		if matched != 0 {
 			err = &model.UnsupportedGDNPreprojectedSequenceError{
@@ -234,10 +252,18 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() {
 		var executed bool
 		executed, err = s.FinalizeQwen35MetalGDNPreprojectedSequence()
+		if measurement != nil && !measurement.inferenceDisabled {
+			measurement.qwen35MetalForwardSequence = s.Qwen35MetalForwardSequenceReceipt()
+		}
 		if err != nil {
 			return
 		}
 		p.qwen35MetalGDNExecuted.Store(executed)
+	}
+	if qwen35MetalStateIdentityEnabled {
+		if err = finalizeAndCaptureQwen35MetalStateIdentity(s, measurement); err != nil {
+			return
+		}
 	}
 
 	// 3) Snapshot the full-prompt KV (before decode mutates s.Cache) and cache it under a
@@ -287,10 +313,6 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 	var counts []int32
 	if freqPenalty != 0 || presPenalty != 0 {
 		counts = make([]int32, len(logits))
-	}
-	var measurement *nativeInferenceMeasurement
-	if len(measurementOpt) > 0 {
-		measurement = measurementOpt[0]
 	}
 	ln := &decodeLane{
 		s:           s,
@@ -401,17 +423,48 @@ type decodeLane struct {
 	err     error
 }
 
+func shouldEnableQwen35MetalStateIdentity(p *InKernelPlanner, measurement *nativeInferenceMeasurement, ids []int, matched int, cachedLogits []float32) bool {
+	return p != nil && p.m != nil && measurement != nil && !measurement.inferenceDisabled &&
+		p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() &&
+		cachedLogits == nil && matched == 0 && len(ids) == 32
+}
+
+type qwen35MetalStateIdentitySession interface {
+	FinalizeQwen35MetalStateIdentityReceipt() (bool, error)
+	Qwen35MetalStateIdentityReceipt() (model.Qwen35MetalStateIdentityReceipt, bool)
+}
+
+func finalizeAndCaptureQwen35MetalStateIdentity(s qwen35MetalStateIdentitySession, measurement *nativeInferenceMeasurement) error {
+	if s == nil || measurement == nil {
+		return fmt.Errorf("agent: opted-in Qwen Metal state identity has no request-local owner")
+	}
+	finalized, err := s.FinalizeQwen35MetalStateIdentityReceipt()
+	if err != nil {
+		return err
+	}
+	identity, available := s.Qwen35MetalStateIdentityReceipt()
+	if !finalized || !available || !identity.Available {
+		return fmt.Errorf("agent: opted-in Qwen Metal state identity did not finalize")
+	}
+	measurement.qwen35MetalStateIdentity = cloneQwen35MetalStateIdentityReceipt(identity)
+	return nil
+}
+
 type nativeInferenceMeasurement struct {
-	startedAt             time.Time
-	tokenIDs              []int
-	logprobs              []float64
-	ttftS                 float64
-	inferenceDisabled     bool
-	traceNow              func() time.Time
-	traceStartedAt        time.Time
-	traceEvents           []NativeDecodeTraceEvent
-	decodeTokenIDsEnabled bool
-	decodeTokenIDs        []int
+	startedAt                           time.Time
+	tokenIDs                            []int
+	logprobs                            []float64
+	ttftS                               float64
+	inferenceDisabled                   bool
+	traceNow                            func() time.Time
+	traceStartedAt                      time.Time
+	traceEvents                         []NativeDecodeTraceEvent
+	decodeTokenIDsEnabled               bool
+	decodeTokenIDs                      []int
+	qwen35MetalForwardSequence          model.Qwen35MetalForwardSequenceReceipt
+	qwen35MetalStateIdentity            *model.Qwen35MetalStateIdentityReceipt
+	cudaImmutableWeightUploadsBefore    NativeCUDAImmutableWeightUploadCounters
+	cudaImmutableWeightUploadsAvailable bool
 }
 
 func (m *nativeInferenceMeasurement) reset() {
@@ -424,6 +477,8 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.traceStartedAt = time.Time{}
 	m.traceEvents = m.traceEvents[:0]
 	m.decodeTokenIDs = m.decodeTokenIDs[:0]
+	m.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{}
+	m.qwen35MetalStateIdentity = nil
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {
@@ -472,6 +527,27 @@ func (m *nativeInferenceMeasurement) recordDecodeTrace(tokenIndex, tokenID int) 
 		}
 		m.decodeTokenIDs = append(m.decodeTokenIDs, tokenID)
 	}
+	return nil
+}
+
+func (m *nativeInferenceMeasurement) recordForwardTiming(tokenIndex int, kind string, activeLanes int, duration time.Duration) error {
+	if m == nil || m.traceNow == nil {
+		return nil
+	}
+	if duration < 0 {
+		return fmt.Errorf("native decode forward clock moved backwards at token %d", tokenIndex)
+	}
+	if tokenIndex <= 0 || tokenIndex > len(m.traceEvents) || m.traceEvents[tokenIndex-1].TokenIndex != tokenIndex {
+		return fmt.Errorf("native decode forward token index %d has no committed trace event", tokenIndex)
+	}
+	if activeLanes <= 0 || (kind != NativeForwardSessionStep && kind != NativeForwardStepBatchActive) {
+		return fmt.Errorf("native decode forward token %d has invalid kind/active lanes %q/%d", tokenIndex, kind, activeLanes)
+	}
+	event := &m.traceEvents[tokenIndex-1]
+	if event.Forward != nil {
+		return fmt.Errorf("native decode forward token %d already recorded", tokenIndex)
+	}
+	event.Forward = &NativeForwardTiming{Kind: kind, DurationNS: duration.Nanoseconds(), ActiveLanes: activeLanes}
 	return nil
 }
 
@@ -561,7 +637,16 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 		if !advance {
 			return
 		}
+		if ln.measurement == nil || ln.measurement.traceNow == nil {
+			ln.logits = ln.s.Step(next)
+			continue
+		}
+		started := ln.measurement.traceNow()
 		ln.logits = ln.s.Step(next)
+		if err := ln.measurement.recordForwardTiming(ln.gen, NativeForwardSessionStep, 1, ln.measurement.traceNow().Sub(started)); err != nil {
+			ln.err, ln.done = err, true
+			return
+		}
 	}
 }
 
@@ -607,11 +692,37 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		if !anyActive {
 			return
 		}
+		activeLanes := 0
+		var forwardNow func() time.Time
+		for i, isActive := range active {
+			if !isActive {
+				continue
+			}
+			activeLanes++
+			if forwardNow == nil && lanes[i].measurement != nil {
+				forwardNow = lanes[i].measurement.traceNow
+			}
+		}
+		var forwardStarted time.Time
+		if forwardNow != nil {
+			forwardStarted = forwardNow()
+		}
 		out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
 		if !probed {
 			out = bs.StepBatchActive(ids, active)
 			panels = bs.LastStepSharedPanels()
 			macs = bs.LastStepMACs()
+		}
+		if forwardNow != nil {
+			duration := forwardNow().Sub(forwardStarted)
+			for i, isActive := range active {
+				if !isActive {
+					continue
+				}
+				if err := lanes[i].measurement.recordForwardTiming(lanes[i].gen, NativeForwardStepBatchActive, activeLanes, duration); err != nil {
+					lanes[i].err, lanes[i].done = err, true
+				}
+			}
 		}
 		sharedPanels += panels
 		sharedMACs += macs

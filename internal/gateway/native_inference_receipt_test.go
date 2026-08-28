@@ -3,18 +3,25 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/anthony-chaudhary/fak/internal/abi"
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
+	"github.com/anthony-chaudhary/fak/internal/modelengine"
 )
 
 func nativeReceiptServer(t *testing.T) *Server {
 	t.Helper()
+	// Gateway tests intentionally reset the process-global ABI registry. Restore
+	// the production in-kernel engine so this wire witness is order-independent.
+	abi.RegisterEngine(modelengine.EngineID, modelengine.Default)
 	t.Setenv("FAK_INKERNEL_RADIX", "off")
 	t.Setenv("FAK_SEED", "9070")
 	cfg := kvmmuSynthCfg()
@@ -71,6 +78,117 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	if receipt.Model != "synthetic-live" || receipt.Engine != "inkernel" || receipt.Backend != "cpu-ref" || receipt.ForwardPath != "cpu/reference" || receipt.Q4K || receipt.FallbackActive {
 		t.Fatalf("execution identity = %+v, want exact synthetic inkernel cpu/reference without Q4K or fallback", receipt)
 	}
+	metrics := srv.renderMetrics()
+	for _, want := range []string{
+		`fak_native_receipt_requests_total{engine="inkernel",backend="other",forward_path="other"} 1`,
+		`fak_native_receipt_signal_supported{signal="prefill"} 1`,
+		`fak_native_receipt_signal_supported{signal="decode"} 1`,
+		`fak_native_receipt_latest_stale 0`,
+	} {
+		if !strings.Contains(metrics, want) {
+			t.Fatalf("production request did not reach /metrics: missing %q", want)
+		}
+	}
+	if receipt.Qwen35MetalForwardSequence != nil || bytes.Contains(rr.Body.Bytes(), []byte(`"qwen35_metal_forward_sequence"`)) {
+		t.Fatalf("CPU receipt acquired Metal sequence evidence: %+v", receipt.Qwen35MetalForwardSequence)
+	}
+	if receipt.Qwen35MetalStateIdentity != nil || bytes.Contains(rr.Body.Bytes(), []byte(`"qwen35_metal_state_identity"`)) {
+		t.Fatalf("CPU receipt acquired Metal state identity: %+v", receipt.Qwen35MetalStateIdentity)
+	}
+	if receipt.CUDAImmutableWeightUploads != nil {
+		t.Fatalf("CPU receipt acquired CUDA upload evidence: %+v", receipt.CUDAImmutableWeightUploads)
+	}
+}
+
+func gatewayQwen35MetalStateIdentityFixture(authority string) *model.Qwen35MetalStateIdentityReceipt {
+	receipt := &model.Qwen35MetalStateIdentityReceipt{
+		Schema:              model.Qwen35MetalStateIdentitySchema,
+		Available:           true,
+		Authority:           authority,
+		OwnerGeneration:     strings.Repeat("a", 64),
+		Tokens:              32,
+		TokenLineageSHA256:  strings.Repeat("b", 64),
+		FullAttentionLayers: 1,
+		GDNLayers:           1,
+		StateCount:          5,
+		States: []model.Qwen35MetalStateDigest{
+			{Layer: 0, Role: model.Qwen35MetalStateRoleKRaw, Elements: 16, SHA256: strings.Repeat("c", 64)},
+			{Layer: 0, Role: model.Qwen35MetalStateRoleKPost, Elements: 16, SHA256: strings.Repeat("d", 64)},
+			{Layer: 0, Role: model.Qwen35MetalStateRoleV, Elements: 16, SHA256: strings.Repeat("e", 64)},
+			{Layer: 1, Role: model.Qwen35MetalStateRoleGDNConv, Elements: 12, SHA256: strings.Repeat("f", 64)},
+			{Layer: 1, Role: model.Qwen35MetalStateRoleGDNRecurrent, Elements: 16, SHA256: strings.Repeat("0", 64)},
+		},
+		DigestOperations:  7,
+		DigestInputBytes:  8192,
+		DigestNanoseconds: 4096,
+		BindingSHA256:     strings.Repeat("1", 64),
+	}
+	if authority == model.Qwen35MetalStateAuthoritySequence {
+		receipt.GDNSnapshotOps = 1
+		receipt.GDNSeedOps = 1
+		receipt.GDNStateD2HBytes = 112
+		receipt.GDNStateH2DBytes = 112
+	}
+	return receipt
+}
+
+func TestNativeInferenceReceiptStateIdentityJSONPrivacyAccountingAndOmission(t *testing.T) {
+	for _, authority := range []string{model.Qwen35MetalStateAuthorityControl, model.Qwen35MetalStateAuthoritySequence} {
+		t.Run(authority, func(t *testing.T) {
+			want := gatewayQwen35MetalStateIdentityFixture(authority)
+			raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{Qwen35MetalStateIdentity: want}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded FakExt
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if decoded.NativeInferenceReceipt == nil || !reflect.DeepEqual(decoded.NativeInferenceReceipt.Qwen35MetalStateIdentity, want) {
+				t.Fatalf("state identity JSON round trip = %+v, want %+v", decoded.NativeInferenceReceipt, want)
+			}
+
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			var native map[string]json.RawMessage
+			if err := json.Unmarshal(envelope["native_inference_receipt"], &native); err != nil {
+				t.Fatal(err)
+			}
+			identityRaw, present := native["qwen35_metal_state_identity"]
+			if !present {
+				t.Fatalf("public receipt omitted opted-in state identity: %s", raw)
+			}
+			for _, field := range []string{
+				`"schema":"fak.qwen35-metal-state-identity/1"`, `"available":true`, `"authority":"` + authority + `"`,
+				`"owner_generation":"` + strings.Repeat("a", 64) + `"`, `"tokens":32`, `"token_lineage_sha256":"` + strings.Repeat("b", 64) + `"`,
+				`"full_attention_layers":1`, `"gdn_layers":1`, `"state_count":5`, `"layer":0`, `"role":"full_attention_k_raw"`,
+				`"elements":16`, `"sha256":"` + strings.Repeat("c", 64) + `"`, `"gdn_snapshot_ops":` + fmt.Sprint(want.GDNSnapshotOps),
+				`"gdn_seed_ops":` + fmt.Sprint(want.GDNSeedOps), `"gdn_state_d2h_bytes":` + fmt.Sprint(want.GDNStateD2HBytes),
+				`"gdn_state_h2d_bytes":` + fmt.Sprint(want.GDNStateH2DBytes), `"digest_operations":7`, `"digest_input_bytes":8192`,
+				`"digest_nanoseconds":4096`, `"binding_sha256":"` + strings.Repeat("1", 64) + `"`,
+			} {
+				if !bytes.Contains(identityRaw, []byte(field)) {
+					t.Fatalf("state identity JSON %s missing exact field %s", identityRaw, field)
+				}
+			}
+			public := strings.ToLower(string(identityRaw))
+			for _, forbidden := range []string{`"handle"`, `"pointer"`, `"ptr"`, `"path"`, `"tensor"`, `"values"`, `"chunks"`, `/users/private/weights`, `0xfeedface`, `3.1415926535`} {
+				if strings.Contains(public, forbidden) {
+					t.Fatalf("public state identity exposed forbidden native/content marker %q: %s", forbidden, identityRaw)
+				}
+			}
+		})
+	}
+
+	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte(`"qwen35_metal_state_identity"`)) {
+		t.Fatalf("unavailable identity emitted null/default object: %s", raw)
+	}
 }
 
 func TestNativeInferenceReceiptDefaultWireOmission(t *testing.T) {
@@ -119,11 +237,35 @@ func TestNativeInferenceReceiptUnsupportedRequestsFailClosed(t *testing.T) {
 }
 
 func TestNativeInferenceReceiptJSONShapeUsesChosenTokenArrays(t *testing.T) {
-	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{TokenIDs: []int{7}, TokenLogprobs: []float64{-1}}})
+	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{
+		TokenIDs:      []int{7},
+		TokenLogprobs: []float64{-1},
+		Qwen35MetalForwardSequence: &model.Qwen35MetalForwardSequenceReceipt{
+			Path:              model.Qwen35MetalGDNSequenceForwardPath,
+			Available:         true,
+			Tokens:            32,
+			CommandBuffers:    1,
+			Encoders:          7,
+			TerminalWaits:     1,
+			TerminalReadbacks: 1,
+			HostUploadBytes:   65536,
+			HostReadbackBytes: 16384,
+			Committed:         true,
+			CompletedWait:     true,
+			TimingAvailable:   true,
+			GPUMilliseconds:   2.5,
+			WaitMilliseconds:  3.5,
+		},
+		CUDAImmutableWeightUploads: &agent.NativeCUDAImmutableWeightUploadDelta{
+			Before: agent.NativeCUDAImmutableWeightUploadCounters{Calls: 4, TransferBytes: 1024, ResidentBytes: 512},
+			After:  agent.NativeCUDAImmutableWeightUploadCounters{Calls: 5, TransferBytes: 5120, ResidentBytes: 2560},
+			Delta:  agent.NativeCUDAImmutableWeightUploadCounters{Calls: 1, TransferBytes: 4096, ResidentBytes: 2048},
+		},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`} {
+	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`, `"qwen35_metal_forward_sequence"`, `"path":"metal/qwen35-gdn-preprojected-sequence-v1"`, `"tokens":32`, `"command_buffers":1`, `"encoders":7`, `"terminal_waits":1`, `"terminal_readbacks":1`, `"host_upload_bytes":65536`, `"host_readback_bytes":16384`, `"committed":true`, `"completed_wait":true`, `"timing_available":true`, `"gpu_milliseconds":2.5`, `"wait_milliseconds":3.5`, `"cuda_immutable_weight_uploads"`, `"before":{"calls":4,"transfer_bytes":1024,"resident_bytes":512}`, `"after":{"calls":5,"transfer_bytes":5120,"resident_bytes":2560}`, `"delta":{"calls":1,"transfer_bytes":4096,"resident_bytes":2048}`} {
 		if !bytes.Contains(raw, []byte(field)) {
 			t.Fatalf("receipt JSON %s missing %s", raw, field)
 		}

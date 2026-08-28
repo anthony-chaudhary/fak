@@ -154,6 +154,12 @@ type cudaBackend struct {
 	budgetBytes int64
 	dlUsed      int64
 	managedN    int
+	// immutableWeightUpload* are cumulative backend-authored counters for successful
+	// immutable-weight H2D misses. They deliberately do not describe activations,
+	// cached hits, refused calls, or current live residency. Guarded by cudaMu.
+	immutableWeightUploadCalls         uint64
+	immutableWeightUploadTransferBytes uint64
+	immutableWeightUploadResidentBytes uint64
 	// faultLatch is the session-scoped device-fault boundary (#6412). This backend owns the
 	// process's single CUDA context (one g_stream, one cudaMu), so backend scope IS session
 	// scope: once a launch/execution/allocation fault is observed here, gated entry points
@@ -192,6 +198,32 @@ func (c *cudaBackend) CUDADebugRestoreResidencyBudget(budgetBytes, dlUsed int64,
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	c.budgetBytes, c.dlUsed, c.managedN = budgetBytes, dlUsed, managedN
+}
+
+// CUDAImmutableWeightUploadSnapshot returns cumulative successful immutable-weight
+// H2D operations. Matrix upload-cache hits are suppressed; deliberately uncached
+// rank-one weight copies are counted individually. The concrete optional method keeps
+// CUDA observability out of the common Backend interface; callers that need it
+// type-assert this exact method.
+// Subtracting snapshots describes a serialized campaign window; overlapping
+// coalesced requests share this backend and cannot claim request-exclusive deltas.
+func (c *cudaBackend) CUDAImmutableWeightUploadSnapshot() (calls, transferBytes, residentBytes uint64) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.immutableWeightUploadCalls, c.immutableWeightUploadTransferBytes, c.immutableWeightUploadResidentBytes
+}
+
+// accountImmutableWeightUpload runs only after the last H2D copy for one weight
+// upload succeeds. Runtime/activation UploadClass calls return before these sites;
+// immutable rank-one norms and biases still count even though pointer caching is
+// deliberately restricted to matrices. Caller holds cudaMu.
+func (c *cudaBackend) accountImmutableWeightUpload(transferBytes int, buf *cudaBuf) {
+	if transferBytes <= 0 || buf == nil || buf.ptr == nil {
+		return
+	}
+	c.immutableWeightUploadCalls++
+	c.immutableWeightUploadTransferBytes += uint64(transferBytes)
+	c.immutableWeightUploadResidentBytes += uint64(buf.residentBytes())
 }
 
 // Name returns the registry id of this backend ("cuda").

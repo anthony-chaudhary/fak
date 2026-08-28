@@ -80,6 +80,10 @@ func TestProjectionGraphMixedQuantizedSingleFence(t *testing.T) {
 	if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 3 || receipt.HostReadbacks != 0 {
 		t.Fatalf("receipt=%+v", receipt)
 	}
+	wantUpload := uint64(len(xf))*4 + uint64(len(xq)) + uint64(len(xd))*4
+	if receipt.HostUploadBytes != wantUpload || receipt.HostReadbackBytes != 0 {
+		t.Fatalf("transfer bytes = upload %d readback %d, want %d/0", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload)
+	}
 	for i, pair := range []struct {
 		r    *GraphResult
 		want []float32
@@ -193,6 +197,9 @@ func TestProjectionGraphDeviceResultChainingSingleFence(t *testing.T) {
 	if !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 5 || receipt.HostReadbacks != 1 {
 		t.Fatalf("receipt=%+v, want one command buffer, five encoders, one terminal wait/readback", receipt)
 	}
+	if wantUpload, wantReadback := uint64(len(x))*4, uint64(P*output)*4; receipt.HostUploadBytes != wantUpload || receipt.HostReadbackBytes != wantReadback {
+		t.Fatalf("transfer bytes = upload %d readback %d, want %d/%d", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload, wantReadback)
+	}
 	firstHost := make([]float32, P*value)
 	first.GEMM(x, P, firstHost)
 	q, d := quantize(firstHost)
@@ -225,6 +232,10 @@ func graphGDNPanel(g GDNGeometry, tokens int) GDNPanel {
 	return panel
 }
 
+func graphGDNPanelUploadBytes(panel GDNPanel) uint64 {
+	return uint64(len(panel.Conv1D)+len(panel.ALog)+len(panel.DTBias)+len(panel.Norm)) * 4
+}
+
 func newProjectionGraphGDNLeaseFixture(t *testing.T) (*ProjectionGraph, *GDNState, *GraphResult, GDNGeometry) {
 	t.Helper()
 	const P, input = 32, 256
@@ -254,7 +265,8 @@ func newProjectionGraphGDNLeaseFixture(t *testing.T) (*ProjectionGraph, *GDNStat
 		g.Free()
 		t.Fatal(err)
 	}
-	core, err := g.GDN(state, mixed, z, b, a, graphGDNPanel(geometry, P))
+	panel := graphGDNPanel(geometry, P)
+	core, err := g.GDN(state, mixed, z, b, a, panel)
 	if err != nil {
 		state.Close()
 		g.Free()
@@ -313,6 +325,9 @@ func TestProjectionGraphGDNLeaseSerializesOwnerLifecycle(t *testing.T) {
 	if len(outputs) != 1 || len(outputs[0]) != 32*geometry.valueDim() || !receipt.Committed || !receipt.CompletedWait || receipt.Encoders != 5 || receipt.HostReadbacks != 1 {
 		t.Fatalf("GDN graph terminal result=%d receipt=%+v", len(outputs), receipt)
 	}
+	if wantUpload, wantReadback := uint64(32*256)*4+graphGDNPanelUploadBytes(graphGDNPanel(geometry, 32)), uint64(32*geometry.valueDim())*4; receipt.HostUploadBytes != wantUpload || receipt.HostReadbackBytes != wantReadback {
+		t.Fatalf("GDN transfer bytes = upload %d readback %d, want %d/%d", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload, wantReadback)
+	}
 	for i := 0; i < 4; i++ {
 		select {
 		case result := <-results:
@@ -339,12 +354,16 @@ func TestProjectionGraphGDNLeaseReleasesOnFailureAndFree(t *testing.T) {
 	baseline := GDNLiveBufferCount()
 
 	t.Run("post-submit failure", func(t *testing.T) {
-		g, state, _, _ := newProjectionGraphGDNLeaseFixture(t)
+		g, state, _, geometry := newProjectionGraphGDNLeaseFixture(t)
 		g.InjectPostSubmitFailureForTest()
 		receipt, err := g.Finish()
 		var post *GraphPostSubmitError
 		if !errors.As(err, &post) || !receipt.Committed || !receipt.CompletedWait {
 			t.Fatalf("injected graph failure receipt=%+v err=%T %v", receipt, err, err)
+		}
+		wantUpload := uint64(32*256)*4 + graphGDNPanelUploadBytes(graphGDNPanel(geometry, 32))
+		if receipt.HostUploadBytes != wantUpload || receipt.HostReadbackBytes != 0 {
+			t.Fatalf("post-submit transfer bytes = upload %d readback %d, want %d/0", receipt.HostUploadBytes, receipt.HostReadbackBytes, wantUpload)
 		}
 		state.Close()
 		g.Free()

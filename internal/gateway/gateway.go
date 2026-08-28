@@ -44,6 +44,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/kernel"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute"
+	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 	"github.com/anthony-chaudhary/fak/internal/rungobs"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
 	"github.com/anthony-chaudhary/fak/internal/vcacheobserve"
@@ -265,6 +266,7 @@ func New(cfg Config) (*Server, error) {
 		activity:                     newSessionActivity(),
 		toolPages:                    ctxmmu.NewToolPageTable(nil), // nil ⇒ the process-global MMU pager (#2440)
 		metrics:                      newGatewayMetrics(time.Now()),
+		nativeReceiptMetrics:         nativeperf.NewReceiptMetrics(0),
 		otlp:                         otlp,
 		orgAudit:                     orgAudit,
 		route:                        newRouteLive(cfg.RouteManifest),

@@ -8,14 +8,22 @@ import (
 	"io"
 	"math"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	EvidenceSchema = "fak-performance-rsi-evidence/1"
-	ReportSchema   = "fak-performance-rsi-scorecard/1"
-	TargetMultiple = 100.0
+	EvidenceSchema    = "fak-performance-rsi-evidence/1"
+	CycleSchema       = "fak-performance-rsi-cycle/1"
+	ImprovementSchema = "fak-performance-rsi-improvement/1"
+	ProvenanceSchema  = "fak-performance-rsi-provenance/1"
+	LearningSchema    = "fak-performance-rsi-learning/1"
+	HardwareSchema    = "fak-performance-rsi-hardware/1"
+	ReportSchema      = "fak-performance-rsi-scorecard/1"
+	TargetMultiple    = 100.0
 )
 
 type Direction string
@@ -26,10 +34,220 @@ const (
 )
 
 type Evidence struct {
-	Schema           string      `json:"schema"`
-	Snapshot         string      `json:"snapshot"`
-	TargetMultiplier float64     `json:"target_multiplier"`
-	Dimensions       []Dimension `json:"dimensions"`
+	Schema           string       `json:"schema"`
+	Snapshot         string       `json:"snapshot"`
+	TargetMultiplier float64      `json:"target_multiplier"`
+	Dimensions       []Dimension  `json:"dimensions"`
+	Cycle            *Cycle       `json:"cycle,omitempty"`
+	Improvement      *Improvement `json:"improvement,omitempty"`
+	Provenance       *Provenance  `json:"provenance,omitempty"`
+	Learning         *Learning    `json:"learning,omitempty"`
+	Hardware         *Hardware    `json:"hardware,omitempty"`
+}
+
+// Hardware is a strict ledger of directly measured accelerator utilization.
+// Queue timing is retained as metadata only and never substitutes for a
+// utilization measurement.
+type Hardware struct {
+	Schema string        `json:"schema"`
+	Runs   []HardwareRun `json:"runs"`
+}
+
+type HardwareRun struct {
+	EnqueuedAt           string                    `json:"enqueued_at"`
+	StartedAt            string                    `json:"started_at"`
+	EndedAt              string                    `json:"ended_at"`
+	RequestedDeviceClass string                    `json:"requested_device_class"`
+	ActiveUtilization    float64                   `json:"active_utilization"`
+	UtilizationUnit      string                    `json:"utilization_unit"`
+	WorkloadID           string                    `json:"workload_id"`
+	TerminalEvidence     *HardwareTerminalEvidence `json:"terminal_evidence,omitempty"`
+}
+
+// HardwareTerminalEvidence is an explicitly typed terminal blocker. Hardware
+// measurement receipts decode it strictly so validation can reject the blocker
+// without inferring terminal state from unrelated measurement fields.
+type HardwareTerminalEvidence struct {
+	Type string `json:"type"`
+}
+
+func (e *HardwareTerminalEvidence) UnmarshalJSON(b []byte) error {
+	type terminalEvidenceJSON HardwareTerminalEvidence
+	var decoded terminalEvidenceJSON
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("hardware terminal_evidence: trailing JSON value")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	if _, ok := fields["type"]; !ok {
+		return errors.New("hardware terminal_evidence type is required")
+	}
+	*e = HardwareTerminalEvidence(decoded)
+	return nil
+}
+
+func (r *HardwareRun) UnmarshalJSON(b []byte) error {
+	type hardwareRunJSON HardwareRun
+	var decoded hardwareRunJSON
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("hardware run: trailing JSON value")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	for _, name := range []string{
+		"enqueued_at", "started_at", "ended_at", "requested_device_class",
+		"active_utilization", "utilization_unit", "workload_id",
+	} {
+		if _, ok := fields[name]; !ok {
+			return fmt.Errorf("hardware run %s is required", name)
+		}
+	}
+	*r = HardwareRun(decoded)
+	return nil
+}
+
+// Learning is an ordered history of predictions, outcomes, and explicit
+// learning reuse. Array position, rather than caller-supplied timestamps,
+// defines chronology.
+type Learning struct {
+	Schema string        `json:"schema"`
+	Rows   []LearningRow `json:"rows"`
+}
+
+type LearningRow struct {
+	CycleID                     string  `json:"cycle_id"`
+	HypothesisID                string  `json:"hypothesis_id"`
+	RecurrenceKey               string  `json:"recurrence_key"`
+	PredictedImprovementPercent float64 `json:"predicted_improvement_percent"`
+	ConfidencePercent           float64 `json:"confidence_percent"`
+	ObservedImprovementPercent  float64 `json:"observed_improvement_percent"`
+	LearningID                  string  `json:"learning_id"`
+	LearningRecorded            bool    `json:"learning_recorded"`
+	LearningReused              bool    `json:"learning_reused"`
+	PriorLearningID             string  `json:"prior_learning_id"`
+	RepeatedFailure             bool    `json:"repeated_failure"`
+	CycleTimeHours              float64 `json:"cycle_time_hours"`
+	Engine                      string  `json:"engine"`
+	Artifact                    string  `json:"artifact"`
+}
+
+func (l *Learning) UnmarshalJSON(b []byte) error {
+	type learningJSON Learning
+	var decoded learningJSON
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("learning: trailing JSON value")
+	}
+	*l = Learning(decoded)
+	return nil
+}
+
+// Cycle is one independently versioned, end-to-end performance improvement
+// cycle. The engine is explicit so cycle evidence cannot silently cross the
+// fak-native boundary.
+type Cycle struct {
+	Schema                string  `json:"schema"`
+	Engine                string  `json:"engine"`
+	IdeaAt                string  `json:"idea_at"`
+	QueueAt               string  `json:"queue_at"`
+	ExecutionAt           string  `json:"execution_at"`
+	EvaluationAt          string  `json:"evaluation_at"`
+	LandingAt             string  `json:"landing_at"`
+	LearningAt            string  `json:"learning_at"`
+	OperatorActiveSeconds float64 `json:"operator_active_seconds"`
+}
+
+func (c *Cycle) UnmarshalJSON(b []byte) error {
+	type cycleJSON Cycle
+	var decoded cycleJSON
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("cycle: trailing JSON value")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	if _, ok := fields["operator_active_seconds"]; !ok {
+		return errors.New("cycle operator_active_seconds is required")
+	}
+	*c = Cycle(decoded)
+	return nil
+}
+
+// Improvement is one independently versioned strict receipt for a measured,
+// quality-preserving fak-native performance change.
+type Improvement struct {
+	Schema            string             `json:"schema"`
+	Engine            string             `json:"engine"`
+	Hypothesis        string             `json:"hypothesis"`
+	ChangedModule     string             `json:"changed_module"`
+	Baseline          ImprovementMeasure `json:"baseline"`
+	Candidate         ImprovementMeasure `json:"candidate"`
+	Quality           ImprovementQuality `json:"quality"`
+	NetTrueGain       ImprovementGain    `json:"net_true_gain"`
+	BaselineEnvelope  OperatingEnvelope  `json:"baseline_envelope"`
+	CandidateEnvelope OperatingEnvelope  `json:"candidate_envelope"`
+	Causal            ImprovementCausal  `json:"causal"`
+}
+
+type ImprovementMeasure struct {
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+}
+
+type ImprovementQuality struct {
+	Gate            string `json:"gate"`
+	BaselinePassed  *bool  `json:"baseline_passed"`
+	CandidatePassed *bool  `json:"candidate_passed"`
+	Parity          *bool  `json:"parity"`
+}
+
+type ImprovementGain struct {
+	Value            float64 `json:"value"`
+	Unit             string  `json:"unit"`
+	OverheadValue    float64 `json:"overhead_value"`
+	OverheadUnit     string  `json:"overhead_unit"`
+	IncludesOverhead *bool   `json:"includes_overhead"`
+}
+
+type OperatingEnvelope struct {
+	Model         string `json:"model"`
+	Quantization  string `json:"quantization"`
+	Hardware      string `json:"hardware"`
+	Workload      string `json:"workload"`
+	ContextTokens int    `json:"context_tokens"`
+	BatchSize     int    `json:"batch_size"`
+}
+
+type ImprovementCausal struct {
+	Ablation       string  `json:"ablation"`
+	ControlValue   float64 `json:"control_value"`
+	TreatmentValue float64 `json:"treatment_value"`
+	Unit           string  `json:"unit"`
+	IsolatesChange *bool   `json:"isolates_change"`
 }
 
 type Dimension struct {
@@ -47,6 +265,8 @@ type Dimension struct {
 type Result struct {
 	ID              string   `json:"id"`
 	Source          string   `json:"source"`
+	EvidenceKind    string   `json:"evidence_kind,omitempty"`
+	Engine          string   `json:"engine,omitempty"`
 	Status          string   `json:"status"`
 	Current         *float64 `json:"current"`
 	Target          *float64 `json:"target"`
@@ -105,13 +325,13 @@ func Decode(r io.Reader) (Evidence, error) {
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return e, errors.New("decode evidence: trailing JSON value")
 	}
-	if err := validate(e); err != nil {
+	if err := validate(&e); err != nil {
 		return e, err
 	}
 	return e, nil
 }
 
-func validate(e Evidence) error {
+func validate(e *Evidence) error {
 	if e.Schema != EvidenceSchema {
 		return fmt.Errorf("schema %q, want %q", e.Schema, EvidenceSchema)
 	}
@@ -157,7 +377,553 @@ func validate(e Evidence) error {
 			return fmt.Errorf("missing dimension %q", id)
 		}
 	}
+	if e.Cycle != nil {
+		if err := applyCycle(e); err != nil {
+			return err
+		}
+	}
+	if e.Improvement != nil {
+		if err := applyImprovement(e); err != nil {
+			return err
+		}
+	}
+	if e.Provenance != nil {
+		if err := applyProvenance(e); err != nil {
+			return err
+		}
+	}
+	if e.Learning != nil {
+		if err := applyLearning(e); err != nil {
+			return err
+		}
+	}
+	if e.Hardware != nil {
+		if err := applyHardware(e); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func applyHardware(e *Evidence) error {
+	h := e.Hardware
+	if h.Schema != HardwareSchema {
+		return fmt.Errorf("hardware schema %q, want %q", h.Schema, HardwareSchema)
+	}
+	if len(h.Runs) == 0 {
+		return errors.New("hardware requires at least one measured run")
+	}
+
+	type validatedRun struct {
+		durationSeconds float64
+		queueSeconds    float64
+		utilization     float64
+	}
+	validated := make([]validatedRun, len(h.Runs))
+	totalDuration, weightedUtilization, totalQueue := 0.0, 0.0, 0.0
+	for i, run := range h.Runs {
+		if strings.TrimSpace(run.RequestedDeviceClass) == "" {
+			return fmt.Errorf("hardware run %d requested_device_class is required", i)
+		}
+		if run.TerminalEvidence != nil {
+			switch run.TerminalEvidence.Type {
+			case "local-no-gpu":
+				return fmt.Errorf("hardware run %d terminal_evidence type %q: local-no-GPU is a terminal blocker, not a hardware utilization measurement", i, run.TerminalEvidence.Type)
+			default:
+				return fmt.Errorf("hardware run %d terminal_evidence type %q is unsupported; measurement receipts require measured runs, not terminal blockers", i, run.TerminalEvidence.Type)
+			}
+		}
+		if strings.TrimSpace(run.WorkloadID) == "" {
+			return fmt.Errorf("hardware run %d workload_id is required", i)
+		}
+		if run.UtilizationUnit != "percent" {
+			return fmt.Errorf("hardware run %d utilization_unit must be exactly percent", i)
+		}
+		if !finite(run.ActiveUtilization) || run.ActiveUtilization < 0 || run.ActiveUtilization > 100 {
+			return fmt.Errorf("hardware run %d active_utilization must be directly measured, finite, and in [0,100]", i)
+		}
+
+		names := []string{"enqueued_at", "started_at", "ended_at"}
+		values := []string{run.EnqueuedAt, run.StartedAt, run.EndedAt}
+		times := make([]time.Time, len(values))
+		for j, value := range values {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("hardware run %d %s is required", i, names[j])
+			}
+			parsed, err := time.Parse(time.RFC3339Nano, value)
+			if err != nil {
+				return fmt.Errorf("hardware run %d %s: malformed RFC3339 timestamp: %w", i, names[j], err)
+			}
+			_, offset := parsed.Zone()
+			if offset != 0 {
+				return fmt.Errorf("hardware run %d %s must be UTC", i, names[j])
+			}
+			times[j] = parsed
+		}
+		if times[0].After(times[1]) || !times[2].After(times[1]) {
+			return fmt.Errorf("hardware run %d timeline must satisfy enqueued_at <= started_at < ended_at", i)
+		}
+		validated[i] = validatedRun{
+			durationSeconds: times[2].Sub(times[1]).Seconds(),
+			queueSeconds:    times[1].Sub(times[0]).Seconds(),
+			utilization:     run.ActiveUtilization,
+		}
+	}
+
+	var hardwareIndex = -1
+	for i := range e.Dimensions {
+		if e.Dimensions[i].ID != "hardware_utilization" {
+			continue
+		}
+		if e.Dimensions[i].Direction != Higher || e.Dimensions[i].Unit != "percent" {
+			return errors.New(`dimension "hardware_utilization" must use canonical direction higher and unit percent`)
+		}
+		hardwareIndex = i
+		break
+	}
+	if hardwareIndex < 0 {
+		return errors.New(`missing dimension "hardware_utilization"`)
+	}
+
+	for _, run := range validated {
+		totalDuration += run.durationSeconds
+		weightedUtilization += run.utilization * run.durationSeconds
+		totalQueue += run.queueSeconds
+	}
+	current := weightedUtilization / totalDuration
+	d := &e.Dimensions[hardwareIndex]
+	d.Current = &current
+	d.Source = fmt.Sprintf(
+		"hardware:%s;queue_delay_seconds_total=%s;queue_delay_seconds_mean=%s",
+		h.Schema,
+		formatFact(totalQueue),
+		formatFact(totalQueue/float64(len(validated))),
+	)
+	d.EvidenceKind = "hardware_utilization_receipt"
+	d.Engine = ""
+	return nil
+}
+
+func formatFact(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
+}
+
+func applyLearning(e *Evidence) error {
+	l := e.Learning
+	if l.Schema != LearningSchema {
+		return fmt.Errorf("learning schema %q, want %q", l.Schema, LearningSchema)
+	}
+	if len(l.Rows) < 2 {
+		return errors.New("learning requires at least two rows of history")
+	}
+	cycleIDs := make(map[string]bool, len(l.Rows))
+	hypothesisIDs := make(map[string]bool, len(l.Rows))
+	type recorded struct {
+		key string
+	}
+	learnings := make(map[string]recorded)
+	seenKeys := make(map[string]bool)
+	failedKeys := make(map[string]bool)
+	originalTime := make(map[string]float64)
+	originalOrder := make([]string, 0)
+	eligible, validReuses := 0, 0
+	confidenceTotal, weightedError := 0.0, 0.0
+	latestReuseTime := make(map[string]float64)
+	for i, row := range l.Rows {
+		if strings.TrimSpace(row.CycleID) == "" || cycleIDs[row.CycleID] {
+			return fmt.Errorf("learning row %d has empty or duplicate cycle_id", i)
+		}
+		if strings.TrimSpace(row.HypothesisID) == "" || hypothesisIDs[row.HypothesisID] {
+			return fmt.Errorf("learning row %d has empty or duplicate hypothesis_id", i)
+		}
+		cycleIDs[row.CycleID], hypothesisIDs[row.HypothesisID] = true, true
+		if strings.TrimSpace(row.RecurrenceKey) == "" {
+			return fmt.Errorf("learning row %d recurrence_key is required", i)
+		}
+		for name, value := range map[string]float64{"prediction": row.PredictedImprovementPercent, "confidence": row.ConfidencePercent, "outcome": row.ObservedImprovementPercent} {
+			if !finite(value) || value < 0 || value > 100 {
+				return fmt.Errorf("learning row %d %s must be finite in [0,100]", i, name)
+			}
+		}
+		if !finite(row.CycleTimeHours) || row.CycleTimeHours <= 0 {
+			return fmt.Errorf("learning row %d cycle_time_hours must be positive and finite", i)
+		}
+		if row.Engine != "fak-native" || strings.TrimSpace(row.Artifact) == "" {
+			return fmt.Errorf("learning row %d requires engine fak-native and artifact", i)
+		}
+		if row.LearningRecorded != (strings.TrimSpace(row.LearningID) != "") {
+			return fmt.Errorf("learning row %d learning_id must be present iff learning_recorded", i)
+		}
+		if row.LearningID != "" {
+			if _, exists := learnings[row.LearningID]; exists {
+				return fmt.Errorf("learning row %d has duplicate learning_id", i)
+			}
+		}
+		if row.LearningReused != (strings.TrimSpace(row.PriorLearningID) != "") {
+			return fmt.Errorf("learning row %d prior_learning_id must be present iff learning_reused", i)
+		}
+		wasSeen := seenKeys[row.RecurrenceKey]
+		if wasSeen {
+			eligible++
+		}
+		if row.LearningReused {
+			if row.PriorLearningID == row.LearningID {
+				return fmt.Errorf("learning row %d cannot reference its own learning_id", i)
+			}
+			prior, exists := learnings[row.PriorLearningID]
+			if !exists || prior.key != row.RecurrenceKey {
+				return fmt.Errorf("learning row %d prior_learning_id must reference earlier learning with same recurrence_key", i)
+			}
+			if !wasSeen {
+				return fmt.Errorf("learning row %d cannot reuse learning without an earlier recurrence", i)
+			}
+			validReuses++
+			latestReuseTime[row.RecurrenceKey] = row.CycleTimeHours
+		}
+		if row.LearningID != "" {
+			learnings[row.LearningID] = recorded{key: row.RecurrenceKey}
+		}
+		failed := row.ObservedImprovementPercent <= 0
+		actualRepeated := failed && failedKeys[row.RecurrenceKey]
+		if row.RepeatedFailure != actualRepeated {
+			return fmt.Errorf("learning row %d repeated_failure does not match ordered failure history", i)
+		}
+		if failed {
+			failedKeys[row.RecurrenceKey] = true
+		}
+		if !wasSeen {
+			originalTime[row.RecurrenceKey] = row.CycleTimeHours
+			originalOrder = append(originalOrder, row.RecurrenceKey)
+		}
+		seenKeys[row.RecurrenceKey] = true
+		confidenceTotal += row.ConfidencePercent
+		weightedError += row.ConfidencePercent * math.Abs(row.PredictedImprovementPercent-row.ObservedImprovementPercent)
+	}
+	if confidenceTotal <= 0 {
+		return errors.New("learning requires positive total confidence")
+	}
+	if eligible == 0 {
+		return errors.New("learning requires a recurrence")
+	}
+	if validReuses == 0 {
+		return errors.New("learning requires a valid explicit prior-learning reuse")
+	}
+	earliestOriginal, latestReused := 0.0, 0.0
+	for _, key := range originalOrder {
+		reusedTime, ok := latestReuseTime[key]
+		if !ok {
+			continue
+		}
+		earliestOriginal = originalTime[key]
+		latestReused = reusedTime
+		break
+	}
+	compounding := 100 * (earliestOriginal - latestReused) / earliestOriginal
+	if !finite(compounding) || compounding <= 0 {
+		return errors.New("learning compounding must be positive; false or negative compounding is rejected")
+	}
+	values := map[string]float64{
+		"hypothesis_calibration": math.Max(0, 100-weightedError/confidenceTotal),
+		"learning_retention":     100 * float64(validReuses) / float64(eligible),
+		"compounding_rate":       compounding,
+	}
+	derivedIndexes := make([]int, 0, len(values))
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		_, derived := values[d.ID]
+		if !derived {
+			continue
+		}
+		if d.Direction != Higher || d.Unit != "percent" {
+			return fmt.Errorf("dimension %q must use canonical direction higher and unit percent", d.ID)
+		}
+		derivedIndexes = append(derivedIndexes, i)
+	}
+	for _, i := range derivedIndexes {
+		d := &e.Dimensions[i]
+		value := values[d.ID]
+		v := value
+		d.Current = &v
+		d.EvidenceKind = "performance_rsi_learning_receipt"
+		d.Engine = "fak-native"
+	}
+	return nil
+}
+
+func applyCycle(e *Evidence) error {
+	c := e.Cycle
+	if c.Schema != CycleSchema {
+		return fmt.Errorf("cycle schema %q, want %q", c.Schema, CycleSchema)
+	}
+	engine := strings.ToLower(strings.TrimSpace(c.Engine))
+	if strings.Contains(engine, "llama") || !strings.HasPrefix(engine, "fak-native") {
+		return errors.New("cycle engine must name explicit fak-native provenance without llama.cpp fallback")
+	}
+	if !finite(c.OperatorActiveSeconds) || c.OperatorActiveSeconds < 0 {
+		return errors.New("cycle operator_active_seconds must be nonnegative and finite")
+	}
+
+	names := []string{"idea_at", "queue_at", "execution_at", "evaluation_at", "landing_at", "learning_at"}
+	values := []string{c.IdeaAt, c.QueueAt, c.ExecutionAt, c.EvaluationAt, c.LandingAt, c.LearningAt}
+	times := make([]time.Time, len(values))
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("cycle %s is required", names[i])
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return fmt.Errorf("cycle %s: malformed RFC3339 timestamp: %w", names[i], err)
+		}
+		times[i] = parsed
+		if i > 0 && !times[i].After(times[i-1]) {
+			return fmt.Errorf("cycle stages must be strictly ordered: %s must follow %s", names[i], names[i-1])
+		}
+	}
+
+	cycleSeconds := times[5].Sub(times[0]).Seconds()
+	evaluationSeconds := times[3].Sub(times[2]).Seconds()
+	if c.OperatorActiveSeconds > cycleSeconds {
+		return errors.New("cycle operator_active_seconds exceeds end-to-end cycle time")
+	}
+
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		var current float64
+		var err error
+		switch d.ID {
+		case "cycle_time":
+			current, err = durationInUnit(cycleSeconds, d.Unit)
+		case "evaluation_latency":
+			current, err = durationInUnit(evaluationSeconds, d.Unit)
+		case "experiment_throughput":
+			current, err = throughputInUnit(cycleSeconds, d.Unit)
+		case "automation_coverage":
+			current, err = coverageInUnit(1-c.OperatorActiveSeconds/cycleSeconds, d.Unit)
+		default:
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("cycle derivation for %s: %w", d.ID, err)
+		}
+		d.Current = &current
+		d.Source = "cycle:" + c.Schema
+		d.EvidenceKind = "cycle_ledger"
+		d.Engine = c.Engine
+	}
+	return nil
+}
+
+func applyImprovement(e *Evidence) error {
+	r := e.Improvement
+	if r.Schema != ImprovementSchema {
+		return fmt.Errorf("improvement schema %q, want %q", r.Schema, ImprovementSchema)
+	}
+	engine := strings.ToLower(strings.TrimSpace(r.Engine))
+	if strings.Contains(engine, "llama") || !strings.HasPrefix(engine, "fak-native") {
+		return errors.New("improvement engine must name explicit fak-native provenance without llama.cpp fallback")
+	}
+	if strings.TrimSpace(r.Hypothesis) == "" {
+		return errors.New("improvement hypothesis is required")
+	}
+	module := strings.TrimSpace(r.ChangedModule)
+	if !strings.Contains(module, "@r") || !strings.Contains(module, "+g") {
+		return errors.New("improvement changed_module must name module@rev")
+	}
+	if r.Baseline.Unit != "milliseconds" || r.Candidate.Unit != "milliseconds" ||
+		!finite(r.Baseline.Value) || !finite(r.Candidate.Value) || r.Baseline.Value <= 0 || r.Candidate.Value <= 0 {
+		return errors.New("improvement baseline and candidate require positive finite milliseconds")
+	}
+	if strings.TrimSpace(r.Quality.Gate) == "" || r.Quality.BaselinePassed == nil || r.Quality.CandidatePassed == nil || r.Quality.Parity == nil ||
+		!*r.Quality.BaselinePassed || !*r.Quality.CandidatePassed || !*r.Quality.Parity {
+		return errors.New("improvement quality gate requires passing baseline/candidate parity")
+	}
+	if r.BaselineEnvelope != r.CandidateEnvelope || !validEnvelope(r.BaselineEnvelope) {
+		return errors.New("improvement baseline and candidate operating envelopes must be complete and matched")
+	}
+	if r.NetTrueGain.Unit != "percent" || r.NetTrueGain.OverheadUnit != "milliseconds" ||
+		r.NetTrueGain.IncludesOverhead == nil || !*r.NetTrueGain.IncludesOverhead ||
+		!finite(r.NetTrueGain.OverheadValue) || r.NetTrueGain.OverheadValue < 0 || !finite(r.NetTrueGain.Value) {
+		return errors.New("improvement net_true_gain must be percent and explicitly include nonnegative millisecond overhead")
+	}
+	wantGain := (r.Baseline.Value - (r.Candidate.Value + r.NetTrueGain.OverheadValue)) / r.Baseline.Value * 100
+	if wantGain <= 0 || math.Abs(wantGain-r.NetTrueGain.Value) > 1e-9 {
+		return errors.New("improvement net_true_gain does not equal baseline minus candidate and overhead")
+	}
+	if strings.TrimSpace(r.Causal.Ablation) == "" || r.Causal.Unit != "milliseconds" || r.Causal.IsolatesChange == nil || !*r.Causal.IsolatesChange ||
+		!finite(r.Causal.ControlValue) || !finite(r.Causal.TreatmentValue) || r.Causal.ControlValue <= r.Causal.TreatmentValue {
+		return errors.New("improvement causal binding requires an isolating, positive ablation in milliseconds")
+	}
+
+	values := map[string]float64{
+		"improvement_yield":     r.NetTrueGain.Value,
+		"receipt_coverage":      100,
+		"quality_gate_coverage": 100,
+		"attribution_quality":   100,
+	}
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		value, ok := values[d.ID]
+		if !ok {
+			continue
+		}
+		if strings.ToLower(strings.TrimSpace(d.Unit)) != "percent" {
+			return fmt.Errorf("improvement derivation for %s: unsupported unit %q", d.ID, d.Unit)
+		}
+		d.Current = &value
+		d.Source = "improvement:" + r.Schema
+		d.EvidenceKind = "improvement_receipt"
+		d.Engine = r.Engine
+	}
+	return nil
+}
+
+var (
+	lowerHex40 = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	moduleRev  = regexp.MustCompile(`^.+@r[1-9][0-9]*\+g([0-9a-f]{7,40})$`)
+)
+
+func applyProvenance(e *Evidence) error {
+	r := e.Provenance
+	if r.Schema != ProvenanceSchema {
+		return fmt.Errorf("provenance schema %q, want %q", r.Schema, ProvenanceSchema)
+	}
+	if strings.TrimSpace(r.Source.Repository) == "" {
+		return errors.New("provenance source repository is required")
+	}
+	if !lowerHex40.MatchString(r.Source.Revision) {
+		return errors.New("provenance source revision must be an immutable 40-character lowercase hex revision")
+	}
+	if r.Unit != "hours" {
+		return errors.New("provenance unit must be hours")
+	}
+	if !r.AdaptationStartExplicit {
+		return errors.New("provenance adaptation start must be explicit")
+	}
+	if !r.Experiment.Linked || strings.TrimSpace(r.Experiment.Artifact) == "" {
+		return errors.New("provenance experiment must be linked and name a nonempty artifact")
+	}
+	if r.Reuse.Classification != "adapted_known_art" {
+		return errors.New("provenance reuse classification must be adapted_known_art")
+	}
+	if r.Reuse.ReusedMechanisms < 0 || r.Reuse.ReinventedMechanisms < 0 {
+		return errors.New("provenance mechanism counts must be nonnegative")
+	}
+	totalMechanisms := r.Reuse.ReusedMechanisms + r.Reuse.ReinventedMechanisms
+	if totalMechanisms <= 0 {
+		return errors.New("provenance mechanism count total must be positive")
+	}
+	if !lowerHex40.MatchString(r.Production.CommitSHA) {
+		return errors.New("provenance production commit_sha must be 40-character lowercase hex")
+	}
+	match := moduleRev.FindStringSubmatch(r.Production.ModuleAtRev)
+	if match == nil || !strings.HasPrefix(r.Production.CommitSHA, match[1]) {
+		return errors.New("provenance production module_at_rev must be module@rN+g<sha-prefix> matching commit_sha")
+	}
+	if r.Production.Engine != "fak-native" {
+		return errors.New("provenance production engine must be fak-native")
+	}
+	if strings.TrimSpace(r.Production.Artifact) == "" {
+		return errors.New("provenance production artifact is required")
+	}
+
+	names := []string{"source.published_at", "discovery_at", "adaptation_started_at", "production.landed_at"}
+	values := []string{r.Source.PublishedAt, r.DiscoveryAt, r.AdaptationStartedAt, r.Production.LandedAt}
+	times := make([]time.Time, len(values))
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("provenance %s is required", names[i])
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return fmt.Errorf("provenance %s: malformed RFC3339 timestamp: %w", names[i], err)
+		}
+		times[i] = parsed
+		if i > 0 && times[i].Before(times[i-1]) {
+			return fmt.Errorf("provenance timeline must satisfy source <= discovery <= adaptation <= landing")
+		}
+	}
+
+	valuesByID := map[string]float64{
+		"discovery_freshness": times[1].Sub(times[0]).Hours(),
+		"adaptation_speed":    times[3].Sub(times[2]).Hours(),
+		"reuse_ratio":         float64(r.Reuse.ReusedMechanisms) / float64(totalMechanisms) * 100,
+		"production_transfer": times[3].Sub(times[1]).Hours(),
+	}
+	for _, d := range e.Dimensions {
+		_, owned := valuesByID[d.ID]
+		if !owned {
+			continue
+		}
+		wantUnit := "hours"
+		if d.ID == "reuse_ratio" {
+			wantUnit = "percent"
+		}
+		if strings.ToLower(strings.TrimSpace(d.Unit)) != wantUnit {
+			return fmt.Errorf("provenance derivation for %s requires unit %q", d.ID, wantUnit)
+		}
+	}
+
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		value, owned := valuesByID[d.ID]
+		if !owned {
+			continue
+		}
+		d.Current = &value
+		d.Source = "provenance:" + r.Schema
+		d.EvidenceKind = "research_transfer_receipt"
+		d.Engine = r.Production.Engine
+	}
+	return nil
+}
+
+func validEnvelope(e OperatingEnvelope) bool {
+	return strings.TrimSpace(e.Model) != "" && strings.TrimSpace(e.Quantization) != "" &&
+		strings.TrimSpace(e.Hardware) != "" && strings.TrimSpace(e.Workload) != "" &&
+		e.ContextTokens > 0 && e.BatchSize > 0
+}
+
+func durationInUnit(seconds float64, unit string) (float64, error) {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "second", "seconds", "s":
+		return seconds, nil
+	case "minute", "minutes", "min":
+		return seconds / 60, nil
+	case "hour", "hours", "h":
+		return seconds / 3600, nil
+	case "day", "days", "d":
+		return seconds / 86400, nil
+	case "week", "weeks", "w":
+		return seconds / (7 * 86400), nil
+	default:
+		return 0, fmt.Errorf("unsupported duration unit %q", unit)
+	}
+}
+
+func throughputInUnit(seconds float64, unit string) (float64, error) {
+	normalized := strings.ToLower(strings.TrimSpace(unit))
+	normalized = strings.ReplaceAll(normalized, "_per_", "/")
+	normalized = strings.ReplaceAll(normalized, " per ", "/")
+	for _, prefix := range []string{"experiments/", "experiment/", "cycles/", "cycle/"} {
+		if strings.HasPrefix(normalized, prefix) {
+			period, err := durationInUnit(1, strings.TrimPrefix(normalized, prefix))
+			if err == nil {
+				return 1 / (seconds * period), nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("unsupported throughput unit %q", unit)
+}
+
+func coverageInUnit(fraction float64, unit string) (float64, error) {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "fraction", "ratio":
+		return fraction, nil
+	case "percent", "percentage", "%":
+		return fraction * 100, nil
+	default:
+		return 0, fmt.Errorf("unsupported coverage unit %q", unit)
+	}
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
@@ -166,7 +932,7 @@ func Score(e Evidence) Report {
 	r := Report{Schema: ReportSchema, Snapshot: e.Snapshot, TargetMultiplier: e.TargetMultiplier}
 	worst := math.Inf(1)
 	for _, d := range e.Dimensions {
-		x := Result{ID: d.ID, Source: d.Source, Current: d.Current, Target: d.Target, Unit: d.Unit, NextAction: d.NextAction, Status: "UNKNOWN"}
+		x := Result{ID: d.ID, Source: d.Source, EvidenceKind: d.EvidenceKind, Engine: d.Engine, Current: d.Current, Target: d.Target, Unit: d.Unit, NextAction: d.NextAction, Status: "UNKNOWN"}
 		debt := math.Inf(1)
 		if d.Current != nil && d.Target != nil {
 			ratio := 0.0
@@ -264,4 +1030,43 @@ func MarshalJSON(r Report) ([]byte, error) { return json.MarshalIndent(r, "", " 
 
 func SortResultsForTest(rs []Result) {
 	sort.Slice(rs, func(i, j int) bool { return rs[i].ID < rs[j].ID })
+}
+
+// Provenance is one independently versioned strict receipt connecting an
+// immutable research source to a fak-native production landing.
+type Provenance struct {
+	Schema                  string               `json:"schema"`
+	Source                  ProvenanceSource     `json:"source"`
+	DiscoveryAt             string               `json:"discovery_at"`
+	AdaptationStartedAt     string               `json:"adaptation_started_at"`
+	AdaptationStartExplicit bool                 `json:"adaptation_start_explicit"`
+	Experiment              ProvenanceExperiment `json:"experiment"`
+	Reuse                   ProvenanceReuse      `json:"reuse"`
+	Production              ProvenanceProduction `json:"production"`
+	Unit                    string               `json:"unit"`
+}
+
+type ProvenanceSource struct {
+	Repository  string `json:"repository"`
+	Revision    string `json:"revision"`
+	PublishedAt string `json:"published_at"`
+}
+
+type ProvenanceExperiment struct {
+	Artifact string `json:"artifact"`
+	Linked   bool   `json:"linked"`
+}
+
+type ProvenanceReuse struct {
+	ReusedMechanisms     int    `json:"reused_mechanisms"`
+	ReinventedMechanisms int    `json:"reinvented_mechanisms"`
+	Classification       string `json:"classification"`
+}
+
+type ProvenanceProduction struct {
+	ModuleAtRev string `json:"module_at_rev"`
+	CommitSHA   string `json:"commit_sha"`
+	LandedAt    string `json:"landed_at"`
+	Engine      string `json:"engine"`
+	Artifact    string `json:"artifact"`
 }

@@ -17,6 +17,8 @@ int fak_qwen35_partial_rope_panel_f32(
     const float *dQ, const float *dK, float *dQOut, float *dKOut,
     int tokens, int startPos, int nQHeads, int nKHeads, int headDim,
     int rotaryDim, double theta);
+int fak_qwen35_kv_write_f32(
+    float *dDst, const float *dSrc, int offset, int n);
 int fak_qwen35_causal_attention_panel_f32(
     const float *dQ, const float *dK, const float *dV, float *dOut,
     int tokens, int prefix, int nH, int nKV, int hd, float scale);
@@ -26,9 +28,55 @@ import "C"
 
 import (
 	"fmt"
+	"math"
 	"sync/atomic"
 	"unsafe"
 )
+
+const qwen35CausalAttentionPanelMaxHeadDim = 128 * 8
+
+func validateQwen35CausalAttentionPanelKVGeometry(tokens, prefix, nKV, headDim int) error {
+	if tokens <= 0 || prefix < 0 || nKV <= 0 || headDim <= 0 {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "token count, KV heads, and head dimension must be positive and prefix non-negative"}
+	}
+	if headDim > qwen35CausalAttentionPanelMaxHeadDim {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: fmt.Sprintf("head_dim %d exceeds bounded online-softmax capacity %d", headDim, qwen35CausalAttentionPanelMaxHeadDim)}
+	}
+	if int64(tokens) > qwen35GDNMaxCInt || int64(prefix) > qwen35GDNMaxCInt-int64(tokens) {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "causal position range overflows the CUDA int ABI"}
+	}
+	positions := int64(prefix) + int64(tokens)
+	if _, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, positions, int64(nKV), int64(headDim)); !ok {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "causal KV panel element count overflows the CUDA int ABI"}
+	}
+	return nil
+}
+
+func validateQwen35CausalAttentionPanelGeometry(tokens, prefix, nH, nKV, headDim int) error {
+	if err := validateQwen35CausalAttentionPanelKVGeometry(tokens, prefix, nKV, headDim); err != nil {
+		return err
+	}
+	if nH <= 0 || nH%nKV != 0 {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "query heads must be positive and divisible by KV heads"}
+	}
+	if int64(nH) > qwen35GDNMaxCInt {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "query head count overflows the CUDA int ABI"}
+	}
+	if _, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, int64(tokens), int64(nH)); !ok {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "causal attention launch grid overflows the CUDA int ABI"}
+	}
+	if _, ok := qwen35GDNCheckedMul(qwen35GDNMaxCInt, int64(tokens), int64(nH), int64(headDim)); !ok {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "causal query/output panel element count overflows the CUDA int ABI"}
+	}
+	return nil
+}
+
+func validateQwen35CausalAttentionPanelScale(scale float32) error {
+	if !(scale > 0) || math.IsNaN(float64(scale)) || math.IsInf(float64(scale), 0) {
+		return &Qwen35SequenceError{Stage: "causal-attention-geometry", Layer: -1, Reason: "attention scale must be finite and positive"}
+	}
+	return nil
+}
 
 func (c *cudaBackend) qwen35SequenceAllocLocked(shape []int, site string) (Tensor, *cudaBuf, error) {
 	t, b, err := c.devTrDeviceOnly(shape, F32, "qwen35-sequence-"+site)
@@ -127,6 +175,9 @@ func (c *cudaBackend) qwen35SequenceSplitQGLocked(qg Tensor, tokens, heads, head
 }
 
 func (c *cudaBackend) qwen35SequenceRoPELocked(q, k Tensor, tokens, start, qHeads, kvHeads, headDim, rotary int, theta float64) (Tensor, *cudaBuf, Tensor, *cudaBuf, error) {
+	if err := validateQwen35CausalAttentionPanelGeometry(tokens, start, qHeads, kvHeads, headDim); err != nil {
+		return Tensor{}, nil, Tensor{}, nil, err
+	}
 	qOut, qb, err := c.qwen35SequenceAllocLocked([]int{tokens, qHeads * headDim}, "attention-query-rope")
 	if err != nil {
 		return Tensor{}, nil, Tensor{}, nil, err
@@ -153,6 +204,15 @@ type qwen35KVReservation struct {
 }
 
 func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, needed int) error {
+	if kv == nil || kv.cfg.NumKVHeads <= 0 || kv.cfg.HeadDim <= 0 ||
+		kv.cfg.HeadDim > qwen35CausalAttentionPanelMaxHeadDim || needed < 0 ||
+		int64(needed) > qwen35GDNMaxCInt {
+		return &Qwen35SequenceError{
+			Stage:  "causal-attention-geometry",
+			Layer:  -1,
+			Reason: "KV reservation exceeds the bounded CUDA prompt-attention geometry",
+		}
+	}
 	if graphEnabled && kv.maxPos > 0 && needed/kv.stride() > kv.maxPos {
 		return &Qwen35SequenceError{Stage: "kv-reserve", Layer: -1, Reason: fmt.Sprintf("fixed CUDA graph KV capacity %d is smaller than requested position %d", kv.maxPos, needed/kv.stride())}
 	}
@@ -200,18 +260,37 @@ func (c *cudaBackend) qwen35SequenceReserveKVLocked(kv *cudaKV, compactLayers, n
 }
 
 func (c *cudaBackend) qwen35SequenceAppendKVLocked(kv *cudaKV, layer int, kRaw, kRoPE, value Tensor, start, tokens int) error {
+	if kv == nil || layer < 0 || layer >= len(kv.Kraw) || layer >= len(kv.K) || layer >= len(kv.V) {
+		return &Qwen35SequenceError{Stage: "kv-append", Layer: layer, Reason: "KV cache does not contain the requested compact attention layer"}
+	}
+	if err := validateQwen35CausalAttentionPanelKVGeometry(tokens, start, kv.cfg.NumKVHeads, kv.cfg.HeadDim); err != nil {
+		return err
+	}
 	width := kv.stride()
 	want := start * width
-	for _, item := range []struct {
+	items := []struct {
 		name string
 		dst  *dslice
 		src  Tensor
-	}{{"raw key", &kv.Kraw[layer], kRaw}, {"key", &kv.K[layer], kRoPE}, {"value", &kv.V[layer], value}} {
+	}{{"raw key", &kv.Kraw[layer], kRaw}, {"key", &kv.K[layer], kRoPE}, {"value", &kv.V[layer], value}}
+	for _, item := range items {
 		if item.dst.len != want || item.dst.cap < want+tokens*width {
 			return &Qwen35SequenceError{Stage: "kv-append", Layer: layer, Reason: fmt.Sprintf("%s cache len/cap=%d/%d, want len=%d cap>=%d", item.name, item.dst.len, item.dst.cap, want, want+tokens*width)}
 		}
-		C.fcuda_kv_write((*C.float)(item.dst.ptr), c.cf(item.src), C.int(item.dst.len), C.int(tokens*width))
-		item.dst.len += tokens * width
+		if err := c.validateQwen35SequenceTensor(item.name, item.src, false, tokens, width); err != nil {
+			return &Qwen35SequenceError{Stage: "kv-append", Layer: layer, Cause: err}
+		}
+	}
+	n := tokens * width
+	for _, item := range items {
+		status := int(C.fak_qwen35_kv_write_f32((*C.float)(item.dst.ptr), c.cf(item.src), C.int(item.dst.len), C.int(n)))
+		if status != 0 {
+			C.fak_qwen35_sequence_sync()
+			return &Qwen35SequenceError{Stage: "kv-append", Layer: layer, Reason: fmt.Sprintf("%s CUDA status %d", item.name, status)}
+		}
+	}
+	for _, item := range items {
+		item.dst.len += n
 	}
 	if layer == 0 {
 		for token := 0; token < tokens; token++ {
@@ -222,6 +301,12 @@ func (c *cudaBackend) qwen35SequenceAppendKVLocked(kv *cudaKV, layer int, kRaw, 
 }
 
 func (c *cudaBackend) qwen35SequenceAttentionLocked(q Tensor, kv *cudaKV, layer, tokens, prefix, heads int, scale float32) (Tensor, *cudaBuf, error) {
+	if err := validateQwen35CausalAttentionPanelGeometry(tokens, prefix, heads, kv.cfg.NumKVHeads, kv.cfg.HeadDim); err != nil {
+		return Tensor{}, nil, err
+	}
+	if err := validateQwen35CausalAttentionPanelScale(scale); err != nil {
+		return Tensor{}, nil, err
+	}
 	out, b, err := c.qwen35SequenceAllocLocked([]int{tokens, heads * kv.cfg.HeadDim}, "causal-attention")
 	if err != nil {
 		return Tensor{}, nil, err
@@ -233,6 +318,45 @@ func (c *cudaBackend) qwen35SequenceAttentionLocked(q Tensor, kv *cudaKV, layer,
 		return Tensor{}, nil, &Qwen35SequenceError{Stage: "causal-attention", Layer: layer, Reason: fmt.Sprintf("CUDA status %d", status)}
 	}
 	return out, b, nil
+}
+
+// qwen35CausalAttentionPanelIntoForTest exposes the supplied-output ABI used by the
+// deterministic sentinel witness. Production allocates its output internally through
+// qwen35SequenceAttentionLocked. This test seam validates every resident tensor before
+// launch and fences the stream so asynchronous execution faults are returned to the caller.
+func (c *cudaBackend) qwen35CausalAttentionPanelIntoForTest(q, k, v, out Tensor, tokens, prefix, heads, kvHeads, headDim int, scale float32) error {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	if err := validateQwen35CausalAttentionPanelGeometry(tokens, prefix, heads, kvHeads, headDim); err != nil {
+		return err
+	}
+	if err := validateQwen35CausalAttentionPanelScale(scale); err != nil {
+		return err
+	}
+	for _, tensor := range []struct {
+		name  string
+		value Tensor
+		shape []int
+	}{
+		{"query", q, []int{tokens, heads * headDim}},
+		{"key", k, []int{prefix + tokens, kvHeads * headDim}},
+		{"value", v, []int{prefix + tokens, kvHeads * headDim}},
+		{"output", out, []int{tokens, heads * headDim}},
+	} {
+		if err := c.validateQwen35SequenceTensor(tensor.name, tensor.value, false, tensor.shape...); err != nil {
+			return err
+		}
+	}
+	status := int(C.fak_qwen35_causal_attention_panel_f32(c.cf(q), c.cf(k), c.cf(v), c.cf(out), C.int(tokens), C.int(prefix), C.int(heads), C.int(kvHeads), C.int(headDim), C.float(scale)))
+	if status != 0 {
+		C.fak_qwen35_sequence_sync()
+		return &Qwen35SequenceError{Stage: "causal-attention", Layer: -1, Reason: fmt.Sprintf("CUDA status %d", status)}
+	}
+	if err := c.qwen35SequenceSyncLocked(); err != nil {
+		atomic.StoreUint32(&out.buf.(*cudaBuf).invalid, 1)
+		return err
+	}
+	return nil
 }
 
 func (c *cudaBackend) qwen35SequenceGDNLocked(x Tensor, layer Qwen35SequenceLayer, state Qwen35SequenceState, req Qwen35SequencePrefillRequest, tokens, layerIndex int) (Tensor, *cudaBuf, error) {

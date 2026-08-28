@@ -46,7 +46,7 @@ func TestQwenPerformanceIndexRoutesCurrentResults(t *testing.T) {
 		}
 	}
 
-	for _, frontDoor := range []string{"README.md", "llms.txt", "llms-full.txt", "INDEX.md", "BENCHMARK-AUTHORITY.md"} {
+	for _, frontDoor := range []string{"llms.txt", "llms-full.txt", "INDEX.md", "BENCHMARK-AUTHORITY.md"} {
 		content, err := os.ReadFile(filepath.Join(root, frontDoor))
 		if err != nil {
 			t.Fatal(err)
