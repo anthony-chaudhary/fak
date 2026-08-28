@@ -41,6 +41,11 @@ fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g98
 fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="memory_pressure"} 0.69
 fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="evidence_freshness"} 18
 fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="receipt_coverage"} 1
+# HELP fak_native_slo_ratio Latest matched-envelope ratio to the accepted baseline.
+# TYPE fak_native_slo_ratio gauge
+fak_native_slo_ratio{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="ttft"} 1.00
+fak_native_slo_ratio{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="ttft"} 1.38
+fak_native_slo_ratio{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="ttft"} 0.98
 # HELP fak_native_slo_violation Whether an available objective currently violates its SLO.
 # TYPE fak_native_slo_violation gauge
 fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="ttft"} 1

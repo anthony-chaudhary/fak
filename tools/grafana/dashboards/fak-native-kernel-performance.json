@@ -43,7 +43,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -105,7 +105,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "sum(fak_engine_model_info{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -119,7 +119,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 4,
@@ -181,7 +181,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) or vector(-1)",
           "refId": "A"
@@ -195,7 +195,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 8,
@@ -257,7 +257,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_gateway_inference_output_tokens_per_second{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -271,7 +271,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -337,7 +337,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "time() - max(timestamp(fak_engine_model_info{engine=~\"$engine\",model=~\"$model\"})) or vector(-1)",
           "refId": "A"
@@ -351,7 +351,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -437,7 +437,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_regression_state{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -451,7 +451,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -517,7 +517,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_missing_telemetry{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -544,7 +544,7 @@
       "type": "bargauge",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -618,7 +618,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "(sum(rate(fak_gateway_inference_queue_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "A",
@@ -627,7 +627,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "B",
@@ -636,7 +636,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "(sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "C",
@@ -645,7 +645,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_transfer_seconds_per_request{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "D",
@@ -654,7 +654,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_kernel_seconds_per_request{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "E",
@@ -669,7 +669,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -735,7 +735,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(fak_native_ttft_seconds_bucket{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval]))) or vector(-1)",
           "refId": "A"
@@ -749,7 +749,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -815,7 +815,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "histogram_quantile(0.95, sum by (le) (rate(fak_native_tpot_seconds_bucket{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval]))) or vector(-1)",
           "refId": "A"
@@ -829,7 +829,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -895,7 +895,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "(sum(rate(fak_gateway_inference_queue_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "A"
@@ -909,7 +909,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -975,7 +975,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_queue_depth{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -989,7 +989,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -1055,7 +1055,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_gateway_inference_kv_cache_usage_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1069,7 +1069,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -1135,7 +1135,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_kv_reuse_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1162,7 +1162,7 @@
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -1172,9 +1172,21 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "color": {
+      "unit": "percentunit",
+      "min": 0,
+      "mappings": [
+        {
+          "type": "value",
+          "options": {
+            "-1": {
+              "index": 0,
+              "text": "UNAVAILABLE",
+              "color": "dark-red"
+            }
+          }
+        }
+      ],
+      "color": {
             "mode": "palette-classic"
           },
           "custom": {
@@ -1238,18 +1250,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
-          "expr": "sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) + sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)",
+          "expr": "(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) + sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "A",
           "legendFormat": "prefill share"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
-          "expr": "sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) + sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)",
+          "expr": "(sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) + sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "B",
           "legendFormat": "decode share"
         }
@@ -1262,7 +1274,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -1328,7 +1340,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_accelerator_utilization_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1342,7 +1354,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -1408,7 +1420,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_memory_pressure_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1422,7 +1434,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -1488,7 +1500,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_transfer_time_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1502,7 +1514,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -1568,7 +1580,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_kernel_time_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1582,7 +1594,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -1648,7 +1660,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_evidence_age_seconds{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1662,7 +1674,7 @@
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -1724,7 +1736,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "expr": "max(fak_native_telemetry_contract_info{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
           "refId": "A"
@@ -1765,17 +1777,17 @@
         "name": "engine",
         "label": "fak-native engine",
         "type": "custom",
-        "query": "fak-native|native.*|metal.*|cuda.*",
+        "query": "fak-native",
         "current": {
           "selected": true,
-          "text": "fak-native|native.*|metal.*|cuda.*",
-          "value": "fak-native|native.*|metal.*|cuda.*"
+          "text": "fak-native",
+          "value": "fak-native"
         },
         "options": [
           {
             "selected": true,
-            "text": "fak-native|native.*|metal.*|cuda.*",
-            "value": "fak-native|native.*|metal.*|cuda.*"
+            "text": "fak-native",
+            "value": "fak-native"
           }
         ],
         "hide": 0,

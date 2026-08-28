@@ -31,6 +31,7 @@
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "links": [
             {
               "targetBlank": true,
@@ -75,6 +76,7 @@
       },
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "links": [
             {
               "targetBlank": true,
@@ -145,7 +147,7 @@
         "current": {
           "selected": false,
           "text": "Prometheus",
-          "value": "prometheus"
+          "value": "fleet-prometheus"
         },
         "hide": 0,
         "includeAll": false,

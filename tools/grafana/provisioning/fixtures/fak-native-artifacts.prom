@@ -1,4 +1,5 @@
 # Synthetic dashboard fixture only; .invalid links cannot resolve to private infrastructure.
+# HELP fak_native_artifact_info Synthetic bounded native artifact index state.
 # TYPE fak_native_artifact_info gauge
 fak_native_artifact_info{engine="fak-native",correlation_key="npc1_0123456789abcdef0123456789abcdef",kind="benchmark_receipt",state="ready"} 1
 fak_native_artifact_info{engine="fak-native",correlation_key="npc1_0123456789abcdef0123456789abcdef",kind="metal_profile_bundle",state="ready"} 1

@@ -36,14 +36,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "Bounded engine/model-family identity. llama.cpp and auto fallback identities are outside the contract.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "fak_native_backend_info{backend=~\"$backend\",engine=\"fak-native\"} == 1",
@@ -55,6 +55,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "short",
           "color": {
             "mode": "palette-classic"
@@ -83,14 +84,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "Empty only when all selected backends are available. Never interpret absence of measurements as zero.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "fak_native_backend_available{backend=~\"$backend\",reason!=\"none\"} == 1",
@@ -102,6 +103,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "short",
           "color": {
             "mode": "palette-classic"
@@ -130,14 +132,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "Active accelerator utilization from the native backend; aligned with #9784 hardware-utilization semantics.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "100 * fak_native_backend_device_utilization_ratio{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -149,6 +151,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "percent",
           "color": {
             "mode": "palette-classic"
@@ -199,14 +202,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "fak_native_backend_memory_bytes{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -218,6 +221,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "bytes",
           "color": {
             "mode": "palette-classic"
@@ -268,14 +272,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "100 * fak_native_backend_memory_pressure_ratio{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -287,6 +291,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "percent",
           "color": {
             "mode": "palette-classic"
@@ -337,14 +342,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "Backend queue delay reuses #9784 queue semantics; stream and command-buffer dimensions are emitted only by supporting native APIs.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "1000 * fak_native_backend_delay_seconds{backend=~\"$backend\"} and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -356,6 +361,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "ms",
           "color": {
             "mode": "palette-classic"
@@ -406,14 +412,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "rate(fak_native_backend_transfer_bytes_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -425,6 +431,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "Bps",
           "color": {
             "mode": "palette-classic"
@@ -475,14 +482,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "rate(fak_native_backend_transfer_seconds_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -494,6 +501,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "s",
           "color": {
             "mode": "palette-classic"
@@ -544,14 +552,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "rate(fak_native_backend_kernel_calls_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -563,6 +571,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
@@ -613,14 +622,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "rate(fak_native_backend_kernel_seconds_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -632,6 +641,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "s",
           "color": {
             "mode": "palette-classic"
@@ -682,14 +692,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "rate(fak_native_backend_sync_events_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -701,6 +711,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "ops",
           "color": {
             "mode": "palette-classic"
@@ -751,14 +762,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "rate(fak_native_backend_sync_seconds_total{backend=~\"$backend\"}[5m]) and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -770,6 +781,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "s",
           "color": {
             "mode": "palette-classic"
@@ -820,14 +832,14 @@
       },
       "datasource": {
         "type": "prometheus",
-        "uid": "prometheus"
+        "uid": "fleet-prometheus"
       },
       "description": "Optional bounded native graph/capture state. unsupported is explicit; absent means the collector cannot report this surface.",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus"
+            "uid": "fleet-prometheus"
           },
           "editorMode": "code",
           "expr": "fak_native_backend_graph_state{backend=~\"$backend\"} == 1 and on(backend) (fak_native_backend_available{backend=~\"$backend\",reason=\"none\"} == 1)",
@@ -839,6 +851,7 @@
       ],
       "fieldConfig": {
         "defaults": {
+          "noValue": "UNAVAILABLE",
           "unit": "short",
           "color": {
             "mode": "palette-classic"
