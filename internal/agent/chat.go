@@ -402,6 +402,7 @@ type Completion struct {
 	// receipt and this planner executed the model math in-kernel. It is captured at
 	// the logits/decode seam, never reconstructed from text or gateway timing.
 	NativeInference *NativeInferenceReceipt
+	InKernelBatch   *InKernelBatchReceipt
 	// DecodeTrace is populated only for an explicitly requested in-kernel decode.
 	// Its events are authored at the native token-commit seam; proxy text and SSE
 	// fragments are never eligible sources.

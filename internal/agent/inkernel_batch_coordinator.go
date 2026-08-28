@@ -38,6 +38,12 @@ func runQwenSharedReceiptProbe(bs *model.BatchSession, ids []int, active []bool)
 	return fn(bs, ids, active)
 }
 
+type InKernelBatchReceipt struct {
+	CohortID     uint64 `json:"cohort_id"`
+	CohortSize   int    `json:"cohort_size"`
+	SharedPanels int    `json:"shared_panels"`
+	SharedMACs   int64  `json:"shared_macs"`
+}
 type inKernelCoalesceResult struct {
 	result inKernelGenerateResult
 	err    error
@@ -51,6 +57,7 @@ type inKernelCoalesceRequest struct {
 	result     chan inKernelCoalesceResult
 	done       chan struct{}
 	decodePass atomic.Uint32
+	receipt    InKernelBatchReceipt
 }
 
 type inKernelCoalesceContextKey struct{}
@@ -86,6 +93,7 @@ func (p *InKernelPlanner) runCoalescedGenerate(ctx context.Context, run func(con
 		p.drainCoalescedGenerates()
 	}
 	out := <-req.result
+	out.result.batchReceipt = req.receipt
 	return out.result, out.err
 }
 
@@ -133,6 +141,8 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
 	}
 
 	var decodeErr error
+	var panels int
+	var macs int64
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -146,12 +156,15 @@ func (p *InKernelPlanner) runDecodeCohort(cohort []*inKernelCoalesceRequest) {
 		if p.coalesceBatchHook != nil {
 			p.coalesceBatchHook(len(lanes))
 		}
-		panels, macs := inKernelDecodeLanesBatched(context.Background(), lanes, p.m, p.quant)
+		panels, macs = inKernelDecodeLanesBatched(context.Background(), lanes, p.m, p.quant)
 		if p.coalesceSharedHook != nil {
 			p.coalesceSharedHook(panels, macs)
 		}
 	}()
+	cohortID := p.coalesceCohortID.Add(1)
+	receipt := InKernelBatchReceipt{CohortID: cohortID, CohortSize: len(lanes), SharedPanels: panels, SharedMACs: macs}
 	for _, req := range prepared {
+		req.receipt = receipt
 		req.proceed <- decodeErr
 	}
 	for _, req := range cohort {
