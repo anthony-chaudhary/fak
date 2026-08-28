@@ -253,6 +253,11 @@ func RunAdapter(ctx context.Context, configPath, corpusPath, reportPath, archive
 	if err := decodeFile(configPath, &cfg); err != nil {
 		return fmt.Errorf("config: %w", err)
 	}
+	if _, maintained := maintainedAdapterArms[cfg.ExecutionEngine]; maintained {
+		if err := validateMaintainedAdapter(cfg); err != nil {
+			return fmt.Errorf("maintained adapter contract: %w; run SelfcheckAdapterConfig(%q) and repair the named field before retrying", err, configPath)
+		}
+	}
 	corpusBytes, err := os.ReadFile(corpusPath)
 	if err != nil {
 		return fmt.Errorf("corpus: %w", err)
