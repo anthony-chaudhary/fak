@@ -1,0 +1,261 @@
+{
+  "schema": "fak-performance-rsi-evidence/1",
+  "snapshot": "issue-9768-live-repository-dogfood-2026-08-28",
+  "target_multiplier": 100,
+  "dimensions": [
+    {
+      "id": "cycle_time",
+      "source": "cycle ledger",
+      "direction": "lower",
+      "target": 0.02,
+      "unit": "hours",
+      "next_action": "shorten the end-to-end learning cycle"
+    },
+    {
+      "id": "improvement_yield",
+      "source": "fixture/yield",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "raise yield"
+    },
+    {
+      "id": "evaluation_latency",
+      "source": "fixture/eval",
+      "direction": "lower",
+      "target": 5,
+      "unit": "minutes",
+      "next_action": "reduce evaluation latency"
+    },
+    {
+      "id": "receipt_coverage",
+      "source": "fixture/receipts",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "capture receipts"
+    },
+    {
+      "id": "quality_gate_coverage",
+      "source": "fixture/quality",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "add quality gates"
+    },
+    {
+      "id": "experiment_throughput",
+      "source": "cycle ledger",
+      "direction": "higher",
+      "target": 1200,
+      "unit": "experiments/day",
+      "next_action": "increase completed cycles"
+    },
+    {
+      "id": "hypothesis_calibration",
+      "source": "fixture/calibration",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "calibrate ranking"
+    },
+    {
+      "id": "discovery_freshness",
+      "source": "fixture/discovery",
+      "direction": "lower",
+      "target": 1,
+      "unit": "hours",
+      "next_action": "refresh discovery"
+    },
+    {
+      "id": "adaptation_speed",
+      "source": "fixture/adaptation",
+      "direction": "lower",
+      "target": 1,
+      "unit": "hours",
+      "next_action": "adapt faster"
+    },
+    {
+      "id": "reuse_ratio",
+      "source": "fixture/reuse",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "reuse mechanisms"
+    },
+    {
+      "id": "learning_retention",
+      "source": "fixture/learning",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "retain learning"
+    },
+    {
+      "id": "production_transfer",
+      "source": "fixture/transfer",
+      "direction": "higher",
+      "target": 100,
+      "unit": "hours",
+      "next_action": "transfer experiments"
+    },
+    {
+      "id": "hardware_utilization",
+      "source": "fixture/hardware",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "use hardware"
+    },
+    {
+      "id": "attribution_quality",
+      "source": "fixture/attribution",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "improve attribution"
+    },
+    {
+      "id": "automation_coverage",
+      "source": "cycle ledger",
+      "direction": "higher",
+      "target": 99,
+      "unit": "percent",
+      "next_action": "reduce operator-active time"
+    },
+    {
+      "id": "compounding_rate",
+      "source": "fixture/compounding",
+      "direction": "higher",
+      "target": 100,
+      "unit": "percent",
+      "next_action": "compound learning"
+    }
+  ],
+  "cycle": {
+    "schema": "fak-performance-rsi-cycle/1",
+    "engine": "fak-native/qwen3.8",
+    "idea_at": "2026-08-28T10:00:00Z",
+    "queue_at": "2026-08-28T10:10:00Z",
+    "execution_at": "2026-08-28T10:30:00Z",
+    "evaluation_at": "2026-08-28T11:00:00Z",
+    "landing_at": "2026-08-28T11:30:00Z",
+    "learning_at": "2026-08-28T12:00:00Z",
+    "operator_active_seconds": 1800
+  },
+  "improvement": {
+    "schema": "fak-performance-rsi-improvement/1",
+    "engine": "fak-native/qwen3.8",
+    "hypothesis": "Fusing dispatch metadata preparation reduces matched end-to-end latency without changing output quality.",
+    "changed_module": "internal/engine@r71+g8effa9524",
+    "baseline": {
+      "value": 125.0,
+      "unit": "milliseconds"
+    },
+    "candidate": {
+      "value": 96.0,
+      "unit": "milliseconds"
+    },
+    "quality": {
+      "gate": "exact-output-parity",
+      "baseline_passed": true,
+      "candidate_passed": true,
+      "parity": true
+    },
+    "net_true_gain": {
+      "value": 20.0,
+      "unit": "percent",
+      "overhead_value": 4.0,
+      "overhead_unit": "milliseconds",
+      "includes_overhead": true
+    },
+    "baseline_envelope": {
+      "model": "Qwen3.8",
+      "quantization": "Q4_K_M",
+      "hardware": "scrubbed CUDA accelerator",
+      "workload": "128-token deterministic decode",
+      "context_tokens": 4096,
+      "batch_size": 1
+    },
+    "candidate_envelope": {
+      "model": "Qwen3.8",
+      "quantization": "Q4_K_M",
+      "hardware": "scrubbed CUDA accelerator",
+      "workload": "128-token deterministic decode",
+      "context_tokens": 4096,
+      "batch_size": 1
+    },
+    "causal": {
+      "ablation": "disable fused dispatch metadata preparation only",
+      "control_value": 124.0,
+      "treatment_value": 96.0,
+      "unit": "milliseconds",
+      "isolates_change": true
+    }
+  },
+  "provenance": {
+    "schema": "fak-performance-rsi-provenance/1",
+    "source": {
+      "repository": "https://github.com/ml-explore/mlx",
+      "revision": "43d2f06cb87e76895bf9a152bade4fee83408643",
+      "published_at": "2026-08-24T12:15:56Z"
+    },
+    "discovery_at": "2026-08-25T04:19:02Z",
+    "adaptation_started_at": "2026-08-28T14:03:05Z",
+    "adaptation_start_explicit": true,
+    "experiment": {
+      "artifact": "internal/qwen38quantrun/metal_sequence_receipt_test.go",
+      "linked": true
+    },
+    "reuse": {
+      "reused_mechanisms": 1,
+      "reinvented_mechanisms": 0,
+      "classification": "adapted_known_art"
+    },
+    "production": {
+      "module_at_rev": "internal/qwen38quantrun@r17+g5e0db65c5",
+      "commit_sha": "5e0db65c50288ec16d9f4f6b5a50bf7174f709c9",
+      "landed_at": "2026-08-28T14:54:34Z",
+      "engine": "fak-native",
+      "artifact": "internal/qwen38quantrun/metal_sequence_receipt.go"
+    },
+    "unit": "hours"
+  },
+  "learning": {
+    "schema": "fak-performance-rsi-learning/1",
+    "rows": [
+      {
+        "cycle_id": "issue-9783-review-correction",
+        "hypothesis_id": "issue-9783-review-correction",
+        "recurrence_key": "perfrsiscore-optional-receipt-extension",
+        "predicted_improvement_percent": 100,
+        "confidence_percent": 90,
+        "observed_improvement_percent": 100,
+        "learning_id": "issue-9783-chronological-validation",
+        "learning_recorded": true,
+        "learning_reused": false,
+        "prior_learning_id": "",
+        "repeated_failure": false,
+        "cycle_time_hours": 0.1413888888888889,
+        "engine": "fak-native",
+        "artifact": "issue-9783 prior correction: perfrsiscore package and focused CLI learning checks passed"
+      },
+      {
+        "cycle_id": "issue-9783-witness-validation-cycle-2",
+        "hypothesis_id": "issue-9783-witness-validation-cycle-2-hypothesis",
+        "recurrence_key": "perfrsiscore-optional-receipt-extension",
+        "predicted_improvement_percent": 100,
+        "confidence_percent": 95,
+        "observed_improvement_percent": 100,
+        "learning_id": "",
+        "learning_recorded": false,
+        "learning_reused": true,
+        "prior_learning_id": "issue-9783-chronological-validation",
+        "repeated_failure": false,
+        "cycle_time_hours": 0.001798996388888889,
+        "engine": "fak-native",
+        "artifact": "issue-9783 validation cycle: perfrsiscore package and focused CLI learning checks passed"
+      }
+    ]
+  }
+}
