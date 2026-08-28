@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/anthony-chaudhary/fak/internal/launchshim"
-	"github.com/anthony-chaudhary/fak/internal/safecommit"
+	"github.com/anthony-chaudhary/fak/internal/processalive"
 )
 
 // LaunchPriorPath is the one retained last-known-good executable for target.
@@ -31,7 +31,7 @@ func BeginLaunchTransaction(target string) (func(), error) {
 	prior := LaunchPriorPath(target)
 	// Reclaim old Windows swap-asides for the retained prior copy before
 	// replacing it. Live prior launches remain protected by their owning PID.
-	_ = ReapStaleAsides(prior, os.Getpid(), safecommit.ProcessAlive)
+	_ = ReapStaleAsides(prior, os.Getpid(), processalive.Check)
 
 	staged, err := stageCopy(target, target, "launch-prior")
 	if err != nil {
