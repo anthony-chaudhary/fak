@@ -1,0 +1,50 @@
+{
+  "schema": "fak-native-performance-live-proof/v1",
+  "issue": 9817,
+  "captured_at_utc": "2026-08-28T20:13:09Z",
+  "status": "unavailable",
+  "scope": "One live fak-native Qwen3.8 execution for native Grafana panel coverage; no comparative performance claim.",
+  "model": {
+    "alias": "qwen38:27b",
+    "family": "Qwen3.8",
+    "artifact": "hf://unsloth/Qwen3.8-27B-GGUF@f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-Q4_K_M.gguf",
+    "artifact_sha256": "7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169",
+    "quantization": "Q4_K_M"
+  },
+  "required_execution": {
+    "engine": "fak-native",
+    "runtime_engine": "inkernel",
+    "planner": "inkernel",
+    "model_owner": "fak",
+    "fallback_count": 0,
+    "fallback_active": false,
+    "llama_cpp_used": false
+  },
+  "attempts": [
+    {
+      "route": "local-metal",
+      "result": "capacity_refused_before_load",
+      "public_detail": "The native streamed-Q4_K admission gate required 44 GiB while the control host exposed 36 GiB. The process failed loud and did not switch engine or backend."
+    },
+    {
+      "route": "gcp-gpu",
+      "result": "authentication_unavailable",
+      "public_detail": "The sanctioned quota probe refused because the configured GCP credential could not be refreshed. No instance was created."
+    },
+    {
+      "route": "private-lab",
+      "result": "authorization_unavailable",
+      "public_detail": "The network-free bridge doctor reported that no authorized control channel was configured. No private endpoint was contacted."
+    }
+  ],
+  "live_execution_obtained": false,
+  "raw_logs_committed": false,
+  "private_identifiers_committed": false,
+  "operator_commands": {
+    "gcp_preflight": "python3 tools/gcp_gpu_probe.py --all-tiers",
+    "gcp_preview": "python3 tools/gcp_bench.py --dry-run --tier <ELIGIBLE_TIER> --engine fak-cuda-q8 --hf-repo unsloth/Qwen3.8-27B-GGUF --hf-file Qwen3.8-27B-Q4_K_M.gguf --fak-ref <ISSUE_9817_COMMIT>",
+    "native_cuda_serve": "FAK_Q4K=1 fak serve --addr 127.0.0.1:8137 --engine inkernel --gguf qwen38:27b --model qwen38:27b --backend cuda --context-budget-tokens 4096",
+    "bounded_request": "curl -fsS http://127.0.0.1:8137/v1/messages -H 'content-type: application/json' -d '{\"model\":\"qwen38:27b\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: Q38\"}]}'"
+  },
+  "completion_rule": "Replace this unavailable receipt only with a scrubbed fresh receipt that records exact Qwen3.8 identity, engine=fak-native, runtime_engine=inkernel, an explicit native forward path, fallback_count=0, and the exact-output quality hash. A gateway/provider or llama.cpp execution cannot satisfy this rule."
+}

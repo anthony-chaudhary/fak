@@ -744,5 +744,64 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "x-disambig-kernelfamily",
+      "canonical": "KernelFamily",
+      "family": "gateway-engine",
+      "kind": "symbol",
+      "definition": "The nativeperfbackend dashboard-label type that groups kernel measurements into bounded families such as matmul, attention, and transfer.",
+      "distinction": "A METRIC/DASHBOARD grouping for native kernel work - NOT a runtime engine, planner, execution backend, or fallback selector.",
+      "distinct_from": [
+        "x2-gateway-engine-fakkernel",
+        "x2-gateway-engine-routeengine"
+      ],
+      "aliases": [],
+      "grounding": "KernelFamily",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-renderprometheus",
+      "canonical": "RenderPrometheus",
+      "family": "render-materialize",
+      "kind": "symbol",
+      "definition": "The nativeperfslo function that materializes one evaluated SLO Result as deterministic Prometheus text exposition for fixtures and validation.",
+      "distinction": "A TEXT-FIXTURE materializer - NOT Grafana panel rendering, NOT a live Prometheus query, and NOT evidence that a live target was scraped.",
+      "distinct_from": [
+        "x2-render-materialize-renderer"
+      ],
+      "aliases": [],
+      "grounding": "RenderPrometheus",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "x-disambig-nativeperfcoverage",
+      "canonical": "nativeperfcoverage",
+      "family": "support-maturity",
+      "kind": "subsystem",
+      "definition": "The deterministic validation package that cross-checks native-performance dashboards, contracts, fixtures, and explicitly supplied live receipts.",
+      "distinction": "Witness/VALIDATION tooling - a green fixture matrix does NOT claim production support maturity or substitute for a fresh fak-native live receipt.",
+      "distinct_from": [
+        "x2-support-maturity-supportmaturity",
+        "x2-support-maturity-maturityscore"
+      ],
+      "aliases": [],
+      "grounding": "nativeperfcoverage",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

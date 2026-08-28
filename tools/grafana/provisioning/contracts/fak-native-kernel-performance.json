@@ -1,9 +1,9 @@
 {
   "schema": "fak-grafana-native-kernel-performance-contract/v1",
-  "dashboard": "../../../dashboards/fak-native-kernel-performance.json",
+  "dashboard": "../../dashboards/fak-native-kernel-performance.json",
   "dashboard_uid": "fak-native-kernel-performance",
   "engine_policy": {
-    "required_regex": "fak-native|native.*|metal.*|cuda.*",
+    "required_regex": "^fak-native$",
     "forbidden_fallbacks": [
       "llama.cpp",
       "llamacpp",

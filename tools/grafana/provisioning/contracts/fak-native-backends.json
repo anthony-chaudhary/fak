@@ -1,6 +1,6 @@
 {
   "schema": "fak-grafana-native-backends-contract/v1",
-  "dashboard": "../../../dashboards/fak-native-backends.json",
+  "dashboard": "../../dashboards/fak-native-backends.json",
   "dashboard_uid": "fak-native-backends",
   "telemetry_schema": "fak-native-backend-telemetry/1",
   "engine_policy": {
