@@ -118,7 +118,9 @@ func guardCodexLoopGateConfigForProfile(profile harnessprofile.HarnessProfile, c
 // Codex at the gateway. Each value is a TOML literal, so strings carry their double quotes
 // verbatim (guard execs the child directly, with no shell to strip them — Codex's own TOML
 // parser consumes the quotes). base_url is the gateway origin plus the `/v1` Codex appends
-// `/responses` to, so the request lands on the gateway's `/v1/responses` route.
+// `/responses` to, so the request lands on the gateway's `/v1/responses` route. The same
+// session receives the gateway MCP endpoint additively, allowing Codex's native tool router to
+// execute the FAK substrate tools that guard exposes to the model.
 func guardCodexConfigArgs(gwURL, apiKeyEnv, model string) []string {
 	base := guardCodexBaseURL(gwURL)
 	envKey := guardCodexEnvKey(apiKeyEnv)
@@ -133,6 +135,7 @@ func guardCodexConfigArgs(gwURL, apiKeyEnv, model string) []string {
 		"-c", "model_providers." + id + ".base_url=" + q(base),
 		"-c", "model_providers." + id + ".wire_api=" + q("responses"),
 		"-c", "model_providers." + id + ".env_key=" + q(envKey),
+		"-c", "mcp_servers.fak_guard.url=" + q(guardCodexMCPURL(gwURL)),
 	}
 	if effort != "" {
 		args = append(args, "-c", "model_reasoning_effort="+q(effort))
@@ -169,6 +172,18 @@ func guardCodexBaseURL(gwURL string) string {
 		return b
 	}
 	return b + "/v1"
+}
+
+// guardCodexMCPURL points Codex's native MCP client at the same in-process gateway as the
+// model route. Accept either the gateway origin or its /v1 model base without producing
+// /v1/mcp, which is not an MCP route.
+func guardCodexMCPURL(gwURL string) string {
+	b := strings.TrimRight(strings.TrimSpace(gwURL), "/")
+	b = strings.TrimSuffix(b, "/v1")
+	if b == "" {
+		return ""
+	}
+	return b + "/mcp"
 }
 
 // guardCodexEnvKey resolves the env var Codex reads the upstream bearer from: the operator's

@@ -515,6 +515,7 @@ type openAIResponsesResponse struct {
 		Status    string `json:"status,omitempty"`
 		CallID    string `json:"call_id,omitempty"`
 		Name      string `json:"name,omitempty"`
+		Namespace string `json:"namespace,omitempty"`
 		Arguments string `json:"arguments,omitempty"`
 		Content   []struct {
 			Type string `json:"type"`
@@ -705,7 +706,7 @@ func (openAIResponsesAdapter) ParseResponse(raw []byte) (*Completion, error) {
 			if strings.TrimSpace(args) == "" {
 				args = "{}"
 			}
-			calls = append(calls, ToolCall{ID: id, Type: "function", Function: Func{Name: item.Name, Arguments: args}})
+			calls = append(calls, ToolCall{ID: id, Type: "function", Function: Func{Name: item.Name, Namespace: item.Namespace, Arguments: args}})
 		}
 	}
 	if len(content) == 0 && rr.OutputText != "" {

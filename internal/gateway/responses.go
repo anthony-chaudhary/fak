@@ -89,6 +89,7 @@ type responsesInputItem struct {
 	// function_call fields:
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 	ID        string `json:"id,omitempty"`
 	// function_call_output field:
@@ -132,6 +133,7 @@ type responsesOutputItem struct {
 	// function_call fields:
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
 }
 
@@ -502,7 +504,7 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 					ToolCalls: []agent.ToolCall{{
 						ID:       id,
 						Type:     "function",
-						Function: agent.Func{Name: it.Name, Arguments: it.Arguments},
+						Function: agent.Func{Name: it.Name, Namespace: it.Namespace, Arguments: it.Arguments},
 					}},
 				})
 			case "function_call_output":
@@ -664,6 +666,7 @@ func responsesOutputFromAssistant(asst agent.Message) []responsesOutputItem {
 			ID:        tc.ID,
 			CallID:    tc.ID,
 			Name:      tc.Function.Name,
+			Namespace: tc.Function.Namespace,
 			Arguments: args,
 			Status:    "completed",
 		})
