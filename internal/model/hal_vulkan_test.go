@@ -126,7 +126,7 @@ func TestHALVulkanQ8ForwardMatchesComputeQ8(t *testing.T) {
 		be.Name(), be.Tier(), prefillCos, stepCos)
 }
 
-func TestHALVulkanQ8SessionCloseReleasesBudgetedWeights(t *testing.T) {
+func TestHALVulkanQ8ModelCloseReleasesBudgetedWeights(t *testing.T) {
 	be := compute.Pick("vulkan")
 	if be.Name() != "vulkan" {
 		t.Skip("vulkan backend not registered (no reachable Vulkan device)")
@@ -154,26 +154,43 @@ func TestHALVulkanQ8SessionCloseReleasesBudgetedWeights(t *testing.T) {
 	m.Quantize()
 	prompt := []int{3, 9, 44, 1, 77, 22}
 
-	run := func(label string) (int64, int) {
-		s := m.NewBackendSession(be)
-		s.Quant = true
-		_ = s.Prefill(prompt)
-		_, liveUsed, liveHostvis := dbg.VulkanDebugResidencyBudget()
-		if liveUsed <= 0 {
-			t.Fatalf("%s: live dlUsed=%d, want budgeted Q8 weights resident", label, liveUsed)
-		}
-		s.Close()
-		_, afterUsed, afterHostvis := dbg.VulkanDebugResidencyBudget()
-		if afterUsed != 0 || afterHostvis != 0 {
-			t.Fatalf("%s: after Close dlUsed=%d hostvisN=%d, want both zero", label, afterUsed, afterHostvis)
-		}
-		return liveUsed, liveHostvis
+	first := m.NewBackendSession(be)
+	first.Quant = true
+	_ = first.Prefill(prompt)
+	_, stagedUsed, stagedHostvis := dbg.VulkanDebugResidencyBudget()
+	if stagedUsed <= 0 {
+		t.Fatalf("first session: dlUsed=%d, want budgeted Q8 weights resident", stagedUsed)
 	}
 
-	used1, hostvis1 := run("first session")
-	used2, hostvis2 := run("second session")
-	if used2 != used1 || hostvis2 != hostvis1 {
-		t.Fatalf("second session residency changed: used=%d/%d hostvis=%d/%d",
-			used2, used1, hostvis2, hostvis1)
+	second := m.NewBackendSession(be)
+	second.Quant = true
+	_ = second.Prefill(prompt)
+	_, sharedUsed, sharedHostvis := dbg.VulkanDebugResidencyBudget()
+	if sharedUsed != stagedUsed || sharedHostvis != stagedHostvis {
+		t.Fatalf("overlapping session restaged model weights: used=%d/%d hostvis=%d/%d",
+			sharedUsed, stagedUsed, sharedHostvis, stagedHostvis)
+	}
+
+	first.Close()
+	_, afterFirstUsed, afterFirstHostvis := dbg.VulkanDebugResidencyBudget()
+	if afterFirstUsed != stagedUsed || afterFirstHostvis != stagedHostvis {
+		t.Fatalf("first Close changed model-owned residency: used=%d/%d hostvis=%d/%d",
+			afterFirstUsed, stagedUsed, afterFirstHostvis, stagedHostvis)
+	}
+	// The peer still borrows the model-owned handles after the first session closes.
+	_ = second.Step(5)
+	second.Close()
+	_, afterSessionsUsed, afterSessionsHostvis := dbg.VulkanDebugResidencyBudget()
+	if afterSessionsUsed != stagedUsed || afterSessionsHostvis != stagedHostvis {
+		t.Fatalf("last Session.Close changed model-owned residency: used=%d/%d hostvis=%d/%d",
+			afterSessionsUsed, stagedUsed, afterSessionsHostvis, stagedHostvis)
+	}
+
+	if err := m.CloseWeights(); err != nil {
+		t.Fatalf("CloseWeights: %v", err)
+	}
+	_, finalUsed, finalHostvis := dbg.VulkanDebugResidencyBudget()
+	if finalUsed != 0 || finalHostvis != 0 {
+		t.Fatalf("after model CloseWeights dlUsed=%d hostvisN=%d, want both zero", finalUsed, finalHostvis)
 	}
 }
