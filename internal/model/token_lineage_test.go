@@ -216,6 +216,12 @@ func TestRestoreTokenLineagePublishesOnlyGeometryMatchedHistory(t *testing.T) {
 		t.Fatalf("second short restore error=%v, want ErrTokenLineageMismatch", err)
 	}
 	requireTokenLineage(t, restored, history)
+	malformed := append([]int(nil), history...)
+	malformed[1] = -1
+	if _, err := restored.RestoreTokenLineage(malformed); !errors.Is(err, ErrTokenLineageMismatch) {
+		t.Fatalf("negative-token restore error=%v, want ErrTokenLineageMismatch", err)
+	}
+	requireTokenLineage(t, restored, history)
 }
 
 func containsInt(values []int, want int) bool {

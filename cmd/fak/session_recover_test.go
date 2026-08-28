@@ -20,6 +20,15 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/sessionrecovery"
 )
 
+func installSessionRecoverIdentityFixture(t *testing.T) {
+	t.Helper()
+	regDir := t.TempDir()
+	if err := os.WriteFile(resume.IdentityLedgerPath(regDir), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FLEET_REG_DIR", regDir)
+}
+
 type captureLauncher struct {
 	got      []sessionrecovery.Request
 	onLaunch func(int, sessionrecovery.Request)
@@ -76,6 +85,7 @@ func TestRecoveryInventoryReportsRuntimeSourceFailure(t *testing.T) {
 }
 
 func TestSessionRecoverPreviewNeedsNoFakDevExecutable(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	if os.Getenv("FAK_RECOVERY_INSTALLED_HELPER") == "1" {
 		if _, err := exec.LookPath("fak-dev"); err == nil {
 			t.Fatal("fak-dev unexpectedly available on isolated PATH")
@@ -148,6 +158,7 @@ func TestSessionRecoverAllAndThreadAreMutuallyExclusive(t *testing.T) {
 }
 
 func TestSessionRecoverPromptAndCWD(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
 	defer func() {
 		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
@@ -184,6 +195,7 @@ func TestSessionRecoverPromptAndCWD(t *testing.T) {
 }
 
 func TestSessionRecoverPollsUntilProductiveAndPreservesObservedCardinality(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
 	defer func() {
 		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
@@ -220,6 +232,7 @@ func TestSessionRecoverPollsUntilProductiveAndPreservesObservedCardinality(t *te
 }
 
 func TestSessionRecoverIdleShellIsNotFalseDone(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
 	defer func() {
 		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow
@@ -255,6 +268,7 @@ func TestSessionRecoverIdleShellIsNotFalseDone(t *testing.T) {
 }
 
 func TestSessionRecoverFailsClosedOnDuplicateGuardedTrees(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv, oldJournal, oldLaunch, oldSleep := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep
 	defer func() {
 		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep = oldInv, oldJournal, oldLaunch, oldSleep
@@ -287,6 +301,7 @@ func TestSessionRecoverFailsClosedOnDuplicateGuardedTrees(t *testing.T) {
 }
 
 func TestSessionRecoverUsesJournalRecordedCWD(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv := recoveryInventory
 	defer func() { recoveryInventory = oldInv }()
 	recoveryInventory = func(time.Duration) (sessionrecovery.InventoryReport, error) {
@@ -320,6 +335,7 @@ func TestSessionRecoverUsesJournalRecordedCWD(t *testing.T) {
 }
 
 func TestSessionRecoverUsesCodexJournalOnlyWithExactStateRequest(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv, oldJournal := recoveryInventory, recoveryJournalCrashes
 	defer func() { recoveryInventory, recoveryJournalCrashes = oldInv, oldJournal }()
 	const id = "94100001-0000-4000-8000-000000000001"
@@ -490,6 +506,7 @@ func TestReconcileHistoricalClaudeAuthSkipsProbeWithoutAuthRows(t *testing.T) {
 }
 
 func TestSessionRecoverHistoricalClaudeAuthUsesCurrentAuthProof(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv, oldProbe := recoveryInventory, recoveryClaudeAuthProbe
 	defer func() {
 		recoveryInventory, recoveryClaudeAuthProbe = oldInv, oldProbe
@@ -546,6 +563,7 @@ func TestSessionRecoverHistoricalClaudeAuthUsesCurrentAuthProof(t *testing.T) {
 }
 
 func TestSessionRecoverUnifiedPreviewAndLiveWitness(t *testing.T) {
+	installSessionRecoverIdentityFixture(t)
 	oldInv, oldJournal, oldLaunch, oldSleep, oldNow := recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow
 	defer func() {
 		recoveryInventory, recoveryJournalCrashes, recoveryLaunch, recoverySleep, recoveryNow = oldInv, oldJournal, oldLaunch, oldSleep, oldNow

@@ -1,3 +1,8 @@
+---
+title: "Startup and adjacent-provider landscape"
+description: "As of: 2026-08-26. This is a taxonomy and watchlist, not an endorsement, market-share."
+---
+
 # Startup and adjacent-provider landscape
 
 **As of:** 2026-08-26. This is a taxonomy and watchlist, not an endorsement, market-share

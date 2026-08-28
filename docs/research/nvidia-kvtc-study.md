@@ -1,3 +1,8 @@
+---
+title: "NVIDIA KVTC: transform-coded KV storage, studied for fak"
+description: "Observed: 2026-08-26 · Tracker: #9341 · Centrality: Enabling · Disposition: adapt the storage-boundary idea; do not port the available third-party serving patches."
+---
+
 # NVIDIA KVTC: transform-coded KV storage, studied for fak
 
 **Observed:** 2026-08-26 · **Tracker:** [#9341](https://github.com/anthony-chaudhary/fak/issues/9341) · **Centrality:** Enabling · **Disposition:** adapt the storage-boundary idea; do not port the available third-party serving patches.

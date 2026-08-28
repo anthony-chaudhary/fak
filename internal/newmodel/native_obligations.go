@@ -207,6 +207,7 @@ func CompileNativeObligationGraph(packet Packet, envelope NativeHardwareEnvelope
 	if packet.Engine != "fak-native" || packet.Descriptor.Engine != "fak-native" || packet.ExternalRuntimeFallback {
 		return NativeObligationGraph{}, refuse(RefusalNativeEngineMismatch, "engine", "packet must remain fak-native with external runtime fallback disabled")
 	}
+	envelope = normalizeNativeLaunchEnvelope(envelope)
 	descriptor := packet.Descriptor.ModelDescriptor()
 	if err := modeldescriptor.Validate(descriptor); err != nil {
 		return NativeObligationGraph{}, refuse(RefusalDescriptorInvalid, "descriptor", err.Error())
@@ -349,6 +350,20 @@ func nativeFusionLaunchFor(domains []NativeFusionLaunchDomain, operation string)
 		}
 	}
 	return match, count
+}
+
+func normalizeNativeLaunchEnvelope(envelope NativeHardwareEnvelope) NativeHardwareEnvelope {
+	envelope.FusionLaunches = append([]NativeFusionLaunchDomain(nil), envelope.FusionLaunches...)
+	for i := range envelope.FusionLaunches {
+		envelope.FusionLaunches[i].Dimensions = append([]NativeLaunchDimension(nil), envelope.FusionLaunches[i].Dimensions...)
+		sort.Slice(envelope.FusionLaunches[i].Dimensions, func(a, b int) bool {
+			return envelope.FusionLaunches[i].Dimensions[a].Name < envelope.FusionLaunches[i].Dimensions[b].Name
+		})
+	}
+	sort.Slice(envelope.FusionLaunches, func(i, j int) bool {
+		return envelope.FusionLaunches[i].Operation < envelope.FusionLaunches[j].Operation
+	})
+	return envelope
 }
 
 func admitNativeFusionLaunch(
@@ -540,6 +555,22 @@ func orderNativeObligations(nodes []NativeObligation) ([]NativeObligation, error
 		}
 		if node.Reason == "" || node.Operation == "" || node.Oracle.ID == "" || node.Oracle.Reason == "" || node.Backend.Engine != "fak-native" || node.Backend.Platform == "" || node.Backend.Backend == "" || node.Backend.Reason == "" || node.MemoryLayout.Reason == "" || node.PromotionWitness.ID == "" || node.PromotionWitness.Kind == "" || node.PromotionWitness.Reason == "" {
 			return nil, refuse(RefusalUnsupportedNativeCombination, "obligation_graph", fmt.Sprintf("node %q has an incomplete reason-bearing obligation", node.ID))
+		}
+		if node.Class == NativeObligationRequired && node.LaunchAdmission != nil {
+			return nil, refuse(RefusalUnsupportedNativeCombination, "obligation_graph", fmt.Sprintf("required node %q unexpectedly carries fusion admission", node.ID))
+		}
+		if node.Class == NativeObligationFusion {
+			admission := node.LaunchAdmission
+			if admission == nil || admission.Engine != "fak-native" || admission.Phase != "pre-allocation" || admission.Reason == "" || admission.Detail == "" {
+				return nil, refuse(RefusalUnsupportedNativeCombination, "obligation_graph", fmt.Sprintf("fusion node %q lacks complete launch admission", node.ID))
+			}
+			wantPath := NativeLaunchPathCorrectness
+			if admission.Admitted {
+				wantPath = NativeLaunchPathFusion
+			}
+			if admission.Path != wantPath || node.Eligible != admission.Admitted {
+				return nil, refuse(RefusalUnsupportedNativeCombination, "obligation_graph", fmt.Sprintf("fusion node %q has contradictory launch admission", node.ID))
+			}
 		}
 		byID[node.ID] = node
 	}

@@ -437,20 +437,20 @@ func classify(repo string, run Runner, ctx context.Context, head, target string,
 		safe := false
 		switch e.Status {
 		case "M":
-			wt, ok := worktreeBytes(repo, e.Path)
-			base, baseExists := blobAt(ctx, run, repo, head, e.Path)
+			_, ok := worktreeBytes(repo, e.Path)
 			// A target-identical local edit is content-safe in a snapshot, but
 			// `git merge --ff-only` deliberately refuses it. Classify only the
 			// worktree shape Git can update without pre-cleaning so check/apply
-			// agree and no helper ever needs to overwrite the path first.
-			safe = ok && baseExists && bytes.Equal(wt, base)
+			// agree and no helper ever needs to overwrite the path first. Ask Git
+			// to compare the filtered worktree view so clean-filter checkout
+			// representations (notably core.autocrlf CRLF) match their HEAD blob.
+			safe = ok && cleanEquivalentTo(ctx, run, repo, head, e.Path)
 		case "A":
 			_, ok := worktreeBytes(repo, e.Path)
 			safe = !ok
 		case "D":
-			wt, ok := worktreeBytes(repo, e.Path)
-			base, exists := blobAt(ctx, run, repo, head, e.Path)
-			safe = !ok || (exists && bytes.Equal(wt, base))
+			_, ok := worktreeBytes(repo, e.Path)
+			safe = !ok || cleanEquivalentTo(ctx, run, repo, head, e.Path)
 		default:
 			safe = false
 		}
@@ -463,12 +463,22 @@ func classify(repo string, run Runner, ctx context.Context, head, target string,
 	return identical, divergent
 }
 
-func blobAt(ctx context.Context, run Runner, repo, ref, path string) ([]byte, bool) {
-	res := run(ctx, repo, "show", ref+":"+path)
-	if res.Err != nil || res.Code != 0 {
-		return nil, false
+func cleanEquivalentTo(ctx context.Context, run Runner, repo, ref, path string) bool {
+	if _, ok := safeWorktreePath(repo, path); !ok {
+		return false
 	}
-	return res.Stdout, true
+	base := run(ctx, repo, "rev-parse", "--verify", ref+":"+path)
+	if base.Err != nil || base.Code != 0 || len(bytes.TrimSpace(base.Stdout)) == 0 {
+		return false
+	}
+	// --path selects the same clean filters Git uses when adding this tracked
+	// path, while omitting -w keeps classification read-only. Comparing object
+	// IDs avoids assuming checkout bytes equal canonical blob bytes.
+	worktree := run(ctx, repo, "hash-object", "--path="+path, "--", path)
+	if worktree.Err != nil || worktree.Code != 0 || len(bytes.TrimSpace(worktree.Stdout)) == 0 {
+		return false
+	}
+	return bytes.Equal(bytes.TrimSpace(worktree.Stdout), bytes.TrimSpace(base.Stdout))
 }
 
 func worktreeBytes(repo, path string) ([]byte, bool) {

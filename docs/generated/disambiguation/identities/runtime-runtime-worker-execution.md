@@ -1,6 +1,6 @@
 ---
-title: "runtime"
-description: "Canonical fak documentation for runtime, including its scope, nearest contrasts, and operational use."
+title: "worker execution runtime identity"
+description: "Meaning: The dispatch worker process that selects a backend, optionally wraps it with fak guard, and executes one lane-scoped work packet."
 ---
 
 # runtime

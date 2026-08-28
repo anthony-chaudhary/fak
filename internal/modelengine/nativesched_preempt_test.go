@@ -627,6 +627,32 @@ func TestNativeSchedulerQwenSwapReadmitLineageMismatchDoesNotPublishSession(t *t
 	}
 }
 
+func TestNativeSchedulerQwenSwapReadmitLongHistoryDoesNotPublishSession(t *testing.T) {
+	m := nativeSchedulerQwenSwapModel()
+	s := NewNativeScheduler(m)
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptSwap, MaxBlocks: 8, BlockTokens: 4})
+	ln := nativeSchedulerQwenReadmitLane(t, s, []int{3, 7, 11, 5}, 2)
+	defer ln.cancel()
+	if err := s.preemptLaneLocked(ln); err != nil {
+		t.Fatalf("swap preempt: %v", err)
+	}
+	ln.gen = append(ln.gen, 34)
+	s.readmitPreemptedLocked()
+
+	if !ln.terminal || !ln.reclaimed || ln.sess != nil || len(s.lanes) != 0 || len(s.preempted) != 0 {
+		t.Fatalf("refused readmit terminal=%t reclaimed=%t session=%p running=%d victims=%d", ln.terminal, ln.reclaimed, ln.sess, len(s.lanes), len(s.preempted))
+	}
+	if !errors.Is(ln.err, model.ErrTokenLineageMismatch) {
+		t.Fatalf("refused readmit error=%v, want ErrTokenLineageMismatch", ln.err)
+	}
+	if stats := s.KVPreemptionStats(); stats.Readmitted != 0 || stats.SwapRestoredBytes != 0 {
+		t.Fatalf("refused readmit stats=%+v, want zero readmit/restored-byte credit", stats)
+	}
+	if ln.hostKV != nil || ln.savedLogits != nil {
+		t.Fatalf("refused readmit retained host state: host_bytes=%d saved_logits=%d", len(ln.hostKV), len(ln.savedLogits))
+	}
+}
+
 func nativeSchedulerQwenSwapModel() *model.Model {
 	cfg := SyntheticConfig()
 	cfg.NumLayers = 4

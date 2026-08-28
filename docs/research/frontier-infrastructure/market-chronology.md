@@ -1,3 +1,8 @@
+---
+title: "Startup, release, acquisition, failure, and rumor chronology"
+description: "As of: 2026-08-26. Tracker: #9305. This chronology records events that can change."
+---
+
 # Startup, release, acquisition, failure, and rumor chronology
 
 **As of:** 2026-08-26. **Tracker:** #9305. This chronology records events that can change

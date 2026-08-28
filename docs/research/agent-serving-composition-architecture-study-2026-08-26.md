@@ -1,3 +1,8 @@
+---
+title: "Agent-serving composition architecture field study"
+description: "Status: decision record, not an implementation claim."
+---
+
 # Agent-serving composition architecture field study
 
 Date: 2026-08-26  

@@ -1,3 +1,8 @@
+---
+title: "Frontier infrastructure source register"
+description: "This register records source lineage, independence, and refresh triggers for report."
+---
+
 # Frontier infrastructure source register
 
 This register records source lineage, independence, and refresh triggers for report

@@ -150,7 +150,7 @@ func cleanKPIs() []KPI {
 		kpiCommandVerbsResolve(nil),
 		kpiFirstCommandRuns(true, true, "examples/p.json", false),
 		kpiInstallOneliner(true, "AGENTS.md"),
-		kpiHonestyLedger(true, nil),
+		kpiHonestyLedger(true, 1, nil),
 		kpiIntegrationRecipes(nil),
 		kpiCodexRecipeCurrent(nil),
 		kpiFencedPathsResolve(nil),
@@ -194,25 +194,32 @@ func TestGradeLetterBands(t *testing.T) {
 	}
 }
 
-func TestUntaggedClaimsCountsTags(t *testing.T) {
-	text := "- [SHIPPED] real thing\n" +
-		"- [SIMULATED] [STUB] two tags is malformed\n" +
-		"- [TODO] a bracketed claim with no status tag\n" +
-		"- a plain bullet (not a `- [` claim line) is not graded\n" +
-		"  - [STUB] indented claim is fine\n" +
-		"not a claim line at all\n"
-	bad := untaggedClaims(text, true)
-	if len(bad) != 2 {
-		t.Fatalf("untaggedClaims returned %d bad, want 2: %v", len(bad), bad)
+func TestHonestyLedgerUsesClaimcheckDocumentSet(t *testing.T) {
+	root := t.TempDir()
+	page := filepath.Join(root, "docs", "claims", "alpha.md")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if !anyContains(bad, "2 status tag") || !anyContains(bad, "0 status tag") {
-		t.Errorf("untaggedClaims missing expected tag-count messages: %v", bad)
+	index := "# Claims\n\n<!-- fak:document-set -->\n\n- [Alpha](docs/claims/alpha.md)\n"
+	if err := os.WriteFile(filepath.Join(root, claimsFile), []byte(index), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if got := untaggedClaims("- [SHIPPED] all good\n- [STUB] also good", true); len(got) != 0 {
-		t.Errorf("clean claims => %v, want empty", got)
+	if err := os.WriteFile(page, []byte("# Alpha\n\n- [SHIPPED] Alpha is real.\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if got := untaggedClaims(text, false); len(got) != 0 {
-		t.Errorf("absent ledger must abstain, got %v", got)
+	if records, defects := readHonestyLedger(root, true); records != 1 || len(defects) != 0 {
+		t.Fatalf("tagged child page records=%d defects=%v, want 1/clean", records, defects)
+	}
+
+	if err := os.WriteFile(page, []byte("# Alpha\n\n- [SHIPPED] [STUB] conflicting state.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, defects := readHonestyLedger(root, true)
+	if len(defects) != 1 || !strings.Contains(defects[0], "docs/claims/alpha.md:3: TAG") {
+		t.Fatalf("malformed child defects=%v, want file-and-line TAG diagnostic", defects)
+	}
+	if records, defects := readHonestyLedger(root, false); records != 0 || len(defects) != 0 {
+		t.Fatalf("absent ledger records=%d defects=%v, want abstain", records, defects)
 	}
 }
 
@@ -400,14 +407,14 @@ func TestInstallOnelinerKpi(t *testing.T) {
 }
 
 func TestHonestyLedgerKpi(t *testing.T) {
-	if k := kpiHonestyLedger(false, nil); k.Score != 0 {
+	if k := kpiHonestyLedger(false, 0, nil); k.Score != 0 {
 		t.Errorf("no ledger => score %d, want 0", k.Score)
 	}
-	untagged := kpiHonestyLedger(true, []string{"CLAIMS.md:5: 0 status tag(s): - foo"})
-	if len(untagged.Defects) != 1 || untagged.Score >= 100 {
-		t.Errorf("untagged => %+v", untagged)
+	broken := kpiHonestyLedger(true, 1, []string{"docs/claims/a.md:5: TAG: carries 0 tags"})
+	if len(broken.Defects) != 1 || broken.Score >= 100 {
+		t.Errorf("ledger violation => %+v", broken)
 	}
-	if k := kpiHonestyLedger(true, nil); len(k.Defects) != 0 {
+	if k := kpiHonestyLedger(true, 33, nil); len(k.Defects) != 0 || !strings.Contains(k.Detail, "33 claim record(s), 0 violation(s)") {
 		t.Errorf("clean ledger => %v", k.Defects)
 	}
 }
@@ -1161,13 +1168,17 @@ func TestRenderCompareSignedScoreDeltaOnRegression(t *testing.T) {
 
 // --- the tolerant live smoke ------------------------------------------------
 
-// TestLivePayloadIsWellFormed exercises the real disk+git gather path and pins the payload
-// SHAPE (schema, the weighted KPI set, per-KPI control-pane fields, a summed frontier). It
-// deliberately does NOT assert zero friction-debt: that is a tree-state regression sentinel
-// (owned by the Python live tests), not a property of this port.
+// TestLivePayloadIsWellFormed exercises the real disk gather path and pins the payload SHAPE
+// (schema, the weighted KPI set, per-KPI control-pane fields, a summed frontier). Calling gather
+// directly keeps the witness valid in fak validate's intentionally metadata-free archive; Build's
+// git-root guard and disk wiring are covered by the hermetic measurement tests. This deliberately
+// does NOT assert zero friction-debt: that is a tree-state regression sentinel, not a property of
+// this port.
 func TestLivePayloadIsWellFormed(t *testing.T) {
-	// Go runs package tests from this directory; Build expects the repository root.
-	p := Build(filepath.Join("..", ".."))
+	// Go runs package tests from this directory; gather expects the repository root.
+	root := filepath.Join("..", "..")
+	kpis, facts := gather(root)
+	p := buildPayload(root, kpis, facts, "")
 	if p.Schema == "" || p.Verdict == "" || p.Finding == "" || p.Reason == "" || p.NextAction == "" {
 		t.Errorf("live payload missing a top-level field: %+v", p)
 	}
@@ -1177,7 +1188,7 @@ func TestLivePayloadIsWellFormed(t *testing.T) {
 	if len(p.KPIs) != len(kpiWeights) {
 		t.Fatalf("live payload has %d KPIs, want the weighted set of %d", len(p.KPIs), len(kpiWeights))
 	}
-	var identity *KPI
+	var identity, honesty *KPI
 	for _, k := range p.KPIs {
 		if k.Kpi == "" || k.Group == "" {
 			t.Errorf("KPI missing kpi/group: %+v", k)
@@ -1188,6 +1199,10 @@ func TestLivePayloadIsWellFormed(t *testing.T) {
 		if k.Kpi == "identity_statement" {
 			k := k
 			identity = &k
+		}
+		if k.Kpi == "honesty_ledger" {
+			k := k
+			honesty = &k
 		}
 	}
 	if identity == nil {
@@ -1200,6 +1215,12 @@ func TestLivePayloadIsWellFormed(t *testing.T) {
 		if !strings.Contains(identity.Detail, doc+":") {
 			t.Errorf("live identity detail %q does not cite %s", identity.Detail, doc)
 		}
+	}
+	if honesty == nil {
+		t.Fatal("live payload has no honesty_ledger KPI")
+	}
+	if honesty.Score != 100 || len(honesty.Defects) != 0 || !strings.Contains(honesty.Detail, "0 violation(s)") {
+		t.Fatalf("live honesty KPI = %+v, want the addressable claim pages clean", *honesty)
 	}
 	frontier := corpusInt(p.Corpus, "experience_frontier")
 	byTerm, ok := p.Corpus["frontier_by_term"].(map[string]int)

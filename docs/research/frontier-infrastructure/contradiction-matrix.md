@@ -1,3 +1,8 @@
+---
+title: "Frontier infrastructure contradiction matrix"
+description: "Most apparent contradictions in frontier-infrastructure reporting disappear when the."
+---
+
 # Frontier infrastructure contradiction matrix
 
 **As of:** 2026-08-26  

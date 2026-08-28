@@ -23,68 +23,68 @@ This compact ledger indexes one addressable page per claim. Claim text and matur
 ## Claims
 
 <a id="the-product"></a>
-- [The product](docs/claims/the-product.md)
+- [SHIPPED] [The product](docs/claims/the-product.md) [exposure: default-on]
 <a id="the-syscall-subsystem-latency-check-not-the-headline-kpi-unit-82"></a>
-- [The syscall subsystem latency check (not the headline KPI — unit 82)](docs/claims/the-syscall-subsystem-latency-check-not-the-headline-kpi-unit-82.md)
+- [SHIPPED] [The syscall subsystem latency check (not the headline KPI — unit 82)](docs/claims/the-syscall-subsystem-latency-check-not-the-headline-kpi-unit-82.md) [exposure: default-on]
 <a id="adjudication-the-in-process-dos-reference-monitor"></a>
-- [Adjudication (the in-process DOS reference monitor)](docs/claims/adjudication-the-in-process-dos-reference-monitor.md)
+- [SHIPPED] [Adjudication (the in-process DOS reference monitor)](docs/claims/adjudication-the-in-process-dos-reference-monitor.md) [exposure: default-on]
 <a id="tool-vdso-3-tier-local-fast-path"></a>
-- [Tool vDSO (3-tier local fast path)](docs/claims/tool-vdso-3-tier-local-fast-path.md)
+- [SHIPPED] [Tool vDSO (3-tier local fast path)](docs/claims/tool-vdso-3-tier-local-fast-path.md) [exposure: default-on]
 <a id="pre-flight-ladder-grammar-rung"></a>
-- [Pre-flight ladder + grammar rung](docs/claims/pre-flight-ladder-grammar-rung.md)
+- [SHIPPED] [Pre-flight ladder + grammar rung](docs/claims/pre-flight-ladder-grammar-rung.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="context-mmu-write-time-result-admission"></a>
-- [Context-MMU (write-time result admission)](docs/claims/context-mmu-write-time-result-admission.md)
+- [SHIPPED] [Context-MMU (write-time result admission)](docs/claims/context-mmu-write-time-result-admission.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="answer-shape-the-consumer-facing-degeneration-verbosity-witness"></a>
-- [Answer-shape: the consumer-facing degeneration/verbosity witness](docs/claims/answer-shape-the-consumer-facing-degeneration-verbosity-witness.md)
+- [SHIPPED] [Answer-shape: the consumer-facing degeneration/verbosity witness](docs/claims/answer-shape-the-consumer-facing-degeneration-verbosity-witness.md) [exposure: default-on]
 <a id="codelint-language-server-packs-over-agent-written-code"></a>
-- [Codelint: language-server packs over agent-written code](docs/claims/codelint-language-server-packs-over-agent-written-code.md)
+- [SHIPPED] [Codelint: language-server packs over agent-written code](docs/claims/codelint-language-server-packs-over-agent-written-code.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="session-core-dump-context-debugger-recall-cdb"></a>
-- [Session core-dump + context debugger (recall + cdb)](docs/claims/session-core-dump-context-debugger-recall-cdb.md)
+- [SHIPPED] [Session core-dump + context debugger (recall + cdb)](docs/claims/session-core-dump-context-debugger-recall-cdb.md) [exposure: default-on]
 <a id="portable-session-image-uniform-dump-restore-session-restore-sessionimage-snapshot"></a>
-- [Portable session image + uniform dump/restore (session.Restore + sessionimage + snapshot)](docs/claims/portable-session-image-uniform-dump-restore-session-restore-sessionimage-snapshot.md)
+- [SHIPPED] [Portable session image + uniform dump/restore (session.Restore + sessionimage + snapshot)](docs/claims/portable-session-image-uniform-dump-restore-session-restore-sessionimage-snapshot.md) [exposure: default-on]
 <a id="in-kernel-agent-to-agent-message-channel-a2achan"></a>
-- [In-kernel agent-to-agent message channel (`a2achan`)](docs/claims/in-kernel-agent-to-agent-message-channel-a2achan.md)
+- [SHIPPED] [In-kernel agent-to-agent message channel (`a2achan`)](docs/claims/in-kernel-agent-to-agent-message-channel-a2achan.md) [exposure: default-on]
 <a id="shared-task-record-fold"></a>
-- [Shared task record fold](docs/claims/shared-task-record-fold.md)
+- [SHIPPED] [Shared task record fold](docs/claims/shared-task-record-fold.md) [exposure: default-on]
 <a id="trajectory-observability-primitives-data-plane-reference-similarity-scorer-seam"></a>
-- [Trajectory observability primitives (data plane + reference similarity + scorer seam)](docs/claims/trajectory-observability-primitives-data-plane-reference-similarity-scorer-seam.md)
+- [SHIPPED] [Trajectory observability primitives (data plane + reference similarity + scorer seam)](docs/claims/trajectory-observability-primitives-data-plane-reference-similarity-scorer-seam.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="task-manager-snapshot"></a>
-- [Task manager snapshot](docs/claims/task-manager-snapshot.md)
+- [SHIPPED] [Task manager snapshot](docs/claims/task-manager-snapshot.md) [exposure: default-on]
 <a id="s7-write-time-durability-gate-context-is-not-memory"></a>
-- [S7 write-time durability gate (context is not memory)](docs/claims/s7-write-time-durability-gate-context-is-not-memory.md)
+- [SHIPPED] [S7 write-time durability gate (context is not memory)](docs/claims/s7-write-time-durability-gate-context-is-not-memory.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="in-kernel-model-the-model-fused-into-the-kernel"></a>
-- [In-kernel model (the model fused into the kernel)](docs/claims/in-kernel-model-the-model-fused-into-the-kernel.md)
+- [SHIPPED] [In-kernel model (the model fused into the kernel)](docs/claims/in-kernel-model-the-model-fused-into-the-kernel.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="security-substrate-the-kernel-stops-believing-the-model"></a>
-- [Security substrate (the kernel stops believing the model)](docs/claims/security-substrate-the-kernel-stops-believing-the-model.md)
+- [SHIPPED] [Security substrate (the kernel stops believing the model)](docs/claims/security-substrate-the-kernel-stops-believing-the-model.md) [exposure: default-on]
 <a id="gateway-fak-serve"></a>
-- [Gateway (`fak serve`)](docs/claims/gateway-fak-serve.md)
+- [SHIPPED] [Gateway (`fak serve`)](docs/claims/gateway-fak-serve.md) [exposure: default-on]
 <a id="model-routing-per-aspect-ensemble-fak-route"></a>
-- [Model routing (per-aspect + ensemble — `fak route`)](docs/claims/model-routing-per-aspect-ensemble-fak-route.md)
+- [SHIPPED] [Model routing (per-aspect + ensemble — `fak route`)](docs/claims/model-routing-per-aspect-ensemble-fak-route.md) [exposure: default-on]
 <a id="turn-tax-benchmark-fak-turntax"></a>
-- [Turn-tax benchmark (`fak turntax`)](docs/claims/turn-tax-benchmark-fak-turntax.md)
+- [SHIPPED] [Turn-tax benchmark (`fak turntax`)](docs/claims/turn-tax-benchmark-fak-turntax.md) [exposure: default-on]
 <a id="self-ablation-sweep-fak-ablate"></a>
-- [Self-ablation sweep (`fak ablate`)](docs/claims/self-ablation-sweep-fak-ablate.md)
+- [SHIPPED] [Self-ablation sweep (`fak ablate`)](docs/claims/self-ablation-sweep-fak-ablate.md) [exposure: default-on]
 <a id="cross-agent-ablation-regime-b-bare-claude-p-vs-fak-guard-claude-p"></a>
-- [Cross-agent ablation (Regime B — bare `claude -p` vs `fak guard -- claude -p`)](docs/claims/cross-agent-ablation-regime-b-bare-claude-p-vs-fak-guard-claude-p.md)
+- [SHIPPED] [Cross-agent ablation (Regime B — bare `claude -p` vs `fak guard -- claude -p`)](docs/claims/cross-agent-ablation-regime-b-bare-claude-p-vs-fak-guard-claude-p.md) [exposure: default-on]
 <a id="fan-out-benchmark-fanbench-one-master-goal-n-sub-agents-n-1-1024"></a>
-- [Fan-out benchmark (`fanbench` — one master goal → N sub-agents, N=1…1024)](docs/claims/fan-out-benchmark-fanbench-one-master-goal-n-sub-agents-n-1-1024.md)
+- [SHIPPED] [Fan-out benchmark (`fanbench` — one master goal → N sub-agents, N=1…1024)](docs/claims/fan-out-benchmark-fanbench-one-master-goal-n-sub-agents-n-1-1024.md) [exposure: default-on]
 <a id="bounded-microagents-construct-harnesses-cmd-microharnessdemo"></a>
-- [Bounded microagents construct harnesses (`cmd/microharnessdemo`)](docs/claims/bounded-microagents-construct-harnesses-cmd-microharnessdemo.md)
+- [SHIPPED] [Bounded microagents construct harnesses (`cmd/microharnessdemo`)](docs/claims/bounded-microagents-construct-harnesses-cmd-microharnessdemo.md) [exposure: default-on]
 <a id="in-process-microagent-host-internal-microagent-n-agent-loops-as-goroutines-behind-one-gateway"></a>
-- [In-process microagent host (`internal/microagent` — N agent loops as goroutines behind ONE gateway)](docs/claims/in-process-microagent-host-internal-microagent-n-agent-loops-as-goroutines-behind-one-gateway.md)
+- [SIMULATED] [In-process microagent host (`internal/microagent` — N agent loops as goroutines behind ONE gateway)](docs/claims/in-process-microagent-host-internal-microagent-n-agent-loops-as-goroutines-behind-one-gateway.md)
 <a id="ultra-long-context-work-floor-longctxbench-per-agent-context-100k-tokens"></a>
-- [Ultra-long-context work floor (`longctxbench` — per-agent context > 100k tokens)](docs/claims/ultra-long-context-work-floor-longctxbench-per-agent-context-100k-tokens.md)
+- [SHIPPED] [Ultra-long-context work floor (`longctxbench` — per-agent context > 100k tokens)](docs/claims/ultra-long-context-work-floor-longctxbench-per-agent-context-100k-tokens.md) [exposure: default-on]
 <a id="engine"></a>
-- [Engine](docs/claims/engine.md)
+- [SHIPPED] [Engine](docs/claims/engine.md) [exposure: default-on]
 <a id="stewards-rsi-ship-gate"></a>
-- [Stewards + RSI ship-gate](docs/claims/stewards-rsi-ship-gate.md)
+- [SHIPPED] [Stewards + RSI ship-gate](docs/claims/stewards-rsi-ship-gate.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="vcache-chains-recall-m4"></a>
-- [vCache Chains & Recall (M4)](docs/claims/vcache-chains-recall-m4.md)
+- [SHIPPED] [vCache Chains & Recall (M4)](docs/claims/vcache-chains-recall-m4.md) [exposure: gated — linked shipped mechanisms include an opt-in or default-off path; see the detail page for each gate]
 <a id="vcache-governor-m5"></a>
-- [vCache Governor (M5)](docs/claims/vcache-governor-m5.md)
+- [SHIPPED] [vCache Governor (M5)](docs/claims/vcache-governor-m5.md) [exposure: default-on]
 <a id="vcache-observability-per-sub-concept-lens"></a>
-- [vCache observability (per-sub-concept lens)](docs/claims/vcache-observability-per-sub-concept-lens.md)
+- [SHIPPED] [vCache observability (per-sub-concept lens)](docs/claims/vcache-observability-per-sub-concept-lens.md) [exposure: default-on]
 <a id="what-fak-is-not"></a>
-- [What fak is NOT](docs/claims/what-fak-is-not.md)
+- [SIMULATED] [What fak is NOT](docs/claims/what-fak-is-not.md)
 <a id="prior-art-posture"></a>
-- [Prior-art posture](docs/claims/prior-art-posture.md)
+- [SHIPPED] [Prior-art posture](docs/claims/prior-art-posture.md) [exposure: default-on]

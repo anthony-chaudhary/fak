@@ -1,3 +1,8 @@
+---
+title: "Refresh and rumor protocol"
+description: "The corpus is a dated snapshot, not a timeless market map. Refresh it without turning."
+---
+
 # Refresh and rumor protocol
 
 The corpus is a dated snapshot, not a timeless market map. Refresh it without turning

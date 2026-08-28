@@ -1,6 +1,6 @@
 ---
-title: "kernel"
-description: "Canonical fak documentation for kernel, including its scope, nearest contrasts, and operational use."
+title: "fak CLI kernel identity"
+description: "Meaning: The fak command-line product surface for operating the agent kernel."
 ---
 
 # kernel

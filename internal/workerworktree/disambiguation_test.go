@@ -103,6 +103,67 @@ func TestVerifyAppliedDisambiguationRecordsThreeWitnesses(t *testing.T) {
 	if !ok || got.Before.Tree != "HEAD" || got.Worktree.Tree != "HEAD" || got.PostApply.Tree != "candidate" {
 		t.Fatalf("witnesses=%+v ok=%v", got, ok)
 	}
+	if got.Timeout.DefaultTimeoutMS != 120_000 || got.Timeout.RequestedTimeoutMS != nil ||
+		got.Timeout.EffectiveTimeoutMS != 120_000 || got.Timeout.RecoveryMode != disambiguationRecoveryDefault {
+		t.Fatalf("default timeout receipt = %+v", got.Timeout)
+	}
+}
+
+func TestVerifyAppliedDisambiguationExplicitTimeoutKeepsSameThreeWitnesses(t *testing.T) {
+	old := readDisambiguation
+	defer func() { readDisambiguation = old }()
+
+	type call struct{ repo, tree string }
+	var calls []call
+	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
+		calls = append(calls, call{repo: repo, tree: tree})
+		return DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, FamilyCoverage: map[string]float64{"loop": 100}}
+	})
+	t.Setenv(DisambiguationTimeoutEnv, "300000")
+	got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
+	if !ok {
+		t.Fatalf("explicit bounded timeout changed oracle verdict: %+v", got)
+	}
+	wantCalls := []call{{"trunk", "HEAD"}, {"worker", "HEAD"}, {"trunk", "candidate"}}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("witness inputs = %+v, want %+v", calls, wantCalls)
+	}
+	if got.Timeout.DefaultTimeoutMS != 120_000 || got.Timeout.RequestedTimeoutMS == nil ||
+		*got.Timeout.RequestedTimeoutMS != 300_000 || got.Timeout.EffectiveTimeoutMS != 300_000 ||
+		got.Timeout.RecoveryMode != disambiguationRecoveryExplicit {
+		t.Fatalf("explicit timeout receipt = %+v", got.Timeout)
+	}
+}
+
+func TestResolveDisambiguationTimeoutBoundsExplicitRecovery(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		present   bool
+		want      time.Duration
+		wantMode  string
+		wantError bool
+	}{
+		{name: "unset default", want: 2 * time.Minute, wantMode: disambiguationRecoveryDefault},
+		{name: "blank present", raw: "  ", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "minimum", raw: "1", present: true, want: time.Millisecond, wantMode: disambiguationRecoveryExplicit},
+		{name: "maximum", raw: "900000", present: true, want: 15 * time.Minute, wantMode: disambiguationRecoveryExplicit},
+		{name: "zero", raw: "0", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "negative", raw: "-1", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "above maximum", raw: "900001", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "not an integer", raw: "later", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipt, got, err := resolveDisambiguationTimeout(func(string) (string, bool) { return tt.raw, tt.present })
+			if (err != nil) != tt.wantError || got != tt.want || receipt.DefaultTimeoutMS != 120_000 || receipt.RecoveryMode != tt.wantMode {
+				t.Fatalf("receipt=%+v timeout=%s err=%v, want timeout=%s mode=%s error=%v", receipt, got, err, tt.want, tt.wantMode, tt.wantError)
+			}
+			if tt.wantError && receipt.EffectiveTimeoutMS != 0 {
+				t.Fatalf("invalid request gained an effective timeout: %+v", receipt)
+			}
+		})
+	}
 }
 
 // TestVerifyAppliedDisambiguationFreshnessIsNonRegression pins the #5359 fix: freshness gates
@@ -246,17 +307,17 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 	oldArchive := runDisambiguationArchive
 	oldScorecard := runAnalyzer
 	oldContext := newDeadline
-	oldTimeout := disambiguationTimeout
 	defer func() {
 		runDisambiguationArchive = oldArchive
 		runAnalyzer = oldScorecard
 		newDeadline = oldContext
-		disambiguationTimeout = oldTimeout
 	}()
 
 	manual := newManualDeadlineContext()
-	disambiguationTimeout = 37 * time.Second
-	newDeadline = func(time.Duration) (context.Context, context.CancelFunc) {
+	t.Setenv(DisambiguationTimeoutEnv, "37000")
+	var requestedDeadline time.Duration
+	newDeadline = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+		requestedDeadline = timeout
 		return manual, func() {}
 	}
 	runDisambiguationArchive = func(context.Context, string, string) ([]byte, error) {
@@ -326,6 +387,12 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 	if !strings.Contains(got.result.Detail, DisambiguationTimeoutCode) || !strings.Contains(got.result.Detail, `"subphase":"scorecard-command"`) {
 		t.Fatalf("compact refusal detail does not carry typed timeout/subphase: %s", got.result.Detail)
 	}
+	deadline := got.result.Disambiguation.Timeout
+	if requestedDeadline != 37*time.Second || deadline.DefaultTimeoutMS != 120_000 ||
+		deadline.RequestedTimeoutMS == nil || *deadline.RequestedTimeoutMS != 37_000 ||
+		deadline.EffectiveTimeoutMS != 37_000 || deadline.RecoveryMode != disambiguationRecoveryExplicit {
+		t.Fatalf("timeout authority was not carried into the receipt: requested=%s receipt=%+v", requestedDeadline, deadline)
+	}
 	if len(g.envCallsWithPrefix("commit-tree")) != 0 ||
 		len(g.callsWithPrefix("update-ref")) != 0 ||
 		len(g.callsWithPrefix("checkout")) != 0 ||
@@ -334,6 +401,57 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 	}
 	if g.lastEnv["GIT_INDEX_FILE"] == "" {
 		t.Fatalf("pre-timeout index construction must remain isolated: env=%v", g.lastEnv)
+	}
+}
+
+func TestLandIsolatedInvalidDisambiguationTimeoutRefusesTypedAndPreCAS(t *testing.T) {
+	old := readDisambiguation
+	defer func() { readDisambiguation = old }()
+
+	for _, raw := range []string{"", "0", "-1", "900001", "malformed-secret-sentinel"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv(DisambiguationTimeoutEnv, raw)
+			reads := 0
+			readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
+				reads++
+				return DisambiguationWitness{Tree: tree}
+			})
+			g := isolatedHappyFake()
+			msg := writeMsg(t, "fix(workerland): reject invalid timeout (fak workerworktree)")
+			got, handled := landIsolated(
+				"/repo", "/worker",
+				"diff --git a/internal/workerworktree/disambiguation.go b/internal/workerworktree/disambiguation.go\n@@\n-old\n+new\n",
+				msg, []string{"internal/workerworktree/disambiguation.go"}, g.run, g.runEnv,
+			)
+			if !handled || got.OK || got.Committed || got.Applied || reads != 0 {
+				t.Fatalf("invalid request must refuse before oracle/CAS: handled=%v reads=%d result=%+v", handled, reads, got)
+			}
+			if got.Disambiguation == nil || got.Disambiguation.Before.Diagnostic == nil {
+				t.Fatalf("typed invalid-timeout diagnostic missing: %+v", got.Disambiguation)
+			}
+			diagnostic := got.Disambiguation.Before.Diagnostic
+			if diagnostic.Code != DisambiguationTimeoutCode || diagnostic.Witness != "configuration" || diagnostic.Subphase != "timeout-config" {
+				t.Fatalf("invalid-timeout diagnostic = %+v", diagnostic)
+			}
+			deadline := got.Disambiguation.Timeout
+			if deadline.DefaultTimeoutMS != 120_000 || deadline.EffectiveTimeoutMS != 0 ||
+				deadline.RecoveryMode != disambiguationRecoveryInvalid {
+				t.Fatalf("invalid timeout receipt = %+v", deadline)
+			}
+			if !strings.Contains(got.Detail, DisambiguationTimeoutCode) || !strings.Contains(got.Detail, DisambiguationTimeoutEnv) {
+				t.Fatalf("typed invalid refusal detail = %q", got.Detail)
+			}
+			if raw == "malformed-secret-sentinel" && strings.Contains(got.Detail, raw) {
+				t.Fatalf("malformed environment value leaked into refusal detail: %q", got.Detail)
+			}
+			if len(g.envCallsWithPrefix("commit-tree")) != 0 || len(g.callsWithPrefix("update-ref")) != 0 ||
+				len(g.callsWithPrefix("checkout")) != 0 || len(g.callsWithPrefix("reset")) != 0 {
+				t.Fatalf("invalid timeout crossed pre-CAS boundary: calls=%v envCalls=%v", g.calls, g.envCalls)
+			}
+			if g.lastEnv["GIT_INDEX_FILE"] == "" {
+				t.Fatalf("invalid timeout must leave index construction isolated: env=%v", g.lastEnv)
+			}
+		})
 	}
 }
 

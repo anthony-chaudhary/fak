@@ -139,7 +139,7 @@ func TestApplyDisablesConfiguredMergeAutostash(t *testing.T) {
 	mutated := false
 	runner := func(ctx context.Context, repo string, args ...string) RunResult {
 		res := RealRunner(ctx, repo, args...)
-		if !mutated && len(args) == 2 && args[0] == "show" && args[1] == headBefore+":a.txt" {
+		if !mutated && isCleanHashFor(args, "a.txt") {
 			writeFile(t, filepath.Join(clone, "a.txt"), "PEER EDIT WITH AUTOSTASH CONFIGURED\n")
 			mutated = true
 		}
@@ -224,10 +224,10 @@ func TestApplyPreservesPeerEditRacedAfterAssessment(t *testing.T) {
 			sawPreclean = true
 		}
 		res := RealRunner(ctx, repo, args...)
-		// classify has already captured the worktree bytes before asking for the
-		// HEAD blob. Mutate immediately after that final read to reproduce the old
-		// assess -> checkout/remove data-loss window.
-		if !mutated && len(args) == 2 && args[0] == "show" && args[1] == headBefore+":a.txt" {
+		// classify has already confirmed the filtered worktree representation.
+		// Mutate immediately after that final read to reproduce the old assess ->
+		// checkout/remove data-loss window.
+		if !mutated && isCleanHashFor(args, "a.txt") {
 			writeFile(t, filepath.Join(clone, "a.txt"), "PEER EDIT AFTER ASSESSMENT\n")
 			mutated = true
 		}
@@ -291,6 +291,80 @@ func TestApplyPinsAssessedTargetWhenTrackingRefAdvances(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(clone, "late.txt")); !os.IsNotExist(err) {
 		t.Fatalf("late unassessed commit leaked into worktree: err=%v", err)
+	}
+}
+
+func TestBehindAutocrlfCleanFilterEquivalentWritePathsApply(t *testing.T) {
+	clone, target := autocrlfBehindClone(t)
+
+	info, err := Assess(context.Background(), Options{Repo: clone, Remote: "origin", Branch: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State != StateBehind || !info.OK || len(info.Divergent) != 0 {
+		t.Fatalf("assessment = %+v, want clean-filter-equivalent write paths safe", info)
+	}
+	if !hasEntry(info.Identical, "M", "modified.txt") || !hasEntry(info.Identical, "D", "deleted.txt") {
+		t.Fatalf("safe entries = %+v, want modified.txt M and deleted.txt D", info.Identical)
+	}
+
+	var mergeArgs []string
+	runner := func(ctx context.Context, repo string, args ...string) RunResult {
+		if len(args) > 0 && args[0] == "merge" {
+			mergeArgs = append([]string(nil), args...)
+		}
+		return RealRunner(ctx, repo, args...)
+	}
+	applied, err := Apply(context.Background(), Options{Repo: clone, Remote: "origin", Branch: "work", Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !applied.Applied || !applied.OK || applied.NewHead != target {
+		t.Fatalf("apply = %+v, want exact target %s applied", applied, target)
+	}
+	wantMerge := []string{"merge", "--ff-only", "--no-autostash", "--no-overwrite-ignore", target}
+	if strings.Join(mergeArgs, "\x00") != strings.Join(wantMerge, "\x00") {
+		t.Fatalf("merge args = %q, want final immutable ff-only guard %q", mergeArgs, wantMerge)
+	}
+	if got := readFile(t, filepath.Join(clone, "modified.txt")); got != "v2\r\n" {
+		t.Fatalf("modified checkout bytes = %q, want configured CRLF representation", got)
+	}
+	if _, err := os.Stat(filepath.Join(clone, "deleted.txt")); !os.IsNotExist(err) {
+		t.Fatalf("deleted.txt still exists after exact-target apply: %v", err)
+	}
+	if got := gitOutput(t, clone, "status", "--porcelain", "--", "modified.txt", "deleted.txt", "genuine.txt"); got != "" {
+		t.Fatalf("applied target is dirty: %q", got)
+	}
+}
+
+func TestBehindAutocrlfGenuineModifiedPathRefuses(t *testing.T) {
+	clone, _ := autocrlfBehindClone(t)
+	headBefore := revString(t, clone, "HEAD")
+	writeFile(t, filepath.Join(clone, "genuine.txt"), "LOCAL\r\nEDIT\r\n")
+
+	info, err := Assess(context.Background(), Options{Repo: clone, Remote: "origin", Branch: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.State != StateBehind || info.OK || len(info.Divergent) != 1 || info.Divergent[0].Path != "genuine.txt" {
+		t.Fatalf("assessment = %+v, want only genuine.txt divergent", info)
+	}
+	if !hasEntry(info.Identical, "M", "modified.txt") || !hasEntry(info.Identical, "D", "deleted.txt") {
+		t.Fatalf("safe entries = %+v, want clean-filter-equivalent M/D paths preserved", info.Identical)
+	}
+
+	applied, err := Apply(context.Background(), Options{Repo: clone, Remote: "origin", Branch: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied.Applied || applied.OK {
+		t.Fatalf("apply should refuse genuine unstaged divergence: %+v", applied)
+	}
+	if got := revString(t, clone, "HEAD"); got != headBefore {
+		t.Fatalf("HEAD moved on refusal: got %s want %s", got, headBefore)
+	}
+	if got := readFile(t, filepath.Join(clone, "genuine.txt")); got != "LOCAL\r\nEDIT\r\n" {
+		t.Fatalf("genuine local edit changed on refusal: %q", got)
 	}
 }
 
@@ -439,6 +513,59 @@ func behindClone(t *testing.T) string {
 	git(t, origin, "commit", "-m", "c2")
 	git(t, clone, "fetch", "origin")
 	return clone
+}
+
+func autocrlfBehindClone(t *testing.T) (string, string) {
+	t.Helper()
+	tmp := t.TempDir()
+	origin := filepath.Join(tmp, "origin")
+	mkdir(t, origin)
+	git(t, origin, "init", "-b", "work")
+	git(t, origin, "config", "core.autocrlf", "false")
+	git(t, origin, "config", "user.name", "test")
+	git(t, origin, "config", "user.email", "test@example.com")
+	writeFile(t, filepath.Join(origin, "modified.txt"), "v1\n")
+	writeFile(t, filepath.Join(origin, "deleted.txt"), "delete me\n")
+	writeFile(t, filepath.Join(origin, "genuine.txt"), "v1\n")
+	git(t, origin, "add", ".")
+	git(t, origin, "commit", "-m", "c1")
+
+	clone := filepath.Join(tmp, "clone")
+	git(t, tmp, "-c", "core.autocrlf=true", "clone", origin, clone)
+	git(t, clone, "config", "core.autocrlf", "true")
+	git(t, clone, "config", "user.name", "test")
+	git(t, clone, "config", "user.email", "test@example.com")
+	if got := readFile(t, filepath.Join(clone, "modified.txt")); got != "v1\r\n" {
+		t.Fatalf("fixture checkout bytes = %q, want core.autocrlf CRLF", got)
+	}
+	if got := readFile(t, filepath.Join(clone, "deleted.txt")); got != "delete me\r\n" {
+		t.Fatalf("deleted-path fixture bytes = %q, want core.autocrlf CRLF", got)
+	}
+	if got := gitOutput(t, clone, "show", "HEAD:modified.txt"); got != "v1\n" {
+		t.Fatalf("fixture HEAD blob = %q, want canonical LF bytes", got)
+	}
+
+	writeFile(t, filepath.Join(origin, "modified.txt"), "v2\n")
+	writeFile(t, filepath.Join(origin, "genuine.txt"), "v2\n")
+	git(t, origin, "rm", "deleted.txt")
+	git(t, origin, "add", "modified.txt", "genuine.txt")
+	git(t, origin, "commit", "-m", "c2")
+	git(t, clone, "fetch", "origin")
+	return clone, revString(t, clone, "origin/work")
+}
+
+func hasEntry(entries []Entry, status, path string) bool {
+	for _, entry := range entries {
+		if entry.Status == status && entry.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func isCleanHashFor(args []string, path string) bool {
+	return len(args) == 4 && args[0] == "hash-object" && args[1] == "--path="+path &&
+		args[2] == "--" && args[3] == path
 }
 
 func git(t *testing.T, cwd string, args ...string) {

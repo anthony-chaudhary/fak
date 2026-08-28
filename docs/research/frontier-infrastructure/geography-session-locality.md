@@ -1,3 +1,8 @@
+---
+title: "Geography and session-locality evidence ledger"
+description: "As of: 2026-08-27. Tracker: #9323. This ledger separates billing geography,."
+---
+
 # Geography and session-locality evidence ledger
 
 **As of:** 2026-08-27. **Tracker:** #9323. This ledger separates billing geography,

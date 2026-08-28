@@ -1,3 +1,8 @@
+---
+title: "Frontier infrastructure and workload expectations index"
+description: "The existing OpScale row now separates four evidence modes from arXiv v1: an."
+---
+
 # Frontier infrastructure and workload expectations index
 
 ## Latest slice: operator-level autoscaling envelope (#9387)

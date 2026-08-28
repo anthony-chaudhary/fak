@@ -1,3 +1,8 @@
+---
+title: "Indexed document sets"
+description: "Any maintained Markdown source longer than 150 lines (approximately three 50-line pages) must be split into bounded child pages and replaced by a concise index. Mark an index with <!--."
+---
+
 # Indexed document sets
 
 Any maintained Markdown source longer than **150 lines** (approximately three 50-line pages) must be split into bounded child pages and replaced by a concise index. Mark an index with `<!-- fak:document-set -->`. The threshold is source-line based so local and CI results are deterministic.
