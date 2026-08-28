@@ -3,10 +3,13 @@ package qwen38quantrun
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
@@ -110,6 +113,122 @@ func TestRunAdapterRejectsInlineAPIKey(t *testing.T) {
 	}
 }
 
+func TestRunAdapterRejectsMaintainedDriftBeforeEffects(t *testing.T) {
+	var requests atomic.Int32
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "must not contact endpoint", http.StatusServiceUnavailable)
+	}))
+	defer endpoint.Close()
+
+	tests := []struct {
+		name, example, want string
+		mutate              func(*AdapterConfig)
+	}{
+		{"llama shell lifecycle", "llama.cpp.json", "cleanup_command", func(cfg *AdapterConfig) { cfg.CleanupCommand = []string{"sh", "-c", cfg.Expected.RuntimeRevision} }},
+		{"llama image drift", "llama.cpp.json", "llama.cpp command", func(cfg *AdapterConfig) {
+			replaceAdapterArg(cfg.Command, "llama.cpp:"+cfg.Expected.RuntimeRevision, "llama.cpp:drift")
+		}},
+		{"vllm runtime revision", "vllm.json", "runtime_source", func(cfg *AdapterConfig) { cfg.Expected.RuntimeRevision = strings.Repeat("0", 40) }},
+		{"vllm inline secret", "vllm.json", "inline api_key", func(cfg *AdapterConfig) { cfg.Endpoint.APIKey = "must-not-leak" }},
+		{"vllm implementation fallback", "vllm.json", "vLLM command", func(cfg *AdapterConfig) { replaceAdapterArg(cfg.Command, "vllm", "auto") }},
+		{"vllm observation drift", "vllm.json", "observation_command", func(cfg *AdapterConfig) { replaceAdapterArg(cfg.ObservationCommand, ".State.Running", "true") }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			marker := filepath.Join(dir, "helper-called")
+			cfg := maintainedAdapterRunTestConfig(t, test.example, endpoint.URL, marker)
+			t.Setenv(cfg.APIKeyEnv, "must-not-leak")
+			test.mutate(&cfg)
+			configPath := filepath.Join(dir, "config.json")
+			corpusPath := filepath.Join(dir, "corpus.json")
+			reportPath := filepath.Join(dir, "report.json")
+			archivePath := filepath.Join(dir, "archive.json")
+			writeJSONTest(t, configPath, cfg)
+			writeJSONTest(t, corpusPath, qwen38quant.DefaultCorpus())
+			beforeRequests := requests.Load()
+
+			err := RunAdapter(context.Background(), configPath, corpusPath, reportPath, archivePath)
+			if err == nil || !contains(err.Error(), test.want) || !contains(err.Error(), "SelfcheckAdapterConfig") {
+				t.Fatalf("err=%v, want field %q and recovery action", err, test.want)
+			}
+			if contains(err.Error(), "must-not-leak") {
+				t.Fatalf("refusal leaked credential value: %v", err)
+			}
+			if requests.Load() != beforeRequests {
+				t.Fatalf("drifted config contacted endpoint: requests %d -> %d", beforeRequests, requests.Load())
+			}
+			for _, path := range []string{marker, reportPath, archivePath} {
+				if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+					t.Fatalf("%s exists after structural refusal", filepath.Base(path))
+				}
+			}
+		})
+	}
+}
+
+func TestRunAdapterValidMaintainedConfigReachesCampaign(t *testing.T) {
+	var requests atomic.Int32
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		http.Error(w, "campaign seam reached", http.StatusServiceUnavailable)
+	}))
+	defer endpoint.Close()
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "helper-called")
+	cfg := maintainedAdapterRunTestConfig(t, "vllm.json", endpoint.URL, marker)
+	t.Setenv(cfg.APIKeyEnv, "test-key")
+	configPath, corpusPath := filepath.Join(dir, "config.json"), filepath.Join(dir, "corpus.json")
+	writeJSONTest(t, configPath, cfg)
+	writeJSONTest(t, corpusPath, qwen38quant.DefaultCorpus())
+	err := RunAdapter(context.Background(), configPath, corpusPath, filepath.Join(dir, "report.json"), filepath.Join(dir, "archive.json"))
+	if err == nil || requests.Load() == 0 {
+		t.Fatalf("valid maintained config did not reach campaign seam: requests=%d err=%v", requests.Load(), err)
+	}
+	if _, statErr := os.Stat(marker); statErr != nil {
+		t.Fatalf("valid maintained config did not execute observation helper: %v", statErr)
+	}
+}
+
+func maintainedAdapterRunTestConfig(t *testing.T, example, endpoint, marker string) AdapterConfig {
+	t.Helper()
+	cfg, err := SelfcheckAdapterConfig(filepath.Join("..", "..", "examples", "qwen38quantrun", example))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := cfg.Expected.RuntimeRevision
+	observationPath := filepath.Join(t.TempDir(), "observation.json")
+	writeJSONTest(t, observationPath, Observation{
+		Identity: cfg.Expected, Hardware: "test", Software: "test", Device: cfg.RequireDevice,
+		ContextTokens: 1, CacheMode: "test", Resident: true,
+	})
+	cfg.Endpoint.Endpoint = endpoint
+	cfg.ObservationCommand = adapterHelperCommand("observation", marker, observationPath, revision, ".State.Running", ".HostConfig.DeviceRequests")
+	cfg.RestartCommand = adapterHelperCommand("effect", marker, revision)
+	cfg.ReadyCommand = adapterHelperCommand("effect", marker, revision, "/health")
+	cfg.CleanupCommand = adapterHelperCommand("effect", marker, revision)
+	cfg.Command = adapterHelperCommand("ok", "", revision, cfg.APIKeyEnv, "--pull", "never", "--gpus", "all")
+	if cfg.ExecutionEngine == qwen38quant.EngineLlamaCpp {
+		cfg.Command = append(cfg.Command, "llama.cpp:"+revision, "--model", "/models/model.gguf", "--n-gpu-layers", "all")
+	} else {
+		cfg.Command = append(cfg.Command, "vllm:"+revision, "serve", "/models/model", "--model-impl", "vllm")
+	}
+	if err := validateMaintainedAdapter(cfg); err != nil {
+		t.Fatalf("test adapter is not maintained-contract clean: %v", err)
+	}
+	return cfg
+}
+
+func replaceAdapterArg(argv []string, old, new string) {
+	for i := range argv {
+		if argv[i] == old {
+			argv[i] = new
+			return
+		}
+	}
+}
+
 func TestCommandProbeRejectsUnknownObservationFields(t *testing.T) {
 	argv := helperCommand("observation-unknown")
 	_, err := (commandProbe{argv: argv}).Observe(context.Background())
@@ -140,11 +259,34 @@ func TestRunAdapterWritesNothingWhenProbeFails(t *testing.T) {
 }
 
 func TestAdapterHelperProcess(t *testing.T) {
-	if len(os.Args) < 2 || os.Args[len(os.Args)-2] != "--" {
+	separator := slices.Index(os.Args, "--")
+	if separator < 0 || separator+1 >= len(os.Args) {
 		return
 	}
-	switch os.Args[len(os.Args)-1] {
+	args := os.Args[separator+1:]
+	switch args[0] {
 	case "ok":
+		os.Exit(0)
+	case "effect":
+		if len(args) < 2 {
+			os.Exit(4)
+		}
+		if err := os.WriteFile(args[1], []byte("called\n"), 0o600); err != nil {
+			os.Exit(5)
+		}
+		os.Exit(0)
+	case "observation":
+		if len(args) < 3 {
+			os.Exit(4)
+		}
+		if err := os.WriteFile(args[1], []byte("called\n"), 0o600); err != nil {
+			os.Exit(5)
+		}
+		raw, err := os.ReadFile(args[2])
+		if err != nil {
+			os.Exit(6)
+		}
+		_, _ = os.Stdout.Write(raw)
 		os.Exit(0)
 	case "observation-unknown":
 		os.Stdout.WriteString(`{"identity":{},"unknown":true}`)
@@ -157,6 +299,14 @@ func TestAdapterHelperProcess(t *testing.T) {
 
 func helperCommand(mode string) []string {
 	return []string{os.Args[0], "-test.run=^TestAdapterHelperProcess$", "--", mode}
+}
+
+func adapterHelperCommand(mode, marker string, extra ...string) []string {
+	argv := []string{os.Args[0], "-test.run=^TestAdapterHelperProcess$", "--", mode}
+	if marker != "" {
+		argv = append(argv, marker)
+	}
+	return append(argv, extra...)
 }
 
 func writeJSONTest(t *testing.T, path string, v any) {
