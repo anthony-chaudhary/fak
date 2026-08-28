@@ -1015,3 +1015,18 @@ These reader-facing references complement the curated paths above. They are grou
 - [`docs/notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md`](docs/notes/QWEN4EXP-SUPPORT-ROLLBACK-WATCH-2026-08-26.md) — Qwen4 experimental support rollback watch and cutover evidence.
 
 - [Actionable CI base-red dogfood 2026-08-27](docs/notes/ACTIONABLE-CI-BASE-RED-DOGFOOD-9466-2026-08-27.md) — live #9466 release-status evidence.
+
+### docs / standards
+
+- [`docs/standards/provider-job-accounting.md`](docs/standards/provider-job-accounting.md) — append-only provider job accounting standard, including counter-only observations and quality-qualified receipts.
+- [`docs/standards/provider-job-accounting-schema.json`](docs/standards/provider-job-accounting-schema.json) — closed JSON Schema for the provider accounting ledger.
+- [`docs/standards/fixtures/provider-job-accounting-gpt56-sol-api.jsonl`](docs/standards/fixtures/provider-job-accounting-gpt56-sol-api.jsonl) — GPT-5.6 Sol official-terms, synthetic receipt, and observed two-turn counter fixtures.
+- [`docs/standards/fixtures/provider-job-accounting-local.jsonl`](docs/standards/fixtures/provider-job-accounting-local.jsonl) — local execution accounting fixture.
+
+### docs / notes / provider accounting
+
+- [`docs/notes/gpt-5-6-sol-official-terms-2026-08-27.md`](docs/notes/gpt-5-6-sol-official-terms-2026-08-27.md) — frozen GPT-5.6 Sol commercial-terms boundary and counter-only evidence limits for #9552/#9578.
+
+### internal / providerjobaccounting
+
+- [`internal/providerjobaccounting`](internal/providerjobaccounting) — schema and fixture contract tests for provider job accounting.
