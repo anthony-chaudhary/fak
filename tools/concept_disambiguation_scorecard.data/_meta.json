@@ -8706,16 +8706,6 @@
         },
         {
           "category": "incidental",
-          "reason": "Go optional-interface name, not a deployable policy capability.",
-          "token": "Qwen35GDNSequenceCapability"
-        },
-        {
-          "category": "incidental",
-          "reason": "Provider admission method, not the kernel policy preflight concept.",
-          "token": "PreflightQwen35GDNSequence"
-        },
-        {
-          "category": "incidental",
           "reason": "Internal receipt mapping record for existing self-update outcomes; it does not introduce a new operator capability or policy concept.",
           "token": "selfUpdateCheckPosture"
         },
@@ -8796,10 +8786,8 @@
         "PolicyRevision",
         "PolicySchema",
         "PrefixPosture",
-        "PreflightQwen35GDNSequence",
         "PreflightRefuseWIPLimit",
         "ProgressCallAdjudicated",
-        "Qwen35GDNSequenceCapability",
         "ReasonArmCapabilityBundled",
         "ReasonArmCapabilityUnnamed",
         "ReasonCapabilityExpired",
