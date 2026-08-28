@@ -732,6 +732,10 @@ func cmdManageCommand(commandName string, argv []string) {
 	guardTraceID = resolveGuardSessionID(guardTraceID, guardDurabilityWanted, session.DescriptorMeta{
 		CacheKey: sessionCacheKey(sessionDurabilityHost(), sessionWorkingDir(), "", command),
 	}, newGuardLaunchNonce())
+	if err := installGuardDevAttestation(guardTraceID, *policyPath); err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard: development lease attestation refused:", err)
+		os.Exit(2)
+	}
 	maybeRecordGuardSessionIndex(auditJournal, guardTraceID, command, time.Now())
 	// Record the operator-owned terminal session before its child starts. Normal
 	// return appends a tombstone; WT/RDP teardown cannot run the defer, leaving an
