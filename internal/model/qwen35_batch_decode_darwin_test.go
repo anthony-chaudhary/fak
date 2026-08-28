@@ -3,6 +3,7 @@
 package model
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -10,6 +11,19 @@ import (
 )
 
 func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
+	for _, active := range [][]bool{
+		{true, true},
+		{true, true, true},
+		{true, false, true, true, true},
+	} {
+		active := active
+		t.Run(qwen35BatchCaseName(active), func(t *testing.T) {
+			qwen35HybridQ4KStepBatchActiveMatchesSerial(t, active)
+		})
+	}
+}
+
+func qwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T, active []bool) {
 	if !metalgemm.Available() {
 		t.Skip("Metal unavailable")
 	}
@@ -27,7 +41,7 @@ func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
 		releaseMetalQ4KResidency(m)
 	})
 
-	const lanes = 5 // four active rows after ragged compaction
+	lanes := len(active)
 	serial := make([]*Session, lanes)
 	batched := make([]*Session, lanes)
 	prompts := make([][]int, lanes)
@@ -42,9 +56,19 @@ func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
 		defer batched[i].Close()
 	}
 
-	active := []bool{true, false, true, true, true}
-	ids := []int{41, 43, 47, 53, 59}
-	beforeInactive := qwen35BatchStateSnapshot(t, batched[1])
+	ids := make([]int, lanes)
+	for i := range ids {
+		ids[i] = []int{41, 43, 47, 53, 59}[i]
+	}
+	var beforeInactive qwen35BatchSnapshot
+	inactive := -1
+	for i, enabled := range active {
+		if !enabled {
+			inactive = i
+			beforeInactive = qwen35BatchStateSnapshot(t, batched[i])
+			break
+		}
+	}
 	want := make([][]float32, lanes)
 	for i := range serial {
 		if active[i] {
@@ -70,9 +94,21 @@ func TestQwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T) {
 		}
 		qwen35BatchCompareSession(t, i, serial[i], batched[i])
 	}
-	if after := qwen35BatchStateSnapshot(t, batched[1]); !reflect.DeepEqual(beforeInactive, after) {
-		t.Fatal("inactive lane state mutated")
+	if inactive >= 0 {
+		if after := qwen35BatchStateSnapshot(t, batched[inactive]); !reflect.DeepEqual(beforeInactive, after) {
+			t.Fatal("inactive lane state mutated")
+		}
 	}
+}
+
+func qwen35BatchCaseName(active []bool) string {
+	activeCount := 0
+	for _, enabled := range active {
+		if enabled {
+			activeCount++
+		}
+	}
+	return fmt.Sprintf("B%d_active%d", len(active), activeCount)
 }
 
 func qwen35BatchPreparedSession(t *testing.T, m *Model, prompt []int) *Session {

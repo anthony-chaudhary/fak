@@ -11,7 +11,7 @@ func init() { qwen35HybridQ4KBatchStep = stepBatchQwen35HybridQ4KMetal }
 func stepBatchQwen35HybridQ4KMetal(bs *BatchSession, ids []int) ([][]float32, bool) {
 	B, m, cfg := len(ids), bs.M, bs.M.Cfg
 	H, hd, nH, nKV := cfg.HiddenSize, cfg.HeadDim, cfg.NumHeads, cfg.NumKVHeads
-	if B < 4 || B > 8 || !metalgemm.Available() || len(bs.Seqs) != B || cfg.ModelType != "qwen3_5_text" || !cfg.AttnOutputGate || !cfg.QKNorm || cfg.rotaryDim() < 2 {
+	if B < 2 || B > 8 || !metalgemm.Available() || len(bs.Seqs) != B || cfg.ModelType != "qwen3_5_text" || !cfg.AttnOutputGate || !cfg.QKNorm || cfg.rotaryDim() < 2 {
 		return nil, false
 	}
 	for _, s := range bs.Seqs {
