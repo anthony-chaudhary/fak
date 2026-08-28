@@ -34,6 +34,7 @@ int mg_gdn_state_seed(int owner, const float *conv, int convElems, const float *
 int mg_gdn_state_snapshot(int owner, float *conv, int convElems, float *recurrent, int recurrentElems);
 void mg_gdn_state_release(int owner);
 int mg_gdn_live_buffers(void);
+int mg_gdn_owner_capacity(void);
 uint64_t mg_gdn_current_allocated_size(void);
 */
 import "C"
@@ -184,6 +185,9 @@ func NewGDNState(g GDNGeometry) (*GDNState, error) {
 	var conv, recurrent C.uint64_t
 	owner := C.mg_gdn_state_new(C.int(g.NumKeyHeads), C.int(g.NumValueHeads), C.int(g.KeyHeadDim),
 		C.int(g.ValueHeadDim), C.int(g.ConvKernel), &conv, &recurrent)
+	if owner == -2 {
+		return nil, &GDNDeclinedError{Reason: fmt.Sprintf("owner registry capacity %d exhausted", gdnOwnerCapacity())}
+	}
 	if owner < 0 || conv == 0 || recurrent == 0 || conv == recurrent {
 		if owner >= 0 {
 			C.mg_gdn_state_release(owner)
@@ -406,6 +410,10 @@ func (s *GDNState) Close() {
 
 // GDNLiveBufferCount returns the number of currently owned persistent buffers.
 func GDNLiveBufferCount() int { return int(C.mg_gdn_live_buffers()) }
+
+// gdnOwnerCapacity reports the native fixed-table bound for lifecycle witnesses.
+// Keeping the readback package-private avoids making registry sizing public API.
+func gdnOwnerCapacity() int { return int(C.mg_gdn_owner_capacity()) }
 
 // gdnCurrentAllocatedBytes is a native readback for the Darwin lifetime witness.
 // Keep it package-private: allocation policy remains owned by Metal, while the test

@@ -32,7 +32,10 @@ typedef struct {
     int nK, nV, kHd, vHd, convKernel;
 } MGGDNOwner;
 
-enum { MG_GDN_MAX_OWNERS = 256 };
+// Qwen3.8 has 48 linear-attention layers, so its declared B=8 envelope owns
+// 384 simultaneous lane-local states. Keep fixed storage and leave headroom for
+// diagnostics or overlapping construction without reallocating an active table.
+enum { MG_GDN_MAX_OWNERS = 512 };
 static MGGDNOwner gGDNOwners[MG_GDN_MAX_OWNERS];
 static uint64_t gGDNNextHandle = 1;
 static id<MTLComputePipelineState> gGDNConvPSO;
@@ -241,6 +244,8 @@ static int mg_gdn_zero(id<MTLBuffer> conv, id<MTLBuffer> recurrent) {
 int mg_gdn_state_new(int nK, int nV, int kHd, int vHd, int convKernel,
                      uint64_t *convHandle, uint64_t *recurrentHandle) {
     if (!mg_init() || !mg_gdn_pipelines() || convHandle == NULL || recurrentHandle == NULL) return -1;
+    *convHandle = 0;
+    *recurrentHandle = 0;
     int keyDim = nK * kHd, valueDim = nV * vHd, convDim = 2 * keyDim + valueDim;
     if (nK < 1 || nV < 1 || nV % nK || kHd < 1 || kHd > 128 || vHd < 1 || vHd > 256 || convKernel < 1 || convKernel > 8) return -1;
     size_t convBytes = (size_t)(convKernel - 1) * convDim * sizeof(float);
@@ -263,8 +268,10 @@ int mg_gdn_state_new(int nK, int nV, int kHd, int vHd, int convKernel,
             return owner;
         }
     }
-    return -1;
+    return -2;
 }
+
+int mg_gdn_owner_capacity(void) { return MG_GDN_MAX_OWNERS; }
 
 static void mg_gdn_event_reset(mg_gdn_event *event) {
     if (event == NULL) return;
