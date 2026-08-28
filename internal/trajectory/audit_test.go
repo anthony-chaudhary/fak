@@ -698,6 +698,38 @@ func TestAuditUserContainsRejectsNonUserEchoesAcrossSources(t *testing.T) {
 	}
 }
 
+func TestAuditUserContainsRejectsCodexRepositoryInstructions(t *testing.T) {
+	root := t.TempDir()
+	instructions := `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /workspace/project\n\n<INSTRUCTIONS>\nNative inference work prefers Qwen.\n</INSTRUCTIONS>"},{"type":"input_text","text":"<environment_context>\n  <cwd>/workspace/project</cwd>\n</environment_context>"}]}}`
+	rows := map[string]string{
+		"injected-only.jsonl": `{"type":"session_meta","payload":{"id":"injected-only"}}
+` + instructions + `
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Audit the documentation index"}]}}`,
+		"operator-task.jsonl": `{"type":"session_meta","payload":{"id":"operator-task"}}
+` + instructions + `
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Measure Qwen decode performance"}]}}`,
+	}
+	for name, body := range rows {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := RunAudit(AuditOptions{
+		Sources:      []AuditSource{{Name: AuditSourceCodex, Root: root, RootLabel: "codex/sessions"}},
+		UserContains: "qwen",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Transcripts) != 1 || result.Transcripts[0].TranscriptID != "operator-task" {
+		t.Fatalf("transcripts = %#v, want only operator-task", result.Transcripts)
+	}
+	if got := result.Denominators[0]; got.FilesDiscovered != 2 || got.FilesMatched != 1 || got.FilesScanned != 1 {
+		t.Fatalf("denominator = %#v, want discovered=2 matched=1 scanned=1", got)
+	}
+}
+
 func TestAuditUserTextRejectsClaudeToolAndInjectedRows(t *testing.T) {
 	user := map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": "qwen task"}}
 	tool := map[string]any{"type": "assistant", "message": map[string]any{"role": "assistant", "content": "qwen tool echo"}}
