@@ -7,10 +7,11 @@ import (
 
 // OwnershipReport is the complete machine-readable #6020 boundary witness.
 type OwnershipReport struct {
-	Schema   string             `json:"schema"`
-	Commands []CommandOwnership `json:"commands"`
-	Packages []PackageOwnership `json:"packages"`
-	Graph    GraphReport        `json:"graph"`
+	Schema     string             `json:"schema"`
+	Commands   []CommandOwnership `json:"commands"`
+	Packages   []PackageOwnership `json:"packages"`
+	Graph      GraphReport        `json:"graph"`
+	Extraction ExtractionReport   `json:"remaining_tier_dev_extraction"`
 }
 
 // BuildOwnershipReport loads the authoritative command catalog and Go import
@@ -30,11 +31,16 @@ func BuildOwnershipReport(root, pattern, importRoot string) (OwnershipReport, er
 	if err != nil {
 		return OwnershipReport{}, err
 	}
+	extraction, err := BuildRemainingExtractionReport(root, nodes)
+	if err != nil {
+		return OwnershipReport{}, fmt.Errorf("remaining TierDev extraction plan: %w", err)
+	}
 	return OwnershipReport{
-		Schema:   "fak-command-ownership/1",
-		Commands: commands,
-		Packages: append([]PackageOwnership(nil), DevOnlyPackages...),
-		Graph:    BuildGraphReport(importRoot, nodes, DevOnlyPackages),
+		Schema:     "fak-command-ownership/2",
+		Commands:   commands,
+		Packages:   append([]PackageOwnership(nil), DevOnlyPackages...),
+		Graph:      BuildGraphReport(importRoot, nodes, DevOnlyPackages),
+		Extraction: extraction,
 	}, nil
 }
 

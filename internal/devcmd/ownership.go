@@ -43,6 +43,9 @@ func RunOwnership(stdout, stderr io.Writer, root string, asJSON bool) int {
 	}
 	fmt.Fprintf(stdout, "command ownership: runtime=%d dev=%d shared=%d total=%d\n", runtime, dev, shared, len(report.Commands))
 	fmt.Fprintf(stdout, "runtime graph: packages=%d internal=%d dev-leaks=%d\n", report.Graph.PackageCount, report.Graph.InternalCount, len(report.Graph.Leaks))
+	fmt.Fprintf(stdout, "remaining TierDev extraction: safe=%d excluded=%d total=%d components=%d\n",
+		report.Extraction.Counts.Safe, report.Extraction.Counts.Excluded,
+		report.Extraction.Counts.Commands, report.Extraction.Counts.Components)
 	for _, leak := range report.Graph.Leaks {
 		fmt.Fprintf(stdout, "LEAK %s: %s\n", leak.Forbidden, strings.Join(leak.Path, " -> "))
 	}

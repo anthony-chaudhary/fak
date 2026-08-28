@@ -18,8 +18,11 @@ func TestRunOwnershipJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Schema != "fak-command-ownership/1" || len(got.Commands) == 0 || got.Graph.PackageCount == 0 {
+	if got.Schema != "fak-command-ownership/2" || len(got.Commands) == 0 || got.Graph.PackageCount == 0 {
 		t.Fatalf("incomplete report: %+v", got)
+	}
+	if got.Extraction.Schema != "fak-dev-extraction-report/1" || got.Extraction.Counts.Commands == 0 || got.Extraction.Counts.Safe+got.Extraction.Counts.Excluded != got.Extraction.Counts.Commands {
+		t.Fatalf("incomplete extraction partition: %+v", got.Extraction)
 	}
 }
 
@@ -67,7 +70,7 @@ func TestRunOwnershipText(t *testing.T) {
 	if code := RunOwnership(&out, &errOut, devindex.FindRoot("."), false); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, errOut.String())
 	}
-	for _, want := range []string{"command ownership: runtime=", "runtime graph: packages=", "dev-leaks=0"} {
+	for _, want := range []string{"command ownership: runtime=", "runtime graph: packages=", "dev-leaks=0", "remaining TierDev extraction: safe="} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}
