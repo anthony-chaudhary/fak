@@ -10,10 +10,12 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
 	EvidenceSchema = "fak-performance-rsi-evidence/1"
+	CycleSchema    = "fak-performance-rsi-cycle/1"
 	ReportSchema   = "fak-performance-rsi-scorecard/1"
 	TargetMultiple = 100.0
 )
@@ -30,6 +32,44 @@ type Evidence struct {
 	Snapshot         string      `json:"snapshot"`
 	TargetMultiplier float64     `json:"target_multiplier"`
 	Dimensions       []Dimension `json:"dimensions"`
+	Cycle            *Cycle      `json:"cycle,omitempty"`
+}
+
+// Cycle is one independently versioned, end-to-end performance improvement
+// cycle. The engine is explicit so cycle evidence cannot silently cross the
+// fak-native boundary.
+type Cycle struct {
+	Schema                string  `json:"schema"`
+	Engine                string  `json:"engine"`
+	IdeaAt                string  `json:"idea_at"`
+	QueueAt               string  `json:"queue_at"`
+	ExecutionAt           string  `json:"execution_at"`
+	EvaluationAt          string  `json:"evaluation_at"`
+	LandingAt             string  `json:"landing_at"`
+	LearningAt            string  `json:"learning_at"`
+	OperatorActiveSeconds float64 `json:"operator_active_seconds"`
+}
+
+func (c *Cycle) UnmarshalJSON(b []byte) error {
+	type cycleJSON Cycle
+	var decoded cycleJSON
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&decoded); err != nil {
+		return err
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("cycle: trailing JSON value")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
+		return err
+	}
+	if _, ok := fields["operator_active_seconds"]; !ok {
+		return errors.New("cycle operator_active_seconds is required")
+	}
+	*c = Cycle(decoded)
+	return nil
 }
 
 type Dimension struct {
@@ -47,6 +87,8 @@ type Dimension struct {
 type Result struct {
 	ID              string   `json:"id"`
 	Source          string   `json:"source"`
+	EvidenceKind    string   `json:"evidence_kind,omitempty"`
+	Engine          string   `json:"engine,omitempty"`
 	Status          string   `json:"status"`
 	Current         *float64 `json:"current"`
 	Target          *float64 `json:"target"`
@@ -105,13 +147,13 @@ func Decode(r io.Reader) (Evidence, error) {
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return e, errors.New("decode evidence: trailing JSON value")
 	}
-	if err := validate(e); err != nil {
+	if err := validate(&e); err != nil {
 		return e, err
 	}
 	return e, nil
 }
 
-func validate(e Evidence) error {
+func validate(e *Evidence) error {
 	if e.Schema != EvidenceSchema {
 		return fmt.Errorf("schema %q, want %q", e.Schema, EvidenceSchema)
 	}
@@ -157,7 +199,118 @@ func validate(e Evidence) error {
 			return fmt.Errorf("missing dimension %q", id)
 		}
 	}
+	if e.Cycle != nil {
+		if err := applyCycle(e); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func applyCycle(e *Evidence) error {
+	c := e.Cycle
+	if c.Schema != CycleSchema {
+		return fmt.Errorf("cycle schema %q, want %q", c.Schema, CycleSchema)
+	}
+	engine := strings.ToLower(strings.TrimSpace(c.Engine))
+	if strings.Contains(engine, "llama") || !strings.HasPrefix(engine, "fak-native") {
+		return errors.New("cycle engine must name explicit fak-native provenance without llama.cpp fallback")
+	}
+	if !finite(c.OperatorActiveSeconds) || c.OperatorActiveSeconds < 0 {
+		return errors.New("cycle operator_active_seconds must be nonnegative and finite")
+	}
+
+	names := []string{"idea_at", "queue_at", "execution_at", "evaluation_at", "landing_at", "learning_at"}
+	values := []string{c.IdeaAt, c.QueueAt, c.ExecutionAt, c.EvaluationAt, c.LandingAt, c.LearningAt}
+	times := make([]time.Time, len(values))
+	for i, value := range values {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("cycle %s is required", names[i])
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return fmt.Errorf("cycle %s: malformed RFC3339 timestamp: %w", names[i], err)
+		}
+		times[i] = parsed
+		if i > 0 && !times[i].After(times[i-1]) {
+			return fmt.Errorf("cycle stages must be strictly ordered: %s must follow %s", names[i], names[i-1])
+		}
+	}
+
+	cycleSeconds := times[5].Sub(times[0]).Seconds()
+	evaluationSeconds := times[3].Sub(times[2]).Seconds()
+	if c.OperatorActiveSeconds > cycleSeconds {
+		return errors.New("cycle operator_active_seconds exceeds end-to-end cycle time")
+	}
+
+	for i := range e.Dimensions {
+		d := &e.Dimensions[i]
+		var current float64
+		var err error
+		switch d.ID {
+		case "cycle_time":
+			current, err = durationInUnit(cycleSeconds, d.Unit)
+		case "evaluation_latency":
+			current, err = durationInUnit(evaluationSeconds, d.Unit)
+		case "experiment_throughput":
+			current, err = throughputInUnit(cycleSeconds, d.Unit)
+		case "automation_coverage":
+			current, err = coverageInUnit(1-c.OperatorActiveSeconds/cycleSeconds, d.Unit)
+		default:
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("cycle derivation for %s: %w", d.ID, err)
+		}
+		d.Current = &current
+		d.Source = "cycle:" + c.Schema
+		d.EvidenceKind = "cycle_ledger"
+		d.Engine = c.Engine
+	}
+	return nil
+}
+
+func durationInUnit(seconds float64, unit string) (float64, error) {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "second", "seconds", "s":
+		return seconds, nil
+	case "minute", "minutes", "min":
+		return seconds / 60, nil
+	case "hour", "hours", "h":
+		return seconds / 3600, nil
+	case "day", "days", "d":
+		return seconds / 86400, nil
+	case "week", "weeks", "w":
+		return seconds / (7 * 86400), nil
+	default:
+		return 0, fmt.Errorf("unsupported duration unit %q", unit)
+	}
+}
+
+func throughputInUnit(seconds float64, unit string) (float64, error) {
+	normalized := strings.ToLower(strings.TrimSpace(unit))
+	normalized = strings.ReplaceAll(normalized, "_per_", "/")
+	normalized = strings.ReplaceAll(normalized, " per ", "/")
+	for _, prefix := range []string{"experiments/", "experiment/", "cycles/", "cycle/"} {
+		if strings.HasPrefix(normalized, prefix) {
+			period, err := durationInUnit(1, strings.TrimPrefix(normalized, prefix))
+			if err == nil {
+				return 1 / (seconds * period), nil
+			}
+		}
+	}
+	return 0, fmt.Errorf("unsupported throughput unit %q", unit)
+}
+
+func coverageInUnit(fraction float64, unit string) (float64, error) {
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "fraction", "ratio":
+		return fraction, nil
+	case "percent", "percentage", "%":
+		return fraction * 100, nil
+	default:
+		return 0, fmt.Errorf("unsupported coverage unit %q", unit)
+	}
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
@@ -166,7 +319,7 @@ func Score(e Evidence) Report {
 	r := Report{Schema: ReportSchema, Snapshot: e.Snapshot, TargetMultiplier: e.TargetMultiplier}
 	worst := math.Inf(1)
 	for _, d := range e.Dimensions {
-		x := Result{ID: d.ID, Source: d.Source, Current: d.Current, Target: d.Target, Unit: d.Unit, NextAction: d.NextAction, Status: "UNKNOWN"}
+		x := Result{ID: d.ID, Source: d.Source, EvidenceKind: d.EvidenceKind, Engine: d.Engine, Current: d.Current, Target: d.Target, Unit: d.Unit, NextAction: d.NextAction, Status: "UNKNOWN"}
 		debt := math.Inf(1)
 		if d.Current != nil && d.Target != nil {
 			ratio := 0.0

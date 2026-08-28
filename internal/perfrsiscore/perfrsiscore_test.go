@@ -108,3 +108,103 @@ func TestFixtureIsVersioned(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func cycleEvidence(t *testing.T) Evidence {
+	t.Helper()
+	e := fixture(t)
+	e.Cycle = &Cycle{
+		Schema:                CycleSchema,
+		Engine:                "fak-native/qwen3.8",
+		IdeaAt:                "2026-08-28T10:00:00Z",
+		QueueAt:               "2026-08-28T10:10:00Z",
+		ExecutionAt:           "2026-08-28T10:30:00Z",
+		EvaluationAt:          "2026-08-28T11:00:00Z",
+		LandingAt:             "2026-08-28T11:30:00Z",
+		LearningAt:            "2026-08-28T12:00:00Z",
+		OperatorActiveSeconds: 1800,
+	}
+	for i := range e.Dimensions {
+		switch e.Dimensions[i].ID {
+		case "cycle_time", "evaluation_latency":
+			e.Dimensions[i].Unit = "hours"
+			e.Dimensions[i].Current = nil
+		case "experiment_throughput":
+			e.Dimensions[i].Unit = "experiments/day"
+			e.Dimensions[i].Current = nil
+		case "automation_coverage":
+			e.Dimensions[i].Unit = "percent"
+			e.Dimensions[i].Current = nil
+		}
+	}
+	return e
+}
+
+func decodeCycleEvidence(t *testing.T, e Evidence) (Evidence, error) {
+	t.Helper()
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Decode(bytes.NewReader(b))
+}
+
+func TestCycleDerivesFourDimensions(t *testing.T) {
+	e, err := decodeCycleEvidence(t, cycleEvidence(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]float64{
+		"cycle_time":            2,
+		"evaluation_latency":    .5,
+		"experiment_throughput": 12,
+		"automation_coverage":   75,
+	}
+	r := Score(e)
+	for _, d := range r.Dimensions {
+		expected, ok := want[d.ID]
+		if !ok {
+			continue
+		}
+		if d.Status == "UNKNOWN" || d.Current == nil || *d.Current != expected {
+			t.Errorf("%s: status=%s current=%v, want %v", d.ID, d.Status, d.Current, expected)
+		}
+		if d.Source != "cycle:"+CycleSchema {
+			t.Errorf("%s source=%q", d.ID, d.Source)
+		}
+	}
+}
+
+func TestCycleRejectsInvalidRows(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Cycle)
+	}{
+		{"unsupported schema", func(c *Cycle) { c.Schema = "fak-performance-rsi-cycle/2" }},
+		{"missing stage", func(c *Cycle) { c.QueueAt = "" }},
+		{"malformed timestamp", func(c *Cycle) { c.ExecutionAt = "yesterday" }},
+		{"reordered stages", func(c *Cycle) { c.LandingAt = "2026-08-28T10:45:00Z" }},
+		{"negative operator duration", func(c *Cycle) { c.OperatorActiveSeconds = -1 }},
+		{"non-native engine", func(c *Cycle) { c.Engine = "llama.cpp" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := cycleEvidence(t)
+			tc.mutate(e.Cycle)
+			if _, err := decodeCycleEvidence(t, e); err == nil {
+				t.Fatal("accepted invalid cycle")
+			}
+		})
+	}
+}
+
+func TestCycleRejectsMissingOperatorDuration(t *testing.T) {
+	e := cycleEvidence(t)
+	b, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b = bytes.Replace(b, []byte(`,"operator_active_seconds":1800`), nil, 1)
+	if _, err := Decode(bytes.NewReader(b)); err == nil {
+		t.Fatal("accepted missing operator_active_seconds")
+	}
+}

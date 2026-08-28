@@ -56,3 +56,38 @@ func TestPerformanceRSIRequiresInput(t *testing.T) {
 		t.Fatal(code)
 	}
 }
+
+func TestPerformanceRSICycleWitness(t *testing.T) {
+	witness := filepath.Join("..", "..", "docs", "_witnesses", "issue-9780-performance-rsi-cycle.json")
+	code, out, err := runPerfRSI(t, "--input", witness, "--json")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, err)
+	}
+	var report struct {
+		Dimensions []struct {
+			ID      string   `json:"id"`
+			Status  string   `json:"status"`
+			Current *float64 `json:"current"`
+		} `json:"dimensions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"cycle_time": false, "evaluation_latency": false,
+		"experiment_throughput": false, "automation_coverage": false,
+	}
+	for _, d := range report.Dimensions {
+		if _, ok := want[d.ID]; ok {
+			if d.Status == "UNKNOWN" || d.Current == nil {
+				t.Errorf("%s remained UNKNOWN", d.ID)
+			}
+			want[d.ID] = true
+		}
+	}
+	for id, found := range want {
+		if !found {
+			t.Errorf("missing derived dimension %s", id)
+		}
+	}
+}
