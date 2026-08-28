@@ -27,7 +27,35 @@ package model
 // correctness. The returned SpecDecodeRun carries MeanAcceptanceLength — the mean real tokens
 // committed per verify pass, > 1 exactly when drafting bought throughput.
 
-import "github.com/anthony-chaudhary/fak/internal/polymodel"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/anthony-chaudhary/fak/internal/polymodel"
+)
+
+// ErrQwen35MTPSpecDecodeUnsupported marks an explicit fail-closed boundary for
+// the opt-in production binding. It never authorizes a fallback runtime.
+var ErrQwen35MTPSpecDecodeUnsupported = errors.New("model: Qwen3.8 MTP speculative decode is unsupported")
+
+// Qwen35MTPSpecDecodeUnsupportedError names why the opt-in binding refused
+// execution before mutating a target or constructing speculative state.
+type Qwen35MTPSpecDecodeUnsupportedError struct {
+	Reason string
+}
+
+func (e *Qwen35MTPSpecDecodeUnsupportedError) Error() string {
+	if e == nil || e.Reason == "" {
+		return ErrQwen35MTPSpecDecodeUnsupported.Error()
+	}
+	return fmt.Sprintf("%v: %s", ErrQwen35MTPSpecDecodeUnsupported, e.Reason)
+}
+
+func (e *Qwen35MTPSpecDecodeUnsupportedError) Unwrap() error {
+	return ErrQwen35MTPSpecDecodeUnsupported
+}
+
+type qwen35MTPDrafterBuilder func(*Model, int, Qwen35MTPTargetHidden, Qwen35MTPTokenEmbedding) (*Qwen35MTPDrafter, error)
 
 // SpecDecodeGreedy runs greedy speculative decoding of the target Session using the drafter
 // Session as the co-resident proposer, driven by polymodel.SpecDecode. It is the pure engine
@@ -85,6 +113,180 @@ func SpecDecodeGreedy(target, drafter *Session, prompt []int, n, k int) (polymod
 			drafter.evictKV(dBase+(draftLen-evictKV), evictKV)
 		},
 	})
+}
+
+// SpecDecodeGreedyQwen35MTP is the explicit native Qwen3.8 MTP entry point.
+// It is intentionally opt-in and never changes ordinary Generate/Prefill behavior.
+//
+// Each proposal reconstructs the committed prefix in a fresh hidden-source
+// session before the MTP drafter may read it. Each verify round likewise uses a
+// fresh target session. Rejected drafts are therefore discarded by closing the
+// round session rather than claiming recurrent-state rollback support that the
+// Qwen hybrid target does not have. The caller's target session remains untouched.
+func SpecDecodeGreedyQwen35MTP(target *Session, prompt []int, n, k int) (polymodel.SpecDecodeRun, error) {
+	return specDecodeGreedyQwen35MTP(target, prompt, n, k, NewQwen35MTPDrafter)
+}
+
+func specDecodeGreedyQwen35MTP(target *Session, prompt []int, n, k int, build qwen35MTPDrafterBuilder) (polymodel.SpecDecodeRun, error) {
+	if target == nil || target.M == nil {
+		return polymodel.SpecDecodeRun{}, errors.New("model: Qwen3.8 MTP target session is required")
+	}
+	if len(prompt) == 0 {
+		return polymodel.SpecDecodeRun{}, ErrQwen35MTPEmptyPrefix
+	}
+	if k <= 0 {
+		return polymodel.SpecDecodeRun{}, ErrQwen35MTPInvalidDraftLength
+	}
+	if k != 1 {
+		return polymodel.SpecDecodeRun{}, &Qwen35MTPSpecDecodeUnsupportedError{Reason: "the retained one-layer MTP head supports exactly one draft token per round"}
+	}
+	if target.Cache == nil || target.Cache.Len() != 0 {
+		return polymodel.SpecDecodeRun{}, &Qwen35MTPSpecDecodeUnsupportedError{Reason: "target session must be fresh; pass the complete prompt explicitly"}
+	}
+	if target.Backend != nil || target.Quant || target.Q4 || target.Q4K || target.F16 || target.GPTQ ||
+		target.Metal || target.MetalQ4K || target.PrecisionPolicy != nil {
+		return polymodel.SpecDecodeRun{}, &Qwen35MTPSpecDecodeUnsupportedError{Reason: "only the native f32 target path has exact pre-final-norm hidden capture"}
+	}
+	mode, err := target.M.Qwen35MTPMode(false)
+	if err != nil {
+		return polymodel.SpecDecodeRun{}, err
+	}
+	if !mode.Enabled {
+		return polymodel.SpecDecodeRun{}, &Qwen35MTPSpecDecodeUnsupportedError{Reason: mode.Reason}
+	}
+	if build == nil {
+		return polymodel.SpecDecodeRun{}, errors.New("model: Qwen3.8 MTP drafter builder is required")
+	}
+	for _, token := range prompt {
+		if _, err := target.TokenEmbedding(token); err != nil {
+			return polymodel.SpecDecodeRun{}, err
+		}
+	}
+
+	var hiddenSource *Session
+	var hiddenCommitted []int
+	d, err := build(target.M, k, func(prefix []int) ([]float32, error) {
+		if hiddenSource == nil || len(prefix) == 0 || !tokenPrefix(prefix, hiddenCommitted) {
+			return nil, fmt.Errorf("model: target hidden for unevaluated prefix length %d is unavailable", len(prefix))
+		}
+		pos := len(prefix) - 1
+		hidden, err := hiddenSource.TargetHiddenAt(pos)
+		if err != nil {
+			return nil, fmt.Errorf("committed prefix position %d: %w", pos, err)
+		}
+		return hidden, nil
+	}, target.TokenEmbedding)
+	if err != nil {
+		return polymodel.SpecDecodeRun{}, err
+	}
+	defer d.Close()
+
+	var runtimeErr error
+	propose := func(committed []int) []int {
+		if runtimeErr != nil || d.Err() != nil {
+			return nil
+		}
+		source, err := newQwen35MTPIsolatedSession(target.M)
+		if err != nil {
+			runtimeErr = err
+			return nil
+		}
+		defer source.Close()
+		if err := evaluateQwen35MTPTargetPrefix(source, committed); err != nil {
+			runtimeErr = err
+			return nil
+		}
+		hiddenSource = source
+		hiddenCommitted = append(hiddenCommitted[:0], committed...)
+		draft := d.Propose(committed)
+		hiddenSource = nil
+		hiddenCommitted = hiddenCommitted[:0]
+		if err := d.Err(); err != nil {
+			runtimeErr = err
+		}
+		return draft
+	}
+	verify := func(committed, draft []int) []int {
+		if runtimeErr != nil || d.Err() != nil {
+			return nil
+		}
+		argmax, err := verifyQwen35MTPRound(target.M, committed, draft)
+		if err != nil {
+			runtimeErr = err
+			return nil
+		}
+		return argmax
+	}
+
+	run, decodeErr := polymodel.SpecDecode(prompt, propose, verify, polymodel.SpecDecodeConfig{
+		MaxNewTokens: n,
+		MaxDraft:     k,
+		// No rollback hook: every verifier is isolated to one round and is closed
+		// after producing target argmax. Rejection discards the whole session.
+	})
+	if drafterErr := d.Err(); drafterErr != nil {
+		return run, drafterErr
+	}
+	if runtimeErr != nil {
+		return run, runtimeErr
+	}
+	return run, decodeErr
+}
+
+func newQwen35MTPIsolatedSession(m *Model) (session *Session, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			session = nil
+			err = fmt.Errorf("model: create isolated Qwen3.8 MTP target session: %v", recovered)
+		}
+	}()
+	session = m.NewSession()
+	if session == nil {
+		return nil, errors.New("model: could not create isolated Qwen3.8 MTP target session")
+	}
+	return session, nil
+}
+
+func evaluateQwen35MTPTargetPrefix(session *Session, committed []int) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("model: evaluate Qwen3.8 MTP target hidden prefix: %v", recovered)
+		}
+	}()
+	session.captureTargetHidden = true
+	for _, token := range committed {
+		session.tokenHidden(token, session.Cache.Len())
+	}
+	return nil
+}
+
+func verifyQwen35MTPRound(m *Model, committed, draft []int) (argmax []int, err error) {
+	session, err := newQwen35MTPIsolatedSession(m)
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			argmax = nil
+			err = fmt.Errorf("model: verify Qwen3.8 MTP round: %v", recovered)
+		}
+	}()
+
+	logits := session.Prefill(committed)
+	if len(logits) == 0 {
+		return nil, errors.New("model: Qwen3.8 MTP verifier returned empty prompt logits")
+	}
+	argmax = make([]int, 0, len(draft)+1)
+	argmax = append(argmax, argmaxF32(logits))
+	for _, token := range draft {
+		logits = session.Step(token)
+		if len(logits) == 0 {
+			return nil, errors.New("model: Qwen3.8 MTP verifier returned empty decode logits")
+		}
+		argmax = append(argmax, argmaxF32(logits))
+	}
+	return argmax, nil
 }
 
 // SpecDecodeGreedyWithDrafter runs greedy speculative decoding with a
