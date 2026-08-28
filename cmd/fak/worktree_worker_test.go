@@ -100,6 +100,138 @@ func TestLandProgressJSONShape(t *testing.T) {
 	}
 }
 
+func TestWorkerLandDisambiguationTimeoutFlagUsesResolverReceiptAndNoRetry(t *testing.T) {
+	previous, hadPrevious := os.LookupEnv(workerworktree.DisambiguationTimeoutEnv)
+	if err := os.Unsetenv(workerworktree.DisambiguationTimeoutEnv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if hadPrevious {
+			_ = os.Setenv(workerworktree.DisambiguationTimeoutEnv, previous)
+		} else {
+			_ = os.Unsetenv(workerworktree.DisambiguationTimeoutEnv)
+		}
+	})
+	repo, worktree, base := newDisambiguationLandFixture(t)
+	var events []workerworktree.LandProgressEvent
+	res, err := withWorkerLandDisambiguationTimeout("1", true, func() workerworktree.Result {
+		return workerworktree.Land(
+			repo, worktree, base, "", []string{"cmd/fak/sample.go"}, nil, nil,
+			workerworktree.WithLandProgress(func(event workerworktree.LandProgressEvent) {
+				events = append(events, event)
+			}),
+		)
+	})
+	if err != nil {
+		t.Fatalf("bridge timeout flag: %v", err)
+	}
+	if res.OK || res.Applied || res.Committed || res.Disambiguation == nil {
+		t.Fatalf("1ms oracle timeout must be a typed pre-CAS refusal: %+v", res)
+	}
+	timeout := res.Disambiguation.Timeout
+	if timeout.DefaultTimeoutMS != 120_000 || timeout.RequestedTimeoutMS == nil ||
+		*timeout.RequestedTimeoutMS != 1 || timeout.EffectiveTimeoutMS != 1 ||
+		timeout.RecoveryMode != "explicit_bounded_override" {
+		t.Fatalf("CLI flag and resolver receipt diverged: %+v", timeout)
+	}
+	if diagnostic := res.Disambiguation.Before.Diagnostic; diagnostic == nil ||
+		diagnostic.Code != workerworktree.DisambiguationTimeoutCode || diagnostic.TimeoutMS != 1 {
+		t.Fatalf("failure-matched timeout diagnostic missing: %+v", res.Disambiguation.Before)
+	}
+	starts := 0
+	for _, event := range events {
+		if event.Phase == "whole-tree-disambiguation" && event.Status == "started" {
+			starts++
+			if event.Attempt != 1 {
+				t.Fatalf("disambiguation ran on retry attempt %d: %+v", event.Attempt, events)
+			}
+		}
+		if event.Phase == "cas-rebase" {
+			t.Fatalf("timeout triggered a retry: %+v", events)
+		}
+	}
+	if starts != 1 {
+		t.Fatalf("whole-tree witness attempts=%d, want exactly one: %+v", starts, events)
+	}
+	if _, present := os.LookupEnv(workerworktree.DisambiguationTimeoutEnv); present {
+		t.Fatalf("%s leaked after land", workerworktree.DisambiguationTimeoutEnv)
+	}
+}
+
+func TestWorkerLandDisambiguationTimeoutFlagLeavesBoundsToSameResolver(t *testing.T) {
+	repo, worktree, base := newDisambiguationLandFixture(t)
+	res, err := withWorkerLandDisambiguationTimeout("900001", true, func() workerworktree.Result {
+		return workerworktree.Land(repo, worktree, base, "", []string{"cmd/fak/sample.go"}, nil, nil)
+	})
+	if err != nil {
+		t.Fatalf("bridge timeout flag: %v", err)
+	}
+	if res.OK || res.Disambiguation == nil || res.Disambiguation.Before.Diagnostic == nil {
+		t.Fatalf("out-of-range timeout must be refused by the oracle resolver: %+v", res)
+	}
+	timeout := res.Disambiguation.Timeout
+	if timeout.DefaultTimeoutMS != 120_000 || timeout.RequestedTimeoutMS == nil ||
+		*timeout.RequestedTimeoutMS != 900001 || timeout.EffectiveTimeoutMS != 0 ||
+		timeout.RecoveryMode != "invalid_explicit_override" {
+		t.Fatalf("invalid CLI flag and resolver receipt diverged: %+v", timeout)
+	}
+	diagnostic := res.Disambiguation.Before.Diagnostic
+	if diagnostic.Code != workerworktree.DisambiguationTimeoutCode ||
+		diagnostic.Witness != "configuration" || diagnostic.Subphase != "timeout-config" {
+		t.Fatalf("invalid timeout diagnostic = %+v", diagnostic)
+	}
+}
+
+func newDisambiguationLandFixture(t *testing.T) (repo, worktree, base string) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git unavailable")
+	}
+	root := t.TempDir()
+	repo = filepath.Join(root, "repo")
+	worktree = filepath.Join(root, "worker")
+	if err := os.MkdirAll(filepath.Join(repo, "cmd", "fak"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "cmd", "fak", "sample.go"), []byte("package sample\n\nconst value = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A valid executable target that intentionally outlives the 1 ms accepted
+	// timeout. CommandContext must cancel it; the 900001 ms case refuses before it.
+	if err := os.WriteFile(filepath.Join(repo, "tools", "concept_disambiguation_scorecard.py"), []byte("import time\ntime.sleep(30)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git -C %s %s: %v: %s", dir, strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git(repo, "init", "-q", "-b", "main")
+	git(repo, "config", "user.email", "t@t")
+	git(repo, "config", "user.name", "t")
+	git(repo, "add", ".")
+	git(repo, "commit", "-qm", "base")
+	base = git(repo, "rev-parse", "HEAD")
+	git(repo, "worktree", "add", "--detach", worktree, base)
+	if err := os.WriteFile(filepath.Join(worktree, "cmd", "fak", "sample.go"), []byte("package sample\n\nconst value = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("git", "-C", repo, "worktree", "remove", "--force", worktree).Run()
+	})
+	return repo, worktree, base
+}
+
 // TestReapJSONShape proves `fak worktree worker reap` emits the removed verdict.
 func TestReapJSONShape(t *testing.T) {
 	res := workerworktree.Result{OK: true, Path: "/wt/fak-worker-wt-cmd-abc", Removed: true}

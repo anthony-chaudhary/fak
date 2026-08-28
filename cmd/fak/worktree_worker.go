@@ -56,9 +56,11 @@ fak worktree <subcommand>
                    Prints {ok, path, base_sha, reused, env, ...}.
       land --worktree D [--base-sha S] [--msg-file F] [--paths p ...] [--verify go-build]
            [--core-lock-maintenance-witness CLAIM] [--recovery-remote R]
-           [--require-remote-recovery]
+           [--require-remote-recovery] [--disambiguation-timeout-ms N]
                    Apply the worktree's diff-since-base onto the trunk as one
                    signed-off commit. Prints {ok, applied, committed, ...}.
+                   The optional disambiguation deadline is 1..900000 ms and uses
+                   the oracle's existing resolver; omitted means 120000 ms.
                    Managed issue lands re-verify the Top-5 comment. Roll back with
                    FAK_THOUGHT_CHECK_MODE=observe|off (default: enforce).
                    A diff touching a hard-self core-locked path is REFUSED with
@@ -213,6 +215,7 @@ func worktreeWorkerLand(argv []string) {
 	msgFile := fs.String("msg-file", "", "commit message file for `git commit -s -F` (default: derive from the worktree tip)")
 	verify := fs.String("verify", "off", "pre-land witness run IN the worktree: off | go-build")
 	root := fs.String("root", "", "repo root the change lands on (default: discover from cwd)")
+	disambiguationTimeoutMS := fs.String("disambiguation-timeout-ms", "", "one shared whole-tree disambiguation deadline in milliseconds (1..900000; default 120000; no retries)")
 	// Same flag name and same semantics as `fak commit --core-lock-maintenance-witness`
 	// (#5392): the claim is RESOLVED against independent evidence, and only a CONFIRMED
 	// resolution clears a hard-self core-lock pathset. Without it the land is refused
@@ -254,11 +257,45 @@ func worktreeWorkerLand(argv []string) {
 		}
 		opts = append(opts, workerworktree.WithRecoveryRemote(remote, *requireRemote))
 	}
-	res := workerworktree.Land(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil, opts...)
+	timeoutSet := flagWasSet(fs, "disambiguation-timeout-ms")
+	res, err := withWorkerLandDisambiguationTimeout(*disambiguationTimeoutMS, timeoutSet, func() workerworktree.Result {
+		return workerworktree.Land(repoRoot, strings.TrimSpace(*worktree), strings.TrimSpace(*baseSHA), strings.TrimSpace(*msgFile), []string(paths), hook, nil, opts...)
+	})
+	if err != nil {
+		res = workerworktree.Result{
+			OK: false, Code: workerworktree.DisambiguationTimeoutCode,
+			Reason: "configure worker land disambiguation timeout: " + err.Error(),
+		}
+	}
 	worktreeWorkerEmit(res)
 	if !res.OK {
 		os.Exit(1)
 	}
+}
+
+// withWorkerLandDisambiguationTimeout bridges the explicit CLI spelling onto the
+// workerworktree resolver's bootstrap input for exactly one Land call. The CLI
+// deliberately does not parse or clamp the value: the existing resolver remains
+// the single authority for the inclusive 1..900000 ms bound and writes the same
+// requested/effective/default fields into the disambiguation receipt. An omitted
+// flag leaves the environment untouched, preserving the 120000 ms default (or an
+// explicitly supplied bootstrap environment for older callers).
+func withWorkerLandDisambiguationTimeout(raw string, explicit bool, land func() workerworktree.Result) (workerworktree.Result, error) {
+	if !explicit {
+		return land(), nil
+	}
+	previous, hadPrevious := os.LookupEnv(workerworktree.DisambiguationTimeoutEnv)
+	if err := os.Setenv(workerworktree.DisambiguationTimeoutEnv, raw); err != nil {
+		return workerworktree.Result{}, err
+	}
+	defer func() {
+		if hadPrevious {
+			_ = os.Setenv(workerworktree.DisambiguationTimeoutEnv, previous)
+		} else {
+			_ = os.Unsetenv(workerworktree.DisambiguationTimeoutEnv)
+		}
+	}()
+	return land(), nil
 }
 
 func worktreeWorkerReap(argv []string) {

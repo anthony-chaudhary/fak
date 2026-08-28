@@ -91,6 +91,31 @@ func TestRecoverSystemCommitHeadroomIsBoundedAndManual(t *testing.T) {
 	}
 }
 
+func TestRecoverDisambiguationTimeoutRoutesToBoundedWorkerLandFlag(t *testing.T) {
+	var out, errb bytes.Buffer
+	if rc := runRecover(&out, &errb, []string{"DISAMBIGUATION_TIMEOUT", "--dry-run"}); rc != 0 {
+		t.Fatalf("rc=%d stderr=%s", rc, errb.String())
+	}
+	for _, want := range []string{
+		"recover DISAMBIGUATION_TIMEOUT",
+		"fak worktree worker land <same-args> --disambiguation-timeout-ms <milliseconds>",
+		"inclusive range 1..900000",
+		"120000 ms default",
+		"same three witnesses",
+		"does not skip, weaken, or retry",
+		"before trunk CAS",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("plan missing %q:\n%s", want, out.String())
+		}
+	}
+	out.Reset()
+	errb.Reset()
+	if rc := runRecover(&out, &errb, []string{"DISAMBIGUATION_TIMEOUT", "--execute"}); rc != 3 {
+		t.Fatalf("execute rc=%d want 3; stdout=%s stderr=%s", rc, out.String(), errb.String())
+	}
+}
+
 // TestRecoverStaleUntrackedRoutesToTheContentComparison binds the STALE_UNTRACKED refusal
 // (#5408) to an actionable playbook. The two things the printed plan must carry are the ones
 // the refusal itself was written to correct: compare the trunk copy content-to-content rather
