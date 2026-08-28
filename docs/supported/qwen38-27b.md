@@ -30,6 +30,24 @@ GDN/full-attention cadence, and a 262144-token configured context. It also has a
 vision tower. Qwen3.5 architecture compatibility is relevant, but does not
 replace exact Qwen3.8 acceptance.
 
+## Support status — 2026-08-28
+
+- The canonical `qwen38:27b` Q4_K_M artifact is pinned in the model registry and
+  covered by registry tests, preventing the preferred identity from drifting.
+- Native receipt and readmit lineage are test-bound across serving and model-engine
+  paths, so a resumed run must retain its native Qwen identity rather than merely
+  reporting a successful response.
+- The Vulkan path now includes Qwen GDN routing and decode plus host-visible Q4_K
+  weight staging. These are implementation and support facts, not an accepted
+  performance result.
+- AMD/Vulkan remains **AWAITING REMEASURE** until a native full-model run produces a
+  quality-complete, comparable hardware receipt. The canonical
+  [Qwen performance index](../benchmarks/QWEN-PERFORMANCE-INDEX.md) owns that status.
+
+The [August 27 dogfood snapshot](../notes/QWEN-TRAJECTORY-SNAPSHOT-DOGFOOD-2026-08-27.md)
+and [August 28 usage-outcome snapshot](../notes/QWEN-TRAJECTORY-SNAPSHOT-USAGE-OUTCOMES-2026-08-28.md)
+add operational and diagnostic context only; neither establishes a new benchmark result.
+
 ## First-class default
 
 Qwen3.8-27B Q4_K_M is fak's default model identity for serving demos and local runs.

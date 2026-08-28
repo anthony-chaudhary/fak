@@ -55,15 +55,15 @@ For the quickest proof, run the offline demo below. For security details, inspec
 default-deny policy. For performance, follow the witnessed native-model results.
 Claims and limitations link to the evidence behind them.
 
-<!-- native-status: 2026-08-26 -->
-### Native-model status — 2026-08-26
+<!-- native-status: 2026-08-28 -->
+### Native-model status — 2026-08-28
 
 This compact readout is designed for frequent refreshes; every row links its authority and says what is *not* proven.
 
 | Lane | Latest witnessed result | Current hold |
 |---|---|---|
 <!-- qwen38-frontdoor:begin -->
-| [Qwen3.8-27B](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | Accepted fak-native Metal Q4_K_M: **2.3-2.9 decode tok/s**, with functional `PASS` in the frozen M3 Pro full-run envelope. ([accepted receipt](docs/_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json)) Closest near-matched observation: **3.3 vs 6.966061 tok/s (~47%)** on the same M3 Pro and artifact. This is approximate, not accepted parity: native used P31/T64 versus P32/T64 and no joint quality-complete receipt exists. ([#8697](https://github.com/anthony-chaudhary/fak/issues/8697)) | Separate A100 cache-restore diagnostic: **~0.2 tok/s with 0/5 exact**. Failed quality makes it diagnostic only, never the parity headline. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md)) |
+| [Qwen3.8-27B](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) | No accepted Metal result remains inside its review window. The closest comparison has passed review and is omitted pending remeasurement. | Separate A100 cache-restore diagnostic: **~0.2 tok/s with 0/5 exact**. Failed quality makes it diagnostic only, never the parity headline. ([cache attribution](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md)) |
 <!-- qwen38-frontdoor:end -->
 | Ultracode / microagents | A `qwen2.5:0.5b` small-model scout/writer campaign preserved the accepted output through width 8 while reading 13,126 scoped tokens vs 32,760 in the full-context counterfactual. This is a context-access result, not a Qwen3.8 or billed-cost claim. ([access frontier](docs/_witnesses/issue-8624-ultracode-smallmodel/README.md)) | ABSTAIN on the GPT-5.6 Ultracode pair: activation and billed-token/spend accounting were not independently verified, and the observed fleet run was slower (0.47× concurrency speedup). ([paired witness](docs/_witnesses/issue-8168-ultracode-live/README.md)) |
 
@@ -170,4 +170,4 @@ scratch. Start with the [harness guide](docs/harness-init.md) when you are ready
 
 Apache-2.0 licensed.
 
-<!-- readme-verified: 2026-08-26 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-26 99.2/100 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->
+<!-- readme-verified: 2026-08-28 vs VERSION 0.45.0 + BENCHMARK-AUTHORITY · appeal-verified: 2026-08-26 99.2/100 · process: tools/readme_freshness_audit.py + tools/doc_appeal_scorecard.py -->

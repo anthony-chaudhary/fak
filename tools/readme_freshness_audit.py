@@ -519,7 +519,8 @@ def check_native_status(readme: str, *, today: _dt.date,
         "ultracode_lane": "ultracode / microagents" in body,
         "qwen38_authority": QWEN_INDEX_REL.lower() in body,
         "microagent_authority": "docs/_witnesses/issue-8624-ultracode-smallmodel/" in body,
-        "honest_hold": ("below parity" in body or "not accepted parity" in body) and "abstain" in body,
+        "honest_hold": ("below parity" in body or "not accepted parity" in body
+                        or "no accepted metal result remains" in body) and "abstain" in body,
         "refresh_contract": "refresh contract:" in body,
     }
     missing.extend(name for name, present in requirements.items() if not present)
@@ -546,22 +547,37 @@ def check_qwen_frontdoor(readme: str, qwen_index: str) -> dict[str, Any]:
         missing.append("index_generated_block")
     readme_block = readme_match.group(1).lower() if readme_match else ""
     index_block = index_match.group(1).lower() if index_match else ""
-    required = {
+    active_required = {
         "accepted_metal": ("2.3-2.9 decode tok/s", "functional `pass`"),
         "approximate_pair": ("3.3", "6.966061", "~47%", "approximate", "not accepted parity"),
         "diagnostic_cache": ("~0.2 tok/s", "0/5 exact", "diagnostic"),
         "p31_p32_caveat": ("p31/t64", "p32/t64", "no joint quality-complete receipt"),
     }
-    for name, needles in required.items():
-        if any(needle not in readme_block for needle in needles):
-            missing.append("readme_" + name)
-        if any(needle not in index_block for needle in needles):
-            missing.append("index_" + name)
+    reaped_required = {
+        "readme": ("no accepted metal result remains", "passed review", "omitted pending remeasurement",
+                   "~0.2 tok/s", "0/5 exact", "diagnostic"),
+        "index": ("reviewed row(s) are reaped", "immutable witnesses remain",
+                  "~0.2 tok/s", "0/5 exact", "diagnostic"),
+    }
+    active_ok = all(needle in readme_block for needles in active_required.values() for needle in needles) \
+        and all(needle in index_block for needles in active_required.values() for needle in needles)
+    reaped_ok = all(needle in readme_block for needle in reaped_required["readme"]) \
+        and all(needle in index_block for needle in reaped_required["index"])
+    if not active_ok and not reaped_ok:
+        for name, needles in active_required.items():
+            if any(needle not in readme_block for needle in needles):
+                missing.append("readme_" + name)
+            if any(needle not in index_block for needle in needles):
+                missing.append("index_" + name)
+        if not all(needle in readme_block for needle in reaped_required["readme"]):
+            missing.append("readme_reaped_state")
+        if not all(needle in index_block for needle in reaped_required["index"]):
+            missing.append("index_reaped_state")
     old_splice = ("cached fak-native decode collapsed", "0.3 tok/s median versus 36.55")
     if any(needle in readme_block for needle in old_splice):
         missing.append("old_cache_parity_splice")
     status = "OK" if not missing else "FAIL"
-    detail = ("generated Qwen front-door blocks agree on accepted, approximate, and diagnostic classes"
+    detail = ("generated Qwen front-door blocks agree on active or reaped result classes"
               if not missing else "Qwen front-door drift: " + ", ".join(missing))
     return {"check": "qwen_frontdoor", "status": status, "detail": detail,
             "items": missing}

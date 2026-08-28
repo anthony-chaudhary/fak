@@ -137,6 +137,20 @@ def test_qwen_frontdoor_accepts_separated_generated_classes() -> None:
     assert c["status"] == "OK", c
 
 
+def test_qwen_frontdoor_accepts_reviewed_rows_reaped_from_active_presentation() -> None:
+    readme = """<!-- qwen38-frontdoor:begin -->
+No accepted Metal result remains inside its review window. The closest comparison has
+passed review and is omitted pending remeasurement. Separate diagnostic: ~0.2 tok/s
+with 0/5 exact; failed quality keeps it diagnostic only.
+<!-- qwen38-frontdoor:end -->"""
+    index = """<!-- qwen38-frontdoor:begin -->
+DIAGNOSTIC: ~0.2 tok/s with 0/5 exact.
+2 reviewed row(s) are reaped from active presentation; immutable witnesses remain.
+<!-- qwen38-frontdoor:end -->"""
+    c = rfa.check_qwen_frontdoor(readme, index)
+    assert c["status"] == "OK", c
+
+
 def test_qwen_frontdoor_rejects_old_cache_parity_splice() -> None:
     c = rfa.check_qwen_frontdoor(_qwen_block(old_splice=True), _qwen_block())
     assert c["status"] == "FAIL", c

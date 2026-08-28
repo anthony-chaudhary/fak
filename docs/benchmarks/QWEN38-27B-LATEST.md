@@ -10,17 +10,19 @@ For the current cross-hardware view, use the canonical [Qwen performance index](
 <!-- qwen38-frontdoor:begin -->
 ## Generated current readout
 
-- **Accepted:** native fak Metal Q4_K_M, **2.3-2.9 decode tok/s**, functional `PASS` in the frozen M3 Pro full-run envelope.
-- **Closest near-matched observation:** **3.3 vs 6.966061 tok/s (~47%)**; approximate only because native was P31/T64 versus P32/T64 and no joint quality-complete receipt exists.
 - **Separate diagnostic:** A100 cache restore was **~0.2 tok/s with 0/5 exact**; failed quality excludes it from parity presentation.
+- **Reaped:** 2 row(s) passed review without renewal and are omitted here; their witnesses remain.
 <!-- qwen38-frontdoor:end -->
 
-**Latest accepted Mac result:** native fak Metal runs Qwen3.8-27B Q4_K_M at
+**Latest retained Metal receipt:** native fak Metal ran Qwen3.8-27B Q4_K_M at
 **2.3–2.9 decode tok/s** and **3.2–8.4 full-prefill tok/s** on the 18-GPU-core,
-36 GiB Apple M3 Pro. This is an acceptance result, not parity with llama.cpp.
+36 GiB Apple M3 Pro. This was an accepted result for its dated envelope, not parity
+with llama.cpp. Its **2026-08-27** review window passed without a comparable renewal,
+so it is now historical and is reaped from the active front-door presentation.
 
 Source of truth: [`metal-native-run-summary.json`](../_witnesses/qwen38-27b-2026-08-20/metal-native-run-summary.json),
-observed 2026-08-20. The exact model is the 17,106,775,008-byte
+observed **2026-08-20** and reviewed through **2026-08-27**. No newer comparable,
+accepted Metal full-run receipt supersedes it. The exact model is the 17,106,775,008-byte
 `unsloth/Qwen3.8-27B-GGUF` Q4_K_M artifact at revision
 `f1bfb127c64f7072bdd2cad55f258b9c8b2910fe`, SHA-256
 `7e78da5d7e3ae28d178121f58646953305f3e5bd3cb46f4a75584e8b6c6fe169`.
@@ -72,11 +74,22 @@ The main delta is implementation maturity, not a demonstrated architectural wind
   reports **1.57–1.71×** over repeated GEMV for the measured shapes, with parity checks. Qwen3.8 must be
   remeasured end to end before attributing that gain to tokens/sec.
 
+## August 27–28 update
+
+The canonical Qwen3.8 artifact pin, native-receipt/readmit lineage tests, Vulkan GDN
+route and decode, and host-visible Vulkan Q4_K staging have landed. The dated
+[trajectory dogfood](../notes/QWEN-TRAJECTORY-SNAPSHOT-DOGFOOD-2026-08-27.md) and
+[usage-outcome snapshot](../notes/QWEN-TRAJECTORY-SNAPSHOT-USAGE-OUTCOMES-2026-08-28.md)
+record supporting operational evidence. These are implementation, support, and diagnostic
+facts—not a newer accepted speed result. Metal and AMD/Vulkan remain awaiting comparable,
+quality-complete full-model remeasurement.
+
 ## Evidence status and next comparison
 
-- **Accepted Mac result:** the 2026-08-20 native-Metal witness linked above.
-- **Not a newer Mac speed result:** open work on resident Metal decode and bounded host
-  materialization (#8324 and #8101) has not produced a later accepted tokens/sec witness.
+- **Historical Mac result:** the 2026-08-20 native-Metal witness linked above passed
+  review on 2026-08-27 without renewal and no longer occupies an active result row.
+- **Not a newer Mac speed result:** resident Metal decode, bounded host materialization,
+  and the August 27–28 support work have not produced a later accepted tokens/sec witness.
 - **Not comparable:** the current BF16 and Q5_K_M campaign artifacts are still open-work
   evidence; Q5_K_M is explicitly `INVALID_API_CONTRACT`, and BF16 is an A100 campaign,
   not the Apple-Metal parity row.
