@@ -98,18 +98,20 @@ start_bg() {  # name port-check-path command… → records only processes this 
     return
   fi
   log "starting ${name}…"
-  bash -c '
+  # nohup makes the supervisor independent of the launcher's shell lifetime. Keep
+  # TERM/INT trapped so down.sh can still stop the owned child through this PID.
+  nohup bash -c '
     child=""
     stop_child() {
       [ -z "$child" ] || kill "$child" 2>/dev/null || true
       [ -z "$child" ] || wait "$child" 2>/dev/null || true
       exit 0
     }
-    trap stop_child TERM INT HUP
+    trap stop_child TERM INT
     "$@" &
     child=$!
     wait "$child"
-  ' "fak-grafana-owner=$RUN_ID" "$@" >"$RUN_DIR/$name.log" 2>&1 &
+  ' "fak-grafana-owner=$RUN_ID" "$@" </dev/null >"$RUN_DIR/$name.log" 2>&1 &
   local pid=$!
   {
     printf 'pid=%s\n' "$pid"

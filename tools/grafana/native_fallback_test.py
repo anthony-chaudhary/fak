@@ -119,6 +119,78 @@ class NativeFallbackTest(unittest.TestCase):
         self.assertEqual(result.stdout, "docker\n")
         self.assertEqual(result.stderr, "called\n")
 
+    def test_owned_process_survives_launcher_exit_and_down_stops_it(self) -> None:
+        root = self.make_fixture()
+        run_dir = root / "tools" / "grafana" / ".run"
+        run_dir.mkdir()
+        (run_dir / "stack.mode").write_text("native\n", encoding="utf-8")
+        script = (root / "tools" / "grafana" / "up.sh").read_text(
+            encoding="utf-8"
+        )
+        start = script.index("start_bg() {")
+        end = script.index("\n}\n", start) + 3
+        owner = "native-persistence-owner"
+
+        subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    f"{script[start:end]}\n"
+                    "port_live() { return 1; }\n"
+                    "log() { :; }\n"
+                    f"RUN_DIR={str(run_dir)!r}\n"
+                    f"RUN_ID={owner!r}\n"
+                    "start_bg owned '65534 /' sleep 30\n"
+                ),
+            ],
+            check=True,
+        )
+
+        pid_file = run_dir / "owned.pid"
+        metadata = dict(
+            line.split("=", 1)
+            for line in pid_file.read_text(encoding="utf-8").splitlines()
+        )
+        pid = int(metadata["pid"])
+        self.addCleanup(self.stop_pid, pid)
+        self.assertEqual(metadata["owner"], owner)
+        command_line = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn(f"fak-grafana-owner={owner}", command_line)
+
+        os.kill(pid, 1)
+        time.sleep(0.1)
+        os.kill(pid, 0)
+        self.assertEqual(
+            pid_file.read_text(encoding="utf-8"),
+            f"pid={pid}\nowner={owner}\n",
+        )
+        command_line = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn(f"fak-grafana-owner={owner}", command_line)
+
+        subprocess.run(
+            ["bash", str(root / "tools" / "grafana" / "down.sh")], check=True
+        )
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        else:
+            self.fail("owned supervisor was not stopped by down.sh")
+        self.assertFalse(pid_file.exists())
+
     def test_down_stops_only_process_with_matching_owner(self) -> None:
         root = self.make_fixture()
         run_dir = root / "tools" / "grafana" / ".run"
@@ -194,6 +266,13 @@ class NativeFallbackTest(unittest.TestCase):
         )
 
         self.assertEqual(calls.read_text(encoding="utf-8"), "compose down -v\n")
+
+    @staticmethod
+    def stop_pid(pid: int) -> None:
+        try:
+            os.kill(pid, 15)
+        except ProcessLookupError:
+            return
 
     @staticmethod
     def stop_process(process: subprocess.Popen[bytes]) -> None:
