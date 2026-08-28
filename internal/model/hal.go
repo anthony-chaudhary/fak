@@ -544,25 +544,6 @@ type rmsNormMatMul3Backend interface {
 	RMSNormMatMul3(wq, wk, wv, x, normWeight compute.Tensor, eps float32) (compute.Tensor, compute.Tensor, compute.Tensor)
 }
 
-type weightBufferCapBackend interface {
-	MaxWeightBufferBytes() int64
-}
-
-func deviceEmbeddingTableFits(be compute.Backend, shape []int) bool {
-	capper, ok := be.(weightBufferCapBackend)
-	if !ok || capper.MaxWeightBufferBytes() <= 0 {
-		return true
-	}
-	elements := int64(1)
-	for _, dimension := range shape {
-		if dimension <= 0 || elements > (1<<63-1)/int64(dimension) {
-			return false
-		}
-		elements *= int64(dimension)
-	}
-	return elements <= capper.MaxWeightBufferBytes()/int64(compute.F32.Bytes())
-}
-
 type embeddingRowBackend interface {
 	EmbeddingRow(table compute.Tensor, row int) compute.Tensor
 }
@@ -594,9 +575,6 @@ func (s *Session) tokenHALOutput(id, pos int, mode halOutputMode) (compute.Tenso
 	var x compute.Tensor
 	var embedTable compute.Tensor
 	embedder, useDeviceEmbed := be.(embeddingRowBackend)
-	if meta, ok := m.manifest["model.embed_tokens.weight"]; ok && !deviceEmbeddingTableFits(be, meta.Shape) {
-		useDeviceEmbed = false
-	}
 	if useDeviceEmbed {
 		embedTable = s.weightHAL("model.embed_tokens.weight")
 	} else {
