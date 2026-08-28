@@ -354,7 +354,13 @@ func documentSetLinkTarget(line string) (string, bool) {
 	}
 	rest := line[open+2:]
 	close := strings.LastIndex(rest, ")")
-	if close < 1 || strings.TrimSpace(rest[close+1:]) != "" {
+	if close < 1 {
+		return "", false
+	}
+	// Managed indexes may put one aggregate status/exposure pair around the link;
+	// linked detail pages remain the claim authority. Reject every other suffix.
+	suffix := strings.TrimSpace(rest[close+1:])
+	if suffix != "" && !validDocumentSetSuffix(suffix) {
 		return "", false
 	}
 	target := strings.TrimSpace(rest[:close])
@@ -362,6 +368,15 @@ func documentSetLinkTarget(line string) (string, bool) {
 		return "", false
 	}
 	return target, true
+}
+
+func validDocumentSetSuffix(s string) bool {
+	upper := strings.ToUpper(strings.TrimSpace(s))
+	if !strings.HasPrefix(upper, "[EXPOSURE:") || !strings.HasSuffix(upper, "]") {
+		return false
+	}
+	value := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(upper, "[EXPOSURE:"), "]"))
+	return strings.HasPrefix(value, "DEFAULT-ON") || strings.HasPrefix(value, "GATED") || strings.HasPrefix(value, "PARKED")
 }
 
 func containedDocumentSetTarget(root, target string) (clean, abs string, ok bool) {
