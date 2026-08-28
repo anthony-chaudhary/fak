@@ -81,6 +81,7 @@ var vulkanDev *vulkanBackend
 type vulkanBuf struct {
 	ptr                 unsafe.Pointer
 	n                   int
+	class               MemoryClass
 	scalePtr            unsafe.Pointer
 	scaleN              int
 	scaleBudgetedBytes  int64
@@ -170,6 +171,8 @@ type vulkanBackend struct {
 	maxStorageBufferRange   int64
 	maxMemoryAllocationSize int64
 }
+
+var _ TensorCloner = (*vulkanBackend)(nil)
 
 const vulkanGoPoolBucketCap = 64
 
@@ -295,7 +298,7 @@ func (v *vulkanBackend) dallocForClass(nbytes int, class MemoryClass, what strin
 			panic(&DeviceAllocError{Bytes: nbytes, Site: "vulkan:" + what, Class: class})
 		}
 	}
-	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes}
+	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes, class: class}
 }
 
 // dallocHostVis allocates a storage buffer in host-visible memory directly (no device-local
@@ -310,7 +313,7 @@ func (v *vulkanBackend) dallocHostVisFor(nbytes int, what string) *vulkanBuf {
 	if p == nil {
 		panic(&DeviceAllocError{Bytes: nbytes, Site: "vulkan:" + what, Class: MemoryOffload})
 	}
-	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes}
+	return &vulkanBuf{ptr: unsafe.Pointer(p), n: nbytes, class: MemoryOffload}
 }
 
 // dallocWeight places a weight buffer device-local while under the residency budget, else
@@ -395,7 +398,7 @@ func (v *vulkanBackend) recycleTransientLocked(b *vulkanBuf) {
 		return
 	}
 	bucket := v.freeTransient[b.n]
-	owner := &vulkanBuf{ptr: b.ptr, n: b.n}
+	owner := &vulkanBuf{ptr: b.ptr, n: b.n, class: b.class}
 	if len(bucket) < vulkanGoPoolBucketCap {
 		v.freeTransient[b.n] = append(bucket, owner)
 	} else {
@@ -554,6 +557,7 @@ func (v *vulkanBackend) uploadQ8Locked(shape []int, codes []int8, scales []float
 	buf := &vulkanBuf{
 		ptr:                 codeBuf.ptr,
 		n:                   codeBuf.n,
+		class:               codeBuf.class,
 		scalePtr:            scaleBuf.ptr,
 		scaleN:              scaleBuf.n,
 		budgetedWeightBytes: codeBuf.budgetedWeightBytes,
@@ -619,6 +623,36 @@ func (v *vulkanBackend) Read(t Tensor) []float32 {
 			C.fvk_d2h(unsafe.Pointer(&out[0]), db.ptr, C.size_t(len(out)*4))
 		}
 	})
+}
+
+// CloneTensor makes an independently owned device-to-device copy for persistent
+// backend state. fvk_d2d records into an open Vulkan batch when one exists, so the
+// flush is part of the clone contract: after this method returns either owner may be
+// freed without invalidating the other's bytes.
+func (v *vulkanBackend) CloneTensor(t Tensor) (Tensor, error) {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	b, ok := t.buf.(*vulkanBuf)
+	if !ok || b == nil || b.ptr == nil {
+		return Tensor{}, fmt.Errorf("vulkan: CloneTensor requires a live vulkan tensor")
+	}
+	if b.scalePtr != nil || len(b.q8Chunks) != 0 {
+		return Tensor{}, fmt.Errorf("vulkan: CloneTensor does not support tensors with auxiliary buffers")
+	}
+	if b.n <= 0 {
+		return Tensor{}, fmt.Errorf("vulkan: CloneTensor invalid allocation size %d", b.n)
+	}
+	class := b.class
+	if class == "" {
+		class = MemoryUnknown
+	}
+	dup := v.dallocForClass(b.n, class, "tensor clone "+shapeText(t.Shape))
+	C.fvk_d2d(dup.ptr, b.ptr, C.size_t(b.n))
+	C.fvk_batch_flush()
+	out := t
+	out.Shape = append([]int(nil), t.Shape...)
+	out.buf = dup
+	return out, nil
 }
 
 // Free releases the tensor's device buffer (and its companion Q8 scale buffer, if any)
@@ -1316,7 +1350,7 @@ func (k *vulkanKV) Pos() []int { return append([]int(nil), k.pos...) }
 func (k *vulkanKV) KeysView(layer int) Tensor {
 	w := k.stride()
 	n := k.K[layer].len / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &vulkanBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4})
+	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &vulkanBuf{ptr: k.K[layer].ptr, n: k.K[layer].len * 4, class: MemoryKVCache})
 }
 
 // ValuesView returns a flat [pos, nKV*hd] device tensor viewing the layer's cached value
@@ -1324,7 +1358,7 @@ func (k *vulkanKV) KeysView(layer int) Tensor {
 func (k *vulkanKV) ValuesView(layer int) Tensor {
 	w := k.stride()
 	n := k.V[layer].len / w
-	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &vulkanBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * 4})
+	return makeTensor(k.be, F32, RowMajor, []int{n, w}, nil, &vulkanBuf{ptr: k.V[layer].ptr, n: k.V[layer].len * 4, class: MemoryKVCache})
 }
 
 // Evict removes [from, from+n) from every layer and compacts the survivors, re-RoPE-ing

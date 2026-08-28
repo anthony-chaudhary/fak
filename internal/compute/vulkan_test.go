@@ -4,6 +4,7 @@ package compute
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,126 @@ func TestVulkanResourceCapsAreDiscovered(t *testing.T) {
 	if maxBufferBytes != want {
 		t.Fatalf("maxBufferBytes=%d, want effective cap %d (storage=%d allocation=%d)",
 			maxBufferBytes, want, maxStorageBufferRange, maxMemoryAllocationSize)
+	}
+}
+
+func TestVulkanCloneTensorCopiesKVStateIndependently(t *testing.T) {
+	v := vk(t)
+	c := cpu()
+	shape := []int{2, 3, 4}
+	values := make([]float32, 24)
+	for i := range values {
+		values[i] = float32(i*i-7*i+3) / 11
+	}
+
+	for _, tc := range []struct {
+		name       string
+		freeSource bool
+	}{
+		{name: "source_first", freeSource: true},
+		{name: "clone_first", freeSource: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := v.UploadClass(
+				NewF32(c, shape, append([]float32(nil), values...)),
+				F32,
+				MemoryKVCache,
+				"qwen38 recurrent state clone test",
+			)
+			sourceBuf := source.buf.(*vulkanBuf)
+			if sourceBuf.class != MemoryKVCache {
+				t.Fatalf("source memory class = %q, want %q", sourceBuf.class, MemoryKVCache)
+			}
+
+			// Clone while a batch is open: CloneTensor must submit and fence the D2D copy
+			// before returning, rather than leaving source lifetime coupled to a later flush.
+			v.BeginBatch()
+			defer v.FlushBatch()
+			clone, err := TensorCloner(v).CloneTensor(source)
+			if err != nil {
+				v.Free(source)
+				t.Fatalf("CloneTensor: %v", err)
+			}
+			cloneBuf := clone.buf.(*vulkanBuf)
+			if cloneBuf == sourceBuf || cloneBuf.ptr == sourceBuf.ptr {
+				v.Free(clone)
+				v.Free(source)
+				t.Fatal("CloneTensor reused the source allocation")
+			}
+			if cloneBuf.class != MemoryKVCache {
+				v.Free(clone)
+				v.Free(source)
+				t.Fatalf("clone memory class = %q, want %q", cloneBuf.class, MemoryKVCache)
+			}
+			if clone.Dtype != source.Dtype || clone.Layout != source.Layout || !slices.Equal(clone.Shape, source.Shape) {
+				v.Free(clone)
+				v.Free(source)
+				t.Fatalf("clone metadata = dtype=%s layout=%d shape=%v, want dtype=%s layout=%d shape=%v",
+					clone.Dtype, clone.Layout, clone.Shape, source.Dtype, source.Layout, source.Shape)
+			}
+			clone.Shape[0]++
+			if slices.Equal(clone.Shape, source.Shape) {
+				v.Free(clone)
+				v.Free(source)
+				t.Fatal("clone shape aliases source metadata")
+			}
+			clone.Shape[0]--
+			if got := v.Read(clone); !slices.Equal(got, values) {
+				v.Free(clone)
+				v.Free(source)
+				t.Fatalf("clone values = %v, want %v", got, values)
+			}
+			deltaValues := make([]float32, len(values))
+			mutatedValues := make([]float32, len(values))
+			for i := range values {
+				deltaValues[i] = 1
+				mutatedValues[i] = values[i] + deltaValues[i]
+			}
+			delta := v.UploadClass(
+				NewF32(c, shape, deltaValues),
+				F32,
+				MemoryActivation,
+				"qwen38 clone independence delta",
+			)
+			v.AddInPlace(source, delta)
+			v.Free(delta)
+			if got := v.Read(clone); !slices.Equal(got, values) {
+				v.Free(clone)
+				v.Free(source)
+				t.Fatalf("clone changed after source mutation: got %v, want %v", got, values)
+			}
+
+			if tc.freeSource {
+				v.Free(source)
+				if sourceBuf.ptr != nil {
+					v.Free(clone)
+					t.Fatal("Free(source) did not invalidate the source handle")
+				}
+				if cloneBuf.ptr == nil {
+					t.Fatal("Free(source) invalidated the clone handle")
+				}
+				if got := v.Read(clone); !slices.Equal(got, values) {
+					v.Free(clone)
+					t.Fatalf("clone after Free(source) = %v, want %v", got, values)
+				}
+				v.Free(clone)
+				return
+			}
+
+			v.Free(clone)
+			if cloneBuf.ptr != nil {
+				v.Free(source)
+				t.Fatal("Free(clone) did not invalidate the clone handle")
+			}
+			if sourceBuf.ptr == nil {
+				t.Fatal("Free(clone) invalidated the source handle")
+			}
+			if got := v.Read(source); !slices.Equal(got, mutatedValues) {
+				v.Free(source)
+				t.Fatalf("source after Free(clone) = %v, want %v", got, mutatedValues)
+			}
+			v.Free(source)
+		})
 	}
 }
 
