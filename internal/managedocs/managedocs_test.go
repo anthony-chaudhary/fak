@@ -14,6 +14,29 @@ func TestCanonicalManageFrontDoor(t *testing.T) {
 	}
 }
 
+func TestDocumentScannerConfigurationAcceptsLongGeneratedLine(t *testing.T) {
+	longLine := strings.Repeat("x", 128*1024)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "examples"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "long.txt"), []byte(longLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// RetainedOccurrences belongs to the real repository, so reaching stale-entry
+	// validation proves the long line was scanned without Scanner's token error.
+	err := Audit(root)
+	if err == nil || strings.Contains(err.Error(), "token too long") {
+		t.Fatalf("Audit() error = %v, want post-scan stale-entry findings", err)
+	}
+}
+
 func TestAuditRejectsUnclassifiedGuardExample(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {

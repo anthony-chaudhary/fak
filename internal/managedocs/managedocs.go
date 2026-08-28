@@ -310,6 +310,7 @@ func Audit(repoRoot string) error {
 			}
 			defer file.Close()
 			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 			lineNo := 0
 			for scanner.Scan() {
 				lineNo++
