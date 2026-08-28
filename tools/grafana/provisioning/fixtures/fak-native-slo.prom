@@ -1,0 +1,58 @@
+# Synthetic deterministic fixture for issue #9815. This is not live performance evidence.
+# Select scenario=good, regression, missing_evidence, or recovery in the dashboard.
+# HELP fak_native_slo_state Current debounced native performance SLO state.
+# TYPE fak_native_slo_state gauge
+fak_native_slo_state{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",state="good"} 1
+fak_native_slo_state{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",state="regression"} 1
+fak_native_slo_state{engine="fak-native",module_rev="internal/nativeperf@r42+g9815missing",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="missing_evidence",state="missing_evidence"} 1
+fak_native_slo_state{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",state="good"} 1
+# HELP fak_native_slo_value Latest available native performance objective value.
+# TYPE fak_native_slo_value gauge
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="ttft"} 0.42
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="tpot"} 0.028
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="throughput"} 118.4
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="queue_delay"} 0.035
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="cache_efficiency"} 0.78
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="transfer_share"} 0.08
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="kernel_share"} 0.62
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="memory_pressure"} 0.72
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="evidence_freshness"} 32
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r41+gbbdda8f04",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="good",objective="receipt_coverage"} 1
+# Regression: every requested objective remains available and the violating dimensions are explicit.
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="ttft"} 0.58
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="tpot"} 0.039
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="throughput"} 91.2
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="queue_delay"} 0.081
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="cache_efficiency"} 0.61
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="transfer_share"} 0.16
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="kernel_share"} 0.78
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="memory_pressure"} 0.94
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="evidence_freshness"} 47
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="receipt_coverage"} 0.98
+# Missing-evidence intentionally has no objective samples. It must render UNAVAILABLE, never zero.
+# Recovery has complete healthy evidence after the debounced transition.
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="ttft"} 0.41
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="tpot"} 0.027
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="throughput"} 121.0
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="queue_delay"} 0.031
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="cache_efficiency"} 0.81
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="transfer_share"} 0.07
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="kernel_share"} 0.60
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="memory_pressure"} 0.69
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="evidence_freshness"} 18
+fak_native_slo_value{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="recovery",objective="receipt_coverage"} 1
+# HELP fak_native_slo_violation Whether an available objective currently violates its SLO.
+# TYPE fak_native_slo_violation gauge
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="ttft"} 1
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="tpot"} 1
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="throughput"} 1
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="queue_delay"} 1
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="cache_efficiency"} 1
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="transfer_share"} 1
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="kernel_share"} 1
+fak_native_slo_violation{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",scenario="regression",objective="memory_pressure"} 1
+# HELP fak_native_lifecycle_event_info Native performance lifecycle event annotation.
+# TYPE fak_native_lifecycle_event_info gauge
+fak_native_lifecycle_event_info{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",event="promotion",release="v0.45.0"} 1
+fak_native_lifecycle_event_info{engine="fak-native",module_rev="internal/nativeperf@r42+g9815bad",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",event="revert",release="v0.45.0"} 1
+fak_native_lifecycle_event_info{engine="fak-native",module_rev="internal/nativeperf@r43+g9815recovered",benchmark_envelope="qwen38-4b-in128-out128-b1-quality-v3",model="Qwen3.8-4B",backend="cuda",event="release",release="v0.45.1"} 1
