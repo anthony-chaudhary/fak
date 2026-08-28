@@ -1,14 +1,14 @@
 # Path-portable Go verification builds: zero cross-root compiles experimentally, link remains
 
-Observed at `2026-08-28T04:02:09Z` for [#9661](https://github.com/anthony-chaudhary/fak/issues/9661), with the cgo follow-up observed at `2026-08-28T04:40:23Z` for [#9671](https://github.com/anthony-chaudhary/fak/issues/9671). The first source event is detached worker commit `ee6f393f419042c130a1b4b08a69883a962bc3f8`; the follow-up is an experimental diff over `0f36db3068126dc8c70d4a6956fc71639e82d912` and still needs committed-tip verification. The runtime is Go 1.26.6 on Darwin/arm64 with cgo enabled. Refresh this note when the Go toolchain changes, an isolated verification seam changes its build flags, or the matched Windows/amd64 benchmark is rerun.
+Observed at `2026-08-28T04:02:09Z` for [#9661](https://github.com/anthony-chaudhary/fak/issues/9661), with the cgo follow-up observed at `2026-08-28T04:40:23Z` for [#9671](https://github.com/anthony-chaudhary/fak/issues/9671) and the Make link census at `2026-08-28T05:03:26Z` for [#9672](https://github.com/anthony-chaudhary/fak/issues/9672). The first source event is detached worker commit `ee6f393f419042c130a1b4b08a69883a962bc3f8`; the cgo follow-up was first measured as an experimental diff over `0f36db3068126dc8c70d4a6956fc71639e82d912` and landed at `e1df7c2cc`; the Make split was measured over `b262395b602bfe67d6bd9183cf405457b91bf866`, which contains that cgo fix. The runtime is Go 1.26.6 on Darwin/arm64 with cgo enabled. Refresh this note when the Go toolchain changes, an isolated verification seam changes its build flags, or the matched Windows/amd64 benchmark is rerun.
 
 ## Verdict
 
 FAK's isolated verification commands materialize identical source under a different absolute directory on each run. Without `-trimpath`, Go 1.26.6 hashes that package directory into the compile action ID. A shared `GOCACHE` therefore cannot reuse most repository packages across those roots. Adding `-trimpath` at the verification-only `buildcheck`, `ci-preflight`, and `validate` build/run/vet/test seams made the second fresh-root build **2.58× faster** (`23.59s` → `9.14s`) and reduced executed compile actions from **590 to 1**. That is 589 of 590 recompiles avoided.
 
-This is a useful measured improvement, not the requested 10× result. The original one surviving compile was `internal/compute`'s cgo/Metal package. The #9671 experiment below removes that action without disabling Metal; every sample still links the 85 MB runtime. The 2+2 falsifiers also do not satisfy #9661's required 5+5 matched Windows/amd64 completion matrix.
+This is a useful measured improvement, not the requested 10× result. The original one surviving compile was `internal/compute`'s cgo/Metal package. The #9671 experiment below removes that action without disabling Metal; every targeted sample still links the 85 MB runtime. The #9672 Make census then separates the named developer artifacts from 147 unrelated whole-tree command links. These mechanism falsifiers do not satisfy #9661's required 5+5 matched Windows/amd64 completion matrix.
 
-The implementation deliberately does not change `scripts/build.sh`, the debuggable `make build` profile, CI `GOFLAGS`, or released artifacts. Debuggable builds retain host paths; only disposable verification roots opt into path normalization.
+The implementation deliberately does not change `scripts/build.sh`, the debuggable `make build` profile flags, CI `GOFLAGS`, or released artifacts. Debuggable builds retain host paths; only disposable verification roots opt into path normalization. The #9672 split changes which target owns the whole-tree sweep, while `make ci` retains both `build` and `build-all` as direct prerequisites.
 
 ## Alternating fresh-root witness
 
@@ -56,7 +56,24 @@ The treatment removed the last cross-root compile and cut this second-root sampl
 
 Both treatment roots produced byte-identical 85,260,210-byte artifacts (`sha256:2dc0d6fb…`). `go tool nm` retained `_fmetal_init` and `_mg_init`, and both artifacts returned `verdict=DENY reason=POLICY_BLOCK by=monitor` for the policy smoke. The Darwin/arm64/cgo tags, Objective-C source, Metal frameworks, shared `metalgemm` device seam, and runtime selection remain unchanged.
 
-This follow-up is still **experimental evidence**, not a landed claim: the receipt was captured from an uncommitted diff over `0f36db306`. The focused compute, architecture, and serve-selection tests passed, but the landed commit must be re-tested and witnessed before #9671 is closed.
+The receipt remains labeled **experimental evidence** because it was captured from an uncommitted diff over `0f36db306`. The one-line treatment subsequently landed at `e1df7c2cc`; the #9672 link census below runs on pinned `b262395b6`, which contains it. The cgo receipt's dedicated committed-tip test reconciliation remains part of #9671's closure record rather than being silently rewritten as pre-landing evidence.
+
+## Make follow-up: named artifacts versus 147 command links
+
+The machine-readable #9672 receipt is [`docs/_witnesses/build10x/make-build-link-census-2026-08-28.json`](../_witnesses/build10x/make-build-link-census-2026-08-28.json). It compares the former `make build` graph with the same pinned source after moving only `go build ./...` to an explicit `build-all` target. Both arms emitted the same four real outputs: debuggable `fak`, native `repoguard`, Windows `repoguard.exe`, and native `dispatchworker`. Each arm had a separate initially empty `GOCACHE`; its warm sample retained the exact named output paths so Go could validate their embedded build IDs.
+
+| Sample | Cache / output state | Real | Compile | Cgo | Link |
+|---|---|---:|---:|---:|---:|
+| former build graph, cold | empty / absent | 53.62s | 1,330 | 14 | 151 |
+| split build graph, cold | empty / absent | 31.14s | 947 | 14 | 4 |
+| former build graph, warm | populated / retained | 15.83s | 0 | 0 | 147 |
+| split build graph, warm | populated / retained | 1.26s | 0 | 0 | 0 |
+
+The cold sample removed 147 links and ran **1.72× faster**. The warm sample removed the same 147 links and ran **12.56× faster**. This is not a linker optimization: `go build ./...` links every main package to a disposable output on every invocation, whereas Go can validate and reuse the named artifacts. Baseline and treatment produced byte-identical copies of all four outputs. The native guard self-test passed 41/41, dispatchworker emitted a guarded dry-run packet, the Windows hook remained a Windows/amd64 PE, and `fak` retained the policy verdict `DENY reason=POLICY_BLOCK by=monitor`.
+
+The contract stays explicit. `make build` emits the runtime and hook artifacts. `make build-all` owns `go build ./...`. `make ci` names both as direct prerequisites, so the full tree still compiles and all commands still link before a green-bar claim. The existing `tools/build_entrypoint_test.py` locks this graph beside the release/profile anti-drift tests.
+
+These timings are a Darwin/arm64 diagnostic with one cold and one warm sample per arm. They do not replace #9673's five-cold/five-warm Windows/amd64 completion matrix, and the 1.72× cold result is not itself #9661's 10× result.
 
 ## Official source ledger
 
@@ -94,6 +111,6 @@ Portfolio disposition: **DEFAULT** for these disposable verification seams; **EX
 
 ## Next falsifier
 
-Keep #9661 open. First verify #9671 at its landed commit; then remove redundant whole-tree links under #9672 and run #9673's five-cold/five-warm matched Windows/amd64 matrix. If cross-root compile actions remain zero but elapsed time stays above 6,555 ms, the executable link is the evidenced next target. If compile actions return, diff the action inputs before changing more code.
+Keep #9661 open. Verify #9672 at its landed commit, then run #9673's five-cold/five-warm matched Windows/amd64 matrix on top of landed #9671 and #9672. If cross-root compile actions remain zero but elapsed time stays above 6,555 ms, the named executable links or host artifact scan are the evidenced next targets. If compile actions return, diff the action inputs before changing more code.
 
-Companions: [#9661](https://github.com/anthony-chaudhary/fak/issues/9661) · [#9671](https://github.com/anthony-chaudhary/fak/issues/9671) · [runtime/dev split #6019](https://github.com/anthony-chaudhary/fak/issues/6019) · [`docs/dev-tooling.md`](../dev-tooling.md)
+Companions: [#9661](https://github.com/anthony-chaudhary/fak/issues/9661) · [#9671](https://github.com/anthony-chaudhary/fak/issues/9671) · [#9672](https://github.com/anthony-chaudhary/fak/issues/9672) · [runtime/dev split #6019](https://github.com/anthony-chaudhary/fak/issues/6019) · [`docs/dev-tooling.md`](../dev-tooling.md)

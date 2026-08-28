@@ -930,16 +930,15 @@ var guardPromptTransportOS = runtime.GOOS
 // non-Windows CI, where the underlying windowgate hook is a no-op.
 var configureManagedHiddenConsole = windowgate.ConfigureBackgroundCommand
 
-// managedLaunchNeedsHiddenConsole keeps the existing #3597 headless behavior for
-// every harness and adds the narrow #8853 attended case: a recognized Codex root.
-// Unknown attended commands (including a user-invoked `fak m git`) remain
-// unchanged; this is a managed-Codex containment rule, not a global foreground
-// process policy.
+// managedLaunchNeedsHiddenConsole keeps #3597's windowless posture for headless
+// workers only. An attended child needs the inherited console itself, not merely
+// os.File values pointing at terminal handles: on Windows CREATE_NO_WINDOW left
+// attended Codex alive but unable to initialize its TUI (no terminal-ready byte
+// and no session file after 40s in #9656). Popup containment for attended Codex
+// must therefore use a mechanism that preserves console usability; applying the
+// background-process flag here is not a valid containment trade.
 func managedLaunchNeedsHiddenConsole(plan guardLaunchPlan) bool {
-	if !plan.interactive() {
-		return true
-	}
-	return plan.recognized() && plan.harnessProfile().Name == "codex"
+	return !plan.interactive()
 }
 
 func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstream bool, meta guardChildSpawnMetadata, broker *toolprocgate.SpawnBroker, launcher guardChildLauncher, extraEnv ...[2]string) (toolprocgate.SpawnGrant, *exec.Cmd, error) {
@@ -949,8 +948,8 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	}
 	plan = plan.withExecutableCommand(command)
 	// Decide from the semantic command before prompt transport can move a `-p`
-	// prompt off argv (#4852). Headless runs remain windowless; attended Codex
-	// roots receive the hidden inherited-console posture below.
+	// prompt off argv (#4852). Headless runs remain windowless; attended roots
+	// retain a console capable of hosting their TUI.
 	hiddenConsoleChild := managedLaunchNeedsHiddenConsole(plan)
 	executable, stdinPrompt, promptOnStdin := guardPromptStdinTransportForOS(plan.executableCommand(), guardPromptTransportOS)
 	plan = plan.withExecutableCommand(executable)
@@ -985,13 +984,11 @@ func launchGuardChildWithBroker(command []string, injected [][2]string, pinUpstr
 	if promptOnStdin {
 		child.Stdin = strings.NewReader(stdinPrompt)
 	}
-	// #3597: headless workers must not allocate an unattended pane. #8853 extends
-	// the same root-level containment to attended Codex only: guardExecLauncher has
-	// already bound stdin/stdout/stderr to the operator's terminal, so changing the
-	// Windows console creation mode does not remove the interactive I/O channel.
-	// Ordinary Codex tool descendants then inherit this non-visible console instead
-	// of allocating transient desktop windows. StartInNewJob preserves the flags by
-	// only OR-ing CREATE_SUSPENDED. Other attended commands stay unchanged.
+	// #3597: headless workers must not allocate an unattended pane. Do not infer
+	// console usability from the inherited os.File pointers here: #9656 proved
+	// attended Codex can retain those pointers yet produce no TUI when Windows
+	// CREATE_NO_WINDOW is set. StartInNewJob may add CREATE_SUSPENDED later, but an
+	// attended child reaches it without the background console flags.
 	if hiddenConsoleChild {
 		configureManagedHiddenConsole(child)
 	}

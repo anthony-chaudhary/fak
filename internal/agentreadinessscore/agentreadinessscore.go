@@ -71,8 +71,6 @@ const (
 	pasteDocsGlob = "docs/integrations"
 )
 
-var claimTags = []string{"[SHIPPED]", "[SIMULATED]", "[STUB]"}
-
 // labeledPaths is (harness/family label, candidate paths); the affordance is present if ANY
 // path exists.
 type labeledPaths struct {
@@ -225,7 +223,6 @@ var frontierUnits = map[string]int{
 // ---- compiled regexes (mirror the Python module-level patterns) -------------------
 
 var (
-	claimLineRe          = regexp.MustCompile(`^\s*- \[`)
 	bracketSlotRe        = regexp.MustCompile(`<[^>]+>`)
 	envSlotRe            = regexp.MustCompile(`^[A-Z][A-Z0-9_]{2,}$`)
 	proofPolicyRe        = regexp.MustCompile(`--policy\s+(\S+)`)
@@ -563,30 +560,6 @@ func boundedIdentityStatement(statement string) string {
 		return statement
 	}
 	return string(runes[:maxRunes-1]) + "…"
-}
-
-func untaggedClaims(claimsText string, present bool) []string {
-	bad := []string{}
-	if !present || claimsText == "" {
-		return bad
-	}
-	for i, line := range strings.Split(claimsText, "\n") {
-		if !claimLineRe.MatchString(line) {
-			continue
-		}
-		n := 0
-		for _, tag := range claimTags {
-			n += strings.Count(line, tag)
-		}
-		if n != 1 {
-			snippet := strings.TrimSpace(line)
-			if len(snippet) > 80 {
-				snippet = snippet[:80]
-			}
-			bad = append(bad, "CLAIMS.md:"+strconv.Itoa(i+1)+": "+strconv.Itoa(n)+" status tag(s) (need exactly 1): "+snippet)
-		}
-	}
-	return bad
 }
 
 func missingRecipes(present map[string]bool) []string {
@@ -999,20 +972,20 @@ func kpiInstallOneliner(found bool, where string) KPI {
 		"install one-liner present in "+where)
 }
 
-func kpiHonestyLedger(present bool, untagged []string) KPI {
+func kpiHonestyLedger(present bool, claimRecords int, violations []string) KPI {
 	defects := []string{}
 	if !present {
 		defects = append(defects, "missing "+claimsFile+" — the honesty ledger an agent trusts (every claim tagged shipped/simulated/stub)")
 	} else {
-		limit := untagged
+		limit := violations
 		if len(limit) > 8 {
 			limit = limit[:8]
 		}
 		defects = append(defects, limit...)
 	}
 	soft := []string{}
-	if present && len(untagged) > 8 {
-		soft = append(soft, "... and "+strconv.Itoa(len(untagged)-8)+" more untagged claim line(s)")
+	if present && len(violations) > 8 {
+		soft = append(soft, "... and "+strconv.Itoa(len(violations)-8)+" more honesty-ledger violation(s)")
 	}
 	base := 0.0
 	nPresentDefects := 0
@@ -1022,7 +995,7 @@ func kpiHonestyLedger(present bool, untagged []string) KPI {
 	}
 	detail := "no " + claimsFile
 	if present {
-		detail = claimsFile + " present, " + strconv.Itoa(len(untagged)) + " untagged claim(s)"
+		detail = claimsFile + " document set present, " + strconv.Itoa(claimRecords) + " claim record(s), " + strconv.Itoa(len(violations)) + " violation(s)"
 	}
 	return KPI{"honesty_ledger", "adopt", mathx.ClampScore(base - 12*float64(nPresentDefects)), detail, defects, soft}
 }

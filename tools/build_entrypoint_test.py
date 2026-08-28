@@ -10,6 +10,7 @@ the stamp again instead of routing through the script — WITHOUT building anyth
 """
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -102,6 +103,54 @@ class ProfileSelectorTest(unittest.TestCase):
                       "`make build` must emit ./fak through the dev profile of the entrypoint")
         self.assertIn("PROFILE=race sh scripts/build.sh", mk,
                       "`make build-race` must build through the race profile of the entrypoint")
+
+
+class MakeBuildGraphTest(unittest.TestCase):
+    """#9672 — keep the artifact build narrow without weakening the whole-tree CI gate."""
+
+    def setUp(self) -> None:
+        self.text = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    def header_prerequisites(self, target: str) -> list[str]:
+        match = re.search(rf"(?m)^{re.escape(target)}:(.*)$", self.text)
+        self.assertIsNotNone(match, f"Makefile is missing target {target!r}")
+        return match.group(1).split()
+
+    def recipe(self, target: str) -> str:
+        lines = self.text.splitlines()
+        header = f"{target}:"
+        start = next(
+            (index for index, line in enumerate(lines) if line.startswith(header)),
+            None,
+        )
+        self.assertIsNotNone(start, f"Makefile is missing target {target!r}")
+        body: list[str] = []
+        for line in lines[start + 1:]:
+            if line.startswith("\t"):
+                body.append(line[1:])
+                continue
+            if not line.strip() and body:
+                break
+            if line.strip() and not line.lstrip().startswith("#"):
+                break
+        return "\n".join(body)
+
+    def test_build_emits_only_named_operator_artifacts(self) -> None:
+        recipe = self.recipe("build")
+        self.assertNotIn("go build ./...", recipe)
+        self.assertIn("OUT=fak PROFILE=dev sh scripts/build.sh", recipe)
+        self.assertIn("-o tools/.bin/repoguard ./cmd/repoguard", recipe)
+        self.assertIn("-o tools/.bin/repoguard.exe ./cmd/repoguard", recipe)
+        self.assertIn("-o tools/.bin/dispatchworker ./cmd/dispatchworker", recipe)
+
+    def test_build_all_owns_the_whole_tree_compile(self) -> None:
+        self.assertIn("build-all", self.header_prerequisites(".PHONY"))
+        self.assertEqual(self.recipe("build-all"), "go build ./...")
+
+    def test_ci_keeps_both_build_contracts_direct(self) -> None:
+        prerequisites = self.header_prerequisites("ci")
+        self.assertIn("build", prerequisites)
+        self.assertIn("build-all", prerequisites)
 
 
 class NoInlineRecipeDriftTest(unittest.TestCase):

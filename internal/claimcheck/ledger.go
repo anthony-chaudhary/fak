@@ -35,6 +35,7 @@ package claimcheck
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -53,6 +54,10 @@ const exposureDefaultOn = "default-on"
 // exposureGated is the marker value for a capability that ships off; everything
 // after it (past a — / - / : separator) is the stated gate reason.
 const exposureGated = "gated"
+
+// documentSetMarker identifies a bounded index whose local Markdown links are
+// navigation and whose linked pages carry the authoritative claim records.
+const documentSetMarker = "<!-- fak:document-set -->"
 
 // gateProse is the narrow, false-positive-free set of phrases a capability line
 // uses when it discloses gating in prose. Narrow by design (the same discipline as
@@ -84,6 +89,7 @@ const (
 
 // LedgerLine is one parsed CLAIMS.md capability line (a line beginning "- [").
 type LedgerLine struct {
+	Path     string   `json:"path"`     // repository-relative source page
 	N        int      `json:"n"`        // 1-based line number in CLAIMS.md
 	Tag      string   `json:"tag"`      // "[SHIPPED]" / "[SIMULATED]" / "[STUB]"; "" when the tag rule failed
 	Exposure Exposure `json:"exposure"` // the state every capability line carries
@@ -99,6 +105,7 @@ type LedgerLine struct {
 
 // Violation is one ledger defect: the rule it broke, on which line, and why.
 type LedgerViolation struct {
+	Path   string `json:"path"`
 	N      int    `json:"n"`
 	Rule   string `json:"rule"`
 	Detail string `json:"detail"`
@@ -128,6 +135,14 @@ const (
 	// RuleEmpty: the ledger parsed to zero capability lines (a broken read is not
 	// a pass — the awk lint's `c==0` exit, kept).
 	RuleEmpty = "EMPTY"
+	// RuleDocumentSetLinkMalformed: an index row is not one local Markdown link.
+	RuleDocumentSetLinkMalformed = "DOCUMENT_SET_LINK_MALFORMED"
+	// RuleDocumentSetLinkMissing: an indexed claim page cannot be read.
+	RuleDocumentSetLinkMissing = "DOCUMENT_SET_LINK_MISSING"
+	// RuleDocumentSetLinkDuplicate: two index rows resolve to the same page.
+	RuleDocumentSetLinkDuplicate = "DOCUMENT_SET_LINK_DUPLICATE"
+	// RuleDocumentSetLinkEscape: an index target resolves outside the document-set root.
+	RuleDocumentSetLinkEscape = "DOCUMENT_SET_LINK_ESCAPE"
 )
 
 // LedgerReport is the whole-ledger result: the per-state counts (the numbers that
@@ -151,6 +166,10 @@ func (r LedgerReport) OK() bool { return len(r.Violations) == 0 }
 // LintLedger parses a CLAIMS.md body and grades every capability line's tag and
 // exposure state. It reads nothing and writes nothing — pure over src.
 func LintLedger(src string) LedgerReport {
+	return lintLedger("CLAIMS.md", src)
+}
+
+func lintLedger(path, src string) LedgerReport {
 	var rep LedgerReport
 	for i, raw := range strings.Split(src, "\n") {
 		line := strings.TrimRight(raw, " \t\r")
@@ -158,7 +177,7 @@ func LintLedger(src string) LedgerReport {
 			continue
 		}
 		rep.Capability++
-		l := LedgerLine{N: i + 1, Text: line}
+		l := LedgerLine{Path: path, N: i + 1, Text: line}
 
 		// Rule TAG — the awk lint, ported verbatim: exactly one of the three.
 		var tags []string
@@ -242,23 +261,152 @@ func LintLedger(src string) LedgerReport {
 	}
 
 	if rep.Capability == 0 {
-		rep.Violations = append(rep.Violations, LedgerViolation{Rule: RuleEmpty, Detail: "no capability lines found — the ledger did not parse"})
+		rep.Violations = append(rep.Violations, LedgerViolation{Path: path, N: 1, Rule: RuleEmpty, Detail: "no capability lines found — the ledger did not parse"})
 	}
-	sort.SliceStable(rep.Violations, func(i, j int) bool { return rep.Violations[i].N < rep.Violations[j].N })
+	sortLedgerViolations(rep.Violations)
 	return rep
 }
 
-// LintLedgerFile is LintLedger over a file on disk (CLAIMS.md at the repo root).
+// LintLedgerFile grades a ledger on disk. A document-set marker makes the root
+// file an index: each local linked page is resolved once and becomes the sole
+// source of capability records. The same report feeds claims-lint and readiness.
 func LintLedgerFile(path string) (LedgerReport, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return LedgerReport{}, err
 	}
-	return LintLedger(string(b)), nil
+	if !strings.Contains(string(b), documentSetMarker) {
+		return lintLedger(filepath.Base(path), string(b)), nil
+	}
+	return lintDocumentSet(path, string(b))
 }
 
 func (r *LedgerReport) violate(l LedgerLine, rule, detail string) {
-	r.Violations = append(r.Violations, LedgerViolation{N: l.N, Rule: rule, Detail: detail, Text: l.Text})
+	r.Violations = append(r.Violations, LedgerViolation{Path: l.Path, N: l.N, Rule: rule, Detail: detail, Text: l.Text})
+}
+
+func lintDocumentSet(indexPath, index string) (LedgerReport, error) {
+	root, err := filepath.Abs(filepath.Dir(indexPath))
+	if err != nil {
+		return LedgerReport{}, err
+	}
+	indexAbs, err := filepath.Abs(indexPath)
+	if err != nil {
+		return LedgerReport{}, err
+	}
+	indexName := filepath.ToSlash(filepath.Base(indexPath))
+	seen := map[string]int{}
+	var rep LedgerReport
+	linked := 0
+
+	for i, raw := range strings.Split(index, "\n") {
+		line := strings.TrimRight(raw, " \t\r")
+		if !strings.HasPrefix(line, "- [") {
+			continue
+		}
+		n := i + 1
+		target, ok := documentSetLinkTarget(line)
+		if !ok {
+			rep.violateAt(indexName, n, RuleDocumentSetLinkMalformed, "document-set row must be one local Markdown link", line)
+			continue
+		}
+		clean, abs, ok := containedDocumentSetTarget(root, target)
+		if !ok || samePath(abs, indexAbs) {
+			rep.violateAt(indexName, n, RuleDocumentSetLinkEscape, fmt.Sprintf("linked claim page %q must stay below the document-set root", target), line)
+			continue
+		}
+		key := strings.ToLower(filepath.ToSlash(clean))
+		if first, duplicate := seen[key]; duplicate {
+			rep.violateAt(indexName, n, RuleDocumentSetLinkDuplicate, fmt.Sprintf("linked claim page %q already appears at %s:%d", filepath.ToSlash(clean), indexName, first), line)
+			continue
+		}
+		seen[key] = n
+		linked++
+
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			rep.violateAt(indexName, n, RuleDocumentSetLinkMissing, fmt.Sprintf("cannot resolve linked claim page %q: %v", filepath.ToSlash(clean), err), line)
+			continue
+		}
+		if !pathWithin(root, resolved) {
+			rep.violateAt(indexName, n, RuleDocumentSetLinkEscape, fmt.Sprintf("linked claim page %q resolves outside the document-set root", filepath.ToSlash(clean)), line)
+			continue
+		}
+		body, err := os.ReadFile(resolved)
+		if err != nil {
+			rep.violateAt(indexName, n, RuleDocumentSetLinkMissing, fmt.Sprintf("cannot read linked claim page %q: %v", filepath.ToSlash(clean), err), line)
+			continue
+		}
+		rep.merge(lintLedger(filepath.ToSlash(clean), string(body)))
+	}
+
+	if linked == 0 && len(rep.Violations) == 0 {
+		rep.violateAt(indexName, 1, RuleEmpty, "document-set index contains no linked claim pages", "")
+	}
+	sortLedgerViolations(rep.Violations)
+	return rep, nil
+}
+
+func documentSetLinkTarget(line string) (string, bool) {
+	open := strings.LastIndex(line, "](")
+	if open < 3 {
+		return "", false
+	}
+	rest := line[open+2:]
+	close := strings.LastIndex(rest, ")")
+	if close < 1 || strings.TrimSpace(rest[close+1:]) != "" {
+		return "", false
+	}
+	target := strings.TrimSpace(rest[:close])
+	if target == "" || strings.HasPrefix(target, "#") || strings.Contains(target, "://") || strings.HasPrefix(target, "//") {
+		return "", false
+	}
+	return target, true
+}
+
+func containedDocumentSetTarget(root, target string) (clean, abs string, ok bool) {
+	fromSlash := filepath.FromSlash(target)
+	if filepath.IsAbs(fromSlash) || filepath.VolumeName(fromSlash) != "" {
+		return "", "", false
+	}
+	clean = filepath.Clean(fromSlash)
+	abs = filepath.Join(root, clean)
+	return clean, abs, pathWithin(root, abs)
+}
+
+func pathWithin(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func samePath(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+}
+
+func (r *LedgerReport) merge(child LedgerReport) {
+	r.Lines = append(r.Lines, child.Lines...)
+	r.Capability += child.Capability
+	r.Shipped += child.Shipped
+	r.Simulated += child.Simulated
+	r.Stub += child.Stub
+	r.DefaultOn += child.DefaultOn
+	r.Gated += child.Gated
+	r.Parked += child.Parked
+	r.Declared += child.Declared
+	r.Violations = append(r.Violations, child.Violations...)
+}
+
+func (r *LedgerReport) violateAt(path string, n int, rule, detail, text string) {
+	r.Violations = append(r.Violations, LedgerViolation{Path: path, N: n, Rule: rule, Detail: detail, Text: text})
+}
+
+func sortLedgerViolations(violations []LedgerViolation) {
+	sort.SliceStable(violations, func(i, j int) bool {
+		if violations[i].Path != violations[j].Path {
+			return violations[i].Path < violations[j].Path
+		}
+		return violations[i].N < violations[j].N
+	})
 }
 
 // markerReport carries a marker-shape defect out of splitExposure.
@@ -297,7 +445,11 @@ func proseGate(body string) string {
 func (r LedgerReport) String() string {
 	var b strings.Builder
 	for _, v := range r.Violations {
-		fmt.Fprintf(&b, "VIOLATION %s (CLAIMS.md:%d): %s\n", v.Rule, v.N, v.Detail)
+		path := v.Path
+		if path == "" {
+			path = "CLAIMS.md"
+		}
+		fmt.Fprintf(&b, "VIOLATION %s (%s:%d): %s\n", v.Rule, path, v.N, v.Detail)
 		if v.Text != "" {
 			fmt.Fprintf(&b, "  %s\n", truncate(v.Text, 160))
 		}

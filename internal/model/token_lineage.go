@@ -193,6 +193,41 @@ func (s *Session) VerifyTokenLineage(expected []int) (TokenLineageVerification, 
 	return s.Cache.lineage.verify(s.Cache.pos, expected)
 }
 
+// RestoreTokenLineage reconstructs exact token identity for a session whose KV
+// tensors and positions were restored through a format that does not carry the
+// lineage sidecar. The candidate stays private until its token count and every
+// resident position agree, so a refusal leaves the session's prior lineage intact.
+func (s *Session) RestoreTokenLineage(history []int) (TokenLineageVerification, error) {
+	if s == nil {
+		return TokenLineageVerification{}, fmt.Errorf("%w: nil session", ErrTokenLineageMismatch)
+	}
+	s.cacheGeometryMu.Lock()
+	defer s.cacheGeometryMu.Unlock()
+
+	candidate := tokenLineage{}
+	candidate.appendSpan(history)
+	if s.Backend != nil {
+		if s.halKV == nil {
+			return TokenLineageVerification{}, fmt.Errorf("%w: backend session has no KV store", ErrTokenLineageMismatch)
+		}
+		report, err := candidate.verify(s.halKV.Pos(), history)
+		if err != nil {
+			return report, err
+		}
+		s.halLineage = candidate
+		return report, nil
+	}
+	if s.Cache == nil {
+		return TokenLineageVerification{}, fmt.Errorf("%w: session has no host KV cache", ErrTokenLineageMismatch)
+	}
+	report, err := candidate.verify(s.Cache.pos, history)
+	if err != nil {
+		return report, err
+	}
+	s.Cache.lineage = candidate
+	return report, nil
+}
+
 // TokenLineageMetadataBytes reports the exact compact lineage payload owned by
 // this session without reading KV tensors.
 func (s *Session) TokenLineageMetadataBytes() int64 {

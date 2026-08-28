@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -35,6 +36,35 @@ func TestCompileNativeObligationGraphQwen38DeterministicWitness(t *testing.T) {
 	}
 	if !bytes.Equal(firstJSON, secondJSON) {
 		t.Fatal("same packet/envelope produced different graph bytes")
+	}
+	var readback NativeObligationGraph
+	if err := json.Unmarshal(firstJSON, &readback); err != nil {
+		t.Fatal(err)
+	}
+	readbackJSON, err := MarshalNativeObligationGraph(readback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstJSON, readbackJSON) {
+		t.Fatal("graph marshal/readback changed deterministic bytes")
+	}
+	permuted := envelope
+	permuted.FusionLaunches = append([]NativeFusionLaunchDomain(nil), envelope.FusionLaunches...)
+	for i := range permuted.FusionLaunches {
+		permuted.FusionLaunches[i].Dimensions = append([]NativeLaunchDimension(nil), permuted.FusionLaunches[i].Dimensions...)
+		slices.Reverse(permuted.FusionLaunches[i].Dimensions)
+	}
+	slices.Reverse(permuted.FusionLaunches)
+	permutedGraph, err := CompileNativeObligationGraph(packet, permuted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	permutedJSON, err := MarshalNativeObligationGraph(permutedGraph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstJSON, permutedJSON) {
+		t.Fatal("equivalent launch-domain ordering changed graph bytes")
 	}
 	if first.Engine != "fak-native" || first.ExternalRuntimeFallback {
 		t.Fatalf("unsafe graph identity: %+v", first)
@@ -112,6 +142,7 @@ func TestNativeFusionLaunchAdmissionMatchesScalarOracle(t *testing.T) {
 			c.limits.MaxGrid = c.domain.Grid
 		}},
 		{name: "missing-backend-limits", mutate: func(c *nativeLaunchAdmissionCase) { c.limits = nil }},
+		{name: "backend-limits-mismatch", mutate: func(c *nativeLaunchAdmissionCase) { c.limits.Backend = "metal" }},
 		{name: "ineligible-optional-fusion", mutate: func(c *nativeLaunchAdmissionCase) { c.optionalFusionEligible = false }},
 	}
 	covered := make(map[NativeLaunchDecisionReason]bool)
@@ -208,15 +239,32 @@ func TestNativeObligationGraphRefusesUnknownAndUnsupportedBeforeAllocation(t *te
 }
 
 func TestNativeHardwareEnvelopeClosedWorldAndEngineFence(t *testing.T) {
-	raw := nativeObligationFixture(t, "qwen38-envelope.json")
-	var object map[string]any
-	if err := json.Unmarshal(raw, &object); err != nil {
+	raw, err := json.Marshal(nativeLaunchEnvelopeFixture(t))
+	if err != nil {
 		t.Fatal(err)
 	}
-	object["unknown"] = true
-	mutated, _ := json.Marshal(object)
-	if _, err := ParseNativeHardwareEnvelope(mutated); err == nil {
-		t.Fatal("unknown hardware envelope field admitted")
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "top-level", mutate: func(object map[string]any) { object["unknown"] = true }},
+		{name: "launch-limits", mutate: func(object map[string]any) { object["launch_limits"].(map[string]any)["unknown"] = true }},
+		{name: "launch-domain", mutate: func(object map[string]any) { object["fusion_launches"].([]any)[0].(map[string]any)["unknown"] = true }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var object map[string]any
+			if err := json.Unmarshal(raw, &object); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(object)
+			mutated, err := json.Marshal(object)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ParseNativeHardwareEnvelope(mutated); err == nil {
+				t.Fatal("unknown hardware envelope field admitted")
+			}
+		})
 	}
 	packet, err := CompileManifest(fixture(t, "qwen38-valid.json"))
 	if err != nil {

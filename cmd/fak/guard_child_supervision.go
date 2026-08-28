@@ -92,7 +92,7 @@ func guardParkProbeStatus(rec goalpark.Record, now time.Time) string {
 	return fmt.Sprintf("probes=%d/%d next_probe=%s", rec.Probes, goalpark.ProbeBudget, next)
 }
 
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
 	// The startup renderer created the card and queued its control replies. Bind its
 	// periodic status fold to the live gateway before the child starts; finalizeOutcome
 	// below stops the updater and replaces the root with the terminal state.
@@ -110,8 +110,10 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 	wireRetries := 0
 	wireLimit := guardWireRetryLimit()
 	for {
+		startupProgress.Phase("broker/preparing child")
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, rotation.launcher())
 		if err != nil {
+			startupProgress.Abort()
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
@@ -122,19 +124,24 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
+		startupProgress.Phase("OS process start")
 		job, startErr := windowgate.StartManagedAgentInNewJob(child)
 		if startErr != nil {
+			startupProgress.Abort()
 			terminalGuardChild(child, startErr, "launch_failed")
 			finishGuardChildAndReport(startErr, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		startupProgress.Phase("child registration")
 		if err := startBoundGuardRegistration(child); err != nil {
+			startupProgress.Abort()
 			_ = child.Process.Kill()
 			_, _ = child.Process.Wait()
 			_ = job.Close()
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		startupProgress.Started()
 		lifecycle := startCrashJournalPulse(guardTraceID, child.Process.Pid)
 		wait := make(chan error, 1)
 		go func() { wait <- child.Wait() }()
@@ -272,7 +279,7 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 	return false, ""
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
 	// Same live card as the unsupervised path; child restarts stay one session and one
 	// Slack thread, so the updater spans the whole supervision loop and finalizes once.
 	guardSessionCardHandle.startUpdater(srv)
@@ -310,17 +317,21 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 	defer stopLoginHijackWatch()
 	relaunchFiles, err := captureGuardRelaunchFiles(command)
 	if err != nil {
+		startupProgress.Abort()
 		finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 		return
 	}
 	for {
 		if err := relaunchFiles.ensure(); err != nil {
+			startupProgress.Abort()
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		startupProgress.Phase("broker/preparing child")
 		_, child, err := launchGuardChildWithBroker(command, injected, pinUpstream, spawnMeta, spawnBroker, nil, extraEnv...)
 		wait := make(chan error, 1)
 		if err != nil {
+			startupProgress.Abort()
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, nil, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
@@ -331,21 +342,26 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 		childStarted := time.Now()
 		srv.BeginChildStartup(childStarted)
 		rotationEvidenceBefore := srv.RotationEvidenceSnapshot()
+		startupProgress.Phase("OS process start")
 		job, err := windowgate.StartManagedAgentInNewJob(child)
 		if err != nil {
+			startupProgress.Abort()
 			// Start/containment failing IS a launch failure: either the child never ran, or
 			// StartInNewJob reaped it because the teardown invariant could not be armed.
 			guardDumpStartupReportOnLaunchFail(os.Stderr, srv, dumpStartupOnLaunchFail)
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		startupProgress.Phase("child registration")
 		if err := startBoundGuardRegistration(child); err != nil {
+			startupProgress.Abort()
 			_ = child.Process.Kill()
 			_, _ = child.Process.Wait()
 			_ = job.Close()
 			finishGuardChildAndReport(err, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
 			return
 		}
+		startupProgress.Started()
 		lifecycle := startCrashJournalPulse(guardTraceID, child.Process.Pid)
 		go func() {
 			runErr := child.Wait()

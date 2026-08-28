@@ -105,6 +105,10 @@ func CheckFresh(root string) (FreshnessResult, error) {
 	if err := generate(root, generated); err != nil {
 		return FreshnessResult{}, err
 	}
+	return compareGeneratedFreshness(root, generated)
+}
+
+func compareGeneratedFreshness(root, generated string) (FreshnessResult, error) {
 	result := FreshnessResult{Fresh: true, Regenerate: RegenerateCommand}
 	for _, art := range generatedArtifacts {
 		expected, err := os.ReadFile(filepath.Join(generated, art.Name))
@@ -325,9 +329,62 @@ func generate(root, out string) error {
 	return nil
 }
 
+// runInvariantSnapshot is the single scorecard snapshot CheckInvariant consumes. It
+// emits the freshness artifacts and JSON verdict together, so both answers describe
+// exactly the same workspace walk.
+var runInvariantSnapshot = executeInvariantSnapshot
+
+// invariantSnapshotCommand is a test seam for process exit and transport behavior.
+// Production always uses the canonical Python scorecard command below.
+var invariantSnapshotCommand = newInvariantSnapshotCommand
+
+func newInvariantSnapshotCommand(root, generated string) *exec.Cmd {
+	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
+	python := "python3"
+	if runtime.GOOS == "windows" {
+		python = "python"
+	}
+	return exec.Command(python, script, "--workspace", root, "--markdown-dir", generated, "--json")
+}
+
+func executeInvariantSnapshot(root, generated string) ([]byte, error) {
+	cmd := invariantSnapshotCommand(root, generated)
+	cmd.Dir = root
+	windowgate.ConfigureBackgroundCommand(cmd)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); !ok {
+			return nil, err
+		}
+		// ACTION is a valid scorecard verdict. A non-zero exit is therefore a
+		// usable snapshot when stdout and every generated artifact are present.
+		if len(bytes.TrimSpace(out)) == 0 {
+			return nil, fmt.Errorf("generate invariant snapshot: %w: %s", err, strings.TrimSpace(stderr.String()))
+		}
+	}
+	for _, art := range generatedArtifacts {
+		if _, statErr := os.Stat(filepath.Join(generated, art.Name)); statErr != nil {
+			return nil, fmt.Errorf("generate invariant snapshot: missing %s: %w", art.Name, statErr)
+		}
+	}
+	return out, nil
+}
+
 // CheckInvariant validates freshness, semantic catalog structure and scorecard critical state.
 func CheckInvariant(root string) (InvariantResult, error) {
-	fresh, err := CheckFresh(root)
+	tmp, err := os.MkdirTemp("", "fak-concept-invariant-*")
+	if err != nil {
+		return InvariantResult{}, err
+	}
+	defer os.RemoveAll(tmp)
+	generated := filepath.Join(tmp, "generated")
+	out, err := runInvariantSnapshot(root, generated)
+	if err != nil {
+		return InvariantResult{}, err
+	}
+	fresh, err := compareGeneratedFreshness(root, generated)
 	if err != nil {
 		return InvariantResult{}, err
 	}
@@ -340,27 +397,6 @@ func CheckInvariant(root string) (InvariantResult, error) {
 		inv.SemanticValid = false
 		b, _ := json.Marshal(ds)
 		inv.Detail = string(b)
-	}
-	tmp, err := os.CreateTemp("", "fak-concept-score-*.json")
-	if err != nil {
-		return inv, err
-	}
-	name := tmp.Name()
-	tmp.Close()
-	defer os.Remove(name)
-	script := filepath.Join(root, "tools", "concept_disambiguation_scorecard.py")
-	python := "python3"
-	if runtime.GOOS == "windows" {
-		python = "python"
-	}
-	cmd := exec.Command(python, script, "--workspace", root, "--json")
-	cmd.Dir = root
-	windowgate.ConfigureBackgroundCommand(cmd)
-	out, runErr := cmd.Output()
-	if runErr != nil {
-		if _, ok := runErr.(*exec.ExitError); !ok {
-			return inv, runErr
-		}
 	}
 	var payload struct {
 		OK     bool   `json:"ok"`

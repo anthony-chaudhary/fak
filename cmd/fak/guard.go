@@ -1442,14 +1442,18 @@ func cmdManageCommand(commandName string, argv []string) {
 	startupReport := renderGuardStartupReport(view)
 	srv.SetStartupReport(startupReport)
 	emitGuardStartupBanner(view, startupReport)
+	startupProgress := newGuardStartupProgress(os.Stderr, !*quiet && bannerMode != guardBannerOff, guardFdIsTerminal(int(os.Stderr.Fd())), guardStartupProgressDelay)
+	defer startupProgress.Stop()
 
 	// Seed the guard child into the opt-in process task manager at origin, with the
 	// durable policy/budget/Stop-ledger paths that already exist before launch.
 	policyEvidence := guardPolicyOriginEvidencePath(guardTraceID, *policyPath)
 	budgetEvidence := writeGuardBudgetEnvelopeEvidence(guardTraceID, contextBudgetLimit, maxDurationLimit.String())
 	registerGuardChildOriginTask(guardTraceID, agentName, policyEvidence, resume.IdentityLedgerPath(resolveSweepRegDir("")), budgetEvidence, stopHookInstall.StopsLedger)
+	startupProgress.Phase("native-hook install")
 	command, restoreNativeHooks, err := installManagedNativeHooksForProfile(command, launchPlan.harnessProfile())
 	if err != nil {
+		startupProgress.Abort()
 		fmt.Fprintf(os.Stderr, "fak %s: install native hooks: %v\n", commandName, err)
 		cancel()
 		return
@@ -1463,24 +1467,32 @@ func cmdManageCommand(commandName string, argv []string) {
 	// On a genuine launch FAILURE, spill the full startup report to stderr — except under
 	// --banner=full, which already streamed it at boot (avoid printing it twice).
 	dumpStartupOnLaunchFail := bannerMode != guardBannerFull
-	arbitrateLease, arbitrateErr := guardArbitrateAcquire(context.Background(), os.Stderr, guardArbitrateConfig{
+	startupProgress.Phase("lease admission")
+	var arbitrateStderr strings.Builder
+	arbitrateLease, arbitrateErr := guardArbitrateAcquire(context.Background(), &arbitrateStderr, guardArbitrateConfig{
 		Mode: arbitrateConfig.Mode, Lane: arbitrateConfig.Lane, Tree: arbitrateConfig.Tree, Force: arbitrateConfig.Force,
 	})
+	if arbitrateStderr.Len() > 0 {
+		startupProgress.EndLine()
+		fmt.Fprint(os.Stderr, arbitrateStderr.String())
+	}
 	if arbitrateErr != nil {
+		startupProgress.Abort()
 		fmt.Fprintf(os.Stderr, "fak guard: %v\n", arbitrateErr)
 		os.Exit(1)
 	}
 	if arbitrateLease != nil {
 		defer arbitrateLease.Close()
 	}
+	startupProgress.Phase("broker/preparing child")
 
 	// The supervised loop is required whenever the child must be interrupted mid-run:
 	// a --restart-on-budget context restart OR a --max-duration wall-clock envelope that
 	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
 	// restarter (its events channel never fires), gaining only the time-budget ticker.
 	if restarter.Enabled() || maxDurationLimit > 0 {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
 }

@@ -1,11 +1,15 @@
 package workerworktree
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -98,6 +102,67 @@ func TestVerifyAppliedDisambiguationRecordsThreeWitnesses(t *testing.T) {
 	got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
 	if !ok || got.Before.Tree != "HEAD" || got.Worktree.Tree != "HEAD" || got.PostApply.Tree != "candidate" {
 		t.Fatalf("witnesses=%+v ok=%v", got, ok)
+	}
+	if got.Timeout.DefaultTimeoutMS != 120_000 || got.Timeout.RequestedTimeoutMS != nil ||
+		got.Timeout.EffectiveTimeoutMS != 120_000 || got.Timeout.RecoveryMode != disambiguationRecoveryDefault {
+		t.Fatalf("default timeout receipt = %+v", got.Timeout)
+	}
+}
+
+func TestVerifyAppliedDisambiguationExplicitTimeoutKeepsSameThreeWitnesses(t *testing.T) {
+	old := readDisambiguation
+	defer func() { readDisambiguation = old }()
+
+	type call struct{ repo, tree string }
+	var calls []call
+	readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
+		calls = append(calls, call{repo: repo, tree: tree})
+		return DisambiguationWitness{Tree: tree, Fresh: true, SemanticValid: true, CriticalClean: true, Coverage: 100, FamilyCoverage: map[string]float64{"loop": 100}}
+	})
+	t.Setenv(DisambiguationTimeoutEnv, "300000")
+	got, ok := verifyAppliedDisambiguation("trunk", "worker", "candidate")
+	if !ok {
+		t.Fatalf("explicit bounded timeout changed oracle verdict: %+v", got)
+	}
+	wantCalls := []call{{"trunk", "HEAD"}, {"worker", "HEAD"}, {"trunk", "candidate"}}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("witness inputs = %+v, want %+v", calls, wantCalls)
+	}
+	if got.Timeout.DefaultTimeoutMS != 120_000 || got.Timeout.RequestedTimeoutMS == nil ||
+		*got.Timeout.RequestedTimeoutMS != 300_000 || got.Timeout.EffectiveTimeoutMS != 300_000 ||
+		got.Timeout.RecoveryMode != disambiguationRecoveryExplicit {
+		t.Fatalf("explicit timeout receipt = %+v", got.Timeout)
+	}
+}
+
+func TestResolveDisambiguationTimeoutBoundsExplicitRecovery(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		present   bool
+		want      time.Duration
+		wantMode  string
+		wantError bool
+	}{
+		{name: "unset default", want: 2 * time.Minute, wantMode: disambiguationRecoveryDefault},
+		{name: "blank present", raw: "  ", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "minimum", raw: "1", present: true, want: time.Millisecond, wantMode: disambiguationRecoveryExplicit},
+		{name: "maximum", raw: "900000", present: true, want: 15 * time.Minute, wantMode: disambiguationRecoveryExplicit},
+		{name: "zero", raw: "0", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "negative", raw: "-1", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "above maximum", raw: "900001", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+		{name: "not an integer", raw: "later", present: true, wantMode: disambiguationRecoveryInvalid, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			receipt, got, err := resolveDisambiguationTimeout(func(string) (string, bool) { return tt.raw, tt.present })
+			if (err != nil) != tt.wantError || got != tt.want || receipt.DefaultTimeoutMS != 120_000 || receipt.RecoveryMode != tt.wantMode {
+				t.Fatalf("receipt=%+v timeout=%s err=%v, want timeout=%s mode=%s error=%v", receipt, got, err, tt.want, tt.wantMode, tt.wantError)
+			}
+			if tt.wantError && receipt.EffectiveTimeoutMS != 0 {
+				t.Fatalf("invalid request gained an effective timeout: %+v", receipt)
+			}
+		})
 	}
 }
 
@@ -242,17 +307,17 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 	oldArchive := runDisambiguationArchive
 	oldScorecard := runAnalyzer
 	oldContext := newDeadline
-	oldTimeout := disambiguationTimeout
 	defer func() {
 		runDisambiguationArchive = oldArchive
 		runAnalyzer = oldScorecard
 		newDeadline = oldContext
-		disambiguationTimeout = oldTimeout
 	}()
 
 	manual := newManualDeadlineContext()
-	disambiguationTimeout = 37 * time.Second
-	newDeadline = func(time.Duration) (context.Context, context.CancelFunc) {
+	t.Setenv(DisambiguationTimeoutEnv, "37000")
+	var requestedDeadline time.Duration
+	newDeadline = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+		requestedDeadline = timeout
 		return manual, func() {}
 	}
 	runDisambiguationArchive = func(context.Context, string, string) ([]byte, error) {
@@ -322,6 +387,12 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 	if !strings.Contains(got.result.Detail, DisambiguationTimeoutCode) || !strings.Contains(got.result.Detail, `"subphase":"scorecard-command"`) {
 		t.Fatalf("compact refusal detail does not carry typed timeout/subphase: %s", got.result.Detail)
 	}
+	deadline := got.result.Disambiguation.Timeout
+	if requestedDeadline != 37*time.Second || deadline.DefaultTimeoutMS != 120_000 ||
+		deadline.RequestedTimeoutMS == nil || *deadline.RequestedTimeoutMS != 37_000 ||
+		deadline.EffectiveTimeoutMS != 37_000 || deadline.RecoveryMode != disambiguationRecoveryExplicit {
+		t.Fatalf("timeout authority was not carried into the receipt: requested=%s receipt=%+v", requestedDeadline, deadline)
+	}
 	if len(g.envCallsWithPrefix("commit-tree")) != 0 ||
 		len(g.callsWithPrefix("update-ref")) != 0 ||
 		len(g.callsWithPrefix("checkout")) != 0 ||
@@ -331,4 +402,227 @@ func TestLandIsolatedDisambiguationTimeoutIsTypedCancellableAndPreCAS(t *testing
 	if g.lastEnv["GIT_INDEX_FILE"] == "" {
 		t.Fatalf("pre-timeout index construction must remain isolated: env=%v", g.lastEnv)
 	}
+}
+
+func TestLandIsolatedInvalidDisambiguationTimeoutRefusesTypedAndPreCAS(t *testing.T) {
+	old := readDisambiguation
+	defer func() { readDisambiguation = old }()
+
+	for _, raw := range []string{"", "0", "-1", "900001", "malformed-secret-sentinel"} {
+		t.Run(raw, func(t *testing.T) {
+			t.Setenv(DisambiguationTimeoutEnv, raw)
+			reads := 0
+			readDisambiguation = stubDisambiguationReader(func(repo, tree string) DisambiguationWitness {
+				reads++
+				return DisambiguationWitness{Tree: tree}
+			})
+			g := isolatedHappyFake()
+			msg := writeMsg(t, "fix(workerland): reject invalid timeout (fak workerworktree)")
+			got, handled := landIsolated(
+				"/repo", "/worker",
+				"diff --git a/internal/workerworktree/disambiguation.go b/internal/workerworktree/disambiguation.go\n@@\n-old\n+new\n",
+				msg, []string{"internal/workerworktree/disambiguation.go"}, g.run, g.runEnv,
+			)
+			if !handled || got.OK || got.Committed || got.Applied || reads != 0 {
+				t.Fatalf("invalid request must refuse before oracle/CAS: handled=%v reads=%d result=%+v", handled, reads, got)
+			}
+			if got.Disambiguation == nil || got.Disambiguation.Before.Diagnostic == nil {
+				t.Fatalf("typed invalid-timeout diagnostic missing: %+v", got.Disambiguation)
+			}
+			diagnostic := got.Disambiguation.Before.Diagnostic
+			if diagnostic.Code != DisambiguationTimeoutCode || diagnostic.Witness != "configuration" || diagnostic.Subphase != "timeout-config" {
+				t.Fatalf("invalid-timeout diagnostic = %+v", diagnostic)
+			}
+			deadline := got.Disambiguation.Timeout
+			if deadline.DefaultTimeoutMS != 120_000 || deadline.EffectiveTimeoutMS != 0 ||
+				deadline.RecoveryMode != disambiguationRecoveryInvalid {
+				t.Fatalf("invalid timeout receipt = %+v", deadline)
+			}
+			if !strings.Contains(got.Detail, DisambiguationTimeoutCode) || !strings.Contains(got.Detail, DisambiguationTimeoutEnv) {
+				t.Fatalf("typed invalid refusal detail = %q", got.Detail)
+			}
+			if raw == "malformed-secret-sentinel" && strings.Contains(got.Detail, raw) {
+				t.Fatalf("malformed environment value leaked into refusal detail: %q", got.Detail)
+			}
+			if len(g.envCallsWithPrefix("commit-tree")) != 0 || len(g.callsWithPrefix("update-ref")) != 0 ||
+				len(g.callsWithPrefix("checkout")) != 0 || len(g.callsWithPrefix("reset")) != 0 {
+				t.Fatalf("invalid timeout crossed pre-CAS boundary: calls=%v envCalls=%v", g.calls, g.envCalls)
+			}
+			if g.lastEnv["GIT_INDEX_FILE"] == "" {
+				t.Fatalf("invalid timeout must leave index construction isolated: env=%v", g.lastEnv)
+			}
+		})
+	}
+}
+
+func TestDisambiguationWitnessPersistentContentCache(t *testing.T) {
+	oldArchive := runDisambiguationArchive
+	oldAnalyzer := runAnalyzer
+	oldRoot := disambiguationCacheRoot
+	oldConfig := disambiguationAnalyzerConfig
+	oldVersion := disambiguationAnalyzerVersion
+	defer func() {
+		runDisambiguationArchive = oldArchive
+		runAnalyzer = oldAnalyzer
+		disambiguationCacheRoot = oldRoot
+		disambiguationAnalyzerConfig = oldConfig
+		disambiguationAnalyzerVersion = oldVersion
+	}()
+
+	fixture := t.TempDir()
+	writeDisambiguationFixture(t, fixture, conceptcatalog.GeneratedReadme, "readme\n")
+	writeDisambiguationFixture(t, fixture, conceptcatalog.GeneratedIndex, "index\n")
+	writeDisambiguationFixture(t, fixture, "tools/concept_disambiguation_scorecard.data/_meta.json", `{"families":[]}`)
+	archive := tarDisambiguationFixture(t, fixture)
+	changedArchive := append([]byte(nil), archive...)
+	changedArchive = append(changedArchive, 0)
+	cacheRoot := t.TempDir()
+	disambiguationCacheRoot = func(string) (string, error) { return cacheRoot, nil }
+
+	var mu sync.Mutex
+	analyzerCalls := 0
+	runAnalyzer = func(_ context.Context, _ string, generated string) ([]byte, error) {
+		mu.Lock()
+		analyzerCalls++
+		mu.Unlock()
+		writeDisambiguationFixture(t, generated, "README.md", "readme\n")
+		writeDisambiguationFixture(t, generated, "INDEX.md", "index\n")
+		return []byte(`{"ok":true,"corpus":{"coverage_debt":1,"clarity_defects":0,"coverage":{"coverage_pct":87.5,"per_family":[{"family":"loop","discovered":4,"covered":3}]}}}`), nil
+	}
+	currentArchive := archive
+	runDisambiguationArchive = func(context.Context, string, string) ([]byte, error) {
+		return append([]byte(nil), currentArchive...), nil
+	}
+	read := func(repo, tree string) DisambiguationWitness {
+		return readDisambiguationWitness(context.Background(), repo, tree, func(string) {})
+	}
+	semanticJSON := func(w DisambiguationWitness) []byte {
+		w.Tree, w.CacheIdentity, w.CacheState, w.CacheReason = "", "", "", ""
+		b, err := json.Marshal(w)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	oracle := read("/repo-a", "tree-a")
+	if oracle.CacheState != "miss" || analyzerCalls != 1 {
+		t.Fatalf("oracle state/calls = %q/%d, want miss/1 (%+v)", oracle.CacheState, analyzerCalls, oracle)
+	}
+	hit := read("/disjoint-exact-path-worker", "same-content")
+	if hit.CacheState != "hit" || hit.CacheIdentity != oracle.CacheIdentity || analyzerCalls != 1 {
+		t.Fatalf("same tree did not reuse cache: oracle=%+v hit=%+v calls=%d", oracle, hit, analyzerCalls)
+	}
+	if !bytes.Equal(semanticJSON(hit), semanticJSON(oracle)) {
+		t.Fatalf("cached semantic decision differs from oracle:\ncache=%s\noracle=%s", semanticJSON(hit), semanticJSON(oracle))
+	}
+
+	currentArchive = changedArchive
+	changed := read("/repo-a", "tree-b")
+	if changed.CacheState != "miss" || changed.CacheIdentity == oracle.CacheIdentity || analyzerCalls != 2 {
+		t.Fatalf("changed relevant content did not miss: %+v calls=%d", changed, analyzerCalls)
+	}
+	currentArchive = archive
+	disambiguationAnalyzerConfig = oldConfig + "+changed"
+	config := read("/repo-a", "tree-a")
+	if config.CacheState != "miss" || analyzerCalls != 3 {
+		t.Fatalf("changed analyzer config did not miss: %+v calls=%d", config, analyzerCalls)
+	}
+	disambiguationAnalyzerConfig = oldConfig
+	disambiguationAnalyzerVersion = oldVersion + "+changed"
+	tool := read("/repo-a", "tree-a")
+	if tool.CacheState != "miss" || analyzerCalls != 4 {
+		t.Fatalf("changed tool version did not miss: %+v calls=%d", tool, analyzerCalls)
+	}
+	disambiguationAnalyzerVersion = oldVersion
+
+	cachePath := filepath.Join(cacheRoot, oracle.CacheIdentity+".json")
+	if err := os.WriteFile(cachePath, []byte("not-json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := read("/repo-a", "tree-a")
+	if corrupt.CacheState != "miss" || corrupt.CacheReason != "corrupt" || analyzerCalls != 5 {
+		t.Fatalf("corrupt cache was not a miss: %+v calls=%d", corrupt, analyzerCalls)
+	}
+	if !bytes.Equal(semanticJSON(corrupt), semanticJSON(oracle)) {
+		t.Fatalf("corrupt-cache recompute differs from oracle")
+	}
+
+	if err := os.Remove(cachePath); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	analyzerCalls = 0
+	mu.Unlock()
+	const callers = 12
+	results := make(chan DisambiguationWitness, callers)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			results <- read("/repo-concurrent", "same-tree")
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	mu.Lock()
+	calls := analyzerCalls
+	mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("concurrent callers executed analyzer %d times, want 1", calls)
+	}
+	misses, hits := 0, 0
+	for got := range results {
+		if !bytes.Equal(semanticJSON(got), semanticJSON(oracle)) {
+			t.Fatalf("concurrent cached result differs from oracle: %+v", got)
+		}
+		switch got.CacheState {
+		case "miss":
+			misses++
+		case "hit":
+			hits++
+		}
+	}
+	if misses != 1 || hits != callers-1 {
+		t.Fatalf("concurrent cache states miss/hit = %d/%d, want 1/%d", misses, hits, callers-1)
+	}
+}
+
+func tarDisambiguationFixture(t *testing.T, root string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		h := &tar.Header{Name: filepath.ToSlash(rel), Mode: 0644, Size: int64(len(body))}
+		if err := tw.WriteHeader(h); err != nil {
+			return err
+		}
+		_, err = tw.Write(body)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }

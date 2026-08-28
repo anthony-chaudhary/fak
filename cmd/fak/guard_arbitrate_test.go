@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -110,6 +111,53 @@ func TestGuardArbitrateCompactStartupSuppressesShadowCollision(t *testing.T) {
 	if got := stderr.String(); got != "" {
 		t.Fatalf("shadow collision polluted compact startup: %q", got)
 	}
+}
+
+func TestGuardArbitrateExpiredReadIsBoundedByMode(t *testing.T) {
+	root := guardArbitrateTestRepo(t)
+	originalLive := guardArbitrateLive
+	originalLimit := guardArbitrateShadowLimit
+	guardArbitrateShadowLimit = 20 * time.Millisecond
+	guardArbitrateLive = func(_ *leaseref.Store, ctx context.Context, _ time.Time) ([]leaseref.Record, []string, error) {
+		<-ctx.Done() // Model the serial cat-file reader staying blocked until its budget expires.
+		return nil, nil, ctx.Err()
+	}
+	t.Cleanup(func() {
+		guardArbitrateLive = originalLive
+		guardArbitrateShadowLimit = originalLimit
+	})
+
+	t.Run("shadow continues", func(t *testing.T) {
+		var stderr strings.Builder
+		started := time.Now()
+		lease, err := guardArbitrateAcquire(context.Background(), &stderr, guardArbitrateConfig{
+			Mode: guardArbitrateModeShadow, Root: root, Tree: []string{"cmd/**"},
+		})
+		if elapsed := time.Since(started); elapsed < guardArbitrateShadowLimit || elapsed > 250*time.Millisecond {
+			t.Fatalf("blocked shadow admission took %s, want deadline-driven continuation near %s", elapsed, guardArbitrateShadowLimit)
+		}
+		if err != nil || lease != nil {
+			t.Fatalf("shadow = lease %v err %v", lease, err)
+		}
+		if got := stderr.String(); !strings.Contains(got, "shadow mode continuing without a lease") {
+			t.Fatalf("shadow timeout diagnostic = %q", got)
+		}
+	})
+
+	t.Run("enforce refuses", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		lease, err := guardArbitrateAcquire(ctx, io.Discard, guardArbitrateConfig{
+			Mode: guardArbitrateModeEnforce, Root: root, Tree: []string{"cmd/**"},
+		})
+		if lease != nil {
+			lease.Close()
+			t.Fatal("enforce returned a lease after its ledger read was cancelled")
+		}
+		if err == nil || !strings.Contains(err.Error(), "COLLISION_RISK") || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("enforce error = %v, want fail-closed COLLISION_RISK wrapping context deadline", err)
+		}
+	})
 }
 
 func TestGuardArbitrateForceBypassesNonExclusiveOverlap(t *testing.T) {

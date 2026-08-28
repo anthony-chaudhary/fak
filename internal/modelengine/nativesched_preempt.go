@@ -304,6 +304,8 @@ func (s *NativeScheduler) readmitPreemptedLocked() {
 			continue
 		}
 		if err := s.restorePreemptedLaneLocked(ln); err != nil {
+			ln.hostKV = nil
+			ln.savedLogits = nil
 			ln.finish(nil, err)
 			continue
 		}
@@ -324,7 +326,8 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 		ln.sess = sess
 	case NativePreemptSwap:
 		var cache *model.KVCache
-		if s.m.Cfg.IsQwen35Hybrid() {
+		qwenHybrid := s.m.Cfg.IsQwen35Hybrid()
+		if qwenHybrid {
 			var err error
 			cache, err = model.QwenHybridKVCacheFromHost(s.m.Cfg, ln.hostKV)
 			if err != nil {
@@ -339,7 +342,17 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 			cache = seq.ToKVCache(s.m.Cfg)
 			seq.Free()
 		}
-		ln.sess = s.sessionFromCache(cache, ln.q4k)
+		candidate := s.sessionFromCache(cache, ln.q4k)
+		if qwenHybrid {
+			history := make([]int, 0, len(ln.prompt)+len(ln.gen))
+			history = append(history, ln.prompt...)
+			history = append(history, ln.gen...)
+			if _, err := candidate.RestoreTokenLineage(history); err != nil {
+				candidate.Close()
+				return fmt.Errorf("modelengine: restore Qwen swap token lineage: %w", err)
+			}
+		}
+		ln.sess = candidate
 		ln.logits = copyF32(ln.savedLogits)
 		s.preemptStats.SwapRestoredBytes += int64(len(ln.hostKV))
 	default:

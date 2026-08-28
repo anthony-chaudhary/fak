@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,11 @@ import (
 )
 
 const (
+	// DisambiguationTimeoutEnv is the explicit bootstrap-only recovery knob for a
+	// cold whole-tree oracle. It changes only the shared deadline around the same
+	// three witnesses; it never skips, retries, or weakens one.
+	DisambiguationTimeoutEnv = "FAK_WORKTREE_DISAMBIGUATION_TIMEOUT_MS"
+
 	// DisambiguationTimeoutCode is the stable machine-readable diagnosis for a
 	// whole-tree witness that exceeded the single pre-CAS deadline.
 	DisambiguationTimeoutCode = "DISAMBIGUATION_TIMEOUT"
@@ -30,6 +37,13 @@ const (
 	// intentionally bounded well below the 20+ minute stalls seen in #9579 while
 	// leaving ample room for the normal full-corpus scan on a busy workstation.
 	defaultDisambiguationTimeout = 2 * time.Minute
+	maxDisambiguationTimeout     = 15 * time.Minute
+)
+
+const (
+	disambiguationRecoveryDefault  = "default"
+	disambiguationRecoveryExplicit = "explicit_bounded_override"
+	disambiguationRecoveryInvalid  = "invalid_explicit_override"
 )
 
 // DisambiguationDiagnostic identifies the exact witness and expensive subphase
@@ -40,6 +54,16 @@ type DisambiguationDiagnostic struct {
 	Witness   string `json:"witness"`
 	Subphase  string `json:"subphase"`
 	TimeoutMS int64  `json:"timeout_ms,omitempty"`
+}
+
+// DisambiguationTimeoutReceipt makes the deadline authority explicit on every
+// whole-tree witness result. RequestedTimeoutMS is null on the ordinary path
+// and when a malformed request cannot be safely represented as an integer.
+type DisambiguationTimeoutReceipt struct {
+	DefaultTimeoutMS   int64  `json:"default_timeout_ms"`
+	RequestedTimeoutMS *int64 `json:"requested_timeout_ms"`
+	EffectiveTimeoutMS int64  `json:"effective_timeout_ms"`
+	RecoveryMode       string `json:"recovery_mode"`
 }
 
 // DisambiguationWitness is one independently materialized view used by land.
@@ -54,11 +78,15 @@ type DisambiguationWitness struct {
 	FamilyCoverage map[string]float64        `json:"family_coverage,omitempty"`
 	Detail         string                    `json:"detail,omitempty"`
 	Diagnostic     *DisambiguationDiagnostic `json:"diagnostic,omitempty"`
+	CacheIdentity  string                    `json:"cache_identity,omitempty"`
+	CacheState     string                    `json:"cache_state,omitempty"`
+	CacheReason    string                    `json:"cache_reason,omitempty"`
 }
 type DisambiguationWitnesses struct {
-	Before    DisambiguationWitness `json:"before"`
-	Worktree  DisambiguationWitness `json:"worktree"`
-	PostApply DisambiguationWitness `json:"post_apply"`
+	Timeout   DisambiguationTimeoutReceipt `json:"timeout"`
+	Before    DisambiguationWitness        `json:"before"`
+	Worktree  DisambiguationWitness        `json:"worktree"`
+	PostApply DisambiguationWitness        `json:"post_apply"`
 }
 
 func disambiguationRelevant(paths []string) bool {
@@ -80,8 +108,7 @@ type boundedReader func(context.Context, string, string, func(string)) Disambigu
 var (
 	readDisambiguation = boundedReader(readDisambiguationWitness)
 
-	disambiguationTimeout = defaultDisambiguationTimeout
-	newDeadline           = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+	newDeadline = func(timeout time.Duration) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(context.Background(), timeout)
 	}
 
@@ -109,12 +136,72 @@ var (
 		windowgate.ConfigureBackgroundCommand(cmd)
 		return cmd.Output()
 	}
+	disambiguationCacheSchema     = "disambiguation-witness-v1"
+	disambiguationAnalyzerConfig  = "json+markdown;catalog-invariant-v1"
+	disambiguationAnalyzerVersion = "concept-disambiguation-scorecard-v1"
+	disambiguationCacheRoot       = func(repo string) (string, error) {
+		cmd := exec.Command("git", "rev-parse", "--git-common-dir")
+		cmd.Dir = repo
+		windowgate.ConfigureBackgroundCommand(cmd)
+		out, err := cmd.Output()
+		if err != nil {
+			return "", err
+		}
+		common := strings.TrimSpace(string(out))
+		if !filepath.IsAbs(common) {
+			common = filepath.Join(repo, common)
+		}
+		return filepath.Join(filepath.Clean(common), "fak-cache", "disambiguation"), nil
+	}
 )
 
 func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
-	ctx, cancel := newDeadline(disambiguationTimeout)
+	timeoutReceipt, timeout, err := resolveDisambiguationTimeout(os.LookupEnv)
+	if err != nil {
+		all := newDisambiguationWitnesses(treeSHA, timeoutReceipt)
+		all.Before.Diagnostic = &DisambiguationDiagnostic{
+			Code: DisambiguationTimeoutCode, Witness: "configuration", Subphase: "timeout-config",
+		}
+		all.Before.Detail = fmt.Sprintf("%s: witness=configuration subphase=timeout-config: %v", DisambiguationTimeoutCode, err)
+		return all, false
+	}
+	ctx, cancel := newDeadline(timeout)
 	defer cancel()
-	return verifyWithinDeadline(ctx, root, wtPath, treeSHA)
+	return verifyWithinDeadline(ctx, root, wtPath, treeSHA, timeoutReceipt)
+}
+
+func resolveDisambiguationTimeout(lookup func(string) (string, bool)) (DisambiguationTimeoutReceipt, time.Duration, error) {
+	receipt := DisambiguationTimeoutReceipt{
+		DefaultTimeoutMS:   defaultDisambiguationTimeout.Milliseconds(),
+		EffectiveTimeoutMS: defaultDisambiguationTimeout.Milliseconds(),
+		RecoveryMode:       disambiguationRecoveryDefault,
+	}
+	raw, present := lookup(DisambiguationTimeoutEnv)
+	raw = strings.TrimSpace(raw)
+	if !present {
+		return receipt, defaultDisambiguationTimeout, nil
+	}
+	requestedMS, err := strconv.ParseInt(raw, 10, 64)
+	if err == nil {
+		receipt.RequestedTimeoutMS = &requestedMS
+	}
+	if err != nil || requestedMS < 1 || requestedMS > maxDisambiguationTimeout.Milliseconds() {
+		receipt.EffectiveTimeoutMS = 0
+		receipt.RecoveryMode = disambiguationRecoveryInvalid
+		return receipt, 0, fmt.Errorf("%s must be an integer in [1,%d]", DisambiguationTimeoutEnv, maxDisambiguationTimeout.Milliseconds())
+	}
+	receipt.EffectiveTimeoutMS = requestedMS
+	receipt.RecoveryMode = disambiguationRecoveryExplicit
+	return receipt, time.Duration(requestedMS) * time.Millisecond, nil
+}
+
+func newDisambiguationWitnesses(treeSHA string, timeout DisambiguationTimeoutReceipt) *DisambiguationWitnesses {
+	return &DisambiguationWitnesses{
+		Timeout:   timeout,
+		Before:    DisambiguationWitness{Tree: "HEAD"},
+		Worktree:  DisambiguationWitness{Tree: "HEAD"},
+		PostApply: DisambiguationWitness{Tree: treeSHA},
+	}
 }
 
 // verifyWithinDeadline keeps the entire three-witness sweep under
@@ -122,22 +209,19 @@ func verifyAppliedDisambiguation(root, wtPath, treeSHA string) (*DisambiguationW
 // throwaway GIT_INDEX_FILE and before commit-tree, recovery publication, or the
 // trunk CAS, so a timeout cannot move HEAD or touch the shared index by
 // construction.
-func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string) (*DisambiguationWitnesses, bool) {
-	all := &DisambiguationWitnesses{
-		Before:    DisambiguationWitness{Tree: "HEAD"},
-		Worktree:  DisambiguationWitness{Tree: "HEAD"},
-		PostApply: DisambiguationWitness{Tree: treeSHA},
-	}
+func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string, timeoutReceipt DisambiguationTimeoutReceipt) (*DisambiguationWitnesses, bool) {
+	all := newDisambiguationWitnesses(treeSHA, timeoutReceipt)
+	timeout := time.Duration(timeoutReceipt.EffectiveTimeoutMS) * time.Millisecond
 	var complete bool
-	all.Before, complete = readOneBounded(ctx, "before", root, "HEAD")
+	all.Before, complete = readOneBounded(ctx, "before", root, "HEAD", timeout)
 	if !complete {
 		return all, false
 	}
-	all.Worktree, complete = readOneBounded(ctx, "worktree", wtPath, "HEAD")
+	all.Worktree, complete = readOneBounded(ctx, "worktree", wtPath, "HEAD", timeout)
 	if !complete {
 		return all, false
 	}
-	all.PostApply, complete = readOneBounded(ctx, "post_apply", root, treeSHA)
+	all.PostApply, complete = readOneBounded(ctx, "post_apply", root, treeSHA, timeout)
 	if !complete {
 		return all, false
 	}
@@ -163,7 +247,7 @@ func verifyWithinDeadline(ctx context.Context, root, wtPath, treeSHA string) (*D
 // the whole-corpus invariant scan. The worker owns its scratch directory until
 // it eventually returns; the land caller may stop waiting immediately at the
 // deadline without racing cleanup or touching trunk state.
-func readOneBounded(ctx context.Context, witness, repo, tree string) (DisambiguationWitness, bool) {
+func readOneBounded(ctx context.Context, witness, repo, tree string, timeout time.Duration) (DisambiguationWitness, bool) {
 	type result struct {
 		witness DisambiguationWitness
 	}
@@ -188,16 +272,16 @@ func readOneBounded(ctx context.Context, witness, repo, tree string) (Disambigua
 	select {
 	case got := <-resultCh:
 		if err := ctx.Err(); err != nil {
-			return timeoutResult(tree, witness, currentSubphase(), err), false
+			return timeoutResult(tree, witness, currentSubphase(), timeout, err), false
 		}
 		return got.witness, true
 	case <-ctx.Done():
-		return timeoutResult(tree, witness, currentSubphase(), ctx.Err()), false
+		return timeoutResult(tree, witness, currentSubphase(), timeout, ctx.Err()), false
 	}
 }
 
-func timeoutResult(tree, witness, subphase string, err error) DisambiguationWitness {
-	timeoutMS := disambiguationTimeout.Milliseconds()
+func timeoutResult(tree, witness, subphase string, timeout time.Duration, err error) DisambiguationWitness {
+	timeoutMS := timeout.Milliseconds()
 	detail := fmt.Sprintf("%s: witness=%s subphase=%s timeout_ms=%d", DisambiguationTimeoutCode, witness, subphase, timeoutMS)
 	if err != nil {
 		detail += ": " + err.Error()
@@ -222,34 +306,145 @@ func coverageFamilyRegressed(before, after map[string]float64) bool {
 
 func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubphase func(string)) DisambiguationWitness {
 	w := DisambiguationWitness{Tree: tree}
-	setSubphase("scratch-tree")
-	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
-	if err != nil {
-		w.Detail = err.Error()
-		return w
-	}
-	defer os.RemoveAll(tmp)
 	setSubphase("git-archive")
 	archive, err := runDisambiguationArchive(ctx, repo, tree)
 	if err != nil {
 		w.Detail = err.Error()
 		return w
 	}
-	// Extract the archive in-process rather than shelling out to `tar`: GNU tar
-	// reads a Windows drive path (C:\...) as a remote host:path and fails with
-	// "Cannot connect to C:", which reddened every disambiguation witness on
-	// Windows. This mirrors the in-process extraction in conceptcatalog.CheckGitTree.
+
+	key := disambiguationCacheKey(archive)
+	w.CacheIdentity = key
+	cacheRoot, cacheErr := disambiguationCacheRoot(repo)
+	if cacheErr != nil {
+		w.CacheState, w.CacheReason = "bypass", "git-common-dir-unavailable"
+		result, _ := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+		return result
+	}
+	if err := os.MkdirAll(cacheRoot, 0755); err != nil {
+		w.CacheState, w.CacheReason = "bypass", "cache-root-unavailable"
+		result, _ := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+		return result
+	}
+
+	lock := filepath.Join(cacheRoot, key+".lock")
+	setSubphase("cache-lock")
+	for {
+		if err := os.Mkdir(lock, 0700); err == nil {
+			break
+		} else if !errors.Is(err, os.ErrExist) {
+			w.CacheState, w.CacheReason = "bypass", "cache-lock-unavailable"
+			result, _ := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+			return result
+		}
+		select {
+		case <-ctx.Done():
+			w.Detail = ctx.Err().Error()
+			return w
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	defer os.Remove(lock)
+
+	cachePath := filepath.Join(cacheRoot, key+".json")
+	setSubphase("cache-read")
+	if cached, reason, ok := readCachedDisambiguation(cachePath, key); ok {
+		cached.Tree = tree
+		cached.CacheIdentity, cached.CacheState, cached.CacheReason = key, "hit", reason
+		return cached
+	} else {
+		w.CacheState, w.CacheReason = "miss", reason
+	}
+
+	w, complete := computeDisambiguationWitness(ctx, w, archive, setSubphase)
+	if complete {
+		setSubphase("cache-write")
+		_ = writeCachedDisambiguation(cachePath, key, w)
+	}
+	return w
+}
+
+type disambiguationCacheEntry struct {
+	Schema  string                `json:"schema"`
+	Key     string                `json:"key"`
+	Witness DisambiguationWitness `json:"witness"`
+}
+
+func disambiguationCacheKey(archive []byte) string {
+	h := sha256.New()
+	io.WriteString(h, disambiguationCacheSchema)
+	h.Write([]byte{0})
+	io.WriteString(h, disambiguationAnalyzerConfig)
+	h.Write([]byte{0})
+	io.WriteString(h, disambiguationAnalyzerVersion)
+	h.Write([]byte{0})
+	h.Write(archive)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func readCachedDisambiguation(path, key string) (DisambiguationWitness, string, bool) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return DisambiguationWitness{}, "not-found", false
+	}
+	if err != nil {
+		return DisambiguationWitness{}, "read-error", false
+	}
+	var entry disambiguationCacheEntry
+	if json.Unmarshal(data, &entry) != nil {
+		return DisambiguationWitness{}, "corrupt", false
+	}
+	if entry.Schema != disambiguationCacheSchema || entry.Key != key {
+		return DisambiguationWitness{}, "mismatch", false
+	}
+	return entry.Witness, "content-addressed", true
+}
+
+func writeCachedDisambiguation(path, key string, witness DisambiguationWitness) error {
+	witness.Tree, witness.CacheIdentity, witness.CacheState, witness.CacheReason = "", "", "", ""
+	data, err := json.Marshal(disambiguationCacheEntry{Schema: disambiguationCacheSchema, Key: key, Witness: witness})
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), key+"-*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err = tmp.Write(data); err == nil {
+		err = tmp.Close()
+	} else {
+		_ = tmp.Close()
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(name, path)
+}
+
+func computeDisambiguationWitness(ctx context.Context, w DisambiguationWitness, archive []byte, setSubphase func(string)) (DisambiguationWitness, bool) {
+	setSubphase("scratch-tree")
+	tmp, err := os.MkdirTemp("", "fak-disambiguation-tree-*")
+	if err != nil {
+		w.Detail = err.Error()
+		return w, false
+	}
+	defer os.RemoveAll(tmp)
 	out := filepath.Join(tmp, "tree")
 	setSubphase("extract-archive")
 	if err = extractTarBounded(ctx, archive, out); err != nil {
 		w.Detail = fmt.Sprintf("extract candidate tree: %v", err)
-		return w
+		return w, false
 	}
 	setSubphase("concept-invariant")
 	inv, err := checkInvariantBounded(ctx, out, setSubphase)
 	if err != nil {
 		w.Detail = err.Error()
-		return w
+		return w, false
 	}
 	w.Fresh = inv.Freshness.Fresh
 	w.SemanticValid = inv.SemanticValid
@@ -259,7 +454,7 @@ func readDisambiguationWitness(ctx context.Context, repo, tree string, setSubpha
 	w.CoverageDebt = inv.CoverageDebt
 	w.FamilyCoverage = inv.FamilyCoverage
 	w.Detail = inv.Detail
-	return w
+	return w, true
 }
 
 // checkInvariantBounded is the context-aware equivalent of

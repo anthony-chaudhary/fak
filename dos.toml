@@ -1375,6 +1375,13 @@ summary  = "A dispatch or worker launch would overlap a live lease/region and ri
 fix      = "Run the arbiter and wait, repartition, or pick a disjoint lane/region before launching. Floor: `dos arbitrate` / lane lease checks."
 see_also = ["dos arbitrate", "dos top", "tools/dos_fleet_lease.py"]
 
+[reasons.DISAMBIGUATION_TIMEOUT]
+category = "OPERATOR_GATE"
+refusal  = true
+summary  = "The exact whole-tree disambiguation oracle exceeded its bounded pre-CAS deadline; the managed worker and trunk/index remain unchanged."
+fix      = "For the one bootstrap land that repairs the cold oracle, rerun the same managed `fak worktree worker land` command with `FAK_WORKTREE_DISAMBIGUATION_TIMEOUT_MS=<milliseconds>` set explicitly in the inclusive range 1..900000. The default remains 120000 ms; the override changes time only and never skips, weakens, or retries any witness. Remove the override after #9580 restores the ordinary default path."
+see_also = ["internal/workerworktree/disambiguation.go", "https://github.com/anthony-chaudhary/fak/issues/9580", "https://github.com/anthony-chaudhary/fak/issues/9655", "https://github.com/anthony-chaudhary/fak/issues/9657"]
+
 [reasons.SYSTEM_COMMIT_HEADROOM]
 category = "OPERATOR_GATE"
 refusal  = true
