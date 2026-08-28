@@ -185,8 +185,9 @@ type Config struct {
 	ScoringFunc         string  `json:"scoring_func,omitempty"`
 	TopKMethod          string  `json:"topk_method,omitempty"`
 
-	// Multi-Token-Prediction (MTP) self-speculation head depth. The MoE families that
-	// ship a speculative-decoding head declare its depth here: GLM-5.2 (glm_moe_dsa) and
+	// Multi-Token-Prediction (MTP) self-speculation head metadata. Older MoE families
+	// declare num_nextn_predict_layers; Qwen3.5-text-family checkpoints declare
+	// mtp_num_hidden_layers and whether the head owns dedicated embeddings. GLM-5.2 (glm_moe_dsa) and
 	// DeepSeek-V3 both set num_nextn_predict_layers to 1. The head's tensors are the
 	// "mtp." / "nextn" module the loaders DROP by default and RETAIN under RetainMTP
 	// (#3078/#3197). This field is the config surface that tells the retained substrate
@@ -196,7 +197,9 @@ type Config struct {
 	// head depth (NumMTPLayers/HasMTPHead/SelfSpeculationSubstrateReady), but no draft/
 	// verify decode consumes it yet. Zero/absent = no MTP head (every dense checkpoint),
 	// so the load + forward path stays byte-identical.
-	NumNextNPredictLayers int `json:"num_nextn_predict_layers,omitempty"`
+	NumNextNPredictLayers     int  `json:"num_nextn_predict_layers,omitempty"`
+	MTPNumHiddenLayers        int  `json:"mtp_num_hidden_layers,omitempty"`
+	MTPUseDedicatedEmbeddings bool `json:"mtp_use_dedicated_embeddings,omitempty"`
 
 	// Qwen3.5 / Qwen3-Next hybrid Gated-DeltaNet linear-attention axis. When LayerTypes
 	// marks a layer "linear_attention", that layer is a recurrent state-space token mixer
@@ -898,12 +901,15 @@ func (c Config) isGLMMoeDsa() bool {
 }
 
 // NumMTPLayers returns the declared depth of this checkpoint's Multi-Token-Prediction
-// (MTP) self-speculation head — the HF num_nextn_predict_layers field — clamped so a
-// negative or absent value reads as zero ("no MTP head"). The head's tensors are the
+// (MTP) self-speculation head — preferring Qwen mtp_num_hidden_layers, then the older
+// HF num_nextn_predict_layers field — clamped so a negative or absent value reads as zero ("no MTP head"). The head's tensors are the
 // "mtp." / "nextn" module the loaders drop by default and retain under RetainMTP
 // (#3078/#3197); this is how many nextn layers that retained substrate spans, i.e. how
 // many draft tokens a self-speculation verify pass would produce per step.
 func (c Config) NumMTPLayers() int {
+	if c.MTPNumHiddenLayers > 0 {
+		return c.MTPNumHiddenLayers
+	}
 	if c.NumNextNPredictLayers > 0 {
 		return c.NumNextNPredictLayers
 	}

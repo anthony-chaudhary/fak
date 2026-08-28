@@ -51,7 +51,8 @@ func (c Config) isLinearAttnLayer(l int) bool {
 // tensors and drop the rest so the standard layer-prefix lookups resolve. The vision
 // tower is dropped by DEFAULT, but RETAINED in place (left in man for newModel to segregate
 // into Model.Vision) when RetainVision is set — the safetensors twin of the GGUF mmproj
-// retain (#4029). The MTP head is always dropped (its retention is the separate #3078 slice).
+// retain (#4029). The MTP head follows RetainMTP; when retained, its exact one-layer
+// namespace is validated before the Model can expose it to native draft wiring.
 func materializeQwen35Tensors(cfg Config, man map[string]tensorMeta) error {
 	if !cfg.IsQwen35Hybrid() {
 		return nil
@@ -68,7 +69,9 @@ func materializeQwen35Tensors(cfg Config, man map[string]tensorMeta) error {
 				drop = append(drop, name)
 			}
 		case strings.HasPrefix(name, "mtp."):
-			drop = append(drop, name)
+			if !RetainMTP {
+				drop = append(drop, name)
+			}
 		}
 	}
 	for old, nw := range renames {
@@ -77,6 +80,11 @@ func materializeQwen35Tensors(cfg Config, man map[string]tensorMeta) error {
 	}
 	for _, d := range drop {
 		delete(man, d)
+	}
+	if RetainMTP {
+		if err := validateQwen35MTPManifest(cfg, man); err != nil {
+			return err
+		}
 	}
 	for l := 0; l < cfg.NumLayers; l++ {
 		if !cfg.isLinearAttnLayer(l) {
