@@ -135,7 +135,7 @@ func qwen35GDNPreprojectedOracle(mixed, z, beta, alpha, convW, aLog, dtBias, nor
 			}
 			inv := 1 / float32(math.Sqrt(float64(ss/float32(vHd)+eps)))
 			for d, x := range vals {
-				out[t*nV*vHd+h*vHd+d] = x * inv * norm[h*vHd+d]
+				out[t*nV*vHd+h*vHd+d] = x * inv * norm[d]
 			}
 		}
 	}
