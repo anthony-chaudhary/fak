@@ -1,0 +1,213 @@
+$ go test -count=1 ./internal/perfrsiscore -run 'Refus|Error|Requir' -v
+=== RUN   TestPerformanceRSILearningRefusals
+=== RUN   TestPerformanceRSILearningRefusals/insufficient_history
+=== RUN   TestPerformanceRSILearningRefusals/no_recurrence
+=== RUN   TestPerformanceRSILearningRefusals/no_valid_reuse
+=== RUN   TestPerformanceRSILearningRefusals/false_compounding
+=== RUN   TestPerformanceRSILearningRefusals/negative_compounding
+=== RUN   TestPerformanceRSILearningRefusals/duplicate_cycle
+=== RUN   TestPerformanceRSILearningRefusals/range
+=== RUN   TestPerformanceRSILearningRefusals/engine
+=== RUN   TestPerformanceRSILearningRefusals/forward_reference
+=== RUN   TestPerformanceRSILearningRefusals/false_repeated_failure
+=== RUN   TestPerformanceRSILearningRefusals/canonical_dimension
+=== RUN   TestPerformanceRSILearningRefusals/later_key_cannot_rescue_false_compounding_for_chronological_key
+--- PASS: TestPerformanceRSILearningRefusals (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/insufficient_history (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/no_recurrence (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/no_valid_reuse (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/false_compounding (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/negative_compounding (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/duplicate_cycle (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/range (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/engine (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/forward_reference (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/false_repeated_failure (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/canonical_dimension (0.00s)
+    --- PASS: TestPerformanceRSILearningRefusals/later_key_cannot_rescue_false_compounding_for_chronological_key (0.00s)
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/schema
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/repository
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/revision
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/timeline
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/explicit_start
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/experiment
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/classification
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/negative_reused
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/empty_total
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/commit
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/module_prefix
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/engine
+=== RUN   TestProvenanceRefusesInvalidReceiptsWithoutMutation/unit
+--- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/schema (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/repository (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/revision (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/timeline (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/explicit_start (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/experiment (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/classification (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/negative_reused (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/empty_total (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/commit (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/module_prefix (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/engine (0.00s)
+    --- PASS: TestProvenanceRefusesInvalidReceiptsWithoutMutation/unit (0.00s)
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_receipt_field
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_run_host
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_run_path
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/typed_terminal_evidence
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/unsupported_terminal_evidence
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_terminal_evidence_field
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/missing_terminal_evidence_type
+=== RUN   TestHardwareStrictJSONAndRequiredMeasuredUtilization/missing_measured_utilization
+--- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_receipt_field (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_run_host (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_run_path (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/typed_terminal_evidence (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/unsupported_terminal_evidence (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/unknown_terminal_evidence_field (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/missing_terminal_evidence_type (0.00s)
+    --- PASS: TestHardwareStrictJSONAndRequiredMeasuredUtilization/missing_measured_utilization (0.00s)
+=== RUN   TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths
+--- PASS: TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths (0.00s)
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/schema
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/snapshot
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/target_multiplier
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/dimension_count
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/duplicate_dimension
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/dimension_metadata
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/dimension_direction
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/dimension_current
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/dimension_target
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/llama_fallback
+=== RUN   TestRefusalContractsNameRequiredEvidenceFix/native_benchmark_engine
+--- PASS: TestRefusalContractsNameRequiredEvidenceFix (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/schema (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/snapshot (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/target_multiplier (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/dimension_count (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/duplicate_dimension (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/dimension_metadata (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/dimension_direction (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/dimension_current (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/dimension_target (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/llama_fallback (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredEvidenceFix/native_benchmark_engine (0.00s)
+=== RUN   TestRefusalContractsNameRequiredSectionFix
+=== RUN   TestRefusalContractsNameRequiredSectionFix/cycle_schema
+=== RUN   TestRefusalContractsNameRequiredSectionFix/cycle_engine
+=== RUN   TestRefusalContractsNameRequiredSectionFix/cycle_active_seconds
+=== RUN   TestRefusalContractsNameRequiredSectionFix/cycle_required_timestamp
+=== RUN   TestRefusalContractsNameRequiredSectionFix/cycle_ordering
+=== RUN   TestRefusalContractsNameRequiredSectionFix/cycle_unit
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_schema
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_engine
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_hypothesis
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_module_revision
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_measures
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_quality
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_envelope
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_gain_units
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_gain_arithmetic
+=== RUN   TestRefusalContractsNameRequiredSectionFix/improvement_causal_binding
+=== RUN   TestRefusalContractsNameRequiredSectionFix/provenance_schema
+=== RUN   TestRefusalContractsNameRequiredSectionFix/provenance_source_revision
+=== RUN   TestRefusalContractsNameRequiredSectionFix/provenance_adaptation
+=== RUN   TestRefusalContractsNameRequiredSectionFix/provenance_experiment
+=== RUN   TestRefusalContractsNameRequiredSectionFix/provenance_reuse
+=== RUN   TestRefusalContractsNameRequiredSectionFix/provenance_commit
+=== RUN   TestRefusalContractsNameRequiredSectionFix/provenance_timeline
+=== RUN   TestRefusalContractsNameRequiredSectionFix/learning_schema
+=== RUN   TestRefusalContractsNameRequiredSectionFix/learning_history
+=== RUN   TestRefusalContractsNameRequiredSectionFix/learning_recurrence_key
+=== RUN   TestRefusalContractsNameRequiredSectionFix/learning_confidence
+=== RUN   TestRefusalContractsNameRequiredSectionFix/learning_engine_artifact
+=== RUN   TestRefusalContractsNameRequiredSectionFix/learning_reuse_reference
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_schema
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_runs
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_device
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_blocker
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_engine
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_utilization
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_timestamp
+=== RUN   TestRefusalContractsNameRequiredSectionFix/hardware_timeline
+--- PASS: TestRefusalContractsNameRequiredSectionFix (0.01s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/cycle_schema (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/cycle_engine (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/cycle_active_seconds (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/cycle_required_timestamp (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/cycle_ordering (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/cycle_unit (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_schema (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_engine (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_hypothesis (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_module_revision (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_measures (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_quality (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_envelope (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_gain_units (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_gain_arithmetic (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/improvement_causal_binding (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/provenance_schema (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/provenance_source_revision (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/provenance_adaptation (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/provenance_experiment (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/provenance_reuse (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/provenance_commit (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/provenance_timeline (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/learning_schema (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/learning_history (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/learning_recurrence_key (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/learning_confidence (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/learning_engine_artifact (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/learning_reuse_reference (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_schema (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_runs (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_device (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_blocker (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_engine (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_utilization (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_timestamp (0.00s)
+    --- PASS: TestRefusalContractsNameRequiredSectionFix/hardware_timeline (0.00s)
+=== RUN   TestErrorContractsNameRequiredCallerFix
+=== RUN   TestErrorContractsNameRequiredCallerFix/decode_unknown_field
+=== RUN   TestErrorContractsNameRequiredCallerFix/decode_trailing_value
+=== RUN   TestErrorContractsNameRequiredCallerFix/compose_snapshot
+=== RUN   TestErrorContractsNameRequiredCallerFix/compose_receipts
+=== RUN   TestErrorContractsNameRequiredCallerFix/compose_source
+=== RUN   TestErrorContractsNameRequiredCallerFix/compose_duplicate_source
+=== RUN   TestErrorContractsNameRequiredCallerFix/compose_no_section
+=== RUN   TestErrorContractsNameRequiredCallerFix/compare_schema
+=== RUN   TestErrorContractsNameRequiredCallerFix/compare_missing_dimension
+--- PASS: TestErrorContractsNameRequiredCallerFix (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/decode_unknown_field (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/decode_trailing_value (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/compose_snapshot (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/compose_receipts (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/compose_source (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/compose_duplicate_source (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/compose_no_section (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/compare_schema (0.00s)
+    --- PASS: TestErrorContractsNameRequiredCallerFix/compare_missing_dimension (0.00s)
+=== RUN   TestRequiredLoopTurnRefusalsNameRecovery
+=== RUN   TestRequiredLoopTurnRefusalsNameRecovery/unset_input
+=== RUN   TestRequiredLoopTurnRefusalsNameRecovery/missing_file
+--- PASS: TestRequiredLoopTurnRefusalsNameRecovery (0.00s)
+    --- PASS: TestRequiredLoopTurnRefusalsNameRecovery/unset_input (0.00s)
+    --- PASS: TestRequiredLoopTurnRefusalsNameRecovery/missing_file (0.00s)
+PASS
+ok  	github.com/anthony-chaudhary/fak/internal/perfrsiscore	0.292s
+
+$ go test -count=1 ./internal/perfrsiscore
+ok  	github.com/anthony-chaudhary/fak/internal/perfrsiscore	0.235s
+
+$ go vet ./internal/perfrsiscore
+
+$ make test-fast
+FAIL (pre-existing trunk architecture violation outside issue #9766 paths)
+TestNoUpwardImports: nativeperf -> agent; qwen38quantrun -> agent
+The build, test-fast timeout regression, and go vet ./... stages passed before architest-gate failed.

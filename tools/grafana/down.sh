@@ -44,8 +44,22 @@ if [ -d "$RUN_DIR" ]; then
     [ -e "$pf" ] || continue
     pid="$(sed -n 's/^pid=//p' "$pf" 2>/dev/null | head -1)"
     owner="$(sed -n 's/^owner=//p' "$pf" 2>/dev/null | head -1)"
+    supervisor="$(sed -n 's/^supervisor=//p' "$pf" 2>/dev/null | head -1)"
+    label="$(sed -n 's/^label=//p' "$pf" 2>/dev/null | head -1)"
     name="$(basename "$pf" .pid)"
-    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+    expected_label="com.fak.grafana.$(id -u).${name//_/-}.$owner"
+    if [ "$supervisor" = launchd ] && [ "$(uname)" = "Darwin" ]; then
+      job="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null || true)"
+      command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+      if [[ "$owner" =~ ^[A-Za-z0-9.-]+$ ]] && [ "$label" = "$expected_label" ] \
+        && [ -n "$job" ] && [[ "$pid" =~ ^[0-9]+$ ]] \
+        && [[ "$command_line" == *"fak-grafana-owner=$owner"* ]]; then
+        log "stopping $name (owned launchd job $label)…"
+        launchctl remove "$label" 2>/dev/null || true
+      else
+        log "leaving $name launchd job running — ownership was not verified."
+      fi
+    elif [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
       command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
       if [ -n "$owner" ] && [[ "$command_line" == *"fak-grafana-owner=$owner"* ]]; then
         log "stopping $name (owned pid $pid)…"

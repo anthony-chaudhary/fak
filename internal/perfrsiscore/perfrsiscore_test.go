@@ -1013,3 +1013,248 @@ func TestHardwareStrictJSONAndRequiredMeasuredUtilization(t *testing.T) {
 		})
 	}
 }
+
+func TestEdgeDecodeRejectsEmptyMalformedAndTrailingInputs(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "empty", input: "", want: "decode evidence:"},
+		{name: "whitespace", input: " \n\t", want: "decode evidence:"},
+		{name: "truncated", input: `{"schema":"fak-performance-rsi-evidence/1"`, want: "decode evidence:"},
+		{name: "wrong top-level type", input: `[]`, want: "decode evidence:"},
+		{name: "trailing value", input: `{} {}`, want: "decode evidence: trailing JSON value"},
+		{name: "unknown hostile field", input: `{"private_token":"do-not-accept"}`, want: "decode evidence:"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Decode(strings.NewReader(tc.input))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Decode() error = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestAdversarialDecodeRejectsOversizedDimensionSet(t *testing.T) {
+	e := fixture(t)
+	const oversizedCount = 10_000
+	e.Dimensions = make([]Dimension, oversizedCount)
+	for i := range e.Dimensions {
+		e.Dimensions[i] = Dimension{
+			ID:         "cycle_time",
+			Direction:  Lower,
+			Unit:       "hours",
+			Source:     "adversarial generated input",
+			NextAction: "reject before scoring",
+		}
+	}
+	encoded, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Decode(bytes.NewReader(encoded)); err == nil || !strings.Contains(err.Error(), "want exactly 16") {
+		t.Fatalf("Decode() error = %v, want oversized dimension rejection", err)
+	}
+}
+
+func TestEdgeScoreLoopTurnPreservesExistingLoadErrorPaths(t *testing.T) {
+	malformed := filepath.Join(t.TempDir(), "malformed.json")
+	if err := os.WriteFile(malformed, []byte(`{"schema":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, input := range []string{malformed, t.TempDir()} {
+		receipt := ScoreLoopTurn(input)
+		if receipt.Status != LoopTurnUnavailable || receipt.Reason != "SCORE_INPUT_UNAVAILABLE" {
+			t.Fatalf("input %q receipt header = %+v", input, receipt)
+		}
+		if strings.TrimSpace(receipt.UnavailableDiagnostic) == "" {
+			t.Fatalf("input %q omitted load diagnostic: %+v", input, receipt)
+		}
+		if receipt.LoopHealth != nil || receipt.PerformanceRSIDebt != nil || receipt.DominantBottleneck != "" {
+			t.Fatalf("input %q invented score data: %+v", input, receipt)
+		}
+	}
+}
+
+func assertRefusalMessage(t *testing.T, err error, wants ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("invalid input was accepted")
+	}
+	for _, want := range wants {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not name required fix %q", err, want)
+		}
+	}
+}
+
+func decodeForRefusal(e Evidence) error {
+	b, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	_, err = Decode(bytes.NewReader(b))
+	return err
+}
+
+func refusalDimension(e *Evidence, id string) *Dimension {
+	for i := range e.Dimensions {
+		if e.Dimensions[i].ID == id {
+			return &e.Dimensions[i]
+		}
+	}
+	panic("fixture missing dimension " + id)
+}
+
+func TestRefusalContractsNameRequiredEvidenceFix(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Evidence)
+		want []string
+	}{
+		{"schema", func(e *Evidence) { e.Schema = "old" }, []string{"schema", EvidenceSchema}},
+		{"snapshot", func(e *Evidence) { e.Snapshot = " " }, []string{"snapshot", "required"}},
+		{"target multiplier", func(e *Evidence) { e.TargetMultiplier = 99 }, []string{"target_multiplier", "100x"}},
+		{"dimension count", func(e *Evidence) { e.Dimensions = e.Dimensions[:15] }, []string{"dimensions", "exactly 16"}},
+		{"duplicate dimension", func(e *Evidence) { e.Dimensions[1].ID = e.Dimensions[0].ID }, []string{"dimension", "more than once"}},
+		{"dimension metadata", func(e *Evidence) { e.Dimensions[0].Source = "" }, []string{"dimension", "source", "unit", "next_action"}},
+		{"dimension direction", func(e *Evidence) { e.Dimensions[0].Direction = "sideways" }, []string{"dimension", "direction"}},
+		{"dimension current", func(e *Evidence) { v := -1.0; e.Dimensions[0].Current = &v }, []string{"dimension", "current"}},
+		{"dimension target", func(e *Evidence) { v := 0.0; e.Dimensions[0].Target = &v }, []string{"dimension", "target"}},
+		{"llama fallback", func(e *Evidence) { e.Dimensions[0].Engine = "llama.cpp" }, []string{"dimension", "llama.cpp", "native"}},
+		{"native benchmark engine", func(e *Evidence) { e.Dimensions[0].EvidenceKind = "native_benchmark"; e.Dimensions[0].Engine = "other" }, []string{"dimension", "fak-native engine"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := fixture(t)
+			tc.edit(&e)
+			assertRefusalMessage(t, decodeForRefusal(e), tc.want...)
+		})
+	}
+}
+
+func TestRefusalContractsNameRequiredSectionFix(t *testing.T) {
+	tests := []struct {
+		name string
+		base func(*testing.T) Evidence
+		edit func(*Evidence)
+		want []string
+	}{
+		{"cycle schema", cycleEvidence, func(e *Evidence) { e.Cycle.Schema = "old" }, []string{"cycle schema", CycleSchema}},
+		{"cycle engine", cycleEvidence, func(e *Evidence) { e.Cycle.Engine = "llama.cpp" }, []string{"cycle engine", "fak-native", "without llama.cpp"}},
+		{"cycle active seconds", cycleEvidence, func(e *Evidence) { e.Cycle.OperatorActiveSeconds = -1 }, []string{"operator_active_seconds", "nonnegative", "finite"}},
+		{"cycle required timestamp", cycleEvidence, func(e *Evidence) { e.Cycle.QueueAt = "" }, []string{"cycle queue_at", "required"}},
+		{"cycle ordering", cycleEvidence, func(e *Evidence) { e.Cycle.QueueAt = e.Cycle.IdeaAt }, []string{"strictly ordered", "queue_at", "idea_at"}},
+		{"cycle unit", cycleEvidence, func(e *Evidence) { refusalDimension(e, "cycle_time").Unit = "fortnights" }, []string{"cycle derivation", "cycle_time", "unsupported duration unit"}},
+		{"improvement schema", improvementEvidence, func(e *Evidence) { e.Improvement.Schema = "old" }, []string{"improvement schema", ImprovementSchema}},
+		{"improvement engine", improvementEvidence, func(e *Evidence) { e.Improvement.Engine = "llama.cpp" }, []string{"improvement engine", "fak-native", "without llama.cpp"}},
+		{"improvement hypothesis", improvementEvidence, func(e *Evidence) { e.Improvement.Hypothesis = "" }, []string{"hypothesis", "required"}},
+		{"improvement module revision", improvementEvidence, func(e *Evidence) { e.Improvement.ChangedModule = "module" }, []string{"changed_module", "module@rev"}},
+		{"improvement measures", improvementEvidence, func(e *Evidence) { e.Improvement.Baseline.Value = 0 }, []string{"baseline", "candidate", "positive finite milliseconds"}},
+		{"improvement quality", improvementEvidence, func(e *Evidence) { e.Improvement.Quality.Parity = nil }, []string{"quality gate", "passing baseline/candidate parity"}},
+		{"improvement envelope", improvementEvidence, func(e *Evidence) { e.Improvement.CandidateEnvelope.Model = "other" }, []string{"operating envelopes", "complete", "matched"}},
+		{"improvement gain units", improvementEvidence, func(e *Evidence) { e.Improvement.NetTrueGain.Unit = "ratio" }, []string{"net_true_gain", "percent", "overhead"}},
+		{"improvement gain arithmetic", improvementEvidence, func(e *Evidence) { e.Improvement.NetTrueGain.Value++ }, []string{"net_true_gain", "baseline minus candidate and overhead"}},
+		{"improvement causal binding", improvementEvidence, func(e *Evidence) { e.Improvement.Causal.IsolatesChange = nil }, []string{"causal binding", "isolating", "milliseconds"}},
+		{"provenance schema", provenanceEvidence, func(e *Evidence) { e.Provenance.Schema = "old" }, []string{"provenance schema", ProvenanceSchema}},
+		{"provenance source revision", provenanceEvidence, func(e *Evidence) { e.Provenance.Source.Revision = "main" }, []string{"source revision", "40-character lowercase hex"}},
+		{"provenance adaptation", provenanceEvidence, func(e *Evidence) { e.Provenance.AdaptationStartExplicit = false }, []string{"adaptation start", "explicit"}},
+		{"provenance experiment", provenanceEvidence, func(e *Evidence) { e.Provenance.Experiment.Linked = false }, []string{"experiment", "linked", "artifact"}},
+		{"provenance reuse", provenanceEvidence, func(e *Evidence) { e.Provenance.Reuse.Classification = "new" }, []string{"reuse classification", "adapted_known_art"}},
+		{"provenance commit", provenanceEvidence, func(e *Evidence) { e.Provenance.Production.CommitSHA = "main" }, []string{"production commit_sha", "40-character lowercase hex"}},
+		{"provenance timeline", provenanceEvidence, func(e *Evidence) { e.Provenance.DiscoveryAt = "1999-01-01T00:00:00Z" }, []string{"timeline", "source <= discovery <= adaptation <= landing"}},
+		{"learning schema", learningEvidence, func(e *Evidence) { e.Learning.Schema = "old" }, []string{"learning schema", LearningSchema}},
+		{"learning history", learningEvidence, func(e *Evidence) { e.Learning.Rows = e.Learning.Rows[:1] }, []string{"at least two rows", "history"}},
+		{"learning recurrence key", learningEvidence, func(e *Evidence) { e.Learning.Rows[0].RecurrenceKey = "" }, []string{"row 0", "recurrence_key", "required"}},
+		{"learning confidence", learningEvidence, func(e *Evidence) { e.Learning.Rows[0].ConfidencePercent = -1 }, []string{"row 0", "confidence", "finite in [0,100]"}},
+		{"learning engine artifact", learningEvidence, func(e *Evidence) { e.Learning.Rows[0].Artifact = "" }, []string{"row 0", "engine fak-native", "artifact"}},
+		{"learning reuse reference", learningEvidence, func(e *Evidence) { e.Learning.Rows[1].PriorLearningID = "missing" }, []string{"row 1", "prior_learning_id", "earlier learning", "same recurrence_key"}},
+		{"hardware schema", hardwareEvidence, func(e *Evidence) { e.Hardware.Schema = "old" }, []string{"hardware schema", HardwareSchema}},
+		{"hardware runs", hardwareEvidence, func(e *Evidence) { e.Hardware.Runs = nil }, []string{"hardware", "at least one measured run"}},
+		{"hardware device", hardwareEvidence, func(e *Evidence) { e.Hardware.Runs[0].RequestedDeviceClass = "" }, []string{"run 0", "requested_device_class", "required"}},
+		{"hardware blocker", hardwareEvidence, func(e *Evidence) {
+			e.Hardware.Runs[0].TerminalEvidence = &HardwareTerminalEvidence{Type: "local-no-gpu"}
+		}, []string{"run 0", "terminal blocker", "not a hardware utilization measurement"}},
+		{"hardware engine", hardwareEvidence, func(e *Evidence) { e.Hardware.Runs[0].Engine = "other" }, []string{"run 0", "engine", "exactly fak-native"}},
+		{"hardware utilization", hardwareEvidence, func(e *Evidence) { e.Hardware.Runs[0].ActiveUtilization = 101 }, []string{"run 0", "active_utilization", "directly measured", "[0,100]"}},
+		{"hardware timestamp", hardwareEvidence, func(e *Evidence) { e.Hardware.Runs[0].StartedAt = "yesterday" }, []string{"run 0", "started_at", "malformed RFC3339 timestamp"}},
+		{"hardware timeline", hardwareEvidence, func(e *Evidence) { e.Hardware.Runs[0].EndedAt = e.Hardware.Runs[0].StartedAt }, []string{"run 0", "timeline", "enqueued_at <= started_at < ended_at"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := tc.base(t)
+			tc.edit(&e)
+			assertRefusalMessage(t, decodeForRefusal(e), tc.want...)
+		})
+	}
+}
+
+func TestErrorContractsNameRequiredCallerFix(t *testing.T) {
+	tests := []struct {
+		name   string
+		reject func(*testing.T) error
+		want   []string
+	}{
+		{"decode unknown field", func(t *testing.T) error { _, err := Decode(strings.NewReader(`{"unknown":true}`)); return err }, []string{"decode evidence", "unknown field", "unknown"}},
+		{"decode trailing value", func(t *testing.T) error { _, err := Decode(strings.NewReader(`{} {}`)); return err }, []string{"decode evidence", "trailing JSON value"}},
+		{"compose snapshot", func(t *testing.T) error {
+			_, err := ComposeV1(" ", []ComposeInput{{Source: "x", Evidence: fixture(t)}})
+			return err
+		}, []string{CompositionSchema, "snapshot", "required"}},
+		{"compose receipts", func(t *testing.T) error { _, err := ComposeV1("snapshot", nil); return err }, []string{CompositionSchema, "at least one receipt", "required"}},
+		{"compose source", func(t *testing.T) error {
+			_, err := ComposeV1("snapshot", []ComposeInput{{Evidence: fixture(t)}})
+			return err
+		}, []string{CompositionSchema, "receipt 0 source", "required"}},
+		{"compose duplicate source", func(t *testing.T) error {
+			e := fixture(t)
+			_, err := ComposeV1("snapshot", []ComposeInput{{Source: "same", Evidence: e}, {Source: "same", Evidence: e}})
+			return err
+		}, []string{CompositionSchema, "receipt source", "appears more than once"}},
+		{"compose no section", func(t *testing.T) error {
+			_, err := ComposeV1("snapshot", []ComposeInput{{Source: "base.json", Evidence: fixture(t)}})
+			return err
+		}, []string{CompositionSchema, "base.json", "no composable section"}},
+		{"compare schema", func(t *testing.T) error {
+			current := Score(fixture(t))
+			prior := current
+			prior.Schema = "old"
+			return Compare(&current, prior)
+		}, []string{"prior schema", ReportSchema}},
+		{"compare missing dimension", func(t *testing.T) error {
+			current := Score(fixture(t))
+			prior := current
+			prior.Dimensions = prior.Dimensions[1:]
+			return Compare(&current, prior)
+		}, []string{"prior snapshot missing dimension", "cycle_time"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { assertRefusalMessage(t, tc.reject(t), tc.want...) })
+	}
+}
+
+func TestRequiredLoopTurnRefusalsNameRecovery(t *testing.T) {
+	tests := []struct {
+		name, input string
+		want        []string
+	}{
+		{"unset input", "", []string{LoopTurnInputEnv, "not set"}},
+		{"missing file", filepath.Join(t.TempDir(), "missing.json"), []string{"missing.json", "no such file"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := ScoreLoopTurn(tc.input)
+			if r.Status != LoopTurnUnavailable || r.Reason != "SCORE_INPUT_UNAVAILABLE" {
+				t.Fatalf("refusal header = %+v", r)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(r.UnavailableDiagnostic, want) {
+					t.Fatalf("diagnostic %q does not name recovery %q", r.UnavailableDiagnostic, want)
+				}
+			}
+		})
+	}
+}
