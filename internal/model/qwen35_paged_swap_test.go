@@ -107,6 +107,38 @@ func TestQwenHybridPagedSwapRejectsTrailingAndInvalidGeometry(t *testing.T) {
 	qwenSwapAssertRefusedWithoutPanic(t, cfg, qwenSwapTestResign(oversizedLength), "oversized byte length")
 }
 
+func TestQwenHybridPagedSwapAdversarialMalformedCacheRefusesWithoutPanic(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*KVCache) *KVCache
+	}{
+		{name: "nil cache", mutate: func(*KVCache) *KVCache { return nil }},
+		{name: "missing K plane", mutate: func(c *KVCache) *KVCache { c.K = nil; return c }},
+		{name: "missing Kraw plane", mutate: func(c *KVCache) *KVCache { c.Kraw = nil; return c }},
+		{name: "missing V plane", mutate: func(c *KVCache) *KVCache { c.V = nil; return c }},
+		{name: "missing linear state", mutate: func(c *KVCache) *KVCache { c.linear = nil; return c }},
+		{name: "short linear layer inventory", mutate: func(c *KVCache) *KVCache {
+			c.linear.layers = c.linear.layers[:len(c.linear.layers)-1]
+			return c
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := NewSynthetic(qwen35HybridTestCfg()).NewSession().Cache
+			cache = tc.mutate(cache)
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("QwenHybridKVCacheToHost panicked: %v", recovered)
+				}
+			}()
+			if blob, err := QwenHybridKVCacheToHost(cache, 4); err == nil || blob != nil {
+				t.Fatalf("malformed cache accepted: blob=%d bytes err=%v", len(blob), err)
+			}
+		})
+	}
+}
+
 func TestQwenHybridPagedSwapV1WireCompatibility(t *testing.T) {
 	cfg := qwen35HybridTestCfg()
 	session := NewSynthetic(cfg).NewSession()

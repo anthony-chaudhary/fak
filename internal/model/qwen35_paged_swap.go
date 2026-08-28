@@ -27,13 +27,16 @@ func QwenHybridKVCacheToHost(c *KVCache, blockTokens int) ([]byte, error) {
 	full := qwenFullAttentionLayers(cfg)
 	n := c.Len()
 	for _, l := range full {
+		if l >= len(c.K) || l >= len(c.Kraw) || l >= len(c.V) {
+			return nil, fmt.Errorf("model: Qwen hybrid swap layer %d plane inventory mismatch", l)
+		}
 		want := n * stride
 		if len(c.K[l]) != want || len(c.Kraw[l]) != want || len(c.V[l]) != want {
 			return nil, fmt.Errorf("model: Qwen hybrid swap layer %d row geometry mismatch", l)
 		}
 	}
-	if c.linear == nil {
-		return nil, errors.New("model: Qwen hybrid swap missing linear state")
+	if c.linear == nil || len(c.linear.layers) != cfg.NumLayers {
+		return nil, errors.New("model: Qwen hybrid swap linear layer inventory mismatch")
 	}
 	blocks := qwenSwapCeilDiv(n, blockTokens)
 	bodyBytes, err := qwenHybridSwapBodyBytes(c, blockTokens, full, blocks, stride)
