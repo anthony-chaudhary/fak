@@ -11,7 +11,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1029,4 +1031,114 @@ func TestLandVerifyFlagParsesGoBuild(t *testing.T) {
 	// The hook selector is exercised via the internal Land test with a fake hook;
 	// here we only assert the CLI's go-build hook is a valid VerifyHook value.
 	var _ workerworktree.VerifyHook = worktreeWorkerGoBuildVerify
+}
+func TestBoundedColdStatusCountsBoundsConcurrencyAndPreservesAnswers(t *testing.T) {
+	const (
+		count = 40
+		limit = 4
+	)
+	paths := make([]string, count)
+	want := make(map[string]int, count)
+	for i := range paths {
+		paths[i] = fmt.Sprintf("fak-worker-wt-status-%03d", i)
+		want[paths[i]] = i
+	}
+
+	var mu sync.Mutex
+	active, maxActive := 0, 0
+	started := make(chan struct{}, count)
+	release := make(chan struct{})
+	done := make(chan map[string]int, 1)
+	go func() {
+		done <- boundedColdStatusCounts(paths, nil, func(path string, _ workerworktree.GitRunner) int {
+			mu.Lock()
+			active++
+			if active > maxActive {
+				maxActive = active
+			}
+			mu.Unlock()
+			started <- struct{}{}
+			<-release
+			mu.Lock()
+			active--
+			mu.Unlock()
+			return want[path]
+		}, limit)
+	}()
+	for range limit {
+		<-started
+	}
+	mu.Lock()
+	gotMax := maxActive
+	mu.Unlock()
+	if gotMax != limit {
+		t.Fatalf("max concurrency=%d want=%d", gotMax, limit)
+	}
+	close(release)
+	got := <-done
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("status answers changed by completion order: got=%v want=%v", got, want)
+	}
+}
+
+func TestWorktreeColdReapListSkipsProtectedStatusAndFailsClosedInOrder(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	floor := time.Hour
+	paths := []string{
+		filepath.Join(root, "fak-worker-wt-live"),
+		filepath.Join(root, "fak-worker-wt-young"),
+		filepath.Join(root, "fak-worker-wt-clean"),
+		filepath.Join(root, "fak-worker-wt-failed"),
+	}
+	for _, path := range paths {
+		if err := os.Mkdir(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := now.Add(-2 * floor)
+	for _, path := range []string{paths[0], paths[2], paths[3]} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git := func(_ string, args []string) (int, string) {
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
+			var out strings.Builder
+			for _, path := range paths {
+				fmt.Fprintf(&out, "worktree %s\n\n", path)
+			}
+			return 0, out.String()
+		}
+		return 1, ""
+	}
+	var mu sync.Mutex
+	var calls []string
+	got := worktreeColdReapList(root, git, now, floor,
+		func(path string) bool { return path == paths[0] },
+		func(path string, _ workerworktree.GitRunner) int {
+			mu.Lock()
+			calls = append(calls, path)
+			mu.Unlock()
+			if path == paths[3] {
+				return -1
+			}
+			return 0
+		}, 2)
+
+	if !reflect.DeepEqual([]string{got[0].Path, got[1].Path, got[2].Path, got[3].Path}, paths) {
+		t.Fatalf("output order changed: got=%v want=%v", got, paths)
+	}
+	sort.Strings(calls)
+	wantCalls := append([]string(nil), paths[2:]...)
+	sort.Strings(wantCalls)
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("status calls=%v want only old dead trees %v", calls, wantCalls)
+	}
+	if !got[2].Eligible || got[2].Unlanded != 0 {
+		t.Fatalf("clean candidate=%+v want eligible", got[2])
+	}
+	if got[3].Eligible || got[3].Unlanded != -1 || !got[3].HeldByWork {
+		t.Fatalf("failed status candidate=%+v want fail-closed unlanded=-1", got[3])
+	}
 }

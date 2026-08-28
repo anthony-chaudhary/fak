@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/leaseref"
@@ -312,9 +313,16 @@ func worktreeWorkerReap(argv []string) {
 
 	repoRoot := worktreeWorkerRoot(*root)
 	if *allCold {
-		finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
-		defer finishLifecycle()
-		worktreeWorkerReapAllCold(repoRoot, *apply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
+		effectiveApply := *apply || strings.EqualFold(strings.TrimSpace(os.Getenv(worktreeColdApplyEnv)), "apply")
+		// A dry-run is itself the pre-cleanup inventory: wrapping it in the generic
+		// WIP lifecycle would serially run git status in every registered worktree
+		// before the bounded classifier below can start. Capture before/after only
+		// for the mutating apply path.
+		if effectiveApply {
+			finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
+			defer finishLifecycle()
+		}
+		worktreeWorkerReapAllCold(repoRoot, effectiveApply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
 		return
 	}
 
@@ -379,8 +387,9 @@ const worktreeColdApplyEnv = "FAK_WORKTREE_COLD_COLLECT"
 // under --apply, whether it was actually removed.
 type worktreeColdReapItem struct {
 	workerworktree.ColdWorktree
-	Bytes   int64 `json:"bytes"`
-	Removed bool  `json:"removed,omitempty"`
+	BytesKnown bool  `json:"bytes_known"`
+	Bytes      int64 `json:"bytes"`
+	Removed    bool  `json:"removed,omitempty"`
 }
 
 // worktreeColdReapFailure records a worktree that was reapable in the planning
@@ -506,7 +515,7 @@ func worktreeColdReapReportWithProbes(
 		}
 	}
 	oracle := worktreeLiveLeaseOracle(repoRoot, now)
-	plan := workerworktree.ColdReapList(repoRoot, nil, now, ageFloor, oracle)
+	plan := worktreeColdReapList(repoRoot, nil, now, ageFloor, oracle, workerworktree.UnlandedCount, worktreeColdStatusConcurrency)
 
 	out := worktreeColdReapOut{
 		Mode:        "dry-run",
@@ -518,8 +527,9 @@ func worktreeColdReapReportWithProbes(
 		out.Mode = "apply"
 	}
 	processesByPath, processSnapshotErr := batchColdProcessRefs(plan, evenIfUnlanded, processSnapshot)
+	bytesByPath := boundedColdDirBytes(plan, apply, worktreeDirBytes, worktreeColdStatusConcurrency)
 	for _, c := range plan {
-		item := worktreeColdReapItem{ColdWorktree: c, Bytes: worktreeDirBytes(c.Path)}
+		item := worktreeColdReapItem{ColdWorktree: c, BytesKnown: apply, Bytes: bytesByPath[c.Path]}
 		// The override promotes ONLY the unlanded-work keeps. A live lease or a
 		// worktree under the age floor stays kept either way: those protect an
 		// in-flight land, which no disk-reclamation flag should be able to override.
@@ -597,6 +607,165 @@ func worktreeColdReapReportWithProbes(
 			}
 		}
 		out.Worktrees = append(out.Worktrees, item)
+	}
+	return out
+}
+
+const worktreeColdStatusConcurrency = 8
+
+// worktreeColdReapList preserves workerworktree.ColdReapList's decisions and
+// deterministic path order while moving its independent, read-only git-status
+// probes behind a small concurrency bound. Live and young trees never reach the
+// status probe. Destructive apply remains serial in worktreeColdReapReportWithProbes.
+func worktreeColdReapList(
+	root string,
+	git workerworktree.GitRunner,
+	now time.Time,
+	ageFloor time.Duration,
+	leaseLive workerworktree.LeaseLiveFn,
+	status func(string, workerworktree.GitRunner) int,
+	limit int,
+) []workerworktree.ColdWorktree {
+	if ageFloor <= 0 {
+		ageFloor = workerworktree.DefaultColdAgeFloor
+	}
+	_, paths := workerworktree.Count(root, git)
+	if len(paths) == 0 {
+		return []workerworktree.ColdWorktree{}
+	}
+
+	leaseByPath := make(map[string]bool, len(paths))
+	candidates := make([]string, 0, len(paths))
+	for _, path := range paths {
+		live := true
+		if leaseLive != nil {
+			live = leaseLive(path)
+		}
+		leaseByPath[path] = live
+		if !live && workerworktree.WorktreeAge(path, now) >= ageFloor {
+			candidates = append(candidates, path)
+		}
+	}
+	statusByPath := boundedColdStatusCounts(candidates, git, status, limit)
+
+	// Feed the prefetched observations through the canonical decision function.
+	// This runner is read-only and deterministic: it replays the original path
+	// order and never starts another git subprocess.
+	statusReplay := func(path string, args []string) (int, string) {
+		if len(args) >= 2 && args[0] == "worktree" && args[1] == "list" {
+			var out strings.Builder
+			for _, path := range paths {
+				fmt.Fprintf(&out, "worktree %s\n\n", path)
+			}
+			return 0, out.String()
+		}
+		if len(args) >= 2 && args[0] == "status" && args[1] == "--porcelain" {
+			count, ok := statusByPath[path]
+			if !ok || count < 0 {
+				return 1, ""
+			}
+			return 0, strings.Repeat("M cached-status-entry\n", count)
+		}
+		return 1, ""
+	}
+	leaseReplay := func(path string) bool { return leaseByPath[path] }
+	return workerworktree.ColdReapList(root, statusReplay, now, ageFloor, leaseReplay)
+}
+
+// boundedColdStatusCounts runs at most limit status probes at once and stores
+// each answer by input index before folding it into a map. The index-addressed
+// writes make completion order irrelevant and avoid concurrent map mutation.
+func boundedColdStatusCounts(
+	paths []string,
+	git workerworktree.GitRunner,
+	status func(string, workerworktree.GitRunner) int,
+	limit int,
+) map[string]int {
+	out := make(map[string]int, len(paths))
+	if len(paths) == 0 {
+		return out
+	}
+	if status == nil {
+		status = func(string, workerworktree.GitRunner) int { return -1 }
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > len(paths) {
+		limit = len(paths)
+	}
+
+	counts := make([]int, len(paths))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	wg.Add(limit)
+	for range limit {
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				counts[i] = status(paths[i], git)
+			}
+		}()
+	}
+	for i := range paths {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	for i, path := range paths {
+		out[path] = counts[i]
+	}
+	return out
+}
+
+// boundedColdDirBytes sizes only rows that can contribute to reclaimable or
+// held-work totals. Protected live/young trees are neither removable nor part of
+// the operator's unlanded-work debt, so recursively walking them wastes most of
+// a large inventory sweep. Writes are index-addressed; output order stays stable.
+func boundedColdDirBytes(
+	plan []workerworktree.ColdWorktree,
+	measure bool,
+	size func(string) int64,
+	limit int,
+) map[string]int64 {
+	paths := make([]string, 0, len(plan))
+	for _, item := range plan {
+		if item.Eligible || item.HeldByWork {
+			paths = append(paths, item.Path)
+		}
+	}
+	out := make(map[string]int64, len(paths))
+	if !measure || len(paths) == 0 {
+		return out
+	}
+	if size == nil {
+		return out
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > len(paths) {
+		limit = len(paths)
+	}
+	values := make([]int64, len(paths))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	wg.Add(limit)
+	for range limit {
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				values[i] = size(paths[i])
+			}
+		}()
+	}
+	for i := range paths {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	for i, path := range paths {
+		out[path] = values[i]
 	}
 	return out
 }

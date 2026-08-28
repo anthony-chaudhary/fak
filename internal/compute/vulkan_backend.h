@@ -189,6 +189,19 @@ typedef struct fvk_dispatch_profile {
     uint64_t batch_submits;
     uint64_t batch_flushes;
     uint64_t one_shot_submits;
+    uint64_t other_matmul_dispatches;
+    uint64_t other_norm_dispatches;
+    uint64_t other_rope_dispatches;
+    uint64_t other_swiglu_dispatches;
+    uint64_t other_add_dispatches;
+    uint64_t other_attention_dispatches;
+    uint64_t other_argmax_dispatches;
+    uint64_t other_gdn_dispatches;
+    uint64_t other_unclassified_dispatches;
+    uint64_t one_shot_compute_submits;
+    uint64_t one_shot_h2d_submits;
+    uint64_t one_shot_d2h_submits;
+    uint64_t one_shot_d2d_submits;
 } fvk_dispatch_profile;
 
 void fvk_dispatch_profile_snapshot(fvk_dispatch_profile *out);

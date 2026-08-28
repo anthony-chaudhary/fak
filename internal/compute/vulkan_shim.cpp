@@ -34,17 +34,16 @@
 #include <unordered_map>
 #include <atomic>
 
-struct DispatchProfileCounters { std::atomic<uint64_t> compute{0}, q4k{0}, other{0}, barriers{0}, d2d{0}, batchSubmits{0}, batchFlushes{0}, oneShotSubmits{0}; };
+struct DispatchProfileCounters {
+    std::atomic<uint64_t> compute{0}, q4k{0}, other{0};
+    std::atomic<uint64_t> otherMatmul{0}, otherNorm{0}, otherRope{0}, otherSwiGLU{0};
+    std::atomic<uint64_t> otherAdd{0}, otherAttention{0}, otherArgmax{0}, otherGDN{0}, otherUnclassified{0};
+    std::atomic<uint64_t> barriers{0}, d2d{0}, batchSubmits{0}, batchFlushes{0}, oneShotSubmits{0};
+    std::atomic<uint64_t> oneShotCompute{0}, oneShotH2D{0}, oneShotD2H{0}, oneShotD2D{0};
+};
 static DispatchProfileCounters g_dp;
 static const bool g_dp_on = [] { const char* v = std::getenv("FAK_VULKAN_DISPATCH_PROFILE"); return v && v[0] == '1' && v[1] == '\0'; }();
-static thread_local bool g_dp_q4k = false;
 static inline void dp_inc(std::atomic<uint64_t>& v) { if (g_dp_on) v.fetch_add(1, std::memory_order_relaxed); }
-static inline void dp_dispatch() {
-    if (!g_dp_on) return;
-    uint64_t n = g_dp.compute.fetch_add(1, std::memory_order_relaxed) + 1;
-    (g_dp_q4k ? g_dp.q4k : g_dp.other).fetch_add(1, std::memory_order_relaxed);
-    if ((n & 255) == 0) fprintf(stderr, "fak-vulkan profile compute=%llu q4k=%llu other=%llu barriers=%llu d2d=%llu batch_submits=%llu batch_flushes=%llu one_shot_submits=%llu\n", (unsigned long long)n, (unsigned long long)g_dp.q4k.load(), (unsigned long long)g_dp.other.load(), (unsigned long long)g_dp.barriers.load(), (unsigned long long)g_dp.d2d.load(), (unsigned long long)g_dp.batchSubmits.load(), (unsigned long long)g_dp.batchFlushes.load(), (unsigned long long)g_dp.oneShotSubmits.load());
-}
 
 #define VKCHECK(call) do { VkResult _r = (call); if (_r != VK_SUCCESS) { \
   fprintf(stderr, "fak-vulkan: %s:%d VkResult=%d\n", __FILE__, __LINE__, (int)_r); abort(); } } while (0)
@@ -107,6 +106,66 @@ struct Kernel {
 
 enum KId { K_MATMUL, K_MATMUL_ADD, K_MATMUL_ARGMAX, K_MATMUL_ARGMAX_BLOCKS, K_MATMUL2, K_MATMUL3, K_RMSNORM, K_RMSNORM_MATMUL, K_RMSNORM_MATMUL2, K_RMSNORM_MATMUL3, K_RMSNORM_MATMUL_ARGMAX_BLOCKS, K_ROPE, K_SWIGLU, K_SWIGLU_MATMUL_ADD, K_ADD, K_ADD_BIAS, K_ATTENTION, K_ARGMAX, K_ARGMAX_PAIRS, K_Q8_MATMUL, K_Q8_MATMUL2, K_Q8_MATMUL3, K_RMSNORM_Q8_MATMUL2, K_RMSNORM_Q8_MATMUL3, K_SWIGLU_Q8_MATMUL_ADD, K_QWEN35_GDN_CONV, K_QWEN35_GDN_RECURRENT, K_Q4K_MATMUL, K_COUNT };
 Kernel g_kern[K_COUNT];
+
+// Every non-Q4_K kernel belongs to exactly one primary operation family. Fused
+// kernels follow their public operation prefix so these fields sum to `other`.
+std::atomic<uint64_t>& dpOtherFamily(KId id) {
+    switch (id) {
+    case K_MATMUL: case K_MATMUL_ADD: case K_MATMUL_ARGMAX: case K_MATMUL_ARGMAX_BLOCKS:
+    case K_MATMUL2: case K_MATMUL3: case K_Q8_MATMUL: case K_Q8_MATMUL2: case K_Q8_MATMUL3:
+        return g_dp.otherMatmul;
+    case K_RMSNORM: case K_RMSNORM_MATMUL: case K_RMSNORM_MATMUL2: case K_RMSNORM_MATMUL3:
+    case K_RMSNORM_MATMUL_ARGMAX_BLOCKS: case K_RMSNORM_Q8_MATMUL2: case K_RMSNORM_Q8_MATMUL3:
+        return g_dp.otherNorm;
+    case K_ROPE:
+        return g_dp.otherRope;
+    case K_SWIGLU: case K_SWIGLU_MATMUL_ADD: case K_SWIGLU_Q8_MATMUL_ADD:
+        return g_dp.otherSwiGLU;
+    case K_ADD: case K_ADD_BIAS:
+        return g_dp.otherAdd;
+    case K_ATTENTION:
+        return g_dp.otherAttention;
+    case K_ARGMAX: case K_ARGMAX_PAIRS:
+        return g_dp.otherArgmax;
+    case K_QWEN35_GDN_CONV: case K_QWEN35_GDN_RECURRENT:
+        return g_dp.otherGDN;
+    case K_Q4K_MATMUL: case K_COUNT:
+        return g_dp.otherUnclassified;
+    }
+    return g_dp.otherUnclassified;
+}
+
+static inline void dpDispatch(const Kernel& k) {
+    if (!g_dp_on) return;
+    const KId id = static_cast<KId>(&k - g_kern);
+    if (id == K_Q4K_MATMUL) {
+        g_dp.q4k.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        g_dp.other.fetch_add(1, std::memory_order_relaxed);
+        dpOtherFamily(id).fetch_add(1, std::memory_order_relaxed);
+    }
+    uint64_t n = g_dp.compute.fetch_add(1, std::memory_order_relaxed) + 1;
+    if ((n & 255) == 0) {
+        fprintf(stderr,
+            "fak-vulkan profile compute=%llu q4k=%llu other=%llu other_ops=matmul:%llu,norm:%llu,rope:%llu,swiglu:%llu,add:%llu,attention:%llu,argmax:%llu,gdn:%llu,unclassified:%llu barriers=%llu d2d=%llu batch_submits=%llu batch_flushes=%llu one_shot_submits=%llu one_shot_calls=compute:%llu,h2d:%llu,d2h:%llu,d2d:%llu\n",
+            (unsigned long long)n, (unsigned long long)g_dp.q4k.load(), (unsigned long long)g_dp.other.load(),
+            (unsigned long long)g_dp.otherMatmul.load(), (unsigned long long)g_dp.otherNorm.load(),
+            (unsigned long long)g_dp.otherRope.load(), (unsigned long long)g_dp.otherSwiGLU.load(),
+            (unsigned long long)g_dp.otherAdd.load(), (unsigned long long)g_dp.otherAttention.load(),
+            (unsigned long long)g_dp.otherArgmax.load(), (unsigned long long)g_dp.otherGDN.load(),
+            (unsigned long long)g_dp.otherUnclassified.load(), (unsigned long long)g_dp.barriers.load(),
+            (unsigned long long)g_dp.d2d.load(), (unsigned long long)g_dp.batchSubmits.load(),
+            (unsigned long long)g_dp.batchFlushes.load(), (unsigned long long)g_dp.oneShotSubmits.load(),
+            (unsigned long long)g_dp.oneShotCompute.load(), (unsigned long long)g_dp.oneShotH2D.load(),
+            (unsigned long long)g_dp.oneShotD2H.load(), (unsigned long long)g_dp.oneShotD2D.load());
+    }
+}
+
+static inline void dpOneShot(std::atomic<uint64_t>& family) {
+    if (!g_dp_on) return;
+    family.fetch_add(1, std::memory_order_relaxed);
+    g_dp.oneShotSubmits.fetch_add(1, std::memory_order_relaxed);
+}
 
 // Q8 fast-path availability (set in fvk_init from the device's 8-bit-storage + int8 features).
 int g_have_q8 = 0;
@@ -487,7 +546,7 @@ void copyHostToDevice(Buffer* dst, const void* host, size_t bytes) {
     VkCommandBuffer cmd = beginCmd();
     VkBufferCopy region{0, 0, bytes};
     vkCmdCopyBuffer(cmd, stage->buf, dst->buf, 1, &region);
-    dp_inc(g_dp.oneShotSubmits);
+    dpOneShot(g_dp.oneShotH2D);
     endSubmitWait(cmd);
 }
 
@@ -498,7 +557,7 @@ void copyDeviceToHost(void* host, Buffer* src, size_t bytes) {
     VkCommandBuffer cmd = beginCmd();
     VkBufferCopy region{0, 0, bytes};
     vkCmdCopyBuffer(cmd, src->buf, stage->buf, 1, &region);
-    dp_inc(g_dp.oneShotSubmits);
+    dpOneShot(g_dp.oneShotD2H);
     endSubmitWait(cmd);
     memcpy(host, g_stageMapped, bytes);
 }
@@ -635,7 +694,7 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
         vkCmdBindPipeline(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
         vkCmdBindDescriptorSets(g_batchCmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
         if (pcsize > 0) vkCmdPushConstants(g_batchCmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
-        dp_dispatch();
+        dpDispatch(k);
         vkCmdDispatch(g_batchCmd, groupsX, 1, 1);
         g_batchSets.push_back(rec);
         ++g_batchOps;
@@ -647,9 +706,9 @@ void dispatch(Kernel& k, Buffer** bufs, const void* pc, uint32_t pcsize, uint32_
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.pipe);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, k.layout, 0, 1, &rec.set, 0, nullptr);
     if (pcsize > 0) vkCmdPushConstants(cmd, k.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, pcsize, pc);
-    dp_dispatch();
+    dpDispatch(k);
     vkCmdDispatch(cmd, groupsX, 1, 1);
-    dp_inc(g_dp.oneShotSubmits);
+    dpOneShot(g_dp.oneShotCompute);
     endSubmitWait(cmd);
     recycleDescriptorSet(rec);
 }
@@ -922,7 +981,7 @@ void fvk_d2d_range(void* dst, size_t dst_off, const void* src, size_t src_off, s
     VkBufferCopy region{src_off, dst_off, bytes};
     dp_inc(g_dp.d2d);
     vkCmdCopyBuffer(cmd, B((void*)src)->buf, B(dst)->buf, 1, &region);
-    dp_inc(g_dp.oneShotSubmits);
+    dpOneShot(g_dp.oneShotD2D);
     endSubmitWait(cmd);
 }
 
@@ -1300,12 +1359,39 @@ extern "C" void fvk_q4k_matmul_f32(const void* dQ4K, const void* dX, void* dY,
                          int out, int in, int P) {
     struct PC { int out, in, p; } pc{out, in, P};
     Buffer* bufs[3] = {B((void*)dQ4K), B((void*)dX), B(dY)};
-    g_dp_q4k = true;
     dispatch(g_kern[K_Q4K_MATMUL], bufs, &pc, sizeof(pc), (uint32_t)(((size_t)out * P + 63) / 64));
-    g_dp_q4k = false;
 }
 extern "C" void fvk_dispatch_profile_snapshot(fvk_dispatch_profile* out) {
- if (!out) return;
- out->compute_dispatches=g_dp.compute.load(); out->q4k_matmul_dispatches=g_dp.q4k.load(); out->other_compute_dispatches=g_dp.other.load(); out->compute_barriers=g_dp.barriers.load(); out->d2d_copies=g_dp.d2d.load(); out->batch_submits=g_dp.batchSubmits.load(); out->batch_flushes=g_dp.batchFlushes.load(); out->one_shot_submits=g_dp.oneShotSubmits.load();
+    if (!out) return;
+    out->compute_dispatches = g_dp.compute.load();
+    out->q4k_matmul_dispatches = g_dp.q4k.load();
+    out->other_compute_dispatches = g_dp.other.load();
+    out->compute_barriers = g_dp.barriers.load();
+    out->d2d_copies = g_dp.d2d.load();
+    out->batch_submits = g_dp.batchSubmits.load();
+    out->batch_flushes = g_dp.batchFlushes.load();
+    out->one_shot_submits = g_dp.oneShotSubmits.load();
+    out->other_matmul_dispatches = g_dp.otherMatmul.load();
+    out->other_norm_dispatches = g_dp.otherNorm.load();
+    out->other_rope_dispatches = g_dp.otherRope.load();
+    out->other_swiglu_dispatches = g_dp.otherSwiGLU.load();
+    out->other_add_dispatches = g_dp.otherAdd.load();
+    out->other_attention_dispatches = g_dp.otherAttention.load();
+    out->other_argmax_dispatches = g_dp.otherArgmax.load();
+    out->other_gdn_dispatches = g_dp.otherGDN.load();
+    out->other_unclassified_dispatches = g_dp.otherUnclassified.load();
+    out->one_shot_compute_submits = g_dp.oneShotCompute.load();
+    out->one_shot_h2d_submits = g_dp.oneShotH2D.load();
+    out->one_shot_d2h_submits = g_dp.oneShotD2H.load();
+    out->one_shot_d2d_submits = g_dp.oneShotD2D.load();
 }
-extern "C" void fvk_dispatch_profile_reset(void) { g_dp.compute.store(0); g_dp.q4k.store(0); g_dp.other.store(0); g_dp.barriers.store(0); g_dp.d2d.store(0); g_dp.batchSubmits.store(0); g_dp.batchFlushes.store(0); g_dp.oneShotSubmits.store(0); }
+extern "C" void fvk_dispatch_profile_reset(void) {
+    g_dp.compute.store(0); g_dp.q4k.store(0); g_dp.other.store(0);
+    g_dp.barriers.store(0); g_dp.d2d.store(0); g_dp.batchSubmits.store(0);
+    g_dp.batchFlushes.store(0); g_dp.oneShotSubmits.store(0);
+    g_dp.otherMatmul.store(0); g_dp.otherNorm.store(0); g_dp.otherRope.store(0);
+    g_dp.otherSwiGLU.store(0); g_dp.otherAdd.store(0); g_dp.otherAttention.store(0);
+    g_dp.otherArgmax.store(0); g_dp.otherGDN.store(0); g_dp.otherUnclassified.store(0);
+    g_dp.oneShotCompute.store(0); g_dp.oneShotH2D.store(0);
+    g_dp.oneShotD2H.store(0); g_dp.oneShotD2D.store(0);
+}
