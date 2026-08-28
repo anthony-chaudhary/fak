@@ -58,6 +58,48 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 push_updates="$(cat)"
 pushed_tips="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && $2 !~ /^0+$/ { print $2 }' | sort -u)"
 
+# GitHub Actions structural gate (#5986). This rung is intentionally independent of
+# FLEET_BUILD_GUARD: workflow syntax still gates a workflow-only push when compilation is off.
+# Each invocation receives the exact remote-old..local-new objects from pre-push stdin; the
+# checker first skips unrelated ranges, then archives local-new so dirty checkout bytes cannot
+# affect the verdict. It also warns early about GitHub's credential requirement, before push
+# reaches the server and fails with the otherwise opaque OAuth/PAT scope refusal.
+workflow_mode="${FLEET_WORKFLOW_GUARD:-block}"
+if [ "$workflow_mode" != "off" ] && [ "${FLEET_ALLOW_WORKFLOW_BREAK:-0}" != "1" ]; then
+	workflow_updates="$(printf '%s\n' "$push_updates" | awk 'NF >= 4 && $2 !~ /^0+$/ { print $4 ":" $2 }')"
+	for workflow_update in $workflow_updates; do
+		workflow_base="${workflow_update%%:*}"
+		workflow_tip="${workflow_update#*:}"
+		if command -v fak >/dev/null 2>&1; then
+			workflow_out="$(fak workflow check --root "$root" --base "$workflow_base" --tip "$workflow_tip" 2>&1)"
+			workflow_status=$?
+		elif command -v go >/dev/null 2>&1; then
+			workflow_out="$(cd "$root" && go run ./cmd/fak workflow check --root "$root" --base "$workflow_base" --tip "$workflow_tip" 2>&1)"
+			workflow_status=$?
+		else
+			workflow_out="neither 'fak' nor 'go' is on PATH"
+			workflow_status=2
+		fi
+		if [ "$workflow_status" -eq 1 ]; then
+			# The checker emits WORKFLOW_SCOPE first. Preserve that ordering in the actual
+			# operator stream rather than prefixing it with our blocked/advisory refusal.
+			echo "$workflow_out" >&2
+			if [ "$workflow_mode" = "block" ]; then
+				echo "WORKFLOW_STRUCTURE (blocked): malformed GitHub Actions workflow in the pushed tip." >&2
+				echo "  fix the finding above; ensure the pushing GitHub OAuth/PAT has the 'workflow' scope; then re-push." >&2
+				exit 1
+			else
+				echo "WORKFLOW_STRUCTURE (advisory): malformed GitHub Actions workflow in the pushed tip." >&2
+			fi
+		elif [ "$workflow_status" -eq 0 ]; then
+			case "$workflow_out" in *"WORKFLOW_SCOPE warning:"*) echo "$workflow_out" >&2 ;; esac
+		else
+			echo "WORKFLOW_STRUCTURE (warn): workflow gate could not run; push allowed." >&2
+			echo "$workflow_out" >&2
+		fi
+	done
+fi
+
 # Bulk remote-ref deletion gate  --  reason: REF_PRUNE  (Toward #5360)
 #
 # The 2026-07-22 origin converge deleted refs/fak/locks/session-* (14278 -> 5882) and
