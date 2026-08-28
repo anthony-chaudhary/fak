@@ -1,0 +1,120 @@
+{
+  "schema": "issue-9827-amd-vllm-sglang-environment/2",
+  "captured_at": "2026-08-28T00:00:00Z",
+  "status": "runtime_gpu_not_admitted",
+  "verdict": "environment_setup_partial_success_then_gpu_admission_failure",
+  "capture_provenance": {
+    "actor": "coordinator",
+    "accessed_utc_date": "2026-08-28"
+  },
+  "host": {
+    "os": "Microsoft Windows 11 Pro",
+    "version": "10.0.26200",
+    "build": "26200",
+    "arch": "x64",
+    "gpus": [
+      {
+        "name": "AMD Radeon RX 7600",
+        "pci_device_id": "DEV_7480",
+        "driver_version": "32.0.31041.1004",
+        "role": "discrete"
+      },
+      {
+        "name": "AMD Radeon Graphics",
+        "role": "integrated"
+      }
+    ]
+  },
+  "wsl": {
+    "distro": "Ubuntu 24.04.4 LTS",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "devices": {
+      "dxg": true,
+      "kfd": false,
+      "dri": false
+    },
+    "pre_setup_absent_commands": [
+      "rocminfo",
+      "rocm-smi",
+      "hipcc"
+    ],
+    "pre_setup_absent_apt_packages": [
+      "rocm-core",
+      "rocm-hip-runtime",
+      "hip-runtime-amd"
+    ]
+  },
+  "user_scoped_rocm_install": {
+    "succeeded": true,
+    "host_driver_changed": false,
+    "venv": "~/.cache/fak/issue-9827/rocm-10-gfx1102/venv",
+    "index_url": "https://stable.repo.amd.com/rocm/whl-next/",
+    "requested_package": "rocm[device-gfx1102,libraries]==10.0.0",
+    "installed": {
+      "rocm-sdk-core": "10.0.0",
+      "libraries": "10.0.0",
+      "device-gfx1102": "10.0.0"
+    },
+    "validation": {
+      "rocm_sdk_targets_includes": [
+        "gfx1102"
+      ],
+      "hipconfig": {
+        "hip_version": "7.15.26333",
+        "amd_clang_version": "23.0.0git"
+      }
+    }
+  },
+  "wsl_bridge_install": {
+    "package": "librocdxg",
+    "version": "1.2.2",
+    "source_type": "GitHub release asset",
+    "sha256": "28ded1254811192ebace1f76c0227580184af7b27ab2475fb9728295a702d541",
+    "installed": true,
+    "notes": [
+      "This is a system/root mutation when reproduced via dpkg.",
+      "Installation did not make GPU compute visible to ROCm in the captured environment."
+    ]
+  },
+  "runtime_probes": {
+    "rocminfo": {
+      "exit_code": 1,
+      "messages": [
+        "No WDDM adapters found",
+        "WSL environment detected",
+        "hsa_init Failed, possibly no supported GPU devices"
+      ]
+    },
+    "amd-smi": {
+      "exit_code": 255,
+      "messages": [
+        "drivers not loaded"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "topic": "AMD WSL compatibility matrix",
+      "url": "https://rocm.docs.amd.com/projects/radeon-ryzen/en/latest/docs/compatibility/compatibilityrad/wsl/wsl_compatibility.html",
+      "accessed": "2026-08-28",
+      "relevance": "Lists supported Radeon families for WSL2; RX 7600 is not listed."
+    },
+    {
+      "topic": "vLLM GPU installation docs",
+      "url": "https://docs.vllm.ai/en/stable/getting_started/installation/gpu/",
+      "accessed": "2026-08-28",
+      "relevance": "Lists AMD/ROCm requirements and supported GPU families; RX 7600 gfx1102 is not listed."
+    },
+    {
+      "topic": "SGLang AMD GPU docs",
+      "url": "https://docs.sglang.ai/platforms/amd_gpu.html",
+      "accessed": "2026-08-28",
+      "relevance": "Recommends AMD Docker/ROCm paths but does not establish RX 7600 WSL support."
+    }
+  ],
+  "next_gate": "Proceed only when rocminfo enumerates gfx1102 in WSL.",
+  "operator_caveats": [
+    "Installing a WSL-specific Windows AMD driver may require an operator-approved driver change and reboot; this was not performed.",
+    "Even if a future driver change allows admission, RX 7600 remains outside the cited AMD official WSL matrix and vLLM's listed AMD GPU families, so any success remains unsupported/experimental unless upstream guidance changes."
+  ]
+}
