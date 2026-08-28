@@ -323,6 +323,7 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 		"-c", `model_providers.fak.base_url="http://127.0.0.1:8137/v1"`,
 		"-c", `model_providers.fak.wire_api="responses"`,
 		"-c", `model_providers.fak.env_key="OPENAI_API_KEY"`,
+		"-c", `mcp_servers.fak_guard.url="http://127.0.0.1:8137/mcp"`,
 		"-c", `model_reasoning_effort="xhigh"`,
 	}
 	if len(got) != len(want) {
@@ -342,6 +343,9 @@ func TestGuardCodexConfigArgs(t *testing.T) {
 	}
 	if !containsArg(gotKey, `model_providers.fak.base_url="http://h:1/v1"`) {
 		t.Errorf("guardCodexConfigArgs did not keep the /v1 base undoubled: %v", gotKey)
+	}
+	if !containsArg(gotKey, `mcp_servers.fak_guard.url="http://h:1/mcp"`) {
+		t.Errorf("guardCodexConfigArgs did not derive the gateway MCP route: %v", gotKey)
 	}
 	if !containsArg(gotKey, `model="gpt-custom"`) || containsArg(gotKey, `model_reasoning_effort="xhigh"`) {
 		t.Errorf("custom model must be pinned without forcing the managed GPT-5.6 effort: %v", gotKey)

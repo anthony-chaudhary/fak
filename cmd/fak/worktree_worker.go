@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -314,14 +313,9 @@ func worktreeWorkerReap(argv []string) {
 	repoRoot := worktreeWorkerRoot(*root)
 	if *allCold {
 		effectiveApply := *apply || strings.EqualFold(strings.TrimSpace(os.Getenv(worktreeColdApplyEnv)), "apply")
-		// A dry-run is itself the pre-cleanup inventory: wrapping it in the generic
-		// WIP lifecycle would serially run git status in every registered worktree
-		// before the bounded classifier below can start. Capture before/after only
-		// for the mutating apply path.
-		if effectiveApply {
-			finishLifecycle := beginAutomaticWIPLifecycle(repoRoot, "worker-reap", os.Stderr)
-			defer finishLifecycle()
-		}
+		// This command's typed decision ledger is already the before/apply receipt.
+		// The generic lifecycle wrapper would run a second serial git-status census
+		// across every worktree before this bounded classifier can start.
 		worktreeWorkerReapAllCold(repoRoot, effectiveApply, time.Duration(*ageFloorMin)*time.Minute, *evenIfUnlanded)
 		return
 	}
@@ -527,9 +521,11 @@ func worktreeColdReapReportWithProbes(
 		out.Mode = "apply"
 	}
 	processesByPath, processSnapshotErr := batchColdProcessRefs(plan, evenIfUnlanded, processSnapshot)
-	bytesByPath := boundedColdDirBytes(plan, apply, worktreeDirBytes, worktreeColdStatusConcurrency)
 	for _, c := range plan {
-		item := worktreeColdReapItem{ColdWorktree: c, BytesKnown: apply, Bytes: bytesByPath[c.Path]}
+		// Recursive byte measurement used to delay both classification and apply
+		// before the first safety recheck. Keep it explicitly unknown; removal and
+		// the count receipt are the authoritative lifecycle evidence.
+		item := worktreeColdReapItem{ColdWorktree: c}
 		// The override promotes ONLY the unlanded-work keeps. A live lease or a
 		// worktree under the age floor stays kept either way: those protect an
 		// in-flight land, which no disk-reclamation flag should be able to override.
@@ -718,58 +714,6 @@ func boundedColdStatusCounts(
 	return out
 }
 
-// boundedColdDirBytes sizes only rows that can contribute to reclaimable or
-// held-work totals. Protected live/young trees are neither removable nor part of
-// the operator's unlanded-work debt, so recursively walking them wastes most of
-// a large inventory sweep. Writes are index-addressed; output order stays stable.
-func boundedColdDirBytes(
-	plan []workerworktree.ColdWorktree,
-	measure bool,
-	size func(string) int64,
-	limit int,
-) map[string]int64 {
-	paths := make([]string, 0, len(plan))
-	for _, item := range plan {
-		if item.Eligible || item.HeldByWork {
-			paths = append(paths, item.Path)
-		}
-	}
-	out := make(map[string]int64, len(paths))
-	if !measure || len(paths) == 0 {
-		return out
-	}
-	if size == nil {
-		return out
-	}
-	if limit < 1 {
-		limit = 1
-	}
-	if limit > len(paths) {
-		limit = len(paths)
-	}
-	values := make([]int64, len(paths))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	wg.Add(limit)
-	for range limit {
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				values[i] = size(paths[i])
-			}
-		}()
-	}
-	for i := range paths {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-	for i, path := range paths {
-		out[path] = values[i]
-	}
-	return out
-}
-
 func batchColdProcessRefs(plan []workerworktree.ColdWorktree, evenIfUnlanded bool, snapshot func([]string) (map[string]bool, error)) (map[string]bool, error) {
 	paths := make([]string, 0, len(plan))
 	for _, c := range plan {
@@ -924,23 +868,6 @@ func isDigitsOnly(s string) bool {
 		}
 	}
 	return true
-}
-
-// worktreeDirBytes is the on-disk size of a worktree, for the reclaimable-bytes ledger.
-// Best-effort: an unreadable dir or entry is skipped (counts 0), never an error — the
-// bytes total is a report field, not a gate.
-func worktreeDirBytes(dir string) int64 {
-	var total int64
-	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if info, ierr := d.Info(); ierr == nil {
-			total += info.Size()
-		}
-		return nil
-	})
-	return total
 }
 
 // worktreeWorkerListOut is the list JSON: a count and the sorted live-worktree

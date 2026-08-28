@@ -1142,3 +1142,25 @@ func TestWorktreeColdReapListSkipsProtectedStatusAndFailsClosedInOrder(t *testin
 		t.Fatalf("failed status candidate=%+v want fail-closed unlanded=-1", got[3])
 	}
 }
+func TestWorktreeColdReapSkipsRecursiveByteCensus(t *testing.T) {
+	repo, _, now, floor := newColdReapProbeFixture(t)
+	got := worktreeColdReapReportWithProbes(
+		repo,
+		false,
+		floor,
+		now,
+		false,
+		func([]string) (map[string]bool, error) { return map[string]bool{}, nil },
+		func(string) (bool, error) { return false, nil },
+		func(_, path string) workerworktree.Result {
+			t.Fatalf("dry-run reached reap for %s", path)
+			return workerworktree.Result{}
+		},
+	)
+	if got.WouldReap != 1 || len(got.Worktrees) != 1 {
+		t.Fatalf("dry-run classification changed: %+v", got)
+	}
+	if got.Worktrees[0].BytesKnown || got.Worktrees[0].Bytes != 0 || got.Bytes != 0 {
+		t.Fatalf("bulk classification must not recursively census bytes: %+v", got)
+	}
+}

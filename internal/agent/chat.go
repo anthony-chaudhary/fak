@@ -52,7 +52,8 @@ type ToolCall struct {
 // Func is the function half of a tool call.
 type Func struct {
 	Name      string `json:"name"`
-	Arguments string `json:"arguments"` // raw JSON string as emitted by the model
+	Namespace string `json:"namespace,omitempty"` // Responses namespace; empty on Chat Completions
+	Arguments string `json:"arguments"`           // raw JSON string as emitted by the model
 }
 
 // UnmarshalJSON decodes a tool call's function object, keeping the arguments as the

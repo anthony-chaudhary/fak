@@ -465,7 +465,7 @@ func TestProviderAdaptersParseToolCalls(t *testing.T) {
 		{"openai_legacy_function_call", ProviderOpenAI, `{"choices":[{"message":{"role":"assistant","content":null,"function_call":{"name":"lookup","arguments":"{\"city\":\"SFO\"}"}},"finish_reason":"function_call"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`},
 		{"openai_content_parts_tool_calls", ProviderOpenAI, `{"choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"checking"},{"type":"text","text":"parts"}],"tool_calls":[{"id":"o2","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"SFO\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`},
 		{"openai_text_tool_call", ProviderOpenAI, `{"choices":[{"message":{"role":"assistant","content":"checking <tool_call>{\"name\":\"lookup\",\"arguments\":{\"city\":\"SFO\"}}</tool_call>"},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`},
-		{"openai_responses_function_call", ProviderOpenAIResponses, `{"status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"checking"}]},{"id":"fc_1","type":"function_call","call_id":"r1","name":"lookup","arguments":"{\"city\":\"SFO\"}"}],"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}`},
+		{"openai_responses_function_call", ProviderOpenAIResponses, `{"status":"completed","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"checking"}]},{"id":"fc_1","type":"function_call","call_id":"r1","name":"lookup","namespace":"mcp__fak_guard","arguments":"{\"city\":\"SFO\"}"}],"usage":{"input_tokens":7,"output_tokens":3,"total_tokens":10}}`},
 		{"xai_tool_calls", ProviderXAI, `{"choices":[{"message":{"role":"assistant","content":"checking","tool_calls":[{"id":"x1","type":"function","function":{"name":"lookup","arguments":"{\"city\":\"SFO\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`},
 		{"anthropic_tool_use", ProviderAnthropic, `{"content":[{"type":"text","text":"checking"},{"type":"tool_use","id":"a1","name":"lookup","input":{"city":"SFO"}}],"stop_reason":"tool_use","usage":{"input_tokens":7,"output_tokens":3}}`},
 		{"gemini_function_call", ProviderGemini, `{"candidates":[{"content":{"role":"model","parts":[{"text":"checking"},{"functionCall":{"name":"lookup","args":{"city":"SFO"},"id":"g1"}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3,"totalTokenCount":10}}`},
@@ -490,6 +490,9 @@ func TestProviderAdaptersParseToolCalls(t *testing.T) {
 			tc := comp.Message.ToolCalls[0]
 			if tc.Function.Name != "lookup" || !strings.Contains(tc.Function.Arguments, "SFO") {
 				t.Errorf("bad tool call: %+v", tc)
+			}
+			if c.name == "openai_responses_function_call" && tc.Function.Namespace != "mcp__fak_guard" {
+				t.Errorf("Responses function namespace = %q, want mcp__fak_guard", tc.Function.Namespace)
 			}
 			if c.name == "openai_content_parts_tool_calls" && comp.Message.Content != "checking\nparts" {
 				t.Errorf("content parts = %q, want joined text parts", comp.Message.Content)
