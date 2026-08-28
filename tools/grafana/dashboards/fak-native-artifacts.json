@@ -1,22 +1,8 @@
 {
   "annotations": {
-    "list": [
-      {
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "enable": true,
-        "expr": "changes(fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\",state!=\"ready\"}[1m]) > 0",
-        "iconColor": "red",
-        "name": "Unavailable artifact transitions",
-        "tagKeys": "state,correlation_key",
-        "textFormat": "[Open exact artifact](https://artifacts.example.invalid/native/{{correlation_key}}/{{kind}}) \u2014 {{state}}",
-        "titleFormat": "Native artifact unavailable"
-      }
-    ]
+    "list": []
   },
-  "description": "Bounded fak-native artifact index. Exact correlation links fail honestly for broken, expired, private, untrusted-scheme, and redacted evidence.",
+  "description": "Live fak-native receipt evidence and freshness. Prometheus intentionally does not expose per-artifact correlation keys or locators, so this dashboard does not fabricate artifact links.",
   "editable": false,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -30,16 +16,7 @@
         "uid": "${datasource}"
       },
       "fieldConfig": {
-        "defaults": {
-          "noValue": "UNAVAILABLE",
-          "links": [
-            {
-              "targetBlank": true,
-              "title": "Open exact artifact",
-              "url": "https://artifacts.example.invalid/native/${__field.labels.correlation_key}/${__field.labels.kind}"
-            }
-          ]
-        },
+        "defaults": {},
         "overrides": []
       },
       "gridPos": {
@@ -59,15 +36,16 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\"}",
+          "expr": "sum by (backend, forward_path) (fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"})",
           "instant": true,
-          "legendFormat": "{{kind}} \u00b7 {{state}}",
+          "legendFormat": "{{backend}} · {{forward_path}}",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Exact native artifacts",
-      "type": "table"
+      "title": "Observed native receipt streams",
+      "type": "table",
+      "description": "Cumulative supported fak-native receipts by bounded backend and forward path. No request, artifact, or model identifier is used as a label."
     },
     {
       "datasource": {
@@ -76,14 +54,37 @@
       },
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE",
-          "links": [
+          "unit": "short",
+          "mappings": [
             {
-              "targetBlank": true,
-              "title": "Open exact artifact",
-              "url": "https://artifacts.example.invalid/native/${__field.labels.correlation_key}/${__field.labels.kind}"
+              "type": "value",
+              "options": {
+                "0": {
+                  "index": 0,
+                  "text": "FRESH",
+                  "color": "green"
+                },
+                "1": {
+                  "index": 1,
+                  "text": "STALE",
+                  "color": "red"
+                }
+              }
             }
-          ]
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -104,15 +105,16 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "count by (state) (fak_native_artifact_info{engine=\"fak-native\",correlation_key=~\"$correlation_key\"})",
+          "expr": "fak_native_receipt_latest_stale",
           "instant": true,
-          "legendFormat": "{{kind}} \u00b7 {{state}}",
+          "legendFormat": "receipt evidence",
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "Artifact states",
-      "type": "stat"
+      "title": "Receipt evidence freshness",
+      "type": "stat",
+      "description": "1 means the latest native receipt is absent or older than the emitter freshness bound; 0 means fresh."
     },
     {
       "fieldConfig": {
@@ -127,10 +129,10 @@
       },
       "id": 3,
       "options": {
-        "content": "### Honest drill-down\n- Engine is **fak-native** only.\n- Select one exact `npc1_\u2026` key.\n- Broken, expired, private, untrusted-scheme, and redacted links remain unavailable.\n- Fixture URLs use `.invalid`; they are UI proof, not benchmark evidence.",
+        "content": "### Honest drill-down\n- Receipt series prove observed fak-native execution only.\n- Backend and forward-path labels use bounded emitter vocabularies.\n- Exact artifact keys and locators stay in the scrubbed artifact index, not Prometheus.\n- Stale or unsupported evidence is shown explicitly; missing device data is never zero-filled.",
         "mode": "markdown"
       },
-      "title": "Artifact guardrails",
+      "title": "Evidence guardrails",
       "type": "text"
     }
   ],
@@ -147,7 +149,7 @@
         "current": {
           "selected": false,
           "text": "Prometheus",
-          "value": "fleet-prometheus"
+          "value": "prometheus"
         },
         "hide": 0,
         "includeAll": false,
@@ -162,29 +164,57 @@
         "type": "datasource"
       },
       {
-        "allValue": "npc1_[0-9a-f]{32}",
+        "allValue": ".*",
         "current": {
           "selected": true,
-          "text": "npc1_0123456789abcdef0123456789abcdef",
-          "value": "npc1_0123456789abcdef0123456789abcdef"
+          "text": "All",
+          "value": "$__all"
         },
         "datasource": {
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(fak_native_artifact_info{engine=\"fak-native\"}, correlation_key)",
+        "definition": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\"}, backend)",
         "hide": 0,
         "includeAll": true,
-        "label": "Correlation key",
-        "multi": false,
-        "name": "correlation_key",
+        "label": "Backend",
+        "multi": true,
+        "name": "backend",
         "options": [],
         "query": {
-          "query": "label_values(fak_native_artifact_info{engine=\"fak-native\"}, correlation_key)",
+          "query": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\"}, backend)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
-        "regex": "/^npc1_[0-9a-f]{32}$/",
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}, forward_path)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Forward path",
+        "multi": true,
+        "name": "forward_path",
+        "options": [],
+        "query": {
+          "query": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}, forward_path)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
         "skipUrlSync": false,
         "sort": 1,
         "type": "query"
@@ -197,7 +227,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "fak-native performance artifacts",
+  "title": "fak-native evidence receipts",
   "uid": "fak-native-artifacts",
   "version": 1,
   "weekStart": ""

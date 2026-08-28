@@ -22,20 +22,20 @@
       {
         "datasource": {
           "type": "prometheus",
-          "uid": "fleet-prometheus"
+          "uid": "prometheus"
         },
         "enable": true,
-        "expr": "changes(fak_native_lifecycle_event_info{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"}[1m]) > 0",
+        "expr": "changes(fak_native_slo_state{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"}[1m]) > 0",
         "iconColor": "yellow",
-        "name": "promotion \u00b7 revert \u00b7 release",
+        "name": "SLO state transitions",
         "step": "1m",
-        "tagKeys": "event,release,module_rev,benchmark_envelope,model,backend",
-        "textFormat": "{{event}} {{release}} \u00b7 {{module_rev}} \u00b7 {{benchmark_envelope}} \u00b7 {{model}}/{{backend}}",
-        "titleFormat": "fak-native lifecycle"
+        "tagKeys": "state,module_rev,benchmark_envelope,model,backend",
+        "textFormat": "{{state}} · {{module_rev}} · {{benchmark_envelope}} · {{model}}/{{backend}}",
+        "titleFormat": "fak-native SLO state transition"
       }
     ]
   },
-  "description": "Matched-envelope fak-native regression SLOs for Qwen3.8. Missing data is UNAVAILABLE, never zero. Synthetic scenarios prove good, regression, missing-evidence, and recovery states.",
+  "description": "Matched-envelope fak-native regression SLOs for Qwen3.8. Missing data is UNAVAILABLE, never zero; dashboard selectors match the emitted envelope, model, and backend labels.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -62,7 +62,7 @@
       "description": "Debounced state: good, regression, or missing evidence. Two consecutive complete observations are required for regression and recovery.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -78,17 +78,17 @@
           "mappings": [
             {
               "options": {
-                "0": {
+                "good": {
                   "color": "green",
                   "index": 0,
                   "text": "GOOD"
                 },
-                "2": {
+                "missing_evidence": {
                   "color": "orange",
                   "index": 2,
                   "text": "MISSING EVIDENCE"
                 },
-                "1": {
+                "regression": {
                   "color": "red",
                   "index": 1,
                   "text": "REGRESSION"
@@ -130,12 +130,12 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max((fak_native_slo_state{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",state=\"good\"} == 1) * 0) or max((fak_native_slo_state{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",state=\"regression\"} == 1) * 1) or max((fak_native_slo_state{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",state=\"missing_evidence\"} == 1) * 2)",
+          "expr": "label_replace(max by (state) (fak_native_slo_state{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"} == 1), \"state_value\", \"$1\", \"state\", \"(.*)\")",
           "instant": true,
-          "legendFormat": "SLO state",
+          "legendFormat": "{{state}}",
           "range": false,
           "refId": "A"
         }
@@ -148,7 +148,7 @@
       "description": "Every comparison is keyed by module@rev, benchmark envelope, Qwen3.8 model, and fak-native backend.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 8,
@@ -170,10 +170,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev, benchmark_envelope, model, backend) (fak_native_slo_state{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"})",
+          "expr": "max by (module_rev, benchmark_envelope, model, backend) (fak_native_slo_state{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"})",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -188,7 +188,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -241,10 +241,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"ttft\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"ttft\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -259,7 +259,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 6,
@@ -312,10 +312,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"tpot\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"tpot\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -330,7 +330,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -383,10 +383,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"throughput\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"throughput\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -401,7 +401,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 18,
@@ -454,10 +454,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"queue_delay\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"queue_delay\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -472,7 +472,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -525,10 +525,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"cache_efficiency\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"cache_efficiency\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -543,7 +543,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 6,
@@ -596,10 +596,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"transfer_share\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"transfer_share\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -614,7 +614,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -667,10 +667,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"kernel_share\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"kernel_share\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -685,7 +685,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 18,
@@ -738,10 +738,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"memory_pressure\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"memory_pressure\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -756,7 +756,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -809,10 +809,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"evidence_freshness\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"evidence_freshness\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -827,7 +827,7 @@
       "description": "Latest available matched-envelope value. No series renders UNAVAILABLE; it is never zero-coerced.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 6,
@@ -880,10 +880,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"receipt_coverage\"})",
+          "expr": "max by (module_rev) (fak_native_slo_value{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\",objective=\"receipt_coverage\"})",
           "instant": true,
           "legendFormat": "{{module_rev}}",
           "range": false,
@@ -898,7 +898,7 @@
       "description": "Candidate/baseline ratio. Ratios exist only when module revision, benchmark envelope, model, and backend are exactly matched.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -965,12 +965,12 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "fak_native_slo_ratio{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"}",
+          "expr": "fak_native_slo_ratio{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"}",
           "instant": false,
-          "legendFormat": "{{objective}} \u00b7 {{module_rev}}",
+          "legendFormat": "{{objective}} · {{module_rev}}",
           "range": true,
           "refId": "A"
         }
@@ -983,7 +983,7 @@
       "description": "Only present, authoritative values can violate. Missing values are handled by the missing-evidence state and alert.",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -993,7 +993,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "noValue": "UNAVAILABLE"
+          "noValue": "NO ACTIVE VIOLATIONS"
         },
         "overrides": []
       },
@@ -1005,10 +1005,10 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max by (objective, module_rev, benchmark_envelope, model, backend) (fak_native_slo_violation{engine=\"fak-native\",scenario=~\"$scenario\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"}) == 1",
+          "expr": "max by (objective, module_rev, benchmark_envelope, model, backend) (fak_native_slo_violation{engine=\"fak-native\",benchmark_envelope=~\"$benchmark_envelope\",model=~\"$model\",backend=~\"$backend\"}) == 1",
           "instant": true,
           "legendFormat": "",
           "range": false,
@@ -1036,33 +1036,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "fleet-prometheus"
-        },
-        "definition": "label_values(fak_native_slo_state{engine=\"fak-native\"}, scenario)",
-        "includeAll": true,
-        "label": "Scenario",
-        "multi": false,
-        "name": "scenario",
-        "options": [],
-        "query": {
-          "query": "label_values(fak_native_slo_state{engine=\"fak-native\"}, scenario)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
-        },
-        "refresh": 1,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
-      },
-      {
-        "allValue": ".*",
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "fleet-prometheus"
+          "uid": "prometheus"
         },
         "definition": "label_values(fak_native_slo_state{engine=\"fak-native\"}, benchmark_envelope)",
         "includeAll": true,
@@ -1088,7 +1062,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "fleet-prometheus"
+          "uid": "prometheus"
         },
         "definition": "label_values(fak_native_slo_state{engine=\"fak-native\"}, model)",
         "includeAll": true,
@@ -1114,7 +1088,7 @@
         },
         "datasource": {
           "type": "prometheus",
-          "uid": "fleet-prometheus"
+          "uid": "prometheus"
         },
         "definition": "label_values(fak_native_slo_state{engine=\"fak-native\"}, backend)",
         "includeAll": true,

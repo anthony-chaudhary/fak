@@ -163,15 +163,31 @@ func TestGrafanaDashboardContractAndFixture(t *testing.T) {
 	readJSON(t, dashboardPath, &dashboard)
 	values := collectStrings(dashboard)
 	for _, query := range contract.RequiredQueries {
-		if !containsString(values, query) {
-			t.Errorf("dashboard missing required query %q", query)
+		if containsString(values, query) {
+			t.Errorf("live dashboard still queries fixture-only artifact family %q", query)
 		}
 	}
-	if count := countString(values, contract.RequiredDataLink); count < 2 {
-		t.Errorf("dashboard data link count = %d, want at least 2", count)
+	if count := countString(values, contract.RequiredDataLink); count != 0 {
+		t.Errorf("live dashboard exposes %d artifact data link(s) without a Prometheus artifact exporter", count)
 	}
-	if !anyStringContains(values, "https://artifacts.example.invalid/native/{{correlation_key}}/{{kind}}") {
-		t.Error("annotation does not link its exact correlation key")
+	for _, want := range []string{
+		`sum by (backend, forward_path) (fak_native_receipt_requests_total{engine="inkernel",backend=~"$backend",forward_path=~"$forward_path"})`,
+		`fak_native_receipt_latest_stale`,
+		`Prometheus intentionally does not expose per-artifact correlation keys or locators`,
+	} {
+		if !anyStringContains(values, want) {
+			t.Errorf("live dashboard missing honest receipt evidence %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"fak_native_artifact_info",
+		"https://artifacts.example.invalid/native/",
+		"{{correlation_key}}",
+		"{{kind}}",
+	} {
+		if anyStringContains(values, forbidden) {
+			t.Errorf("live dashboard exposes unavailable artifact surface %q", forbidden)
+		}
 	}
 	for _, forbidden := range []string{"llama.cpp", "file://", "localhost", "/Users/", "/home/", "token="} {
 		if anyStringContains(values, forbidden) {

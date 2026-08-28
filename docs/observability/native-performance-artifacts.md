@@ -23,14 +23,16 @@ The package contract is `internal/nativeperfartifact` (`fak-native-performance-a
 production adapter may persist or serve its scrubbed snapshot, but must preserve these rejection
 and capacity rules.
 
-## Grafana links
+## Grafana status
 
-`fak-native-artifacts` provides the operator-facing index. Panels and annotations query only
-`fak_native_artifact_info{engine="fak-native", correlation_key=~"$correlation_key"}` and link via
-`https://artifacts.example.invalid/native/${__field.labels.correlation_key}/${__field.labels.kind}`. The endpoint is a
-public-safe artifact resolver: it must validate the exact key, re-run expiry/state checks, and
-return an honest error page for unavailable evidence.
+`fak-native-artifacts` does **not** pretend that the in-memory index is already exported through
+Prometheus. The live dashboard shows only the bounded native receipt streams and freshness
+families that the gateway actually emits. It carries no correlation-key variable, artifact
+annotation, or clickable resolver URL, because the binary does not yet expose an
+`artifact_info` metric or a public resolver adapter.
 
-The checked-in fixture uses documentation-only `.invalid` URLs and synthetic keys. It proves
-query, label, link, and failure-state shape; it is not benchmark evidence and cannot expose a
-credential, private path, or raw log.
+The checked-in provisioning fixture still uses documentation-only `.invalid` URLs and synthetic
+keys to prove the future query, label, link, and failure-state shape. It is not live telemetry or
+benchmark evidence. When a production adapter lands, it must wire the scrubbed index into the
+binary, preserve the exact-key rejection rules above, and only then enable per-artifact Grafana
+links.

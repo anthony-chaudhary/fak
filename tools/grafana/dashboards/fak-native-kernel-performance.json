@@ -15,7 +15,7 @@
       }
     ]
   },
-  "description": "One-screen fak-native kernel performance overview. Existing gateway metrics populate only when native engine labels match; proposed bounded native metrics render explicit UNAVAILABLE states until their exporters land. New evidence defaults to Qwen3.8.",
+  "description": "One-screen fak-native receipt performance overview. Backend and forward-path selectors match the bounded live emitter; gateway-wide context panels are labeled explicitly and missing native evidence remains unavailable.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -25,7 +25,7 @@
   "panels": [
     {
       "id": 1,
-      "title": "Native kernel operating state \u2014 fak-native only",
+      "title": "Native kernel operating state — fak-native only",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -38,12 +38,12 @@
     },
     {
       "id": 2,
-      "title": "Native engine present",
-      "description": "Counts bounded engine/model identity series. A missing series is explicitly UNAVAILABLE; it is never interpreted as llama.cpp or as successful native execution.",
+      "title": "Native receipt streams",
+      "description": "Count of bounded backend/forward-path series that have emitted a supported non-fallback native receipt.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -105,9 +105,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "sum(fak_engine_model_info{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "count(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}) or vector(-1)",
           "refId": "A"
         }
       ]
@@ -115,11 +115,11 @@
     {
       "id": 3,
       "title": "Native requests / sec",
-      "description": "Request rate from the existing bounded gateway inference contract, filtered to a fak-native engine. UNAVAILABLE means native receipt export or matching labels are not wired.",
+      "description": "Supported fak-native receipt rate for the selected bounded backend and forward path.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 4,
@@ -181,21 +181,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) or vector(-1)",
+          "expr": "sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])) or vector(-1)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 4,
-      "title": "Output tokens / sec",
-      "description": "Latest output throughput from the existing gateway inference contract. This is not device-kernel throughput.",
+      "title": "Gateway output tokens / sec (all engines)",
+      "description": "Gateway-wide output throughput context. This emitter has no engine label, so the panel does not present it as native-only.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 8,
@@ -257,21 +257,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_gateway_inference_output_tokens_per_second{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "max(fak_gateway_inference_output_tokens_per_second) or vector(-1)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 5,
-      "title": "Evidence age",
-      "description": "Age of the newest fak-native engine identity sample. This proves scrape freshness only; receipt/profile freshness remains unavailable until its bounded exporter lands.",
+      "title": "Evidence age (all backends)",
+      "description": "Age of the latest native receipt observation across all backends, measured by the live receipt emitter.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -337,21 +337,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "time() - max(timestamp(fak_engine_model_info{engine=~\"$engine\",model=~\"$model\"})) or vector(-1)",
+          "expr": "fak_native_receipt_latest_age_seconds",
           "refId": "A"
         }
       ]
     },
     {
       "id": 6,
-      "title": "Regression state",
-      "description": "Proposed bounded metric fak_native_regression_state (0=pass, 1=warn, 2=fail). UNAVAILABLE is honest until benchmark/promotion evidence is exported.",
+      "title": "Native SLO regression",
+      "description": "Debounced matched-envelope SLO regression state for the selected backend; 0=not regressed, 1=regressed.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -373,12 +373,8 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 1
-              },
-              {
                 "color": "red",
-                "value": 2
+                "value": 1
               }
             ]
           },
@@ -390,25 +386,15 @@
                   "index": 0,
                   "text": "UNAVAILABLE",
                   "color": "dark-red"
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
+                },
                 "0": {
                   "index": 1,
-                  "text": "PASS",
+                  "text": "GOOD",
                   "color": "green"
                 },
                 "1": {
                   "index": 2,
-                  "text": "WARN",
-                  "color": "yellow"
-                },
-                "2": {
-                  "index": 3,
-                  "text": "FAIL",
+                  "text": "REGRESSION",
                   "color": "red"
                 }
               }
@@ -437,21 +423,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_native_regression_state{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "max(fak_native_slo_state{engine=\"fak-native\",backend=~\"$backend\",state=\"regression\"}) or vector(-1)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 7,
-      "title": "Missing telemetry",
-      "description": "Number of required native metric families absent from the scrape. Proposed bounded metric; UNAVAILABLE until the native performance contract exporter lands.",
+      "title": "Receipt evidence stale (all backends)",
+      "description": "1 when the latest native receipt across all backends is absent or older than the emitter freshness bound; 0 when fresh.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -473,12 +459,8 @@
                 "value": null
               },
               {
-                "color": "yellow",
-                "value": 1
-              },
-              {
                 "color": "red",
-                "value": 4
+                "value": 1
               }
             ]
           },
@@ -486,10 +468,15 @@
             {
               "type": "value",
               "options": {
-                "-1": {
+                "0": {
                   "index": 0,
-                  "text": "UNAVAILABLE",
-                  "color": "dark-red"
+                  "text": "FRESH",
+                  "color": "green"
+                },
+                "1": {
+                  "index": 1,
+                  "text": "STALE",
+                  "color": "red"
                 }
               }
             }
@@ -517,9 +504,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_native_missing_telemetry{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "fak_native_receipt_latest_stale",
           "refId": "A"
         }
       ]
@@ -539,12 +526,12 @@
     },
     {
       "id": 9,
-      "title": "Phase time / request \u2014 largest bar is the bottleneck",
-      "description": "Existing queue/prefill/decode totals are normalized by native request rate. Transfer and kernel series are proposed bounded contract names and remain UNAVAILABLE until exported. Fixture renders are evidence of dashboard behavior, not live wiring.",
+      "title": "Phase time / request — largest bar is the bottleneck",
+      "description": "Receipt-projected queue, prefill, decode, and kernel seconds normalized by supported native requests.",
       "type": "bargauge",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -618,58 +605,49 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "(sum(rate(fak_gateway_inference_queue_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "expr": "(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"queue\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "A",
           "legendFormat": "queue / request"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "expr": "(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"prefill\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "B",
           "legendFormat": "prefill / request"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "(sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "expr": "(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"decode\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "C",
           "legendFormat": "decode / request"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_native_transfer_seconds_per_request{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"kernel\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "D",
-          "legendFormat": "transfer / request"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "expr": "max(fak_native_kernel_seconds_per_request{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
-          "refId": "E",
           "legendFormat": "kernel / request"
         }
       ]
     },
     {
       "id": 10,
-      "title": "TTFT p95",
-      "description": "Proposed histogram fak_native_ttft_seconds. UNAVAILABLE until authoritative native request receipts export it; queue+prefill is not mislabeled as TTFT.",
+      "title": "Gateway TTFT p95 (all engines)",
+      "description": "Gateway-wide streamed-turn TTFT percentile. The histogram has no engine label, so this is context rather than native-only evidence.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -735,21 +713,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(fak_native_ttft_seconds_bucket{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval]))) or vector(-1)",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fak_gateway_inference_ttft_seconds_bucket[$__rate_interval]))) or vector(-1)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 11,
-      "title": "TPOT p95",
-      "description": "Proposed histogram fak_native_tpot_seconds. UNAVAILABLE until authoritative native decode receipts export it.",
+      "title": "Gateway TPOT p95 (all engines)",
+      "description": "Gateway-wide per-output-token latency percentile. The histogram has no engine label, so this is context rather than native-only evidence.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -815,9 +793,9 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(fak_native_tpot_seconds_bucket{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval]))) or vector(-1)",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fak_gateway_inference_tpot_seconds_bucket[$__rate_interval]))) or vector(-1)",
           "refId": "A"
         }
       ]
@@ -825,11 +803,11 @@
     {
       "id": 12,
       "title": "Queue delay / request",
-      "description": "Existing bounded queue-seconds total divided by native requests. UNAVAILABLE when matching request telemetry is absent.",
+      "description": "Receipt-projected queue seconds divided by supported native request rate.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -895,21 +873,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "(sum(rate(fak_gateway_inference_queue_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_requests_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "expr": "(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"queue\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 13,
-      "title": "Queue depth",
-      "description": "Proposed bounded gauge fak_native_queue_depth. UNAVAILABLE until the native scheduler exports it.",
+      "title": "Queue timing supported (all backends)",
+      "description": "Whether the latest native receipt across all backends carried authoritative queue timing.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
@@ -927,16 +905,12 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
+                "color": "red",
                 "value": null
               },
               {
-                "color": "yellow",
+                "color": "green",
                 "value": 1
-              },
-              {
-                "color": "red",
-                "value": 8
               }
             ]
           },
@@ -944,10 +918,15 @@
             {
               "type": "value",
               "options": {
-                "-1": {
+                "0": {
                   "index": 0,
-                  "text": "UNAVAILABLE",
-                  "color": "dark-red"
+                  "text": "UNSUPPORTED",
+                  "color": "red"
+                },
+                "1": {
+                  "index": 1,
+                  "text": "SUPPORTED",
+                  "color": "green"
                 }
               }
             }
@@ -975,21 +954,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_native_queue_depth{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "max(fak_native_receipt_signal_supported{signal=\"queue\"})",
           "refId": "A"
         }
       ]
     },
     {
       "id": 14,
-      "title": "KV cache usage",
-      "description": "Existing bounded gateway inference ratio. This is utilization, not hit/reuse effectiveness.",
+      "title": "KV bytes / native request",
+      "description": "Observed KV movement bytes divided by supported native requests. Unsupported KV observation remains absent, not zero-filled.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 16,
@@ -999,7 +978,7 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "percentunit",
+          "unit": "bytes",
           "color": {
             "mode": "thresholds"
           },
@@ -1009,14 +988,6 @@
               {
                 "color": "green",
                 "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.8
-              },
-              {
-                "color": "red",
-                "value": 0.95
               }
             ]
           },
@@ -1055,21 +1026,21 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_gateway_inference_kv_cache_usage_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "(sum(rate(fak_native_receipt_bytes_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",kind=\"kv\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])), 0.000001)) or vector(-1)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 15,
-      "title": "KV reuse ratio",
-      "description": "Proposed bounded ratio fak_native_kv_reuse_ratio. UNAVAILABLE rather than inferred from cache occupancy.",
+      "title": "Gateway prompt-cache hit ratio (all engines)",
+      "description": "Gateway-wide provider prompt-cache hit ratio. The gauge has no engine label and is not presented as native KV reuse.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 20,
@@ -1135,16 +1106,16 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_native_kv_reuse_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "max(fak_gateway_inference_cached_prompt_hit_ratio) or vector(-1)",
           "refId": "A"
         }
       ]
     },
     {
       "id": 16,
-      "title": "Execution mix, device pressure, and evidence gaps",
+      "title": "Execution mix and receipt evidence",
       "type": "row",
       "collapsed": false,
       "gridPos": {
@@ -1158,11 +1129,11 @@
     {
       "id": 17,
       "title": "Prefill / decode execution share",
-      "description": "Share of observed native inference execution time from existing cumulative phase totals. Missing series remain gaps; the graph does not manufacture a complete 100%.",
+      "description": "Share of receipt-projected prefill and decode time for the selected native backend and forward path.",
       "type": "timeseries",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 0,
@@ -1172,21 +1143,9 @@
       },
       "fieldConfig": {
         "defaults": {
-      "unit": "percentunit",
-      "min": 0,
-      "mappings": [
-        {
-          "type": "value",
-          "options": {
-            "-1": {
-              "index": 0,
-              "text": "UNAVAILABLE",
-              "color": "dark-red"
-            }
-          }
-        }
-      ],
-      "color": {
+          "unit": "percentunit",
+          "min": 0,
+          "color": {
             "mode": "palette-classic"
           },
           "custom": {
@@ -1250,18 +1209,18 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) + sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "expr": "sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"prefill\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"prefill\"}[$__rate_interval])) + sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"decode\"}[$__rate_interval])), 0.000001)",
           "refId": "A",
           "legendFormat": "prefill share"
         },
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "(sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) / clamp_min(sum(rate(fak_gateway_inference_prefill_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])) + sum(rate(fak_gateway_inference_decode_seconds_total{engine=~\"$engine\",model=~\"$model\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "expr": "sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"decode\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"prefill\"}[$__rate_interval])) + sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"decode\"}[$__rate_interval])), 0.000001)",
           "refId": "B",
           "legendFormat": "decode share"
         }
@@ -1269,418 +1228,18 @@
     },
     {
       "id": 18,
-      "title": "Accelerator utilization",
-      "description": "Proposed backend-neutral gauge fak_native_accelerator_utilization_ratio. UNAVAILABLE until CUDA/Metal device telemetry is joined to fak-native evidence.",
+      "title": "Kernel timing supported (all backends)",
+      "description": "Whether the latest native receipt across all backends carried authoritative kernel timing; this is support, not accelerator utilization.",
       "type": "stat",
       "datasource": {
         "type": "prometheus",
-        "uid": "fleet-prometheus"
+        "uid": "prometheus"
       },
       "gridPos": {
         "x": 12,
         "y": 15,
         "w": 4,
         "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.4
-              },
-              {
-                "color": "green",
-                "value": 0.75
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "index": 0,
-                  "text": "UNAVAILABLE",
-                  "color": "dark-red"
-                }
-              }
-            }
-          ],
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "expr": "max(fak_native_accelerator_utilization_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 19,
-      "title": "Memory pressure",
-      "description": "Proposed backend-neutral gauge fak_native_memory_pressure_ratio. UNAVAILABLE until allocator/device memory evidence is exported.",
-      "type": "stat",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 15,
-        "w": 4,
-        "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.8
-              },
-              {
-                "color": "red",
-                "value": 0.95
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "index": 0,
-                  "text": "UNAVAILABLE",
-                  "color": "dark-red"
-                }
-              }
-            }
-          ],
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "expr": "max(fak_native_memory_pressure_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 20,
-      "title": "Transfer share",
-      "description": "Proposed ratio fak_native_transfer_time_ratio. UNAVAILABLE until host/device transfer receipts are exported.",
-      "type": "stat",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 15,
-        "w": 4,
-        "h": 4
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.15
-              },
-              {
-                "color": "red",
-                "value": 0.3
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "index": 0,
-                  "text": "UNAVAILABLE",
-                  "color": "dark-red"
-                }
-              }
-            }
-          ],
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "expr": "max(fak_native_transfer_time_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 21,
-      "title": "Kernel share",
-      "description": "Proposed ratio fak_native_kernel_time_ratio. UNAVAILABLE until native kernel timing receipts are exported.",
-      "type": "stat",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 19,
-        "w": 4,
-        "h": 3
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.4
-              },
-              {
-                "color": "green",
-                "value": 0.7
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "index": 0,
-                  "text": "UNAVAILABLE",
-                  "color": "dark-red"
-                }
-              }
-            }
-          ],
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "expr": "max(fak_native_kernel_time_ratio{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 22,
-      "title": "Receipt evidence age",
-      "description": "Proposed gauge fak_native_evidence_age_seconds. UNAVAILABLE until receipt/profile freshness is joined; scrape freshness above is not substituted.",
-      "type": "stat",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 19,
-        "w": 4,
-        "h": 3
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 300
-              },
-              {
-                "color": "red",
-                "value": 1800
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "index": 0,
-                  "text": "UNAVAILABLE",
-                  "color": "dark-red"
-                }
-              }
-            }
-          ],
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "fleet-prometheus"
-          },
-          "expr": "max(fak_native_evidence_age_seconds{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 23,
-      "title": "Telemetry contract",
-      "description": "Proposed info gauge fak_native_telemetry_contract_info. A value of 1 means the bounded native schema exporter declares itself present; absence is UNAVAILABLE.",
-      "type": "stat",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "fleet-prometheus"
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 19,
-        "w": 4,
-        "h": 3
       },
       "fieldConfig": {
         "defaults": {
@@ -1705,6 +1264,308 @@
             {
               "type": "value",
               "options": {
+                "0": {
+                  "index": 0,
+                  "text": "UNSUPPORTED",
+                  "color": "red"
+                },
+                "1": {
+                  "index": 1,
+                  "text": "SUPPORTED",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(fak_native_receipt_signal_supported{signal=\"kernel\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 19,
+      "title": "Transfer bytes / native request",
+      "description": "Observed transfer bytes divided by supported native requests; this is byte movement, not memory pressure.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 15,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "index": 0,
+                  "text": "UNAVAILABLE",
+                  "color": "dark-red"
+                }
+              }
+            }
+          ],
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum(rate(fak_native_receipt_bytes_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",kind=\"transfer\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "title": "Transfer evidence supported (all backends)",
+      "description": "Whether the latest native receipt across all backends carried authoritative transfer evidence; this is support, not a time-share estimate.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 15,
+        "w": 4,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "index": 0,
+                  "text": "UNSUPPORTED",
+                  "color": "red"
+                },
+                "1": {
+                  "index": 1,
+                  "text": "SUPPORTED",
+                  "color": "green"
+                }
+              }
+            }
+          ],
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(fak_native_receipt_signal_supported{signal=\"transfer\"})",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "title": "Kernel share",
+      "description": "Receipt-projected kernel seconds divided by queue+prefill+decode request time for selected native receipts. Kernel time is nested execution evidence and is not double-counted in the denominator.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 4,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "index": 0,
+                  "text": "UNAVAILABLE",
+                  "color": "dark-red"
+                }
+              }
+            }
+          ],
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=\"kernel\"}[$__rate_interval])) / clamp_min(sum(rate(fak_native_receipt_phase_seconds_total{engine=\"inkernel\",backend=~\"$backend\",forward_path=~\"$forward_path\",phase=~\"queue|prefill|decode\"}[$__rate_interval])), 0.000001)) or vector(-1)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 22,
+      "title": "Unsupported native receipts / sec",
+      "description": "Rate of invalid, fallback-active, or unrecognized receipt observations excluded from native totals.",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 19,
+        "w": 4,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
                 "-1": {
                   "index": 0,
                   "text": "UNAVAILABLE",
@@ -1736,9 +1597,85 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "fleet-prometheus"
+            "uid": "prometheus"
           },
-          "expr": "max(fak_native_telemetry_contract_info{engine=~\"$engine\",model=~\"$model\"}) or vector(-1)",
+          "expr": "rate(fak_native_receipt_unsupported_total[$__rate_interval])",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "Supported receipt signals (all backends)",
+      "description": "Count of authoritative signals present on the latest native receipt across all backends (queue, prefill, decode, KV, transfer, kernel).",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 19,
+        "w": 4,
+        "h": 3
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 6
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "index": 0,
+                  "text": "UNAVAILABLE",
+                  "color": "dark-red"
+                }
+              }
+            }
+          ],
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(fak_native_receipt_signal_supported)",
           "refId": "A"
         }
       ]
@@ -1756,7 +1693,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "### Read this dashboard honestly\n- **Engine must be fak-native.** No query silently falls back to llama.cpp; engine/model identity stays visible.\n- **Qwen3.8 is the default evidence model.** Change the model variable only for an explicit regression, compatibility, historical, or hardware/artifact exception.\n- **UNAVAILABLE is data.** It means the bounded producer/exporter is absent, stale, or unmatched \u2014 never zero and never success.\n- **Fixture renders are UI contract proof, not live performance evidence.** Promote numbers only from matched, quality-constrained native receipts."
+        "content": "### Interpretation guardrails\n- Native panels use supported non-fallback receipt totals with bounded backend and forward-path labels.\n- Gateway TTFT, TPOT, output rate, and prompt-cache ratio are explicitly all-engine context because those emitters have no engine label.\n- Signal-support gauges say whether a measurement is authoritative; they do not substitute a measured zero.\n- Device utilization, memory pressure, queue depth, graph state, and artifact locators are not inferred from receipt data."
       },
       "transparent": true
     }
@@ -1774,48 +1711,60 @@
   "templating": {
     "list": [
       {
-        "name": "engine",
-        "label": "fak-native engine",
-        "type": "custom",
-        "query": "fak-native",
+        "allValue": ".*",
         "current": {
           "selected": true,
-          "text": "fak-native",
-          "value": "fak-native"
+          "text": "All",
+          "value": "$__all"
         },
-        "options": [
-          {
-            "selected": true,
-            "text": "fak-native",
-            "value": "fak-native"
-          }
-        ],
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\"}, backend)",
         "hide": 0,
-        "includeAll": false,
-        "multi": false,
-        "skipUrlSync": false
+        "includeAll": true,
+        "label": "Native backend",
+        "multi": true,
+        "name": "backend",
+        "options": [],
+        "query": {
+          "query": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\"}, backend)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
       },
       {
-        "name": "model",
-        "label": "model (Qwen3.8 default)",
-        "type": "custom",
-        "query": ".*Qwen3[._-]?8.*",
+        "allValue": ".*",
         "current": {
           "selected": true,
-          "text": ".*Qwen3[._-]?8.*",
-          "value": ".*Qwen3[._-]?8.*"
+          "text": "All",
+          "value": "$__all"
         },
-        "options": [
-          {
-            "selected": true,
-            "text": ".*Qwen3[._-]?8.*",
-            "value": ".*Qwen3[._-]?8.*"
-          }
-        ],
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}, forward_path)",
         "hide": 0,
-        "includeAll": false,
-        "multi": false,
-        "skipUrlSync": false
+        "includeAll": true,
+        "label": "Native forward path",
+        "multi": true,
+        "name": "forward_path",
+        "options": [],
+        "query": {
+          "query": "label_values(fak_native_receipt_requests_total{engine=\"inkernel\",backend=~\"$backend\"}, forward_path)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
       }
     ]
   },
