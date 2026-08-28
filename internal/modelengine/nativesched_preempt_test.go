@@ -561,6 +561,9 @@ func TestNativeSchedulerQwenSwapPreemptionResumes(t *testing.T) {
 			t.Fatalf("Qwen swap production row %d = %+v, want byte-bearing v1 committed success", i, row)
 		}
 	}
+	if rows[0].Bytes != stats.SwapBytes || rows[1].Bytes != stats.SwapRestoredBytes {
+		t.Fatalf("Qwen swap row bytes out/in=%d/%d, want encoded output/input=%d/%d", rows[0].Bytes, rows[1].Bytes, stats.SwapBytes, stats.SwapRestoredBytes)
+	}
 	fold, err := modelperfobs.FoldQwenSwapUsage(ledger)
 	if err != nil {
 		t.Fatal(err)
@@ -569,6 +572,45 @@ func TestNativeSchedulerQwenSwapPreemptionResumes(t *testing.T) {
 		t.Fatalf("Qwen swap production fold = %+v, want two committed invocations", fold)
 	}
 	t.Logf("Qwen swap production rows=%+v fold=%+v", rows, fold)
+}
+
+func TestNativeSchedulerQwenSwapUsageAppendFailureIsObservational(t *testing.T) {
+	calls := issue31Calls()
+	policy := NativePreemptionPolicy{MaxBlocks: 1, BlockTokens: 16, Mode: NativePreemptSwap}
+	want, wantStats := drainIssue31SchedulerWithStats(t, nativeSchedulerQwenSwapModel(), calls, policy)
+
+	dir := t.TempDir()
+	blocker := dir + "/not-a-directory"
+	if err := os.WriteFile(blocker, []byte("block ledger parent"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	policy.UsageLedgerPath = blocker + "/qwen-swap.jsonl"
+	got, gotStats := drainIssue31SchedulerWithStats(t, nativeSchedulerQwenSwapModel(), calls, policy)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unwritable ledger changed scheduler output:\n got %v\nwant %v", got, want)
+	}
+	if !reflect.DeepEqual(gotStats, wantStats) {
+		t.Fatalf("unwritable ledger changed scheduler lifecycle/stats:\n got %+v\nwant %+v", gotStats, wantStats)
+	}
+	if gotStats.SwapPreemptions == 0 || gotStats.Readmitted == 0 || gotStats.SwappedOut != 0 || gotStats.SwapBytes == 0 || gotStats.SwapRestoredBytes != gotStats.SwapBytes {
+		t.Fatalf("unwritable ledger scheduler receipt = %+v, want completed byte-exact swap/readmit", gotStats)
+	}
+	if _, err := os.Stat(policy.UsageLedgerPath); err == nil {
+		t.Fatal("unwritable ledger unexpectedly exists")
+	}
+
+	s := NewNativeScheduler(nativeSchedulerQwenSwapModel())
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{Mode: NativePreemptSwap, MaxBlocks: 8, BlockTokens: 4, UsageLedgerPath: policy.UsageLedgerPath})
+	ln := nativeSchedulerQwenReadmitLane(t, s, []int{3, 7, 11, 5}, 2)
+	defer ln.cancel()
+	if err := s.preemptLaneLocked(ln); err != nil {
+		t.Fatalf("unwritable-ledger swap preempt: %v", err)
+	}
+	ln.hostKV[0] ^= 0xff
+	s.readmitPreemptedLocked()
+	if ln.err == nil || !strings.Contains(ln.err.Error(), "checksum mismatch") || strings.Contains(ln.err.Error(), "record Qwen swap usage") {
+		t.Fatalf("unwritable ledger changed primary codec error: %v", ln.err)
+	}
 }
 
 func TestNativeSchedulerQwenSwapReadmitRestoresTokenLineageAndContinuation(t *testing.T) {

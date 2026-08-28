@@ -11,7 +11,6 @@ package modelengine
 // readmit. In both modes the lane's token stream stays open and resumes after readmit.
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -336,8 +335,8 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 			var err error
 			cache, err = model.QwenHybridKVCacheFromHost(s.m.Cfg, ln.hostKV)
 			if err != nil {
-				usageErr := s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionIn, modelperfobs.QwenSwapOutcomeError, modelperfobs.QwenSwapResultRefused, len(ln.hostKV))
-				return joinQwenSwapUsageError(err, usageErr)
+				_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionIn, modelperfobs.QwenSwapOutcomeError, modelperfobs.QwenSwapResultRefused, len(ln.hostKV))
+				return err
 			}
 		} else {
 			pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
@@ -356,13 +355,10 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 			if _, err := candidate.RestoreTokenLineage(history); err != nil {
 				candidate.Close()
 				operationErr := fmt.Errorf("modelengine: restore Qwen swap token lineage: %w", err)
-				usageErr := s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionIn, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultRefused, len(ln.hostKV))
-				return joinQwenSwapUsageError(operationErr, usageErr)
+				_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionIn, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultRefused, len(ln.hostKV))
+				return operationErr
 			}
-			if err := s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionIn, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultCommitted, len(ln.hostKV)); err != nil {
-				candidate.Close()
-				return joinQwenSwapUsageError(nil, err)
-			}
+			_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionIn, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultCommitted, len(ln.hostKV))
 		}
 		ln.sess = candidate
 		ln.logits = copyF32(ln.savedLogits)
@@ -531,17 +527,13 @@ func (s *NativeScheduler) preemptLaneLocked(ln *schedLane) error {
 		}
 		if err != nil {
 			if qwenHybrid {
-				usageErr := s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeError, modelperfobs.QwenSwapResultRefused, 0)
-				return joinQwenSwapUsageError(err, usageErr)
+				_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeError, modelperfobs.QwenSwapResultRefused, 0)
 			}
 			return err
 		}
 		ln.hostKV = blob
 		if qwenHybrid {
-			if err := s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultCommitted, len(blob)); err != nil {
-				ln.hostKV = nil
-				return joinQwenSwapUsageError(nil, err)
-			}
+			_ = s.recordQwenSwapUsage(modelperfobs.QwenSwapDirectionOut, modelperfobs.QwenSwapOutcomeSuccess, modelperfobs.QwenSwapResultCommitted, len(blob))
 		}
 		s.preemptStats.SwapPreemptions++
 		s.preemptStats.SwapBytes += int64(len(blob))
@@ -561,17 +553,6 @@ func (s *NativeScheduler) recordQwenSwapUsage(direction, outcome, result string,
 		Schema: modelperfobs.QwenSwapUsageSchema, ObservedAt: time.Now().UTC(), Version: modelperfobs.QwenSwapCodecVersion,
 		Direction: direction, Outcome: outcome, Result: result, Bytes: int64(bytes),
 	})
-}
-
-func joinQwenSwapUsageError(operationErr, usageErr error) error {
-	if usageErr == nil {
-		return operationErr
-	}
-	ledgerErr := fmt.Errorf("modelengine: record Qwen swap usage: %w", usageErr)
-	if operationErr == nil {
-		return ledgerErr
-	}
-	return errors.Join(operationErr, ledgerErr)
 }
 
 func (s *NativeScheduler) newLaneSession(q4k bool) *model.Session {
