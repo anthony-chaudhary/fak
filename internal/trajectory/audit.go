@@ -225,6 +225,18 @@ type AuditRefusalRow struct {
 	Detail     string `json:"detail"`
 }
 
+// AuditCorpusRow binds snapshot-backed output to the verified, content-addressed
+// input corpus. It is absent for ordinary live audits, preserving their bytes.
+type AuditCorpusRow struct {
+	Schema       string `json:"schema"`
+	Kind         string `json:"kind"`
+	CorpusSchema string `json:"corpus_schema"`
+	Digest       string `json:"corpus_digest"`
+	Verified     bool   `json:"verified"`
+	Files        int    `json:"files"`
+	Bytes        int64  `json:"bytes"`
+}
+
 // AuditResult is the complete versioned artifact before rendering.
 type AuditConclusionStatus struct {
 	BroadEfficiencySupported bool `json:"broad_efficiency_supported"`
@@ -234,6 +246,7 @@ type AuditConclusionStatus struct {
 }
 
 type AuditResult struct {
+	Corpus            *AuditCorpusRow       `json:"corpus,omitempty"`
 	ConclusionStatus  AuditConclusionStatus `json:"conclusion_status"`
 	Summary           AuditSummaryRow
 	Denominators      []AuditDenominatorRow
@@ -830,6 +843,9 @@ func WriteAuditJSONL(w io.Writer, result AuditResult) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetEscapeHTML(false)
 	rows := []any{result.Summary}
+	if result.Corpus != nil {
+		rows = append(rows, *result.Corpus)
+	}
 	for _, row := range result.Denominators {
 		rows = append(rows, row)
 	}

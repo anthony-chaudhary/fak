@@ -234,6 +234,138 @@ func TestParseTrajectoryAuditSinceDays(t *testing.T) {
 	}
 }
 
+func TestRunTrajectoryAuditSnapshotCaptureDeleteRootsReplay(t *testing.T) {
+	base := t.TempDir()
+	claudeRoot, codexRoot := writeTrajectoryAuditSnapshotRoots(t, base)
+	snapshot := filepath.Join(base, "private-snapshot")
+	captureJSON := filepath.Join(base, "capture.jsonl")
+	captureMD := filepath.Join(base, "capture.md")
+	var stdout, stderr bytes.Buffer
+	rc := runTrajectory(&stdout, &stderr, []string{
+		"audit", "--since", "0", "--user-contains", "snapshot-topic",
+		"--claude-root", claudeRoot, "--codex-root", codexRoot,
+		"--snapshot-out", snapshot, "--jsonl", captureJSON, "--md", captureMD,
+	})
+	if rc != 0 {
+		t.Fatalf("capture rc=%d stderr=%s", rc, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "OUT_OF_TREE_WRITE operation=trajectory-audit-snapshot") || !strings.Contains(stderr.String(), "verified=true") {
+		t.Fatalf("capture did not declare and verify private output: %s", stderr.String())
+	}
+	manifest, err := os.ReadFile(filepath.Join(snapshot, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"cli-private-prompt", claudeRoot, codexRoot, "snapshot-topic"} {
+		if bytes.Contains(manifest, []byte(forbidden)) {
+			t.Fatalf("manifest leaked %q: %s", forbidden, manifest)
+		}
+	}
+	if info, err := os.Stat(snapshot); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("snapshot mode = %v err=%v", info.Mode().Perm(), err)
+	}
+	if err := os.RemoveAll(filepath.Dir(claudeRoot)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Dir(codexRoot)); err != nil {
+		t.Fatal(err)
+	}
+	capturedJSON := mustReadTrajectoryAuditFile(t, captureJSON)
+	capturedMD := mustReadTrajectoryAuditFile(t, captureMD)
+	for i := 1; i <= 2; i++ {
+		jsonPath := filepath.Join(base, "replay-"+strconv.Itoa(i)+".jsonl")
+		mdPath := filepath.Join(base, "replay-"+strconv.Itoa(i)+".md")
+		stdout.Reset()
+		stderr.Reset()
+		rc = runTrajectory(&stdout, &stderr, []string{"audit", "--snapshot", snapshot, "--jsonl", jsonPath, "--md", mdPath})
+		if rc != 0 {
+			t.Fatalf("replay %d rc=%d stderr=%s", i, rc, stderr.String())
+		}
+		if !bytes.Equal(capturedJSON, mustReadTrajectoryAuditFile(t, jsonPath)) || !bytes.Equal(capturedMD, mustReadTrajectoryAuditFile(t, mdPath)) {
+			t.Fatalf("replay %d output differs from capture", i)
+		}
+		if !strings.Contains(stderr.String(), "sessions=2") || !strings.Contains(stderr.String(), "verified=true") {
+			t.Fatalf("replay %d status = %s", i, stderr.String())
+		}
+	}
+	for name, output := range map[string][]byte{"jsonl": capturedJSON, "markdown": capturedMD} {
+		if bytes.Contains(output, []byte("cli-private-prompt")) {
+			t.Fatalf("%s leaked transcript payload", name)
+		}
+		if !bytes.Contains(output, []byte("snapshot")) {
+			t.Fatalf("%s does not name snapshot corpus", name)
+		}
+	}
+}
+
+func TestRunTrajectoryAuditSnapshotFlagAndTamperRefusals(t *testing.T) {
+	base := t.TempDir()
+	claudeRoot, codexRoot := writeTrajectoryAuditSnapshotRoots(t, base)
+	snapshot := filepath.Join(base, "snapshot")
+	var stdout, stderr bytes.Buffer
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--snapshot-out", snapshot}); rc != 0 {
+		t.Fatalf("capture rc=%d stderr=%s", rc, stderr.String())
+	}
+	for _, args := range [][]string{
+		{"audit", "--snapshot", snapshot, "--since", "0"},
+		{"audit", "--snapshot", snapshot, "--user-contains", "topic"},
+		{"audit", "--snapshot", snapshot, "--claude-root", claudeRoot},
+		{"audit", "--snapshot", snapshot, "--snapshot-out", filepath.Join(base, "other")},
+	} {
+		stderr.Reset()
+		if rc := runTrajectory(&stdout, &stderr, args); rc != 2 || !strings.Contains(stderr.String(), "SNAPSHOT_FLAGS_INCOMPATIBLE") {
+			t.Fatalf("args=%v rc=%d stderr=%s", args, rc, stderr.String())
+		}
+	}
+	stderr.Reset()
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--since", "0", "--claude-root", claudeRoot, "--codex-root", codexRoot, "--snapshot-out", snapshot}); rc != 1 || !strings.Contains(stderr.String(), "SNAPSHOT_TARGET_EXISTS") {
+		t.Fatalf("existing target rc=%d stderr=%s", rc, stderr.String())
+	}
+	manifestPath := filepath.Join(snapshot, "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	if rc := runTrajectory(&stdout, &stderr, []string{"audit", "--snapshot", snapshot}); rc != 1 || !strings.Contains(stderr.String(), "SNAPSHOT_SCHEMA_INCOMPATIBLE") {
+		t.Fatalf("tamper rc=%d stderr=%s", rc, stderr.String())
+	}
+}
+
+func writeTrajectoryAuditSnapshotRoots(t *testing.T, base string) (string, string) {
+	t.Helper()
+	claudeRoot := filepath.Join(base, "claude-live", "projects")
+	codexRoot := filepath.Join(base, "codex-live", "sessions")
+	claudePath := filepath.Join(claudeRoot, "project", "claude.jsonl")
+	codexPath := filepath.Join(codexRoot, "2026", "08", "28", "codex.jsonl")
+	for _, path := range []string{claudePath, codexPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claude := "{\"type\":\"user\",\"sessionId\":\"claude-snapshot\",\"message\":{\"role\":\"user\",\"content\":\"snapshot-topic cli-private-prompt\"}}\n" +
+		"{\"type\":\"assistant\",\"sessionId\":\"claude-snapshot\",\"message\":{\"id\":\"msg-1\",\"model\":\"claude-test\",\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"cache_read_input_tokens\":3,\"cache_creation_input_tokens\":1},\"content\":\"done\"}}\n"
+	codex := "{\"timestamp\":\"2026-08-28T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"codex-snapshot\",\"model_provider\":\"openai\"}}\n" +
+		"{\"timestamp\":\"2026-08-28T00:00:01Z\",\"type\":\"turn_context\",\"payload\":{\"model\":\"gpt-test\",\"turn_id\":\"turn-1\"}}\n" +
+		"{\"timestamp\":\"2026-08-28T00:00:02Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"snapshot-topic cli-private-prompt\"}]}}\n" +
+		"{\"timestamp\":\"2026-08-28T00:00:03Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"last_token_usage\":{\"input_tokens\":20,\"cached_input_tokens\":5,\"cache_write_input_tokens\":0,\"output_tokens\":4,\"reasoning_output_tokens\":0,\"total_tokens\":24},\"total_token_usage\":{\"input_tokens\":20,\"cached_input_tokens\":5,\"cache_write_input_tokens\":0,\"output_tokens\":4,\"reasoning_output_tokens\":0,\"total_tokens\":24}}}}\n"
+	if err := os.WriteFile(claudePath, []byte(claude), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexPath, []byte(codex), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return claudeRoot, codexRoot
+}
+
+func mustReadTrajectoryAuditFile(t *testing.T, path string) []byte {
+	t.Helper()
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
 func TestRunTrajectoryRoutesAssurance(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runTrajectory(&stdout, &stderr, []string{"assurance", "unexpected"})

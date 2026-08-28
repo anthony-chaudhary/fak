@@ -46,9 +46,13 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	userContains := flags.String("user-contains", "", "keep transcripts whose user-authored prompts contain this case-insensitive literal")
 	claudeRoot := flags.String("claude-root", "", "override Claude projects root")
 	codexRoot := flags.String("codex-root", "", "override Codex sessions root")
+	snapshotOut := flags.String("snapshot-out", "", "capture selected private inputs into a new replayable snapshot directory")
+	snapshot := flags.String("snapshot", "", "verify and replay a private audit snapshot without reading live roots")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	explicit := map[string]bool{}
+	flags.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	if flags.NArg() != 0 {
 		fmt.Fprintf(stderr, "fak trajectory audit: unexpected arguments: %s\n", strings.Join(flags.Args(), " "))
 		return 2
@@ -56,6 +60,19 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 	if *jsonlPath != "" && *markdownPath != "" && filepath.Clean(*jsonlPath) == filepath.Clean(*markdownPath) {
 		fmt.Fprintln(stderr, "fak trajectory audit: --jsonl and --md must name different outputs")
 		return 2
+	}
+	if strings.TrimSpace(*snapshotOut) != "" && strings.TrimSpace(*snapshot) != "" {
+		return trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot-out and --snapshot are mutually exclusive")
+	}
+	if strings.TrimSpace(*snapshot) != "" {
+		for _, name := range []string{"since", "user-contains", "claude-root", "codex-root", "baseline"} {
+			if explicit[name] {
+				return trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot rejects live selection flag --"+name)
+			}
+		}
+	}
+	if strings.TrimSpace(*snapshotOut) != "" && explicit["baseline"] {
+		return trajectoryAuditSnapshotFlagRefusal(stderr, "--snapshot-out cannot capture an external baseline; capture the input corpus first")
 	}
 	since, err := parseTrajectoryAuditSince(*sinceText)
 	if err != nil {
@@ -84,10 +101,39 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 	}
-	result, err := trajectory.RunAudit(trajectory.AuditOptions{Sources: sources, Since: since, Baseline: baseline, UserContains: strings.TrimSpace(*userContains)})
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	var result trajectory.AuditResult
+	var snapshotManifest *trajectory.AuditSnapshotManifest
+	switch {
+	case strings.TrimSpace(*snapshotOut) != "":
+		target, absErr := filepath.Abs(filepath.Clean(strings.TrimSpace(*snapshotOut)))
+		if absErr != nil {
+			return trajectoryAuditSnapshotFlagRefusal(stderr, "resolve --snapshot-out target")
+		}
+		for _, output := range []string{*jsonlPath, *markdownPath} {
+			if output != "" && trajectoryAuditPathWithin(target, output) {
+				return trajectoryAuditSnapshotFlagRefusal(stderr, "audit output must be outside the private snapshot directory")
+			}
+		}
+		fmt.Fprintf(stderr, "OUT_OF_TREE_WRITE operation=trajectory-audit-snapshot target=%q\n", target)
+		manifest, captured, captureErr := trajectory.CaptureAuditSnapshot(target, trajectory.AuditOptions{Sources: sources, Since: since, UserContains: strings.TrimSpace(*userContains)})
+		if captureErr != nil {
+			return trajectoryAuditSnapshotError(stderr, captureErr)
+		}
+		result = captured
+		snapshotManifest = &manifest
+	case strings.TrimSpace(*snapshot) != "":
+		manifest, replayed, replayErr := trajectory.ReplayAuditSnapshot(strings.TrimSpace(*snapshot))
+		if replayErr != nil {
+			return trajectoryAuditSnapshotError(stderr, replayErr)
+		}
+		result = replayed
+		snapshotManifest = &manifest
+	default:
+		result, err = trajectory.RunAudit(trajectory.AuditOptions{Sources: sources, Since: since, Baseline: baseline, UserContains: strings.TrimSpace(*userContains)})
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 	}
 
 	if *jsonlPath == "" && *markdownPath == "" {
@@ -117,7 +163,35 @@ func runTrajectoryAudit(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintf(stderr, "TRAJECTORY_SCHEMA_REFUSED %s %s:%d %s\n", first.Source, first.SourcePath, first.Line, first.Code)
 		return 1
 	}
+	if snapshotManifest != nil {
+		fmt.Fprintf(stderr, "trajectory audit snapshot: corpus_sha256=%s files=%d verified=true\n", snapshotManifest.CorpusDigest, len(snapshotManifest.Files))
+	}
 	return 0
+}
+
+func trajectoryAuditSnapshotFlagRefusal(stderr io.Writer, detail string) int {
+	fmt.Fprintln(stderr, "TRAJECTORY_SNAPSHOT_REFUSED SNAPSHOT_FLAGS_INCOMPATIBLE")
+	fmt.Fprintln(stderr, "fak trajectory audit:", detail)
+	return 2
+}
+
+func trajectoryAuditSnapshotError(stderr io.Writer, err error) int {
+	fmt.Fprintln(stderr, "TRAJECTORY_SNAPSHOT_REFUSED", trajectory.AuditSnapshotRefusalCode(err))
+	fmt.Fprintln(stderr, err)
+	return 1
+}
+
+func trajectoryAuditPathWithin(root, candidate string) bool {
+	root, err := filepath.Abs(filepath.Clean(root))
+	if err != nil {
+		return false
+	}
+	candidate, err = filepath.Abs(filepath.Clean(candidate))
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, candidate)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func parseTrajectoryAuditSince(value string) (time.Duration, error) {

@@ -1592,6 +1592,34 @@ fak server down --dir DIR --json
 
 `trajectory audit` separates deterministic model-visible content bytes from serialized transcript storage/telemetry overhead. Runtime event mirrors such as Codex `item_completed` and Claude attachments are typed by subtype in a separate table and never inflate the model-visible denominator. `visible_unknown` is explicit and coverage-budgetable.
 
+### Replayable private audit corpus
+
+Use `--snapshot-out` when a later audit must replay the exact selected Claude and
+Codex inputs rather than rediscover a moving live window:
+
+```bash
+fak trajectory audit --since 7d --user-contains qwen \
+  --snapshot-out /private/path/qwen-corpus \
+  --jsonl qwen-audit.jsonl --md qwen-audit.md
+fak trajectory audit --snapshot /private/path/qwen-corpus \
+  --jsonl replay.jsonl --md replay.md
+```
+
+Capture applies the live root, time, and topic selectors first, copies only selected
+JSONL files, audits the captured copy, then atomically publishes a new 0700 directory
+with 0600 inputs and `manifest.json` schema `fak-trajectory-audit-corpus/1`. The
+manifest contains safe root labels, relative paths, byte lengths, SHA-256 values,
+selection presence, audit schema, corpus digest, and captured-output digest—never
+payload bytes, absolute live roots, or the topic literal. Existing targets are refused.
+
+Replay accepts output flags but rejects live roots, `--since`, `--user-contains`, and
+`--baseline`. It verifies schema, containment, exact file set, permissions, lengths,
+and hashes before parsing and repeats verification afterward. Any missing, changed,
+extra, malformed, incompatible, path-escaping, or concurrently mutated input exits
+nonzero with `TRAJECTORY_SNAPSHOT_REFUSED`. Snapshots contain raw transcript bytes:
+keep them outside Git and public witness paths, never sync them as audit output, and
+delete the explicit directory when retention ends.
+
 ## `fak new-model`: refusal-safe native model intake
 
 Compile a pinned model-release manifest into a deterministic fak-native onboarding packet:
