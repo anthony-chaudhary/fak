@@ -25,6 +25,20 @@ Direct code or deployment reuse is **INSPIRE-ONLY**. The root `LICENSE` says MIT
 
 Centrality: **Enabling**, except session-pinned skill coherence, which is **Core** to #1103. P1 bounds repeated prompt/extraction work; P2 counts checkpoint, retry, token-expansion, and stale-conflict overhead; P3 scopes state per session and retains bounded lexical expansion; P4 makes cursor, sanitization, version-bind, conflict, and retrieval evidence queryable.
 
+## Dated source ledger
+
+All rows were observed at `2026-08-28T21:58:11Z`. Open forge items are direction or negative evidence, not shipped behavior.
+
+| Source | Source event and state | Immutable anchor | Platform/context and effect on the conclusion | Refresh trigger |
+|---|---|---|---|---|
+| Default branch `feat/server_team` | `2026-08-27T06:49:33Z`, shipped at the checked head | [`5299c00aaf65481703c180fd69df066d11254eb7`](https://github.com/TencentCloud/TencentDB-Agent-Memory/commit/5299c00aaf65481703c180fd69df066d11254eb7) | Node 22.16+ multi-service tree; pins every code anchor in this note. | Default branch moves. |
+| Release `v2.0.1` | `2026-08-25T08:37:36Z`, released | [`v2.0.1`](https://github.com/TencentCloud/TencentDB-Agent-Memory/releases/tag/v2.0.1) | Confirms an actively packaged product rather than an unshipped source sketch; release claims remain subordinate to code/tests. | New release or moved tag. |
+| First-class Pi adapter | `2026-08-27T06:49:33Z`, merged as the checked head | [PR #1126](https://github.com/TencentCloud/TencentDB-Agent-Memory/pull/1126) | Shows the current cross-harness direction; it does not add named behavior tests for the memory contracts borrowed here. | Adapter follow-up, revert, or test addition. |
+| License contradiction | Issue created `2026-08-19T15:56:08Z`, maintainer response `2026-08-20T02:34:55Z`, still open | [root `LICENSE`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/LICENSE), [`README.docker.md:264-266`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/README.docker.md#L264-L266), [#1073](https://github.com/TencentCloud/TencentDB-Agent-Memory/issues/1073) | Root source says MIT while the deployment guide says proprietary and GitHub reports `Other`; all transfer decisions therefore stay INSPIRE-ONLY. | #1073 resolution or either licensing file changes. |
+| Prompt-cache regression report | Created `2026-05-31T16:35:59Z`, updated `2026-08-20T08:43:43Z`, open | [#120](https://github.com/TencentCloud/TencentDB-Agent-Memory/issues/120) | OpenAI-compatible provider report; makes cache placement a measured tradeoff rather than an upstream performance claim. | Reproduction, fix, closure, or provider-contract change. |
+| Benchmark reproducibility requests | Created `2026-05-22T09:17:32Z` and `2026-05-28T10:24:30Z`; updated `2026-08-06T10:52:35Z` and `2026-08-06T11:00:29Z`; open | [#73](https://github.com/TencentCloud/TencentDB-Agent-Memory/issues/73), [#106](https://github.com/TencentCloud/TencentDB-Agent-Memory/issues/106) | Public users could not reproduce or requested a method; headline PersonaMem numbers are EXCLUDE until a pinned evaluator/corpus appears. | Reproducible evaluator, corpus, and rerun land. |
+| Local source inventory | Generated `2026-08-28T21:42:35Z`, exhaustive tree walk | [`fak-study-inventory-map/1`](../research/inventory/tencentcloud-tencentdb-agent-memory.json) at the checked revision | 995 files, 11 subsystems, 826 runtime files, two test-named files; supplies the coverage denominator and test-maturity caveat. | Checked revision or inventory classifier changes. |
+
 ## What the system is trying to do
 
 The upstream worldview is that a durable agent should not treat its prompt transcript as its memory system. It records a raw L0 boundary, extracts scene/episode L1 records, rolls those into semantic L2 knowledge, and maintains an L3 persona. A separate knowledge engine makes linked pages retrievable on demand. Memory and skills are exposed through proxy bridges so the model sees a smaller, governed tool surface rather than storage credentials or arbitrary mutation authority.
@@ -46,30 +60,40 @@ That worldview matches FAK's “context is not memory” direction, but its prod
 
 ## FAK on-axis witness
 
-The study used `fak capabilities`, the docs/leaf/verb/claim index surfaces where responsive, and raw source/issue search before retaining gaps.
+The completion audit reran `fak capabilities`, all four `fak-dev index docs|leaves|verbs|claims` surfaces, raw source search, and issue read-back. The issue bodies carry the full command result; the compact record is:
 
-- Queries for layered agent memory, memory-asset loadouts, versioned skill assets, wiki link graphs, and proxy memory injection returned no direct capability match. Generic model-routing and session-control hits were rejected as off-axis.
-- `docs/integrations/agent-memory.md` explicitly says FAK has no embedder, vector search, or fact-extraction pipeline. That is a product boundary, not a reason to introduce one for these four issues.
-- `cmd/fak/skill.go:73-88` proves global version pins, residency reads, and guarded hot-swap are present; raw search found no per-session skill-version binding or `expected_version` contract.
-- `internal/recall/recall.go:612-615` and `internal/memq/memq.go:539-542` independently tokenize by non-letter/non-digit separators, leaving uninterrupted CJK text as one long lexical term.
-- The memory-loop issue family #2346/#2349 owns lesson proposal/promotion, while #2618/#2621 owns graph recall. Neither contains the checkpoint or capture-hygiene witness filed here.
-- Some `fak dev index` queries stalled on this peer-dirty workstation; their absence was not treated as proof. The retained verdicts rest on direct source reads and issue read-back.
+| Axis query | Capability result | Index/raw-code refinement | Verdict |
+|---|---|---|---|
+| `artifact coupled memory extraction checkpoint cursor durable write monotonic lease loss retry` | `no matching capability` | Generic durable-artifact/checkpoint-score hits only. `internal/trajectory/trajectory.go:26-45` records turns and `internal/memq/memstore.go:58-96` writes memory, but no extraction cursor binds them. | **ABSENT-on-axis** → #9865. |
+| `memory capture original user prompt remove injected recall before distillation` | Compression, stable-prompt reuse, session control/restore, and policy cards | These are adjacent. `internal/trajectory/trajectory.go:296-349` copies producer query bytes without original-versus-injected provenance or a capture filter. | **PARTIAL neighborhood, ABSENT-on-axis** → #9866. |
+| `session pinned skill version expected version optimistic write hot swap` | Session restore/control and model routing cards | The `skill` verb is present, but `cmd/fak/skill.go:73-88,453-459` persists one global page table. Raw search finds `expected_version` for code-file edits, not skill/session binding. | **PARTIAL global versioning, ABSENT-on-axis** → #9867. |
+| `CJK bigram lexical memory recall mixed Chinese Latin tokenizer` | Session restore only | The index returns recall and model-tokenizer leaves. Reading `internal/recall/recall.go:612-615` and `internal/memq/memq.go:539-542` proves memory retrieval keeps a whole CJK run as one token; the model tokenizer is off-axis. | **PARTIAL lexical recall, ABSENT-on-axis** → #9868. |
+
+`docs/integrations/agent-memory.md` explicitly says FAK has no embedder, vector search, or fact-extraction pipeline. That remains a product boundary, not an excuse to add one for these four issues. The memory-loop family #2346/#2349 continues to own lesson proposal/promotion, while #2618/#2621 owns graph recall. Initial wrapper-based index calls stalled, so they were not used as null evidence; the final direct `fak-dev` reads above completed and were confirmed against source.
 
 ## Candidate matrix
 
-| Candidate | FAK status | Disposition | Outcome |
-|---|---|---|---|
-| Artifact-coupled, monotonic extraction checkpoint | **ABSENT** | **DEFAULT · INSPIRE-ONLY** | #9865 |
-| Pre-distillation capture hygiene | **ABSENT** | **DEFAULT · INSPIRE-ONLY** | #9866 |
-| Per-session skill-version coherence | **ABSENT** | **DEFAULT · INSPIRE-ONLY** | #9867 |
-| Bounded CJK/mixed lexical memory tokens | **ABSENT** | **DEFAULT · INSPIRE-ONLY** | #9868 |
-| Graph-neighbor recall | **PARTIAL** | **DEFAULT** | Existing #2621 |
-| First witnessed turn-end lesson | **PARTIAL** | **WATCH** | Existing #2349 is the spine; do not clone L0-L3 wholesale. |
-| Stable-prefix/dynamic-recall placement | **PRESENT** | **DEFAULT** | Keep FAK's native placement/accounting. |
-| Model-unforgeable memory authorization | **PRESENT** | **DEFAULT** | Keep FAK's default-deny policy gate. |
-| Source-cascade deletion | **PARTIAL** | **WATCH** | Revisit only with a FAK provenance-retirement witness. |
-| PersonaMem/cache-hit headline numbers | **ABSENT** | **EXCLUDE** | No reproducible pinned method; issues #73, #106, and #120 qualify or dispute outcomes. |
-| Direct code/deployment reuse | **ABSENT** | **EXCLUDE** | License conflict #1073 is unresolved. |
+| Candidate and source state | Axis and upstream user-world reason | FAK on-axis witness/seam | Portfolio/license | Action or disconfirming check |
+|---|---|---|---|---|
+| Artifact-coupled monotonic extraction checkpoint — shipped [`checkpoint.ts:4-24,616-742`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryCore/src/utils/checkpoint.ts#L616-L742) | Replay determinism for long-running, retrying, multi-session memory workers. | **ABSENT** between `trajectory.Turn` and `memq.MemStore.AddPromoted`. | **DEFAULT · INSPIRE-ONLY** | #9865; retire if an existing artifact/cursor coordinator is found or the failure fixture cannot reproduce skipped/duplicate work. |
+| Pre-distillation capture hygiene — shipped [`l0-recorder.ts:199-265`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryCore/src/core/conversation/l0-recorder.ts#L199-L265) | Capture fidelity for harnesses that prepend recalled memory into the user turn. | **ABSENT** at `trajectory.turnFromEvent`; prompt placement itself is PRESENT. | **DEFAULT · INSPIRE-ONLY** | #9866; reject heuristics if callers cannot supply original bytes or explicit injected spans. |
+| Per-session skill-version coherence — shipped [`skill-bridge.ts:175-182,840-856,1001-1012`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryProxy/src/skill/skill-bridge.ts#L175-L182) | Instruction consistency for teams updating shared skills while agents remain live. | **PARTIAL**: global page-table/CAS swap exists; session binding does not. | **DEFAULT · INSPIRE-ONLY** | #9867; retire if global remap can already prove a live session never observes mixed versions. |
+| Bounded CJK/mixed lexical terms — shipped [`manager.ts:332-373`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryKnowledge/src/engines/wiki/manager.ts#L332-L373) | Phrase recall for Chinese and mixed identifiers without an external segmenter. | **PARTIAL** lexical recall; **ABSENT** phrase discrimination in the two memory tokenizers. | **DEFAULT · INSPIRE-ONLY** | #9868; reject if bounded bigrams do not improve the fixed corpus or regress English ordering/cost. |
+| Bounded graph-neighbor recall — shipped [`graph-search.ts:45-87`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryKnowledge/src/engines/wiki/graph-search.ts#L45-L87) | Relational recall for wiki-like memory assets while keeping expansion bounded. | **PARTIAL**, already owned by #2621 under #2618. | **DEFAULT · INSPIRE-ONLY** | No duplicate; #2621 remains the falsifier and implementation owner. |
+| Progressive turn-end semantic distillation — shipped across the L0/L1/L2/L3 pipeline | Compact durable learning for users who expect continuity across harness sessions. | **PARTIAL**, first working proposal/promotion spine already #2349. | **WATCH · INSPIRE-ONLY** | Keep #2349 minimal; do not clone the whole hierarchy unless dogfood proves another independently shippable layer. |
+| Stable-prefix/dynamic-recall placement — shipped [`pipeline.ts:284-327`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryProxy/src/injection/pipeline.ts#L284-L327) | Provider-cache reuse for agents that recall every turn. | **PRESENT-on-axis** in FAK prompt/cache placement; issue #120 warns the tradeoff is workload-dependent. | **DEFAULT · native FAK** | No issue; reopen only if a matched trace shows FAK placement causes avoidable prefix churn. |
+| Model-unforgeable read-only memory bridge — shipped [`memory-bridge.ts:259-385`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryProxy/src/injection/memory-bridge.ts#L259-L385) | Least authority for models consuming organizational memory. | **PRESENT-on-axis** through FAK policy/adjudicator, with a broader default-deny boundary. | **DEFAULT · native FAK** | No issue; a policy-bypass witness would reopen the comparison. |
+| Source-provenance cascade deletion — shipped [`cascade.ts:69-228`](https://github.com/TencentCloud/TencentDB-Agent-Memory/blob/5299c00aaf65481703c180fd69df066d11254eb7/MemoryKnowledge/src/engines/wiki/cascade.ts#L69-L228) | Correct retirement for knowledge imported from mutable source collections. | **PARTIAL** near #2624 structural supersession, but no current FAK dogfood demands source cascade. | **WATCH · INSPIRE-ONLY** | Review when a concrete imported-source removal leaves derived pages behind; then file the smallest provenance-retirement leaf. |
+| PersonaMem/cache-hit headline numbers — README/open-issue claims | Outcome and cache efficiency. Their users want measurable quality, but the public method is missing or disputed. | No FAK implementation axis can be justified from an unreproduced number. | **EXCLUDE** | Reopen only with a pinned evaluator, corpus, method, and matched rerun resolving #73/#106/#120. |
+| Direct code or deployment reuse — exact checked tree | Supply-chain clarity for self-hosters and downstream redistribution. | Not a capability gap. | **EXCLUDE / INSPIRE-ONLY** | Reclassify only after #1073 resolves the MIT/proprietary boundary and provenance is independently reviewed. |
+
+## Default and coverage frontiers
+
+**Default frontier.** Keep FAK's kernel-owned policy/adjudication and stable-prefix placement as the common-case defaults. Add the four narrow semantics in #9865-#9868 at their existing leaves: replay-safe extraction, explicit capture hygiene, session-coherent skills, and bounded multilingual lexical recall. None requires the upstream service topology, vector store, or L0-L3 product hierarchy.
+
+**Coverage frontier.** No upstream backend survives as an optional module or recipe today: adopting the Node/Redis/SQLite/vector stack would widen dependencies and authority without a witnessed cohort that FAK's native leaves cannot serve. Source-cascade deletion remains WATCH for imported mutable knowledge. The only absent supported cohort with immediate evidence is Chinese/mixed-text lexical-memory users (#9868); the other three gaps improve correctness for all long-running sessions.
+
+Support remains bounded: #9868 is a small shared-tokenizer/test change; #9866 is a small-to-medium typed capture/provenance boundary with privacy fixtures; #9865 and #9867 are medium state-lifecycle changes requiring crash/retry/reap/conflict tests and queryable receipts. Their parent epics own maintenance and review triggers. If their declared failure fixtures do not reproduce or their incremental cost exceeds the measured saved retries/consistency gain, the default proposal is disconfirmed rather than preserved for hypothetical users.
 
 ## Negative knowledge
 
@@ -100,3 +124,4 @@ Refresh when the checked revision moves, upstream #1073 resolves, a reproducible
 - [#9868](https://github.com/anthony-chaudhary/fak/issues/9868): bounded CJK lexical memory tokenizer.
 - Existing owners retained: [#2349](https://github.com/anthony-chaudhary/fak/issues/2349), [#2621](https://github.com/anthony-chaudhary/fak/issues/2621), and [#2624](https://github.com/anthony-chaudhary/fak/issues/2624).
 
+Companions: [`study-repo`](../../.claude/skills/study-repo/SKILL.md) · [`field-borrow`](../../.claude/skills/field-borrow/SKILL.md) · [memory-loop epic #2346](https://github.com/anthony-chaudhary/fak/issues/2346) · [verified-recall epic #2395](https://github.com/anthony-chaudhary/fak/issues/2395) · [queried-skill epic #1103](https://github.com/anthony-chaudhary/fak/issues/1103).
