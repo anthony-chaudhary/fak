@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -15,6 +16,8 @@ import (
 )
 
 const guardCodexSessionStartTimeoutSeconds = 5
+
+var guardCodexProviderThreadID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 type guardCodexSessionStartDecision struct {
 	Boundary bool
@@ -178,4 +181,66 @@ func writeGuardCodexSessionBinding(statePath, sessionID, traceID string) error {
 		return err
 	}
 	return writeGuardSettingsFileAtomic(statePath, append(data, '\n'))
+}
+
+// guardCodexResourceResumeCommand rebuilds the one safe interactive Codex continuation
+// after guard-owned resource containment. The provider thread comes only from the exact,
+// launch-scoped SessionStart binding: the guard trace is correlation metadata and is never a
+// substitute thread ID. Only root-level config overrides survive; the original interactive
+// prompt and any prior subcommand are deliberately not replayed.
+func guardCodexResourceResumeCommand(command []string, statePath, guardTraceID string) ([]string, error) {
+	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+		return nil, fmt.Errorf("Codex resource reattach has no executable command")
+	}
+	binding, err := readGuardCodexSessionBinding(statePath, guardTraceID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(command)+2)
+	out = append(out, command[0])
+	for i := 1; i < len(command); i++ {
+		switch {
+		case command[i] == "--":
+			i = len(command)
+		case command[i] == "-c" || command[i] == "--config":
+			if i+1 >= len(command) {
+				return nil, fmt.Errorf("Codex resource reattach found %s without a value", command[i])
+			}
+			out = append(out, command[i], command[i+1])
+			i++
+		case strings.HasPrefix(command[i], "--config="):
+			out = append(out, command[i])
+		}
+	}
+	out = append(out, "resume", binding.ProviderSessionID)
+	return out, nil
+}
+
+func readGuardCodexSessionBinding(statePath, guardTraceID string) (guardCodexSessionStartBinding, error) {
+	statePath = strings.TrimSpace(statePath)
+	if statePath == "" {
+		return guardCodexSessionStartBinding{}, fmt.Errorf("Codex SessionStart binding path is unavailable")
+	}
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		return guardCodexSessionStartBinding{}, fmt.Errorf("read Codex SessionStart binding: %w", err)
+	}
+	var binding guardCodexSessionStartBinding
+	if err := json.Unmarshal(raw, &binding); err != nil {
+		return guardCodexSessionStartBinding{}, fmt.Errorf("decode Codex SessionStart binding: %w", err)
+	}
+	binding.ProviderSessionID = strings.TrimSpace(binding.ProviderSessionID)
+	binding.TraceID = strings.TrimSpace(binding.TraceID)
+	if binding.ProviderSessionID == "" {
+		return guardCodexSessionStartBinding{}, fmt.Errorf("Codex SessionStart binding has no provider thread ID")
+	}
+	if !guardCodexProviderThreadID.MatchString(binding.ProviderSessionID) {
+		return guardCodexSessionStartBinding{}, fmt.Errorf("Codex SessionStart binding has malformed provider thread ID")
+	}
+	guardTraceID = strings.TrimSpace(guardTraceID)
+	if guardTraceID == "" || binding.TraceID != guardTraceID {
+		return guardCodexSessionStartBinding{}, fmt.Errorf("Codex SessionStart binding does not belong to the current guard trace")
+	}
+	return binding, nil
 }

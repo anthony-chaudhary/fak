@@ -92,7 +92,7 @@ func guardParkProbeStatus(rec goalpark.Record, now time.Time) string {
 	return fmt.Sprintf("probes=%d/%d next_probe=%s", rec.Probes, goalpark.ProbeBudget, next)
 }
 
-func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
+func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, codexSessionStatePath string, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
 	// The startup renderer created the card and queued its control replies. Bind its
 	// periodic status fold to the live gateway before the child starts; finalizeOutcome
 	// below stops the updater and replaces the root with the terminal state.
@@ -169,10 +169,18 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 			}
 			verdict := resourceRetries.decide(event, agentName, sessionStartSHA())
 			if verdict.Action == guardResourceRetryRelaunch {
-				guardReportResourceRestart(os.Stderr, agentName, verdict, command)
+				nextCommand, reattachErr := guardResourceReattachCommand(command, agentName, codexSessionStatePath, guardTraceID)
+				if reattachErr != nil {
+					guardRecordResourceReattachUnavailable(auditJournal, agentName, guardTraceID)
+					fmt.Fprintln(os.Stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID, reattachErr))
+					resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
+					finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+					return
+				}
+				guardReportResourceRestart(os.Stderr, agentName, verdict, nextCommand)
 				time.Sleep(verdict.Delay)
 				guardRecordResourceRestart(auditJournal, os.Stderr, agentName, guardTraceID, verdict.Attempt)
-				command = guardRestartRelaunchCommand(command, agentName)
+				command = nextCommand
 				continue
 			}
 			if verdict.Action == guardResourceRetryExhausted {
@@ -180,7 +188,8 @@ func runGuardChildAndReport(command []string, injected [][2]string, pinUpstream 
 				fmt.Fprintln(os.Stderr, guardResourceRestartGiveUpStatus(verdict, guardTraceID))
 				resourceErr = fmt.Errorf("%s: %w", guardResourceRestartExhaustedReason, resourceErr)
 			} else if verdict.Cause == guardResourceRestartCauseNoReattach {
-				fmt.Fprintln(os.Stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID))
+				guardRecordResourceReattachUnavailable(auditJournal, agentName, guardTraceID)
+				fmt.Fprintln(os.Stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID, nil))
 				resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
 			}
 			finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
@@ -279,7 +288,7 @@ func guardTimeBudgetExhausted(sessions *session.Table, traceID string, now time.
 	return false, ""
 }
 
-func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, restarter *guardBudgetRestarter, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
+func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pinUpstream bool, credPath string, rotation *guardRotationRuntime, spawnMeta guardChildSpawnMetadata, codexSessionStatePath string, restarter *guardBudgetRestarter, wireErrors *guardWireErrorGauge, srv *gateway.Server, cancel context.CancelFunc, serveErr <-chan error, quiet bool, auditJournal *journal.Journal, auditSeq0 uint64, guardTraceID, agentName, provider string, dojoMode bool, sampler *harnessres.Sampler, dumpStartupOnLaunchFail bool, startupProgress *guardStartupProgress) {
 	// Same live card as the unsupervised path; child restarts stay one session and one
 	// Slack thread, so the updater spans the whole supervision loop and finalizes once.
 	guardSessionCardHandle.startUpdater(srv)
@@ -397,10 +406,20 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 			}
 			verdict := resourceRetries.decide(event, agentName, sessionStartSHA())
 			if verdict.Action == guardResourceRetryRelaunch {
-				guardReportResourceRestart(restarter.stderr, agentName, verdict, command)
+				nextCommand, reattachErr := guardResourceReattachCommand(command, agentName, codexSessionStatePath, guardTraceID)
+				if reattachErr != nil {
+					guardRecordResourceReattachUnavailable(auditJournal, agentName, guardTraceID)
+					if restarter.stderr != nil {
+						fmt.Fprintln(restarter.stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID, reattachErr))
+					}
+					resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
+					finishGuardChildAndReport(resourceErr, child.ProcessState, srv, cancel, serveErr, quiet, auditJournal, auditSeq0, guardTraceID, agentName, provider, dojoMode, sampler)
+					return
+				}
+				guardReportResourceRestart(restarter.stderr, agentName, verdict, nextCommand)
 				time.Sleep(verdict.Delay)
 				guardRecordResourceRestart(auditJournal, restarter.stderr, agentName, guardTraceID, verdict.Attempt)
-				command = guardRestartRelaunchCommand(command, agentName)
+				command = nextCommand
 				continue
 			}
 			if verdict.Action == guardResourceRetryExhausted {
@@ -410,8 +429,9 @@ func runGuardChildSupervisedAndReport(command []string, injected [][2]string, pi
 				}
 				resourceErr = fmt.Errorf("%s: %w", guardResourceRestartExhaustedReason, resourceErr)
 			} else if verdict.Cause == guardResourceRestartCauseNoReattach {
+				guardRecordResourceReattachUnavailable(auditJournal, agentName, guardTraceID)
 				if restarter.stderr != nil {
-					fmt.Fprintln(restarter.stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID))
+					fmt.Fprintln(restarter.stderr, guardResourceReattachUnavailableStatus(agentName, guardTraceID, nil))
 				}
 				resourceErr = fmt.Errorf("%s: %w", guardResourceReattachUnavailable, resourceErr)
 			}

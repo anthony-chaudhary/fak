@@ -1343,7 +1343,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	sessionStartManaged := !launchPlan.interactive()
 	// Thread the guard trace id into the hook argv so the running SessionStart hook holds both
 	// ids and can record the A1 uuid<->trace identity join (#4112/#4113).
-	command, _, err = installGuardSessionStartHookForProfile(command, launchPlan.harnessProfile(), os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
+	var sessionStartInstall guardSessionStartInstall
+	command, sessionStartInstall, err = installGuardSessionStartHookForProfile(command, launchPlan.harnessProfile(), os.Getenv(guardSessionStartEnvMode), sessionStartManaged, sessionStartSettings, guardTraceID)
 	if err != nil {
 		abortChildWiring(cancel, "provider SessionStart hook setup", err, 1)
 	}
@@ -1491,8 +1492,8 @@ func cmdManageCommand(commandName string, argv []string) {
 	// must be ENFORCED (#2229). A --max-duration-only run routes here with a disabled
 	// restarter (its events channel never fires), gaining only the time-budget ticker.
 	if restarter.Enabled() || maxDurationLimit > 0 {
-		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
+		runGuardChildSupervisedAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, restarter, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
 		return
 	}
-	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
+	runGuardChildAndReport(command, injected, pinUpstream, credPath, &rotationRuntime, spawnMeta, sessionStartInstall.StatePath, wireErrors, srv, cancel, serveErr, *quiet, auditJournal, auditSeq0, guardTraceID, agentName, up, *dojoMode, resSampler, dumpStartupOnLaunchFail, startupProgress)
 }

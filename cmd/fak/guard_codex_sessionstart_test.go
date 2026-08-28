@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -123,5 +124,71 @@ func TestClassifyGuardCodexSessionStart(t *testing.T) {
 	decision, err = classifyGuardCodexSessionStart(statePath, "resume", "thread-3")
 	if err != nil || decision != (guardCodexSessionStartDecision{Bind: true}) {
 		t.Fatalf("non-boundary source=(%+v, %v)", decision, err)
+	}
+}
+
+func TestGuardCodexResourceResumeCommandUsesExactSessionStartBinding(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "codex-sessionstart-state")
+	const threadID = "0198f76a-67c2-7d11-a8f5-8f3d82149734"
+	if err := writeGuardCodexSessionBinding(statePath, threadID, "guard-trace-9734"); err != nil {
+		t.Fatal(err)
+	}
+	command := []string{
+		"codex",
+		"-c", "hooks.SessionStart=[]",
+		"-c", `model_provider="fak"`,
+		"--config=sandbox=workspace-write",
+		"the original interactive prompt must not replay",
+	}
+	got, err := guardCodexResourceResumeCommand(command, statePath, "guard-trace-9734")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"codex",
+		"-c", "hooks.SessionStart=[]",
+		"-c", `model_provider="fak"`,
+		"--config=sandbox=workspace-write",
+		"resume", threadID,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Codex resource resume argv=%v, want %v", got, want)
+	}
+	joined := strings.Join(got, " ")
+	if strings.Contains(joined, "original interactive prompt") || strings.Contains(joined, "guard-trace-9734") {
+		t.Fatalf("resume replayed prompt or substituted guard trace: %v", got)
+	}
+	if strings.Count(joined, "resume") != 1 {
+		t.Fatalf("resume subcommand must occur exactly once: %v", got)
+	}
+	if strings.Join(command, " ") != `codex -c hooks.SessionStart=[] -c model_provider="fak" --config=sandbox=workspace-write the original interactive prompt must not replay` {
+		t.Fatalf("input command mutated: %v", command)
+	}
+}
+
+func TestGuardCodexResourceResumeCommandRefusesMissingOrMalformedBinding(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "missing", path: filepath.Join(dir, "missing")},
+		{name: "malformed", path: filepath.Join(dir, "malformed"), body: `{not-json`},
+		{name: "blank provider thread", path: filepath.Join(dir, "blank"), body: `{"provider_session_id":" ","trace_id":"guard-trace"}`},
+		{name: "leading dash provider thread", path: filepath.Join(dir, "leading-dash"), body: `{"provider_session_id":"--dangerous","trace_id":"guard-trace"}`},
+		{name: "foreign trace", path: filepath.Join(dir, "foreign-trace"), body: `{"provider_session_id":"0198f76a-67c2-7d11-a8f5-8f3d82149734","trace_id":"another-guard"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.body != "" {
+				if err := os.WriteFile(tc.path, []byte(tc.body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := guardCodexResourceResumeCommand([]string{"codex", "original prompt"}, tc.path, "guard-trace")
+			if err == nil || strings.TrimSpace(err.Error()) == "" || got != nil {
+				t.Fatalf("unsafe binding produced command=%v err=%v", got, err)
+			}
+		})
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -77,11 +78,19 @@ func TestGuardResourceRetryAdmission(t *testing.T) {
 		if got.Action != guardResourceRetryTerminal || got.Cause != guardResourceRestartCauseNoReattach || state.restarts != 0 {
 			t.Fatalf("unrecognized agent admitted retry: verdict=%+v state=%+v", got, state)
 		}
-		status := guardResourceReattachUnavailableStatus("foreign-harness", "trace-resource")
-		for _, want := range []string{guardResourceReattachUnavailable, "foreign-harness", "trace-resource", "refusing a cold relaunch"} {
+		status := guardResourceReattachUnavailableStatus("foreign-harness", "trace-resource", fmt.Errorf("binding missing"))
+		for _, want := range []string{guardResourceReattachUnavailable, "foreign-harness", "trace-resource", "binding missing", "refusing a cold relaunch", "provider-native resume command"} {
 			if !strings.Contains(status, want) {
 				t.Fatalf("reattach refusal %q missing %q", status, want)
 			}
+		}
+	})
+
+	t.Run("Codex exact binding transport is admitted", func(t *testing.T) {
+		state := guardResourceRetryState{limit: 3}
+		got := state.decide(resourceRetryEvent("CHILD_TREE_RSS_LIMIT"), "codex", "sha-a")
+		if got.Action != guardResourceRetryRelaunch || got.Attempt != 1 {
+			t.Fatalf("Codex binding transport was not admitted: verdict=%+v state=%+v", got, state)
 		}
 	})
 }
@@ -130,7 +139,7 @@ func TestGuardResourceRetryReportAndTypedExhaustion(t *testing.T) {
 		Delay:        250 * time.Millisecond,
 		ResourceType: "CHILD_TREE_RSS_LIMIT",
 	}
-	guardReportResourceRestart(&stderr, "claude", verdict, []string{"claude"})
+	guardReportResourceRestart(&stderr, "claude", verdict, []string{"claude", "--continue"})
 	for _, want := range []string{
 		"CHILD_TREE_RSS_LIMIT",
 		"verified tree reap and receipt complete",
@@ -176,6 +185,37 @@ func TestGuardResourceRestartHopReattachesSameTrace(t *testing.T) {
 	}
 	if hop.Handback != guardRestartHandbackContinue || hop.Status != journal.RestartHopOK || hop.Hop != 2 {
 		t.Fatalf("restart hop=%+v", hop)
+	}
+}
+
+func TestGuardResourceRestartHopMarksCodexBindingResumeEngaged(t *testing.T) {
+	hop := guardResourceRestartHop("guard-resource", "codex", 1)
+	if hop.FromTrace != "guard-resource" || hop.ToTrace != "guard-resource" || hop.Child != "guard-resource" {
+		t.Fatalf("trace lineage=%+v", hop)
+	}
+	if hop.Handback != guardRestartHandbackContinue || hop.Status != journal.RestartHopOK {
+		t.Fatalf("Codex binding resume must be an engaged hop: %+v", hop)
+	}
+}
+
+func TestGuardResourceReattachUnavailablePersistsTypedCauseWithoutHop(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	audit, err := journal.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guardRecordResourceReattachUnavailable(audit, "codex", "trace-resource")
+	rows := audit.Recent(8)
+	if err := audit.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Kind != journal.KindChildCrash || strings.TrimSpace(rows[0].Reason) != guardResourceReattachUnavailable {
+		t.Fatalf("typed reattach refusal row=%+v", rows)
+	}
+	for _, row := range rows {
+		if row.Kind == journal.KindRestartHop {
+			t.Fatalf("unsafe binding emitted restart hop: %+v", rows)
+		}
 	}
 }
 

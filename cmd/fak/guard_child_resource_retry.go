@@ -104,7 +104,7 @@ func (s *guardResourceRetryState) decide(event guardChildWaitEvent, agentName, c
 	if !guardResourceContainmentReason(verdict.ResourceType) || s.limit <= 0 {
 		return verdict
 	}
-	if _, ok := guardContinueFlagForAgent(agentName); !ok {
+	if !guardResourceReattachSupported(agentName) {
 		verdict.Cause = guardResourceRestartCauseNoReattach
 		return verdict
 	}
@@ -133,9 +133,36 @@ func (s *guardResourceRetryState) decide(event guardChildWaitEvent, agentName, c
 	return verdict
 }
 
-func guardResourceReattachUnavailableStatus(agentName, traceID string) string {
-	return fmt.Sprintf("fak guard: %s: child resource containment recovery cannot safely reattach agent %q in place (trace %s); refusing a cold relaunch",
-		guardResourceReattachUnavailable, strings.TrimSpace(agentName), strings.TrimSpace(traceID))
+func guardResourceReattachSupported(agentName string) bool {
+	if _, ok := guardContinueFlagForAgent(agentName); ok {
+		return true
+	}
+	return guardIsCodex(agentName)
+}
+
+func guardResourceReattachCommand(command []string, agentName, codexStatePath, guardTraceID string) ([]string, error) {
+	if flag, ok := guardContinueFlagForAgent(agentName); ok {
+		return guardAppendContinueFlag(command, flag), nil
+	}
+	if guardIsCodex(agentName) {
+		return guardCodexResourceResumeCommand(command, codexStatePath, guardTraceID)
+	}
+	return nil, fmt.Errorf("agent %q has no safe resource reattach transport", strings.TrimSpace(agentName))
+}
+
+func guardResourceReattachUnavailableStatus(agentName, traceID string, cause error) string {
+	detail := "exact continuation binding unavailable"
+	if cause != nil && strings.TrimSpace(cause.Error()) != "" {
+		detail = strings.TrimSpace(cause.Error())
+	}
+	recovery := "rerun the original fak guard invocation with this harness's provider-native resume command"
+	if guardIsCodex(agentName) {
+		recovery = "run `fak guard -- codex resume` and select the interrupted thread"
+	} else if _, ok := guardContinueFlagForAgent(agentName); ok {
+		recovery = "run `fak guard -- claude --continue`"
+	}
+	return fmt.Sprintf("fak guard: %s: child resource containment recovery cannot safely reattach agent %q in place (trace %s): %s; refusing a cold relaunch; recovery: %s",
+		guardResourceReattachUnavailable, strings.TrimSpace(agentName), strings.TrimSpace(traceID), detail, recovery)
 }
 
 func guardReportResourceRestart(stderr io.Writer, agentName string, verdict guardResourceRetryVerdict, command []string) {
@@ -144,7 +171,7 @@ func guardReportResourceRestart(stderr io.Writer, agentName string, verdict guar
 	}
 	fmt.Fprintf(stderr, "fak guard: %s child hit %s; verified tree reap and receipt complete; guard remains up and is reattaching the child after %s (resource restart %d/%d) `%s`\n",
 		agentName, verdict.ResourceType, verdict.Delay, verdict.Attempt, verdict.Limit,
-		strings.Join(guardRestartRelaunchCommand(command, agentName), " "))
+		strings.Join(command, " "))
 }
 
 func guardResourceRestartGiveUpStatus(verdict guardResourceRetryVerdict, traceID string) string {
@@ -161,11 +188,22 @@ func guardRecordResourceRestart(auditJournal *journal.Journal, stderr io.Writer,
 }
 
 func guardResourceRestartHop(traceID, agentName string, hop int) journal.RestartHop {
-	return guardSameTraceRelaunchHop(traceID, agentName, hop)
+	restart := guardSameTraceRelaunchHop(traceID, agentName, hop)
+	if guardResourceReattachSupported(agentName) {
+		restart.Handback = guardRestartHandbackContinue
+		restart.Status = journal.RestartHopOK
+	}
+	return restart
 }
 
 func guardRecordResourceRestartGiveUp(auditJournal *journal.Journal, agentName, traceID string) {
 	if auditJournal != nil {
 		auditJournal.AppendCrash(agentName, traceID, guardResourceRestartExhaustedReason, -1)
+	}
+}
+
+func guardRecordResourceReattachUnavailable(auditJournal *journal.Journal, agentName, traceID string) {
+	if auditJournal != nil {
+		auditJournal.AppendCrash(agentName, traceID, guardResourceReattachUnavailable, -1)
 	}
 }

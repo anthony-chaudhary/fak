@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,6 +36,181 @@ func TestGuardParentSurvivesDarwinRSSContainment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runGuardParentSurvivesDarwinRSSContainment(t, tc.maxDuration)
+		})
+	}
+}
+
+func TestGuardParentSurvivesDarwinCodexRSSContainment(t *testing.T) {
+	if os.Getenv("FAK_DARWIN_CODEX_RESOURCE_RELAUNCH_HELPER") != "" {
+		runDarwinGuardCodexResourceRelaunchHelper(t)
+		return
+	}
+
+	dir := t.TempDir()
+	statePath := filepath.Join(dir, "child-state")
+	observedPath := filepath.Join(dir, "observed.jsonl")
+	resourceJournal := filepath.Join(dir, "child-resource.jsonl")
+	auditPath := filepath.Join(dir, "audit.jsonl")
+	codexPath := filepath.Join(dir, "codex")
+	wrapper := `#!/bin/sh
+unset FAK_GUARD_E2E_HELPER
+exec "$FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY" -test.run=^TestGuardParentSurvivesDarwinCodexRSSContainment$ -- "$@"
+`
+	if err := os.WriteFile(codexPath, []byte(wrapper), 0o700); err != nil {
+		t.Fatalf("write Darwin Codex resource wrapper: %v", err)
+	}
+
+	const guardTrace = "guard-trace-9734"
+	guardArgs := strings.Join([]string{
+		"--quiet", "--provider", "openai", "--session-id", guardTrace,
+		"--api-key-env", "FAK_GUARD_RESOURCE_WITNESS_KEY", "--audit", auditPath,
+		"--", codexPath, "original-prompt-must-not-replay",
+	}, " ")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "guard")
+	cmd.Env = append(os.Environ(),
+		guardE2EHelperEnv+"="+guardArgs,
+		"FAK_GUARD_RESOURCE_WITNESS_KEY=test-only",
+		"FAK_DARWIN_CODEX_RESOURCE_RELAUNCH_HELPER=1",
+		"FAK_DARWIN_CODEX_RESOURCE_STATE="+statePath,
+		"FAK_DARWIN_CODEX_RESOURCE_OBSERVED="+observedPath,
+		"FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY="+os.Args[0],
+		"FAK_CHILD_RESOURCE_JOURNAL="+resourceJournal,
+		"FAK_CHILD_MAX_MEMORY_MB=48",
+		"FAK_CHILD_RESOURCE_POLL=100ms",
+		guardResourceRestartLimitEnv+"=1",
+		guardResourceNoProgressLimitEnv+"=0",
+		guardCrashRestartLimitEnv+"=0",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Codex guard did not converge after RSS containment: %v\nstdout:\n%s\nstderr:\n%s", err, stdout.String(), stderr.String())
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("Codex guard RSS containment witness timed out: %v\nstderr:\n%s", ctx.Err(), stderr.String())
+	}
+
+	observations := readDarwinResourceRelaunchObservations(t, observedPath)
+	if len(observations) != 2 {
+		t.Fatalf("Codex child generations=%d, want 2: %+v", len(observations), observations)
+	}
+	first, second := observations[0], observations[1]
+	if first.ParentPID <= 0 || first.ParentPID != second.ParentPID || first.GatewayURL == "" || first.GatewayURL != second.GatewayURL {
+		t.Fatalf("guard parent/gateway did not survive: first=%+v second=%+v", first, second)
+	}
+	if first.ChildPID == second.ChildPID || second.HealthStatus != http.StatusOK {
+		t.Fatalf("replacement child/gateway witness failed: first=%+v second=%+v", first, second)
+	}
+	const threadID = "0198f76a-67c2-7d11-a8f5-8f3d82149734"
+	if len(second.Argv) < 2 {
+		t.Fatalf("Codex replacement argv too short: %v", second.Argv)
+	}
+	if got := second.Argv[len(second.Argv)-2:]; got[0] != "resume" || got[1] != threadID {
+		t.Fatalf("Codex replacement suffix=%v, want [resume %s]; argv=%v", got, threadID, second.Argv)
+	}
+	joined := strings.Join(second.Argv, " ")
+	if strings.Count(joined, "resume") != 1 || strings.Contains(joined, "original-prompt-must-not-replay") || strings.Contains(joined, guardTrace+" resume") {
+		t.Fatalf("Codex replacement was not one exact provider-thread resume: %v", second.Argv)
+	}
+	if got, want := guardCodexConfigOverrides(second.Argv), guardCodexConfigOverrides(first.Argv); strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("Codex root config/wire overrides changed: first=%v second=%v", want, got)
+	}
+
+	receipts := readDarwinResourceReceipts(t, resourceJournal)
+	if len(receipts) != 1 || receipts[0].RootPID != first.ChildPID || receipts[0].Reason != "CHILD_TREE_RSS_LIMIT" {
+		t.Fatalf("Codex resource receipt=%+v, want one generation-1 RSS receipt", receipts)
+	}
+	rows, err := journal.ReadRows(auditPath)
+	if err != nil {
+		t.Fatalf("read durable Codex guard audit: %v", err)
+	}
+	hops := 0
+	for _, row := range rows {
+		if row.Kind != journal.KindRestartHop {
+			continue
+		}
+		hops++
+		if row.Restart == nil || row.Restart.Status != journal.RestartHopOK || row.Restart.Handback != guardRestartHandbackContinue {
+			t.Fatalf("Codex resource restart hop was not engaged: %+v", row)
+		}
+	}
+	if hops != 1 {
+		t.Fatalf("Codex durable restart hops=%d, want exactly 1: %+v", hops, rows)
+	}
+	assertDarwinWitnessPIDsGone(t, 3*time.Second, first.ChildPID)
+}
+
+func TestGuardDarwinCodexRSSContainmentRefusesUnsafeBinding(t *testing.T) {
+	if os.Getenv("FAK_DARWIN_CODEX_RESOURCE_RELAUNCH_HELPER") != "" {
+		runDarwinGuardCodexResourceRelaunchHelper(t)
+		return
+	}
+	for _, mode := range []string{"missing", "malformed"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			observedPath := filepath.Join(dir, "observed.jsonl")
+			auditPath := filepath.Join(dir, "audit.jsonl")
+			codexPath := filepath.Join(dir, "codex")
+			wrapper := `#!/bin/sh
+unset FAK_GUARD_E2E_HELPER
+exec "$FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY" -test.run=^TestGuardDarwinCodexRSSContainmentRefusesUnsafeBinding$ -- "$@"
+`
+			if err := os.WriteFile(codexPath, []byte(wrapper), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			guardArgs := strings.Join([]string{
+				"--quiet", "--provider", "openai", "--session-id", "guard-trace-9734",
+				"--api-key-env", "FAK_GUARD_RESOURCE_WITNESS_KEY", "--audit", auditPath,
+				"--", codexPath, "original-prompt-must-not-replay",
+			}, " ")
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(ctx, os.Args[0], "guard")
+			cmd.Env = append(os.Environ(),
+				guardE2EHelperEnv+"="+guardArgs,
+				"FAK_GUARD_RESOURCE_WITNESS_KEY=test-only",
+				"FAK_DARWIN_CODEX_RESOURCE_RELAUNCH_HELPER=1",
+				"FAK_DARWIN_CODEX_RESOURCE_BINDING_MODE="+mode,
+				"FAK_DARWIN_CODEX_RESOURCE_STATE="+filepath.Join(dir, "child-state"),
+				"FAK_DARWIN_CODEX_RESOURCE_OBSERVED="+observedPath,
+				"FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY="+os.Args[0],
+				"FAK_CHILD_RESOURCE_JOURNAL="+filepath.Join(dir, "child-resource.jsonl"),
+				"FAK_CHILD_MAX_MEMORY_MB=48", "FAK_CHILD_RESOURCE_POLL=100ms",
+				guardResourceRestartLimitEnv+"=1", guardResourceNoProgressLimitEnv+"=0", guardCrashRestartLimitEnv+"=0",
+			)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			err := cmd.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+				t.Fatalf("unsafe %s binding guard exit=%v, want exit 1\nstdout:\n%s\nstderr:\n%s", mode, err, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), guardResourceReattachUnavailable) || !strings.Contains(stderr.String(), "fak guard -- codex resume") || !strings.Contains(stderr.String(), "refusing a cold relaunch") {
+				t.Fatalf("unsafe %s binding lacks typed recovery guidance:\n%s", mode, stderr.String())
+			}
+			observations := readDarwinResourceRelaunchObservations(t, observedPath)
+			if len(observations) != 1 {
+				t.Fatalf("unsafe %s binding launched %d generations, want 1: %+v", mode, len(observations), observations)
+			}
+			rows, err := journal.ReadRows(auditPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			causes, hops := 0, 0
+			for _, row := range rows {
+				if row.Kind == journal.KindChildCrash && row.Reason == guardResourceReattachUnavailable {
+					causes++
+				}
+				if row.Kind == journal.KindRestartHop {
+					hops++
+				}
+			}
+			if causes != 1 || hops != 0 {
+				t.Fatalf("unsafe %s binding durable causes=%d hops=%d, want 1/0: %+v", mode, causes, hops, rows)
+			}
 		})
 	}
 }
@@ -139,13 +315,9 @@ exec "$FAK_DARWIN_RESOURCE_RELAUNCH_TEST_BINARY" -test.run=^TestGuardParentSurvi
 	if receipt.Action != "reap_tree" || receipt.DescendantsSurvive || receipt.TreeRSSBytes == nil || *receipt.TreeRSSBytes < receipt.ThresholdBytes {
 		t.Fatalf("generation 1 receipt does not prove verified reap at threshold: %+v", receipt)
 	}
-	audit, err := journal.Open(auditPath)
+	rows, err := journal.ReadRows(auditPath)
 	if err != nil {
-		t.Fatalf("open guard audit: %v", err)
-	}
-	rows := audit.Recent(128)
-	if err := audit.Close(); err != nil {
-		t.Fatalf("close guard audit: %v", err)
+		t.Fatalf("read durable guard audit: %v", err)
 	}
 	var restart *journal.Row
 	for i := range rows {
@@ -167,12 +339,137 @@ exec "$FAK_DARWIN_RESOURCE_RELAUNCH_TEST_BINARY" -test.run=^TestGuardParentSurvi
 }
 
 type darwinResourceRelaunchObservation struct {
-	Generation   int    `json:"generation"`
-	ParentPID    int    `json:"parent_pid"`
-	ChildPID     int    `json:"child_pid"`
-	GatewayURL   string `json:"gateway_url"`
-	Continued    bool   `json:"continued"`
-	HealthStatus int    `json:"health_status,omitempty"`
+	Generation   int      `json:"generation"`
+	ParentPID    int      `json:"parent_pid"`
+	ChildPID     int      `json:"child_pid"`
+	GatewayURL   string   `json:"gateway_url"`
+	Continued    bool     `json:"continued"`
+	HealthStatus int      `json:"health_status,omitempty"`
+	Argv         []string `json:"argv,omitempty"`
+}
+
+func runDarwinGuardCodexResourceRelaunchHelper(t *testing.T) {
+	statePath := os.Getenv("FAK_DARWIN_CODEX_RESOURCE_STATE")
+	generation := 1
+	if data, err := os.ReadFile(statePath); err == nil {
+		if prior, convErr := strconv.Atoi(strings.TrimSpace(string(data))); convErr == nil {
+			generation = prior + 1
+		}
+	}
+	if err := os.WriteFile(statePath, []byte(strconv.Itoa(generation)), 0o600); err != nil {
+		t.Fatalf("write Codex resource generation: %v", err)
+	}
+	argv := guardTestArgsAfterDelimiter(os.Args)
+	if generation == 1 {
+		hookState := guardCodexHookStatePath(argv)
+		if hookState == "" {
+			t.Fatalf("fake Codex found no launch-scoped SessionStart state path in %v", argv)
+		}
+		switch os.Getenv("FAK_DARWIN_CODEX_RESOURCE_BINDING_MODE") {
+		case "missing":
+		case "malformed":
+			if err := os.WriteFile(hookState, []byte(`{not-json`), 0o600); err != nil {
+				t.Fatalf("fake malformed Codex SessionStart binding: %v", err)
+			}
+		default:
+			if err := writeGuardCodexSessionBinding(hookState, "0198f76a-67c2-7d11-a8f5-8f3d82149734", "guard-trace-9734"); err != nil {
+				t.Fatalf("fake Codex SessionStart binding: %v", err)
+			}
+		}
+	}
+
+	base := strings.TrimRight(os.Getenv("OPENAI_BASE_URL"), "/")
+	if base == "" {
+		base = guardCodexConfigValue(argv, "model_providers.fak.base_url")
+	}
+	base = strings.TrimSuffix(base, "/v1")
+	row := darwinResourceRelaunchObservation{Generation: generation, ParentPID: os.Getppid(), ChildPID: os.Getpid(), GatewayURL: base, Argv: argv}
+	if generation > 1 {
+		client := http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get(base + "/healthz")
+		if err != nil {
+			t.Fatalf("probe stable Codex guard gateway: %v", err)
+		}
+		row.HealthStatus = resp.StatusCode
+		_ = resp.Body.Close()
+	}
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(os.Getenv("FAK_DARWIN_CODEX_RESOURCE_OBSERVED"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintln(f, string(encoded)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if generation > 1 {
+		return
+	}
+	memory := make([]byte, 96<<20)
+	for i := 0; i < len(memory); i += 4096 {
+		memory[i] = byte(i)
+	}
+	for {
+		time.Sleep(100 * time.Millisecond)
+		memory[0]++
+	}
+}
+
+func guardTestArgsAfterDelimiter(argv []string) []string {
+	for i, arg := range argv {
+		if arg == "--" {
+			return append([]string(nil), argv[i+1:]...)
+		}
+	}
+	return nil
+}
+
+func guardCodexHookStatePath(argv []string) string {
+	const marker = "'--state' '"
+	for _, arg := range argv {
+		start := strings.Index(arg, marker)
+		if start < 0 {
+			continue
+		}
+		rest := arg[start+len(marker):]
+		if end := strings.IndexByte(rest, '\''); end >= 0 {
+			return rest[:end]
+		}
+	}
+	return ""
+}
+
+func guardCodexConfigOverrides(argv []string) []string {
+	var out []string
+	for i := 0; i < len(argv); i++ {
+		if (argv[i] == "-c" || argv[i] == "--config") && i+1 < len(argv) {
+			out = append(out, argv[i], argv[i+1])
+			i++
+		} else if strings.HasPrefix(argv[i], "--config=") {
+			out = append(out, argv[i])
+		}
+	}
+	return out
+}
+
+func guardCodexConfigValue(argv []string, key string) string {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] != "-c" && argv[i] != "--config" {
+			continue
+		}
+		configKey, value, ok := strings.Cut(argv[i+1], "=")
+		if ok && configKey == key {
+			return strings.Trim(value, `"`)
+		}
+		i++
+	}
+	return ""
 }
 
 func runDarwinGuardResourceRelaunchHelper(t *testing.T) {
