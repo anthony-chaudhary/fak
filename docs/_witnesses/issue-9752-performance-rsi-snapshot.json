@@ -1,0 +1,169 @@
+{
+  "schema": "fak-performance-rsi-scorecard/1",
+  "snapshot": "repository-initial-2026-08-28",
+  "target_multiplier": 100,
+  "dimensions": [
+    {
+      "id": "cycle_time",
+      "source": "UNKNOWN: no versioned end-to-end cycle ledger",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "hours/cycle",
+      "normalized_ratio": null,
+      "next_action": "capture idea-to-land wall clock per native improvement"
+    },
+    {
+      "id": "improvement_yield",
+      "source": "UNKNOWN: benchmark gains are not joined to cycle count",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "join net-true gains to completed cycles"
+    },
+    {
+      "id": "evaluation_latency",
+      "source": "UNKNOWN: no comparable fak-native evaluation latency series",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "minutes",
+      "normalized_ratio": null,
+      "next_action": "record fak-native/qwen3.8 evaluation latency in receipts"
+    },
+    {
+      "id": "receipt_coverage",
+      "source": "UNKNOWN: no performance-cycle receipt denominator",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "count cycles with complete replayable receipts"
+    },
+    {
+      "id": "quality_gate_coverage",
+      "source": "UNKNOWN: quality gates lack a cycle-level denominator",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "join quality-parity gates to experiments"
+    },
+    {
+      "id": "experiment_throughput",
+      "source": "UNKNOWN: experiments are not counted per elapsed day",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "experiments/day",
+      "normalized_ratio": null,
+      "next_action": "ledger safe parallel experiments and elapsed time"
+    },
+    {
+      "id": "hypothesis_calibration",
+      "source": "UNKNOWN: predicted and realized value are not paired",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "record expected value before each experiment"
+    },
+    {
+      "id": "discovery_freshness",
+      "source": "UNKNOWN: discovery age is not joined to performance cycles",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "days",
+      "normalized_ratio": null,
+      "next_action": "timestamp selected OSS and research mechanisms"
+    },
+    {
+      "id": "adaptation_speed",
+      "source": "UNKNOWN: mechanism discovery-to-native adaptation time is absent",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "days",
+      "normalized_ratio": null,
+      "next_action": "ledger discovery and fak-native landing timestamps"
+    },
+    {
+      "id": "reuse_ratio",
+      "source": "UNKNOWN: reuse and reinvention outcomes are not classified",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "classify each mechanism as borrowed reused or invented"
+    },
+    {
+      "id": "learning_retention",
+      "source": "UNKNOWN: repeated failures lack a denominator",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "fingerprint failed hypotheses and detect repeats"
+    },
+    {
+      "id": "production_transfer",
+      "source": "UNKNOWN: experiments are not joined to native production landings",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "link experiment receipts to fak-native commits"
+    },
+    {
+      "id": "hardware_utilization",
+      "source": "UNKNOWN: queue and device utilization are not in public receipts",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "capture scrubbed queue delay and accelerator utilization"
+    },
+    {
+      "id": "attribution_quality",
+      "source": "UNKNOWN: gains lack one-change causal attribution coverage",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "require ablation-backed gain attribution"
+    },
+    {
+      "id": "automation_coverage",
+      "source": "UNKNOWN: operator touch time is not measured",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "record automated stages and operator minutes"
+    },
+    {
+      "id": "compounding_rate",
+      "source": "UNKNOWN: successive cycle efficiency is not yet comparable",
+      "status": "UNKNOWN",
+      "current": null,
+      "target": null,
+      "unit": "percent",
+      "normalized_ratio": null,
+      "next_action": "compare each cycle against its predecessor"
+    }
+  ],
+  "dominant_bottleneck": "cycle_time",
+  "unknown_debt": 16
+}

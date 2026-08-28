@@ -632,6 +632,8 @@ func dispatchExtendedVerbB(name string, args []string) bool {
 		cmdScore(args)
 	case "scorecard":
 		cmdScorecardPane(args)
+	case "performance-rsi-scorecard":
+		cmdPerformanceRSIScorecard(args)
 	case "repo-hygiene-scorecard":
 		cmdRepoHygieneScorecard(args)
 	case "ui-quality-scorecard":
