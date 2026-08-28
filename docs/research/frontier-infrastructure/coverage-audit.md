@@ -1,3 +1,8 @@
+---
+title: "Frontier infrastructure coverage audit"
+description: "duplicate entry, URL, or entity. Totals remain 272 entries, 265 unique."
+---
+
 # Frontier infrastructure coverage audit
 
 ## Issue #9387 delta

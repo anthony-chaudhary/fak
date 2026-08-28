@@ -1,3 +1,8 @@
+---
+title: "Provider-neutral completed-job accounting (fak-provider-job-accounting/1)"
+description: "Verdict: compare local and API execution only through append-only job receipts that keep commercial terms, provider telemetry, local outcome/quality, and derived accounting separate. The."
+---
+
 # Provider-neutral completed-job accounting (`fak-provider-job-accounting/1`)
 
 Issue: [#9575](https://github.com/anthony-chaudhary/fak/issues/9575)

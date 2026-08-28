@@ -1,3 +1,8 @@
+---
+title: "Datacenter delivery and supply-chain ledger"
+description: "As of: 2026-08-26. Tracker: #9304. This ledger treats an AI datacenter as a."
+---
+
 # Datacenter delivery and supply-chain ledger
 
 **As of:** 2026-08-26. **Tracker:** #9304. This ledger treats an AI datacenter as a

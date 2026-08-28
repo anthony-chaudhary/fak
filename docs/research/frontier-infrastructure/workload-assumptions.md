@@ -1,3 +1,8 @@
+---
+title: "Workload and cluster assumption registry"
+description: "As of: 2026-08-27. This registry turns the source ledger into assumptions that can be."
+---
+
 # Workload and cluster assumption registry
 
 **As of:** 2026-08-27. This registry turns the source ledger into assumptions that can be

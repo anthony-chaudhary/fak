@@ -1,3 +1,8 @@
+---
+title: "Compute-placement tax"
+description: "Compute-placement tax is the preferred name for the incremental cost caused by placing a fixed compute graph and its state across coherence, device, host, or network boundaries. “Placement."
+---
+
 # Compute-placement tax
 
 **Compute-placement tax** is the preferred name for the incremental cost caused by placing a fixed compute graph and its state across coherence, device, host, or network boundaries. “Placement loss,” “distribution overhead,” and “parallelism overhead” remain search aliases, but *tax* is more accurate: distribution can still win when extra useful compute or capacity exceeds the tax.

@@ -1,3 +1,8 @@
+---
+title: "Frontier-lab and regional census"
+description: "The current index contains 59 frontier-lab entries within a 207-entry."
+---
+
 # Frontier-lab and regional census
 
 **As of:** 2026-08-26

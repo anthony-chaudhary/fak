@@ -1,3 +1,8 @@
+---
+title: "Hyperscaler filings and obligations ledger"
+description: "As of: 2026-08-26. Tracker: #9302. This ledger records the latest disclosed."
+---
+
 # Hyperscaler filings and obligations ledger
 
 **As of:** 2026-08-26. **Tracker:** #9302. This ledger records the latest disclosed

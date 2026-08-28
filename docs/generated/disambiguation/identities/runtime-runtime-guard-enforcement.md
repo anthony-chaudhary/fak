@@ -1,6 +1,6 @@
 ---
-title: "runtime"
-description: "Canonical fak documentation for runtime, including its scope, nearest contrasts, and operational use."
+title: "guard enforcement runtime identity"
+description: "Meaning: The wrapper process that launches a guest command under fak policy, hook, capability, and stop-gate enforcement."
 ---
 
 # runtime

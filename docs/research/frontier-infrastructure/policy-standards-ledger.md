@@ -1,3 +1,8 @@
+---
+title: "Policy, sovereign compute, and standards ledger"
+description: "Regional infrastructure is not a uniform pool. Export controls, sovereign procurement,."
+---
+
 # Policy, sovereign compute, and standards ledger
 
 **As of:** 2026-08-26

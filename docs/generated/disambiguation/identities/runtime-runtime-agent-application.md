@@ -1,6 +1,6 @@
 ---
-title: "runtime"
-description: "Canonical fak documentation for runtime, including its scope, nearest contrasts, and operational use."
+title: "agent application runtime identity"
+description: "Meaning: The host-side agent application loop that turns model completions into tool calls and final answers through the Planner seam."
 ---
 
 # runtime
