@@ -1591,3 +1591,21 @@ fak server down --dir DIR --json
 `fak trajectory audit` records two deliberately separate views: provider-exact request-level input/output/cache token buckets, and a deterministic transcript-payload distribution measured in UTF-8 bytes. The latter shows user messages, assistant messages, reasoning, tool calls, tool results, other records, and a per-tool ranking in JSONL and Markdown. It is an attribution signal—not per-block billed tokens, which providers do not expose. `trajectory.CompactAuditDistributionLine` supplies the stable width-bounded line used by terminal/TUI status surfaces.
 
 `trajectory audit` separates deterministic model-visible content bytes from serialized transcript storage/telemetry overhead. Runtime event mirrors such as Codex `item_completed` and Claude attachments are typed by subtype in a separate table and never inflate the model-visible denominator. `visible_unknown` is explicit and coverage-budgetable.
+
+## `fak new-model`: refusal-safe native model intake
+
+Compile a pinned model-release manifest into a deterministic fak-native onboarding packet:
+
+```bash
+fak new-model --from-manifest internal/newmodel/testdata/qwen38-valid.json --json
+```
+
+Manifest intake requires `--json` and cannot be combined with scaffold flags. The manifest pins the model identity and semantic deltas; successful output names the `fak-native` engine and never selects an external runtime fallback. Unknown or contradictory semantic deltas are refused before allocation with structured JSON on stderr and exit code 3.
+
+The existing scaffold mode remains separate:
+
+```bash
+fak new-model --family myfamily --topology prenorm --dry-run --json
+```
+
+Exactly one mode is required. Positional arguments are unsupported. For the manifest schema, packet fields, refusal vocabulary, and onboarding sequence, see [the new-model playbook](new-model-playbook.md).
