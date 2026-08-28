@@ -168,6 +168,36 @@ func TestTokenLineageVerificationDetectsMismatchAndCorruption(t *testing.T) {
 	}
 }
 
+func TestRestoreTokenLineagePublishesOnlyGeometryMatchedHistory(t *testing.T) {
+	m := NewSynthetic(tokenLineageDenseQwen38Config())
+	s := m.NewSession()
+	defer s.Close()
+	history := []int{3, 7, 11}
+	s.Prefill(history)
+
+	// A Qwen host-swap restore reconstructs resident positions but has no lineage
+	// payload. Exercise that state directly at the model-owned restoration seam.
+	s.Cache.lineage = tokenLineage{}
+	report, err := s.RestoreTokenLineage(history)
+	if err != nil {
+		t.Fatalf("RestoreTokenLineage(%v): %v", history, err)
+	}
+	if report.Positions != len(history) || report.MetadataBytes != int64(len(history)*tokenLineageBytesPerPosition) {
+		t.Fatalf("restoration report=%+v, want positions=%d metadata_bytes=%d", report, len(history), len(history)*tokenLineageBytesPerPosition)
+	}
+	requireTokenLineage(t, s, history)
+
+	for _, invalid := range [][]int{
+		{3, 7},
+		{3, -1, 11},
+	} {
+		if _, err := s.RestoreTokenLineage(invalid); !errors.Is(err, ErrTokenLineageMismatch) {
+			t.Fatalf("RestoreTokenLineage(%v) error=%v, want ErrTokenLineageMismatch", invalid, err)
+		}
+		requireTokenLineage(t, s, history)
+	}
+}
+
 func containsInt(values []int, want int) bool {
 	for _, value := range values {
 		if value == want {

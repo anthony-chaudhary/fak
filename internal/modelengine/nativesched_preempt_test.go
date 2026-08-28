@@ -2,6 +2,7 @@ package modelengine
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"sync"
@@ -557,4 +558,153 @@ func TestNativeSchedulerQwenSwapPreemptionResumes(t *testing.T) {
 	if stats.SwapPreemptions == 0 || stats.Readmitted == 0 || stats.SwapBytes == 0 || stats.SwapRestoredBytes == 0 {
 		t.Fatalf("Qwen swap stats = %+v, want nonzero swap/readmission counters", stats)
 	}
+}
+
+func TestNativeSchedulerQwenSwapReadmitRestoresTokenLineageAndContinuation(t *testing.T) {
+	m := model.NewSynthetic(qwenSwapLineageTestConfig())
+	s := NewNativeScheduler(m)
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{
+		Mode:        NativePreemptSwap,
+		MaxBlocks:   1,
+		BlockTokens: 16,
+	})
+
+	prompt := []int{3, 5, 8}
+	generated := []int{13, 21}
+	control := m.NewSession()
+	controlLogits := control.Prefill(prompt)
+	for _, id := range generated {
+		controlLogits = control.Step(id)
+	}
+	defer control.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ln := &schedLane{
+		sched:     s,
+		ctx:       ctx,
+		cancel:    cancel,
+		sess:      m.NewSession(),
+		prompt:    append([]int(nil), prompt...),
+		promptLen: len(prompt),
+		gen:       append([]int(nil), generated...),
+		emitted:   len(generated),
+		tokens:    make(chan abi.EngineToken, 1),
+		done:      make(chan struct{}),
+	}
+	ln.logits = ln.sess.Prefill(prompt)
+	for _, id := range generated {
+		ln.logits = ln.sess.Step(id)
+	}
+	wantSavedLogits := copyF32(ln.logits)
+
+	if err := s.preemptLaneLocked(ln); err != nil {
+		t.Fatalf("preempt Qwen lane: %v", err)
+	}
+	if ln.sess != nil || len(s.preempted) != 1 {
+		t.Fatalf("preempted lane state: session=%p preempted=%d, want nil session and one queued lane", ln.sess, len(s.preempted))
+	}
+	if !reflect.DeepEqual(ln.savedLogits, wantSavedLogits) {
+		t.Fatal("preemption did not preserve logits bit-exactly")
+	}
+
+	s.readmitPreemptedLocked()
+	if ln.err != nil {
+		t.Fatalf("readmit Qwen lane: %v", ln.err)
+	}
+	if ln.sess == nil || len(s.lanes) != 1 || s.lanes[0] != ln || len(s.preempted) != 0 {
+		t.Fatalf("readmitted lane state: session=%p running=%d preempted=%d", ln.sess, len(s.lanes), len(s.preempted))
+	}
+	defer ln.sess.Close()
+	defer cancel()
+	if !reflect.DeepEqual(ln.logits, wantSavedLogits) {
+		t.Fatal("readmission did not restore saved logits bit-exactly")
+	}
+	history := append(append([]int(nil), prompt...), generated...)
+	if _, err := ln.sess.VerifyTokenLineage(history); err != nil {
+		t.Fatalf("readmitted Qwen lineage: %v", err)
+	}
+
+	for step := 0; step < 3; step++ {
+		wantToken := argmax(controlLogits)
+		gotToken := argmax(ln.logits)
+		if gotToken != wantToken {
+			t.Fatalf("continuation step %d token = %d, want %d", step, gotToken, wantToken)
+		}
+		controlLogits = control.Step(wantToken)
+		ln.logits = ln.sess.Step(gotToken)
+		if !reflect.DeepEqual(ln.logits, controlLogits) {
+			t.Fatalf("continuation step %d logits differ after exact token %d", step, gotToken)
+		}
+		history = append(history, gotToken)
+		if _, err := ln.sess.VerifyTokenLineage(history); err != nil {
+			t.Fatalf("continuation step %d lineage: %v", step, err)
+		}
+	}
+	stats := s.KVPreemptionStats()
+	if stats.SwapPreemptions != 1 || stats.Readmitted != 1 || stats.SwapBytes == 0 || stats.SwapRestoredBytes != stats.SwapBytes {
+		t.Fatalf("Qwen swap/readmit stats = %+v, want one byte-exact round trip", stats)
+	}
+}
+
+func TestNativeSchedulerQwenSwapReadmitLineageMismatchDoesNotPublishSession(t *testing.T) {
+	m := model.NewSynthetic(qwenSwapLineageTestConfig())
+	s := NewNativeScheduler(m)
+	s.SetKVPreemptionPolicy(NativePreemptionPolicy{
+		Mode:        NativePreemptSwap,
+		MaxBlocks:   1,
+		BlockTokens: 16,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	ln := &schedLane{
+		sched:     s,
+		ctx:       ctx,
+		cancel:    cancel,
+		sess:      m.NewSession(),
+		prompt:    []int{3, 5, 8},
+		promptLen: 3,
+		gen:       []int{13, 21},
+		emitted:   2,
+		tokens:    make(chan abi.EngineToken, 1),
+		done:      make(chan struct{}),
+	}
+	ln.logits = ln.sess.Prefill(ln.prompt)
+	for _, id := range ln.gen {
+		ln.logits = ln.sess.Step(id)
+	}
+	if err := s.preemptLaneLocked(ln); err != nil {
+		t.Fatalf("preempt Qwen lane: %v", err)
+	}
+
+	// The scheduler history is authoritative, but it must describe the same number
+	// of positions as the restored KV. An inconsistent history must fail closed.
+	ln.gen = append(ln.gen, 34)
+	s.readmitPreemptedLocked()
+	if !errors.Is(ln.err, model.ErrTokenLineageMismatch) {
+		t.Fatalf("readmit error=%v, want ErrTokenLineageMismatch", ln.err)
+	}
+	if ln.sess != nil || len(s.lanes) != 0 || len(s.preempted) != 0 {
+		t.Fatalf("mismatched readmit published state: session=%p running=%d preempted=%d", ln.sess, len(s.lanes), len(s.preempted))
+	}
+	if !ln.terminal || !ln.reclaimed {
+		t.Fatalf("mismatched lane terminal=%v reclaimed=%v, want both true", ln.terminal, ln.reclaimed)
+	}
+	stats := s.KVPreemptionStats()
+	if stats.Readmitted != 0 || stats.SwapRestoredBytes != 0 {
+		t.Fatalf("mismatched readmit stats=%+v, want no published restoration", stats)
+	}
+}
+
+func qwenSwapLineageTestConfig() model.Config {
+	cfg := SyntheticConfig()
+	cfg.NumLayers = 4
+	cfg.LayerTypes = []string{"linear_attention", "linear_attention", "linear_attention", "full_attention"}
+	cfg.FullAttentionInterval = 4
+	cfg.LinearConvKernelDim = 3
+	cfg.LinearKeyHeadDim = cfg.HeadDim
+	cfg.LinearValueHeadDim = cfg.HeadDim
+	cfg.LinearNumKeyHeads = cfg.NumKVHeads
+	cfg.LinearNumValueHeads = cfg.NumHeads
+	cfg.AttnOutputGate = true
+	cfg.NormGain1p = true
+	return cfg
 }

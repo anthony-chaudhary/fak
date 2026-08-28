@@ -330,6 +330,15 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 			if err != nil {
 				return err
 			}
+			sess := s.sessionFromCache(cache, ln.q4k)
+			history := make([]int, 0, len(ln.prompt)+len(ln.gen))
+			history = append(history, ln.prompt...)
+			history = append(history, ln.gen...)
+			if _, err := sess.RestoreTokenLineage(history); err != nil {
+				sess.Close()
+				return fmt.Errorf("modelengine: restore Qwen token lineage: %w", err)
+			}
+			ln.sess = sess
 		} else {
 			pool := model.NewPagedKVPoolWithRaw(s.m.Cfg, s.blockTokensLocked())
 			seq, err := pool.RestoreFromHost(ln.hostKV)
@@ -338,8 +347,8 @@ func (s *NativeScheduler) restorePreemptedLaneLocked(ln *schedLane) error {
 			}
 			cache = seq.ToKVCache(s.m.Cfg)
 			seq.Free()
+			ln.sess = s.sessionFromCache(cache, ln.q4k)
 		}
-		ln.sess = s.sessionFromCache(cache, ln.q4k)
 		ln.logits = copyF32(ln.savedLogits)
 		s.preemptStats.SwapRestoredBytes += int64(len(ln.hostKV))
 	default:
