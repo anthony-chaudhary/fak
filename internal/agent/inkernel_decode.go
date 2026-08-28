@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -176,6 +177,19 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 		s.Metal = true
 		s.MetalQ4K = p.q4k
 	}
+	qwen35MetalStateIdentityEnabled := false
+	if shouldEnableQwen35MetalStateIdentity(p, measurement, ids, matched, cachedLogits) {
+		if enableErr := s.EnableQwen35MetalStateIdentityReceipt(ids); enableErr != nil {
+			var unavailable *model.Qwen35MetalStateIdentityUnavailableError
+			if !errors.As(enableErr, &unavailable) {
+				err = enableErr
+				return
+			}
+		} else {
+			qwen35MetalStateIdentityEnabled = true
+			defer s.ResetQwen35MetalStateIdentityReceipt()
+		}
+	}
 	if p.qwen35MetalGDNSequence && p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() && cachedLogits == nil {
 		if matched != 0 {
 			err = &model.UnsupportedGDNPreprojectedSequenceError{
@@ -245,6 +259,11 @@ func (p *InKernelPlanner) generateReusedContextWithBias(ctx context.Context, ids
 			return
 		}
 		p.qwen35MetalGDNExecuted.Store(executed)
+	}
+	if qwen35MetalStateIdentityEnabled {
+		if err = finalizeAndCaptureQwen35MetalStateIdentity(s, measurement); err != nil {
+			return
+		}
 	}
 
 	// 3) Snapshot the full-prompt KV (before decode mutates s.Cache) and cache it under a
@@ -404,6 +423,33 @@ type decodeLane struct {
 	err     error
 }
 
+func shouldEnableQwen35MetalStateIdentity(p *InKernelPlanner, measurement *nativeInferenceMeasurement, ids []int, matched int, cachedLogits []float32) bool {
+	return p != nil && p.m != nil && measurement != nil && !measurement.inferenceDisabled &&
+		p.backend == nil && p.metal && p.q4k && p.m.Cfg.IsQwen35Hybrid() &&
+		cachedLogits == nil && matched == 0 && len(ids) == 32
+}
+
+type qwen35MetalStateIdentitySession interface {
+	FinalizeQwen35MetalStateIdentityReceipt() (bool, error)
+	Qwen35MetalStateIdentityReceipt() (model.Qwen35MetalStateIdentityReceipt, bool)
+}
+
+func finalizeAndCaptureQwen35MetalStateIdentity(s qwen35MetalStateIdentitySession, measurement *nativeInferenceMeasurement) error {
+	if s == nil || measurement == nil {
+		return fmt.Errorf("agent: opted-in Qwen Metal state identity has no request-local owner")
+	}
+	finalized, err := s.FinalizeQwen35MetalStateIdentityReceipt()
+	if err != nil {
+		return err
+	}
+	identity, available := s.Qwen35MetalStateIdentityReceipt()
+	if !finalized || !available || !identity.Available {
+		return fmt.Errorf("agent: opted-in Qwen Metal state identity did not finalize")
+	}
+	measurement.qwen35MetalStateIdentity = cloneQwen35MetalStateIdentityReceipt(identity)
+	return nil
+}
+
 type nativeInferenceMeasurement struct {
 	startedAt                           time.Time
 	tokenIDs                            []int
@@ -416,6 +462,7 @@ type nativeInferenceMeasurement struct {
 	decodeTokenIDsEnabled               bool
 	decodeTokenIDs                      []int
 	qwen35MetalForwardSequence          model.Qwen35MetalForwardSequenceReceipt
+	qwen35MetalStateIdentity            *model.Qwen35MetalStateIdentityReceipt
 	cudaImmutableWeightUploadsBefore    NativeCUDAImmutableWeightUploadCounters
 	cudaImmutableWeightUploadsAvailable bool
 }
@@ -431,6 +478,7 @@ func (m *nativeInferenceMeasurement) reset() {
 	m.traceEvents = m.traceEvents[:0]
 	m.decodeTokenIDs = m.decodeTokenIDs[:0]
 	m.qwen35MetalForwardSequence = model.Qwen35MetalForwardSequenceReceipt{}
+	m.qwen35MetalStateIdentity = nil
 }
 
 func (m *nativeInferenceMeasurement) record(logits []float32, token int) error {

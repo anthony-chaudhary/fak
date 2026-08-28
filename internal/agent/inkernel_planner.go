@@ -1069,6 +1069,10 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		snapshot := measurement.qwen35MetalForwardSequence
 		qwen35MetalForwardSequence = &snapshot
 	}
+	var qwen35MetalStateIdentity *model.Qwen35MetalStateIdentityReceipt
+	if measurement.qwen35MetalStateIdentity != nil && measurement.qwen35MetalStateIdentity.Available {
+		qwen35MetalStateIdentity = cloneQwen35MetalStateIdentityReceipt(*measurement.qwen35MetalStateIdentity)
+	}
 	var cudaImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta
 	if after, ok := cudaImmutableWeightUploadSnapshot(p.backend); ok && measurement.cudaImmutableWeightUploadsAvailable {
 		before := measurement.cudaImmutableWeightUploadsBefore
@@ -1098,8 +1102,14 @@ func (p *InKernelPlanner) buildNativeInferenceReceipt(measurement *nativeInferen
 		FallbackActive:             false,
 		PrefillChunkTokens:         p.nativeInferencePrefillChunkTokens(),
 		Qwen35MetalForwardSequence: qwen35MetalForwardSequence,
+		Qwen35MetalStateIdentity:   qwen35MetalStateIdentity,
 		CUDAImmutableWeightUploads: cudaImmutableWeightUploads,
 	}
+}
+
+func cloneQwen35MetalStateIdentityReceipt(src model.Qwen35MetalStateIdentityReceipt) *model.Qwen35MetalStateIdentityReceipt {
+	src.States = append([]model.Qwen35MetalStateDigest(nil), src.States...)
+	return &src
 }
 
 type cudaImmutableWeightUploadSnapshotter interface {

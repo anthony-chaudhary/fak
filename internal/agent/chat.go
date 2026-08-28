@@ -476,7 +476,10 @@ type NativeInferenceReceipt struct {
 	// Qwen35MetalForwardSequence is present only when the model session produced
 	// terminal evidence for the native whole-sequence Metal graph.
 	Qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt `json:"qwen35_metal_forward_sequence,omitempty"`
-	CUDAImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta    `json:"cuda_immutable_weight_uploads,omitempty"`
+	// Qwen35MetalStateIdentity is present only for an explicitly requested native
+	// receipt whose fresh exact-P32 Metal session sealed model-owned state identity.
+	Qwen35MetalStateIdentity   *model.Qwen35MetalStateIdentityReceipt `json:"qwen35_metal_state_identity,omitempty"`
+	CUDAImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta  `json:"cuda_immutable_weight_uploads,omitempty"`
 }
 
 // NativeCUDAImmutableWeightUploadCounters is one cumulative CUDA-backend
