@@ -1,0 +1,74 @@
+{
+  "schema": "fak-upstream-self-query/1",
+  "observed_at": "2026-08-28T13:48:46Z",
+  "revision": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+  "durable_receipt": "study_6a93ae6773023dd3e547b7e25d2b705701dbc77f6b875a9cc150b744edcfdc57",
+  "commands": [
+    "fak capabilities \"reusable plan run caller-owned workspace\"",
+    "fak capabilities \"kernel artifact identity architecture compiler dispatch\"",
+    "fak capabilities \"variable window attention\"",
+    "fak capabilities \"distributed context parallel speculative decode\"",
+    "fak capabilities \"variable length top k\"",
+    "fak dev index docs \"workspace plan run\"",
+    "fak dev index leaves \"attention topk artifact\"",
+    "fak dev index verbs \"artifact benchmark attention\"",
+    "fak dev index claims \"Blackwell attention\"",
+    "rg -n \"workspace|Artifact|top.?k|attention\" internal/compute internal/model"
+  ],
+  "results": [
+    {
+      "axis": "reusable plan/run and caller-owned workspace",
+      "verdict": "PARTIAL",
+      "evidence": [
+        "fak capabilities returned no matching capability",
+        "internal/compute/cpuref.go:634-656 has a prepared MatMul workspace, but no cross-op reusable plan/run contract",
+        "open #8607"
+      ]
+    },
+    {
+      "axis": "artifact identity and compiler/arch applicability",
+      "verdict": "PARTIAL",
+      "evidence": [
+        "self-index surfaced artifact leaves but no typed hardware/compiler/op-shape eligibility tuple",
+        "internal/compute/build_cuda.sh:69 validates architecture membership",
+        "closed #4184 proves reporting, not the full three-axis dispatch contract"
+      ]
+    },
+    {
+      "axis": "attention portfolio including per-query variable windows",
+      "verdict": "PARTIAL",
+      "evidence": [
+        "internal/compute/compute.go:292-300 has per-layer WindowPerLayer",
+        "no per-query variable-window plan surfaced",
+        "open #3254 owns the attention portfolio seam"
+      ]
+    },
+    {
+      "axis": "variable-length top-k",
+      "verdict": "PARTIAL",
+      "evidence": [
+        "internal/compute/cuda_accuracy_gates.go:142-144 gates discrete top-k set equality",
+        "no general variable-length top-k workspace/API surfaced",
+        "closed #3088 retains sparse-attention selector outcome"
+      ]
+    },
+    {
+      "axis": "striped DCP speculative attention",
+      "verdict": "ABSENT",
+      "evidence": [
+        "fak capabilities query returned no matching capability",
+        "internal/compute/compute.go:405-407 has no DCP primitive",
+        "internal/model/tensor_parallel_forward.go:1-95 explicitly supports standard GQA TP and rejects linear attention; no context-parallel merge/workspace contract"
+      ]
+    },
+    {
+      "axis": "bounded trace and offline tuning",
+      "verdict": "PRESENT",
+      "evidence": [
+        "closed #8608 and #8609 read back shipped",
+        "prior study dedup map records both outcomes"
+      ]
+    }
+  ],
+  "classification_limit": "Lexical self-query can miss capabilities; every ABSENT/PARTIAL result was cross-checked against raw source grep and exact seams. Re-run on any FAK seam/status change."
+}

@@ -304,6 +304,7 @@ Developer, design, and internal reference docs — indexed here so each is reach
 - [Native harness live-model and dogfood readout — 2026-08-22](docs/notes/NATIVE-HARNESS-DOGFOOD-2026-08-22.md) -- auto-indexed dated note.
 - [Concept study: mini-sglang's compact serving control loop](docs/notes/CONCEPT-STUDY-MINI-SGLANG-2026-08-22.md) -- auto-indexed dated note.
 - [FlashInfer study — reusable execution plans, workload tuning, and traceable kernels](docs/notes/flashinfer-study-2026-08-22.md) -- pinned deep study; files plan/run #8607, offline tuning #8608, and device-event trace #8609.
+- [FlashInfer current-source refresh — DCP attention, variable windows, and provenance contracts](docs/notes/CONCEPT-STUDY-FLASHINFER-REFRESH-2026-08-28.md) -- pinned eight-commit main delta plus divergent v0.6.18rc10 review; exact candidate, license, self-query, and dedup evidence for #9757.
 
 - [Flash Linear Attention: recurrent-state kernels are an oracle, not a new runtime](docs/notes/CONCEPT-STUDY-FLASH-LINEAR-ATTENTION-2026-08-22.md) -- auto-indexed dated note.
 - [Concept study: FreeToken edge-native MoE serving](docs/notes/CONCEPT-STUDY-FREETOKEN-2026-08-22.md) -- source-pinned deep study; filed semantic state anchors #8601 and idle cache geometry #8603.

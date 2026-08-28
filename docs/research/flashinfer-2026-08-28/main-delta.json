@@ -1,0 +1,191 @@
+{
+  "schema": "fak-upstream-main-delta/1",
+  "base": "39b484f1ce2fff086c66f9a899a0a58ba7f0ec3e",
+  "head": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+  "count": 8,
+  "commits": [
+    {
+      "sha": "737c7ddf1ab380065e4f3546a9e428f1ceadd902",
+      "source_event_at": "2026-08-27T14:58:04Z",
+      "subject": "Support per-token NVFP4 ReLU2 MoE (#4618)",
+      "candidate": "C23",
+      "changed_paths": [
+        "flashinfer/artifacts.py",
+        "flashinfer/fused_moe/core.py",
+        "flashinfer/fused_moe/runners.py",
+        "flashinfer/moe_ep/backends/split/kernel/fused_moe/weights.py",
+        "tests/moe/test_trtllm_gen_moe_autotune_tactics.py",
+        "tests/moe/test_trtllm_gen_per_token_moe.py",
+        "tests/moe/test_unified_moe.py"
+      ]
+    },
+    {
+      "sha": "286eee4e2999a825716eab68e597cb1ee0881e1b",
+      "source_event_at": "2026-08-27T16:39:19Z",
+      "subject": "feat: CUB `DeviceBatchedTopK` top-k backend with variable-length support (#4442)",
+      "candidate": "C24",
+      "changed_paths": [
+        "3rdparty/cccl",
+        "CLAUDE.md",
+        "benchmarks/bench_topk.py",
+        "csrc/cub_topk.cu",
+        "csrc/flashinfer_topk_binding.cu",
+        "csrc/topk.cu",
+        "csrc/topk_transform_checks.h",
+        "flashinfer/jit/topk.py",
+        "flashinfer/topk.py",
+        "flashinfer/trace/templates/sampling.py",
+        "tests/utils/test_topk.py"
+      ]
+    },
+    {
+      "sha": "e04a5a5d7fac9f2e9531b5e30e76ed999fb83055",
+      "source_event_at": "2026-08-27T23:41:31Z",
+      "subject": "feat(cake_fmha): add native Blackwell DCP speculative decode (#4518)",
+      "candidate": "C25",
+      "changed_paths": [
+        ".pre-commit-config.yaml",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_binding.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_d256_binding.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_d256_split16_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_d256_split1_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_d256_split2_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_d256_split3_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_d256_split4_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_d256_split8_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_manifest.json",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split1_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split1_retain1.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split2_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split2_retain1.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split3_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split3_retain1.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split4_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_fp8_split4_retain1.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_manifest.json",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v1_binding.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v1_retain0.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v1_retain1.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_binding.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split10.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split11.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split12.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split13.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split14.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split15.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split16.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split2.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split3.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split4.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split5.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split6.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split7.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split8.cu",
+        "csrc/dcp/cake_fmha_dcp_spec_bf16_v4_split9.cu",
+        "docs/api/attention.rst",
+        "flashinfer/__init__.py",
+        "flashinfer/cake_dcp.py",
+        "flashinfer/decode.py",
+        "flashinfer/jit/cake_dcp.py",
+        "flashinfer/trace/templates/attention.py",
+        "tests/attention/cake_dcp_public_validation.py",
+        "tests/attention/test_dcp_spec_fp8.py",
+        "tests/attention/test_dcp_spec_jit.py"
+      ]
+    },
+    {
+      "sha": "63f1b5b30d11bcdd9543d1f538c99436805ebca6",
+      "source_event_at": "2026-08-27T23:55:58Z",
+      "subject": "fix(cute_dsl): consult the arch gate in the GEMM and GDN dispatchers (#4649)",
+      "candidate": "C26",
+      "changed_paths": [
+        "flashinfer/cute_dsl/utils.py",
+        "flashinfer/gdn_kernels/blackwell/gdn_cp_prefill.py",
+        "flashinfer/gemm/gemm_base.py"
+      ]
+    },
+    {
+      "sha": "cbcbce48e817c83f03ad5a3e6ce59480eaf6935d",
+      "source_event_at": "2026-08-28T00:36:20Z",
+      "subject": "feat(activation): add fused Blackwell SwiGLU MXFP8 quantization (#4638)",
+      "candidate": "C27",
+      "changed_paths": [
+        ".clang-format-ignore",
+        "benchmarks/bench_gated_act_mxfp8.py",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_both.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_both_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_both_sm103.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_both_sm103_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_col.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_col_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_row.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_row_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_row_sm103.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_bwd_row_sm103_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_both.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_both_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_both_noalloc.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_both_noalloc_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_col.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_col_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_row.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_row_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_row_noalloc.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_fwd_row_noalloc_launch.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_jit_binding.cu",
+        "csrc/gated_act_mxfp8/gated_act_mxfp8_launch.cuh",
+        "docs/api/quantization.rst",
+        "flashinfer/__init__.py",
+        "flashinfer/gated_act_mxfp8.py",
+        "flashinfer/jit/gated_act_mxfp8.py",
+        "flashinfer/trace/templates/gated_act_mxfp8.py",
+        "tests/trace/template_registry.py",
+        "tests/utils/test_gated_act_mxfp8.py"
+      ]
+    },
+    {
+      "sha": "71d31b5a23a3c0394edb36330dec1ce2a0def365",
+      "source_event_at": "2026-08-28T01:45:53Z",
+      "subject": "Adding var-window FMHA context support for PrimsTS. (#4599)",
+      "candidate": "C28",
+      "changed_paths": [
+        "flashinfer/attention/prims_ts/context.py",
+        "flashinfer/attention/prims_ts/kernels/fmha_context/fmha_kernel.py",
+        "flashinfer/attention/prims_ts/kernels/fmha_context/fmha_resources.py",
+        "flashinfer/attention/prims_ts/kernels/fmha_context/fmha_tasks.py",
+        "flashinfer/attention/prims_ts/kernels/fmha_context/helpers.py",
+        "tests/attention/test_attention_ts_context.py"
+      ]
+    },
+    {
+      "sha": "950376c45a473d8f9ebfa83b2224094f5102c0e6",
+      "source_event_at": "2026-08-28T06:38:01Z",
+      "subject": "Add bias support to cublast gemm backend and as fallback backend for cutedsl gemm backend (#4772)",
+      "candidate": "C29",
+      "changed_paths": [
+        "csrc/mm_bf16_cublaslt.cu",
+        "flashinfer/gemm/gemm_base.py",
+        "include/flashinfer/gemm/mm_bf16_cublaslt.cuh",
+        "tests/gemm/test_mm_bf16.py"
+      ]
+    },
+    {
+      "sha": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+      "source_event_at": "2026-08-28T09:53:19Z",
+      "subject": "misc: multi-arch cubins (sm100, 103, 107) in a single artifact (#4648)",
+      "candidate": "C30",
+      "changed_paths": [
+        "csrc/trtllm_fused_moe_kernel_launcher.cu",
+        "flashinfer/artifacts.py",
+        "flashinfer/deep_gemm.py",
+        "flashinfer/jit/fused_moe.py",
+        "flashinfer/jit/gemm/core.py",
+        "flashinfer/jit/trtllm_gen_metainfo.py",
+        "include/flashinfer/trtllm/batched_gemm/KernelRunner.h",
+        "tests/jit/test_trtllm_gen_metainfo.py",
+        "tests/test_artifacts.py"
+      ]
+    }
+  ]
+}

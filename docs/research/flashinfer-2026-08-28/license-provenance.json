@@ -1,0 +1,59 @@
+{
+  "schema": "fak-upstream-license-provenance/1",
+  "repository": "flashinfer-ai/flashinfer",
+  "revision": "93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+  "observed_at": "2026-08-28T13:48:46Z",
+  "durable_receipt": "study_6a93ae6773023dd3e547b7e25d2b705701dbc77f6b875a9cc150b744edcfdc57",
+  "root_license": {
+    "path": "LICENSE:1@93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+    "spdx": "Apache-2.0",
+    "sha256": "b9183571315fe6a9e21f4d4e415526f997ae8c02daa396eac965413f87ce6fa6"
+  },
+  "notice": {
+    "path": "NOTICE:1@93f4f2642e1b3680a52ebb51cf68e0fdad237796",
+    "sha256": "20d62869ee016e7c94573eee97c3d2480f114eaef529447e0f7aa245375df2aa"
+  },
+  "bundled_licenses": [
+    {
+      "path": "licenses/LICENSE.cutlass.txt",
+      "sha256": "9d4896a295f5a425b1f10542d69788c3d0189afa497145b4ca2271ecab9ecebe"
+    },
+    {
+      "path": "licenses/LICENSE.flashattention3.txt",
+      "sha256": "c364d38c8ee8070159ad68f56a8bab4917b8d020548da33a01e036505c8e4add"
+    },
+    {
+      "path": "licenses/LICENSE.fmt.txt",
+      "sha256": "4e79fcc686dacf1a83eeddf1813ce28bbac5bd67a8b067d740c8fcd8c8405e1d"
+    },
+    {
+      "path": "licenses/LICENSE.spdlog.txt",
+      "sha256": "6f86d2d8f45db5de73ad7d4b21c1e5bc5a670cc59546023764c37ebe8b18c9c7"
+    }
+  ],
+  "gitmodules_sha256": "01efc44d786922b8da4bd50a87586b29bb4c42b939d5eae514bd38e245269782",
+  "gitlinks": [
+    {
+      "path": "3rdparty/cccl",
+      "revision": "16bd510c9b712e82b0ab6cbb630d8e29ba1f7116",
+      "url": "https://github.com/NVIDIA/cccl.git",
+      "change": "updated by main commit 286eee4; v0.6.18rc10 instead pins 876867684f7fac130e0f5911236e0a92a970d4fd"
+    },
+    {
+      "path": "3rdparty/cutlass",
+      "revision": "b46b16d003484063bca4ed365e44095c4c6ed633",
+      "url": "https://github.com/NVIDIA/cutlass.git"
+    },
+    {
+      "path": "3rdparty/nixl",
+      "revision": "b20f4d0adb95f53c4a1272915ef8d86cec304584",
+      "url": "https://github.com/ai-dynamo/nixl.git"
+    },
+    {
+      "path": "3rdparty/spdlog",
+      "revision": "c3aed4b68373955e1cc94307683d44dca1515d2b",
+      "url": "https://github.com/gabime/spdlog.git"
+    }
+  ],
+  "copy_status": "No upstream source, test, comment, or asset copied. ADAPT/DIRECT suitability still requires file-level review at implementation time; runtime integration is excluded by the FAK-native ownership boundary."
+}
