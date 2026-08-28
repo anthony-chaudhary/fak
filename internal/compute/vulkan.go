@@ -158,14 +158,47 @@ func (v *vulkanBackend) VulkanDebugQ4KProfileSnapshot() (enabled bool, deviceCal
 type VulkanDispatchProfile struct {
 	ComputeDispatches, Q4KMatmulDispatches, OtherComputeDispatches         uint64
 	ComputeBarriers, D2DCopies, BatchSubmits, BatchFlushes, OneShotSubmits uint64
+	OtherMatmulDispatches, OtherNormDispatches, OtherRoPEDispatches        uint64
+	OtherSwiGLUDispatches, OtherAddDispatches, OtherAttentionDispatches    uint64
+	OtherArgmaxDispatches, OtherGDNDispatches, OtherUnclassifiedDispatches uint64
+	OneShotComputeSubmits, OneShotH2DSubmits                               uint64
+	OneShotD2HSubmits, OneShotD2DSubmits                                   uint64
 }
 
 func (v *vulkanBackend) VulkanDebugDispatchProfileSnapshot() VulkanDispatchProfile {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
 	var p C.fvk_dispatch_profile
 	C.fvk_dispatch_profile_snapshot(&p)
-	return VulkanDispatchProfile{uint64(p.compute_dispatches), uint64(p.q4k_matmul_dispatches), uint64(p.other_compute_dispatches), uint64(p.compute_barriers), uint64(p.d2d_copies), uint64(p.batch_submits), uint64(p.batch_flushes), uint64(p.one_shot_submits)}
+	return VulkanDispatchProfile{
+		ComputeDispatches:           uint64(p.compute_dispatches),
+		Q4KMatmulDispatches:         uint64(p.q4k_matmul_dispatches),
+		OtherComputeDispatches:      uint64(p.other_compute_dispatches),
+		ComputeBarriers:             uint64(p.compute_barriers),
+		D2DCopies:                   uint64(p.d2d_copies),
+		BatchSubmits:                uint64(p.batch_submits),
+		BatchFlushes:                uint64(p.batch_flushes),
+		OneShotSubmits:              uint64(p.one_shot_submits),
+		OtherMatmulDispatches:       uint64(p.other_matmul_dispatches),
+		OtherNormDispatches:         uint64(p.other_norm_dispatches),
+		OtherRoPEDispatches:         uint64(p.other_rope_dispatches),
+		OtherSwiGLUDispatches:       uint64(p.other_swiglu_dispatches),
+		OtherAddDispatches:          uint64(p.other_add_dispatches),
+		OtherAttentionDispatches:    uint64(p.other_attention_dispatches),
+		OtherArgmaxDispatches:       uint64(p.other_argmax_dispatches),
+		OtherGDNDispatches:          uint64(p.other_gdn_dispatches),
+		OtherUnclassifiedDispatches: uint64(p.other_unclassified_dispatches),
+		OneShotComputeSubmits:       uint64(p.one_shot_compute_submits),
+		OneShotH2DSubmits:           uint64(p.one_shot_h2d_submits),
+		OneShotD2HSubmits:           uint64(p.one_shot_d2h_submits),
+		OneShotD2DSubmits:           uint64(p.one_shot_d2d_submits),
+	}
 }
-func (v *vulkanBackend) VulkanDebugResetDispatchProfile() { C.fvk_dispatch_profile_reset() }
+func (v *vulkanBackend) VulkanDebugResetDispatchProfile() {
+	vulkanMu.Lock()
+	defer vulkanMu.Unlock()
+	C.fvk_dispatch_profile_reset()
+}
 
 func (v *vulkanBackend) VulkanDebugResetQ4KProfile() {
 	vulkanMu.Lock()

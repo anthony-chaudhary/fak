@@ -47,23 +47,87 @@ func TestVulkanDispatchProfileCountsClassificationAndReset(t *testing.T) {
 		t.Skip("set FAK_VULKAN_DISPATCH_PROFILE=1")
 	}
 	v := vk(t)
-	v.VulkanDebugResetDispatchProfile()
 	c := cpu()
 	w := v.Upload(NewF32(c, []int{4, 4}, []float32{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1}), F32)
 	x := v.Upload(NewF32(c, []int{4}, []float32{1, 2, 3, 4}), F32)
-	_ = v.Read(v.MatMul(w, x))
+
+	// Prepare attention and GDN operands before reset so only the operations under
+	// classification contribute to the exact family counts below.
+	vkv := v.NewKV(KVConfig{NumLayers: 1, NumKVHeads: 1, HeadDim: 4, RopeTheta: 10000})
+	vkv.AppendKV(0, x, x, x, 0)
+	upload := func(shape []int, data []float32, what string) Tensor {
+		return v.UploadClass(NewF32(c, shape, data), F32, MemoryActivation, what)
+	}
+	mixed := upload([]int{1, 3}, []float32{0.1, -0.2, 0.3}, "profile GDN mixed")
+	scalar := upload([]int{1}, []float32{0.1}, "profile GDN scalar")
+	conv := upload([]int{3, 2}, []float32{0, 0, 0, 0, 0, 0}, "profile GDN conv")
+	convState := upload([]int{1, 3}, []float32{0, 0, 0}, "profile GDN conv state")
+	recurrentState := upload([]int{1, 1, 1}, []float32{0}, "profile GDN recurrent state")
+
+	v.VulkanDebugResetDispatchProfile()
+	y := v.MatMul(w, x)
+	_ = v.RMSNorm(x, x, 1e-5)
+	_ = v.RoPEInPlace(x, 0, 1, 4, 10000)
+	_ = v.SwiGLU(x, x)
+	v.AddInPlace(x, x)
+	_ = v.Attention(x, vkv, 0, true, 1, 0.5)
+	_ = v.Argmax(x)
+	if _, err := v.Qwen35GDNPreprojected(
+		mixed, scalar, scalar, scalar, conv, scalar, scalar, scalar, convState, recurrentState,
+		1, 1, 1, 1, 1, 2, 1e-5,
+	); err != nil {
+		t.Fatal(err)
+	}
 	v.BeginBatch()
 	_ = v.MatMul(w, x)
 	v.FlushBatch()
+	_ = upload([]int{1}, []float32{1}, "profile post-reset upload")
+	_ = v.Read(y)
 	if _, err := v.CloneTensor(x); err != nil {
 		t.Fatal(err)
 	}
+
 	got := v.VulkanDebugDispatchProfileSnapshot()
-	if got.ComputeDispatches < 2 || got.OtherComputeDispatches < 2 || got.Q4KMatmulDispatches != 0 {
+	if got.ComputeDispatches != 10 || got.OtherComputeDispatches != 10 || got.Q4KMatmulDispatches != 0 {
 		t.Fatalf("dispatch classification = %+v", got)
 	}
-	if got.D2DCopies == 0 || got.BatchSubmits == 0 || got.BatchFlushes == 0 || got.OneShotSubmits == 0 {
-		t.Fatalf("operation families = %+v", got)
+	wantFamilies := VulkanDispatchProfile{
+		OtherMatmulDispatches:    2,
+		OtherNormDispatches:      1,
+		OtherRoPEDispatches:      1,
+		OtherSwiGLUDispatches:    1,
+		OtherAddDispatches:       1,
+		OtherAttentionDispatches: 1,
+		OtherArgmaxDispatches:    1,
+		OtherGDNDispatches:       2,
+	}
+	if got.OtherMatmulDispatches != wantFamilies.OtherMatmulDispatches ||
+		got.OtherNormDispatches != wantFamilies.OtherNormDispatches ||
+		got.OtherRoPEDispatches != wantFamilies.OtherRoPEDispatches ||
+		got.OtherSwiGLUDispatches != wantFamilies.OtherSwiGLUDispatches ||
+		got.OtherAddDispatches != wantFamilies.OtherAddDispatches ||
+		got.OtherAttentionDispatches != wantFamilies.OtherAttentionDispatches ||
+		got.OtherArgmaxDispatches != wantFamilies.OtherArgmaxDispatches ||
+		got.OtherGDNDispatches != wantFamilies.OtherGDNDispatches ||
+		got.OtherUnclassifiedDispatches != 0 {
+		t.Fatalf("operation family classification = %+v", got)
+	}
+	otherFamilies := got.OtherMatmulDispatches + got.OtherNormDispatches + got.OtherRoPEDispatches +
+		got.OtherSwiGLUDispatches + got.OtherAddDispatches + got.OtherAttentionDispatches +
+		got.OtherArgmaxDispatches + got.OtherGDNDispatches + got.OtherUnclassifiedDispatches
+	if otherFamilies != got.OtherComputeDispatches {
+		t.Fatalf("operation family total = %d, other compute dispatches = %d", otherFamilies, got.OtherComputeDispatches)
+	}
+	if got.OneShotComputeSubmits != 9 || got.OneShotH2DSubmits != 1 ||
+		got.OneShotD2HSubmits != 2 || got.OneShotD2DSubmits != 1 {
+		t.Fatalf("one-shot callsite classification = %+v", got)
+	}
+	oneShotFamilies := got.OneShotComputeSubmits + got.OneShotH2DSubmits + got.OneShotD2HSubmits + got.OneShotD2DSubmits
+	if oneShotFamilies != got.OneShotSubmits {
+		t.Fatalf("one-shot family total = %d, one-shot submits = %d", oneShotFamilies, got.OneShotSubmits)
+	}
+	if got.D2DCopies != 1 || got.BatchSubmits != 1 || got.BatchFlushes != 2 {
+		t.Fatalf("aggregate operation counters = %+v", got)
 	}
 	v.VulkanDebugResetDispatchProfile()
 	if zero := v.VulkanDebugDispatchProfileSnapshot(); zero != (VulkanDispatchProfile{}) {
