@@ -191,6 +191,10 @@ func (s *Server) Handler() http.Handler {
 	for _, rt := range s.routeTable() {
 		mux.HandleFunc(rt.pattern, rt.handler)
 	}
+	// /readyz is an orchestration probe rather than a product API route. Keep it
+	// outside routeTable so API-spec and follower-fanout coverage remain scoped
+	// to callable runtime surfaces.
+	mux.HandleFunc("/readyz", s.handleReady)
 	return s.withMetrics(s.withAuth(mux))
 }
 
@@ -425,7 +429,7 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 //     so request counts, token volumes, the model id, and uptime are never
 //     exposed to the open internet.
 func authExempt(r *http.Request) bool {
-	if r.URL.Path == "/healthz" {
+	if r.URL.Path == "/healthz" || r.URL.Path == "/readyz" {
 		return true
 	}
 	// Human/agent discovery is directly clickable from the loopback URL shown
