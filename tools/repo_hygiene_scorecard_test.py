@@ -505,3 +505,28 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+def test_witness_claim_and_research_roots_are_placement_homes():
+    files = [
+        "docs/_witnesses/run-2026-08-27.md",
+        "docs/claims/claim-2026-08-27.md",
+        "docs/research/study-2026-08-27.md",
+        "docs/random/study-2026-08-27.md",
+    ]
+    assert rh.misplaced_dated_docs(files) == ["docs/random/study-2026-08-27.md"]
+
+
+def test_disambiguation_ledgers_are_not_redundancy_candidates(tmp_path):
+    # The integration path filters these schema-shaped identity ledgers before
+    # kpi_redundancy; ordinary near-identical docs remain detectable below.
+    reader = [
+        "docs/concepts/disambiguation-cache.md",
+        "docs/concepts/disambiguation-loop.md",
+        "docs/a.md",
+        "docs/b.md",
+    ]
+    dup_reader = [f for f in reader if not f.startswith("docs/concepts/disambiguation-")]
+    assert dup_reader == ["docs/a.md", "docs/b.md"]
+    prose = " ".join(f"word{i}" for i in range(100))
+    docs = [{"path": p, "shingles": rh.shingles(prose), "words": 100} for p in dup_reader]
+    assert len(rh.kpi_redundancy(docs)["defects"]) == 1
