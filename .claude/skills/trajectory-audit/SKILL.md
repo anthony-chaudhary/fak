@@ -41,6 +41,31 @@ Pass `--claude-root` or `--codex-root` only for an explicit alternate corpus or
 a pinned fixture. The paths persisted in artifacts are relative to those roots;
 machine-private absolute roots are never emitted.
 
+## Pinned private replay
+
+Capture the selected inputs when a later audit must use the identical corpus:
+
+```bash
+fak trajectory audit --since 7d --user-contains qwen \
+  --snapshot-out /private/path/qwen-corpus \
+  --jsonl qwen-audit.jsonl --md qwen-audit.md
+```
+
+`--snapshot-out` requires a new directory, copies only selected JSONL inputs,
+and reports a verified corpus digest. The snapshot contains raw transcript bytes:
+keep it private, never commit or sync it, and remove it explicitly when it is no
+longer needed. Replay verifies the manifest and every input before and after parsing:
+
+```bash
+fak trajectory audit --snapshot /private/path/qwen-corpus \
+  --jsonl replay.jsonl --md replay.md
+```
+
+Replay rejects `--since`, `--user-contains`, live-root overrides, and `--baseline`;
+the snapshot already owns selection and captured output identity. A missing, extra,
+changed, malformed, path-escaping, or permission-open input fails closed with
+`TRAJECTORY_SNAPSHOT_REFUSED`.
+
 ## Exact accounting contract
 
 Every JSONL row uses schema `fak-trajectory-audit/1`. Claude usage is folded once
