@@ -126,6 +126,41 @@ func TestMetalQwenGDNPriorArt(t *testing.T) {
 	}
 }
 
+func TestKVCacheTransformCompressionPriorArt(t *testing.T) {
+	op, ok := BySlug("kv-cache-transform-compression")
+	if !ok {
+		t.Fatal("kv-cache-transform-compression row missing from the SOTA matrix")
+	}
+	for _, p := range []string{
+		"internal/model/kvquant.go",
+		"internal/model/coldkv.go",
+		"internal/engine/kv_quantization.go",
+		"internal/compute/kvprecision.go",
+	} {
+		if !anyGlobMatches(op.FileGlobs, p) {
+			t.Errorf("kv-cache-transform-compression FileGlobs %v do not cover %s", op.FileGlobs, p)
+		}
+	}
+	if op.Route != RouteBorrow {
+		t.Errorf("kv-cache-transform-compression route = %q, want %q", op.Route, RouteBorrow)
+	}
+	if !strings.Contains(op.SOTA, "SPECTRA@272032275106dc5944fbfa7091a1ceb403fa7e28") {
+		t.Errorf("SOTA %q does not pin the studied SPECTRA revision", op.SOTA)
+	}
+	for _, obligation := range []string{
+		"fak-native Qwen3.8",
+		"resident bytes",
+		"peak transient bytes",
+		"end-to-end latency and throughput",
+		"exact pre-RoPE eviction/reuse compatibility",
+		"zero fallback",
+	} {
+		if !strings.Contains(op.Oracle, obligation) {
+			t.Errorf("kv-cache-transform-compression oracle %q does not name %q", op.Oracle, obligation)
+		}
+	}
+}
+
 // TestEveryRowResolvesAndIsComplete mirrors the coverage scorecard's per-row HARD KPIs
 // in-binary: every row resolves by its own slug and carries a primary http(s) link, an
 // oracle, and a fak-path. A row that fails this is a matrix that silently stopped being
