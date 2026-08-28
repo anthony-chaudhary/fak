@@ -211,6 +211,8 @@ func dispatchCoreVerbA(name string, args []string) bool {
 		cmdMacFit(args)
 	case "capabilities":
 		os.Exit(runCapabilities(os.Stdout, os.Stderr, args))
+	case "runtime-capabilities":
+		os.Exit(runRuntimeCapabilities(os.Stdout, os.Stderr, args))
 	case "codex":
 		cmdCodex(args)
 	case "codex-mcp-health":
