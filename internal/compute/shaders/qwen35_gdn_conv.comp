@@ -1,0 +1,23 @@
+#version 450
+
+layout(local_size_x = 64) in;
+layout(set=0,binding=0) readonly buffer Mixed { float mixed[]; };
+layout(set=0,binding=1) readonly buffer Weight { float weight[]; };
+layout(set=0,binding=2) buffer State { float state[]; };
+layout(set=0,binding=3) writeonly buffer Out { float outv[]; };
+layout(push_constant) uniform PC { int tokens; int convDim; int kernel; } pc;
+
+void main() {
+    int c = int(gl_GlobalInvocationID.x);
+    if (c >= pc.convDim) return;
+    int hist = pc.kernel - 1;
+    for (int t = 0; t < pc.tokens; ++t) {
+        float sum = mixed[t * pc.convDim + c] * weight[c * pc.kernel + hist];
+        for (int k = 0; k < hist; ++k)
+            sum += state[k * pc.convDim + c] * weight[c * pc.kernel + k];
+        for (int k = 0; k + 1 < hist; ++k)
+            state[k * pc.convDim + c] = state[(k + 1) * pc.convDim + c];
+        if (hist > 0) state[(hist - 1) * pc.convDim + c] = mixed[t * pc.convDim + c];
+        outv[t * pc.convDim + c] = sum / (1.0 + exp(-sum));
+    }
+}
