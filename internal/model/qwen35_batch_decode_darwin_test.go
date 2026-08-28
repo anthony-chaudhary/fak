@@ -35,7 +35,7 @@ func qwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T, active []bool) {
 	cfg.QKNormEps = 3e-5
 	m := NewSynthetic(cfg)
 	m.Quantize()
-	fillQ4KMajority(t, m, cfg)
+	fillQwen35BatchQ4KFixture(t, m, cfg)
 	t.Cleanup(func() {
 		m.releaseMetalQ8Residency()
 		releaseMetalQ4KResidency(m)
@@ -99,6 +99,16 @@ func qwen35HybridQ4KStepBatchActiveMatchesSerial(t *testing.T, active []bool) {
 			t.Fatal("inactive lane state mutated")
 		}
 	}
+}
+
+// fillQwen35BatchQ4KFixture adds the resident output head required by the
+// production batch preflight. fillQ4KMajority intentionally covers projection
+// weights only; serial Q4_K decode can use another resident head format, while
+// the native B-row path requires one Q4_K head for its shared final dispatch.
+func fillQwen35BatchQ4KFixture(t *testing.T, m *Model, cfg Config) {
+	t.Helper()
+	fillQ4KMajority(t, m, cfg)
+	fillQ4KW(t, m, [][2]any{{"model.embed_tokens.weight", cfg.VocabSize}}, 9074)
 }
 
 func qwen35BatchCaseName(active []bool) string {
@@ -204,18 +214,15 @@ func qwen35BatchCompareSession(t *testing.T, lane int, want, got *Session) {
 		if !cfg.isLinearAttnLayer(l) {
 			continue
 		}
-		host := want.Cache.linear.layer(cfg, l)
-		snap := got.qwen35HAL.sequenceBackend.(qwen35GDNSequenceSnapshotter)
-		c, r, e := snap.SnapshotQwen35GDNAuxState(got.qwen35HAL.sequenceLayers[l])
-		if e != nil {
-			t.Fatal(e)
+		wantSnap := want.qwen35HAL.sequenceBackend.(qwen35GDNSequenceSnapshotter)
+		wc, wr, err := wantSnap.SnapshotQwen35GDNAuxState(want.qwen35HAL.sequenceLayers[l])
+		if err != nil {
+			t.Fatal(err)
 		}
-		var wc, wr []float32
-		for _, x := range host.conv {
-			wc = append(wc, x...)
-		}
-		for _, x := range host.recurrent {
-			wr = append(wr, x...)
+		gotSnap := got.qwen35HAL.sequenceBackend.(qwen35GDNSequenceSnapshotter)
+		c, r, err := gotSnap.SnapshotQwen35GDNAuxState(got.qwen35HAL.sequenceLayers[l])
+		if err != nil {
+			t.Fatal(err)
 		}
 		assertCosineAtLeast(t, "conv", wc, c, Qwen35GDNParityCosineMin)
 		assertMaxAbsAtMost(t, "conv", wc, c, 2e-4)
@@ -235,6 +242,6 @@ func NewQwen35HybridQ4KMetalFixture(t *testing.T) *Model {
 	cfg.QKNormEps = 3e-5
 	m := NewSynthetic(cfg)
 	m.Quantize()
-	fillQ4KMajority(t, m, cfg)
+	fillQwen35BatchQ4KFixture(t, m, cfg)
 	return m
 }
