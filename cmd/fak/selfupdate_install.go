@@ -88,8 +88,8 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	// A per-invocation temp dir under the OS temp root satisfies both. BuildDirName encodes
 	// our PID so a future run's reaper can tell a live build from a leaked corpse.
 	buildDir := filepath.Join(os.TempDir(), selfinstall.BuildDirName(os.Getpid()))
-	stopHeartbeat := startSelfUpdateHeartbeat(30, "preparing pristine origin/main worktree")
-	_, cleanup, perr := selfinstall.PrepareOrigin(ctx, selfinstall.RealRunner, repoRoot, "origin/main", buildDir)
+	stopHeartbeat := startSelfUpdateHeartbeat(30, "preparing pristine selected-commit worktree")
+	_, cleanup, perr := prepareSelfUpdateAttempt(ctx, selfinstall.RealRunner, repoRoot, headRev, buildDir)
 	stopHeartbeat()
 	if perr != nil {
 		fmt.Fprintln(os.Stderr, "self-update:", perr)
@@ -127,10 +127,7 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	res := selfinstall.Install(ctx, selfUpdateGateRunner, func(source, _ string) error {
 		candidate = source
 		return nil
-	}, selfinstall.Options{
-		RepoRoot: buildDir,
-		Target:   installTarget,
-	})
+	}, selfUpdateAttemptOptions(buildDir, installTarget, headRev))
 	if !res.Installed || candidate == "" {
 		detail := string(res.Stage) + ": " + res.Detail
 		if candidate == "" && res.Installed {
@@ -227,4 +224,24 @@ func performSelfUpdate(repoRoot, headRev string, target *string, companionPaths 
 	}
 	emitSelfUpdateOutcome(outcomeInstalled, installTarget, res.Detail)
 
+}
+
+// prepareSelfUpdateAttempt materializes the immutable commit selected by the admission
+// fetch. Passing origin/main here would recreate the TOCTOU window where that mutable ref
+// can advance between selection and build; a full commit also tells PrepareOrigin that no
+// second fetch is needed for this transaction.
+func prepareSelfUpdateAttempt(ctx context.Context, runner selfinstall.Runner, repoRoot, expectedCommit, buildDir string) (string, func(), error) {
+	expectedCommit = strings.TrimSpace(expectedCommit)
+	if !isFullGitCommit(expectedCommit) {
+		return "", func() {}, fmt.Errorf("self-update: selected revision is not a full 40-hex commit")
+	}
+	return selfinstall.PrepareOrigin(ctx, runner, repoRoot, expectedCommit, buildDir)
+}
+
+func selfUpdateAttemptOptions(buildDir, installTarget, expectedCommit string) selfinstall.Options {
+	return selfinstall.Options{
+		RepoRoot:       buildDir,
+		Target:         installTarget,
+		ExpectedCommit: strings.TrimSpace(expectedCommit),
+	}
 }

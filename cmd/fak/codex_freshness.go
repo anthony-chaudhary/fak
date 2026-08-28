@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
@@ -58,25 +61,32 @@ var (
 		}
 		return codexFreshnessInspection{Assessment: assessment}
 	}
-	codexFreshnessUpdate = func(root, executable string) error {
+	codexFreshnessUpdate = func(root, executable string) (string, error) {
 		cmd := exec.Command(executable, codexFreshnessSelfUpdateArgs(root, executable)...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-		return cmd.Run()
+		var receipt bytes.Buffer
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, &receipt, os.Stderr
+		if err := cmd.Run(); err != nil {
+			return "", err
+		}
+		return codexFreshnessInstalledRevision(receipt.Bytes(), executable)
 	}
-	codexFreshnessReexec = func(executable string, argv []string) error {
-		cmd := exec.Command(executable, argv[1:]...)
-		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-		cmd.Env = append(os.Environ(), codexFreshnessReexecEnv+"=1")
-		return cmd.Run()
-	}
-	codexFreshnessStatus = func() *codexStartupStatus {
+	codexFreshnessReexec    = runCodexFreshnessReexec
+	codexFreshnessParentPID = os.Getppid
+	codexFreshnessStatus    = func() *codexStartupStatus {
 		return newCodexStartupStatus(os.Stderr, guardFdIsTerminal(int(os.Stderr.Fd())))
 	}
 	codexFreshnessResolveCheckout = codexFreshnessCheckout
 )
 
 func codexFreshnessSelfUpdateArgs(root, executable string) []string {
-	return []string{"self-update", "--root", root, "--target", executable}
+	return []string{"self-update", "--json", "--root", root, "--target", executable}
+}
+
+func runCodexFreshnessReexec(executable string, argv []string, expectedCommit string) error {
+	cmd := exec.Command(executable, argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Env = codexFreshnessReexecEnvironment(os.Environ(), expectedCommit, os.Getpid())
+	return cmd.Run()
 }
 
 type codexStartupStatus struct {
@@ -149,20 +159,31 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 
 	switch inspection.Assessment.Verdict {
 	case codexFreshnessFresh:
+		consumeCodexFreshnessReexecMarker()
 		return filtered, 0, false
 	case codexFreshnessBehind:
 		if os.Getenv(codexFreshnessReexecEnv) != "" {
+			// The update attempt is linearized at the commit selected before its build.
+			// origin/main may legitimately advance while that attempt is in flight. Admit
+			// only the immediate child whose clean running stamp exactly matches that
+			// selected commit; the next ordinary launch has no marker and observes the new
+			// tip normally. A marker without an exact full commit never weakens admission.
+			if codexFreshnessMatchesReexecTarget(inspection.Assessment) {
+				consumeCodexFreshnessReexecMarker()
+				return filtered, 0, false
+			}
 			fmt.Fprintln(os.Stderr, "fak codex: freshness admission refused: updated launcher is still stale (re-exec suppressed)")
 			return nil, 1, true
 		}
 		status.Update(fmt.Sprintf("updating launcher %s -> %s at %s", running, target, executable))
-		if err := codexFreshnessUpdate(root, executable); err != nil {
+		installedCommit, err := codexFreshnessUpdate(root, executable)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: self-update failed: %v\n", err)
 			return nil, 1, true
 		}
-		status.Update(fmt.Sprintf("launching updated build %s from %s", target, executable))
+		status.Update(fmt.Sprintf("launching updated build %s from %s", shortFreshnessID(installedCommit), executable))
 		argv := append([]string{executable, "codex"}, filtered...)
-		if err := codexFreshnessReexec(executable, argv); err != nil {
+		if err := codexFreshnessReexec(executable, argv, installedCommit); err != nil {
 			fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: re-exec failed: %v\n", err)
 			return nil, 1, true
 		}
@@ -171,6 +192,89 @@ func runCodexFreshnessAdmission(args []string) ([]string, int, bool) {
 		fmt.Fprintf(os.Stderr, "fak codex: freshness admission refused: %s; use --freshness-gate off only as an explicit override\n", inspection.Assessment.Detail)
 		return nil, 1, true
 	}
+}
+
+func codexFreshnessMatchesReexecTarget(assessment codexFreshnessAssessment) bool {
+	expected, parentPID, ok := parseCodexFreshnessReexecMarker(os.Getenv(codexFreshnessReexecEnv))
+	if !ok || parentPID != codexFreshnessParentPID() {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(assessment.RunningCommit), expected)
+}
+
+func consumeCodexFreshnessReexecMarker() {
+	_ = os.Unsetenv(codexFreshnessReexecEnv)
+}
+
+func codexFreshnessInstalledRevision(data []byte, executable string) (string, error) {
+	var receipt selfUpdateReceipt
+	if err := json.Unmarshal(data, &receipt); err != nil {
+		return "", fmt.Errorf("decode self-update receipt: %w", err)
+	}
+	if receipt.Schema != selfUpdateReceiptSchema || receipt.SchemaVersion != 1 {
+		return "", fmt.Errorf("self-update returned an unexpected receipt schema")
+	}
+	if receipt.Status != "updated" {
+		return "", fmt.Errorf("self-update receipt status is %q, want updated", receipt.Status)
+	}
+	if receipt.Changed < 1 || receipt.NewRevision == nil || !isFullGitCommit(strings.TrimSpace(*receipt.NewRevision)) {
+		return "", fmt.Errorf("self-update receipt does not attest an installed full commit")
+	}
+	wantTarget := filepath.Clean(executable)
+	primaryMatched := false
+	for _, target := range receipt.Targets {
+		if target.Role == "primary" && strings.EqualFold(filepath.Clean(target.Path), wantTarget) {
+			primaryMatched = true
+			break
+		}
+	}
+	if !primaryMatched {
+		return "", fmt.Errorf("self-update receipt does not attest the requested primary target")
+	}
+	return strings.ToLower(strings.TrimSpace(*receipt.NewRevision)), nil
+}
+
+func codexFreshnessReexecEnvironment(base []string, expectedCommit string, parentPID int) []string {
+	// This is a one-generation lifecycle guard, not a same-user security boundary: an
+	// operator who controls this process's environment can already pass the documented
+	// --freshness-gate=off escape. The exact commit + direct-parent binding prevents stale
+	// inherited markers and nested fak launches from accidentally reusing the admission.
+	env := make([]string, 0, len(base)+1)
+	for _, entry := range base {
+		key := entry
+		if i := strings.IndexByte(entry, '='); i >= 0 {
+			key = entry[:i]
+		}
+		if strings.EqualFold(strings.TrimSpace(key), codexFreshnessReexecEnv) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, codexFreshnessReexecEnv+"="+strings.TrimSpace(expectedCommit)+":"+strconv.Itoa(parentPID))
+}
+
+func parseCodexFreshnessReexecMarker(marker string) (string, int, bool) {
+	commit, pidText, ok := strings.Cut(strings.TrimSpace(marker), ":")
+	if !ok || !isFullGitCommit(commit) {
+		return "", 0, false
+	}
+	pid, err := strconv.Atoi(pidText)
+	if err != nil || pid < 1 {
+		return "", 0, false
+	}
+	return strings.ToLower(commit), pid, true
+}
+
+func isFullGitCommit(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func parseCodexFreshnessMode(args []string) ([]string, bool, error) {

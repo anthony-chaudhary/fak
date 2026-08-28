@@ -5,17 +5,148 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anthony-chaudhary/fak/internal/binstamp"
+	"github.com/anthony-chaudhary/fak/internal/selfinstall"
 	"github.com/anthony-chaudhary/fak/internal/versionskew"
 )
 
 const selfUpdateProbeHelperEnv = "GO_WANT_SELFUPDATE_PROBE_HELPER"
 const selfUpdateProbeHelperRev = "1234567890abcdef1234567890abcdef12345678"
+
+func TestSelfUpdateAttemptPinsSelectionAcrossMovingOrigin(t *testing.T) {
+	const (
+		selected = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		advanced = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+	repoRoot := t.TempDir()
+	buildDir := filepath.Join(t.TempDir(), "build")
+	liveRef, addedRef, fetches := advanced, "", 0
+	runner := func(_ context.Context, _, name string, args ...string) (string, bool) {
+		if name != "git" {
+			return "unexpected command", false
+		}
+		switch {
+		case len(args) >= 1 && args[0] == "fetch":
+			fetches++
+			return "", true
+		case len(args) == 5 && args[0] == "worktree" && args[1] == "add":
+			addedRef = args[4]
+			if err := os.MkdirAll(args[3], 0o755); err != nil {
+				return err.Error(), false
+			}
+			return "", true
+		case len(args) >= 2 && args[0] == "worktree" && args[1] == "remove":
+			_ = os.RemoveAll(args[len(args)-1])
+			return "", true
+		case len(args) >= 2 && args[0] == "worktree" && args[1] == "prune":
+			return "", true
+		default:
+			return "unexpected git command", false
+		}
+	}
+
+	dir, cleanup, err := prepareSelfUpdateAttempt(context.Background(), runner, repoRoot, selected, buildDir)
+	if err != nil {
+		t.Fatalf("prepare selected attempt: %v", err)
+	}
+	defer cleanup()
+	if dir != buildDir || liveRef != advanced || addedRef != selected || fetches != 0 {
+		t.Fatalf("dir=%q live origin=%s worktree ref=%s fetches=%d, want dir=%q live origin B=%s immutable A=%s with no second fetch", dir, liveRef, addedRef, fetches, buildDir, advanced, selected)
+	}
+	opts := selfUpdateAttemptOptions(buildDir, filepath.Join(repoRoot, "fak.exe"), selected)
+	if opts.ExpectedCommit != selected {
+		t.Fatalf("install expected commit=%q, want selected attempt %q", opts.ExpectedCommit, selected)
+	}
+	// Keep the compile-time contract explicit: the production options are the gated
+	// selfinstall options whose source/provenance mismatch refuses before build or swap.
+	var _ selfinstall.Options = opts
+}
+
+func TestSelfUpdateAttemptRejectsUnpinnedSelection(t *testing.T) {
+	called := false
+	runner := func(context.Context, string, string, ...string) (string, bool) {
+		called = true
+		return "", true
+	}
+	if _, _, err := prepareSelfUpdateAttempt(context.Background(), runner, t.TempDir(), "", filepath.Join(t.TempDir(), "build")); err == nil {
+		t.Fatal("empty selection fell back to mutable origin/main")
+	}
+	if called {
+		t.Fatal("invalid selection reached Git instead of failing closed")
+	}
+}
+
+func TestSelfUpdateAttemptRealGitPinsSelectionAcrossMovingOrigin(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for moving-ref acceptance")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	remote, seed, clone := filepath.Join(root, "remote.git"), filepath.Join(root, "seed"), filepath.Join(root, "clone")
+	mustSelfUpdateGit(t, ctx, root, "init", "--bare", remote)
+	mustSelfUpdateGit(t, ctx, root, "init", seed)
+	mustSelfUpdateGit(t, ctx, seed, "config", "user.email", "fak-test@example.invalid")
+	mustSelfUpdateGit(t, ctx, seed, "config", "user.name", "FAK Test")
+	mustSelfUpdateGit(t, ctx, seed, "checkout", "-b", "main")
+	tracked := filepath.Join(seed, "tracked.txt")
+	if err := os.WriteFile(tracked, []byte("A\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustSelfUpdateGit(t, ctx, seed, "add", "tracked.txt")
+	mustSelfUpdateGit(t, ctx, seed, "commit", "-m", "A")
+	mustSelfUpdateGit(t, ctx, seed, "remote", "add", "origin", remote)
+	mustSelfUpdateGit(t, ctx, seed, "push", "-u", "origin", "main")
+	mustSelfUpdateGit(t, ctx, root, "clone", "--branch", "main", remote, clone)
+	selected := mustSelfUpdateGit(t, ctx, clone, "rev-parse", "origin/main")
+
+	if err := os.WriteFile(tracked, []byte("B\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustSelfUpdateGit(t, ctx, seed, "add", "tracked.txt")
+	mustSelfUpdateGit(t, ctx, seed, "commit", "-m", "B")
+	mustSelfUpdateGit(t, ctx, seed, "push", "origin", "main")
+	advanced := mustSelfUpdateGit(t, ctx, seed, "rev-parse", "HEAD")
+	if selected == advanced {
+		t.Fatal("fixture did not advance remote from A to B")
+	}
+	// Advance the clone's observation before the transaction. The pinned attempt must not
+	// fetch again and must still materialize the already-selected A.
+	mustSelfUpdateGit(t, ctx, clone, "fetch", "origin", "--quiet")
+
+	buildDir := filepath.Join(root, "selected-worktree")
+	dir, cleanup, err := prepareSelfUpdateAttempt(ctx, selfinstall.RealRunner, clone, selected, buildDir)
+	if err != nil {
+		t.Fatalf("prepare immutable A after remote advanced to B: %v", err)
+	}
+	defer cleanup()
+	if got := mustSelfUpdateGit(t, ctx, clone, "rev-parse", "origin/main"); got != advanced {
+		t.Fatalf("fixture fetch did not expose moving origin/main B before pinned prepare: got %s want %s", got, advanced)
+	}
+	if got := mustSelfUpdateGit(t, ctx, dir, "rev-parse", "HEAD"); got != selected {
+		t.Fatalf("prepared worktree followed mutable ref: got %s want immutable A %s", got, selected)
+	}
+	if got := mustSelfUpdateGit(t, ctx, dir, "status", "--porcelain"); got != "" {
+		t.Fatalf("prepared selected worktree is dirty: %q", got)
+	}
+}
+
+func mustSelfUpdateGit(t *testing.T, ctx context.Context, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
 
 func init() {
 	if os.Getenv(selfUpdateProbeHelperEnv) != "1" {
