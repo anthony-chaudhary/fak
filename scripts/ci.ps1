@@ -143,7 +143,7 @@ if ($null -ne $py) {
     & $py "tools/cuda_abi_parity.py" --check
     if ($LASTEXITCODE -ne 0) { exit 1 }
     Write-Host "== cuda architecture matrix =="
-    & $py "tools/cuda_arch_matrix.py"
+    go test ./internal/cudaarch
     if ($LASTEXITCODE -ne 0) { exit 1 }
 } else {
     Write-Host "== index-sync + repo-hygiene (warn): python not found; gates skipped =="

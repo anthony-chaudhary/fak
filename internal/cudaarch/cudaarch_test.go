@@ -10,6 +10,7 @@ import (
 var fixtureFiles = []string{
 	"internal/compute/cuda_arch.txt",
 	"internal/compute/build_cuda.sh",
+	"scripts/ci.ps1",
 	"tools/build_cuda_windows.ps1",
 	"Dockerfile.cuda",
 	"docs/cuda-dev.md",
@@ -61,6 +62,22 @@ func TestCurrentTreeIsValid(t *testing.T) {
 	}
 }
 
+func TestEntrypointsUseGoValidator(t *testing.T) {
+	root := fixture(t)
+	for _, rel := range []string{"internal/compute/build_cuda.sh", "scripts/ci.ps1"} {
+		contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(contents)
+		if strings.Contains(text, "tools/cuda_arch_matrix.py") {
+			t.Errorf("%s still invokes retired Python validator", rel)
+		}
+		if !strings.Contains(text, "go test ./internal/cudaarch") {
+			t.Errorf("%s does not invoke the Go CUDA architecture validator", rel)
+		}
+	}
+}
 func TestRejectsMissingSM120(t *testing.T) {
 	root := fixture(t)
 	replaceFixture(t, root, "internal/compute/cuda_arch.txt", "sm_120\n", "")
