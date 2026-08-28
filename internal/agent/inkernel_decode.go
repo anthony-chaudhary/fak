@@ -405,17 +405,19 @@ type decodeLane struct {
 }
 
 type nativeInferenceMeasurement struct {
-	startedAt                  time.Time
-	tokenIDs                   []int
-	logprobs                   []float64
-	ttftS                      float64
-	inferenceDisabled          bool
-	traceNow                   func() time.Time
-	traceStartedAt             time.Time
-	traceEvents                []NativeDecodeTraceEvent
-	decodeTokenIDsEnabled      bool
-	decodeTokenIDs             []int
-	qwen35MetalForwardSequence model.Qwen35MetalForwardSequenceReceipt
+	startedAt                           time.Time
+	tokenIDs                            []int
+	logprobs                            []float64
+	ttftS                               float64
+	inferenceDisabled                   bool
+	traceNow                            func() time.Time
+	traceStartedAt                      time.Time
+	traceEvents                         []NativeDecodeTraceEvent
+	decodeTokenIDsEnabled               bool
+	decodeTokenIDs                      []int
+	qwen35MetalForwardSequence          model.Qwen35MetalForwardSequenceReceipt
+	cudaImmutableWeightUploadsBefore    NativeCUDAImmutableWeightUploadCounters
+	cudaImmutableWeightUploadsAvailable bool
 }
 
 func (m *nativeInferenceMeasurement) reset() {
@@ -477,6 +479,27 @@ func (m *nativeInferenceMeasurement) recordDecodeTrace(tokenIndex, tokenID int) 
 		}
 		m.decodeTokenIDs = append(m.decodeTokenIDs, tokenID)
 	}
+	return nil
+}
+
+func (m *nativeInferenceMeasurement) recordForwardTiming(tokenIndex int, kind string, activeLanes int, duration time.Duration) error {
+	if m == nil || m.traceNow == nil {
+		return nil
+	}
+	if duration < 0 {
+		return fmt.Errorf("native decode forward clock moved backwards at token %d", tokenIndex)
+	}
+	if tokenIndex <= 0 || tokenIndex > len(m.traceEvents) || m.traceEvents[tokenIndex-1].TokenIndex != tokenIndex {
+		return fmt.Errorf("native decode forward token index %d has no committed trace event", tokenIndex)
+	}
+	if activeLanes <= 0 || (kind != NativeForwardSessionStep && kind != NativeForwardStepBatchActive) {
+		return fmt.Errorf("native decode forward token %d has invalid kind/active lanes %q/%d", tokenIndex, kind, activeLanes)
+	}
+	event := &m.traceEvents[tokenIndex-1]
+	if event.Forward != nil {
+		return fmt.Errorf("native decode forward token %d already recorded", tokenIndex)
+	}
+	event.Forward = &NativeForwardTiming{Kind: kind, DurationNS: duration.Nanoseconds(), ActiveLanes: activeLanes}
 	return nil
 }
 
@@ -566,7 +589,16 @@ func inKernelDecodeSerial(ctx context.Context, ln *decodeLane) {
 		if !advance {
 			return
 		}
+		if ln.measurement == nil || ln.measurement.traceNow == nil {
+			ln.logits = ln.s.Step(next)
+			continue
+		}
+		started := ln.measurement.traceNow()
 		ln.logits = ln.s.Step(next)
+		if err := ln.measurement.recordForwardTiming(ln.gen, NativeForwardSessionStep, 1, ln.measurement.traceNow().Sub(started)); err != nil {
+			ln.err, ln.done = err, true
+			return
+		}
 	}
 }
 
@@ -612,11 +644,37 @@ func inKernelDecodeLanesBatched(ctx context.Context, lanes []*decodeLane, m *mod
 		if !anyActive {
 			return
 		}
+		activeLanes := 0
+		var forwardNow func() time.Time
+		for i, isActive := range active {
+			if !isActive {
+				continue
+			}
+			activeLanes++
+			if forwardNow == nil && lanes[i].measurement != nil {
+				forwardNow = lanes[i].measurement.traceNow
+			}
+		}
+		var forwardStarted time.Time
+		if forwardNow != nil {
+			forwardStarted = forwardNow()
+		}
 		out, panels, macs, probed := runQwenSharedReceiptProbe(bs, ids, active)
 		if !probed {
 			out = bs.StepBatchActive(ids, active)
 			panels = bs.LastStepSharedPanels()
 			macs = bs.LastStepMACs()
+		}
+		if forwardNow != nil {
+			duration := forwardNow().Sub(forwardStarted)
+			for i, isActive := range active {
+				if !isActive {
+					continue
+				}
+				if err := lanes[i].measurement.recordForwardTiming(lanes[i].gen, NativeForwardStepBatchActive, activeLanes, duration); err != nil {
+					lanes[i].err, lanes[i].done = err, true
+				}
+			}
 		}
 		sharedPanels += panels
 		sharedMACs += macs

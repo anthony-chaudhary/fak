@@ -79,6 +79,9 @@ func TestNativeInferenceReceiptProductionPath(t *testing.T) {
 	if receipt.Qwen35MetalForwardSequence != nil {
 		t.Fatalf("CPU receipt acquired Metal sequence evidence: %+v", receipt.Qwen35MetalForwardSequence)
 	}
+	if receipt.CUDAImmutableWeightUploads != nil {
+		t.Fatalf("CPU receipt acquired CUDA upload evidence: %+v", receipt.CUDAImmutableWeightUploads)
+	}
 }
 
 func TestNativeInferenceReceiptDefaultWireOmission(t *testing.T) {
@@ -144,11 +147,16 @@ func TestNativeInferenceReceiptJSONShapeUsesChosenTokenArrays(t *testing.T) {
 			GPUMilliseconds:   2.5,
 			WaitMilliseconds:  3.5,
 		},
+		CUDAImmutableWeightUploads: &agent.NativeCUDAImmutableWeightUploadDelta{
+			Before: agent.NativeCUDAImmutableWeightUploadCounters{Calls: 4, TransferBytes: 1024, ResidentBytes: 512},
+			After:  agent.NativeCUDAImmutableWeightUploadCounters{Calls: 5, TransferBytes: 5120, ResidentBytes: 2560},
+			Delta:  agent.NativeCUDAImmutableWeightUploadCounters{Calls: 1, TransferBytes: 4096, ResidentBytes: 2048},
+		},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`, `"qwen35_metal_forward_sequence"`, `"path":"metal/qwen35-gdn-preprojected-sequence-v1"`, `"tokens":32`, `"command_buffers":1`, `"encoders":7`, `"terminal_waits":1`, `"terminal_readbacks":1`, `"committed":true`, `"completed_wait":true`, `"timing_available":true`, `"gpu_milliseconds":2.5`, `"wait_milliseconds":3.5`} {
+	for _, field := range []string{`"native_inference_receipt"`, `"token_ids":[7]`, `"token_logprobs":[-1]`, `"fallback_active":false`, `"qwen35_metal_forward_sequence"`, `"path":"metal/qwen35-gdn-preprojected-sequence-v1"`, `"tokens":32`, `"command_buffers":1`, `"encoders":7`, `"terminal_waits":1`, `"terminal_readbacks":1`, `"committed":true`, `"completed_wait":true`, `"timing_available":true`, `"gpu_milliseconds":2.5`, `"wait_milliseconds":3.5`, `"cuda_immutable_weight_uploads"`, `"before":{"calls":4,"transfer_bytes":1024,"resident_bytes":512}`, `"after":{"calls":5,"transfer_bytes":5120,"resident_bytes":2560}`, `"delta":{"calls":1,"transfer_bytes":4096,"resident_bytes":2048}`} {
 		if !bytes.Contains(raw, []byte(field)) {
 			t.Fatalf("receipt JSON %s missing %s", raw, field)
 		}

@@ -414,10 +414,12 @@ type Completion struct {
 }
 
 const (
-	NativeDecodeTraceSchema    = "fak.native-decode-trace/1"
-	NativeDecodeTraceEngine    = "fak-native"
-	NativeDecodeTokenIDsSchema = "fak.native-decode-token-ids/1"
-	NativeDecodeTokenIDsEngine = "fak-native"
+	NativeDecodeTraceSchema      = "fak.native-decode-trace/1"
+	NativeDecodeTraceEngine      = "fak-native"
+	NativeDecodeTokenIDsSchema   = "fak.native-decode-token-ids/1"
+	NativeDecodeTokenIDsEngine   = "fak-native"
+	NativeForwardSessionStep     = "session_step"
+	NativeForwardStepBatchActive = "step_batch_active"
 )
 
 // NativeDecodeTrace is the versioned, engine-authored timeline of generated-token
@@ -431,8 +433,18 @@ type NativeDecodeTrace struct {
 // NativeDecodeTraceEvent records one non-stop generated token after it has been
 // emitted and counted. TokenIndex is 1-based and consecutive within the attempt.
 type NativeDecodeTraceEvent struct {
-	TokenIndex int   `json:"token_index"`
-	ElapsedNS  int64 `json:"elapsed_ns"`
+	TokenIndex int                  `json:"token_index"`
+	ElapsedNS  int64                `json:"elapsed_ns"`
+	Forward    *NativeForwardTiming `json:"forward,omitempty"`
+}
+
+// NativeForwardTiming binds the direct model-forward wall time to the committed
+// token which caused it. StepBatchActive duration is one shared batch wall time;
+// ActiveLanes records how many lanes shared that call.
+type NativeForwardTiming struct {
+	Kind        string `json:"kind"`
+	DurationNS  int64  `json:"duration_ns"`
+	ActiveLanes int    `json:"active_lanes"`
 }
 
 // NativeDecodeTokenIDs is a lightweight ordered receipt for tokens already
@@ -464,6 +476,25 @@ type NativeInferenceReceipt struct {
 	// Qwen35MetalForwardSequence is present only when the model session produced
 	// terminal evidence for the native whole-sequence Metal graph.
 	Qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt `json:"qwen35_metal_forward_sequence,omitempty"`
+	CUDAImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta    `json:"cuda_immutable_weight_uploads,omitempty"`
+}
+
+// NativeCUDAImmutableWeightUploadCounters is one cumulative CUDA-backend
+// snapshot. TransferBytes counts actual host payload crossing H2D; ResidentBytes
+// counts the resulting device layout, including quant scale sidecars.
+type NativeCUDAImmutableWeightUploadCounters struct {
+	Calls         uint64 `json:"calls"`
+	TransferBytes uint64 `json:"transfer_bytes"`
+	ResidentBytes uint64 `json:"resident_bytes"`
+}
+
+// NativeCUDAImmutableWeightUploadDelta is the request's cumulative-backend
+// observation window. Delta is exact for the parent's deliberately serialized
+// campaign; concurrent requests may contribute to the same backend window.
+type NativeCUDAImmutableWeightUploadDelta struct {
+	Before NativeCUDAImmutableWeightUploadCounters `json:"before"`
+	After  NativeCUDAImmutableWeightUploadCounters `json:"after"`
+	Delta  NativeCUDAImmutableWeightUploadCounters `json:"delta"`
 }
 
 // InKernelQwenQ4KPrefillChunkConfigError is retained by a planner when the

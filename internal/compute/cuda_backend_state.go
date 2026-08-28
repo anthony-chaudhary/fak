@@ -154,6 +154,12 @@ type cudaBackend struct {
 	budgetBytes int64
 	dlUsed      int64
 	managedN    int
+	// immutableWeightUpload* are cumulative backend-authored counters for successful,
+	// cache-eligible immutable matrix H2D misses. They deliberately do not describe
+	// activations, cached hits, refused calls, or current live residency. Guarded by cudaMu.
+	immutableWeightUploadCalls         uint64
+	immutableWeightUploadTransferBytes uint64
+	immutableWeightUploadResidentBytes uint64
 	// faultLatch is the session-scoped device-fault boundary (#6412). This backend owns the
 	// process's single CUDA context (one g_stream, one cudaMu), so backend scope IS session
 	// scope: once a launch/execution/allocation fault is observed here, gated entry points
@@ -192,6 +198,27 @@ func (c *cudaBackend) CUDADebugRestoreResidencyBudget(budgetBytes, dlUsed int64,
 	cudaMu.Lock()
 	defer cudaMu.Unlock()
 	c.budgetBytes, c.dlUsed, c.managedN = budgetBytes, dlUsed, managedN
+}
+
+// CUDAImmutableWeightUploadSnapshot returns cumulative successful immutable-matrix
+// upload-cache misses. The concrete optional method keeps CUDA observability out of
+// the common Backend interface; callers that need it type-assert this exact method.
+func (c *cudaBackend) CUDAImmutableWeightUploadSnapshot() (calls, transferBytes, residentBytes uint64) {
+	cudaMu.Lock()
+	defer cudaMu.Unlock()
+	return c.immutableWeightUploadCalls, c.immutableWeightUploadTransferBytes, c.immutableWeightUploadResidentBytes
+}
+
+// accountImmutableWeightUpload runs only after the last H2D copy for one cache
+// miss succeeds. hp==0 excludes rank-one/transient Upload callers which are not
+// admitted to the immutable pointer cache. Caller holds cudaMu.
+func (c *cudaBackend) accountImmutableWeightUpload(hp uintptr, transferBytes int, buf *cudaBuf) {
+	if hp == 0 || transferBytes <= 0 || buf == nil || buf.ptr == nil {
+		return
+	}
+	c.immutableWeightUploadCalls++
+	c.immutableWeightUploadTransferBytes += uint64(transferBytes)
+	c.immutableWeightUploadResidentBytes += uint64(buf.residentBytes())
 }
 
 // Name returns the registry id of this backend ("cuda").

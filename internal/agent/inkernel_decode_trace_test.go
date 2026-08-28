@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -45,9 +46,15 @@ func runDecodeTrace(t *testing.T, batched, captureTokenIDs bool) decodeTraceRun 
 		traceNow: decodeTraceClock(
 			0,
 			10*time.Nanosecond,
+			11*time.Nanosecond,
+			21*time.Nanosecond,
 			25*time.Nanosecond,
-			25*time.Nanosecond,
-			80*time.Nanosecond,
+			26*time.Nanosecond,
+			46*time.Nanosecond,
+			50*time.Nanosecond,
+			55*time.Nanosecond,
+			85*time.Nanosecond,
+			100*time.Nanosecond,
 		),
 	}
 	if captureTokenIDs {
@@ -87,7 +94,7 @@ func TestInKernelDecodeTraceIndicesTimingAndBatchParity(t *testing.T) {
 	if !eqInts(batched.emitted, serial.emitted) || !eqInts(serialIDs.emitted, serial.emitted) || !eqInts(batchedIDs.emitted, serial.emitted) {
 		t.Fatalf("serial/batched token mismatch: %v/%v/%v/%v", serial.emitted, serialIDs.emitted, batched.emitted, batchedIDs.emitted)
 	}
-	wantElapsed := []int64{10, 25, 25, 80}
+	wantElapsed := []int64{10, 25, 50, 100}
 	for name, trace := range map[string][]NativeDecodeTraceEvent{"serial": serial.events, "serial-ids": serialIDs.events, "batched": batched.events, "batched-ids": batchedIDs.events} {
 		if len(trace) != len(wantElapsed) {
 			t.Fatalf("%s trace length = %d, want %d", name, len(trace), len(wantElapsed))
@@ -95,6 +102,20 @@ func TestInKernelDecodeTraceIndicesTimingAndBatchParity(t *testing.T) {
 		for i, event := range trace {
 			if event.TokenIndex != i+1 || event.ElapsedNS != wantElapsed[i] {
 				t.Fatalf("%s event[%d] = %+v, want token_index=%d elapsed_ns=%d", name, i, event, i+1, wantElapsed[i])
+			}
+			if i == len(trace)-1 {
+				if event.Forward != nil {
+					t.Fatalf("%s final event has nonexistent forward timing: %+v", name, event.Forward)
+				}
+				continue
+			}
+			wantDuration := int64((i + 1) * 10)
+			wantKind := NativeForwardSessionStep
+			if name == "batched" || name == "batched-ids" {
+				wantKind = NativeForwardStepBatchActive
+			}
+			if event.Forward == nil || event.Forward.DurationNS != wantDuration || event.Forward.Kind != wantKind || event.Forward.ActiveLanes != 1 {
+				t.Fatalf("%s event[%d] forward = %+v, want kind=%s duration=%dns active_lanes=1", name, i, event.Forward, wantKind, wantDuration)
 			}
 		}
 	}
@@ -111,6 +132,75 @@ func TestInKernelDecodeTraceIndicesTimingAndBatchParity(t *testing.T) {
 	}
 	if !reflect.DeepEqual(serial.events, serialIDs.events) || !reflect.DeepEqual(batched.events, batchedIDs.events) {
 		t.Fatalf("light token capture changed fake-clock timings: serial=%v/%v batched=%v/%v", serial.events, serialIDs.events, batched.events, batchedIDs.events)
+	}
+}
+
+func TestInKernelDecodeTraceExactCachedLogitsBindsOnlyRealSteps(t *testing.T) {
+	cfg := tinyCfg()
+	cfg.EOSTokenID = -1
+	p := reusePlanner(true, false, cfg)
+	ids := synthIDs(cfg.VocabSize, 24, 9754)
+	decode(p, ids, 0) // prime exact prompt-final logits without a decode step.
+
+	measurement := &nativeInferenceMeasurement{
+		inferenceDisabled: true,
+		traceNow: decodeTraceClock(
+			0,
+			10*time.Nanosecond, 11*time.Nanosecond, 21*time.Nanosecond,
+			30*time.Nanosecond, 31*time.Nanosecond, 51*time.Nanosecond,
+			60*time.Nanosecond,
+		),
+	}
+	gen, _, _, matched, _, _, _, _, err := p.generateReusedContextWithBias(
+		context.Background(), ids, 3, 0, 0, 0, nil, 0, 0, map[int]bool{}, nil, measurement,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gen != 3 || matched != len(ids) {
+		t.Fatalf("exact replay generated/matched = %d/%d, want 3/%d", gen, matched, len(ids))
+	}
+	if len(measurement.traceEvents) != 3 {
+		t.Fatalf("exact replay trace length = %d, want 3", len(measurement.traceEvents))
+	}
+	for i, wantDuration := range []int64{10, 20} {
+		forward := measurement.traceEvents[i].Forward
+		if forward == nil || forward.Kind != NativeForwardSessionStep || forward.DurationNS != wantDuration || forward.ActiveLanes != 1 {
+			t.Fatalf("exact replay event[%d] forward = %+v, want first/steady direct Step duration %dns", i, forward, wantDuration)
+		}
+	}
+	if measurement.traceEvents[2].Forward != nil {
+		t.Fatalf("exact replay final event has nonexistent Step: %+v", measurement.traceEvents[2].Forward)
+	}
+}
+
+func TestInKernelDecodeTraceBatchedForwardIsOneSharedWallTime(t *testing.T) {
+	cfg := tinyCfg()
+	cfg.EOSTokenID = -1
+	m := model.NewSynthetic(cfg)
+	clocks := [][]time.Duration{
+		{0, 10 * time.Nanosecond, 11 * time.Nanosecond, 31 * time.Nanosecond, 40 * time.Nanosecond},
+		{0, 12 * time.Nanosecond, 42 * time.Nanosecond},
+	}
+	lanes := make([]*decodeLane, len(clocks))
+	for i := range lanes {
+		lanes[i], _ = newDecodeLaneOver(m, synthIDs(cfg.VocabSize, 8+i, uint64(97540+i)), 2, 0)
+		lanes[i].measurement = &nativeInferenceMeasurement{inferenceDisabled: true, traceNow: decodeTraceClock(clocks[i]...)}
+		lanes[i].measurement.startDecodeTrace()
+	}
+	inKernelDecodeLanesBatched(context.Background(), lanes, m, false)
+
+	for i, lane := range lanes {
+		if len(lane.measurement.traceEvents) != 2 {
+			t.Fatalf("lane %d trace length = %d, want 2", i, len(lane.measurement.traceEvents))
+		}
+		forward := lane.measurement.traceEvents[0].Forward
+		if forward == nil || forward.Kind != NativeForwardStepBatchActive || forward.DurationNS != 20 || forward.ActiveLanes != 2 {
+			t.Fatalf("lane %d shared forward = %+v, want one 20ns StepBatchActive wall time across 2 lanes", i, forward)
+		}
+		if lane.measurement.traceEvents[1].Forward != nil {
+			t.Fatalf("lane %d final event has nonexistent batch forward: %+v", i, lane.measurement.traceEvents[1].Forward)
+		}
 	}
 }
 
@@ -225,8 +315,11 @@ func TestInKernelDecodeTraceOOMRetryDropsFirstAttempt(t *testing.T) {
 		decodeTokenIDsEnabled: true,
 		decodeTokenIDs:        make([]int, 0, 3),
 		traceNow: decodeTraceClock(
-			0, 10*time.Nanosecond,
-			100*time.Nanosecond, 110*time.Nanosecond, 120*time.Nanosecond, 130*time.Nanosecond,
+			0, 10*time.Nanosecond, 11*time.Nanosecond,
+			100*time.Nanosecond,
+			110*time.Nanosecond, 111*time.Nanosecond, 121*time.Nanosecond,
+			130*time.Nanosecond, 131*time.Nanosecond, 141*time.Nanosecond,
+			150*time.Nanosecond,
 		),
 	}
 	be := &decodeTraceOOMBackend{Backend: compute.Default(), measurement: measurement}
@@ -247,11 +340,56 @@ func TestInKernelDecodeTraceOOMRetryDropsFirstAttempt(t *testing.T) {
 		t.Fatalf("retry state failed=%v gen=%d emitted=%d events=%d, want true/3/3/3", be.failed, res.gen, len(emitted), len(measurement.traceEvents))
 	}
 	for i, event := range measurement.traceEvents {
-		if event.TokenIndex != i+1 || event.ElapsedNS != int64((i+1)*10) {
+		if event.TokenIndex != i+1 || event.ElapsedNS != int64((i+1)*20-10) {
 			t.Fatalf("retry event[%d] = %+v, want clean second-attempt index/timing", i, event)
 		}
 	}
 	if !measurement.inferenceDisabled || cap(measurement.decodeTokenIDs) < 3 || !eqInts(measurement.decodeTokenIDs, emitted) || len(measurement.tokenIDs) != 0 || len(measurement.logprobs) != 0 {
 		t.Fatalf("retry inferenceDisabled/cap/light/full IDs/logprobs = %v/%d/%v/%v/%v, emitted=%v", measurement.inferenceDisabled, cap(measurement.decodeTokenIDs), measurement.decodeTokenIDs, measurement.tokenIDs, measurement.logprobs, emitted)
+	}
+}
+
+type cudaUploadSnapshotBackend struct {
+	compute.Backend
+	once          sync.Once
+	mu            sync.Mutex
+	calls         uint64
+	transferBytes uint64
+	residentBytes uint64
+}
+
+func (b *cudaUploadSnapshotBackend) MatMul(w, x compute.Tensor) compute.Tensor {
+	b.once.Do(func() {
+		b.mu.Lock()
+		b.calls++
+		b.transferBytes += 4096
+		b.residentBytes += 2048
+		b.mu.Unlock()
+	})
+	return b.Backend.MatMul(w, x)
+}
+
+func (b *cudaUploadSnapshotBackend) CUDAImmutableWeightUploadSnapshot() (calls, transferBytes, residentBytes uint64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls, b.transferBytes, b.residentBytes
+}
+
+func TestNativeInferenceReceiptCarriesCumulativeCUDAUploadDelta(t *testing.T) {
+	cfg := tinyConcurrencyConfig()
+	cfg.EOSTokenID = -1
+	m := model.NewSynthetic(cfg)
+	be := &cudaUploadSnapshotBackend{Backend: compute.Default()}
+	p := NewInKernelPlanner(m, loadProbeTok(t), "synthetic-cuda-upload-receipt", false, be, false)
+	comp, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "receipt"}}, nil, WithMaxTokens(3), WithNativeInferenceReceipt(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := comp.NativeInference.CUDAImmutableWeightUploads
+	if got == nil {
+		t.Fatal("native inference receipt omitted available CUDA immutable-weight upload counters")
+	}
+	if got.Before != (NativeCUDAImmutableWeightUploadCounters{}) || got.After != (NativeCUDAImmutableWeightUploadCounters{Calls: 1, TransferBytes: 4096, ResidentBytes: 2048}) || got.Delta != got.After {
+		t.Fatalf("CUDA immutable-weight upload window = %+v, want zero before and exact 1/4096/2048 after+delta", got)
 	}
 }
