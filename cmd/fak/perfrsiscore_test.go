@@ -352,3 +352,164 @@ func TestPerformanceRSIProvenanceRefusals(t *testing.T) {
 		})
 	}
 }
+
+func performanceRSIHardwareTestReceipt(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(fixturePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["hardware"] = map[string]any{
+		"schema": "fak-performance-rsi-hardware/1",
+		"runs": []any{
+			map[string]any{
+				"enqueued_at": "2026-08-28T10:00:00Z", "started_at": "2026-08-28T10:10:00Z",
+				"ended_at": "2026-08-28T11:10:00Z", "requested_device_class": "cuda-l4",
+				"active_utilization": 50.0, "utilization_unit": "percent", "workload_id": "workload-a",
+			},
+			map[string]any{
+				"enqueued_at": "2026-08-28T12:00:00Z", "started_at": "2026-08-28T12:20:00Z",
+				"ended_at": "2026-08-28T15:20:00Z", "requested_device_class": "cuda-h100",
+				"active_utilization": 90.0, "utilization_unit": "percent", "workload_id": "workload-b",
+			},
+		},
+	}
+	for _, raw := range doc["dimensions"].([]any) {
+		d := raw.(map[string]any)
+		if d["id"] == "hardware_utilization" {
+			d["direction"] = "higher"
+			d["unit"] = "percent"
+		}
+	}
+	b, err = json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestPerformanceRSIHardwareAcceptance(t *testing.T) {
+	path := writePerformanceRSILearningTestReceipt(t, performanceRSIHardwareTestReceipt(t))
+	code, out, errText := runPerfRSI(t, "--input", path, "--json")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errText)
+	}
+	var report struct {
+		Dimensions []struct {
+			ID           string   `json:"id"`
+			Source       string   `json:"source"`
+			EvidenceKind string   `json:"evidence_kind"`
+			Current      *float64 `json:"current"`
+		} `json:"dimensions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range report.Dimensions {
+		if d.ID != "hardware_utilization" {
+			continue
+		}
+		if d.Current == nil || *d.Current != 80 {
+			t.Fatalf("hardware_utilization=%v, want 80", d.Current)
+		}
+		if d.Source != "hardware:fak-performance-rsi-hardware/1;queue_delay_seconds_total=1800;queue_delay_seconds_mean=900" ||
+			d.EvidenceKind != "hardware_utilization_receipt" {
+			t.Fatalf("hardware metadata: %+v", d)
+		}
+		return
+	}
+	t.Fatal("missing hardware_utilization")
+}
+
+func TestPerformanceRSIHardwareAllowsBenignLocalNoGPUDeviceClassText(t *testing.T) {
+	var doc map[string]any
+	if err := json.Unmarshal(performanceRSIHardwareTestReceipt(t), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["requested_device_class"] =
+		"simulator-local-no-gpu-compatible"
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writePerformanceRSILearningTestReceipt(t, b)
+	code, out, errText := runPerfRSI(t, "--input", path, "--json")
+	if code != 0 || strings.TrimSpace(out) == "" || errText != "" {
+		t.Fatalf("benign device class rejected: code=%d out=%q err=%q", code, out, errText)
+	}
+}
+
+func TestPerformanceRSIHardwareRejectsTypedLocalNoGPUEvidencePrecisely(t *testing.T) {
+	var doc map[string]any
+	if err := json.Unmarshal(performanceRSIHardwareTestReceipt(t), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["hardware"].(map[string]any)["runs"].([]any)[0].(map[string]any)["terminal_evidence"] =
+		map[string]any{"type": "local-no-gpu"}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writePerformanceRSILearningTestReceipt(t, b)
+	code, out, errText := runPerfRSI(t, "--input", path, "--json")
+	wantErr := "fak performance-rsi-scorecard: hardware run 0 terminal_evidence type " +
+		"\"local-no-gpu\": local-no-GPU is a terminal blocker, not a hardware utilization measurement\n"
+	if code == 0 || out != "" || errText != wantErr {
+		t.Fatalf("typed terminal evidence result: code=%d out=%q err=%q, want err=%q", code, out, errText, wantErr)
+	}
+}
+
+func TestPerformanceRSIHardwareRefusals(t *testing.T) {
+	original := performanceRSIHardwareTestReceipt(t)
+	var base map[string]any
+	if err := json.Unmarshal(original, &base); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		edit func(map[string]any)
+	}{
+		{"schema", func(r map[string]any) { r["schema"] = "unsupported" }},
+		{"missing timestamp", func(r map[string]any) { delete(r["runs"].([]any)[0].(map[string]any), "started_at") }},
+		{"non UTC", func(r map[string]any) {
+			r["runs"].([]any)[0].(map[string]any)["started_at"] = "2026-08-28T10:10:00-07:00"
+		}},
+		{"order", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["ended_at"] = "2026-08-28T10:10:00Z" }},
+		{"unit", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["utilization_unit"] = "%" }},
+		{"device", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["requested_device_class"] = "" }},
+		{"workload", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["workload_id"] = "" }},
+		{"range", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["active_utilization"] = 101.0 }},
+		{"invalid second run", func(r map[string]any) { r["runs"].([]any)[1].(map[string]any)["active_utilization"] = -1.0 }},
+		{"private host", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["host"] = "private-node" }},
+		{"private path", func(r map[string]any) { r["runs"].([]any)[0].(map[string]any)["path"] = "/private/lab" }},
+		{"typed local no GPU", func(r map[string]any) {
+			r["runs"].([]any)[0].(map[string]any)["terminal_evidence"] = map[string]any{"type": "local-no-gpu"}
+		}},
+		{"unsupported terminal evidence", func(r map[string]any) {
+			r["runs"].([]any)[0].(map[string]any)["terminal_evidence"] = map[string]any{"type": "gpu-driver-missing"}
+		}},
+		{"unknown terminal evidence field", func(r map[string]any) {
+			r["runs"].([]any)[0].(map[string]any)["terminal_evidence"] =
+				map[string]any{"type": "local-no-gpu", "host": "private-node"}
+		}},
+		{"strict receipt", func(r map[string]any) { r["private_node"] = "private-node" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			copyJSON, _ := json.Marshal(base)
+			var doc map[string]any
+			_ = json.Unmarshal(copyJSON, &doc)
+			tc.edit(doc["hardware"].(map[string]any))
+			b, _ := json.Marshal(doc)
+			path := writePerformanceRSILearningTestReceipt(t, b)
+			code, out, errText := runPerfRSI(t, "--input", path, "--json")
+			if code == 0 || out != "" || strings.TrimSpace(errText) == "" {
+				t.Fatalf("expected refusal without report: code=%d out=%q err=%q", code, out, errText)
+			}
+		})
+	}
+}
