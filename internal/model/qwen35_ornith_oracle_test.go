@@ -26,10 +26,11 @@ import (
 //     hybrid qwen35 materialization already does.
 //
 // HONEST SCAFFOLD: the real Ornith oracle fixture (HF reference vectors + weights) is NOT
-// present on a CI box, so this test SKIPS with a clear regeneration hint when the fixture
-// directory (or the FAK_ORNITH_ORACLE_DIR override) is absent — it never falsely passes.
-// It turns green only against a real fixture. To regenerate, point the exporter at a tiny
-// qwen3_5 / qwen3_5_moe Ornith checkpoint the way ornithOracleExportHint describes.
+// present on a CI box, so this test SKIPS with a clear regeneration hint when the default
+// fixture directory is absent — it never falsely passes. An explicit FAK_ORNITH_ORACLE_DIR
+// makes the fixture mandatory so a broken witness job fails closed. It turns green only
+// against a real fixture. To regenerate, point the exporter at a tiny qwen3_5 / qwen3_5_moe
+// Ornith checkpoint the way ornithOracleExportHint describes.
 
 // ornithOracleDirEnv overrides the default in-tree fixture dir with an out-of-tree path
 // (e.g. a fixture exported on an artifact node and mounted elsewhere on a verify box).
@@ -127,6 +128,14 @@ func ornithFixtureDir() string {
 	return ornithFixtureDirFrom(os.Getenv(ornithOracleDirEnv), ornithOracleDir)
 }
 
+// ornithMissingFixtureMaySkip distinguishes an optional local witness from an
+// explicitly configured witness job. Once an operator names a fixture path,
+// absence is a broken witness and must fail closed instead of reporting SKIP.
+func ornithMissingFixtureMaySkip() bool {
+	_, configured := os.LookupEnv(ornithOracleDirEnv)
+	return !configured
+}
+
 func ornithFixtureDirFrom(override, defaultDir string) string {
 	if override != "" {
 		return override
@@ -170,15 +179,40 @@ func TestOrnithFixtureDirResolution(t *testing.T) {
 	})
 }
 
+func TestOrnithExplicitFixtureOverrideIsRequired(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestOptionalOrnithOracleForwardMatchesHF$", "-test.count=1")
+	cmd.Env = append(envWithout(cmd.Environ(), ornithOracleDirEnv), ornithOracleDirEnv+"="+missing)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("explicit missing Ornith fixture silently skipped; want failure\n%s", out)
+	}
+	want := "no exported weights in " + missing
+	if !strings.Contains(string(out), want) {
+		t.Fatalf("explicit missing Ornith fixture failed without %q:\n%s", want, out)
+	}
+}
+
+func envWithout(env []string, name string) []string {
+	prefix := name + "="
+	out := make([]string, 0, len(env))
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 // TestOptionalOrnithOracleForwardMatchesHF is the per-size Ornith HF-oracle parity witness.
-// It is OPTIONAL by construction: loadFixtureDir t.Skips cleanly when the gitignored fixture
-// is absent (and under -short), so a CI box with no weights stays green instead of falsely
-// passing. With a real fixture present it asserts the Ornith specifics, then per-layer
-// hidden-state cosine >= 0.9999 and argmax parity at every position via the shared oracle
-// asserter.
+// It is OPTIONAL by default: loadFixtureDir t.Skips cleanly when the gitignored fixture is
+// absent (and under -short), so an unconfigured CI box with no weights stays green instead of
+// falsely passing. FAK_ORNITH_ORACLE_DIR opts into a mandatory witness. With a real fixture
+// present it asserts the Ornith specifics, then per-layer hidden-state cosine >= 0.9999 and
+// argmax parity at every position via the shared oracle asserter.
 func TestOptionalOrnithOracleForwardMatchesHF(t *testing.T) {
 	dir := ornithFixtureDir()
-	m, doc := loadFixtureDir(t, dir, true) // missingIsSkip=true: no fixture -> clean t.Skip, never a pass
+	m, doc := loadFixtureDir(t, dir, ornithMissingFixtureMaySkip())
 	cfg := m.Cfg
 
 	// Ornith is a qwen3_5 / qwen3_5_moe arch (#1026); the hybrid linear-attention axis must
