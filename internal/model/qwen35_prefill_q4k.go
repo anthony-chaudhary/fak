@@ -101,25 +101,30 @@ type qwen35GDNSequenceSnapshotter interface {
 // has not produced a terminal receipt; a committed post-submit failure remains
 // available so callers can distinguish it from the default path.
 type Qwen35MetalForwardSequenceReceipt struct {
-	Path              string  `json:"path"`
-	Available         bool    `json:"available"`
-	Tokens            int     `json:"tokens"`
-	CommandBuffers    int     `json:"command_buffers"`
-	Encoders          int     `json:"encoders"`
-	TerminalWaits     int     `json:"terminal_waits"`
-	TerminalReadbacks int     `json:"terminal_readbacks"`
-	HostUploadBytes   uint64  `json:"host_upload_bytes"`
-	HostReadbackBytes uint64  `json:"host_readback_bytes"`
-	Committed         bool    `json:"committed"`
-	CompletedWait     bool    `json:"completed_wait"`
-	TimingAvailable   bool    `json:"timing_available"`
-	GPUMilliseconds   float64 `json:"gpu_milliseconds"`
-	WaitMilliseconds  float64 `json:"wait_milliseconds"`
+	Path              string                           `json:"path"`
+	Available         bool                             `json:"available"`
+	Tokens            int                              `json:"tokens"`
+	CommandBuffers    int                              `json:"command_buffers"`
+	Encoders          int                              `json:"encoders"`
+	TerminalWaits     int                              `json:"terminal_waits"`
+	TerminalReadbacks int                              `json:"terminal_readbacks"`
+	HostUploadBytes   uint64                           `json:"host_upload_bytes"`
+	HostReadbackBytes uint64                           `json:"host_readback_bytes"`
+	Committed         bool                             `json:"committed"`
+	CompletedWait     bool                             `json:"completed_wait"`
+	TimingAvailable   bool                             `json:"timing_available"`
+	GPUMilliseconds   float64                          `json:"gpu_milliseconds"`
+	WaitMilliseconds  float64                          `json:"wait_milliseconds"`
+	StateIdentity     *Qwen35MetalStateIdentityReceipt `json:"state_identity,omitempty"`
 }
 
 type qwen35MetalForwardSequenceRunner interface {
 	Qwen35MetalForwardSequence(*Session, []int) ([]float32, Qwen35MetalForwardSequenceReceipt, bool, error)
 	Qwen35MetalForwardSequenceReceipt() (Qwen35MetalForwardSequenceReceipt, bool)
+}
+
+type qwen35MetalStateIdentityBinder interface {
+	bindQwen35MetalStateIdentity(Qwen35MetalStateIdentityReceipt)
 }
 
 // EnableQwen35MetalGDNPreprojectedSequence admits the opt-in owner before any
@@ -179,8 +184,29 @@ func (s *Session) FinalizeQwen35MetalGDNPreprojectedSequence() (bool, error) {
 		}
 		snapshots = append(snapshots, qwen35GDNLayerSnapshot{layer: layer, conv: conv, recurrent: recurrent})
 	}
+	var stateIdentity *Qwen35MetalStateIdentityReceipt
+	if s.qwen35MetalStateIdentity != nil {
+		if _, ok := q.sequenceBackend.(qwen35GDNStateSeeder); !ok {
+			return len(snapshots) > 0, s.failQwen35GDNSequence(-1, "state identity accounting", fmt.Errorf("receipt-opted sequence backend cannot seed the finalized GDN owners"))
+		}
+		stateBytes := uint64(0)
+		for _, snapshot := range snapshots {
+			stateBytes += uint64(len(snapshot.conv)+len(snapshot.recurrent)) * 4
+		}
+		receipt, err := s.buildQwen35MetalStateIdentityReceipt(Qwen35MetalStateAuthoritySequence, snapshots, qwen35MetalStateIdentityAccounting{
+			GDNSnapshotOps: len(snapshots), GDNSeedOps: len(snapshots),
+			GDNStateD2HBytes: stateBytes, GDNStateH2DBytes: stateBytes,
+		})
+		if err != nil {
+			return len(snapshots) > 0, s.failQwen35GDNSequence(-1, "state identity", err)
+		}
+		stateIdentity = &receipt
+	}
 	selected, err := s.promoteQwen35MetalGDNDecode(snapshots)
 	if err != nil || selected {
+		if err == nil && selected && stateIdentity != nil {
+			s.installQwen35MetalStateIdentityReceipt(*stateIdentity)
+		}
 		return len(snapshots) > 0, err
 	}
 	// A backend that cannot seed decode owners retains the historical one-time
