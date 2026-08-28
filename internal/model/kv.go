@@ -255,6 +255,10 @@ type Session struct {
 	// Qwen3.5/3.6 linear-attention layer. It is separate from Cache.linear, which is
 	// the legacy CPU/reference object's state and is never consulted by a HAL session.
 	qwen35HAL *qwen35HALState
+	// qwen35MetalStateIdentity is request-observation state only. Keeping it on
+	// Session lets receipt-opted selector-off Metal control runs own an identity
+	// without fabricating a HAL owner or entering prefix snapshots.
+	qwen35MetalStateIdentity *qwen35MetalStateIdentityObservation
 	// halClosed makes Close idempotent and prevents an operation failure from falling
 	// through to the legacy CPU path on a later request. halFailure is the witnessed
 	// backend error re-raised by any attempted reuse of that failed session.

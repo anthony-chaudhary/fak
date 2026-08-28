@@ -44,14 +44,38 @@ type metalQwen35GDNSequenceBackend struct {
 func (b *metalQwen35GDNSequenceBackend) Qwen35MetalForwardSequenceReceipt() (Qwen35MetalForwardSequenceReceipt, bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.forwardReceipt, b.forwardRan
+	receipt := b.forwardReceipt
+	if receipt.StateIdentity != nil {
+		identity := cloneQwen35MetalStateIdentityReceipt(*receipt.StateIdentity)
+		receipt.StateIdentity = &identity
+	}
+	return receipt, b.forwardRan
 }
 
 func (b *metalQwen35GDNSequenceBackend) setForwardReceipt(r Qwen35MetalForwardSequenceReceipt) {
 	b.mu.Lock()
+	if r.StateIdentity != nil {
+		identity := cloneQwen35MetalStateIdentityReceipt(*r.StateIdentity)
+		r.StateIdentity = &identity
+	}
 	b.forwardReceipt = r
 	b.forwardRan = true
 	b.mu.Unlock()
+}
+
+func (b *metalQwen35GDNSequenceBackend) bindQwen35MetalStateIdentity(identity Qwen35MetalStateIdentityReceipt) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.forwardRan || b.forwardReceipt.StateIdentity != nil {
+		return
+	}
+	cloned := cloneQwen35MetalStateIdentityReceipt(identity)
+	b.forwardReceipt.StateIdentity = &cloned
+	// FinishRead accounts the graph's one terminal pack. The GDN finalizer's
+	// existing snapshot/seed transfers are outside GraphReceipt, so fold their
+	// exact bytes into the model-level total only after every operation succeeds.
+	b.forwardReceipt.HostReadbackBytes += identity.GDNStateD2HBytes
+	b.forwardReceipt.HostUploadBytes += identity.GDNStateH2DBytes
 }
 
 func qwen35GraphProjection(g *metalgemm.ProjectionGraph, s *Session, name string, input *metalgemm.GraphResult, quantized map[*metalgemm.GraphResult]*metalgemm.QuantizedGraphResult) (*metalgemm.GraphResult, error) {

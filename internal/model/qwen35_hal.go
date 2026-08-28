@@ -155,7 +155,13 @@ func (q *qwen35HALState) freeSequence() {
 }
 
 func (s *Session) closeQwen35HALState() {
-	if s == nil || s.qwen35HAL == nil {
+	if s == nil {
+		return
+	}
+	// Receipt observation has no execution ownership, but it is session-local and
+	// must not remain readable after Close even for a selector-off control arm.
+	s.qwen35MetalStateIdentity = nil
+	if s.qwen35HAL == nil {
 		return
 	}
 	s.qwen35HAL.free(s.Backend)
