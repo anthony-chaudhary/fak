@@ -1030,7 +1030,7 @@ func Land(root, wtPath, baseSHA, commitMsgFile string, paths []string, verify Ve
 			return Result{OK: false, Reason: err.Error()}
 		}
 	}
-	rc, diff := run(git, wtPath, []string{"diff", diffRef})
+	rc, diff := run(git, wtPath, []string{"diff", "--binary", diffRef})
 	if rc != 0 {
 		return Result{OK: false, Reason: "could not read worktree diff vs " + diffRef + " (git error) — fail open"}
 	}

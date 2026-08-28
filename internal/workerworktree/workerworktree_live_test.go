@@ -149,3 +149,63 @@ func TestLiveLandNewDirectoryContentsAtomically(t *testing.T) {
 		t.Fatalf("worktree witness = %q, %v", got, err)
 	}
 }
+
+// TestLiveLandCommittedBinaryAddition preserves the binary patch payload and
+// full object IDs needed to apply a file that exists only in the worker commit.
+func TestLiveLandCommittedBinaryAddition(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	repo := t.TempDir()
+	run := func(dir string, args ...string) string {
+		c := exec.Command("git", args...)
+		c.Dir = dir
+		out, err := c.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return string(out)
+	}
+	run(repo, "init", "-q", "-b", "main")
+	run(repo, "config", "user.email", "e2e@test")
+	run(repo, "config", "user.name", "e2e")
+	run(repo, "config", "commit.gpgsign", "false")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(repo, "add", "base.txt")
+	run(repo, "commit", "-q", "-m", "base")
+	base := TrunkHeadSHA(repo, nil)
+
+	res := Prepare(repo, "workerworktree", "9821", base, t.TempDir(), nil)
+	if !res.OK {
+		t.Fatalf("prepare: %+v", res)
+	}
+	binaryPath := filepath.Join(res.Path, "proof.png")
+	wantBytes := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0x00, 0xff, 0x10, 0x80}
+	if err := os.WriteFile(binaryPath, wantBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(res.Path, "config", "user.email", "worker@test")
+	run(res.Path, "config", "user.name", "worker")
+	run(res.Path, "config", "commit.gpgsign", "false")
+	run(res.Path, "add", "proof.png")
+	run(res.Path, "commit", "-q", "-m", "fix(workerland): add binary proof (#9821) (fak workerworktree)")
+	workerBlob := strings.TrimSpace(run(res.Path, "rev-parse", "HEAD:proof.png"))
+
+	land := Land(repo, res.Path, base, "", []string{"proof.png"}, nil, nil)
+	if !land.OK || !land.Committed {
+		t.Fatalf("land committed binary addition: %+v", land)
+	}
+	landedBlob := strings.TrimSpace(run(repo, "rev-parse", "HEAD:proof.png"))
+	if landedBlob != workerBlob {
+		t.Fatalf("landed blob = %s, worker blob = %s", landedBlob, workerBlob)
+	}
+	gotBytes, err := os.ReadFile(filepath.Join(repo, "proof.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotBytes) != string(wantBytes) {
+		t.Fatalf("landed bytes = %x, want %x", gotBytes, wantBytes)
+	}
+}
