@@ -465,6 +465,48 @@ func PrepareOwned(root, lane, key, baseSHA, wtRoot string, git GitRunner, owner 
 	return PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot, git, defaultIsolationBackend, owner)
 }
 
+// PrepareOwnedBounded is the launch-facing prepare path. One total budget bounds
+// materialization and readiness checks, and metadata is withheld until the detached
+// checkout is proven complete and clean.
+func PrepareOwnedBounded(root, lane, key, baseSHA, wtRoot string, owner OwnerStamp, budget time.Duration) Result {
+	if budget <= 0 {
+		budget = 2 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+	git := BoundedGitRunner(ctx)
+	base := strings.TrimSpace(baseSHA)
+	revision := "HEAD"
+	if base != "" {
+		revision = base + "^{commit}"
+	}
+	rc, out := run(git, root, []string{"rev-parse", revision})
+	if rc == ReapTimeoutExitCode || ctx.Err() != nil {
+		return prepareTimeoutResult(Path(lane, key, wtRoot), baseSHA, "resolving base", ctx.Err())
+	}
+	if rc == 0 {
+		base = strings.TrimSpace(out)
+	}
+	res := prepareOwnedWithBackend(root, lane, key, base, wtRoot, git, defaultIsolationBackend, owner, true)
+	if !res.OK && res.Path != "" && (res.Code == "PREPARE_TIMEOUT" || ctx.Err() != nil) {
+		cleanupPartialPrepareBounded(root, res.Path)
+	}
+	if ctx.Err() != nil && !res.OK {
+		return prepareTimeoutResult(res.Path, base, "materialization/readiness", ctx.Err())
+	}
+	return res
+}
+
+func prepareTimeoutResult(path, base, phase string, err error) Result {
+	detail := "prepare deadline exceeded"
+	if err != nil {
+		detail = err.Error()
+	}
+	return Result{OK: false, Code: "PREPARE_TIMEOUT", Path: path, BaseSHA: base,
+		Reason: "worker worktree prepare timed out during " + phase + " - no ready receipt emitted",
+		Detail: detail}
+}
+
 // PrepareWithBackend is the injectable form of Prepare.
 func PrepareWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend) Result {
 	return PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot, git, backend, defaultOwnerStamp(lane))
@@ -472,6 +514,10 @@ func PrepareWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, 
 
 // PrepareOwnedWithBackend combines the backend seam with an explicit owner stamp.
 func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp) Result {
+	return prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot, git, backend, owner, false)
+}
+
+func prepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRunner, backend IsolationBackend, owner OwnerStamp, verifyReady bool) Result {
 	if backend == nil {
 		backend = defaultIsolationBackend
 	}
@@ -483,7 +529,17 @@ func PrepareOwnedWithBackend(root, lane, key, baseSHA, wtRoot string, git GitRun
 		res = backend.Materialize(root, lane, key, baseSHA, wtRoot, git)
 	}
 	if !res.OK || res.Path == "" {
+		if verifyReady && res.Path != "" && res.Code == "PREPARE_TIMEOUT" {
+			cleanupPartialPrepare(root, res.Path, git)
+			return prepareTimeoutResult(res.Path, res.BaseSHA, "materialization", fmt.Errorf("%s", res.Detail))
+		}
 		return res
+	}
+	if verifyReady {
+		if ready := verifyPreparedWorktree(res, git); !ready.OK {
+			cleanupPartialPrepare(root, res.Path, git)
+			return ready
+		}
 	}
 	metadataErr := writeOwnerStamp(res.Path, owner)
 	if metadataErr == nil && PoolCap() > 0 && isGitWorktreeBackend(backend) {
@@ -520,6 +576,60 @@ func isolationBackendName(backend IsolationBackend) string {
 	default:
 		return gitWorktreeBackendName
 	}
+}
+
+func verifyPreparedWorktree(res Result, git GitRunner) Result {
+	fail := func(code, reason, detail string) Result {
+		return Result{OK: false, Code: code, Path: res.Path, BaseSHA: res.BaseSHA,
+			Reason: reason + " - no ready receipt emitted", Detail: detail}
+	}
+	rc, out := run(git, res.Path, []string{"rev-parse", "HEAD"})
+	if rc == ReapTimeoutExitCode {
+		return fail("PREPARE_TIMEOUT", "worker worktree prepare timed out during HEAD verification", tail(out, 500))
+	}
+	if rc != 0 || strings.TrimSpace(out) != strings.TrimSpace(res.BaseSHA) {
+		return fail("PREPARE_NOT_READY", "worker worktree HEAD does not match requested base", tail(out, 500))
+	}
+	rc, out = run(git, res.Path, []string{"status", "--porcelain"})
+	if rc == ReapTimeoutExitCode {
+		return fail("PREPARE_TIMEOUT", "worker worktree prepare timed out during clean-index verification", tail(out, 500))
+	}
+	if rc != 0 || strings.TrimSpace(out) != "" {
+		return fail("PREPARE_NOT_READY", "worker worktree index or checkout is not clean", tail(out, 500))
+	}
+	rc, gitDir := run(git, res.Path, []string{"rev-parse", "--git-dir"})
+	if rc != 0 {
+		return fail("PREPARE_NOT_READY", "worker worktree git directory could not be resolved", tail(gitDir, 500))
+	}
+	gitDir = strings.TrimSpace(gitDir)
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(res.Path, gitDir)
+	}
+	lock := filepath.Join(gitDir, "index.lock")
+	if _, err := os.Stat(lock); err == nil {
+		return fail("PREPARE_NOT_READY", "worker worktree index lock is still present", lock)
+	} else if !os.IsNotExist(err) {
+		return fail("PREPARE_NOT_READY", "worker worktree index lock state is unknown", err.Error())
+	}
+	res.OK = true
+	return res
+}
+
+// cleanupPartialPrepare names only the path derived for this prepare attempt.
+// It never scans or reaps neighboring worker trees.
+func cleanupPartialPrepareBounded(root, path string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cleanupPartialPrepare(root, path, BoundedGitRunner(ctx))
+}
+
+func cleanupPartialPrepare(root, path string, git GitRunner) {
+	if path == "" || !IsWorkerWorktree(path) {
+		return
+	}
+	_, _ = run(git, root, []string{"worktree", "remove", "--force", path})
+	_, _ = run(git, root, []string{"worktree", "prune"})
+
 }
 
 func isGitWorktreeBackend(backend IsolationBackend) bool {
@@ -583,8 +693,12 @@ func (gitWorktree) MaterializeOwned(root, lane, key, baseSHA, wtRoot string, git
 	}
 	rc, out := run(git, root, []string{"worktree", "add", "--detach", wt, base})
 	if rc != 0 {
-		return Result{OK: false, Path: wt, BaseSHA: base,
-			Reason: "git worktree add failed — fail open", Detail: tail(out, 500)}
+		code := ""
+		if rc == ReapTimeoutExitCode {
+			code = "PREPARE_TIMEOUT"
+		}
+		return Result{OK: false, Code: code, Path: wt, BaseSHA: base,
+			Reason: "git worktree add failed - fail open", Detail: tail(out, 500)}
 	}
 	return Result{OK: true, Path: wt, BaseSHA: base, Reused: false}
 }

@@ -186,7 +186,7 @@ func worktreeWorkerPrepare(argv []string) {
 	if owner.LeaseID == "" && strings.TrimSpace(*lane) != "" {
 		owner.LeaseID = "resolve-" + strings.TrimSpace(*lane)
 	}
-	res := workerworktree.PrepareOwned(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), nil, owner)
+	res := workerworktree.PrepareOwnedBounded(repoRoot, *lane, *key, strings.TrimSpace(*baseSHA), strings.TrimSpace(*wtRoot), owner, 2*time.Minute)
 	out := worktreePrepareOut{Result: res}
 	if res.OK && res.Path != "" {
 		out.Env = workerworktree.WorktreeEnv(nil, res.Path)
