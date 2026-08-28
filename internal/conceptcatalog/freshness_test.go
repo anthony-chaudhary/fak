@@ -3,6 +3,8 @@ package conceptcatalog
 import (
 	"archive/tar"
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -78,6 +80,131 @@ func TestGeneratedSnapshotIsByteStableAndPortable(t *testing.T) {
 	if strings.Contains(string(aa), root) {
 		t.Fatal("generated output leaks machine path")
 	}
+}
+
+func TestCheckInvariantUsesOneGreenScorecardSnapshot(t *testing.T) {
+	root := fixtureRepo(t)
+	calls := installInvariantSnapshotHelper(t, "green")
+
+	got, err := CheckInvariant(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *calls != 1 {
+		t.Fatalf("scorecard snapshot processes = %d, want exactly 1", *calls)
+	}
+	if !got.Freshness.Fresh || !got.SemanticValid || !got.CriticalClean {
+		t.Fatalf("green invariant flags = %+v", got)
+	}
+	if got.Coverage != 98.25 || got.CoverageDebt != 7 || got.ClarityDebt != 0 {
+		t.Fatalf("green invariant totals = %+v", got)
+	}
+	if got.FamilyCoverage["cache"] != 87.5 {
+		t.Fatalf("cache family coverage = %v, want 87.5", got.FamilyCoverage["cache"])
+	}
+}
+
+func TestCheckInvariantParsesStructuredRedExit(t *testing.T) {
+	root := fixtureRepo(t)
+	installInvariantSnapshotHelper(t, "red")
+
+	got, err := CheckInvariant(root)
+	if err != nil {
+		t.Fatalf("structured ACTION exit must remain a result, got %v", err)
+	}
+	if !got.Freshness.Fresh || !got.SemanticValid {
+		t.Fatalf("structured red snapshot lost valid companion results: %+v", got)
+	}
+	if got.CriticalClean || got.ClarityDebt != 3 || got.CoverageDebt != 9 {
+		t.Fatalf("structured red payload fold = %+v", got)
+	}
+	if got.Detail != "clarity debt remains" {
+		t.Fatalf("structured red detail = %q", got.Detail)
+	}
+}
+
+func TestExecuteInvariantSnapshotReturnsProcessStartFailure(t *testing.T) {
+	old := invariantSnapshotCommand
+	t.Cleanup(func() { invariantSnapshotCommand = old })
+	invariantSnapshotCommand = func(_, _ string) *exec.Cmd {
+		return exec.Command(filepath.Join(t.TempDir(), "missing-scorecard-executable"))
+	}
+
+	_, err := executeInvariantSnapshot(t.TempDir(), filepath.Join(t.TempDir(), "generated"))
+	if err == nil {
+		t.Fatal("missing executable must return its process-start error")
+	}
+	if _, ok := err.(*exec.ExitError); ok {
+		t.Fatalf("process-start failure was misclassified as a scorecard verdict: %v", err)
+	}
+}
+
+func TestExecuteInvariantSnapshotReturnsMissingArtifactError(t *testing.T) {
+	root := t.TempDir()
+	generated := filepath.Join(t.TempDir(), "generated")
+	installInvariantSnapshotHelper(t, "missing-artifact")
+
+	_, err := executeInvariantSnapshot(root, generated)
+	if err == nil {
+		t.Fatal("partial snapshot must return the missing artifact error")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing artifact error must preserve os.ErrNotExist, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "INDEX.md") {
+		t.Fatalf("missing artifact error does not name the absent file: %v", err)
+	}
+}
+
+func installInvariantSnapshotHelper(t *testing.T, mode string) *int {
+	t.Helper()
+	old := invariantSnapshotCommand
+	t.Cleanup(func() { invariantSnapshotCommand = old })
+	calls := 0
+	invariantSnapshotCommand = func(root, generated string) *exec.Cmd {
+		calls++
+		cmd := exec.Command(os.Args[0], "-test.run=^TestInvariantSnapshotHelperProcess$")
+		cmd.Env = append(os.Environ(),
+			"FAK_TEST_INVARIANT_HELPER=1",
+			"FAK_TEST_INVARIANT_MODE="+mode,
+			"FAK_TEST_INVARIANT_ROOT="+root,
+			"FAK_TEST_INVARIANT_GENERATED="+generated,
+		)
+		return cmd
+	}
+	return &calls
+}
+
+func TestInvariantSnapshotHelperProcess(t *testing.T) {
+	if os.Getenv("FAK_TEST_INVARIANT_HELPER") != "1" {
+		return
+	}
+	root := os.Getenv("FAK_TEST_INVARIANT_ROOT")
+	generated := os.Getenv("FAK_TEST_INVARIANT_GENERATED")
+	mode := os.Getenv("FAK_TEST_INVARIANT_MODE")
+	if err := os.MkdirAll(generated, 0755); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	for i, art := range generatedArtifacts {
+		if mode == "missing-artifact" && i == len(generatedArtifacts)-1 {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(art.Tracked)))
+		if err != nil {
+			b = []byte("synthetic generated artifact\n")
+		}
+		if err := os.WriteFile(filepath.Join(generated, art.Name), b, 0644); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+	}
+	if mode == "red" || mode == "missing-artifact" {
+		fmt.Print(`{"ok":false,"reason":"clarity debt remains","corpus":{"coverage_debt":9,"clarity_defects":3,"coverage":{"coverage_pct":97.75,"per_family":[{"family":"cache","discovered":8,"covered":6}]}}}`)
+		os.Exit(1)
+	}
+	fmt.Print(`{"ok":true,"reason":"","corpus":{"coverage_debt":7,"clarity_defects":0,"coverage":{"coverage_pct":98.25,"per_family":[{"family":"cache","discovered":8,"covered":7}]}}}`)
+	os.Exit(0)
 }
 
 // TestGeneratedReadmeRoundTripsThroughGitStaging is the #5136 regression: the
