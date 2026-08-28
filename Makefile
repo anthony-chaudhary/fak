@@ -532,6 +532,7 @@ demo-scorecards:
 # ratchet (#1442). Re-pin both axes with `--pin` after a real drop.
 scorecard-ratchet:
 	@python3 tools/readme_freshness_audit_test.py
+	@python3 tools/readme_freshness_audit.py --json >/dev/null
 	@python3 tools/scorecard_control_pane_test.py
 	@python3 tools/scorecard_control_pane.py --check
 	@echo "scorecard-ratchet OK"

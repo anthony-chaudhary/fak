@@ -12,6 +12,15 @@ in [`../../BENCHMARK-GALLERY.md`](../../BENCHMARK-GALLERY.md). Each sheet below 
 own provenance labels (MEASURED / MODELED / WITNESSED / PENDING / GATED); this page just
 tells you where to look.
 
+## Publishing the latest hardware result
+
+Keep detailed and historical receipts indexed here. Only the newest committed receipt for
+each of Mac, AMD, and NVIDIA belongs on the repository front page. When a receipt becomes the
+latest for one of those platforms, update its exact row and metadata in
+[`hardware-latest.json`](hardware-latest.json) and update the matching `README.md` row in the
+same change. The README freshness audit verifies the three-platform set, heading date, exact
+rows, observed dates, and that every indexed detail path exists.
+
 ## Engine identity rule
 
 Use the [fak-native inference doctrine](../native-inference-goal.md) before interpreting any

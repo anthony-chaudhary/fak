@@ -12,6 +12,7 @@ from __future__ import annotations
 import datetime as _dt
 import contextlib
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -97,54 +98,122 @@ def _hardware_front_page(date: str = TODAY.isoformat(), *, extra_row: str = "") 
 
 | Platform | Latest result | Qualification and detail |
 | :--- | :--- | :--- |
-| **Mac** | result | Historical/expired review. [Detail](docs/benchmarks/QWEN38-27B-LATEST.md) |
-| **AMD** | result | Narrow microbench only. [Detail](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |
-| **NVIDIA** | result | Held after failed cache quality. [Detail](docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md) |
+| Mac | result observed 2026-06-18. | Historical/expired review. [Detail](docs/benchmarks/mac.md) |
+| AMD | result observed 2026-06-19. | Narrow microbench only. [Detail](docs/benchmarks/amd.md) |
+| NVIDIA | result captured 2026-06-20. | Held after failed cache quality. [Detail](docs/benchmarks/nvidia.md) |
 {extra_row}
 History and specific envelopes live in the [benchmark index](docs/benchmarks/README.md).
 """
 
 
-def test_hardware_front_page_accepts_exact_three_rows() -> None:
-    c = rfa.check_hardware_front_page(_hardware_front_page(), today=TODAY,
-                                      max_age_days=14)
-    assert c["status"] == "OK"
+def _hardware_manifest(date: str = TODAY.isoformat(), *, platform: str | None = None,
+                       row_suffix: str = "") -> str:
+    readme = _hardware_front_page(date)
+    rows = {line.split("|", 2)[1].strip(): line for line in readme.splitlines()
+            if line.startswith(("| Mac |", "| AMD |", "| NVIDIA |"))}
+    if platform:
+        rows[platform] += row_suffix
+    return json.dumps({
+        "schema": rfa.HARDWARE_LATEST_SCHEMA,
+        "as_of": date,
+        "platforms": {
+            "Mac": {"observed": "2026-06-18", "detail": "docs/benchmarks/mac.md", "row": rows["Mac"]},
+            "AMD": {"observed": "2026-06-19", "detail": "docs/benchmarks/amd.md", "row": rows["AMD"]},
+            "NVIDIA": {"observed": "2026-06-20", "detail": "docs/benchmarks/nvidia.md", "row": rows["NVIDIA"]},
+        },
+    })
 
 
-def test_hardware_front_page_rejects_stale_date() -> None:
-    c = rfa.check_hardware_front_page(_hardware_front_page("2026-06-01"), today=TODAY,
-                                      max_age_days=14)
+def _hardware_root(tmp_path: Path) -> Path:
+    for name in ("mac.md", "amd.md", "nvidia.md", "README.md"):
+        path = tmp_path / "docs" / "benchmarks" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("receipt\n", encoding="utf-8")
+    return tmp_path
+
+
+def _check_hardware(tmp_path: Path, readme: str | None = None,
+                    manifest: str | None = None) -> dict[str, object]:
+    return rfa.check_hardware_front_page(
+        readme or _hardware_front_page(),
+        _hardware_manifest() if manifest is None else manifest,
+        _hardware_root(tmp_path), today=TODAY, max_age_days=14)
+
+
+def test_hardware_front_page_accepts_exact_three_rows(tmp_path: Path) -> None:
+    assert _check_hardware(tmp_path)["status"] == "OK"
+
+
+def test_hardware_front_page_rejects_stale_date(tmp_path: Path) -> None:
+    date = "2026-06-01"
+    c = _check_hardware(tmp_path, _hardware_front_page(date), _hardware_manifest(date))
+    assert c["status"] == "FAIL" and "fresh_date" in c["items"]
+
+
+def test_hardware_front_page_rejects_extra_result_row(tmp_path: Path) -> None:
+    c = _check_hardware(tmp_path, _hardware_front_page(
+        extra_row="| Ultracode | result | hold |"))
     assert c["status"] == "FAIL"
-    assert "fresh_date" in c["items"]
+    assert "README must contain no extra result rows" in c["items"]
 
 
-def test_hardware_front_page_rejects_extra_result_row() -> None:
-    c = rfa.check_hardware_front_page(
-        _hardware_front_page(extra_row="| **Ultracode** | result | hold |"),
-        today=TODAY, max_age_days=14,
-    )
+def test_hardware_front_page_rejects_missing_platform(tmp_path: Path) -> None:
+    readme = _hardware_front_page().replace(
+        "| AMD | result observed 2026-06-19. | Narrow microbench only. [Detail](docs/benchmarks/amd.md) |\n", "")
+    c = _check_hardware(tmp_path, readme)
     assert c["status"] == "FAIL"
-    assert "no extra result rows" in c["items"]
+    assert "README must contain exactly Mac, AMD, NVIDIA rows" in c["items"]
+    assert any(item.startswith("AMD:") for item in c["items"])
 
 
-def test_hardware_front_page_rejects_missing_platform_or_detail() -> None:
-    text = _hardware_front_page().replace(
-        "| **AMD** | result | Narrow microbench only. [Detail](docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md) |\n",
-        "",
-    )
-    c = rfa.check_hardware_front_page(text, today=TODAY, max_age_days=14)
-    assert c["status"] == "FAIL"
-    assert "exactly Mac, AMD, NVIDIA rows" in c["items"]
-    assert "AMD detail link" in c["items"]
-
-
-def test_hardware_front_page_rejects_generated_qwen_marker() -> None:
-    c = rfa.check_hardware_front_page(
-        _hardware_front_page() + "\n<!-- qwen38-frontdoor:begin -->\n",
-        today=TODAY, max_age_days=14,
-    )
+def test_hardware_front_page_rejects_generated_qwen_marker(tmp_path: Path) -> None:
+    c = _check_hardware(tmp_path, _hardware_front_page() + "\n<!-- qwen38-frontdoor:begin -->\n")
     assert c["status"] == "FAIL"
     assert "README must not contain generated qwen38-frontdoor markers" in c["items"]
+
+
+def test_hardware_front_page_rejects_each_platform_manifest_drift(tmp_path: Path) -> None:
+    for platform in ("Mac", "AMD", "NVIDIA"):
+        c = _check_hardware(tmp_path, manifest=_hardware_manifest(platform=platform, row_suffix=" updated"))
+        assert c["status"] == "FAIL", platform
+        assert platform in c["detail"]
+        assert rfa.HARDWARE_LATEST_REL in c["detail"] and rfa.README_REL in c["detail"]
+
+
+def test_hardware_front_page_rejects_heading_manifest_date_drift(tmp_path: Path) -> None:
+    c = _check_hardware(tmp_path, manifest=_hardware_manifest("2026-06-19"))
+    assert c["status"] == "FAIL"
+    assert "heading date differs" in c["detail"]
+
+
+def test_hardware_front_page_rejects_missing_or_malformed_manifest(tmp_path: Path) -> None:
+    for manifest in ("", "{not json"):
+        c = _check_hardware(tmp_path, manifest=manifest)
+        assert c["status"] == "FAIL"
+        assert rfa.HARDWARE_LATEST_REL in c["detail"] and rfa.README_REL in c["detail"]
+
+
+def test_hardware_front_page_rejects_extra_manifest_platform(tmp_path: Path) -> None:
+    manifest = json.loads(_hardware_manifest())
+    manifest["platforms"]["Intel"] = manifest["platforms"]["AMD"]
+    c = _check_hardware(tmp_path, manifest=json.dumps(manifest))
+    assert c["status"] == "FAIL"
+    assert "manifest must contain exactly Mac, AMD, NVIDIA" in c["items"]
+
+
+def test_hardware_front_page_rejects_missing_detail_receipt(tmp_path: Path) -> None:
+    manifest = json.loads(_hardware_manifest())
+    manifest["platforms"]["Mac"]["detail"] = "docs/benchmarks/missing.md"
+    c = _check_hardware(tmp_path, manifest=json.dumps(manifest))
+    assert c["status"] == "FAIL"
+    assert "Mac" in c["detail"] and "does not exist" in c["detail"]
+
+
+def test_standard_gates_run_actual_readme_audit() -> None:
+    root = Path(__file__).resolve().parents[1]
+    expected = "python3 tools/readme_freshness_audit.py --json"
+    assert expected in (root / "Makefile").read_text(encoding="utf-8")
+    assert "python tools/readme_freshness_audit.py --json" in (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 
 
 def _qwen_result_doc(peer: str) -> str:

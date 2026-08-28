@@ -2,6 +2,16 @@
 
 **Audience:** evaluators deciding which current `fak` result is applicable, what tuned alternative it was measured against, and how to inspect or reproduce its evidence.
 
+## README hardware freshness contract
+
+The front page is intentionally limited to one latest row each for Mac, AMD, and NVIDIA.
+`docs/benchmarks/hardware-latest.json` is the compact consistency authority for those three
+rows: its `as_of`, exact row text, observed date, and indexed receipt path must match
+`README.md`. A publisher that adds or supersedes a platform receipt must update both files in
+the same change. History and envelope-specific results remain on the benchmark index pages.
+The standard CI and `make scorecard-ratchet` gates run the real freshness audit, so receipt
+publication cannot leave the front page silently stale.
+
 ## Current Qwen performance
 
 - [Qwen performance index](docs/benchmarks/QWEN-PERFORMANCE-INDEX.md) — the canonical cross-hardware route for accepted highlights, receipts, result classes, and remaining gaps.

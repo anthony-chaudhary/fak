@@ -120,6 +120,9 @@ VERSION_REL = "VERSION"
 AUTHORITY_REL = "BENCHMARK-AUTHORITY.md"
 QWEN_INDEX_REL = "docs/benchmarks/QWEN-PERFORMANCE-INDEX.md"
 QWEN_LATEST_REL = "docs/benchmarks/QWEN38-27B-LATEST.md"
+HARDWARE_LATEST_REL = "docs/benchmarks/hardware-latest.json"
+HARDWARE_LATEST_SCHEMA = "fak-hardware-latest/1"
+HARDWARE_PLATFORMS = {"Mac", "AMD", "NVIDIA"}
 # The binary's real dispatch table — the source of truth for which `fak <verb>`
 # commands actually exist. Parsed live (never a hand-list) so the lcd_onramp
 # anti-gaming cross-check stays correct as verbs are added/renamed.
@@ -494,30 +497,58 @@ def check_freshness_stamp(readme: str, *, today: _dt.date,
             "detail": f"verified {age}d ago (<= {max_age_days}d window)"}
 
 
-def check_hardware_front_page(readme: str, *, today: _dt.date,
-                              max_age_days: int) -> dict[str, Any]:
-    """Keep the README's first result view limited to the latest hardware rows."""
+def check_hardware_front_page(readme: str, hardware_latest: str, root: Path, *,
+                              today: _dt.date, max_age_days: int) -> dict[str, Any]:
+    """Bind the three README hardware rows to the latest-receipt authority."""
+    update_hint = f"update {HARDWARE_LATEST_REL} and {README_REL}"
+    failures: list[str] = []
+
+    try:
+        manifest = json.loads(hardware_latest)
+    except (json.JSONDecodeError, TypeError) as exc:
+        return {"check": "hardware_front_page", "status": "FAIL",
+                "detail": f"malformed or missing hardware authority: {exc}; {update_hint}",
+                "items": ["hardware latest manifest", update_hint]}
+    if not isinstance(manifest, dict):
+        return {"check": "hardware_front_page", "status": "FAIL",
+                "detail": f"hardware authority must be a JSON object; {update_hint}",
+                "items": ["hardware latest manifest", update_hint]}
+    if manifest.get("schema") != HARDWARE_LATEST_SCHEMA:
+        failures.append(f"schema must be {HARDWARE_LATEST_SCHEMA}")
+
+    platforms = manifest.get("platforms")
+    if not isinstance(platforms, dict):
+        failures.append("platforms must be an object containing exactly Mac, AMD, NVIDIA")
+        platforms = {}
+    elif set(platforms) != HARDWARE_PLATFORMS:
+        failures.append("manifest must contain exactly Mac, AMD, NVIDIA")
+
     match = re.search(
         r"^## Latest hardware results — (\d{4}-\d{2}-\d{2})\s*$"
-        r"(.*?)(?=^##\s|\Z)",
-        readme,
-        flags=re.MULTILINE | re.DOTALL,
-    )
+        r"(.*?)(?=^##\s|\Z)", readme, flags=re.MULTILINE | re.DOTALL)
     if match is None:
-        return {"check": "hardware_front_page", "status": "FAIL",
-                "detail": "missing dated 'Latest hardware results' section"}
+        failures.append("missing dated 'Latest hardware results' section")
+        heading_date = ""
+        body = ""
+    else:
+        heading_date = match.group(1)
+        body = match.group(2)
 
-    missing: list[str] = []
+    as_of = manifest.get("as_of")
     try:
-        stamped = _dt.date.fromisoformat(match.group(1))
-    except ValueError:
-        return {"check": "hardware_front_page", "status": "FAIL",
-                "detail": "latest hardware results heading has an invalid date"}
-    age = (today - stamped).days
-    if age < 0 or age > max_age_days:
-        missing.append("fresh_date")
+        stamped = _dt.date.fromisoformat(as_of)
+    except (TypeError, ValueError):
+        failures.append("manifest as_of must be an ISO date")
+        stamped = None
+    if heading_date and heading_date != as_of:
+        failures.append(f"heading date differs from manifest as_of {as_of!r}")
+    if stamped is not None:
+        age = (today - stamped).days
+        if age < 0 or age > max_age_days:
+            failures.append("fresh_date")
+    else:
+        age = None
 
-    body = match.group(2)
     rows: dict[str, str] = {}
     extra_rows: list[str] = []
     for line in body.splitlines():
@@ -527,39 +558,64 @@ def check_hardware_front_page(readme: str, *, today: _dt.date,
         if not cells or cells[0].lower() == "platform":
             continue
         platform = re.sub(r"[*_`]", "", cells[0]).strip()
-        if platform in {"Mac", "AMD", "NVIDIA"}:
+        if platform in HARDWARE_PLATFORMS:
             rows[platform] = line
         else:
             extra_rows.append(platform or line)
-
-    if set(rows) != {"Mac", "AMD", "NVIDIA"}:
-        missing.append("exactly Mac, AMD, NVIDIA rows")
+    if set(rows) != HARDWARE_PLATFORMS:
+        failures.append("README must contain exactly Mac, AMD, NVIDIA rows")
     if extra_rows:
-        missing.append("no extra result rows")
+        failures.append("README must contain no extra result rows")
+
+    for platform in sorted(HARDWARE_PLATFORMS):
+        entry = platforms.get(platform)
+        if not isinstance(entry, dict):
+            failures.append(f"{platform}: missing manifest entry")
+            continue
+        row = entry.get("row")
+        detail = entry.get("detail")
+        observed = entry.get("observed")
+        if not isinstance(row, str) or not row.startswith(f"| {platform} |"):
+            failures.append(f"{platform}: manifest row is missing or malformed")
+        elif rows.get(platform) != row:
+            failures.append(f"{platform}: README row differs from latest manifest row")
+        if not isinstance(observed, str):
+            failures.append(f"{platform}: observed must be an ISO date")
+        else:
+            try:
+                _dt.date.fromisoformat(observed)
+            except ValueError:
+                failures.append(f"{platform}: observed must be an ISO date")
+            if isinstance(row, str) and observed not in row:
+                failures.append(f"{platform}: row must name observed date {observed}")
+        if not isinstance(detail, str) or not detail:
+            failures.append(f"{platform}: detail path is missing")
+        else:
+            detail_path = (root / detail).resolve()
+            try:
+                detail_path.relative_to(root.resolve())
+            except ValueError:
+                failures.append(f"{platform}: detail path escapes repository")
+            else:
+                if not detail_path.is_file():
+                    failures.append(f"{platform}: indexed detail path does not exist: {detail}")
+            if isinstance(row, str) and detail not in row:
+                failures.append(f"{platform}: row does not link its indexed detail path")
+
     if not re.search(r"newest\s+committed performance receipt", body, re.IGNORECASE):
-        missing.append("visible latest definition")
+        failures.append("visible latest definition")
     if "docs/benchmarks/README.md" not in body:
-        missing.append("benchmark/history index")
+        failures.append("benchmark/history index")
     if "qwen38-frontdoor" in readme.lower():
-        missing.append("README must not contain generated qwen38-frontdoor markers")
+        failures.append("README must not contain generated qwen38-frontdoor markers")
 
-    row_requirements = {
-        "Mac": ("docs/benchmarks/QWEN38-27B-LATEST.md", ("historical", "expired", "hold", "no accepted")),
-        "AMD": ("docs/benchmarks/QWEN36-AMD-VULKAN-RESULTS.md", ("microbench", "narrow", "hold", "no accepted")),
-        "NVIDIA": ("docs/_witnesses/issue-8819-qwen38-cache-attribution/README.md", ("held", "failed", "diagnostic", "no accepted")),
-    }
-    for platform, (detail, qualifiers) in row_requirements.items():
-        row = rows.get(platform, "").lower()
-        if detail.lower() not in row:
-            missing.append(f"{platform} detail link")
-        if row and not any(word in row for word in qualifiers):
-            missing.append(f"{platform} qualification/hold")
-
-    status = "OK" if not missing else "FAIL"
-    detail = (f"latest hardware view dated {match.group(1)} ({age}d old) has only Mac, AMD, NVIDIA"
-              if not missing else "hardware front page needs: " + ", ".join(missing))
-    return {"check": "hardware_front_page", "status": status,
-            "detail": detail, "items": missing + extra_rows}
+    if failures:
+        return {"check": "hardware_front_page", "status": "FAIL",
+                "detail": "hardware front page drift: " + "; ".join(failures) + f"; {update_hint}",
+                "items": failures + extra_rows + [update_hint]}
+    return {"check": "hardware_front_page", "status": "OK",
+            "detail": f"manifest-backed hardware view dated {as_of} ({age}d old) has only Mac, AMD, NVIDIA",
+            "items": []}
 
 
 def check_qwen_result_docs(qwen_index: str, qwen_latest: str) -> dict[str, Any]:
@@ -1419,6 +1475,7 @@ def fak_dispatch_verbs(root: Path) -> set[str] | None:
 
 
 def run_checks(readme: str, version: str, authority: str, root: Path, *,
+               hardware_latest: str = "",
                today: _dt.date, max_age_days: int,
                dispatch: set[str] | None = None,
                showcase: str | None = None,
@@ -1432,7 +1489,7 @@ def run_checks(readme: str, version: str, authority: str, root: Path, *,
         check_naive_baseline(readme),
         check_headline_authority(readme, authority),
         check_freshness_stamp(readme, today=today, max_age_days=max_age_days),
-        check_hardware_front_page(readme, today=today, max_age_days=max_age_days),
+        check_hardware_front_page(readme, hardware_latest, root, today=today, max_age_days=max_age_days),
         check_qwen_result_docs(qwen_index, qwen_latest),
         check_showcase_sync(readme, showcase, version=version,
                             dataset_versions=dataset_versions, dispatch=dispatch),
@@ -1465,12 +1522,13 @@ def collect(workspace: Path, *, today: _dt.date | None = None,
     authority = _safe_read(root / AUTHORITY_REL)
     qwen_index = _safe_read(root / QWEN_INDEX_REL)
     qwen_latest = _safe_read(root / QWEN_LATEST_REL)
+    hardware_latest = _safe_read(root / HARDWARE_LATEST_REL)
     dispatch = fak_dispatch_verbs(root)
     # None (not "") when the second front door is absent, so check_showcase_sync can
     # tell "no page to read" (abstain) apart from "an empty page" (a real defect).
     showcase = _safe_read(root / SHOWCASE_REL) or None
     checks = run_checks(readme, version, authority, root,
-                        today=today, max_age_days=max_age_days, dispatch=dispatch,
+                        today=today, max_age_days=max_age_days, hardware_latest=hardware_latest, dispatch=dispatch,
                         showcase=showcase,
                         dataset_versions=bench_dataset_versions(root),
                         qwen_index=qwen_index, qwen_latest=qwen_latest)
