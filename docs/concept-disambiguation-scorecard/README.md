@@ -15,20 +15,20 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **2** (clarity 2 + coverage 0) |
+| **Disambiguation-debt (drive to 0)** | **0** (clarity 0 + coverage 0) |
 | **Crystal-clear concepts (and climbing)** | **955** crystal of 2669 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2790 / 2790** (100.0% of the discovered confusable space) |
+| **Confusable tokens positioned (covered / discovered)** | **2792 / 2792** (100.0% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
 | **Ambiguous lookup names (drive to 0)** | **77** of 3787 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
-| Legacy bounded score (saturates; not the driver) | 98.9/100 (grade A) |
+| Legacy bounded score (saturates; not the driver) | 100.0/100 (grade A) |
 
 > **Read this right.** The metric to optimize is the UNBOUNDED disambiguation-debt (drive it toward 0) and the counters that climb without a ceiling (crystal concepts, confusable tokens positioned). The bounded /100 score SATURATES - once the catalogued namespace is clean it sits near 100 and can no longer tell you how much confusable space is still un-disambiguated - so it is kept only as a labeled legacy line, not the driver.
 
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2669 concepts - score 98.9/100 (grade A) - disambiguation-debt 2
+concept-disambiguation chart - 2669 concepts - score 100.0/100 (grade A) - disambiguation-debt 0
 
 clarity ladder (count of concepts, best -> fog):
   * crystal       ################............ 955
@@ -70,7 +70,7 @@ coverage by family (positioned / discovered):
   dev-tier         ............................ 0/0
   evict            ############################ 54/54
   gateway-engine   ############################ 193/193
-  guard-gate       ############################ 497/497
+  guard-gate       ############################ 499/499
   layout           ############################ 19/19
   loop             ############################ 93/93
   plan             ############################ 404/404
@@ -84,7 +84,7 @@ coverage by family (positioned / discovered):
   vfs              ............................ 0/0
   witness-proof    ############################ 162/162
 
-namespace coverage  [################################] 100.0%  (2790/2790 confusable tokens positioned)
+namespace coverage  [################################] 100.0%  (2792/2792 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -2939,7 +2939,6 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 
 | Group | KPI | Score | Debt | Detail |
 |---|---|---:|:--:|---|
-| grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 22 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
 | separation | `mutuality_soft` | 80 | 0 | 2986/4726 boundaries drawn one-way only |
@@ -2950,6 +2949,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `reference_resolves` | 100 | 0 | every distinct_from reference resolves to a real concept |
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
+| grounded | `grounded` | 100 | 0 | every concept's grounding token appears in the tree |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
 | indexed | `index_resolves` | 100 | 0 | every one of 3787 lookup name(s) resolves - 77 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
@@ -2966,7 +2966,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | dev-tier | 0 | 0 | 0 |
 | evict | 54 | 54 | 0 |
 | gateway-engine | 193 | 193 | 0 |
-| guard-gate | 497 | 497 | 0 |
+| guard-gate | 499 | 499 | 0 |
 | layout | 19 | 19 | 0 |
 | loop | 93 | 93 | 0 |
 | plan | 404 | 404 | 0 |
