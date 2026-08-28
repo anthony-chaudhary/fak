@@ -101,6 +101,46 @@ func TestPerformanceRSILearningAcceptance(t *testing.T) {
 	}
 }
 
+func TestPerformanceRSICommittedLearningReceiptSourceLabels(t *testing.T) {
+	witness := filepath.Join("..", "..", "docs", "_witnesses", "issue-9783-performance-rsi-learning.json")
+	code, out, errText := runPerfRSI(t, "--input", witness, "--json")
+	if code != 0 {
+		t.Fatalf("code=%d err=%s", code, errText)
+	}
+	var report struct {
+		Dimensions []struct {
+			ID           string `json:"id"`
+			Source       string `json:"source"`
+			EvidenceKind string `json:"evidence_kind"`
+			Engine       string `json:"engine"`
+		} `json:"dimensions"`
+	}
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"hypothesis_calibration": false,
+		"learning_retention":     false,
+		"compounding_rate":       false,
+	}
+	for _, d := range report.Dimensions {
+		if _, ok := want[d.ID]; !ok {
+			continue
+		}
+		if d.Source != "learning:fak-performance-rsi-learning/1" ||
+			d.EvidenceKind != "performance_rsi_learning_receipt" ||
+			d.Engine != "fak-native" {
+			t.Errorf("%s provenance=%+v", d.ID, d)
+		}
+		want[d.ID] = true
+	}
+	for id, found := range want {
+		if !found {
+			t.Errorf("missing learning-derived dimension %s", id)
+		}
+	}
+}
+
 func TestPerformanceRSILearningRefusals(t *testing.T) {
 	original := performanceRSILearningTestReceipt(t)
 	var base map[string]any
