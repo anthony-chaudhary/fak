@@ -63,6 +63,15 @@ func (f *fakeGit) replyOnce(verb string, rc int, out string) *fakeGit {
 	return f
 }
 
+// replyLandDiff models the three diff reads a path-scoped land performs: the
+// declared-path admission list, the patch itself, then the whole diff name list.
+func replyLandDiff(g *fakeGit, declaredNames, patch, allNames string) *fakeGit {
+	return g.
+		replyOnce("diff", 0, declaredNames).
+		replyOnce("diff", 0, patch).
+		replyOnce("diff", 0, allNames)
+}
+
 func (f *fakeGit) run(root string, args []string) (int, string) {
 	f.calls = append(f.calls, append([]string{}, args...))
 	verb := ""
@@ -484,8 +493,7 @@ func TestLandLandsDiffOntoTrunkByPathSignedOff(t *testing.T) {
 	// safety gates off (default-ON since #3619) so this fake need not stub them.
 	t.Setenv(IsolatedLandEnv, "0")
 	t.Setenv(LandReadbackEnv, "0")
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg")
 	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
@@ -527,8 +535,7 @@ func TestLandApplyFailureDoesNotCommit(t *testing.T) {
 }
 
 func TestLandBaseSHAIsTheDiffRefNotHead(t *testing.T) {
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg")
 	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
@@ -608,8 +615,7 @@ func TestLandDerivesMsgFromWorktreeTipWhenNoFile(t *testing.T) {
 
 func TestLandReadbackVerifyPassesWhenTrunkCarriesPaths(t *testing.T) {
 	t.Setenv(LandReadbackEnv, "1")
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg").
 		reply("rev-parse", 0, "abc123def4567\n").
@@ -624,8 +630,7 @@ func TestLandReadbackVerifyRefusesWhenPathSweptByRace(t *testing.T) {
 	t.Setenv(LandReadbackEnv, "1")
 	// commit succeeded, but trunk HEAD carries a DIFFERENT file — our `x` was swept
 	// into a concurrent commit on the shared index (the #3547 failure).
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg").
 		reply("rev-parse", 0, "deadbeef12345\n").
@@ -642,8 +647,7 @@ func TestLandReadbackVerifyRefusesWhenPathSweptByRace(t *testing.T) {
 func TestLandReadbackForcedOffLeavesBaselineUnchanged(t *testing.T) {
 	t.Setenv(LandReadbackEnv, "0") // explicit off — baseline path
 	// A diff-tree that WOULD fail the check must never be consulted when off.
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg").
 		reply("diff-tree", 0, "totally/unrelated.go\n")
@@ -660,8 +664,7 @@ func TestLandReadbackFailsOpenOnGitError(t *testing.T) {
 	t.Setenv(LandReadbackEnv, "1")
 	// HEAD unreadable — the readback cannot run, so it must NOT manufacture a
 	// refusal; the commit's own verdict stands (fail-open, the module invariant).
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg").
 		reply("rev-parse", 127, "")
@@ -930,8 +933,7 @@ func TestLandIsolatedForcedOffLeavesBaselineUnchanged(t *testing.T) {
 	// that #3619 flipped both gates default-ON; force both off here.
 	t.Setenv(IsolatedLandEnv, "0")
 	t.Setenv(LandReadbackEnv, "0")
-	g := newFakeGit().
-		reply("diff", 0, "diff --git a/x b/x\n@@\n-old\n+new\n").
+	g := replyLandDiff(newFakeGit(), "x\n", "diff --git a/x b/x\n@@\n-old\n+new\n", "x\n").
 		reply("apply", 0, "").
 		reply("commit", 0, "[main abc] msg")
 	res := Land("/trunk", "/wt/fak-worker-wt-tools-abc", "feedface", "/tmp/msg.txt", []string{"x"}, nil, g.run)
@@ -948,7 +950,7 @@ func TestLandIsolatedForcedOffLeavesBaselineUnchanged(t *testing.T) {
 
 func TestLandIsolatedGateOnRoutesLandThroughIsolatedPath(t *testing.T) {
 	t.Setenv(IsolatedLandEnv, "1")
-	g := isolatedHappyFake().reply("diff", 0, "diff --git a/x b/x\n@@\n-o\n+n\n")
+	g := replyLandDiff(isolatedHappyFake(), "x\n", "diff --git a/x b/x\n@@\n-o\n+n\n", "x\n")
 	// Inject the fake env-runner into the package seam Land's isolated path uses.
 	saved := isolatedGitEnv
 	isolatedGitEnv = g.runEnv
@@ -984,15 +986,7 @@ func TestLandReportsDroppedOutOfLanePaths(t *testing.T) {
 	t.Setenv(IsolatedLandEnv, "0")
 	t.Setenv(LandReadbackEnv, "0")
 	g := newFakeGit()
-	g.replies = map[string][]struct {
-		rc  int
-		out string
-	}{
-		"diff": {
-			{0, "patch"},
-			{0, "internal/tools/a.go\ndocs/escaped.md\n"},
-		},
-	}
+	g = replyLandDiff(g, "internal/tools/a.go\n", "patch", "internal/tools/a.go\ndocs/escaped.md\n")
 	g.reply("log", 0, "feat(tools): witness lane (fak tools)")
 	g.reply("apply", 0, "")
 	g.reply("commit", 0, "committed")
