@@ -66,6 +66,7 @@ type InKernelPlanner struct {
 	qwenQ4KPrefillChunkTokens    int
 	qwenQ4KPrefillChunkConfigErr *model.InKernelQwenQ4KPrefillChunkConfigError
 	qwen35MetalGDNSequence       bool
+	q4kGateUpOutputSlab          bool
 	qwen35MetalGDNExecuted       atomic.Bool
 
 	// tree is the process-scoped RadixAttention prefix cache (internal/radixkv): the
@@ -201,7 +202,21 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	if len(cpuOffloadExpertsOpt) > 0 {
 		cpuOffloadExperts = cpuOffloadExpertsOpt[0]
 	}
-	prefillChunkTokens, prefillChunkErr := resolveInKernelQwenQ4KPrefillChunkTokens(os.Getenv("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS"))
+	return NewInKernelPlannerWithConfig(m, tok, modelID, q4k, backend, metal, InKernelPlannerConfig{CPUOffloadExperts: cpuOffloadExperts})
+}
+
+// InKernelPlannerConfig carries settings that must be fixed at planner construction.
+// Empty/zero fields preserve NewInKernelPlanner's historical defaults.
+type InKernelPlannerConfig struct {
+	CPUOffloadExperts         bool
+	QwenQ4KPrefillChunkTokens int
+	Qwen35MetalGDNSequence    bool
+	Q4KGateUpOutputSlab       bool
+}
+
+// NewInKernelPlannerWithConfig is the explicit configuration constructor for native planning.
+func NewInKernelPlannerWithConfig(m *model.Model, tok *tokenizer.Tokenizer, modelID string, q4k bool, backend compute.Backend, metal bool, cfg InKernelPlannerConfig) *InKernelPlanner {
+	prefillChunkTokens, prefillChunkErr := resolveInKernelQwenQ4KPrefillChunkTokens(cfg.QwenQ4KPrefillChunkTokens)
 	p := &InKernelPlanner{
 		m:                            m,
 		tok:                          tok,
@@ -210,16 +225,14 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 		quant:                        true, // the served in-kernel path runs the Q8_0 forward (a quantized model)
 		backend:                      backend,
 		metal:                        metal,
-		cpuOffloadExperts:            cpuOffloadExperts,
+		cpuOffloadExperts:            cfg.CPUOffloadExperts,
 		maxNew:                       envInt("FAK_INKERNEL_MAX_TOKENS", 256),
 		temp:                         envFloat("FAK_INKERNEL_TEMP", 0),
 		seed:                         int64(envInt("FAK_INKERNEL_SEED", 0)),
 		qwenQ4KPrefillChunkTokens:    prefillChunkTokens,
 		qwenQ4KPrefillChunkConfigErr: prefillChunkErr,
-	}
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("FAK_INKERNEL_QWEN35_METAL_GDN_SEQUENCE"))) {
-	case "on", "1", "true", "yes":
-		p.qwen35MetalGDNSequence = true
+		qwen35MetalGDNSequence:       cfg.Qwen35MetalGDNSequence,
+		q4kGateUpOutputSlab:          cfg.Q4KGateUpOutputSlab,
 	}
 	if backend == nil && metal {
 		m.PrepareMetalResidency(q4k)
@@ -260,22 +273,26 @@ func NewInKernelPlanner(m *model.Model, tok *tokenizer.Tokenizer, modelID string
 	return p
 }
 
-func resolveInKernelQwenQ4KPrefillChunkTokens(raw string) (int, *model.InKernelQwenQ4KPrefillChunkConfigError) {
-	switch raw {
-	case "":
+// RuntimeConfig returns the explicit native settings fixed at planner construction.
+// It is a readback seam for gateway/operator reachability receipts; changing the returned
+// value cannot mutate a running planner.
+func (p *InKernelPlanner) RuntimeConfig() InKernelPlannerConfig {
+	return InKernelPlannerConfig{
+		CPUOffloadExperts:         p.cpuOffloadExperts,
+		QwenQ4KPrefillChunkTokens: p.qwenQ4KPrefillChunkTokens,
+		Qwen35MetalGDNSequence:    p.qwen35MetalGDNSequence,
+		Q4KGateUpOutputSlab:       p.q4kGateUpOutputSlab,
+	}
+}
+
+func resolveInKernelQwenQ4KPrefillChunkTokens(tokens int) (int, *model.InKernelQwenQ4KPrefillChunkConfigError) {
+	switch {
+	case tokens == 0:
 		return inKernelQwenQ4KPrefillChunkTokens, nil
-	case "512":
-		return 512, nil
-	case "1024":
-		return 1024, nil
-	case "2048":
-		return 2048, nil
-	case "4096":
-		return 4096, nil
-	case "8192":
-		return 8192, nil
+	case tokens >= 128 && tokens <= 8192:
+		return tokens, nil
 	default:
-		return 0, &model.InKernelQwenQ4KPrefillChunkConfigError{Value: raw}
+		return 0, &model.InKernelQwenQ4KPrefillChunkConfigError{Value: fmt.Sprint(tokens)}
 	}
 }
 

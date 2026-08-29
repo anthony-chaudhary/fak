@@ -41,5 +41,48 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "issue10046-plan-inkernelplannerconfig",
+      "canonical": "InKernelPlannerConfig (native planner construction settings)",
+      "family": "plan",
+      "kind": "config",
+      "definition": "agent.InKernelPlannerConfig is the typed bundle of native planner and session settings fixed at construction, including Qwen Q4_K prefill chunking, Qwen3.5 Metal GDN sequencing, CPU expert offload, and the Q4_K gate/up output slab.",
+      "distinction": "This is configuration supplied to a native planner, not InKernelPlanner, the runtime planner that owns request state, and not NewInKernelPlannerWithConfig, the constructor that consumes the configuration.",
+      "distinct_from": [
+        "x2-plan-newinkernelplanner",
+        "issue10046-plan-newinkernelplannerwithconfig",
+        "issue10046-gateway-inkernelplannerconfig-binding",
+        "issue10046-guard-gate-q4k-gateup-output-slab"
+      ],
+      "aliases": [],
+      "grounding": "InKernelPlannerConfig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
+  ,
+    {
+      "id": "issue10046-plan-newinkernelplannerwithconfig",
+      "canonical": "NewInKernelPlannerWithConfig (typed native planner constructor)",
+      "family": "plan",
+      "kind": "symbol",
+      "definition": "agent.NewInKernelPlannerWithConfig constructs the local in-kernel planner from a loaded model plus an explicit InKernelPlannerConfig, fixing operator-selected native behavior before any request session is created.",
+      "distinction": "This is the constructor that consumes explicit typed settings; unlike NewInKernelPlanner it is not the compatibility constructor with only CPU-offload input, and unlike InKernelPlannerConfig it performs construction rather than representing settings.",
+      "distinct_from": [
+        "x2-plan-newinkernelplanner",
+        "issue10046-plan-inkernelplannerconfig",
+        "issue10046-gateway-configured-inkernelplanner-construction"
+      ],
+      "aliases": [],
+      "grounding": "NewInKernelPlannerWithConfig",
+      "grounding_kind": "symbol",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

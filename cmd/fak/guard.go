@@ -163,6 +163,9 @@ func cmdManageCommand(commandName string, argv []string) {
 	quiet := fs.Bool("quiet", false, "suppress the startup banner and the exit audit summary")
 	bannerFlag := fs.String("banner", guardBannerAuto, "startup surface before handing the terminal to the agent: auto|full|compact|animate|off. AUTO (default) emits only delayed loading progress for healthy interactive and noninteractive launches: no guard report, profiles, identity/configuration, animation, or persistent settle lines. Explicit full, compact, and animate retain those displays; off suppresses the startup surface. The full report is always recorded on the in-process gateway regardless — read it any time during the session with `fak info --startup` (it is the startup_report field of /debug/vars), and it is spilled to the terminal in full when the launch itself fails. --quiet still silences everything.")
 	resourceStats := fs.Bool("resource-stats", true, "ON by default — track the HARNESS's own hardware-resource use this session (CPU, memory/RSS, disk-I/O) for BOTH halves: the kernel (this guard process + the in-process gateway, sampled continuously) and the agent (the wrapped child, folded from its exit state). Reported as one line in the exit summary and appended to .fak/nightrun/harness-resources.jsonl. Pass --resource-stats=false to disable (epic #2044).")
+	childMaxMemoryMB := fs.Uint64("child-max-memory-mb", 0, "maximum wrapped-child process-tree memory in MiB (0 uses the host-sized default)")
+	childResourcePoll := fs.Duration("child-resource-poll", guardResourcePollDefault, "wrapped-child resource sampling interval (minimum 100ms)")
+	childResourceJournal := fs.String("child-resource-journal", "", "child-resource receipt JSONL path (default: user config directory)")
 	debugStats := fs.Bool("debug-stats", true, "ON by default — the observable debug layer: print ONE compact, payload-free line per served turn to stderr with the turn's cache + token-value economy (request_tokens/cache_read/cache_creation, cache_hit, cache_rebate_tokens, and session-to-date current/previous/average/median/high/low cache savings), the SAFETY half (blocked:/repaired:/quarantined: with the dominant reason whenever the kernel refused, rewrote, or paged out a call THIS turn — so a refused rm -rf or a quarantined secret is visible the moment it happens, not only in the exit summary), the compaction action, and the resetScore SHADOW health (healthy_cache|cache_decay|stale_prefix|cooldown|unknown_provider). These counts are the provider's own usage numbers, so it works natively over your Claude subscription OAuth. Independent of --log; pass --debug-stats=false or --quiet to silence it (#793).")
 	preCompactHook := fs.String("precompact-hook", guardPreCompactModeShadow, "Claude Code PreCompact hook actuator for auto-compaction: off|shadow|enforce. shadow logs would-block/would-allow while exiting 0; enforce returns the compactcohere posture exit code.")
 	arbitrateConfig := guardArbitrateConfig{Mode: guardArbitrateModeShadow}
@@ -206,6 +209,7 @@ func cmdManageCommand(commandName string, argv []string) {
 	alongside := fs.Bool("alongside", false, "with --gguf: serve the small local model ALONGSIDE the API upstream instead of REPLACING it (the dual planner). The wrapped agent's normal turns proxy to the provider exactly as a plain `fak guard` session (same OAuth/passthrough, same prompt-cache preservation), while any request addressed to the --gguf model's alias — or the literal model id \"local\" — decodes in-kernel on your box with no upstream call and no tokens billed (e.g. point a cheap subagent tier at it). Implied by --gguf + an explicit --base-url.")
 	localAuto := fs.Bool("local", false, "auto-detect a local OpenAI-compatible model server you are ALREADY running (Ollama, LM Studio, Qwen3.6 dogfood, or llama.cpp) and wire guard's upstream to it with zero flags — `fak guard --local -- codex` becomes a governed local coding loop with no base-URL hunting. Probes, fail-soft (~300ms each), Ollama (127.0.0.1:11434, honors OLLAMA_HOST), then LM Studio (127.0.0.1:1234), then Qwen3.6 dogfood (127.0.0.1:8131), then llama.cpp (127.0.0.1:8080); the first live one wins and a coding-tuned served model is preferred. If --gguf is ALSO passed it wins (that is the no-server in-kernel path); if nothing is detected and no --gguf, fak fails loud with how to start a server. Mutually exclusive with --base-url / --remote-serve.")
 	gpuBackend := fs.String("backend", "", "with --gguf: compute backend for the in-kernel decode — empty = the CPU reference path; a registered device like 'cuda' runs prefill+decode through the GPU HAL (needs a -tags cuda build AND a reachable GPU). Fails loud if named but unavailable, so a typo never silently runs on CPU.")
+	guardNativeFlags := registerGuardNativeControlFlags(fs)
 	tokPath := fs.String("tokenizer", "", "with --gguf: OPTIONAL tokenizer override (a tokenizer.json or its directory); default uses the GGUF's EMBEDDED tokenizer. Pass this only for a checkpoint with no embedded BPE tokenizer or a custom vocab.")
 	replayTrace := fs.String("replay-trace", "", "DON'T wrap a live agent — instead REPLAY a recorded trace fixture through the real guard end to end and watch the floor fire. Stands up the gateway against a built-in fake upstream that emits the fixture's tool_use + token-usage turns, posts each turn through the SAME adjudication path `fak guard -- claude` uses, and prints per-turn what was allowed vs denied (with the deny reason), the turn's token/cache economy, and the journal rows recorded — then the exit summary + the verify command. No API key, no GPU, no child process. Use it to understand exactly what the guard does to a trace that leads to token work, and to demo the floor. See internal/gateway/testdata/guard-trace-e2e.json for the fixture shape.")
 	replayWire := fs.String("replay-wire", "anthropic", "with --replay-trace: the provider wire to replay over (anthropic = the `fak guard -- claude` flagship /v1/messages path; openai = the codex/opencode /v1/chat/completions path).")
@@ -226,6 +230,16 @@ func cmdManageCommand(commandName string, argv []string) {
 	fs.Usage = func() { printGuardUsage(os.Stderr, fs, commandName, guardHelpAll) }
 	argv = rewriteLegacyDenyAllArgs(argv)
 	_ = fs.Parse(argv)
+	if err := validateNativeQwenQ4KPrefillChunk(*guardNativeFlags.prefillChunk); err != nil {
+		fmt.Fprintln(os.Stderr, "fak guard:", err)
+		os.Exit(2)
+	}
+	guardNativeConfig := guardNativeFlags.config()
+	if *childResourcePoll < 100*time.Millisecond {
+		fmt.Fprintln(os.Stderr, "fak guard: --child-resource-poll must be at least 100ms")
+		os.Exit(2)
+	}
+	setGuardResourceConfig(guardResourceConfig{MaxMemoryMB: *childMaxMemoryMB, PollInterval: *childResourcePoll, ReceiptPath: *childResourceJournal})
 	launchPlan := newGuardLaunchPlan(fs.Args())
 	setLaunchToolGrant(allowTools)
 	rotateSet := false
@@ -820,6 +834,10 @@ func cmdManageCommand(commandName string, argv []string) {
 		if chatBackend != nil {
 			fmt.Fprintf(os.Stderr, "fak guard: in-kernel decode → device backend %q\n", chatBackend.Name())
 		}
+		if err := applyNativeControls(chatBackend, guardNativeConfig); err != nil {
+			fmt.Fprintln(os.Stderr, "fak guard:", err)
+			os.Exit(2)
+		}
 		inKernelModel, inKernelQ4K, loadProfile, loadPhase = loadServeInKernelModel(*ggufPath, chatBackend, false, contextBudgetLimit, nil, 1)
 		if inKernelModel == nil {
 			fmt.Fprintf(os.Stderr, "fak guard: failed to load %q into the in-kernel engine\n", *ggufPath)
@@ -962,6 +980,7 @@ func cmdManageCommand(commandName string, argv []string) {
 		InKernelModel:         inKernelModel,
 		Tokenizer:             inKernelTok,
 		InKernelQ4K:           inKernelQ4K,
+		InKernelPlanner:       guardNativeConfig.Planner,
 		LocalModelID:          localAlias,
 		Backend:               chatBackend,
 		PinUpstreamCredential: pinUpstream,

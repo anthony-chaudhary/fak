@@ -34,6 +34,9 @@ type benchFlags struct {
 	metal                 *bool
 	verify                *bool
 	backendName           *string
+	q4kGateUpSlab         *bool
+	vulkanQ4KProfile      *bool
+	vulkanStageQ4K        *bool
 	requireNonReference   *bool
 	workloadPath          *string
 	workloadPrefillCap    *int
@@ -82,6 +85,9 @@ func parseFlags() *benchFlags {
 		metal:                 flag.Bool("metal", false, "run prefill projections on the Metal GPU backend (auto-compiled on darwin/arm64+cgo, no build tag needed; implies -quant for the Q8 weight store; with -q4k, routes Q4_K tensors through MetalQ4K)"),
 		verify:                flag.Bool("verify", false, "with -metal: cross-check the Metal prefill's last-token logits against the CPU Q8 path (argmax agreement + max|Δ|) and exit"),
 		backendName:           flag.String("backend", "legacy", "execution backend: legacy or a compute backend name"),
+		q4kGateUpSlab:         flag.Bool("q4k-gateup-slab", false, "reuse the bounded Q4_K gate/up output slab within each benchmark session"),
+		vulkanQ4KProfile:      flag.Bool("vulkan-q4k-profile", false, "enable Vulkan Q4_K timing profiles (requires -backend vulkan)"),
+		vulkanStageQ4K:        flag.Bool("vulkan-stage-q4k", false, "use Vulkan host-visible Q4_K staging (requires -backend vulkan)"),
 		requireNonReference:   flag.Bool("require-non-reference", false, "fail unless -backend selects a non-reference compute backend"),
 		workloadPath:          flag.String("workload", "", "optional recorded agent workload JSON; emits workload_prefill/workload_decode"),
 		workloadPrefillCap:    flag.Int("workload-prefill-cap", 0, "cap recorded workload prompt lengths for smoke runs (0 = full recorded length)"),

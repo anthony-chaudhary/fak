@@ -117,13 +117,10 @@ func WriteUpdateState(target, prior string) error {
 	})
 }
 
-// UpdatePolicy resolves flag > environment > config > default. The wait is
+// UpdatePolicy resolves flag > config > default. The wait is
 // positive and capped even when configuration is hostile.
 func UpdatePolicy(c Config, flagPolicy, flagWait string) (string, time.Duration, error) {
 	policy := strings.TrimSpace(flagPolicy)
-	if policy == "" {
-		policy = strings.TrimSpace(os.Getenv("FAK_UPDATE_LAUNCH_POLICY"))
-	}
 	if policy == "" {
 		policy = strings.TrimSpace(c.UpdateLaunchPolicy)
 	}
@@ -148,10 +145,6 @@ func UpdatePolicy(c Config, flagPolicy, flagWait string) (string, time.Duration,
 	}
 	rawWait := strings.TrimSpace(flagWait)
 	source := "--update-launch-wait"
-	if rawWait == "" {
-		rawWait = strings.TrimSpace(os.Getenv("FAK_UPDATE_LAUNCH_WAIT"))
-		source = "FAK_UPDATE_LAUNCH_WAIT"
-	}
 	if rawWait != "" {
 		parsed, err := time.ParseDuration(rawWait)
 		if err != nil || parsed <= 0 {

@@ -188,6 +188,10 @@ func (rt *serveRuntime) resolveCompute(sf *serveFlags) {
 		rt.addStartupMessage(newServeStartupMessage("serve", "compute-backend", "info",
 			fmt.Sprintf("in-kernel chat decode -> device backend %q", chatBackend.Name())))
 	}
+	if err := applyNativeControls(chatBackend, serveNativeControlConfig(sf)); err != nil {
+		fmt.Fprintln(os.Stderr, "fak serve:", err)
+		os.Exit(2)
+	}
 	// Resolve the Apple-Silicon Metal GPU forward BEFORE eager loading. On an
 	// Apple-Silicon+cgo binary with a usable device it is the default runtime path; an
 	// explicit --metal/FAK_METAL=1 keeps the old fail-loud posture when Metal is unavailable.

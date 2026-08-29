@@ -3,6 +3,8 @@ package superloop
 import (
 	"strings"
 	"testing"
+
+	"github.com/anthony-chaudhary/fak/internal/scoreboard"
 )
 
 // reportFeederRoster is the reporting family this intent must walk: the Slack feeders
@@ -19,7 +21,7 @@ var reportFeederRoster = map[string]string{
 	"report:cachevalue": "fak slack refresh --surface cachevalue",
 	"report:bench":      "fak slack refresh --surface bench",
 	"report:dojo":       "fak slack refresh --surface dojo",
-	"report:backlog":    "fak slack refresh --surface backlog",
+	"report:backlog":    "fak slack refresh --surface backlog --backlog-channel " + scoreboard.CICDReportChannel,
 	"report:node-usage": "fak slack refresh --surface node-usage",
 	"report:steering":   "fak slack refresh --surface steering",
 }

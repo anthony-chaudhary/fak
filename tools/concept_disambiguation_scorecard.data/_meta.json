@@ -3322,6 +3322,21 @@
           "category": "incidental",
           "reason": "Private Check implementation for the registered MICROHARNESS_WITNESS advisory; it follows the established gate<Name> helper convention and is not a separate guard-gate concept.",
           "token": "gateMicroharnessWitness"
+        },
+        {
+          "category": "incidental",
+          "reason": "Private CLI flag-storage shorthand for the positioned Q4KGateUpOutputSlab setting; it introduces no separate runtime mechanism or meaning.",
+          "token": "q4kgateupslab"
+        },
+        {
+          "category": "incidental",
+          "reason": "serveFlags pointer field carrying the positioned Q4KGateUpOutputSlab setting between flag parsing and typed configuration; it is not a distinct slab or gate.",
+          "token": "nativeq4kgateupoutputslab"
+        },
+        {
+          "category": "incidental",
+          "reason": "Setter spelling used to propagate the positioned Q4KGateUpOutputSlab setting into engines and schedulers; it names no separate concept.",
+          "token": "setq4kgateupoutputslab"
         }
       ],
       "exclude": [
@@ -3680,6 +3695,7 @@
         "markGuardChildTerminalIntent",
         "marshalGuardProfileCapture",
         "nativeReasonMessageRoleUnsupported",
+        "nativeq4kgateupoutputslab",
         "newGuardCompactionWitness",
         "newguardlaunchnonce",
         "next_gate_review",
@@ -3700,6 +3716,7 @@
         "proseGate",
         "ptrGuardInfoWorkDone",
         "publicGatewayURL",
+        "q4kgateupslab",
         "quality_gate",
         "qwenEmptyUsageGuardFromEnv",
         "qwenEmptyUsageGuardReceipt",
@@ -3726,6 +3743,7 @@
         "semanticGate",
         "setGuardCompactionAnchorMode",
         "setGuardCoreLockAll",
+        "setq4kgateupoutputslab",
         "shrinkLeverGuardCommand",
         "stallscanSkewGuard",
         "startBoundGuardRegistration",
@@ -13158,6 +13176,11 @@
           "category": "incidental",
           "reason": "Receipt field records local fak ownership of the control plane; it is not a planning primitive or plan authority.",
           "token": "ControlPlaneOwner"
+        },
+        {
+          "category": "incidental",
+          "reason": "Package-local adapter function that assembles the positioned InKernelPlannerConfig from serve flags; the helper name is not a distinct planning concept.",
+          "token": "servenativeplannerconfig"
         }
       ],
       "exclude": [
@@ -13342,6 +13365,7 @@
         "scanCodexMarketplaceCandidates",
         "seedCandidate",
         "seen_candidates",
+        "servenativeplannerconfig",
         "stablePlanID",
         "validateGroupedPlan",
         "watchdogCandidates",

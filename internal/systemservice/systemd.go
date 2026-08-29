@@ -39,7 +39,7 @@ WatchdogSec=30s
 DynamicUser=yes
 RuntimeDirectory=fak
 RuntimeDirectoryMode=0700
-ExecStart=` + exec + ` service run --interval 15s
+ExecStart=` + exec + ` service run --interval 15s --notify systemd
 Restart=always
 RestartSec=3s
 KillMode=control-group
@@ -64,7 +64,6 @@ MemoryMax=1G
 TasksMax=256
 CPUQuota=50%
 Environment=FAK_SERVICE_MANAGER=systemd-system
-Environment=FAK_SERVICE_NOTIFY=systemd
 Environment=FLEET_REG_DIR=` + state + `
 
 [Install]

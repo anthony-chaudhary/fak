@@ -6,10 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
-	"strconv"
-	"strings"
 	"syscall"
 	"unsafe"
 )
@@ -139,6 +136,12 @@ type JobObject struct {
 	handle syscall.Handle
 }
 
+// ManagedJobConfig carries the explicit aggregate Job Object memory ceiling.
+// A zero value preserves the historical 64 GiB managed-agent default.
+type ManagedJobConfig struct {
+	MemoryLimitBytes uint64
+}
+
 // Close closes the job handle. Because the job carries KILL_ON_JOB_CLOSE, closing
 // the last handle terminates every process still assigned to it. Safe on a nil or
 // already-closed receiver.
@@ -231,8 +234,8 @@ func StartInNewJob(cmd *exec.Cmd) (*JobObject, error) {
 // StartManagedAgentInNewJob starts a child-agent tree with both kill-on-close
 // ownership and the aggregate commit ceiling. Callers opt in explicitly so an
 // unrelated command-line argument cannot accidentally select or evade the cap.
-func StartManagedAgentInNewJob(cmd *exec.Cmd) (*JobObject, error) {
-	return startInNewJob(cmd, managedJobMemoryLimitBytes())
+func StartManagedAgentInNewJob(cmd *exec.Cmd, config ManagedJobConfig) (*JobObject, error) {
+	return startInNewJob(cmd, managedJobMemoryLimitBytes(config))
 }
 
 func startInNewJob(cmd *exec.Cmd, memoryLimit uint64) (*JobObject, error) {
@@ -371,15 +374,10 @@ func assignProcessToNewJobObject(cmd *exec.Cmd, memoryLimit uint64) (*JobObject,
 	return job, nil
 }
 
-func managedJobMemoryLimitBytes() uint64 {
+func managedJobMemoryLimitBytes(config ManagedJobConfig) uint64 {
 	const defaultLimit = uint64(64) << 30
-	raw := strings.TrimSpace(os.Getenv("FAK_CHILD_MAX_COMMIT_MB"))
-	if raw == "" {
+	if config.MemoryLimitBytes == 0 {
 		return defaultLimit
 	}
-	mb, err := strconv.ParseUint(raw, 10, 64)
-	if err != nil || mb == 0 || mb > ^uint64(0)>>20 {
-		return defaultLimit
-	}
-	return mb << 20
+	return config.MemoryLimitBytes
 }

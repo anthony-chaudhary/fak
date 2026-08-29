@@ -64,6 +64,7 @@ exec "$FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY" -test.run=^TestGuardParentSurvives
 	guardArgs := strings.Join([]string{
 		"--quiet", "--provider", "openai", "--session-id", guardTrace,
 		"--api-key-env", "FAK_GUARD_RESOURCE_WITNESS_KEY", "--audit", auditPath,
+		"--child-max-memory-mb", "48", "--child-resource-poll", "100ms", "--child-resource-journal", resourceJournal,
 		"--", codexPath, "original-prompt-must-not-replay",
 	}, " ")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -76,9 +77,6 @@ exec "$FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY" -test.run=^TestGuardParentSurvives
 		"FAK_DARWIN_CODEX_RESOURCE_STATE="+statePath,
 		"FAK_DARWIN_CODEX_RESOURCE_OBSERVED="+observedPath,
 		"FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY="+os.Args[0],
-		"FAK_CHILD_RESOURCE_JOURNAL="+resourceJournal,
-		"FAK_CHILD_MAX_MEMORY_MB=48",
-		"FAK_CHILD_RESOURCE_POLL=100ms",
 		guardResourceRestartLimitEnv+"=1",
 		guardResourceNoProgressLimitEnv+"=0",
 		guardCrashRestartLimitEnv+"=0",
@@ -164,6 +162,7 @@ exec "$FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY" -test.run=^TestGuardDarwinCodexRSS
 			guardArgs := strings.Join([]string{
 				"--quiet", "--provider", "openai", "--session-id", "guard-trace-9734",
 				"--api-key-env", "FAK_GUARD_RESOURCE_WITNESS_KEY", "--audit", auditPath,
+				"--child-max-memory-mb", "48", "--child-resource-poll", "100ms", "--child-resource-journal", filepath.Join(dir, "child-resource.jsonl"),
 				"--", codexPath, "original-prompt-must-not-replay",
 			}, " ")
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -177,8 +176,6 @@ exec "$FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY" -test.run=^TestGuardDarwinCodexRSS
 				"FAK_DARWIN_CODEX_RESOURCE_STATE="+filepath.Join(dir, "child-state"),
 				"FAK_DARWIN_CODEX_RESOURCE_OBSERVED="+observedPath,
 				"FAK_DARWIN_CODEX_RESOURCE_TEST_BINARY="+os.Args[0],
-				"FAK_CHILD_RESOURCE_JOURNAL="+filepath.Join(dir, "child-resource.jsonl"),
-				"FAK_CHILD_MAX_MEMORY_MB=48", "FAK_CHILD_RESOURCE_POLL=100ms",
 				guardResourceRestartLimitEnv+"=1", guardResourceNoProgressLimitEnv+"=0", guardCrashRestartLimitEnv+"=0",
 			)
 			var stdout, stderr bytes.Buffer
@@ -242,6 +239,7 @@ exec "$FAK_DARWIN_RESOURCE_RELAUNCH_TEST_BINARY" -test.run=^TestGuardParentSurvi
 		"--quiet", "--provider", "anthropic",
 		"--api-key-env", "FAK_GUARD_RESOURCE_WITNESS_KEY",
 		"--audit", auditPath,
+		"--child-max-memory-mb", "48", "--child-resource-poll", "100ms", "--child-resource-journal", resourceJournal,
 	}
 	if maxDuration != "" {
 		guardArgv = append(guardArgv, "--max-duration", maxDuration)
@@ -258,9 +256,6 @@ exec "$FAK_DARWIN_RESOURCE_RELAUNCH_TEST_BINARY" -test.run=^TestGuardParentSurvi
 		"FAK_DARWIN_RESOURCE_RELAUNCH_STATE="+statePath,
 		"FAK_DARWIN_RESOURCE_RELAUNCH_OBSERVED="+observedPath,
 		"FAK_DARWIN_RESOURCE_RELAUNCH_TEST_BINARY="+os.Args[0],
-		"FAK_CHILD_RESOURCE_JOURNAL="+resourceJournal,
-		"FAK_CHILD_MAX_MEMORY_MB=48",
-		"FAK_CHILD_RESOURCE_POLL=100ms",
 		guardResourceRestartLimitEnv+"=1",
 		guardResourceNoProgressLimitEnv+"=0",
 		guardCrashRestartLimitEnv+"=0",
@@ -648,7 +643,9 @@ func TestGuardChildResourceMonitorDarwinReapsOwnedTreeAndReceipts(t *testing.T) 
 
 	_ = stopGuardChild(cmd, wait, 0)
 	stopped = true
-	t.Setenv("FAK_CHILD_RESOURCE_JOURNAL", journal)
+	oldConfig := guardResourceConfigured
+	setGuardResourceConfig(guardResourceConfig{ReceiptPath: journal})
+	t.Cleanup(func() { setGuardResourceConfig(oldConfig) })
 	if err := guardWriteResourceReceipt(ev, "trace-darwin-witness", "codex", cmd.Process.Pid); err != nil {
 		t.Fatalf("write Darwin resource receipt: %v", err)
 	}

@@ -63,11 +63,12 @@ type NativeScheduler struct {
 	// maxObservedRunning is the high-water mark of the running set, written only by the
 	// run goroutine under mu. It lets a witness assert the waiting queue actually gated
 	// (peak == maxRunning) without racing on a live concurrency count.
-	maxObservedRunning int
-	sharedBatchSteps   uint64
-	sharedPanels       uint64
-	sharedMACs         uint64
-	closed             bool
+	maxObservedRunning  int
+	sharedBatchSteps    uint64
+	sharedPanels        uint64
+	sharedMACs          uint64
+	q4kGateUpOutputSlab bool
+	closed              bool
 
 	// preemption is disabled until MaxBlocks is set. When enabled it treats MaxBlocks as
 	// the live paged-KV block budget and preempts running lanes at scheduler boundaries
@@ -90,6 +91,15 @@ func (s *NativeScheduler) SetMaxRunning(n int) {
 	s.maxRunning = n
 	s.mu.Unlock()
 	s.signal()
+}
+
+// SetQ4KGateUpOutputSlab selects the explicit session-owned slab for Q4_K lanes.
+// Set it before Admit; applying it to every session constructor keeps preemption
+// restore and ordinary admission behavior identical.
+func (s *NativeScheduler) SetQ4KGateUpOutputSlab(enabled bool) {
+	s.mu.Lock()
+	s.q4kGateUpOutputSlab = enabled
+	s.mu.Unlock()
 }
 
 // MaxObservedRunning reports the peak running-set size the loop reached — the witness
@@ -173,6 +183,7 @@ func (s *NativeScheduler) AdmitWithHint(ctx context.Context, c *abi.ToolCall, hi
 		// implement q4kw dispatch.
 		sess.Quant = true
 		sess.Q4K = true
+		sess.Q4KGateUpOutputSlab = s.q4kGateUpOutputSlab
 	}
 	logits := sess.Prefill(prompt)
 	kvReuseHits, kvPinned, kvPinUntil := nativeKVBMHintsFromMeta(c.Meta)

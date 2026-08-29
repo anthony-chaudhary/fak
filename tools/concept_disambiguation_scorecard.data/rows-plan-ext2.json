@@ -166,7 +166,9 @@
       "distinction": "It constructs the LOCAL in-process generation planner, NOT the outbound network HTTPPlanner nor an offline test planner.",
       "distinct_from": [
         "HTTPPlanner (agent client)",
-        "x2-gateway-engine-inkernelchat"
+        "x2-gateway-engine-inkernelchat",
+        "issue10046-plan-inkernelplannerconfig",
+        "issue10046-plan-newinkernelplannerwithconfig"
       ],
       "aliases": [
         "buildrunplanner"

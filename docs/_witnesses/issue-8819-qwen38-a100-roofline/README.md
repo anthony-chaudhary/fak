@@ -24,5 +24,5 @@ is still usable because all four hits took the same 4.71–4.73 s decode path, b
 no gain may be claimed until quality is restored.
 
 Raw evidence is scrubbed: `prefix-profile.jsonl` and `rows.json`; the raw server log was used to derive `profile.json` but is intentionally not committed as regenerable output.
-The profile events are opt-in via `FAK_PREFIX_PROFILE`; ordinary execution pays no
+The profile events are opt-in via the explicit `model.SetPrefixProfilePath` config API; ordinary execution pays no
 clock or I/O overhead.

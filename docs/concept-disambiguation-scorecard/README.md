@@ -15,11 +15,11 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 
 | Metric (primary = unbounded driver) | Value |
 |---|---|
-| **Disambiguation-debt (drive to 0)** | **13** (clarity 2 + coverage 11) |
-| **Crystal-clear concepts (and climbing)** | **965** crystal of 2679 positioned |
-| **Confusable tokens positioned (covered / discovered)** | **2800 / 2811** (99.6% of the discovered confusable space) |
+| **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
+| **Crystal-clear concepts (and climbing)** | **970** crystal of 2684 positioned |
+| **Confusable tokens positioned (covered / discovered)** | **2803 / 2815** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **77** of 3799 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **79** of 3807 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 98.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2679 concepts - score 98.6/100 (grade A) - disambiguation-debt 13
+concept-disambiguation chart - 2684 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 965
+  * crystal       ################............ 970
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -46,11 +46,11 @@ clarity mix by family (each cell = one concept):
   decision         *********************************ooooooooooooooooooooo (54 concept(s); 33 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
   evict            ***************oooooooooooooooooooooooooooooooo (47 concept(s); 15 crystal)
-  gateway-engine   ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (156 concept(s); 39 crystal)
-  guard-gate       *********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (442 concept(s); 201 crystal)
+  gateway-engine   *****************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (158 concept(s); 41 crystal)
+  guard-gate       **********************************************************************************************************************************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (443 concept(s); 202 crystal)
   layout           *********ooooooooo (18 concept(s); 9 crystal)
   loop             *********************************************oooooooooooooooooooooooooooooooooooooo (83 concept(s); 45 crystal)
-  plan             *********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (345 concept(s); 105 crystal)
+  plan             ***********************************************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (347 concept(s); 107 crystal)
   policy-capability ************************************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (189 concept(s); 84 crystal)
   pool             ******oooooooooooooooooooooooooooooooo (38 concept(s); 6 crystal)
   render-materialize ***************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (192 concept(s); 39 crystal)
@@ -63,10 +63,11 @@ clarity mix by family (each cell = one concept):
 
 coverage by family (positioned / discovered):
   policy-capability ############################ 209/212
-  gateway-engine   ############################ 195/197
-  guard-gate       ############################ 499/501
+  gateway-engine   ############################ 196/198
+  guard-gate       ############################ 500/502
   support-maturity ###########################. 62/64
   cache            ############################ 299/300
+  plan             ############################ 407/408
   session-runtime  ############################ 270/271
   witness-proof    ############################ 162/163
   attention        ############################ 85/85
@@ -77,14 +78,13 @@ coverage by family (positioned / discovered):
   evict            ############################ 54/54
   layout           ############################ 19/19
   loop             ############################ 93/93
-  plan             ############################ 404/404
   pool             ############################ 40/40
   render-materialize ############################ 209/209
   score-debt       ############################ 92/92
   trajectory-control ............................ 0/0
   vfs              ............................ 0/0
 
-namespace coverage  [################################] 99.6%  (2800/2811 confusable tokens positioned)
+namespace coverage  [################################] 99.6%  (2803/2815 confusable tokens positioned)
 
 pairwise separation (of the name-pairs a reader cannot keep apart):
   mutual       ############################ 207
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 207/207
 
-name index: 3799 lookup name(s) -> 2679 concept(s), 77 ambiguous
+name index: 3807 lookup name(s) -> 2684 concept(s), 79 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **207 / 207** (207 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1768 / 4759 |
+| Boundaries drawn (mutual / total) | 1790 / 4780 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3799 over 2679 concepts |
-| Lookup names landing on several concepts | 77 |
+| Lookup names indexed | 3807 over 2684 concepts |
+| Lookup names landing on several concepts | 79 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2679 |
+| Concepts carrying a contrast set | 2684 |
 
 ## The concepts (best verdict first)
 
@@ -364,11 +364,11 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for kernelerr** - `kernelerr` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginekind** - `enginekind` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginenative** - `enginenative` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
-| * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for fakinkernelqwenq4kprefillchunktokens** - `fakinkernelqwenq4kprefillchunktokens` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for inkernelmodelbutchatismock** - `inkernelmodelbutchatismock` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for kernelscompilation** - `kernelscompilation` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for turningressengine** - `turningressengine` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for inkernelbatchreceipt** - `inkernelbatchreceipt` is a concrete tree symbol classified in the `gateway-engine` family. This row positions that implementation surface so lookup does not conflate it with the family umbrella. |
+| * | crystal | config | gateway-engine | **Qwen Q4_K native prefill chunk setting** - InKernelPlannerConfig.QwenQ4KPrefillChunkTokens is the explicit 128..8192-token bound used to partition Qwen Q4_K native prefill calls before decode; operator flags populate it at planner construction. |
 | * | crystal | config | gateway-engine | **FAK_AWQ_KERNEL** - The env/CPUID gate (FAK_AWQ_KERNEL) that opts into the AWQ 4-bit matmul kernel on amd64; unset leaves the default path provably untouched. |
 | * | crystal | config | gateway-engine | **FAK_INKERNEL_BATCH** - The env gate (FAK_INKERNEL_BATCH) enabling the in-kernel decode path to co-batch concurrent requests; unset decodes byte-identically via serial Session.Step per lane. |
 | * | crystal | config | gateway-engine | **FAK_INKERNEL_RADIX** - The env gate (FAK_INKERNEL_RADIX, budget via FAK_INKERNEL_RADIX_BUDGET) enabling in-kernel radix prefix reuse in the decode planner. |
@@ -380,6 +380,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | config | gateway-engine | **ExecutionEngine values (fak-native / llama.cpp)** - The closed qwen38 campaign values selecting either fak-native model math for promotion eligibility or the pinned llama.cpp comparison-only runtime. |
 | * | crystal | config | gateway-engine | **NativeEngine (model descriptor execution identity)** - The modeldescriptor field that pins an onboarding descriptor to fak-native execution before compatibility validation. |
 | * | crystal | symbol | gateway-engine | **execViaKernel (agent-loop syscall adapter)** - The agent-loop adapter that lowers one admitted model tool call into abi.ToolCall, invokes the fak kernel syscall, and converts its verdict/result into model-visible tool content. |
+| * | crystal | config | gateway-engine | **Gateway in-kernel planner configuration binding** - The serveNativePlannerConfig production seam binds explicit serve flags into agent.InKernelPlannerConfig and then into gateway.Config.InKernelPlanner before the gateway constructs its native planner. |
+| * | crystal | symbol | gateway-engine | **Gateway configured in-kernel planner construction** - newInKernelChatPlanner carries gateway.Config.InKernelPlanner into agent.NewInKernelPlannerWithConfig when the gateway selects its in-process native chat planner. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for engineresult** - `engineResult` is the gateway-engine symbol declared or used at `internal/agent/readengine.go:65` as `return engineResult(ctx, c, body, out, isErr, FakReadEngineID), nil`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginespec** - `EngineSpec` is the gateway-engine symbol declared or used at `internal/quality/case.go:70` as `Engine EngineSpec `json:"engine"``. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | gateway-engine | **gateway-engine implementation surface for enginevllm** - `EngineVLLM` is the gateway-engine symbol declared or used at `internal/enginecache/compare.go:61` as `witnessed, err := (Client{Engine: EngineVLLM, BaseURL: server.URL}).Invalidate(context.Background(), dirs)`. This row positions that concrete implementation surface, not merely the family label. |
@@ -432,6 +434,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | guard-gate | **fak_gateway_compaction_thrash_sessions_total (metric)** - The gateway metrics counter naming how many served sessions reached the COMPACTION_THRASH verdict. It is the operator-visible half of the thrash detector: incremented on every thrash session regardless of whether the stop is armed, so the signal is readable before anything acts on it. |
 | * | crystal | symbol | guard-gate | **aggregateAnswers** - Typed exhaustive corpus-level gold facts and candidate outputs for state counts, label counts, and chronology top-k grading. |
 | * | crystal | symbol | guard-gate | **gateVerbTierTree (whole-tree verb-tier gate)** - Whole-tree fak hygiene gate (internal/hooks/gate_verbtier.go, reason VERB_UNTIERED) that refuses a dispatched cmd/fak verb whose token devindex.TierOf cannot resolve to a tier — the pre-push twin of devindex.TestVerbTierCoverageIsTotal (epic #2653). |
+| * | crystal | config | guard-gate | **Q4_K gate/up output slab (session-owned Metal buffer)** - Q4KGateUpOutputSlab is the explicit session setting that reuses one bounded Metal output buffer across eligible Q4_K gate and up MLP projections within that session. |
 | * | crystal | subsystem | guard-gate | **guard_mcp (guard MCP self-query install)** - The cmd/fak/guard_mcp.go module: it wires fak's own MCP self-query surface (fak_index_*, fak_memory_*, fak_context_*) into the guarded child by injecting an MCP server registration into the child's launch config, mirroring the install shape of guard_precompact.go / guard_codex.go. |
 | * | crystal | subsystem | guard-gate | **guard_codex (guard Codex-provider wiring)** - The cmd/fak/guard_codex.go module: the first-class `fak guard -- codex` wiring, fak's OpenAI-Codex provider install path (credential resolve plus config rewrite) that lets the guard front a Codex child the same way it fronts an Anthropic one. |
 | * | crystal | symbol | guard-gate | **GuardAssumption (assume-check adjudication)** - assumecheck.GuardAssumption: the adjudication that folds a stated assumption plus its evidence into an Allow/Refuse verdict for `fak assume check` (and the re-witness loop `fak assume loop`). |
@@ -701,6 +704,8 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | concept | plan | **replanning** - The property/act of re-deriving a plan for the same turn (ctxplan PlanView, supervisoragent action) - a deterministic re-admission that reuses the existing admit receipt, not a new authority. |
 | * | crystal | symbol | plan | **RolePlan** - Binds one execution Role to its own modelroute Subject (independent model constraints), an independent per-axis Budget, an escalation target, and a result fold. |
 | * | crystal | symbol | plan | **RolePlanSet** - The declared multi-role execution plan: an ordered list of RolePlans plus a top-level fold that composes the roles' results into the final answer. |
+| * | crystal | config | plan | **InKernelPlannerConfig (native planner construction settings)** - agent.InKernelPlannerConfig is the typed bundle of native planner and session settings fixed at construction, including Qwen Q4_K prefill chunking, Qwen3.5 Metal GDN sequencing, CPU expert offload, and the Q4_K gate/up output slab. |
+| * | crystal | symbol | plan | **NewInKernelPlannerWithConfig (typed native planner constructor)** - agent.NewInKernelPlannerWithConfig constructs the local in-kernel planner from a loaded model plus an explicit InKernelPlannerConfig, fixing operator-selected native behavior before any request session is created. |
 | * | crystal | symbol | plan | **CandidateBlockedBy (dispatch prereq grammar)** - dispatchtick.CandidateBlockedBy parses a dispatch candidate's blocked-by grammar - which other candidates a candidate must wait on before it becomes eligible for a lane. |
 | * | crystal | symbol | plan | **buildKnownBadIssuePlan (known-bad issue-filing plan)** - cmd/fak/knownbad.go buildKnownBadIssuePlan builds the create/update PLAN for filing a known-bad record as a deduped GitHub issue (title, body, occurrence escalation). |
 | * | crystal | symbol | plan | **candidateIDs (rescore/route candidate id vector)** - candidateIDs (internal/kvmmu/rescore.go, internal/modelroute/audit_route.go) is the parallel vector of identifiers for the items being scored - KV spans under rescore, or routes under audit - whose results line up index-for-index. |
@@ -2952,8 +2957,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 23 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2991/4759 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2679 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2990/4780 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2684 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2961,7 +2966,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3799 lookup name(s) resolves - 77 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3807 lookup name(s) resolves - 79 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)
@@ -2969,10 +2974,11 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | Family | Positioned | Discovered | Unpositioned |
 |---|---:|---:|---:|
 | policy-capability | 209 | 212 | 3 |
-| gateway-engine | 195 | 197 | 2 |
-| guard-gate | 499 | 501 | 2 |
+| gateway-engine | 196 | 198 | 2 |
+| guard-gate | 500 | 502 | 2 |
 | support-maturity | 62 | 64 | 2 |
 | cache | 299 | 300 | 1 |
+| plan | 407 | 408 | 1 |
 | session-runtime | 270 | 271 | 1 |
 | witness-proof | 162 | 163 | 1 |
 | attention | 85 | 85 | 0 |
@@ -2983,7 +2989,6 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | evict | 54 | 54 | 0 |
 | layout | 19 | 19 | 0 |
 | loop | 93 | 93 | 0 |
-| plan | 404 | 404 | 0 |
 | pool | 40 | 40 | 0 |
 | render-materialize | 209 | 209 | 0 |
 | score-debt | 92 | 92 | 0 |

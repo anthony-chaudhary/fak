@@ -125,6 +125,28 @@ func TestNativeSchedulerPreemptionRequiresPagedBlockBudget(t *testing.T) {
 	}
 }
 
+func TestNativeSchedulerQ4KSlabConfigReachesNewAndRestoredSessions(t *testing.T) {
+	t.Setenv("FAK_Q4K_GATEUP_SLAB", "0")
+	s := NewNativeScheduler(model.NewSynthetic(SyntheticConfig()))
+	s.SetQ4KGateUpOutputSlab(true)
+
+	fresh := s.newLaneSession(true)
+	defer fresh.Close()
+	if !fresh.Q4KGateUpOutputSlab {
+		t.Fatal("explicit scheduler Q4_K slab setting did not reach fresh session")
+	}
+
+	seed := s.m.NewSession()
+	cache := seed.Cache
+	seed.Cache = nil
+	seed.Close()
+	restored := s.sessionFromCache(cache, true)
+	defer restored.Close()
+	if !restored.Q4KGateUpOutputSlab {
+		t.Fatal("explicit scheduler Q4_K slab setting did not reach restored session")
+	}
+}
+
 func TestNativeSchedulerPreemptionMetrics(t *testing.T) {
 	m := model.NewSynthetic(SyntheticConfig())
 	s := NewNativeScheduler(m)

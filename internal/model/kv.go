@@ -174,9 +174,12 @@ type Session struct {
 	// Backend is non-nil when this session is intentionally running through the
 	// internal/compute HAL instead of the legacy direct []float32 path. The legacy
 	// path stays the default until the full optimized prefill/batch path is adopted.
-	Backend    compute.Backend
-	halKV      compute.KVStore
-	halLineage tokenLineage
+	Backend compute.Backend
+	// Q4KGateUpOutputSlab explicitly enables the experimental session-owned Metal
+	// gate/up output slab. The default remains off until the measured KEEP gate lands.
+	Q4KGateUpOutputSlab bool
+	halKV               compute.KVStore
+	halLineage          tokenLineage
 	// halW memoizes weights staged onto Backend so a device session uploads each weight
 	// to VRAM exactly once, not once per token. (On cpu-ref, Upload is identity over the
 	// zero-copy host view, so caching changes nothing and the bit-equality gate holds.)
