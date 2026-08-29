@@ -26,7 +26,7 @@ func TestInKernelQwenQ4KPrefillChunkConfig(t *testing.T) {
 	}
 	for _, raw := range []string{"malformed", "0", "-512", "768", "16384", " 512", "512 "} {
 		got, err := resolveInKernelQwenQ4KPrefillChunkTokens(raw)
-		var typed *InKernelQwenQ4KPrefillChunkConfigError
+		var typed *model.InKernelQwenQ4KPrefillChunkConfigError
 		if got != 0 || !errors.As(err, &typed) || typed.Value != raw {
 			t.Errorf("resolve(%q) = (%d, %T %v), want (0, typed error retaining value)", raw, got, err, err)
 		}
@@ -167,14 +167,14 @@ func TestInKernelQwenQ4KBoundedPrefillCancellation(t *testing.T) {
 }
 
 func TestInKernelQwenQ4KPrefillChunkInvalidRefusesBeforeModelWork(t *testing.T) {
-	typed := &InKernelQwenQ4KPrefillChunkConfigError{Value: "768"}
+	typed := &model.InKernelQwenQ4KPrefillChunkConfigError{Value: "768"}
 	p := qwenQ4KPrefillPlanner(nil)
 	p.qwenQ4KPrefillChunkConfigErr = typed
 
 	// The target planner deliberately has no tokenizer. Reaching tokenization or
 	// model execution would panic; the typed error must return first.
 	_, err := p.Complete(context.Background(), []Message{{Role: RoleUser, Content: "must not run"}}, nil)
-	var got *InKernelQwenQ4KPrefillChunkConfigError
+	var got *model.InKernelQwenQ4KPrefillChunkConfigError
 	if !errors.As(err, &got) || got != typed {
 		t.Fatalf("Complete error = %T %v, want retained typed config error", err, err)
 	}
@@ -188,7 +188,7 @@ func TestInKernelQwenQ4KPrefillChunkReceiptReadback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got NativeInferenceReceipt
+	var got model.NativeInferenceReceipt
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestInKernelQwenQ4KBoundedPrefillLeavesOtherPathsSingleCall(t *testing.T) {
 		ids  []int
 	}{
 		{name: "target-small", p: qwenQ4KPrefillPlanner(nil), ids: long[:inKernelQwenQ4KPrefillChunkTokens]},
-		{name: "non-qwen", p: &InKernelPlanner{m: &model.Model{}, q4k: true, qwenQ4KPrefillChunkConfigErr: &InKernelQwenQ4KPrefillChunkConfigError{Value: "invalid"}}, ids: long},
+		{name: "non-qwen", p: &InKernelPlanner{m: &model.Model{}, q4k: true, qwenQ4KPrefillChunkConfigErr: &model.InKernelQwenQ4KPrefillChunkConfigError{Value: "invalid"}}, ids: long},
 		{name: "non-q4k", p: &InKernelPlanner{m: qwenHybridPrefillModel()}, ids: long},
 		{name: "backend", p: qwenQ4KPrefillPlanner(compute.Default()), ids: long},
 	}

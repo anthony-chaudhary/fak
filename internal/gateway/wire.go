@@ -7,6 +7,7 @@ import (
 	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/guardrsi"
 	"github.com/anthony-chaudhary/fak/internal/kernel"
+	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/modelroute/inputtrigger"
 	"github.com/anthony-chaudhary/fak/internal/numfmt"
 	"github.com/anthony-chaudhary/fak/internal/toolplugin"
@@ -576,7 +577,7 @@ type FakExt struct {
 	Compaction *CompactionContract `json:"compaction,omitempty"`
 	// NativeInferenceReceipt is emitted only for an explicitly requested,
 	// successfully measured in-kernel turn.
-	NativeInferenceReceipt *agent.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
+	NativeInferenceReceipt *model.NativeInferenceReceipt `json:"native_inference_receipt,omitempty"`
 	InputTriggerRoute      *InputTriggerRouteReceipt     `json:"input_trigger_route,omitempty"`
 	// NativeDecodeTokenIDs is emitted only alongside an explicitly requested
 	// native decode trace and carries the ordered committed token IDs.

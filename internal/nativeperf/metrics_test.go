@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
 )
 
@@ -112,8 +111,8 @@ func TestReceiptMetricsConcurrentObserveAndScrape(t *testing.T) {
 	}
 }
 
-func fixtureNativeReceipt() *agent.NativeInferenceReceipt {
-	return &agent.NativeInferenceReceipt{
+func fixtureNativeReceipt() *model.NativeInferenceReceipt {
+	return &model.NativeInferenceReceipt{
 		TokenIDs:       []int{1, 2, 3},
 		TokenLogprobs:  []float64{-0.1, -0.2, -0.3},
 		PrefillSeconds: 0.3,

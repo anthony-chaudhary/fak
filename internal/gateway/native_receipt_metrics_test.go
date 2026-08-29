@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/nativeperf"
 )
@@ -15,7 +14,7 @@ func TestNativeReceiptMetricsRenderOnGatewayMetricsSurface(t *testing.T) {
 	if srv.nativeReceiptMetrics == nil {
 		t.Fatal("New did not initialize native receipt metrics")
 	}
-	srv.nativeReceiptMetrics.Observe(&agent.NativeInferenceReceipt{
+	srv.nativeReceiptMetrics.Observe(&model.NativeInferenceReceipt{
 		PrefillSeconds: 0.2,
 		TTFTSeconds:    0.25,
 		DecodeSeconds:  0.4,
@@ -23,8 +22,8 @@ func TestNativeReceiptMetricsRenderOnGatewayMetricsSurface(t *testing.T) {
 		Engine:         "inkernel",
 		Backend:        "cuda",
 		ForwardPath:    "qwen-cuda-forward",
-		CUDAImmutableWeightUploads: &agent.NativeCUDAImmutableWeightUploadDelta{
-			Delta: agent.NativeCUDAImmutableWeightUploadCounters{TransferBytes: 4096},
+		CUDAImmutableWeightUploads: &model.NativeCUDAImmutableWeightUploadDelta{
+			Delta: model.NativeCUDAImmutableWeightUploadCounters{TransferBytes: 4096},
 		},
 		Qwen35MetalStateIdentity: &model.Qwen35MetalStateIdentityReceipt{
 			Available:        true,

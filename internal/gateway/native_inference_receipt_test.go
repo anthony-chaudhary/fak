@@ -137,7 +137,7 @@ func TestNativeInferenceReceiptStateIdentityJSONPrivacyAccountingAndOmission(t *
 	for _, authority := range []string{model.Qwen35MetalStateAuthorityControl, model.Qwen35MetalStateAuthoritySequence} {
 		t.Run(authority, func(t *testing.T) {
 			want := gatewayQwen35MetalStateIdentityFixture(authority)
-			raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{Qwen35MetalStateIdentity: want}})
+			raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &model.NativeInferenceReceipt{Qwen35MetalStateIdentity: want}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -183,7 +183,7 @@ func TestNativeInferenceReceiptStateIdentityJSONPrivacyAccountingAndOmission(t *
 		})
 	}
 
-	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{}})
+	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &model.NativeInferenceReceipt{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestNativeInferenceReceiptUnsupportedRequestsFailClosed(t *testing.T) {
 }
 
 func TestNativeInferenceReceiptJSONShapeUsesChosenTokenArrays(t *testing.T) {
-	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &agent.NativeInferenceReceipt{
+	raw, err := json.Marshal(FakExt{NativeInferenceReceipt: &model.NativeInferenceReceipt{
 		TokenIDs:      []int{7},
 		TokenLogprobs: []float64{-1},
 		Qwen35MetalForwardSequence: &model.Qwen35MetalForwardSequenceReceipt{
@@ -257,10 +257,10 @@ func TestNativeInferenceReceiptJSONShapeUsesChosenTokenArrays(t *testing.T) {
 			GPUMilliseconds:   2.5,
 			WaitMilliseconds:  3.5,
 		},
-		CUDAImmutableWeightUploads: &agent.NativeCUDAImmutableWeightUploadDelta{
-			Before: agent.NativeCUDAImmutableWeightUploadCounters{Calls: 4, TransferBytes: 1024, ResidentBytes: 512},
-			After:  agent.NativeCUDAImmutableWeightUploadCounters{Calls: 5, TransferBytes: 5120, ResidentBytes: 2560},
-			Delta:  agent.NativeCUDAImmutableWeightUploadCounters{Calls: 1, TransferBytes: 4096, ResidentBytes: 2048},
+		CUDAImmutableWeightUploads: &model.NativeCUDAImmutableWeightUploadDelta{
+			Before: model.NativeCUDAImmutableWeightUploadCounters{Calls: 4, TransferBytes: 1024, ResidentBytes: 512},
+			After:  model.NativeCUDAImmutableWeightUploadCounters{Calls: 5, TransferBytes: 5120, ResidentBytes: 2560},
+			Delta:  model.NativeCUDAImmutableWeightUploadCounters{Calls: 1, TransferBytes: 4096, ResidentBytes: 2048},
 		},
 	}})
 	if err != nil {

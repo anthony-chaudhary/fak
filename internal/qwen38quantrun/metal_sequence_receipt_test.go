@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthony-chaudhary/fak/internal/agent"
 	"github.com/anthony-chaudhary/fak/internal/model"
 	"github.com/anthony-chaudhary/fak/internal/qwen38quant"
 )
@@ -150,7 +149,7 @@ func validQwenMetalSequencePair() (QwenMetalSequenceArm, QwenMetalSequenceArm) {
 	}
 	control := QwenMetalSequenceArm{
 		Artifact: artifact,
-		Receipt: &agent.NativeInferenceReceipt{
+		Receipt: &model.NativeInferenceReceipt{
 			Model: artifact.Model, Engine: qwen38quant.EngineFakNative, Backend: qwenMetalBackend,
 			ForwardPath: qwenMetalControlForwardPath, Q4K: true,
 		},
@@ -160,7 +159,7 @@ func validQwenMetalSequencePair() (QwenMetalSequenceArm, QwenMetalSequenceArm) {
 		Artifact:                  artifact,
 		ExpectedHostUploadBytes:   65536,
 		ExpectedHostReadbackBytes: 16384,
-		Receipt: &agent.NativeInferenceReceipt{
+		Receipt: &model.NativeInferenceReceipt{
 			Model: artifact.Model, Engine: qwen38quant.EngineFakNative, Backend: qwenMetalBackend,
 			ForwardPath: model.Qwen35MetalGDNSequenceForwardPath, Q4K: true,
 			Qwen35MetalForwardSequence: validQwenMetalSequenceReceipt(),

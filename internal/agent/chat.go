@@ -403,7 +403,7 @@ type Completion struct {
 	// NativeInference is populated only when the caller explicitly requested a
 	// receipt and this planner executed the model math in-kernel. It is captured at
 	// the logits/decode seam, never reconstructed from text or gateway timing.
-	NativeInference *NativeInferenceReceipt
+	NativeInference *model.NativeInferenceReceipt
 	InKernelBatch   *InKernelBatchReceipt
 	// DecodeTrace is populated only for an explicitly requested in-kernel decode.
 	// Its events are authored at the native token-commit seam; proxy text and SSE
@@ -455,75 +455,6 @@ type NativeDecodeTokenIDs struct {
 	Schema   string `json:"schema"`
 	Engine   string `json:"engine"`
 	TokenIDs []int  `json:"token_ids"`
-}
-
-// NativeInferenceReceipt binds generated tokens and their normalized chosen-token
-// log probabilities to the native model execution which produced them. Logprobs
-// are log_softmax over the unmodified model logits, so receipt capture is supported
-// only for greedy sampling without bias or repetition penalties.
-type NativeInferenceReceipt struct {
-	TokenIDs           []int     `json:"token_ids"`
-	TokenLogprobs      []float64 `json:"token_logprobs"`
-	PrefillSeconds     float64   `json:"prefill_seconds"`
-	TTFTSeconds        float64   `json:"ttft_seconds"`
-	DecodeSeconds      float64   `json:"decode_seconds"`
-	Model              string    `json:"model"`
-	Engine             string    `json:"engine"`
-	Planner            string    `json:"planner"`
-	Owner              string    `json:"owner"`
-	Backend            string    `json:"backend"`
-	ForwardPath        string    `json:"forward_path"`
-	Q4K                bool      `json:"q4k"`
-	FallbackActive     bool      `json:"fallback_active"`
-	PrefillChunkTokens int       `json:"prefill_chunk_tokens"`
-	// Qwen35MetalForwardSequence is present only when the model session produced
-	// terminal evidence for the native whole-sequence Metal graph.
-	Qwen35MetalForwardSequence *model.Qwen35MetalForwardSequenceReceipt `json:"qwen35_metal_forward_sequence,omitempty"`
-	// Qwen35MetalStateIdentity is present only for an explicitly requested native
-	// receipt whose fresh exact-P32 Metal session sealed model-owned state identity.
-	Qwen35MetalStateIdentity   *model.Qwen35MetalStateIdentityReceipt `json:"qwen35_metal_state_identity,omitempty"`
-	CUDAImmutableWeightUploads *NativeCUDAImmutableWeightUploadDelta  `json:"cuda_immutable_weight_uploads,omitempty"`
-}
-
-// NativeCUDAImmutableWeightUploadCounters is one cumulative CUDA-backend
-// snapshot. TransferBytes counts actual host payload crossing H2D; ResidentBytes
-// counts the resulting device layout, including quant scale sidecars.
-type NativeCUDAImmutableWeightUploadCounters struct {
-	Calls         uint64 `json:"calls"`
-	TransferBytes uint64 `json:"transfer_bytes"`
-	ResidentBytes uint64 `json:"resident_bytes"`
-}
-
-// NativeCUDAImmutableWeightUploadDelta is the request's cumulative-backend
-// observation window. Delta is exact for the parent's deliberately serialized
-// campaign; concurrent requests may contribute to the same backend window.
-type NativeCUDAImmutableWeightUploadDelta struct {
-	Before NativeCUDAImmutableWeightUploadCounters `json:"before"`
-	After  NativeCUDAImmutableWeightUploadCounters `json:"after"`
-	Delta  NativeCUDAImmutableWeightUploadCounters `json:"delta"`
-}
-
-// InKernelQwenQ4KPrefillChunkConfigError is retained by a planner when the
-// bounded Qwen resident-Q4_K prefill control is nonempty but not one of the
-// supported widths. Targeted requests return it before tokenization or model
-// execution; unrelated model paths do not acquire a new failure mode.
-type InKernelQwenQ4KPrefillChunkConfigError struct {
-	Value string
-}
-
-func (e *InKernelQwenQ4KPrefillChunkConfigError) Error() string {
-	return fmt.Sprintf("FAK_INKERNEL_QWEN_Q4K_PREFILL_CHUNK_TOKENS=%q: want one of 512, 1024, 2048, 4096, 8192", e.Value)
-}
-
-// NativeInferenceReceiptUnsupportedError is returned before model execution when
-// receipt semantics would be ambiguous. The receipt contract is intentionally
-// narrower than ordinary sampling rather than guessing what modified logits mean.
-type NativeInferenceReceiptUnsupportedError struct {
-	Reason string
-}
-
-func (e *NativeInferenceReceiptUnsupportedError) Error() string {
-	return "native inference receipt unsupported: " + e.Reason
 }
 
 // SampleParams are the per-request sampling overrides a CALLER may attach to one
