@@ -93,7 +93,7 @@ type responsesInputItem struct {
 	Arguments string `json:"arguments,omitempty"`
 	ID        string `json:"id,omitempty"`
 	// function_call_output field:
-	Output string `json:"output,omitempty"`
+	Output json.RawMessage `json:"output,omitempty"`
 }
 
 // responsesResponse is the outbound POST /v1/responses body. The `fak` extension
@@ -510,10 +510,14 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 			case "function_call_output":
 				// A tool RESULT the client executed — the bytes the result-side floor
 				// screens (poison quarantine, secret redaction) before the model sees them.
+				output, err := responsesFunctionOutputText(it.Output)
+				if err != nil {
+					return nil, fmt.Errorf("function_call_output.output: %w", err)
+				}
 				msgs = append(msgs, agent.Message{
 					Role:       agent.RoleTool,
 					ToolCallID: it.CallID,
-					Content:    it.Output,
+					Content:    output,
 				})
 			default:
 				// Unknown item type (reasoning, image, etc.) — skip rather than 400, so a
@@ -526,8 +530,58 @@ func decodeResponsesInput(raw json.RawMessage, instructions string) ([]agent.Mes
 	}
 }
 
+// responsesFunctionOutputText decodes the Responses function_call_output.output
+// union. Existing string results retain their decoded bytes exactly. Structured
+// results are flattened only from text parts because agent.Message has no image or
+// file representation; those parts are ignored rather than letting their URLs or
+// metadata masquerade as tool text. Invalid union arms and malformed text entries
+// fail the request before any result reaches the model. The request body cap bounds
+// both the number of parts and the total text accumulated here.
+func responsesFunctionOutputText(raw json.RawMessage) (string, error) {
+	b := trimLeadingWS(raw)
+	if len(b) == 0 || string(b) == "null" {
+		// Preserve the old string field's zero-value behavior for omitted/null output.
+		return "", nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return "", err
+		}
+		return s, nil
+	}
+	if b[0] != '[' {
+		return "", errInvalidFunctionOutput
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return "", err
+	}
+	out := make([]byte, 0, 64)
+	for _, p := range parts {
+		switch p.Type {
+		case "input_text", "output_text", "text":
+		default:
+			continue
+		}
+		if p.Text == "" {
+			continue
+		}
+		if len(out) > 0 {
+			out = append(out, '\n')
+		}
+		out = append(out, p.Text...)
+	}
+	return string(out), nil
+}
+
 // errInvalidInput is the 400 cause when `input` is neither a string nor an array.
 var errInvalidInput = errInput("input must be a string or an array of input items")
+
+var errInvalidFunctionOutput = errInput("must be a string or an array of structured content items")
 
 type errInput string
 
