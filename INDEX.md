@@ -285,6 +285,8 @@ Developer, design, and internal reference docs — indexed here so each is reach
 
 - [Cactus Needle: borrow the negative tool-call corpus, not the runtime (2026-08-28)](docs/notes/CONCEPT-STUDY-NEEDLE-2026-08-28.md) — pinned source, tests, history, forge, and license study; keeps FAK's descriptor/acceptance/native-engine contracts, excludes unpinned binaries/confidence authority/default telemetry, and files the attributed six-class Qwen3.8 tool-call corpus as #9864.
 
+- [Modular monorepo: full native-inference design and optimization study (2026-08-28)](docs/notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md) - pinned 10,688-file/full-history/six-endpoint study across MAX serving, model architecture, kernels, KGEN, AsyncRT, Cache, and Support; 87 witnessed candidates yielded 68 contract-clean leaves #9910-#9977 under #9900 while preserving FAK-native execution ownership.
+
 - [Apache Maka: durable runtime authority and crash-safe orchestration (2026-08-28)](docs/notes/CONCEPT-STUDY-APACHE-MAKA-2026-08-28.md) — exhaustive pinned runtime/project study; preserves FAK's stricter security boundary, records the ASF IP-clearance fence, and files source-bound compaction, runtime-fact graph activation, and bounded cancel settlement as #9870-#9872.
 
 - [TencentDB Agent Memory: borrow the durability seams, not the product stack (2026-08-28)](docs/notes/CONCEPT-STUDY-TENCENTDB-AGENT-MEMORY-2026-08-28.md) — pinned memory/knowledge/proxy study; keeps FAK's native policy and prompt-placement substrate, records license and evidence fences, and files artifact checkpoints, capture hygiene, session skill pins, and CJK recall as #9865-#9868.

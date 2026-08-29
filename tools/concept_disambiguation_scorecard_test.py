@@ -22,6 +22,7 @@ or `python -m pytest tools/concept_disambiguation_scorecard_test.py -q`.
 from __future__ import annotations
 
 import json
+import random
 import sys
 import tempfile
 from pathlib import Path
@@ -650,6 +651,111 @@ def test_live_real_data_is_clean_and_in_band() -> None:
     for r in c["leaderboard"]:
         if r["verdict"] == "crystal":
             assert r["glossary_anchor"], f"{r['id']} is crystal but has no anchor"
+
+
+def test_indexed_pairs_match_serial_on_boundary_and_seeded_rows() -> None:
+    rng = random.Random(9884)
+    rows = [
+        {"id": f"random-{i:03d}",
+         "canonical": "".join(rng.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(12))}
+        for i in range(400)
+    ]
+    rows.extend([
+        {"id": "prefix-a", "canonical": "abcde-tail-one"},
+        {"id": "prefix-b", "canonical": "abcde-tail-two"},
+        {"id": "suffix-a", "canonical": "first-abcde"},
+        {"id": "suffix-b", "canonical": "frost-abcde"},
+        {"id": "edit-two-a", "canonical": "boundarysameaa"},
+        {"id": "edit-two-b", "canonical": "boundarysamebb"},
+        {"id": "duplicate-a", "canonical": "Duplicate (first gloss)"},
+        {"id": "duplicate-b", "canonical": "Duplicate (second gloss)"},
+        {"id": "same-token-a", "canonical": "Same token"},
+        {"id": "same-token-b", "canonical": "same_token"},
+    ])
+    assert cd.confusable_pairs(rows) == cd.confusable_pairs(rows, indexed=False)
+
+
+def test_indexed_coverage_matches_serial_on_closed_edge_cases() -> None:
+    families = [
+        {"id": "short", "roots": ["ab"], "min_files": 2,
+         "ignore": ["abignored"], "exclude": ["abexclude"]},
+        {"id": "cache", "roots": ["cache"], "min_files": 2},
+        {"id": "gate", "roots": ["gate"], "min_files": 2,
+         "exclude": ["gateway"]},
+    ]
+    rows = [
+        {"canonical": "AB covered", "aliases": ["cache shared"],
+         "grounding": "gatecovered"},
+    ]
+    corpus = {
+        "sym_files": {
+            "abcovered": {"a.go", "b.go"},
+            "abignored": {"a.go", "b.go"},
+            "abexcludeitem": {"a.go", "b.go"},
+            "cacheshared": {"a.go", "b.go"},
+            "gatecovered": {"a.go", "b.go"},
+            "gatewayclient": {"a.go", "b.go"},
+            "cachegate": {"a.go", "b.go"},
+        },
+        "structural": {"abstructural", "cachestructural"},
+    }
+    indexed = cd.coverage_report(families, rows, corpus)
+    serial = cd.coverage_report(families, rows, corpus, indexed=False)
+    assert indexed == serial
+    assert indexed["discovered"] < sum(f["discovered"] for f in indexed["per_family"])
+
+
+def test_indexed_fold_matches_serial_payload_and_documents() -> None:
+    rows = [
+        row(canonical="Cache key", grounding="cachekey"),
+        sibling(canonical="Key cache", grounding="keycache"),
+    ]
+    corpus = {
+        "sym_files": {
+            "cachekey": {"a.go", "b.go"},
+            "keycache": {"a.go", "b.go"},
+            "cacheworker": {"a.go", "b.go"},
+        },
+        "structural": {"cachequeue"},
+    }
+    grounded = set(corpus["sym_files"]) | corpus["structural"]
+    tree_facts = {
+        "corpus": corpus,
+        "in_tree": lambda token: token in grounded,
+        "exists": lambda _path: True,
+        "doc_verbs": set(),
+    }
+    data = _data(rows)
+    indexed = cd.build_payload(workspace="/same", data=data, tree=tree_facts)
+    serial = cd.build_payload(workspace="/same", data=data, tree=tree_facts, indexed=False)
+    assert json.dumps(indexed, indent=2) == json.dumps(serial, indent=2)
+    assert cd.render_doc_folder(indexed, stamp="2026-08-28") == cd.render_doc_folder(
+        serial, stamp="2026-08-28")
+
+
+def test_current_catalog_indexes_bound_candidate_work() -> None:
+    root = Path(".").resolve()
+    data, err = cd.load_data(root / cd.DATA_DIR_REL)
+    assert data is not None and not err
+    roots = [cd.norm_token(raw) for family in data["families"]
+             for raw in family.get("roots", []) if cd.norm_token(raw)]
+    counts = {f"x{i:05d}{roots[i % len(roots)]}tail": 2 for i in range(18000)}
+    counts.update({cd.norm_token(r.get("grounding", "")): 2 for r in data["rows"]
+                   if cd.norm_token(r.get("grounding", ""))})
+    structural = set(list(counts)[::200])
+    pair_stats: dict[str, int] = {}
+    cd.confusable_pairs(data["rows"], _stats=pair_stats)
+    assert pair_stats["near_candidate_pairs"] * 20 < pair_stats["near_legacy_pairs"]
+    assert pair_stats["near_distance_checks"] <= pair_stats["near_candidate_pairs"]
+
+    coverage_stats: dict[str, int] = {}
+    cd.coverage_report(
+        data["families"], data["rows"],
+        {"sym_files": counts, "structural": structural}, _stats=coverage_stats)
+    assert (coverage_stats["coverage_candidate_tokens"] * 4 <
+            coverage_stats["coverage_legacy_family_token_probes"])
+    assert (coverage_stats["coverage_root_candidate_probes"] <
+            coverage_stats["coverage_legacy_family_token_probes"])
 
 
 def main() -> int:

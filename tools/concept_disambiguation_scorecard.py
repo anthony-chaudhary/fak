@@ -113,6 +113,7 @@ Run from the repo ROOT::
 from __future__ import annotations
 
 import argparse
+import functools
 import itertools
 import json
 import re
@@ -228,6 +229,14 @@ def _nonempty(v: Any) -> bool:
     return isinstance(v, str) and bool(v.strip())
 
 
+_NORM_TOKEN_RE = re.compile(r"[^a-z0-9]")
+
+
+@functools.lru_cache(maxsize=32768)
+def _norm_token_str(s: str) -> str:
+    return _NORM_TOKEN_RE.sub("", s.lower())
+
+
 def norm_token(s: Any) -> str:
     """Collapse a name to its comparable token: lowercase, keep only [a-z0-9].
 
@@ -236,7 +245,7 @@ def norm_token(s: Any) -> str:
     that surfaces a true canonical-name collision between two rows."""
     if not isinstance(s, str):
         return ""
-    return re.sub(r"[^a-z0-9]", "", s.lower())
+    return _norm_token_str(s)
 
 
 def token_match(a: str, b: str) -> bool:
@@ -435,11 +444,28 @@ def shared_affix(a: str, b: str) -> int:
     return max(head, tail)
 
 
+def _character_counts(value: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for char in value:
+        counts[char] = counts.get(char, 0) + 1
+    return counts
+
+
+def _character_multiset_may_be_within(a: dict[str, int], b: dict[str, int],
+                                       max_length: int, cap: int) -> bool:
+    """Conservative Levenshtein lower bound used only to reject candidates."""
+    if len(a) > len(b):
+        a, b = b, a
+    common = sum(min(count, b.get(char, 0)) for char, count in a.items())
+    return max_length - common <= cap
+
+
 PAIR_KINDS = ("homonym", "permuted", "near")   # most confusable first
 _PAIR_RANK = {k: i for i, k in enumerate(PAIR_KINDS)}
 
 
-def confusable_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def confusable_pairs(rows: list[dict[str, Any]], *, indexed: bool = True,
+                     _stats: dict[str, int] | None = None) -> list[dict[str, Any]]:
     """The pairs of DISTINCT concepts whose names a reader cannot tell apart.
 
     Discovered from the catalog's own names - not declared - so the pair list grows
@@ -458,6 +484,9 @@ def confusable_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     The strongest kind wins when a pair qualifies as several. Returns a deterministic
     list sorted by (kind, a, b)."""
     named = [r for r in rows if _nonempty(r.get("id")) and _nonempty(r.get("canonical"))]
+    prepared = [(ordinal, r, norm_token(bare_name(r.get("canonical"))),
+                 split_words(r.get("canonical")))
+                for ordinal, r in enumerate(named)]
     found: dict[tuple[str, str], dict[str, Any]] = {}
 
     def _add(a: str, b: str, kind: str, why: str) -> None:
@@ -469,8 +498,7 @@ def confusable_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     # homonym: bucket by the BARE normalized name. The gloss in `Decision (kernel)` is
     # the catalog explaining itself to a reader; the tree only ever says `Decision`.
     by_bare: dict[str, list[str]] = {}
-    for r in named:
-        tok = norm_token(bare_name(r.get("canonical")))
+    for _ordinal, r, tok, _words in prepared:
         if tok:
             by_bare.setdefault(tok, []).append(r["id"])
     for tok, ids in by_bare.items():
@@ -483,8 +511,7 @@ def confusable_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     # permuted: bucket by the sorted word multiset; anything sharing a bucket is a
     # rearrangement of the same words.
     by_words: dict[tuple[str, ...], list[str]] = {}
-    for r in named:
-        ws = split_words(r.get("canonical"))
+    for _ordinal, r, _tok, ws in prepared:
         if len(ws) >= 2:
             by_words.setdefault(tuple(sorted(ws)), []).append(r["id"])
     for ws, ids in by_words.items():
@@ -496,25 +523,74 @@ def confusable_pairs(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     # near: bucket normalized names by length; a pair within `cap` edits cannot differ
     # in length by more than `cap`, so only neighbouring buckets need comparing.
-    by_len: dict[int, list[tuple[str, str]]] = {}
-    for r in named:
-        tok = norm_token(bare_name(r.get("canonical")))
+    by_len: dict[int, list[tuple[int, str, str]]] = {}
+    near_by_ordinal: dict[int, tuple[str, str]] = {}
+    affix_buckets: dict[tuple[str, str, int], list[int]] = {}
+    indexed_tokens: dict[int, str] = {}
+    indexed_counts: dict[int, dict[str, int]] = {}
+    candidates: set[tuple[int, int]] | None = set() if indexed else None
+    for ordinal, r, tok, _words in prepared:
         if len(tok) >= MIN_PAIR_LEN:
-            by_len.setdefault(len(tok), []).append((r["id"], tok))
-    for length in sorted(by_len):
-        left = by_len[length]
-        right = [x for d in range(1, MAX_PAIR_EDITS + 1) for x in by_len.get(length + d, [])]
-        for i, (ida, ta) in enumerate(left):
-            for idb, tb in left[i + 1:] + right:
-                if ida == idb or ta == tb:
-                    continue
-                affix = shared_affix(ta, tb)
-                if affix < MIN_SHARED_AFFIX:
-                    continue
-                d = edit_distance_within(ta, tb, MAX_PAIR_EDITS)
-                if d <= MAX_PAIR_EDITS:
-                    _add(ida, idb, "near",
-                         f"{d} edit(s) apart sharing {affix} characters: {ta} / {tb}")
+            by_len.setdefault(len(tok), []).append((ordinal, r["id"], tok))
+            near_by_ordinal[ordinal] = (r["id"], tok)
+            if candidates is not None:
+                prior: set[int] = set()
+                for candidate_length in range(len(tok) - MAX_PAIR_EDITS,
+                                              len(tok) + MAX_PAIR_EDITS + 1):
+                    prior.update(affix_buckets.get(
+                        ("head", tok[:MIN_SHARED_AFFIX], candidate_length), ()))
+                    prior.update(affix_buckets.get(
+                        ("tail", tok[-MIN_SHARED_AFFIX:], candidate_length), ()))
+                counts = _character_counts(tok)
+                candidates.update(
+                    (other, ordinal) for other in prior
+                    if _character_multiset_may_be_within(
+                        indexed_counts[other], counts,
+                        max(len(indexed_tokens[other]), len(tok)), MAX_PAIR_EDITS))
+                indexed_tokens[ordinal] = tok
+                indexed_counts[ordinal] = counts
+                affix_buckets.setdefault(
+                    ("head", tok[:MIN_SHARED_AFFIX], len(tok)), []).append(ordinal)
+                affix_buckets.setdefault(
+                    ("tail", tok[-MIN_SHARED_AFFIX:], len(tok)), []).append(ordinal)
+    if _stats is not None:
+        _stats["near_legacy_pairs"] = sum(
+            len(bucket) * (len(bucket) - 1) // 2 +
+            len(bucket) * sum(len(by_len.get(length + delta, ()))
+                              for delta in range(1, MAX_PAIR_EDITS + 1))
+            for length, bucket in by_len.items())
+        _stats["near_candidate_pairs"] = (
+            len(candidates) if candidates is not None else _stats["near_legacy_pairs"])
+        _stats["near_distance_checks"] = 0
+
+    def _consider_near(ida: str, ta: str, idb: str, tb: str) -> None:
+        if ida == idb or ta == tb:
+            return
+        affix = shared_affix(ta, tb)
+        if affix < MIN_SHARED_AFFIX:
+            return
+        if _stats is not None:
+            _stats["near_distance_checks"] += 1
+        distance = edit_distance_within(ta, tb, MAX_PAIR_EDITS)
+        if distance <= MAX_PAIR_EDITS:
+            _add(ida, idb, "near",
+                 f"{distance} edit(s) apart sharing {affix} characters: {ta} / {tb}")
+
+    if candidates is not None:
+        for left_ordinal, right_ordinal in sorted(candidates):
+            ida, ta = near_by_ordinal[left_ordinal]
+            idb, tb = near_by_ordinal[right_ordinal]
+            if len(ta) > len(tb):
+                ida, ta, idb, tb = idb, tb, ida, ta
+            _consider_near(ida, ta, idb, tb)
+    else:
+        for length in sorted(by_len):
+            left = by_len[length]
+            right = [x for delta in range(1, MAX_PAIR_EDITS + 1)
+                     for x in by_len.get(length + delta, [])]
+            for i, (_oa, ida, ta) in enumerate(left):
+                for _ob, idb, tb in left[i + 1:] + right:
+                    _consider_near(ida, ta, idb, tb)
     return sorted(found.values(), key=lambda p: (_PAIR_RANK[p["kind"]], p["a"], p["b"]))
 
 
@@ -951,7 +1027,9 @@ def expected_verdict(row: dict[str, Any], *, colliding: bool, exists: Callable[[
 
 def kpi_clarity_consistent(rows: list[dict[str, Any]], colliding_ids: set[str],
                            exists: Callable[[str], bool], sizes: dict[str, int],
-                           entangled: dict[str, str] | None = None) -> dict[str, Any]:
+                           entangled: dict[str, str] | None = None,
+                           expected_by_row: dict[int, tuple[str, str]] | None = None
+                           ) -> dict[str, Any]:
     """The stated verdict must match what the evidence implies. Calling a drifting
     concept 'crystal', a colliding one 'defined', or an ENTANGLED one either, is the
     overclaim this catches - the same self-report refusal the rest of the repo runs."""
@@ -960,8 +1038,10 @@ def kpi_clarity_consistent(rows: list[dict[str, Any]], colliding_ids: set[str],
     for i, r in enumerate(rows):
         rid = r.get("id", i)
         declared = r.get("verdict")
-        exp, why = expected_verdict(r, colliding=(rid in colliding_ids), exists=exists,
-                                    sizes=sizes, entangled=entangled.get(rid, ""))
+        expected = expected_by_row.get(id(r)) if expected_by_row is not None else None
+        exp, why = expected or expected_verdict(
+            r, colliding=(rid in colliding_ids), exists=exists,
+            sizes=sizes, entangled=entangled.get(rid, ""))
         if declared != exp:
             defects.append(f"{rid}: claims '{declared}' but evidence implies '{exp}' - {why}")
     return _kpi("clarity_consistent", defects, "every verdict matches its evidence",
@@ -1164,7 +1244,59 @@ def kpi_hierarchy_soft(rows: list[dict[str, Any]]) -> dict[str, Any]:
 # the catalog positions. This is the ungameable engine that lands the honest score.
 # ---------------------------------------------------------------------------
 
-def discover_family_tokens(family: dict[str, Any], corpus: dict[str, Any]) -> list[dict[str, Any]]:
+
+def _presence(files_or_count: Any) -> int:
+    return files_or_count if isinstance(files_or_count, int) else len(files_or_count)
+
+
+class _CorpusFoldIndex:
+    """Exact root-substring candidates shared by every watched family."""
+
+    def __init__(self, corpus: dict[str, Any], stats: dict[str, int] | None = None):
+        self.sym_files = corpus["sym_files"]
+        self.structural = corpus["structural"]
+        self.tokens = set(self.sym_files) | set(self.structural)
+        self._root_hits: dict[str, tuple[str, ...]] = {}
+        self._stats = stats
+        if stats is not None:
+            stats["coverage_index_tokens"] = len(self.tokens)
+            stats["coverage_trigram_windows"] = 0
+            stats["coverage_root_candidate_probes"] = 0
+            stats["coverage_candidate_tokens"] = 0
+
+    def prepare_roots(self, roots: set[str]) -> None:
+        roots = roots - self._root_hits.keys()
+        if not roots:
+            return
+        grams = {root[:3] for root in roots if len(root) >= 3}
+        gram_hits: dict[str, list[str]] = {gram: [] for gram in grams}
+        for token in self.tokens:
+            if self._stats is not None:
+                self._stats["coverage_trigram_windows"] += max(0, len(token) - 2)
+            seen: set[str] = set()
+            for offset in range(len(token) - 2):
+                gram = token[offset:offset + 3]
+                if gram in gram_hits and gram not in seen:
+                    gram_hits[gram].append(token)
+                    seen.add(gram)
+        for root in roots:
+            source = gram_hits.get(root[:3]) if len(root) >= 3 else None
+            candidates = self.tokens if source is None else source
+            if self._stats is not None:
+                self._stats["coverage_root_candidate_probes"] += len(candidates)
+            self._root_hits[root] = tuple(token for token in candidates if root in token)
+
+    def root_hits(self, root: str) -> tuple[str, ...]:
+        hits = self._root_hits.get(root)
+        if hits is None:
+            hits = tuple(token for token in self.tokens if root in token)
+            self._root_hits[root] = hits
+        return hits
+
+
+def discover_family_tokens(family: dict[str, Any], corpus: dict[str, Any],
+                           fold_index: _CorpusFoldIndex | None = None,
+                           _stats: dict[str, int] | None = None) -> list[dict[str, Any]]:
     """The distinct confusable tokens of one family that are REAL concepts in the tree.
 
     A token counts only when it has genuine presence: it spans >= min_files production
@@ -1182,28 +1314,32 @@ def discover_family_tokens(family: dict[str, Any], corpus: dict[str, Any]) -> li
             return False
         return not any(ex in tok for ex in exclude)
 
-    sym_files: dict[str, set[str]] = corpus["sym_files"]   # token -> set(production files)
-    structural: set[str] = corpus["structural"]            # dir/package/heading tokens
+    sym_files = corpus["sym_files"]
+    structural: set[str] = corpus["structural"]
     found: dict[str, dict[str, Any]] = {}
-    for tok, files in sym_files.items():
+    if fold_index is None:
+        candidates = set(sym_files) | set(structural)
+    else:
+        candidates: set[str] = set()
+        for root in roots:
+            candidates.update(fold_index.root_hits(root))
+    if _stats is not None:
+        _stats["coverage_candidate_tokens"] = (
+            _stats.get("coverage_candidate_tokens", 0) + len(candidates))
+    for tok in candidates:
         if not _matches(tok):
             continue
+        presence = _presence(sym_files.get(tok, 0))
         is_struct = tok in structural
-        if len(files) >= min_files or is_struct:
-            found[tok] = {"token": tok, "presence": len(files),
-                          "where": "dir/heading" if is_struct else f"{len(files)} files"}
-    # structural-only tokens (a dir/heading whose identifier never met min_files but
-    # is unmistakably a real concept) still count.
-    for tok in structural:
-        if tok in found or not _matches(tok):
-            continue
-        found[tok] = {"token": tok, "presence": len(sym_files.get(tok, set())),
-                      "where": "dir/heading"}
+        if presence >= min_files or is_struct:
+            found[tok] = {"token": tok, "presence": presence,
+                          "where": "dir/heading" if is_struct else f"{presence} files"}
     return sorted(found.values(), key=lambda d: (-d["presence"], d["token"]))
 
 
 def coverage_report(families: list[dict[str, Any]], rows: list[dict[str, Any]],
-                    corpus: dict[str, Any]) -> dict[str, Any]:
+                    corpus: dict[str, Any], *, indexed: bool = True,
+                    _stats: dict[str, int] | None = None) -> dict[str, Any]:
     """For every watched family, discover the real confusable tokens and mark each
     covered when some row answers to it. Uncovered tokens are coverage_debt: a
     confusable concept the tree has but nobody disambiguated.
@@ -1224,9 +1360,18 @@ def coverage_report(families: list[dict[str, Any]], rows: list[dict[str, Any]],
     per_family: list[dict[str, Any]] = []
     global_cov: dict[str, bool] = {}        # token -> covered (deduped)
     global_owner: dict[str, str] = {}       # token -> first family that found it
+    if _stats is not None:
+        _stats["coverage_legacy_family_token_probes"] = (
+            len(families) * len(set(corpus["sym_files"]) | set(corpus["structural"])))
+    fold_index = _CorpusFoldIndex(corpus, _stats) if indexed else None
+    if fold_index is not None:
+        fold_index.prepare_roots({
+            token for family in families for raw in (family.get("roots") or [])
+            if _nonempty(raw) and (token := norm_token(raw))
+        })
     for fam in families:
         fid = fam.get("id", "?")
-        toks = discover_family_tokens(fam, corpus)
+        toks = discover_family_tokens(fam, corpus, fold_index, _stats)
         fam_cov = 0
         fam_unc: list[str] = []
         for t in toks:
@@ -1276,13 +1421,16 @@ def per_row_debt(rows: list[dict[str, Any]], kpis: list[dict[str, Any]]) -> dict
 
 def leaderboard(rows: list[dict[str, Any]], colliding_ids: set[str],
                 exists: Callable[[str], bool], sizes: dict[str, int],
-                entangled: dict[str, str] | None = None) -> list[dict[str, Any]]:
+                entangled: dict[str, str] | None = None,
+                expected_by_row: dict[int, tuple[str, str]] | None = None
+                ) -> list[dict[str, Any]]:
     entangled = entangled or {}
     out: list[dict[str, Any]] = []
     for r in rows:
-        exp, _ = expected_verdict(r, colliding=(r.get("id") in colliding_ids),
-                                  exists=exists, sizes=sizes,
-                                  entangled=entangled.get(r.get("id"), ""))
+        expected = expected_by_row.get(id(r)) if expected_by_row is not None else None
+        exp, _ = expected or expected_verdict(
+            r, colliding=(r.get("id") in colliding_ids), exists=exists, sizes=sizes,
+            entangled=entangled.get(r.get("id"), ""))
         out.append({
             "id": r.get("id"), "canonical": r.get("canonical"), "family": r.get("family"),
             "kind": r.get("kind"), "verdict": r.get("verdict"), "expected_verdict": exp,
@@ -1307,9 +1455,11 @@ def critical_backlog(rows: list[dict[str, Any]], row_debt: dict[str, int]) -> li
 def run_kpis(rows: list[dict[str, Any]], families: set[str], colliding_ids: set[str],
              sizes: dict[str, int], in_tree: Callable[[str], bool],
              exists: Callable[[str], bool], doc_verbs: set[str], *,
-             sep: dict[str, Any], unresolved: list[str], index: dict[str, Any],
-             ipairs: list[dict[str, Any]], edges: set[tuple[str, str]],
-             entangled: dict[str, str]) -> list[dict[str, Any]]:
+              sep: dict[str, Any], unresolved: list[str], index: dict[str, Any],
+              ipairs: list[dict[str, Any]], edges: set[tuple[str, str]],
+              entangled: dict[str, str],
+              expected_by_row: dict[int, tuple[str, str]] | None = None
+              ) -> list[dict[str, Any]]:
     return [
         kpi_well_formed(rows, families),
         kpi_canonical_unique(rows),
@@ -1321,7 +1471,8 @@ def run_kpis(rows: list[dict[str, Any]], families: set[str], colliding_ids: set[
         kpi_grounded(rows, in_tree),
         kpi_anchored(rows, exists),
         kpi_index_resolves(ipairs, rows, edges, index),
-        kpi_clarity_consistent(rows, colliding_ids, exists, sizes, entangled),
+        kpi_clarity_consistent(rows, colliding_ids, exists, sizes, entangled,
+                               expected_by_row),
         kpi_kind_grounding_soft(rows, doc_verbs),
         kpi_hierarchy_soft(rows),
         kpi_mutuality_soft(sep),
@@ -1329,7 +1480,7 @@ def run_kpis(rows: list[dict[str, Any]], families: set[str], colliding_ids: set[
 
 
 def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str, Any],
-                  error: str | None = None) -> dict[str, Any]:
+                  error: str | None = None, indexed: bool = True) -> dict[str, Any]:
     if error or not isinstance(data, dict):
         return {
             "schema": SCHEMA, "ok": False, "verdict": "AUDIT_ERROR",
@@ -1346,6 +1497,16 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
     in_tree = tree.get("in_tree") or (lambda t: False)
     exists = tree.get("exists") or (lambda p: False)
     doc_verbs = tree.get("doc_verbs") or set()
+    if indexed:
+        # One fold observes one immutable tree. Cache repeated anchor probes so the KPI,
+        # verdict consistency check, and leaderboard consume exactly the same fact.
+        raw_exists = exists
+        exists_cache: dict[str, bool] = {}
+
+        def exists(path: str) -> bool:
+            if path not in exists_cache:
+                exists_cache[path] = raw_exists(path)
+            return exists_cache[path]
 
     colliding_ids = set(find_collisions(rows))
     sizes = cluster_sizes(rows)
@@ -1354,23 +1515,32 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
     # catalog's own names, so neither can be satisfied by adding prose to a row.
     index = build_index(rows)
     edges, unresolved = separation_edges(rows, index)
-    pairs = confusable_pairs(rows)
+    pairs = confusable_pairs(rows, indexed=indexed)
     ipairs = index_pairs(index, pairs)
     sep = separation_report(rows, edges, pairs)
     contrast = index_contrast(rows, edges, pairs + ipairs)
     entangled = entangled_rows(sep, edges, ipairs)
     unseparated = unseparated_pairs(sep, ipairs, edges)
+    expected_by_row = None
+    if indexed:
+        expected_by_row = {
+            id(row): expected_verdict(
+                row, colliding=(row.get("id") in colliding_ids), exists=exists,
+                sizes=sizes, entangled=entangled.get(row.get("id"), ""))
+            for row in rows
+        }
 
     kpis = run_kpis(rows, families, colliding_ids, sizes, in_tree, exists, doc_verbs,
                     sep=sep, unresolved=unresolved, index=index, ipairs=ipairs,
-                    edges=edges, entangled=entangled)
+                    edges=edges, entangled=entangled,
+                    expected_by_row=expected_by_row)
     by_name = {k["kpi"]: k for k in kpis}
     clarity_score = round(sum(KPI_WEIGHTS[n] * by_name[n]["score"]
                               for n in KPI_WEIGHTS if n in by_name), 1)
     clarity_defects = sum(len(k["defects"]) for k in kpis)
     n_soft = sum(len(k["soft"]) for k in kpis)
 
-    cov = coverage_report(fam_defs, rows, corpus)
+    cov = coverage_report(fam_defs, rows, corpus, indexed=indexed)
     disambiguation_debt = clarity_defects + cov["coverage_debt"]
 
     cov_pct = cov["coverage_pct"] if cov["discovered"] else 100.0
@@ -1389,7 +1559,7 @@ def build_payload(*, workspace: str, data: dict[str, Any] | None, tree: dict[str
 
     row_debt = per_row_debt(rows, kpis)
     pos = standing(rows)
-    lb = leaderboard(rows, colliding_ids, exists, sizes, entangled)
+    lb = leaderboard(rows, colliding_ids, exists, sizes, entangled, expected_by_row)
     crit = critical_backlog(rows, row_debt)
     rollup = roll_up(rows, row_debt)
     n_crystal = pos.get("crystal", 0)

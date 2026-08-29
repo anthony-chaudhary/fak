@@ -19,5 +19,26 @@
       "verdict": "crystal",
       "gaps": []
     }
+  ,
+    {
+      "id": "openviking-rest-adapter",
+      "canonical": "OpenViking REST adapter",
+      "family": "context-ctx",
+      "kind": "subsystem",
+      "definition": "The optional typed HTTP client that lets fak operators call an external OpenViking service through its public REST contract.",
+      "distinction": "An interoperability boundary only: it transports health, retrieval, session capture, and commit calls; it is not fak-native context storage, contextq materialization, ctxplan optimization, or recall persistence.",
+      "distinct_from": [
+        "contextq",
+        "ctxplan",
+        "recall"
+      ],
+      "aliases": [],
+      "grounding": "openviking",
+      "grounding_kind": "path",
+      "glossary_anchor": "docs/fak/concept-glossary.md",
+      "parent": "",
+      "verdict": "crystal",
+      "gaps": []
+    }
   ]
 }

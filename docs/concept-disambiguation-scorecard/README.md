@@ -16,10 +16,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 | Metric (primary = unbounded driver) | Value |
 |---|---|
 | **Disambiguation-debt (drive to 0)** | **14** (clarity 2 + coverage 12) |
-| **Crystal-clear concepts (and climbing)** | **959** crystal of 2673 positioned |
+| **Crystal-clear concepts (and climbing)** | **960** crystal of 2674 positioned |
 | **Confusable tokens positioned (covered / discovered)** | **2794 / 2806** (99.6% of the discovered confusable space) |
 | **Undrawn twin-pairs (drive to 0)** | **0** of 207 confusable name-pairs |
-| **Ambiguous lookup names (drive to 0)** | **77** of 3792 indexed names |
+| **Ambiguous lookup names (drive to 0)** | **77** of 3794 indexed names |
 | As of | 2026-08-05 (fak 0.43.0) |
 | Legacy bounded score (saturates; not the driver) | 98.6/100 (grade A) |
 
@@ -28,10 +28,10 @@ The driver is the UNBOUNDED disambiguation-debt (drive it to 0) plus the positiv
 ## Standing at a glance
 
 ```text
-concept-disambiguation chart - 2673 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
+concept-disambiguation chart - 2674 concepts - score 98.6/100 (grade A) - disambiguation-debt 14
 
 clarity ladder (count of concepts, best -> fog):
-  * crystal       ################............ 959
+  * crystal       ################............ 960
   o defined       ############################ 1714
   ~ drifting      ............................ 0
   = entangled     ............................ 0
@@ -41,7 +41,7 @@ clarity ladder (count of concepts, best -> fog):
 clarity mix by family (each cell = one concept):
   attention        ***************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (80 concept(s); 15 crystal)
   cache            *****************************************************************************oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (253 concept(s); 77 crystal)
-  context-ctx      ******************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (223 concept(s); 66 crystal)
+  context-ctx      *******************************************************************ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo (224 concept(s); 67 crystal)
   cross-cluster    **************     (14 concept(s); 14 crystal)
   decision         *********************************ooooooooooooooooooooo (54 concept(s); 33 crystal)
   dev-tier         ****               (4 concept(s); 4 crystal)
@@ -92,7 +92,7 @@ pairwise separation (of the name-pairs a reader cannot keep apart):
   undrawn      ............................ 0
   pairs separated   [################################] 207/207
 
-name index: 3792 lookup name(s) -> 2673 concept(s), 77 ambiguous
+name index: 3794 lookup name(s) -> 2674 concept(s), 77 ambiguous
 
 legend: * crystal   o defined   ~ drifting   = entangled   x colliding   . undocumented
 ```
@@ -118,7 +118,7 @@ Per-concept clarity is not the same question as pairwise separation. A concept i
 | **Separated from each other (drive to all)** | **207 / 207** (207 mutual, 0 one-sided) |
 | **Undrawn twin-pairs (drive to 0)** | **0** |
 | Entangled concepts (own twin undrawn) | 0 |
-| Boundaries drawn (mutual / total) | 1742 / 4733 |
+| Boundaries drawn (mutual / total) | 1748 / 4739 |
 | Dangling `distinct_from` references (drive to 0) | 0 |
 
 ## Indexing - can a reader who meets a NAME find the concept?
@@ -127,10 +127,10 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 
 | Index metric | Value |
 |---|---|
-| Lookup names indexed | 3792 over 2673 concepts |
+| Lookup names indexed | 3794 over 2674 concepts |
 | Lookup names landing on several concepts | 77 |
 | **Shared names whose concepts stay unseparated (drive to 0)** | **0** |
-| Concepts carrying a contrast set | 2673 |
+| Concepts carrying a contrast set | 2674 |
 
 ## The concepts (best verdict first)
 
@@ -231,6 +231,7 @@ The catalog is organised by concept; a reader arrives with a **spelling**. [`IND
 | * | crystal | symbol | context-ctx | **CompactionJoinKey** - The event-join coordinate a compaction fire shares with the provider usage record for the turn it rewrote, so the fire's provider-side re-warm counters can be PROVEN against one usage row instead of pasted in by caller convention. The zero value is UNSTAMPED: a sample assembled without turn context, which the join passes through verbatim rather than counting as a failed join. |
 | * | crystal | symbol | context-ctx | **CompactionJoinResult** - The outcome of attempting to bind one compaction fire to the provider usage record sharing its CompactionJoinKey: the joined sample plus whether the binding was PROVEN, left unstamped, or withdrawn because no single usage row matched. It reports the provenance of the provider counters, so an unproven join withdraws them rather than letting an unmatched number stand as evidence. |
 | * | crystal | symbol | context-ctx | **full_context_tokens** - Token count in the unscoped full-context counterfactual used as the conservation baseline. |
+| * | crystal | subsystem | context-ctx | **OpenViking REST adapter** - The optional typed HTTP client that lets fak operators call an external OpenViking service through its public REST contract. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextual** - `contextual` is the context-ctx symbol declared or used at `cmd/fak/harness_preview.go:21` as `currentDomain := fs.String("current-domain", "", "last admitted contextual domain")`. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for contextid** - `ContextID` is the context-ctx symbol declared or used at `cmd/microcontextdemo/effect_batch.go:22` as `ContextID string `json:"context_id"``. This row positions that concrete implementation surface, not merely the family label. |
 | * | crystal | symbol | context-ctx | **context-ctx implementation surface for additionalcontext** - `additionalContext` is the context-ctx symbol declared or used at `cmd/fak/guard_sessionstart.go:31` as `// context as additionalContext (a one-time cost, NOT a per-prompt-prefix tax — so it does`. This row positions that concrete implementation surface, not merely the family label. |
@@ -2946,8 +2947,8 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | grounded | `grounded` | 68 | 2 | 2 ungrounded concept(s) |
 | honesty | `kind_grounding_soft` | 60 | 0 | 23 kind/grounding mismatch |
 | honesty | `hierarchy_soft` | 70 | 0 | 27 hierarchy issue(s) |
-| separation | `mutuality_soft` | 80 | 0 | 2991/4733 boundaries drawn one-way only |
-| well-formed | `well_formed` | 100 | 0 | all 2673 rows well-formed |
+| separation | `mutuality_soft` | 80 | 0 | 2991/4739 boundaries drawn one-way only |
+| well-formed | `well_formed` | 100 | 0 | all 2674 rows well-formed |
 | distinctness | `canonical_unique` | 100 | 0 | every concept has a unique canonical name |
 | distinctness | `defined` | 100 | 0 | every concept has a definition |
 | distinctness | `disambiguated` | 100 | 0 | every confusable concept names what it is NOT |
@@ -2955,7 +2956,7 @@ abstraction overclaims (19) - head reads clearer than its subtree supports:
 | separation | `pair_separated` | 100 | 0 | all 207 confusable name-pair(s) are separated |
 | separation | `pair_mutual` | 100 | 0 | every confusable pair draws its line from both sides |
 | grounded | `anchored` | 100 | 0 | every crystal concept's distinction is anchored on disk |
-| indexed | `index_resolves` | 100 | 0 | every one of 3792 lookup name(s) resolves - 77 land on several concepts, all separated |
+| indexed | `index_resolves` | 100 | 0 | every one of 3794 lookup name(s) resolves - 77 land on several concepts, all separated |
 | honesty | `clarity_consistent` | 100 | 0 | every verdict matches its evidence |
 
 ## Coverage by family (how much of each confusable space is positioned)

@@ -581,8 +581,12 @@ func PrepareOrigin(ctx context.Context, run Runner, repoRoot, ref, dir string) (
 	} else if !os.IsNotExist(err) {
 		return "", noop, fmt.Errorf("prepare-origin: cannot inspect worktree path %s: %v", dir, err)
 	}
-	// Make sure the ref is current before we detach onto it.
-	_, _ = run(ctx, repoRoot, "git", "fetch", "origin", "--quiet")
+	// Mutable refs need a refresh immediately before materialization. A caller that already
+	// selected a full immutable commit must not fetch again: that preserves one attempt's
+	// identity and avoids an unnecessary metadata write in the linearized transaction.
+	if !validCommit(ref) {
+		_, _ = run(ctx, repoRoot, "git", "fetch", "origin", "--quiet")
+	}
 	if out, ok := run(ctx, repoRoot, "git", "worktree", "add", "--detach", dir, ref); !ok {
 		// Git may have materialized part of the directory/admin entry before returning
 		// failure. The path was proven absent above, so removing that partial result

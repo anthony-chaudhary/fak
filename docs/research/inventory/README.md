@@ -15,6 +15,7 @@ A forge corpus is a compact top-level index, not complete relational enrichment.
 
 Current maps:
 
+- [`modular-modular.json`](modular-modular.json) - exhaustive 10,688-file maintained-tree map for `modular/modular` at `1c9fd2e03331f77d3a1034127cb3700b7fa43c02`; the paired [`modular-modular-forge-receipt.json`](modular-modular-forge-receipt.json) proves the six-endpoint 7,071-record forge census used by the 87-candidate study.
 - [`vllm-related-system-adjacency-v1.json`](vllm-related-system-adjacency-v1.json) —
   versioned bounded adjacency manifest for the terminal
   `vllm-project/vllm@f18d0ba90d972a852a351c98be3f42b31372cfe4` corpus cutoff

@@ -4,6 +4,86 @@
   "methodology": "Harness, model-serving, and agentic-performance repositories absent by exact owner/name from the durable registry were ranked by direct seam relevance, current development activity, adoption signal, license clarity, and dedupe against existing fak issues/notes. Stars are a discovery signal, not a quality claim; checked revisions and push timestamps make each observation reproducible.",
   "repositories": [
     {
+      "repository": "modular/modular",
+      "url": "https://github.com/modular/modular",
+      "status": "studied",
+      "priority": 1,
+      "why": "FAK's closest broad native-inference design peer across serving admission, KV movement, speculative decoding, model architecture, accelerator kernels, graph optimization, async runtime, and cache support. The study adapts mechanisms into FAK-owned Go/native paths and explicitly excludes a Modular runtime dependency or fallback.",
+      "last_checked": "2026-08-28",
+      "checked_revision": "1c9fd2e03331f77d3a1034127cb3700b7fa43c02",
+      "stars_at_check": 29305,
+      "last_push_at_check": "2026-08-28T09:02:51Z",
+      "study_note": "docs/notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md",
+      "refresh_issue": "#9900",
+      "inventory": {
+        "mode": "exhaustive",
+        "map_path": "docs/research/inventory/modular-modular.json",
+        "forge_receipt_path": "docs/research/inventory/modular-modular-forge-receipt.json",
+        "indexed_revision": "1c9fd2e03331f77d3a1034127cb3700b7fa43c02",
+        "source_classes": [
+          "readme_docs",
+          "architecture_design",
+          "runtime_source",
+          "tests_fixtures",
+          "history_changelog_releases",
+          "open_closed_issues_prs_discussions",
+          "roadmap_todos",
+          "license_provenance",
+          "fak_selfquery_witness",
+          "candidate_matrix",
+          "completeness_critic",
+          "issue_tracking"
+        ],
+        "subsystem_count": 16,
+        "candidate_count": 87,
+        "filed_issue_count": 68,
+        "source_evidence": [
+          {
+            "class": "open_closed_issues_prs_discussions",
+            "evidence": [
+              "docs/research/inventory/modular-modular-forge-receipt.json",
+              "gh api --paginate --slurp repos/modular/modular/issues?state=all&per_page=100&sort=created&direction=asc",
+              "gh pr list --repo modular/modular --state all --limit 10000 --json number,title,state,createdAt,closedAt,mergedAt,labels,url",
+              "gh api graphql repository(owner:modular,name:modular) discussions(first:100)"
+            ],
+            "note": "Complete six-endpoint census through 2026-08-28T23:59:59Z with checksum sha256:a0752d13d096c945d50198126de5083a4c3878f00c84fe26bfc404322ba0f40e: 3,716 issues, 2,667 pull requests, 523 discussions, 151 labels, 14 releases, and zero milestones; targeted candidate threads received deeper read-back."
+          },
+          {
+            "class": "fak_selfquery_witness",
+            "evidence": [
+              "fak capabilities \"Qwen3.5 MTP embedding hidden concatenation layout\"",
+              "fak dev index docs \"graph compiler pass pipeline SCCP SROA Mem2Reg\"",
+              "fak dev index leaves \"KV transfer onload tensor parallel topology\"",
+              "internal/model/qwen35_mtp_forward.go"
+            ],
+            "note": "All 87 candidate rows received three-layer FAK self-query and exact-owner deduplication; the note preserves PRESENT, PARTIAL, and ABSENT dispositions."
+          },
+          {
+            "class": "candidate_matrix",
+            "evidence": [
+              "docs/notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md#full-candidate-matrix"
+            ]
+          },
+          {
+            "class": "issue_tracking",
+            "evidence": [
+              "https://github.com/anthony-chaudhary/fak/issues/9900",
+              "https://github.com/anthony-chaudhary/fak/issues/9910",
+              "https://github.com/anthony-chaudhary/fak/issues/9977",
+              "docs/notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md"
+            ],
+            "note": "Parent #9900 owns 68 contract-clean children in the contiguous #9910-#9977 range; live read-back proved unique immutable markers, receipt references, labels, and Generation G3 routing. Durable decision/outcome receipts: study_a55850a776986e47ab91c858765a98e3cc4ce918086bb8ef380d5aa4f2325189 and study_96c38d851458c92a9dea84574cff09471a9d13bf9d4a050eb076c5bb8b62416f."
+          }
+        ],
+        "issue_refs": [
+          "#9900",
+          "#9910",
+          "#9977"
+        ],
+        "completeness_critic": "Exhaustive maintained-tree inventory, full reachable history and tags, complete six-endpoint forge census, README/design/runtime/test/roadmap/license review, candidate-specific FAK self-query, exact-owner dedupe, 87-row disposition matrix, independent source-anchor review, and live issue-contract read-back are covered. Generated/target/vendor trees are deliberately excluded; forge comments/reviews/timelines and every linked commit were not traversed for all 7,071 parents, while candidate-bearing threads were followed selectively."
+      }
+    },
+    {
       "repository": "ruvnet/ruflo",
       "url": "https://github.com/ruvnet/ruflo",
       "status": "candidate",

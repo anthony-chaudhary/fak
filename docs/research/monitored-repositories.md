@@ -1,10 +1,10 @@
 ---
 title: "Monitored related repositories"
-description: "Checked: 2026-08-25 Machine source: monitored-repositories.json Refresh view: fak study-monitor --due-days 14 (add --json for automation) Inventory gate:"
+description: "Checked: 2026-08-28 Machine source: monitored-repositories.json Refresh view: fak study-monitor --due-days 14 (add --json for automation) Inventory gate:"
 ---
 # Monitored related repositories
 
-**Checked:** 2026-08-25
+**Checked:** 2026-08-28
 **Machine source:** [`monitored-repositories.json`](monitored-repositories.json)
 **Refresh view:** `fak study-monitor --due-days 14` (add `--json` for automation)
 **Inventory gate:** `fak study-monitor --inventory-check --json`
@@ -42,6 +42,7 @@ This list intentionally does not claim that these repositories contain a borrowa
 
 | Repository | Result | Pinned evidence |
 |---|---|---|
+| [`modular/modular`](https://github.com/modular/modular) | Full-tree, full-history, compiler/runtime/serving/model/kernel study produced 87 witnessed candidates: 68 contract-clean issues (#9910-#9977) and 19 recorded-only dispositions under #9900. FAK retains native execution ownership; no Modular runtime fallback was proposed. | `1c9fd2e03331f77d3a1034127cb3700b7fa43c02`; [study note](../notes/CONCEPT-STUDY-MODULAR-MONOREPO-2026-08-28.md), [inventory](inventory/modular-modular.json), and [forge receipt](inventory/modular-modular-forge-receipt.json). |
 | [`SemiAnalysisAI/InferenceX`](https://github.com/SemiAnalysisAI/InferenceX) | AgentX lifecycle/interactivity, scope-versioned measured-power, and reuse integrity yielded #8773-#8775; lineage reuse otherwise converged with fak. | `0b0138fd7de0a6f927f9769b19d594d01f586107`; [study note](../notes/BORROW-BENCHMARK-SERVING-METRICS-INFERENCEX-STUDY-2026-07-13.md). |
 | [`strukto-ai/mirage`](https://github.com/strukto-ai/mirage) | Deep study retained one borrow: a strict pre-effect drift contract for mutable external inputs on resume/replay. Typed backend capabilities and transactional workspaces map to stronger existing fak seams/issues; a universal VFS is a bounded optional integration, not the default. | [`mirage-study-2026-08-17.md`](../notes/mirage-study-2026-08-17.md), revision `e0a4f51109cbe6b8a239700d8348f0cbebd70b26`; 3,499 stars and last push `2026-08-17T23:41:51Z` at check time. |
 | [`agent0ai/agent-zero`](https://github.com/agent0ai/agent-zero) | Deep study found lifecycle legibility and effect-centered Time Travel worth retaining as design guidance. FAK already covers the central kernel mechanisms with stricter typed policy, isolated workers, managed context, and witnessed scheduling; full-computer and semantic-memory breadth remains modular. | [`agent-zero-study-2026-08-18.md`](../notes/agent-zero-study-2026-08-18.md), revision `baadd0dd0b09fa769a1027c183b964be85d5c8cc` (`v2.9`), forward edge `add781d3b3e5b3972fbd7cef54657b7bfb274ae9`; 18,903 stars and last push `2026-08-16T17:45:50Z` at check time. |
