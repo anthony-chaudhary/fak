@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -17,7 +18,8 @@ func TestCompareProfilesUsesControlMedianForEveryCandidate(t *testing.T) {
 	// Paired-row comparison would admit the 105 ms candidate against its 110 ms
 	// control. The campaign contract compares it with the 100 ms control median.
 	r := compareProfiles([]float64{90, 100, 110}, []float64{80, 105, 70})
-	if r.Verdict != "REJECT" || r.EveryCandidateBelowControlMedian {
+	if r.Verdict != "REJECT" || r.EveryCandidateBelowControlMedian || r.Phase != profileComparisonPhasePrefill ||
+		len(r.ControlPhaseMilliseconds) != 0 || len(r.CandidatePhaseMilliseconds) != 0 {
 		t.Fatalf("comparison = %+v, want REJECT against control median", r)
 	}
 	if got := compareProfiles([]float64{90}, []float64{70}); got.Verdict != "HOLD" {
@@ -78,6 +80,85 @@ func TestNativeProfileCampaignKeepRejectAndDeterministicJSON(t *testing.T) {
 	rejectPaths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{90, 91, 92})
 	if got := compareNativeProfileCampaign(strings.Join(rejectPaths, ",")); got.Verdict != "REJECT" {
 		t.Fatalf("below-threshold campaign = %+v, want REJECT", got)
+	}
+}
+
+func TestNativeProfileComparisonSelectsSteadyDecode(t *testing.T) {
+	paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{100, 102, 98})
+	setComparisonCampaignPhaseDurations(t, paths, "steady-decode", []float64{200, 202, 198}, []float64{150, 152, 151})
+
+	got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseSteadyDecode)
+	if got.Verdict != "KEEP" || got.Phase != profileComparisonPhaseSteadyDecode ||
+		!reflect.DeepEqual(got.ControlPhaseMilliseconds, []float64{200, 202, 198}) ||
+		!reflect.DeepEqual(got.CandidatePhaseMilliseconds, []float64{150, 152, 151}) ||
+		len(got.ControlPrefillMilliseconds) != 0 || len(got.CandidatePrefillMilliseconds) != 0 {
+		t.Fatalf("steady-decode comparison = %+v, want typed KEEP", got)
+	}
+}
+
+func TestNativeProfileComparisonSelectsDecodeEndToEnd(t *testing.T) {
+	paths := writeComparisonCampaign(t, []float64{100, 101, 102}, []float64{80, 81, 82})
+	setComparisonCampaignPhaseDurations(t, paths, "steady-decode", []float64{200, 202, 204}, []float64{120, 121, 122})
+
+	got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseEndToEnd)
+	if got.Verdict != "KEEP" || got.Phase != profileComparisonPhaseEndToEnd {
+		t.Fatalf("end-to-end comparison = %+v, want typed KEEP", got)
+	}
+	// The four other canonical phases are 1 ms each, so the full wall includes
+	// load setup, first-token, verification, and teardown around the two arms.
+	if !reflect.DeepEqual(got.ControlPhaseMilliseconds, []float64{304, 307, 310}) ||
+		!reflect.DeepEqual(got.CandidatePhaseMilliseconds, []float64{204, 206, 208}) {
+		t.Fatalf("end-to-end durations = control %v candidate %v", got.ControlPhaseMilliseconds, got.CandidatePhaseMilliseconds)
+	}
+}
+
+func TestNativeProfileComparisonDecodeEndToEndRequiresContiguousCanonicalWall(t *testing.T) {
+	paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{80, 82, 81})
+	rewriteComparisonPair(t, paths[1], func(p *nativeperf.ProfileBundle, _ *nativeProfileReceipt) {
+		for i := 3; i < len(p.Phases); i++ {
+			p.Phases[i].StartMilliseconds++
+		}
+	})
+
+	got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseEndToEnd)
+	if got.Verdict != "HOLD" || got.Phase != profileComparisonPhaseEndToEnd || !strings.Contains(got.Reason, "contiguous") {
+		t.Fatalf("non-contiguous end-to-end comparison = %+v, want typed HOLD", got)
+	}
+}
+
+func TestNativeProfileComparisonDecodePhaseFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*nativeperf.ProfileBundle)
+	}{
+		{name: "missing", edit: func(p *nativeperf.ProfileBundle) { p.Phases = p.Phases[:3] }},
+		{name: "duplicate", edit: func(p *nativeperf.ProfileBundle) { p.Phases[0].Name = "steady-decode" }},
+		{name: "mismatched", edit: func(p *nativeperf.ProfileBundle) { p.Phases[3].Name = "decode" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			paths := writeComparisonCampaign(t, []float64{100, 102, 98}, []float64{80, 82, 81})
+			rewriteComparisonPair(t, paths[2], func(p *nativeperf.ProfileBundle, _ *nativeProfileReceipt) { test.edit(p) })
+			got := compareNativeProfileCampaignPhase(strings.Join(paths, ","), profileComparisonPhaseSteadyDecode)
+			if got.Verdict != "HOLD" || got.Phase != profileComparisonPhaseSteadyDecode || !strings.Contains(strings.ToLower(got.Reason), "phase") {
+				t.Fatalf("%s selected phase = %+v, want typed HOLD phase reason", test.name, got)
+			}
+		})
+	}
+
+	got := compareNativeProfileCampaignPhase("unused", profileComparisonPhase("decode"))
+	if got.Verdict != "HOLD" || !strings.Contains(got.Reason, "invalid") {
+		t.Fatalf("invalid typed selector = %+v, want HOLD", got)
+	}
+}
+
+func TestProfileComparisonDecodePhaseFlagIsTyped(t *testing.T) {
+	phase := profileComparisonPhasePrefill
+	if err := phase.Set("steady-decode"); err != nil || phase != profileComparisonPhaseSteadyDecode {
+		t.Fatalf("set steady-decode = %q, err=%v", phase, err)
+	}
+	if err := phase.Set("position-3"); err == nil || phase != profileComparisonPhaseSteadyDecode {
+		t.Fatalf("invalid phase changed selection to %q, err=%v", phase, err)
 	}
 }
 
@@ -254,7 +335,28 @@ func writeComparisonCampaign(t *testing.T, control, candidate []float64) []strin
 }
 
 func setComparisonPrefillDuration(profile *nativeperf.ProfileBundle, duration float64) {
-	profile.Phases[1].DurationMilliseconds = duration
+	setComparisonPhaseDuration(profile, "prefill", duration)
+}
+
+func setComparisonCampaignPhaseDurations(t *testing.T, paths []string, phase string, control, candidate []float64) {
+	t.Helper()
+	durations := append(append([]float64(nil), control...), candidate...)
+	if len(paths) != nativeProfileCampaignRuns || len(durations) != nativeProfileCampaignRuns {
+		t.Fatal("test campaign phase edit requires 6 paths and 3+3 durations")
+	}
+	for i, path := range paths {
+		rewriteComparisonPair(t, path, func(p *nativeperf.ProfileBundle, _ *nativeProfileReceipt) {
+			setComparisonPhaseDuration(p, phase, durations[i])
+		})
+	}
+}
+
+func setComparisonPhaseDuration(profile *nativeperf.ProfileBundle, phaseName string, duration float64) {
+	for i := range profile.Phases {
+		if profile.Phases[i].Name == phaseName {
+			profile.Phases[i].DurationMilliseconds = duration
+		}
+	}
 	start := 0.0
 	for i := range profile.Phases {
 		profile.Phases[i].StartMilliseconds = start

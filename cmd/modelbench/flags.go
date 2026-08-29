@@ -63,6 +63,7 @@ type benchFlags struct {
 // parseFlags defines and parses the command-line flags, then expands a leading ~
 // in the path flags (Go/PowerShell don't), so ~/... opens as intended.
 func parseFlags() *benchFlags {
+	nativeProfileComparisonPhaseSelection = profileComparisonPhasePrefill
 	f := &benchFlags{
 		dir:                   flag.String("dir", "internal/model/.cache/smollm2-135m", "model export dir (fak format: config/manifest/weights.f32)"),
 		hf:                    flag.String("hf", "", "HuggingFace snapshot dir (config.json + model.safetensors, bf16/f32, loaded fully in Go); overrides -dir"),
@@ -101,6 +102,7 @@ func parseFlags() *benchFlags {
 		nativeProfileReadback: flag.String("native-performance-readback", "", "validate a native-performance profile and its companion raw-event receipt without loading a model"),
 		nativeProfileCompare:  flag.String("native-performance-compare", "", "compare exactly six comma-separated canonical profile paths in order: 3 selector OFF controls, then 3 selector ON candidates; requires every candidate below the control median and at least 15% median improvement; companion .receipt.json paths are derived"),
 	}
+	flag.Var(&nativeProfileComparisonPhaseSelection, "native-performance-compare-phase", "stable comparison phase: prefill (default), steady-decode, or end-to-end (full contiguous capture including setup, verification, and teardown)")
 	flag.Parse()
 	*f.dir = pathutil.ExpandTilde(*f.dir)
 	*f.gguf = pathutil.ExpandTilde(*f.gguf)
